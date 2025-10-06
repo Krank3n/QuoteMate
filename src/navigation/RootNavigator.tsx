@@ -48,7 +48,7 @@ function NewQuoteNavigator() {
         headerStyle: {
           backgroundColor: colors.primary,
         },
-        headerTintColor: '#fff',
+        headerTintColor: colors.white,
         headerTitleStyle: {
           fontWeight: 'bold',
         },
@@ -99,11 +99,15 @@ function MainTabs() {
           return <MaterialCommunityIcons name={iconName} size={size} color={color} />;
         },
         tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: '#999',
+        tabBarInactiveTintColor: colors.inactive,
+        tabBarStyle: {
+          backgroundColor: colors.surface,
+          borderTopColor: colors.border,
+        },
         headerStyle: {
           backgroundColor: colors.primary,
         },
-        headerTintColor: '#fff',
+        headerTintColor: colors.white,
         headerTitleStyle: {
           fontWeight: 'bold',
         },
@@ -147,7 +151,7 @@ export function RootNavigator() {
           presentation: 'modal',
           headerShown: true,
           headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: '#fff',
+          headerTintColor: colors.white,
           title: 'Upgrade to Pro',
         }}
       />
