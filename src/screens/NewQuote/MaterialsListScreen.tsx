@@ -358,6 +358,7 @@ export function MaterialsListScreen() {
           mode="contained"
           onPress={handleNext}
           style={styles.nextButton}
+          labelStyle={styles.nextButtonLabel}
           disabled={materials.length === 0}
         >
           Next: Labor & Markup
@@ -368,7 +369,7 @@ export function MaterialsListScreen() {
         icon="plus"
         style={styles.fab}
         onPress={handleAddMaterial}
-        color="#fff"
+        color={colors.white}
       />
 
       {/* Edit Material Dialog */}
@@ -530,7 +531,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listItem: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     marginBottom: 1,
   },
   itemRight: {
@@ -572,10 +573,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     padding: 20,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: colors.border,
   },
   summaryLabel: {
     fontSize: 16,
@@ -588,12 +589,15 @@ const styles = StyleSheet.create({
   },
   bottomActions: {
     padding: 20,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: colors.border,
   },
   nextButton: {
     paddingVertical: 8,
+  },
+  nextButtonLabel: {
+    color: colors.white,
   },
   fab: {
     position: 'absolute',

@@ -340,13 +340,6 @@ export function JobDetailsScreen() {
             placeholder="e.g., Build a 5x4 meter outdoor deck with 10 steps leading down to the garden. Need to replace old timber and add handrails."
             disabled={isEditingExisting}
           />
-
-          {isAnalyzing && (
-            <View style={styles.analyzingContainer}>
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.analyzingText}>Analyzing job with AI...</Text>
-            </View>
-          )}
         </Surface>
       )}
 
@@ -400,17 +393,6 @@ export function JobDetailsScreen() {
       >
         {isAnalyzing ? 'Analyzing...' : (selectedTemplate?.id === 'custom' && !isEditingExisting ? 'Analyze & Continue' : 'Next: Materials')}
       </Button>
-
-      {/* Debug info - remove after testing */}
-      {__DEV__ && selectedTemplate?.id === 'custom' && (
-        <View style={styles.debugInfo}>
-          <Text style={{ fontSize: 10, color: '#666' }}>
-            Debug: Customer={customerName ? '✓' : '✗'} |
-            Template={selectedTemplate ? '✓' : '✗'} |
-            Description={jobDescription.trim() ? '✓' : '✗'}
-          </Text>
-        </View>
-      )}
     </ScrollView>
   );
 }
@@ -457,6 +439,7 @@ const styles = StyleSheet.create({
   },
   templateCard: {
     minHeight: 140,
+    backgroundColor: colors.surface,
   },
   selectedCard: {
     borderWidth: 2,
@@ -481,6 +464,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     elevation: 2,
+    backgroundColor: colors.surface,
   },
   nextButton: {
     marginHorizontal: 20,
@@ -509,6 +493,6 @@ const styles = StyleSheet.create({
     padding: 10,
     marginHorizontal: 20,
     marginBottom: 20,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: colors.surfaceGray3,
   },
 });

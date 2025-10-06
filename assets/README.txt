@@ -8,7 +8,7 @@ This folder should contain the following image files:
 
 2. splash.png (1242x2436px minimum)
    - Splash screen image
-   - Centered on green background (#008542)
+   - Centered on dark background (#0F172A)
 
 3. adaptive-icon.png (1024x1024px)
    - Android adaptive icon
@@ -25,4 +25,8 @@ Recommended tools:
 - Canva (free)
 - Icon generator: https://icon.kitchen/
 
-Bunnings green color: #008542
+Theme colors:
+- Primary (Eucalyptus Green): #009868
+- Secondary (Golden Wattle): #cfa153
+- Background (Dark): #0F172A
+- Surface (Dark): #1E293B

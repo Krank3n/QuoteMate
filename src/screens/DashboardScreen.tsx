@@ -158,10 +158,10 @@ export function DashboardScreen() {
         body {
           font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
           padding: 40px;
-          color: #333;
+          color: ${colors.textDark};
         }
         .header {
-          border-bottom: 3px solid #008542;
+          border-bottom: 3px solid ${colors.primaryDark};
           padding-bottom: 20px;
           margin-bottom: 30px;
         }
@@ -171,14 +171,14 @@ export function DashboardScreen() {
           margin-bottom: 15px;
         }
         .header h1 {
-          color: #008542;
+          color: ${colors.primaryDark};
           margin: 0 0 10px 0;
         }
         .info-section {
           margin-bottom: 30px;
         }
         .info-section h3 {
-          color: #008542;
+          color: ${colors.primaryDark};
           margin-bottom: 10px;
         }
         table {
@@ -187,28 +187,28 @@ export function DashboardScreen() {
           margin-bottom: 20px;
         }
         th {
-          background-color: #008542;
+          background-color: ${colors.primaryDark};
           color: white;
           padding: 10px;
           text-align: left;
         }
         td {
           padding: 8px;
-          border-bottom: 1px solid #ddd;
+          border-bottom: 1px solid ${colors.borderLight};
         }
         .total-row {
           font-weight: bold;
-          background-color: #f5f5f5;
+          background-color: ${colors.surfaceGray};
         }
         .grand-total {
           font-size: 18px;
-          color: #008542;
+          color: ${colors.primaryDark};
           font-weight: bold;
         }
         .summary {
           margin-top: 30px;
           padding: 20px;
-          background-color: #f9f9f9;
+          background-color: ${colors.surfaceGray2};
           border-radius: 8px;
         }
         .summary-row {
@@ -314,7 +314,7 @@ export function DashboardScreen() {
 
       ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${quote.notes}</p></div>` : ''}
 
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
+      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid ${colors.borderLight}; font-size: 12px; color: ${colors.textMuted};">
         <p>This quote is valid for 30 days from the date of issue.</p>
         <p>Generated with QuoteMate - quoting tool for Australian tradies</p>
       </div>
@@ -408,13 +408,13 @@ export function DashboardScreen() {
         </Surface>
 
         <Surface style={styles.statCard}>
-          <MaterialCommunityIcons name="check-circle" size={32} color="#4CAF50" />
+          <MaterialCommunityIcons name="check-circle" size={32} color={colors.success} />
           <Text style={styles.statNumber}>{acceptedQuotes}</Text>
           <Text style={styles.statLabel}>Accepted</Text>
         </Surface>
 
         <Surface style={styles.statCard}>
-          <MaterialCommunityIcons name="currency-usd" size={32} color="#FF9800" />
+          <MaterialCommunityIcons name="currency-usd" size={32} color={colors.warning} />
           <Text style={styles.statNumber}>{formatCurrency(totalRevenue)}</Text>
           <Text style={styles.statLabel}>Revenue</Text>
         </Surface>
@@ -541,7 +541,7 @@ export function DashboardScreen() {
 function getStatusStyle(status: string) {
   switch (status) {
     case 'accepted':
-      return { color: '#4CAF50' };
+      return { color: colors.success };
     case 'sent':
       return { color: colors.secondary };
     case 'rejected':
@@ -585,6 +585,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     elevation: 2,
+    backgroundColor: colors.surface,
   },
   statNumber: {
     fontSize: 24,
@@ -607,6 +608,7 @@ const styles = StyleSheet.create({
   },
   quoteCard: {
     marginBottom: 12,
+    backgroundColor: colors.surface,
   },
   quoteHeader: {
     flexDirection: 'row',

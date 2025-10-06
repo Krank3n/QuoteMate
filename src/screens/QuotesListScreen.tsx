@@ -175,10 +175,10 @@ export function QuotesListScreen() {
         body {
           font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
           padding: 40px;
-          color: #333;
+          color: ${colors.textDark};
         }
         .header {
-          border-bottom: 3px solid #008542;
+          border-bottom: 3px solid ${colors.primaryDark};
           padding-bottom: 20px;
           margin-bottom: 30px;
         }
@@ -188,14 +188,14 @@ export function QuotesListScreen() {
           margin-bottom: 15px;
         }
         .header h1 {
-          color: #008542;
+          color: ${colors.primaryDark};
           margin: 0 0 10px 0;
         }
         .info-section {
           margin-bottom: 30px;
         }
         .info-section h3 {
-          color: #008542;
+          color: ${colors.primaryDark};
           margin-bottom: 10px;
         }
         table {
@@ -204,28 +204,28 @@ export function QuotesListScreen() {
           margin-bottom: 20px;
         }
         th {
-          background-color: #008542;
+          background-color: ${colors.primaryDark};
           color: white;
           padding: 10px;
           text-align: left;
         }
         td {
           padding: 8px;
-          border-bottom: 1px solid #ddd;
+          border-bottom: 1px solid ${colors.borderLight};
         }
         .total-row {
           font-weight: bold;
-          background-color: #f5f5f5;
+          background-color: ${colors.surfaceGray};
         }
         .grand-total {
           font-size: 18px;
-          color: #008542;
+          color: ${colors.primaryDark};
           font-weight: bold;
         }
         .summary {
           margin-top: 30px;
           padding: 20px;
-          background-color: #f9f9f9;
+          background-color: ${colors.surfaceGray2};
           border-radius: 8px;
         }
         .summary-row {
@@ -331,7 +331,7 @@ export function QuotesListScreen() {
 
       ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${quote.notes}</p></div>` : ''}
 
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
+      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid ${colors.borderLight}; font-size: 12px; color: ${colors.textMuted};">
         <p>This quote is valid for 30 days from the date of issue.</p>
         <p>Generated with QuoteMate - quoting tool for Australian tradies</p>
       </div>
@@ -547,7 +547,7 @@ export function QuotesListScreen() {
         icon="plus"
         style={styles.fab}
         onPress={handleNewQuote}
-        color="#fff"
+        color={colors.white}
       />
 
       {/* Status Change Dialog */}
@@ -564,7 +564,7 @@ export function QuotesListScreen() {
                 onPress={() => setSelectedStatus('draft')}
               >
                 <View style={styles.statusOptionContent}>
-                  <View style={[styles.statusDot, { backgroundColor: '#9E9E9E' }]} />
+                  <View style={[styles.statusDot, { backgroundColor: colors.info }]} />
                   <Text style={[
                     styles.statusOptionText,
                     selectedStatus === 'draft' && styles.statusOptionTextSelected,
@@ -585,7 +585,7 @@ export function QuotesListScreen() {
                 onPress={() => setSelectedStatus('sent')}
               >
                 <View style={styles.statusOptionContent}>
-                  <View style={[styles.statusDot, { backgroundColor: '#FF9800' }]} />
+                  <View style={[styles.statusDot, { backgroundColor: colors.warning }]} />
                   <Text style={[
                     styles.statusOptionText,
                     selectedStatus === 'sent' && styles.statusOptionTextSelected,
@@ -606,7 +606,7 @@ export function QuotesListScreen() {
                 onPress={() => setSelectedStatus('accepted')}
               >
                 <View style={styles.statusOptionContent}>
-                  <View style={[styles.statusDot, { backgroundColor: '#4CAF50' }]} />
+                  <View style={[styles.statusDot, { backgroundColor: colors.success }]} />
                   <Text style={[
                     styles.statusOptionText,
                     selectedStatus === 'accepted' && styles.statusOptionTextSelected,
@@ -627,7 +627,7 @@ export function QuotesListScreen() {
                 onPress={() => setSelectedStatus('rejected')}
               >
                 <View style={styles.statusOptionContent}>
-                  <View style={[styles.statusDot, { backgroundColor: '#F44336' }]} />
+                  <View style={[styles.statusDot, { backgroundColor: colors.rejected }]} />
                   <Text style={[
                     styles.statusOptionText,
                     selectedStatus === 'rejected' && styles.statusOptionTextSelected,
@@ -654,13 +654,13 @@ export function QuotesListScreen() {
 function getStatusChipStyle(status: string) {
   switch (status) {
     case 'accepted':
-      return { backgroundColor: '#E8F5E9' };
+      return { backgroundColor: colors.successBg };
     case 'sent':
-      return { backgroundColor: '#FFF3E0' };
+      return { backgroundColor: colors.warningBg };
     case 'rejected':
-      return { backgroundColor: '#FFEBEE' };
+      return { backgroundColor: colors.errorBg };
     default:
-      return { backgroundColor: '#F5F5F5' };
+      return { backgroundColor: colors.infoBg };
   }
 }
 
@@ -672,6 +672,7 @@ const styles = StyleSheet.create({
   searchBar: {
     margin: 16,
     elevation: 2,
+    backgroundColor: colors.surface,
   },
   filterRow: {
     flexDirection: 'row',
@@ -680,12 +681,14 @@ const styles = StyleSheet.create({
   },
   filterChip: {
     marginRight: 8,
+    backgroundColor: colors.surface,
   },
   listContent: {
     padding: 16,
   },
   card: {
     marginBottom: 12,
+    backgroundColor: colors.surface,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -754,12 +757,12 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     borderWidth: 2,
-    borderColor: '#E0E0E0',
-    backgroundColor: '#FAFAFA',
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceLight,
   },
   statusOptionSelected: {
     borderColor: colors.primary,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: colors.successBg,
   },
   statusOptionContent: {
     flexDirection: 'row',
@@ -774,7 +777,7 @@ const styles = StyleSheet.create({
   statusOptionText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#333',
+    color: colors.textDark,
     textTransform: 'capitalize',
   },
   statusOptionTextSelected: {

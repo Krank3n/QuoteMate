@@ -5,12 +5,12 @@ export default {
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
-    userInterfaceStyle: "light",
+    userInterfaceStyle: "dark",
     newArchEnabled: true,
     splash: {
       image: "./assets/splash.png",
       resizeMode: "contain",
-      backgroundColor: "#008542"
+      backgroundColor: "#1E293B"
     },
     assetBundlePatterns: [
       "**/*"
@@ -22,7 +22,7 @@ export default {
     android: {
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
-        backgroundColor: "#008542"
+        backgroundColor: "#009868"
       },
       package: "com.quotemate.app",
       versionCode: 1,

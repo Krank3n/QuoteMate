@@ -292,7 +292,7 @@ export function SettingsScreen() {
           <Text style={styles.infoTitle}>About QuoteMate</Text>
           <Text style={styles.infoText}>Version 1.0.0</Text>
           <Text style={styles.infoText}>
-            Quoting tool for Australian tradies with Bunnings Sandbox API integration
+            Quoting tool for Australian tradies with AI and Bunnings integration
           </Text>
         </View>
 
@@ -323,6 +323,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     borderRadius: 8,
     elevation: 2,
+    backgroundColor: colors.surface,
   },
   sectionTitle: {
     fontSize: 18,
@@ -399,7 +400,7 @@ const styles = StyleSheet.create({
     borderColor: colors.outline,
     borderRadius: 8,
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surfaceLight,
   },
   logoImage: {
     width: '100%',
@@ -421,7 +422,7 @@ const styles = StyleSheet.create({
   proBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF3E0',
+    backgroundColor: colors.warningBg,
     padding: 12,
     borderRadius: 8,
     marginBottom: 12,
