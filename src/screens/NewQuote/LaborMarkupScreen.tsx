@@ -220,6 +220,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     marginTop: 12,
+    backgroundColor: colors.surface,
   },
   calculationLabel: {
     fontSize: 16,
@@ -235,6 +236,7 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 8,
     elevation: 3,
+    backgroundColor: colors.surface,
   },
   summaryRow: {
     flexDirection: 'row',

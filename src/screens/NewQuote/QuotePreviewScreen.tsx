@@ -95,10 +95,10 @@ export function QuotePreviewScreen() {
         body {
           font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
           padding: 40px;
-          color: #333;
+          color: ${colors.textDark};
         }
         .header {
-          border-bottom: 3px solid #008542;
+          border-bottom: 3px solid ${colors.primaryDark};
           padding-bottom: 20px;
           margin-bottom: 30px;
         }
@@ -108,14 +108,14 @@ export function QuotePreviewScreen() {
           margin-bottom: 15px;
         }
         .header h1 {
-          color: #008542;
+          color: ${colors.primaryDark};
           margin: 0 0 10px 0;
         }
         .info-section {
           margin-bottom: 30px;
         }
         .info-section h3 {
-          color: #008542;
+          color: ${colors.primaryDark};
           margin-bottom: 10px;
         }
         table {
@@ -124,28 +124,28 @@ export function QuotePreviewScreen() {
           margin-bottom: 20px;
         }
         th {
-          background-color: #008542;
+          background-color: ${colors.primaryDark};
           color: white;
           padding: 10px;
           text-align: left;
         }
         td {
           padding: 8px;
-          border-bottom: 1px solid #ddd;
+          border-bottom: 1px solid ${colors.borderLight};
         }
         .total-row {
           font-weight: bold;
-          background-color: #f5f5f5;
+          background-color: ${colors.surfaceGray};
         }
         .grand-total {
           font-size: 18px;
-          color: #008542;
+          color: ${colors.primaryDark};
           font-weight: bold;
         }
         .summary {
           margin-top: 30px;
           padding: 20px;
-          background-color: #f9f9f9;
+          background-color: ${colors.surfaceGray2};
           border-radius: 8px;
         }
         .summary-row {
@@ -251,7 +251,7 @@ export function QuotePreviewScreen() {
 
       ${notes ? `<div class="info-section"><h3>Notes</h3><p>${notes}</p></div>` : ''}
 
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
+      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid ${colors.borderLight}; font-size: 12px; color: ${colors.textMuted};">
         <p>This quote is valid for 30 days from the date of issue.</p>
         <p>Generated with QuoteMate - quoting tool for Australian tradies</p>
       </div>
@@ -416,6 +416,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     elevation: 2,
+    backgroundColor: colors.surface,
   },
   sectionTitle: {
     fontSize: 16,
@@ -472,7 +473,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     elevation: 3,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: colors.surfaceGray,
   },
   totalRow: {
     flexDirection: 'row',
