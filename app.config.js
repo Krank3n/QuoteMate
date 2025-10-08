@@ -25,7 +25,7 @@ export default {
         backgroundColor: "#009868"
       },
       package: "com.quotemate.app",
-      versionCode: 2,
+      versionCode: 3,
       compileSdkVersion: 35,
       targetSdkVersion: 35,
       permissions: [],
