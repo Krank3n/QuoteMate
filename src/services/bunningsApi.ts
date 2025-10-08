@@ -17,10 +17,10 @@ console.log('🔧 Bunnings API Config:', {
   clientIdLength: CLIENT_ID.length,
 });
 
-const AUTH_URL = 'https://connect.sandbox.api.bunnings.com.au';
-const ITEM_API_URL = 'https://item.sandbox.api.bunnings.com.au';
-const PRICING_API_URL = 'https://pricing.sandbox.api.bunnings.com.au';
-const INVENTORY_API_URL = 'https://inventory.sandbox.api.bunnings.com.au';
+const AUTH_URL = 'https://connect.api.bunnings.com.au';
+const ITEM_API_URL = 'https://item.api.bunnings.com.au';
+const PRICING_API_URL = 'https://pricing.api.bunnings.com.au';
+const INVENTORY_API_URL = 'https://inventory.api.bunnings.com.au';
 
 class BunningsAPI {
   private accessToken: string | null = null;
