@@ -28,7 +28,7 @@ export default {
       versionCode: 2,
       targetSdkVersion: 35,
       permissions: [],
-      blockedPermissions: ["android.permission.CAMERA"]
+      blockedPermissions: ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"]
     },
     web: {
       favicon: "./assets/favicon.png"
