@@ -26,6 +26,7 @@ export default {
       },
       package: "com.quotemate.app",
       versionCode: 2,
+      compileSdkVersion: 35,
       targetSdkVersion: 35,
       permissions: [],
       blockedPermissions: ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"]
