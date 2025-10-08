@@ -27,7 +27,8 @@ export default {
       package: "com.quotemate.app",
       versionCode: 2,
       targetSdkVersion: 35,
-      permissions: []
+      permissions: [],
+      blockedPermissions: ["android.permission.CAMERA"]
     },
     web: {
       favicon: "./assets/favicon.png"
