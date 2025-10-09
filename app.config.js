@@ -7,6 +7,18 @@ export default {
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
     newArchEnabled: true,
+    plugins: [
+      [
+        "expo-build-properties",
+        {
+          android: {
+            compileSdkVersion: 35,
+            targetSdkVersion: 35,
+            buildToolsVersion: "35.0.0"
+          }
+        }
+      ]
+    ],
     splash: {
       image: "./assets/splash.png",
       resizeMode: "contain",
@@ -25,9 +37,7 @@ export default {
         backgroundColor: "#009868"
       },
       package: "com.quotemate.app",
-      versionCode: 2,
-      compileSdkVersion: 35,
-      targetSdkVersion: 35,
+      versionCode: 4,
       permissions: [],
       blockedPermissions: ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"]
     },
