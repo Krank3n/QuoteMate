@@ -30,52 +30,72 @@ interface LLMResponse {
 /**
  * Analyze a job description and generate a materials list
  * @param jobDescription - Natural language description of the job
+ * @param retryCount - Number of retry attempts (default: 3)
  * @returns Materials list and estimated hours
  */
 export async function analyzeJobDescription(
-  jobDescription: string
+  jobDescription: string,
+  retryCount: number = 3
 ): Promise<LLMResponse> {
   if (!ANTHROPIC_API_KEY) {
     console.warn('ANTHROPIC_API_KEY not set, using fallback');
-    return getFallbackResponse(jobDescription);
+    throw new Error('API key not configured');
   }
 
-  try {
-    const prompt = createPrompt(jobDescription);
+  let lastError: Error | null = null;
 
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 2000,
-        messages: [
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-      }),
-    });
+  // Retry loop
+  for (let attempt = 0; attempt < retryCount; attempt++) {
+    try {
+      const prompt = createPrompt(jobDescription);
 
-    if (!response.ok) {
-      throw new Error(`LLM API error: ${response.status} ${response.statusText}`);
+      const response = await fetch(ANTHROPIC_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-sonnet-20241022',
+          max_tokens: 2000,
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API returned ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json();
+      const content = data.content[0].text;
+
+      // Parse the JSON response
+      const result = parseResponse(content);
+      return result;
+    } catch (error) {
+      lastError = error as Error;
+      console.error(`LLM analysis attempt ${attempt + 1} failed:`, error);
+
+      // If this isn't the last attempt, wait before retrying
+      if (attempt < retryCount - 1) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 5000); // Exponential backoff, max 5s
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
-
-    const data = await response.json();
-    const content = data.content[0].text;
-
-    // Parse the JSON response
-    const result = parseResponse(content);
-    return result;
-  } catch (error) {
-    console.error('LLM analysis error:', error);
-    return getFallbackResponse(jobDescription);
   }
+
+  // All retries failed
+  throw new Error(
+    lastError?.message || 'Failed to analyze job description after multiple attempts'
+  );
 }
 
 /**
