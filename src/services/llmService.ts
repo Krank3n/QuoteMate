@@ -3,16 +3,14 @@
  * Generates materials lists from natural language descriptions
  */
 
-import Constants from 'expo-constants';
+import { ANTHROPIC_API_KEY } from '@env';
 import { Material } from '../types';
 
-const expoExtra = Constants.expoConfig?.extra || {};
-const ANTHROPIC_API_KEY = expoExtra.ANTHROPIC_API_KEY || '';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
 console.log('🔧 Anthropic API Config:', {
   hasApiKey: !!ANTHROPIC_API_KEY,
-  keyLength: ANTHROPIC_API_KEY.length,
+  keyLength: ANTHROPIC_API_KEY?.length || 0,
 });
 
 interface LLMMaterial {

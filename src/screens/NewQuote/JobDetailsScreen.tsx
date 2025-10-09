@@ -10,6 +10,8 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import {
   Text,
@@ -220,8 +222,17 @@ export function JobDetailsScreen() {
   };
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.section}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.section}>
         <Title style={styles.sectionTitle}>Customer Details</Title>
 
         <TextInput
@@ -379,21 +390,22 @@ export function JobDetailsScreen() {
         </Surface>
       )}
 
-      <Button
-        mode="contained"
-        onPress={handleNext}
-        style={styles.nextButton}
-        disabled={
-          !selectedTemplate ||
-          !customerName.trim() ||
-          isAnalyzing ||
-          (selectedTemplate?.id === 'custom' && !jobDescription.trim() && !isEditingExisting)
-        }
-        loading={isAnalyzing}
-      >
-        {isAnalyzing ? 'Analyzing...' : (selectedTemplate?.id === 'custom' && !isEditingExisting ? 'Analyze & Continue' : 'Next: Materials')}
-      </Button>
-    </ScrollView>
+        <Button
+          mode="contained"
+          onPress={handleNext}
+          style={styles.nextButton}
+          disabled={
+            !selectedTemplate ||
+            !customerName.trim() ||
+            isAnalyzing ||
+            (selectedTemplate?.id === 'custom' && !jobDescription.trim() && !isEditingExisting)
+          }
+          loading={isAnalyzing}
+        >
+          {isAnalyzing ? 'Analyzing...' : (selectedTemplate?.id === 'custom' && !isEditingExisting ? 'Analyze & Continue' : 'Next: Materials')}
+        </Button>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -417,6 +429,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  scrollContent: {
+    paddingBottom: 220,
+    flexGrow: 1,
+  },
   section: {
     padding: 20,
   },
@@ -426,7 +442,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   input: {
-    marginBottom: 12,
+    marginBottom: 20,
   },
   templatesGrid: {
     flexDirection: 'row',
@@ -468,7 +484,8 @@ const styles = StyleSheet.create({
   },
   nextButton: {
     marginHorizontal: 20,
-    marginBottom: 40,
+    marginTop: 24,
+    marginBottom: 80,
     paddingVertical: 8,
   },
   helperText: {

@@ -3,18 +3,16 @@
  * Handles OAuth authentication and API calls to Bunnings services
  */
 
-import Constants from 'expo-constants';
+import { BUNNINGS_CLIENT_ID, BUNNINGS_CLIENT_SECRET } from '@env';
 import { BunningsAuthResponse, BunningsItem, BunningsPrice, BunningsInventory } from '../types';
 
-// Get credentials from expo-constants (works with .env files)
-const expoExtra = Constants.expoConfig?.extra || {};
-const CLIENT_ID = expoExtra.BUNNINGS_CLIENT_ID || '';
-const CLIENT_SECRET = expoExtra.BUNNINGS_CLIENT_SECRET || '';
+const CLIENT_ID = BUNNINGS_CLIENT_ID || '';
+const CLIENT_SECRET = BUNNINGS_CLIENT_SECRET || '';
 
 console.log('🔧 Bunnings API Config:', {
   hasClientId: !!CLIENT_ID,
   hasClientSecret: !!CLIENT_SECRET,
-  clientIdLength: CLIENT_ID.length,
+  clientIdLength: CLIENT_ID?.length || 0,
 });
 
 const AUTH_URL = 'https://connect.api.bunnings.com.au';

@@ -133,9 +133,13 @@ export function SettingsScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <Surface style={styles.card}>
           <Title style={styles.sectionTitle}>Business Information</Title>
 
@@ -317,6 +321,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
+    paddingBottom: 220,
+    flexGrow: 1,
   },
   card: {
     padding: 16,
@@ -331,11 +337,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   input: {
-    marginBottom: 12,
+    marginBottom: 20,
   },
   button: {
     marginTop: 12,
-    marginBottom: 40,
+    marginBottom: 80,
     paddingVertical: 8,
   },
   helperText: {

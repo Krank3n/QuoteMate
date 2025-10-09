@@ -95,7 +95,7 @@ export function QuotePreviewScreen() {
         body {
           font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
           padding: 40px;
-          color: ${colors.textDark};
+          color: #1a1a1a;
         }
         .header {
           border-bottom: 3px solid ${colors.primaryDark};
@@ -111,12 +111,24 @@ export function QuotePreviewScreen() {
           color: ${colors.primaryDark};
           margin: 0 0 10px 0;
         }
+        .header p {
+          color: #333333;
+          margin: 5px 0;
+        }
         .info-section {
           margin-bottom: 30px;
+        }
+        .info-section h2 {
+          color: #1a1a1a;
+          margin-bottom: 15px;
         }
         .info-section h3 {
           color: ${colors.primaryDark};
           margin-bottom: 10px;
+        }
+        .info-section p {
+          color: #333333;
+          margin: 5px 0;
         }
         table {
           width: 100%;
@@ -131,11 +143,12 @@ export function QuotePreviewScreen() {
         }
         td {
           padding: 8px;
-          border-bottom: 1px solid ${colors.borderLight};
+          border-bottom: 1px solid #e0e0e0;
+          color: #333333;
         }
         .total-row {
           font-weight: bold;
-          background-color: ${colors.surfaceGray};
+          background-color: #f5f5f5;
         }
         .grand-total {
           font-size: 18px;
@@ -145,13 +158,19 @@ export function QuotePreviewScreen() {
         .summary {
           margin-top: 30px;
           padding: 20px;
-          background-color: ${colors.surfaceGray2};
+          background-color: #f9f9f9;
           border-radius: 8px;
+          border: 1px solid #e0e0e0;
         }
         .summary-row {
           display: flex;
           justify-content: space-between;
           padding: 8px 0;
+          color: #333333;
+        }
+        h3 {
+          color: ${colors.primaryDark};
+          margin-bottom: 10px;
         }
       </style>
     </head>
@@ -251,7 +270,7 @@ export function QuotePreviewScreen() {
 
       ${notes ? `<div class="info-section"><h3>Notes</h3><p>${notes}</p></div>` : ''}
 
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid ${colors.borderLight}; font-size: 12px; color: ${colors.textMuted};">
+      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666666;">
         <p>This quote is valid for 30 days from the date of issue.</p>
         <p>Generated with QuoteMate - quoting tool for Australian tradies</p>
       </div>
@@ -288,7 +307,10 @@ export function QuotePreviewScreen() {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+    >
       {/* Quote Details Preview */}
       <Surface style={styles.section}>
         <Title style={styles.sectionTitle}>Customer</Title>
@@ -411,6 +433,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  scrollContent: {
+    paddingBottom: 220,
+    flexGrow: 1,
+  },
   section: {
     margin: 16,
     padding: 16,
@@ -491,7 +517,7 @@ const styles = StyleSheet.create({
   },
   actions: {
     padding: 16,
-    paddingBottom: 40,
+    paddingBottom: 80,
   },
   actionButton: {
     marginBottom: 12,

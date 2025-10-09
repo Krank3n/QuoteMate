@@ -3,8 +3,8 @@
  * Shows subscription options when free quote limit is reached
  */
 
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import {
   Text,
   Button,
@@ -14,43 +14,109 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
+import * as RNIap from 'react-native-iap';
 
 import { useStore } from '../store/useStore';
 import { colors } from '../theme';
+import { billingService, SUBSCRIPTION_SKUS } from '../services/billingService';
+import { useSubscriptionStore } from '../store/subscriptionStore';
 
 export function PaywallScreen() {
   const navigation = useNavigation<any>();
-  const { subscriptionStatus, upgradeToProMock } = useStore();
+  const { subscriptionStatus } = useStore();
+  const { quoteCount, setPremium } = useSubscriptionStore();
   const [isUpgrading, setIsUpgrading] = useState(false);
+  const [products, setProducts] = useState<RNIap.Subscription[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const quotesUsed = subscriptionStatus?.quotesThisMonth || 0;
-  const quotesLimit = subscriptionStatus?.freeQuotesLimit || 5;
+  const quotesUsed = quoteCount;
+  const quotesLimit = 5;
+
+  useEffect(() => {
+    loadProducts();
+    setupPurchaseListener();
+
+    return () => {
+      RNIap.purchaseUpdatedListener?.remove();
+      RNIap.purchaseErrorListener?.remove();
+    };
+  }, []);
+
+  const loadProducts = async () => {
+    setLoading(true);
+    try {
+      const availableProducts = await billingService.getProducts();
+      setProducts(availableProducts);
+    } catch (error) {
+      console.error('Error loading products:', error);
+      Alert.alert('Error', 'Failed to load subscription options');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const setupPurchaseListener = () => {
+    const purchaseUpdateSubscription = RNIap.purchaseUpdatedListener(
+      async (purchase: RNIap.SubscriptionPurchase) => {
+        console.log('Purchase updated:', purchase);
+        const receipt = purchase.transactionReceipt;
+        if (receipt) {
+          try {
+            await setPremium(
+              true,
+              purchase.productId,
+              new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+            );
+            await billingService.finishTransaction(purchase);
+            Alert.alert(
+              'Success!',
+              'Welcome to QuoteMate Pro! You now have unlimited quotes.',
+              [{ text: 'OK', onPress: () => navigation.goBack() }]
+            );
+          } catch (error) {
+            console.error('Error processing purchase:', error);
+          }
+        }
+        setIsUpgrading(false);
+      }
+    );
+
+    const purchaseErrorSubscription = RNIap.purchaseErrorListener(
+      (error: RNIap.PurchaseError) => {
+        if (error.code !== 'E_USER_CANCELLED') {
+          console.error('Purchase error:', error);
+          Alert.alert('Purchase Failed', error.message);
+        }
+        setIsUpgrading(false);
+      }
+    );
+  };
 
   const handleUpgrade = async () => {
     setIsUpgrading(true);
-
     try {
-      // In production, this would integrate with:
-      // - iOS: StoreKit / RevenueCat
-      // - Android: Google Play Billing / RevenueCat
-      await upgradeToProMock();
-
-      Alert.alert(
-        'Success!',
-        'Welcome to QuoteMate Pro! You now have unlimited quote analyses.',
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          },
-        ]
-      );
-    } catch (error) {
-      Alert.alert('Error', 'Failed to upgrade. Please try again.');
-    } finally {
+      await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
+    } catch (error: any) {
       setIsUpgrading(false);
+      if (error.code !== 'E_USER_CANCELLED') {
+        Alert.alert('Error', 'Failed to start purchase');
+      }
     }
   };
+
+  const getProductPrice = (productId: string): string => {
+    const product = products.find(p => p.productId === productId);
+    return product?.localizedPrice || '$19';
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={styles.loadingText}>Loading subscription options...</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container}>
@@ -62,7 +128,7 @@ export function PaywallScreen() {
         />
         <Title style={styles.title}>Upgrade to Pro</Title>
         <Text style={styles.subtitle}>
-          You've used {quotesUsed} of {quotesLimit} free quote analyses this month
+          You've created {quotesUsed} of {quotesLimit} free quotes
         </Text>
       </View>
 
@@ -70,8 +136,7 @@ export function PaywallScreen() {
         <View style={styles.planHeader}>
           <Text style={styles.planName}>QuoteMate Pro</Text>
           <View style={styles.priceContainer}>
-            <Text style={styles.currency}>$</Text>
-            <Text style={styles.price}>19</Text>
+            <Text style={styles.price}>{getProductPrice(SUBSCRIPTION_SKUS.MONTHLY)}</Text>
             <Text style={styles.period}>/month</Text>
           </View>
         </View>
@@ -115,16 +180,16 @@ export function PaywallScreen() {
         </Button>
 
         <Text style={styles.disclaimer}>
-          * This is a demo version. In production, payment would be processed through App Store or Google Play.
+          Cancel anytime. Subscriptions automatically renew unless cancelled 24 hours before the end of the period.
         </Text>
       </Surface>
 
       <Surface style={styles.freeCard}>
         <Text style={styles.freeTitle}>Free Plan</Text>
         <Text style={styles.freeText}>
-          • {quotesLimit} quote analyses per month{'\n'}
-          • Resets on the 1st of each month{'\n'}
-          • All core features included
+          • {quotesLimit} quotes total{'\n'}
+          • All core features included{'\n'}
+          • Upgrade anytime for unlimited quotes
         </Text>
       </Surface>
 
@@ -143,6 +208,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    color: colors.onSurface,
   },
   header: {
     alignItems: 'center',
