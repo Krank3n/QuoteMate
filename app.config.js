@@ -37,10 +37,10 @@ export default {
     android: {
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
-        backgroundColor: "#009868"
+        backgroundColor: "#1E293B"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 4,
+      versionCode: 6,
       permissions: [],
       blockedPermissions: ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"]
     },
@@ -51,10 +51,7 @@ export default {
     extra: {
       eas: {
         projectId: "b164d7f8-b04e-4960-a962-ebc74fe65bce"
-      },
-      BUNNINGS_CLIENT_ID: process.env.BUNNINGS_CLIENT_ID,
-      BUNNINGS_CLIENT_SECRET: process.env.BUNNINGS_CLIENT_SECRET,
-      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      }
     }
   }
 };

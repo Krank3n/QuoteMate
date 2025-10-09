@@ -3,7 +3,7 @@
  * View, edit, add, and delete materials with Bunnings pricing
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -32,12 +32,13 @@ import { Material, BunningsItem } from '../../types';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
 import { bunningsApi } from '../../services/bunningsApi';
+import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 
 export function MaterialsListScreen() {
   const navigation = useNavigation<any>();
-  const { currentQuote, updateQuote } = useStore();
+  const { currentQuote, updateQuote, businessSettings } = useStore();
   const insets = useSafeAreaInsets();
 
   const [isFetchingPrices, setIsFetchingPrices] = useState(false);
@@ -47,6 +48,7 @@ export function MaterialsListScreen() {
   const [editQuantity, setEditQuantity] = useState('');
   const [editUnit, setEditUnit] = useState<Material['unit']>('each');
   const [editPrice, setEditPrice] = useState('');
+  const [isFetchingSinglePrice, setIsFetchingSinglePrice] = useState(false);
 
   // Product search state
   const [searchDialogVisible, setSearchDialogVisible] = useState(false);
@@ -54,6 +56,24 @@ export function MaterialsListScreen() {
   const [searchResults, setSearchResults] = useState<BunningsItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
+  // Memoize text input handlers to prevent flickering
+  const handleEditNameChange = useCallback((text: string) => {
+    setEditName(text);
+  }, []);
+
+  const handleEditQuantityChange = useCallback((text: string) => {
+    setEditQuantity(text);
+  }, []);
+
+  const handleEditPriceChange = useCallback((text: string) => {
+    setEditPrice(text);
+  }, []);
+
+  const handleSearchQueryChange = useCallback((text: string) => {
+    setSearchQuery(text);
+  }, []);
+
+  // Early return after all hooks have been called
   if (!currentQuote) {
     return null;
   }
@@ -72,6 +92,11 @@ export function MaterialsListScreen() {
     let skippedCount = 0;
     let failedCount = 0;
 
+    // Determine which pricing method to use
+    const useBunningsApi = businessSettings?.useBunningsApi === true; // Default to false
+    const hardwareStores = businessSettings?.hardwareStores || ['https://www.bunnings.com.au/'];
+    const methodName = useBunningsApi ? 'Bunnings API' : 'AI estimation';
+
     try {
       const updatedMaterials = [...materials];
 
@@ -84,29 +109,58 @@ export function MaterialsListScreen() {
           continue;
         }
 
-        // Fetch from Bunnings
         const searchTerm = material.searchTerm || material.name;
-        const result = await bunningsApi.findAndPriceMaterial(searchTerm);
 
-        if (result) {
-          material.bunningsItemNumber = result.item.itemNumber;
-          material.price = result.price.priceIncGst;
-          material.totalPrice = material.price * material.quantity;
-          material.manualPriceOverride = false;
-          fetchedCount++;
+        if (useBunningsApi) {
+          // Use Bunnings API (original method)
+          const result = await bunningsApi.findAndPriceMaterial(searchTerm);
+
+          if (result) {
+            material.bunningsItemNumber = result.item.itemNumber;
+            material.price = result.price.priceIncGst;
+            material.totalPrice = material.price * material.quantity;
+            material.manualPriceOverride = false;
+            fetchedCount++;
+          } else {
+            failedCount++;
+          }
         } else {
-          failedCount++;
+          // Use AI price estimation with Claude
+          const result = await searchMaterialPrice(searchTerm, hardwareStores);
+
+          if (result.price) {
+            material.price = result.price;
+            material.totalPrice = material.price * material.quantity;
+            material.manualPriceOverride = false;
+
+            // Store additional info if available
+            if (result.productName) {
+              material.name = result.productName;
+            }
+
+            fetchedCount++;
+          } else {
+            failedCount++;
+          }
         }
 
-        // Update UI progressively
-        updateQuote({
-          ...currentQuote,
-          materials: [...updatedMaterials],
-        });
+        // Update UI progressively (skip if dialogs are open to avoid flickering)
+        if (!editDialogVisible && !searchDialogVisible) {
+          updateQuote({
+            ...currentQuote,
+            materials: [...updatedMaterials],
+          });
+        }
 
         // Small delay to avoid overwhelming the API
         await new Promise(resolve => setTimeout(resolve, 500));
       }
+
+      // Final update to ensure all changes are saved
+      updateQuote({
+        ...currentQuote,
+        materials: [...updatedMaterials],
+      });
 
       // Show appropriate message based on results
       if (fetchedCount === 0 && failedCount === 0 && skippedCount > 0) {
@@ -114,18 +168,18 @@ export function MaterialsListScreen() {
       } else if (fetchedCount === 0 && failedCount > 0) {
         Alert.alert(
           'No Prices Found',
-          `Could not find prices for ${failedCount} material${failedCount > 1 ? 's' : ''}.\n\nThe Bunnings API may be down or the product names don't match. Try:\n• Editing material names to match Bunnings products\n• Adding prices manually\n• Checking again later`
+          `Could not find prices for ${failedCount} material${failedCount > 1 ? 's' : ''} using ${methodName}.\n\nTry:\n• Editing material names to match hardware store products\n• Adding prices manually\n• ${useBunningsApi ? 'Checking if the Bunnings API is down' : 'Trying different hardware stores in Settings'}\n• Checking again later`
         );
       } else if (fetchedCount > 0 && failedCount === 0) {
-        Alert.alert('Success', `Updated ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} from Bunnings.`);
+        Alert.alert('Success', `Updated ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} using ${methodName}.`);
       } else if (fetchedCount > 0 && failedCount > 0) {
-        Alert.alert('Partial Success', `Updated ${fetchedCount} price${fetchedCount > 1 ? 's' : ''}. Could not find ${failedCount} item${failedCount > 1 ? 's' : ''}. The Bunnings API may be experiencing issues.`);
+        Alert.alert('Partial Success', `Updated ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} using ${methodName}. Could not find ${failedCount} item${failedCount > 1 ? 's' : ''}. ${useBunningsApi ? 'The Bunnings API may be experiencing issues.' : 'Try editing material names or adjusting hardware stores in Settings.'}`);
       } else {
         Alert.alert('Complete', 'Price fetch complete.');
       }
     } catch (error) {
       console.error('Error fetching prices:', error);
-      Alert.alert('Error', 'Failed to fetch prices. The Bunnings API may be down or there may be a connection issue. Please try again later.');
+      Alert.alert('Error', `Failed to fetch prices using ${methodName}. ${useBunningsApi ? 'The Bunnings API may be down or' : 'The AI price estimation service may be unavailable or'} there may be a connection issue. Please try again later.`);
     } finally {
       setIsFetchingPrices(false);
     }
@@ -269,6 +323,54 @@ export function MaterialsListScreen() {
     );
   };
 
+  const handleFetchSinglePrice = async () => {
+    if (!editName.trim()) {
+      Alert.alert('Enter Material Name', 'Please enter a material name to search for pricing');
+      return;
+    }
+
+    setIsFetchingSinglePrice(true);
+
+    try {
+      const useBunningsApi = businessSettings?.useBunningsApi === true;
+      const hardwareStores = businessSettings?.hardwareStores || ['https://www.bunnings.com.au/'];
+      const searchTerm = editName;
+
+      if (useBunningsApi) {
+        // Use Bunnings API
+        const result = await bunningsApi.findAndPriceMaterial(searchTerm);
+
+        if (result) {
+          setEditPrice(result.price.priceIncGst.toString());
+          Alert.alert('Success', `Found price: ${formatCurrency(result.price.priceIncGst)}`);
+        } else {
+          Alert.alert(
+            'Not Found',
+            'Could not find this material in the Bunnings catalog. Try:\n\n• Editing the material name\n• Entering the price manually\n• Checking if Bunnings API is available'
+          );
+        }
+      } else {
+        // Use AI price estimation
+        const result = await searchMaterialPrice(searchTerm, hardwareStores);
+
+        if (result.price) {
+          setEditPrice(result.price.toString());
+          Alert.alert('Estimated Price', `Estimated price: ${formatCurrency(result.price)}\n\nNote: This is an AI estimate, not a live price.`);
+        } else {
+          Alert.alert(
+            'Could Not Estimate',
+            'Could not estimate a price for this material. Please enter the price manually.'
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching single price:', error);
+      Alert.alert('Error', 'Failed to fetch price. Please try again or enter manually.');
+    } finally {
+      setIsFetchingSinglePrice(false);
+    }
+  };
+
   const handleNext = () => {
     if (materials.length === 0) {
       Alert.alert('No Materials', 'Please add at least one material');
@@ -358,6 +460,12 @@ export function MaterialsListScreen() {
           >
             Fetch Prices
           </Button>
+
+          {(businessSettings?.useBunningsApi === false || businessSettings?.useBunningsApi === undefined) && (
+            <Text style={styles.disclaimerText}>
+              Note: Awaiting Bunnings API approval. Prices are AI estimates only.
+            </Text>
+          )}
         </View>
 
         <View style={styles.summary}>
@@ -388,7 +496,7 @@ export function MaterialsListScreen() {
             <TextInput
               label="Material Name"
               value={editName}
-              onChangeText={setEditName}
+              onChangeText={handleEditNameChange}
               mode="outlined"
               style={styles.dialogInput}
             />
@@ -396,7 +504,7 @@ export function MaterialsListScreen() {
             <TextInput
               label="Quantity"
               value={editQuantity}
-              onChangeText={setEditQuantity}
+              onChangeText={handleEditQuantityChange}
               mode="outlined"
               keyboardType="decimal-pad"
               style={styles.dialogInput}
@@ -431,12 +539,24 @@ export function MaterialsListScreen() {
             <TextInput
               label="Price per Unit"
               value={editPrice}
-              onChangeText={setEditPrice}
+              onChangeText={handleEditPriceChange}
               mode="outlined"
               keyboardType="decimal-pad"
               left={<TextInput.Affix text="$" />}
               style={styles.dialogInput}
             />
+
+            <Button
+              mode="text"
+              onPress={handleFetchSinglePrice}
+              loading={isFetchingSinglePrice}
+              disabled={isFetchingSinglePrice || !editName.trim()}
+              icon="cash-sync"
+              compact
+              style={styles.fetchPriceButton}
+            >
+              Fetch Price
+            </Button>
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setEditDialogVisible(false)}>Cancel</Button>
@@ -456,7 +576,7 @@ export function MaterialsListScreen() {
               <TextInput
                 label="Search Products"
                 value={searchQuery}
-                onChangeText={setSearchQuery}
+                onChangeText={handleSearchQueryChange}
                 mode="outlined"
                 placeholder="e.g., treated pine 90x45"
                 style={styles.searchInput}
@@ -585,6 +705,14 @@ const styles = StyleSheet.create({
   actionButton: {
     marginBottom: 12,
   },
+  disclaimerText: {
+    fontSize: 11,
+    color: colors.onSurface,
+    fontStyle: 'italic',
+    marginTop: 8,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
   summary: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -617,6 +745,11 @@ const styles = StyleSheet.create({
   },
   dialogInput: {
     marginBottom: 12,
+  },
+  fetchPriceButton: {
+    marginTop: -8,
+    marginBottom: 8,
+    alignSelf: 'flex-start',
   },
   unitSelector: {
     marginBottom: 16,

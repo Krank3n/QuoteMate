@@ -16,9 +16,6 @@
     "production": {
       "android": {
         "buildType": "app-bundle"
-      },
-      "env": {
-        "ANDROID_HOME": "/Users/tom/Library/Android/sdk"
       }
     }
   },
