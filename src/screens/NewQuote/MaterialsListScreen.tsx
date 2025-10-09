@@ -17,7 +17,6 @@ import {
   Button,
   List,
   IconButton,
-  FAB,
   Dialog,
   Portal,
   TextInput,
@@ -33,10 +32,13 @@ import { Material, BunningsItem } from '../../types';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
 import { bunningsApi } from '../../services/bunningsApi';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 
 export function MaterialsListScreen() {
   const navigation = useNavigation<any>();
   const { currentQuote, updateQuote } = useStore();
+  const insets = useSafeAreaInsets();
 
   const [isFetchingPrices, setIsFetchingPrices] = useState(false);
   const [editDialogVisible, setEditDialogVisible] = useState(false);
@@ -110,17 +112,20 @@ export function MaterialsListScreen() {
       if (fetchedCount === 0 && failedCount === 0 && skippedCount > 0) {
         Alert.alert('Already Priced', 'All materials already have prices.');
       } else if (fetchedCount === 0 && failedCount > 0) {
-        Alert.alert('No Prices Found', `Could not find prices for ${failedCount} material${failedCount > 1 ? 's' : ''}. Try editing the material names to match Bunnings products.`);
+        Alert.alert(
+          'No Prices Found',
+          `Could not find prices for ${failedCount} material${failedCount > 1 ? 's' : ''}.\n\nThe Bunnings API may be down or the product names don't match. Try:\n• Editing material names to match Bunnings products\n• Adding prices manually\n• Checking again later`
+        );
       } else if (fetchedCount > 0 && failedCount === 0) {
         Alert.alert('Success', `Updated ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} from Bunnings.`);
       } else if (fetchedCount > 0 && failedCount > 0) {
-        Alert.alert('Partial Success', `Updated ${fetchedCount} price${fetchedCount > 1 ? 's' : ''}. Could not find ${failedCount} item${failedCount > 1 ? 's' : ''}.`);
+        Alert.alert('Partial Success', `Updated ${fetchedCount} price${fetchedCount > 1 ? 's' : ''}. Could not find ${failedCount} item${failedCount > 1 ? 's' : ''}. The Bunnings API may be experiencing issues.`);
       } else {
         Alert.alert('Complete', 'Price fetch complete.');
       }
     } catch (error) {
       console.error('Error fetching prices:', error);
-      Alert.alert('Error', 'Failed to fetch prices. Please check your connection.');
+      Alert.alert('Error', 'Failed to fetch prices. The Bunnings API may be down or there may be a connection issue. Please try again later.');
     } finally {
       setIsFetchingPrices(false);
     }
@@ -335,6 +340,16 @@ export function MaterialsListScreen() {
 
         <View style={styles.actions}>
           <Button
+            mode="contained"
+            onPress={handleAddMaterial}
+            style={styles.addButton}
+            icon="plus"
+            contentStyle={styles.addButtonContent}
+          >
+            Add
+          </Button>
+
+          <Button
             mode="outlined"
             onPress={handleFetchPrices}
             style={styles.actionButton}
@@ -353,7 +368,7 @@ export function MaterialsListScreen() {
         </View>
       </ScrollView>
 
-      <View style={styles.bottomActions}>
+      <View style={[styles.bottomActions, { paddingBottom: insets.bottom + 20 }]}>
         <Button
           mode="contained"
           onPress={handleNext}
@@ -364,13 +379,6 @@ export function MaterialsListScreen() {
           Next: Labor & Markup
         </Button>
       </View>
-
-      <FAB
-        icon="plus"
-        style={styles.fab}
-        onPress={handleAddMaterial}
-        color={colors.white}
-      />
 
       {/* Edit Material Dialog */}
       <Portal>
@@ -566,6 +574,14 @@ const styles = StyleSheet.create({
   actions: {
     padding: 20,
   },
+  addButton: {
+    alignSelf: 'flex-end',
+    marginTop: 0,
+    marginBottom: 24,
+  },
+  addButtonContent: {
+    flexDirection: 'row-reverse',
+  },
   actionButton: {
     marginBottom: 12,
   },
@@ -598,12 +614,6 @@ const styles = StyleSheet.create({
   },
   nextButtonLabel: {
     color: colors.white,
-  },
-  fab: {
-    position: 'absolute',
-    right: 16,
-    bottom: 90,
-    backgroundColor: colors.primary,
   },
   dialogInput: {
     marginBottom: 12,

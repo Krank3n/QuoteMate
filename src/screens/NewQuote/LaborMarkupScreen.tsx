@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import {
   Text,
   TextInput,
@@ -71,8 +71,17 @@ export function LaborMarkupScreen() {
   };
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.section}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.section}>
         <Title style={styles.sectionTitle}>Labor</Title>
 
         <TextInput
@@ -187,14 +196,15 @@ export function LaborMarkupScreen() {
         </View>
       </Surface>
 
-      <Button
-        mode="contained"
-        onPress={handleNext}
-        style={styles.nextButton}
-      >
-        Next: Preview Quote
-      </Button>
-    </ScrollView>
+        <Button
+          mode="contained"
+          onPress={handleNext}
+          style={styles.nextButton}
+        >
+          Next: Preview Quote
+        </Button>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -202,6 +212,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  scrollContent: {
+    paddingBottom: 220,
+    flexGrow: 1,
   },
   section: {
     padding: 20,
@@ -212,7 +226,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   input: {
-    marginBottom: 12,
+    marginBottom: 20,
   },
   calculationRow: {
     flexDirection: 'row',
@@ -270,7 +284,8 @@ const styles = StyleSheet.create({
   },
   nextButton: {
     marginHorizontal: 20,
-    marginBottom: 40,
+    marginTop: 24,
+    marginBottom: 80,
     paddingVertical: 8,
   },
 });
