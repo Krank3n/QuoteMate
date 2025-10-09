@@ -7,6 +7,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { QuotesListScreen } from '../screens/QuotesListScreen';
@@ -82,6 +83,8 @@ function NewQuoteNavigator() {
  * Main Tabs Navigator
  */
 function MainTabs() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -103,6 +106,9 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
+          paddingTop: 8,
+          paddingBottom: insets.bottom + 16,
+          height: 60 + insets.bottom,
         },
         headerStyle: {
           backgroundColor: colors.primary,
