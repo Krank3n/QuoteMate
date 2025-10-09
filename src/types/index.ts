@@ -77,6 +77,9 @@ export interface BusinessSettings {
   logoUri?: string; // Local file URI for company logo
   defaultLaborRate: number;
   defaultMarkup: number;
+  // Price fetching settings
+  useBunningsApi?: boolean; // If true, use Bunnings API. If false/undefined, use AI estimation (default: false)
+  hardwareStores?: string[]; // Up to 3 hardware store URLs for AI price estimation context
 }
 
 // Bunnings API types

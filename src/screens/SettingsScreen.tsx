@@ -23,6 +23,7 @@ import {
   Divider,
   IconButton,
   Chip,
+  Switch,
 } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -44,6 +45,10 @@ export function SettingsScreen() {
   const [logoUri, setLogoUri] = useState<string | undefined>(undefined);
   const [laborRate, setLaborRate] = useState('85');
   const [markup, setMarkup] = useState('20');
+  const [useBunningsApi, setUseBunningsApi] = useState(false);
+  const [store1, setStore1] = useState('https://www.bunnings.com.au/');
+  const [store2, setStore2] = useState('');
+  const [store3, setStore3] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   // Load current settings
@@ -57,6 +62,11 @@ export function SettingsScreen() {
       setLogoUri(businessSettings.logoUri);
       setLaborRate(businessSettings.defaultLaborRate.toString());
       setMarkup(businessSettings.defaultMarkup.toString());
+      setUseBunningsApi(businessSettings.useBunningsApi === true); // Default to false
+      const stores = businessSettings.hardwareStores || ['https://www.bunnings.com.au/'];
+      setStore1(stores[0] || 'https://www.bunnings.com.au/');
+      setStore2(stores[1] || '');
+      setStore3(stores[2] || '');
     }
   }, [businessSettings]);
 
@@ -74,7 +84,7 @@ export function SettingsScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        aspect: [16, 9], // Wide logo format
+        aspect: [1, 1], // Square logo format
         quality: 0.8,
       });
 
@@ -108,6 +118,16 @@ export function SettingsScreen() {
       return;
     }
 
+    // Collect hardware stores (only non-empty URLs)
+    const hardwareStores = [store1, store2, store3]
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+
+    if (!useBunningsApi && hardwareStores.length === 0) {
+      alert('Please add at least one hardware store URL when using AI price estimation');
+      return;
+    }
+
     const settings: BusinessSettings = {
       businessName: businessName.trim(),
       abn: abn.trim() || undefined,
@@ -117,6 +137,8 @@ export function SettingsScreen() {
       logoUri: logoUri,
       defaultLaborRate: parseFloat(laborRate) || 85,
       defaultMarkup: parseFloat(markup) || 20,
+      useBunningsApi: useBunningsApi,
+      hardwareStores: hardwareStores.length > 0 ? hardwareStores : undefined,
     };
 
     try {
@@ -181,7 +203,7 @@ export function SettingsScreen() {
                   color={colors.primary}
                 />
                 <Text style={styles.logoUploadText}>Tap to Upload Logo</Text>
-                <Text style={styles.logoUploadHint}>Recommended: 800x200px</Text>
+                <Text style={styles.logoUploadHint}>Recommended: 500x500px (Square)</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -251,6 +273,76 @@ export function SettingsScreen() {
             keyboardType="decimal-pad"
             right={<TextInput.Affix text="%" />}
           />
+        </Surface>
+
+        <Surface style={styles.card}>
+          <Title style={styles.sectionTitle}>Price Fetching Method</Title>
+          <Text style={styles.helperText}>
+            Choose how to fetch material prices
+          </Text>
+
+          <View style={styles.switchRow}>
+            <View style={styles.switchLabel}>
+              <Text style={styles.switchTitle}>Use Bunnings API</Text>
+              <Text style={styles.switchSubtitle}>
+                {useBunningsApi ? 'Live prices from Bunnings' : 'AI price estimates'}
+              </Text>
+            </View>
+            <Switch
+              value={useBunningsApi}
+              onValueChange={setUseBunningsApi}
+              color={colors.primary}
+            />
+          </View>
+
+          {!useBunningsApi && (
+            <>
+              <Divider style={styles.smallDivider} />
+              <Text style={styles.helperText}>
+                When AI estimation is enabled, Claude will estimate typical hardware store prices based on training data. For accurate real-time prices, use the Bunnings API.
+              </Text>
+
+              <TextInput
+                label="Hardware Store 1 *"
+                value={store1}
+                onChangeText={setStore1}
+                mode="outlined"
+                style={styles.input}
+                keyboardType="url"
+                autoCapitalize="none"
+                placeholder="https://www.bunnings.com.au/"
+              />
+
+              <TextInput
+                label="Hardware Store 2 (Optional)"
+                value={store2}
+                onChangeText={setStore2}
+                mode="outlined"
+                style={styles.input}
+                keyboardType="url"
+                autoCapitalize="none"
+                placeholder="https://www.mitre10.com.au/"
+              />
+
+              <TextInput
+                label="Hardware Store 3 (Optional)"
+                value={store3}
+                onChangeText={setStore3}
+                mode="outlined"
+                style={styles.input}
+                keyboardType="url"
+                autoCapitalize="none"
+                placeholder="https://www.totaltools.com.au/"
+              />
+
+              <View style={styles.infoBox}>
+                <MaterialCommunityIcons name="information" size={20} color={colors.primary} />
+                <Text style={styles.infoBoxText}>
+                  AI estimation uses Claude's knowledge to provide price estimates based on typical Australian hardware store pricing. Store URLs are used for context only. For exact current prices, enable the Bunnings API option.
+                </Text>
+              </View>
+            </>
+          )}
         </Surface>
 
         <Surface style={styles.card}>
@@ -456,5 +548,41 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.onSurface,
     textAlign: 'center',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  switchLabel: {
+    flex: 1,
+    marginRight: 16,
+  },
+  switchTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  switchSubtitle: {
+    fontSize: 13,
+    color: colors.onSurface,
+  },
+  smallDivider: {
+    marginVertical: 16,
+  },
+  infoBox: {
+    flexDirection: 'row',
+    backgroundColor: colors.primaryBg,
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  infoBoxText: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 13,
+    color: colors.text,
+    lineHeight: 18,
   },
 });
