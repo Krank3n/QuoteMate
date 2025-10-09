@@ -23,6 +23,7 @@ import { format } from 'date-fns';
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
+import { generateQuotePDF } from '../../utils/pdfGenerator';
 
 export function QuotePreviewScreen() {
   const navigation = useNavigation<any>();
@@ -65,235 +66,51 @@ export function QuotePreviewScreen() {
     }
   };
 
-  const generateHTML = async () => {
-    const business = businessSettings || {
-      businessName: 'Your Business',
-      email: '',
-      phone: '',
-      abn: '',
-    };
-
-    // Convert logo to base64 if it exists
-    let logoBase64 = '';
-    if (businessSettings?.logoUri) {
-      try {
-        const base64 = await FileSystem.readAsStringAsync(businessSettings.logoUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        logoBase64 = `data:image/png;base64,${base64}`;
-      } catch (error) {
-        console.error('Failed to load logo:', error);
-      }
-    }
-
-    return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
-      <style>
-        body {
-          font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-          padding: 40px;
-          color: #1a1a1a;
-        }
-        .header {
-          border-bottom: 3px solid ${colors.primaryDark};
-          padding-bottom: 20px;
-          margin-bottom: 30px;
-        }
-        .logo {
-          max-width: 300px;
-          max-height: 80px;
-          margin-bottom: 15px;
-        }
-        .header h1 {
-          color: ${colors.primaryDark};
-          margin: 0 0 10px 0;
-        }
-        .header p {
-          color: #333333;
-          margin: 5px 0;
-        }
-        .info-section {
-          margin-bottom: 30px;
-        }
-        .info-section h2 {
-          color: #1a1a1a;
-          margin-bottom: 15px;
-        }
-        .info-section h3 {
-          color: ${colors.primaryDark};
-          margin-bottom: 10px;
-        }
-        .info-section p {
-          color: #333333;
-          margin: 5px 0;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 20px;
-        }
-        th {
-          background-color: ${colors.primaryDark};
-          color: white;
-          padding: 10px;
-          text-align: left;
-        }
-        td {
-          padding: 8px;
-          border-bottom: 1px solid #e0e0e0;
-          color: #333333;
-        }
-        .total-row {
-          font-weight: bold;
-          background-color: #f5f5f5;
-        }
-        .grand-total {
-          font-size: 18px;
-          color: ${colors.primaryDark};
-          font-weight: bold;
-        }
-        .summary {
-          margin-top: 30px;
-          padding: 20px;
-          background-color: #f9f9f9;
-          border-radius: 8px;
-          border: 1px solid #e0e0e0;
-        }
-        .summary-row {
-          display: flex;
-          justify-content: space-between;
-          padding: 8px 0;
-          color: #333333;
-        }
-        h3 {
-          color: ${colors.primaryDark};
-          margin-bottom: 10px;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        ${logoBase64 ? `<img src="${logoBase64}" alt="${business.businessName}" class="logo" />` : ''}
-        <h1>${business.businessName}</h1>
-        <p>
-          ${business.abn ? `ABN: ${business.abn}<br>` : ''}
-          ${business.email ? `Email: ${business.email}<br>` : ''}
-          ${business.phone ? `Phone: ${business.phone}` : ''}
-        </p>
-      </div>
-
-      <div class="info-section">
-        <h2>QUOTATION</h2>
-        <p><strong>Quote Date:</strong> ${format(new Date(), 'dd MMMM yyyy')}</p>
-        <p><strong>Customer:</strong> ${currentQuote.customerName}</p>
-        ${currentQuote.customerEmail ? `<p><strong>Email:</strong> ${currentQuote.customerEmail}</p>` : ''}
-        ${currentQuote.customerPhone ? `<p><strong>Phone:</strong> ${currentQuote.customerPhone}</p>` : ''}
-        ${currentQuote.jobAddress ? `<p><strong>Job Address:</strong> ${currentQuote.jobAddress}</p>` : ''}
-      </div>
-
-      <div class="info-section">
-        <h3>Job Details</h3>
-        <p><strong>${currentQuote.job.name}</strong></p>
-        <p>${currentQuote.job.description}</p>
-      </div>
-
-      <h3>Materials</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Quantity</th>
-            <th>Unit Price</th>
-            <th>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${currentQuote.materials
-            .map(
-              (m) => `
-            <tr>
-              <td>${m.name}</td>
-              <td>${m.quantity} ${m.unit}</td>
-              <td>${formatCurrency(m.price)}</td>
-              <td>${formatCurrency(m.totalPrice)}</td>
-            </tr>
-          `
-            )
-            .join('')}
-          <tr class="total-row">
-            <td colspan="3">Materials Subtotal</td>
-            <td>${formatCurrency(currentQuote.materialsSubtotal)}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <h3>Labor</h3>
-      <table>
-        <tbody>
-          <tr>
-            <td>Labor (${currentQuote.laborHours} hours @ ${formatCurrency(currentQuote.laborRate)}/hr)</td>
-            <td>${formatCurrency(currentQuote.laborTotal)}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="summary">
-        <div class="summary-row">
-          <span>Materials Subtotal</span>
-          <span>${formatCurrency(currentQuote.materialsSubtotal)}</span>
-        </div>
-        <div class="summary-row">
-          <span>Labor</span>
-          <span>${formatCurrency(currentQuote.laborTotal)}</span>
-        </div>
-        <div class="summary-row">
-          <span>Subtotal</span>
-          <span>${formatCurrency(currentQuote.subtotal)}</span>
-        </div>
-        <div class="summary-row">
-          <span>Markup (${currentQuote.markup}%)</span>
-          <span>${formatCurrency(currentQuote.markupAmount)}</span>
-        </div>
-        <div class="summary-row">
-          <span>GST (10%)</span>
-          <span>${formatCurrency(currentQuote.gst)}</span>
-        </div>
-        <hr>
-        <div class="summary-row grand-total">
-          <span>TOTAL</span>
-          <span>${formatCurrency(currentQuote.total)}</span>
-        </div>
-      </div>
-
-      ${notes ? `<div class="info-section"><h3>Notes</h3><p>${notes}</p></div>` : ''}
-
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666666;">
-        <p>This quote is valid for 30 days from the date of issue.</p>
-        <p>Generated with QuoteMate - quoting tool for Australian tradies</p>
-      </div>
-    </body>
-    </html>
-    `;
-  };
 
   const handleExportPDF = async () => {
     try {
       setIsExporting(true);
 
-      const html = await generateHTML();
-      const filename = `Quote_${currentQuote.customerName.replace(/\s+/g, '_')}_${currentQuote.job.name.replace(/\s+/g, '_')}_${format(new Date(), 'dd-MMM-yyyy')}.pdf`;
+      // Update quote with current notes before generating PDF
+      const quoteWithNotes = { ...currentQuote, notes };
+      const html = await generateQuotePDF(quoteWithNotes, businessSettings);
+
+      // Format filename: Quote_CustomerName_JobName_09-Jan-2025.pdf
+      const sanitizedCustomer = currentQuote.customerName
+        .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special characters
+        .replace(/\s+/g, '_')             // Replace spaces with underscores
+        .substring(0, 30);                // Limit length
+
+      const sanitizedJob = currentQuote.job.name
+        .replace(/[^a-zA-Z0-9\s]/g, '')
+        .replace(/\s+/g, '_')
+        .substring(0, 30);
+
+      const dateStr = format(new Date(), 'dd-MMM-yyyy');
+      const filename = `Quote_${sanitizedCustomer}_${sanitizedJob}_${dateStr}.pdf`;
+
       const { uri } = await Print.printToFileAsync({ html });
 
+      // Copy to proper filename for sharing
+      const newUri = `${FileSystem.cacheDirectory}${filename}`;
+      await FileSystem.copyAsync({
+        from: uri,
+        to: newUri,
+      });
+
       if (Platform.OS === 'ios') {
-        await Sharing.shareAsync(uri, { dialogTitle: filename });
+        await Sharing.shareAsync(newUri, {
+          UTI: 'com.adobe.pdf',
+          mimeType: 'application/pdf',
+        });
       } else {
-        // On Android, we can share or save
+        // On Android, copy to Downloads folder with proper name
         const isAvailable = await Sharing.isAvailableAsync();
         if (isAvailable) {
-          await Sharing.shareAsync(uri, { dialogTitle: filename });
+          await Sharing.shareAsync(newUri, {
+            mimeType: 'application/pdf',
+            dialogTitle: 'Share Quote',
+          });
         } else {
           Alert.alert('PDF Created', `${filename} saved successfully`);
         }

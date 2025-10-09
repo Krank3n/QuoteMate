@@ -40,8 +40,14 @@ export default function App() {
   }, []);
 
   if (isLoading) {
-    // Could add a splash screen here
-    return null;
+    // Show a simple loading view while initializing
+    return (
+      <SafeAreaProvider>
+        <PaperProvider theme={theme}>
+          <StatusBar style="light" />
+        </PaperProvider>
+      </SafeAreaProvider>
+    );
   }
 
   return (

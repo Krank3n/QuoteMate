@@ -28,6 +28,7 @@ import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
+import { generateQuotePDF } from '../utils/pdfGenerator';
 
 export function DashboardScreen() {
   const navigation = useNavigation<any>();
@@ -104,7 +105,7 @@ export function DashboardScreen() {
       }
 
       // Generate PDF with custom filename
-      const html = await generateHTML(quote);
+      const html = await generateQuotePDF(quote, businessSettings);
       const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
       const { uri } = await Print.printToFileAsync({ html, base64: false });
 
@@ -128,204 +129,9 @@ export function DashboardScreen() {
     }
   };
 
-  const generateHTML = async (quote: Quote) => {
-    const business = businessSettings || {
-      businessName: 'Your Business',
-      email: '',
-      phone: '',
-      abn: '',
-    };
-
-    // Convert logo to base64 if it exists
-    let logoBase64 = '';
-    if (businessSettings?.logoUri) {
-      try {
-        const base64 = await FileSystem.readAsStringAsync(businessSettings.logoUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        logoBase64 = `data:image/png;base64,${base64}`;
-      } catch (error) {
-        console.error('Failed to load logo:', error);
-      }
-    }
-
-    return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
-      <style>
-        body {
-          font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-          padding: 40px;
-          color: ${colors.textDark};
-        }
-        .header {
-          border-bottom: 3px solid ${colors.primaryDark};
-          padding-bottom: 20px;
-          margin-bottom: 30px;
-        }
-        .logo {
-          max-width: 300px;
-          max-height: 80px;
-          margin-bottom: 15px;
-        }
-        .header h1 {
-          color: ${colors.primaryDark};
-          margin: 0 0 10px 0;
-        }
-        .info-section {
-          margin-bottom: 30px;
-        }
-        .info-section h3 {
-          color: ${colors.primaryDark};
-          margin-bottom: 10px;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 20px;
-        }
-        th {
-          background-color: ${colors.primaryDark};
-          color: white;
-          padding: 10px;
-          text-align: left;
-        }
-        td {
-          padding: 8px;
-          border-bottom: 1px solid ${colors.borderLight};
-        }
-        .total-row {
-          font-weight: bold;
-          background-color: ${colors.surfaceGray};
-        }
-        .grand-total {
-          font-size: 18px;
-          color: ${colors.primaryDark};
-          font-weight: bold;
-        }
-        .summary {
-          margin-top: 30px;
-          padding: 20px;
-          background-color: ${colors.surfaceGray2};
-          border-radius: 8px;
-        }
-        .summary-row {
-          display: flex;
-          justify-content: space-between;
-          padding: 8px 0;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        ${logoBase64 ? `<img src="${logoBase64}" alt="${business.businessName}" class="logo" />` : ''}
-        <h1>${business.businessName}</h1>
-        <p>
-          ${business.abn ? `ABN: ${business.abn}<br>` : ''}
-          ${business.email ? `Email: ${business.email}<br>` : ''}
-          ${business.phone ? `Phone: ${business.phone}` : ''}
-        </p>
-      </div>
-
-      <div class="info-section">
-        <h2>QUOTATION</h2>
-        <p><strong>Quote Date:</strong> ${format(new Date(quote.updatedAt), 'dd MMMM yyyy')}</p>
-        <p><strong>Customer:</strong> ${quote.customerName}</p>
-        ${quote.customerEmail ? `<p><strong>Email:</strong> ${quote.customerEmail}</p>` : ''}
-        ${quote.customerPhone ? `<p><strong>Phone:</strong> ${quote.customerPhone}</p>` : ''}
-        ${quote.jobAddress ? `<p><strong>Job Address:</strong> ${quote.jobAddress}</p>` : ''}
-      </div>
-
-      <div class="info-section">
-        <h3>Job Details</h3>
-        <p><strong>${quote.job.name}</strong></p>
-        <p>${quote.job.description}</p>
-      </div>
-
-      <h3>Materials</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Quantity</th>
-            <th>Unit Price</th>
-            <th>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${quote.materials
-            .map(
-              (m) => `
-            <tr>
-              <td>${m.name}</td>
-              <td>${m.quantity} ${m.unit}</td>
-              <td>${formatCurrency(m.price)}</td>
-              <td>${formatCurrency(m.totalPrice)}</td>
-            </tr>
-          `
-            )
-            .join('')}
-          <tr class="total-row">
-            <td colspan="3">Materials Subtotal</td>
-            <td>${formatCurrency(quote.materialsSubtotal)}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <h3>Labor</h3>
-      <table>
-        <tbody>
-          <tr>
-            <td>Labor (${quote.laborHours} hours @ ${formatCurrency(quote.laborRate)}/hr)</td>
-            <td>${formatCurrency(quote.laborTotal)}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="summary">
-        <div class="summary-row">
-          <span>Materials Subtotal</span>
-          <span>${formatCurrency(quote.materialsSubtotal)}</span>
-        </div>
-        <div class="summary-row">
-          <span>Labor</span>
-          <span>${formatCurrency(quote.laborTotal)}</span>
-        </div>
-        <div class="summary-row">
-          <span>Subtotal</span>
-          <span>${formatCurrency(quote.subtotal)}</span>
-        </div>
-        <div class="summary-row">
-          <span>Markup (${quote.markup}%)</span>
-          <span>${formatCurrency(quote.markupAmount)}</span>
-        </div>
-        <div class="summary-row">
-          <span>GST (10%)</span>
-          <span>${formatCurrency(quote.gst)}</span>
-        </div>
-        <hr>
-        <div class="summary-row grand-total">
-          <span>TOTAL</span>
-          <span>${formatCurrency(quote.total)}</span>
-        </div>
-      </div>
-
-      ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${quote.notes}</p></div>` : ''}
-
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid ${colors.borderLight}; font-size: 12px; color: ${colors.textMuted};">
-        <p>This quote is valid for 30 days from the date of issue.</p>
-        <p>Generated with QuoteMate - quoting tool for Australian tradies</p>
-      </div>
-    </body>
-    </html>
-    `;
-  };
-
   const handleShareQuote = async (quote: Quote) => {
     try {
-      const html = await generateHTML(quote);
+      const html = await generateQuotePDF(quote, businessSettings);
       const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
       const { uri } = await Print.printToFileAsync({ html });
 
@@ -347,7 +153,7 @@ export function DashboardScreen() {
 
   const handleExportQuote = async (quote: Quote) => {
     try {
-      const html = await generateHTML(quote);
+      const html = await generateQuotePDF(quote, businessSettings);
       const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
       const { uri } = await Print.printToFileAsync({ html });
 

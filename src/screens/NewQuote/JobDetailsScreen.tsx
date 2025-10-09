@@ -88,6 +88,33 @@ export function JobDetailsScreen() {
     }));
   };
 
+  const handleSkipToManualEntry = () => {
+    if (!currentQuote) return;
+
+    // Create a job with empty materials list - user will add them manually
+    const job = {
+      id: generateId(),
+      name: jobName || 'Custom Job',
+      description: jobDescription,
+      template: 'custom' as const,
+      estimatedHours: 8, // Default hours
+    };
+
+    const updatedQuote = {
+      ...currentQuote,
+      customerName,
+      customerEmail,
+      customerPhone,
+      jobAddress,
+      job,
+      materials: [], // Empty - user will add manually
+      laborHours: 8,
+    };
+
+    updateQuote(updatedQuote);
+    navigation.navigate('MaterialsList');
+  };
+
   const handleAnalyzeCustomJob = async () => {
     if (!jobDescription.trim()) {
       Alert.alert('Missing Information', 'Please enter a job description');
@@ -97,7 +124,7 @@ export function JobDetailsScreen() {
     setIsAnalyzing(true);
 
     try {
-      // Call LLM to analyze job description
+      // Call LLM to analyze job description (with automatic retries built-in)
       const analysis = await analyzeJobDescription(jobDescription);
 
       if (!currentQuote) return;
@@ -140,9 +167,36 @@ export function JobDetailsScreen() {
       // Navigate to materials screen where prices will be fetched
       navigation.navigate('MaterialsList');
     } catch (error: any) {
+      console.error('Analysis error:', error);
+
+      // Show user-friendly error with options
       Alert.alert(
-        'Analysis Failed',
-        error.message || 'Failed to analyze job description. Please try again or enter materials manually.'
+        'AI Analysis Failed',
+        `Unable to generate materials list automatically.\n\n${
+          error.message.includes('API key')
+            ? 'API key is not configured.'
+            : error.message.includes('429')
+            ? 'Rate limit exceeded. Please try again in a moment.'
+            : error.message.includes('401') || error.message.includes('403')
+            ? 'API authentication failed. Please check your API key.'
+            : 'The AI service is temporarily unavailable.'
+        }\n\nWould you like to:`,
+        [
+          {
+            text: 'Try Again',
+            onPress: () => handleAnalyzeCustomJob(),
+          },
+          {
+            text: 'Enter Manually',
+            onPress: () => handleSkipToManualEntry(),
+            style: 'default',
+          },
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+        ],
+        { cancelable: true }
       );
     } finally {
       setIsAnalyzing(false);
@@ -325,7 +379,7 @@ export function JobDetailsScreen() {
             </Text>
           ) : (
             <Text style={styles.helperText}>
-              Describe the job in detail. AI will analyze it and suggest materials.
+              Describe the job in detail. AI will analyze it and suggest materials, or skip to enter materials manually.
             </Text>
           )}
 
@@ -351,6 +405,18 @@ export function JobDetailsScreen() {
             placeholder="e.g., Build a 5x4 meter outdoor deck with 10 steps leading down to the garden. Need to replace old timber and add handrails."
             disabled={isEditingExisting}
           />
+
+          {!isEditingExisting && (
+            <Button
+              mode="text"
+              onPress={handleSkipToManualEntry}
+              style={styles.skipButton}
+              icon="pencil"
+              disabled={!customerName.trim()}
+            >
+              Skip AI & Enter Materials Manually
+            </Button>
+          )}
         </Surface>
       )}
 
@@ -487,6 +553,10 @@ const styles = StyleSheet.create({
     marginTop: 24,
     marginBottom: 80,
     paddingVertical: 8,
+  },
+  skipButton: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
   },
   helperText: {
     fontSize: 13,
