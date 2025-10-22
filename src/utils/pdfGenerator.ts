@@ -8,6 +8,7 @@ import { format } from 'date-fns';
 import { Quote, BusinessSettings } from '../types';
 import { formatCurrency } from './quoteCalculator';
 import { colors } from '../theme';
+import { Platform } from 'react-native';
 
 export async function generateQuotePDF(quote: Quote, businessSettings: BusinessSettings | null): Promise<string> {
   const business = businessSettings || {
@@ -19,7 +20,7 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
 
   // Convert logo to base64 if it exists
   let logoBase64 = '';
-  if (businessSettings?.logoUri) {
+  if (businessSettings?.logoUri && Platform.OS !== 'web') {
     try {
       const base64 = await FileSystem.readAsStringAsync(businessSettings.logoUri, {
         encoding: FileSystem.EncodingType.Base64,
@@ -28,6 +29,9 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
     } catch (error) {
       console.error('Failed to load logo:', error);
     }
+  } else if (businessSettings?.logoUri && Platform.OS === 'web') {
+    // On web, the logoUri is already a URL that can be used directly
+    logoBase64 = businessSettings.logoUri;
   }
 
   return `

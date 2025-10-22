@@ -4,8 +4,15 @@
  */
 
 import { ANTHROPIC_API_KEY } from '@env';
+import { Platform } from 'react-native';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+
+// Firebase Functions URL configuration
+const IS_DEV = __DEV__;
+const FIREBASE_FUNCTIONS_URL = IS_DEV
+  ? 'http://127.0.0.1:5001/hansendev/us-central1'
+  : 'https://us-central1-hansendev.cloudfunctions.net';
 
 interface PriceSearchResult {
   price: number | null;
@@ -26,6 +33,12 @@ export async function searchMaterialPrice(
   materialName: string,
   hardwareStoreUrls: string[]
 ): Promise<PriceSearchResult> {
+  // On web, use Firebase Functions to avoid CORS issues
+  if (Platform.OS === 'web') {
+    return searchPriceViaFirebaseFunction(materialName, hardwareStoreUrls);
+  }
+
+  // On mobile, call Anthropic API directly
   if (!ANTHROPIC_API_KEY) {
     console.warn('ANTHROPIC_API_KEY not set');
     return { price: null };
@@ -125,6 +138,55 @@ Example:
       productName: result.productName,
       store: result.store || 'Bunnings (estimated)',
       url: undefined,
+    };
+  } catch (error) {
+    console.error('❌ Price estimation error:', materialName, error);
+    if (error instanceof Error) {
+      console.error('Error details:', error.message);
+    }
+    return { price: null };
+  }
+}
+
+/**
+ * Search material price via Firebase Cloud Function (for web)
+ */
+async function searchPriceViaFirebaseFunction(
+  materialName: string,
+  hardwareStoreUrls: string[]
+): Promise<PriceSearchResult> {
+  try {
+    console.log('🔍 Estimating price via Firebase Function for:', materialName);
+
+    const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/searchMaterialPrice`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        materialName,
+        hardwareStoreUrls
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (data.price !== null) {
+      console.log('✅ Estimated price:', materialName, '→ $' + data.price);
+    } else {
+      console.log('⚠️  Could not estimate price for:', materialName);
+    }
+
+    return {
+      price: data.price || null,
+      productName: data.productName,
+      store: data.store || 'Bunnings (estimated)',
+      url: data.url,
     };
   } catch (error) {
     console.error('❌ Price estimation error:', materialName, error);

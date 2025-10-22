@@ -12,6 +12,8 @@ import {
   Surface,
   Title,
   Divider,
+  Dialog,
+  Portal,
 } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 
@@ -26,6 +28,8 @@ export function LaborMarkupScreen() {
   const [laborHours, setLaborHours] = useState('');
   const [laborRate, setLaborRate] = useState('');
   const [markup, setMarkup] = useState('');
+  const [warningDialogVisible, setWarningDialogVisible] = useState(false);
+  const [warningMessage, setWarningMessage] = useState('');
 
   useEffect(() => {
     if (currentQuote) {
@@ -52,6 +56,19 @@ export function LaborMarkupScreen() {
   );
 
   const handleNext = () => {
+    // Validate labor hours and rate
+    if (hours === 0 || rate === 0) {
+      setWarningMessage(
+        'Labor hours or rate is set to $0. This means no labor cost will be included in the quote.\n\nDo you want to continue?'
+      );
+      setWarningDialogVisible(true);
+      return;
+    }
+
+    proceedToPreview();
+  };
+
+  const proceedToPreview = () => {
     // Update quote with labor details
     const updatedQuote = {
       ...currentQuote,
@@ -67,20 +84,30 @@ export function LaborMarkupScreen() {
     };
 
     updateQuote(updatedQuote);
+    setWarningDialogVisible(false);
     navigation.navigate('QuotePreview');
   };
 
-  return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
+  const scrollContent = (
+    <>
+      <Portal>
+        <Dialog visible={warningDialogVisible} onDismiss={() => setWarningDialogVisible(false)}>
+          <Dialog.Title>Zero Labor Cost</Dialog.Title>
+          <Dialog.Content>
+            <Text>{warningMessage}</Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setWarningDialogVisible(false)}>Cancel</Button>
+            <Button onPress={proceedToPreview}>Continue</Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+      <View style={styles.container}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
         <View style={styles.section}>
         <Title style={styles.sectionTitle}>Labor</Title>
 
@@ -204,6 +231,22 @@ export function LaborMarkupScreen() {
           Next: Preview Quote
         </Button>
       </ScrollView>
+    </View>
+    </>
+  );
+
+  // On web, return ScrollView directly. On mobile, wrap with KeyboardAvoidingView
+  if (Platform.OS === 'web') {
+    return scrollContent;
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      {scrollContent}
     </KeyboardAvoidingView>
   );
 }
@@ -212,10 +255,30 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+    ...(Platform.OS === 'web' && {
+      display: 'flex' as any,
+      flexDirection: 'column' as any,
+      height: '100vh',
+      overflow: 'hidden',
+    }),
+  },
+  scrollView: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      overflow: 'auto' as any,
+      flexShrink: 1,
+    }),
   },
   scrollContent: {
     paddingBottom: 220,
     flexGrow: 1,
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+      margin: 'auto' as any,
+      width: '100%',
+      paddingBottom: 20,
+      height: '0px',
+    }),
   },
   section: {
     padding: 20,

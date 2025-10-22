@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, ActivityIndicator, Platform } from 'react-native';
 import {
   Text,
   Button,
@@ -15,91 +15,203 @@ import {
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 import * as RNIap from 'react-native-iap';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { billingService, SUBSCRIPTION_SKUS } from '../services/billingService';
 import { useSubscriptionStore } from '../store/subscriptionStore';
+import { unifiedBillingService } from '../services/unifiedBillingService';
+import { auth } from '../config/firebase';
+import { WebContainer } from '../components/WebContainer';
 
 export function PaywallScreen() {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const { subscriptionStatus } = useStore();
   const { quoteCount, setPremium } = useSubscriptionStore();
   const [isUpgrading, setIsUpgrading] = useState(false);
   const [products, setProducts] = useState<RNIap.Subscription[]>([]);
   const [loading, setLoading] = useState(true);
+  const [iapNotAvailable, setIapNotAvailable] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
-  const quotesUsed = quoteCount;
-  const quotesLimit = 5;
+  // Use subscriptionStatus from useStore which has the accurate count
+  const quotesUsed = subscriptionStatus?.quotesThisMonth || quoteCount;
+  const quotesLimit = subscriptionStatus?.freeQuotesLimit || 5;
 
   useEffect(() => {
-    loadProducts();
-    setupPurchaseListener();
+    loadProducts().catch(error => {
+      console.error('Failed to load products:', error);
+      // Don't crash, just set loading to false
+      setLoading(false);
+    });
+
+    try {
+      setupPurchaseListener();
+    } catch (error) {
+      console.error('Failed to setup purchase listener:', error);
+    }
 
     return () => {
-      RNIap.purchaseUpdatedListener?.remove();
-      RNIap.purchaseErrorListener?.remove();
+      try {
+        RNIap.purchaseUpdatedListener?.remove?.();
+        RNIap.purchaseErrorListener?.remove?.();
+      } catch (error) {
+        console.error('Error removing listeners:', error);
+      }
     };
   }, []);
 
   const loadProducts = async () => {
     setLoading(true);
     try {
-      const availableProducts = await billingService.getProducts();
-      setProducts(availableProducts);
-    } catch (error) {
+      console.log('🔍 Loading products...');
+      console.log('🔍 Platform:', Platform.OS);
+
+      // Use unified billing service for all platforms
+      await unifiedBillingService.initialize();
+      const availableProducts = await unifiedBillingService.getProducts();
+      console.log('📦 Found products:', availableProducts);
+      console.log('📦 Product count:', availableProducts.length);
+
+      if (availableProducts.length === 0) {
+        // Only show alert if we're on Android where we expect subscriptions
+        if (Platform.OS === 'android') {
+          Alert.alert(
+            'No Products Found',
+            'Subscription products are not set up yet. Please:\n\n' +
+            '1. Create subscriptions in Google Play Console\n' +
+            '2. Use product IDs:\n   • quotemate_premium_monthly\n   • quotemate_premium_yearly\n' +
+            '3. Make sure they are ACTIVE\n' +
+            '4. Install app from Play Store test link'
+          );
+        } else if (Platform.OS === 'web') {
+          console.log('ℹ️ Web products loaded from configuration');
+        }
+      }
+      // Convert to RNIap.Subscription format for compatibility
+      const formattedProducts = availableProducts.map((p: any) => ({
+        productId: p.id,
+        title: p.title,
+        description: p.description,
+        localizedPrice: p.price,
+        price: p.priceValue,
+        currency: p.currency,
+      }));
+      setProducts(formattedProducts as any);
+    } catch (error: any) {
       console.error('Error loading products:', error);
-      Alert.alert('Error', 'Failed to load subscription options');
+
+      // Handle IAP not available gracefully
+      if (error?.code === 'E_IAP_NOT_AVAILABLE' || error?.message?.includes('E_IAP_NOT_AVAILABLE')) {
+        console.log('ℹ️ In-app purchases not available on this platform');
+        setIapNotAvailable(true);
+      } else {
+        Alert.alert('Error', 'Failed to load subscription options');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const setupPurchaseListener = () => {
-    const purchaseUpdateSubscription = RNIap.purchaseUpdatedListener(
-      async (purchase: RNIap.SubscriptionPurchase) => {
-        console.log('Purchase updated:', purchase);
-        const receipt = purchase.transactionReceipt;
-        if (receipt) {
+    try {
+      const purchaseUpdateSubscription = RNIap.purchaseUpdatedListener(
+        async (purchase: RNIap.SubscriptionPurchase) => {
           try {
-            await setPremium(
-              true,
-              purchase.productId,
-              new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
-            );
-            await billingService.finishTransaction(purchase);
-            Alert.alert(
-              'Success!',
-              'Welcome to QuoteMate Pro! You now have unlimited quotes.',
-              [{ text: 'OK', onPress: () => navigation.goBack() }]
-            );
+            console.log('Purchase updated:', purchase);
+            const receipt = purchase.transactionReceipt;
+            if (receipt) {
+              await setPremium(
+                true,
+                purchase.productId,
+                new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+              );
+              await billingService.finishTransaction(purchase);
+              Alert.alert(
+                'Success!',
+                'Welcome to QuoteMate Pro! You now have unlimited quotes.',
+                [{ text: 'OK', onPress: () => navigation.goBack() }]
+              );
+            }
           } catch (error) {
             console.error('Error processing purchase:', error);
+            Alert.alert('Error', 'Failed to process purchase. Please contact support.');
+          } finally {
+            setIsUpgrading(false);
           }
         }
-        setIsUpgrading(false);
-      }
-    );
+      );
 
-    const purchaseErrorSubscription = RNIap.purchaseErrorListener(
-      (error: RNIap.PurchaseError) => {
-        if (error.code !== 'E_USER_CANCELLED') {
-          console.error('Purchase error:', error);
-          Alert.alert('Purchase Failed', error.message);
+      const purchaseErrorSubscription = RNIap.purchaseErrorListener(
+        (error: RNIap.PurchaseError) => {
+          try {
+            console.error('Purchase error:', error);
+            if (error.code !== 'E_USER_CANCELLED' && error.code !== 'E_IAP_NOT_AVAILABLE') {
+              Alert.alert('Purchase Failed', error.message || 'An error occurred during purchase');
+            }
+          } catch (alertError) {
+            console.error('Error showing alert:', alertError);
+          } finally {
+            setIsUpgrading(false);
+          }
         }
+      );
+    } catch (error: any) {
+      console.error('Error setting up purchase listeners:', error);
+      // Don't show alert for E_IAP_NOT_AVAILABLE during setup
+      if (error?.code !== 'E_IAP_NOT_AVAILABLE') {
         setIsUpgrading(false);
       }
-    );
+    }
   };
 
   const handleUpgrade = async () => {
+    console.log('💳 handleUpgrade clicked');
+
+    if (products.length === 0) {
+      console.log('❌ No products available');
+      Alert.alert(
+        'Not Available',
+        'Subscription products are not available yet. Please make sure:\n\n' +
+        '1. You installed the app from Play Store test link\n' +
+        '2. Subscriptions are created and ACTIVE in Play Console\n' +
+        '3. Wait a few minutes after creating subscriptions'
+      );
+      return;
+    }
+
     setIsUpgrading(true);
     try {
-      await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
+      const firstProduct = products[0];
+      console.log('📦 First product:', firstProduct);
+
+      if (Platform.OS === 'web') {
+        // For web, get Firebase user ID (should always exist due to auth guard)
+        const currentUser = auth.currentUser;
+        console.log('👤 Current user:', currentUser?.uid);
+
+        if (!currentUser) {
+          // This should not happen due to auth guard, but handle it gracefully
+          Alert.alert('Error', 'Please sign in to purchase a subscription');
+          setIsUpgrading(false);
+          return;
+        }
+
+        console.log('✅ Proceeding with purchase for user:', currentUser.uid);
+        // This will redirect to Stripe Checkout
+        await unifiedBillingService.purchaseSubscription(firstProduct.productId, currentUser.uid);
+        // Redirect happens, so loading state will persist
+      } else {
+        // For mobile, use native IAP
+        await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
+      }
     } catch (error: any) {
+      console.error('❌ Error in handleUpgrade:', error);
       setIsUpgrading(false);
-      if (error.code !== 'E_USER_CANCELLED') {
-        Alert.alert('Error', 'Failed to start purchase');
+      if (error?.code !== 'E_USER_CANCELLED') {
+        Alert.alert('Error', error?.message || 'Failed to start purchase. Please try again.');
       }
     }
   };
@@ -109,29 +221,198 @@ export function PaywallScreen() {
     return product?.localizedPrice || '$19';
   };
 
+  const handleCancelSubscription = () => {
+    // Show "Are you sure?" confirmation
+    Alert.alert(
+      'Cancel Subscription?',
+      'Are you sure you want to cancel your Pro subscription? You can provide feedback during the cancellation process in the Stripe portal.',
+      [
+        {
+          text: 'Keep Subscription',
+          style: 'cancel',
+        },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: confirmCancelSubscription,
+        },
+      ]
+    );
+  };
+
+  const confirmCancelSubscription = async () => {
+    setIsCancelling(true);
+    try {
+      const currentUser = auth.currentUser;
+
+      if (Platform.OS === 'web') {
+        // For web, open Stripe Customer Portal to manage subscription
+        if (currentUser) {
+          const { stripeService } = require('../services/stripeService');
+          try {
+            const portalUrl = await stripeService.createPortalSession(currentUser.uid);
+
+            // Open Stripe portal
+            window.open(portalUrl, '_blank');
+
+            Alert.alert(
+              'Manage Subscription',
+              'We\'ve opened the Stripe Customer Portal where you can confirm your cancellation and provide feedback.',
+              [{ text: 'OK' }]
+            );
+          } catch (portalError) {
+            console.error('Error opening portal:', portalError);
+            Alert.alert(
+              'Error',
+              'Failed to open the Stripe Customer Portal. Please try again or contact support.',
+              [{ text: 'OK' }]
+            );
+          }
+        }
+      } else {
+        // For native platforms, show instructions
+        Alert.alert(
+          'Cancel Subscription',
+          Platform.OS === 'ios'
+            ? 'To cancel your subscription, go to Settings > Your Name > Subscriptions on your iPhone.'
+            : 'To cancel your subscription, open the Play Store app, tap Menu > Subscriptions, and select QuoteMate.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error handling cancellation:', error);
+      Alert.alert('Error', 'Failed to process cancellation. Please contact support.');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Loading subscription options...</Text>
+        <WebContainer>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Loading subscription options...</Text>
+        </WebContainer>
       </View>
     );
   }
 
+  // Show iOS-specific message if IAP is not available
+  if (iapNotAvailable && Platform.OS === 'ios') {
+    return (
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 20 }]}
+      >
+        <WebContainer>
+          <View style={styles.header}>
+          <MaterialCommunityIcons
+            name="information"
+            size={80}
+            color={colors.secondary}
+          />
+          <Title style={styles.title}>iOS Subscriptions Not Available</Title>
+          <Text style={styles.subtitle}>
+            In-app purchases are currently only configured for Android.
+          </Text>
+        </View>
+
+        <Surface style={styles.planCard}>
+          <Text style={styles.featureText}>
+            To enable subscriptions on iOS, you'll need to:
+            {'\n\n'}
+            1. Set up in-app purchases in App Store Connect
+            {'\n'}
+            2. Create subscription products with the same IDs
+            {'\n'}
+            3. Configure iOS billing in the app
+            {'\n\n'}
+            For now, you can continue using the free tier.
+          </Text>
+        </Surface>
+
+        <Button
+          mode="text"
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
+          Go Back
+        </Button>
+        </WebContainer>
+      </ScrollView>
+    );
+  }
+
+  // Check if user is Pro
+  const isPro = subscriptionStatus?.isPro || false;
+
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 20 }]}
+    >
+      <WebContainer>
+        <View style={styles.header}>
         <MaterialCommunityIcons
           name="crown"
           size={80}
           color={colors.secondary}
         />
-        <Title style={styles.title}>Upgrade to Pro</Title>
+        <Title style={styles.title}>{isPro ? 'Manage Subscription' : 'Upgrade to Pro'}</Title>
         <Text style={styles.subtitle}>
-          You've created {quotesUsed} of {quotesLimit} free quotes
+          {isPro
+            ? 'You have unlimited quote analyses'
+            : `You've created ${quotesUsed} of ${quotesLimit} free quotes`
+          }
         </Text>
       </View>
 
+      {/* Pro Member Management Section */}
+      {isPro && (
+        <Surface style={styles.planCard}>
+          <View style={styles.proStatusSection}>
+            <View style={styles.proBadge}>
+              <MaterialCommunityIcons name="crown" size={32} color={colors.secondary} />
+              <Text style={styles.proStatusTitle}>Pro Member</Text>
+            </View>
+            <Text style={styles.proStatusText}>
+              Thank you for your support! You have unlimited access to all Pro features.
+            </Text>
+
+            <View style={styles.proFeatures}>
+              <View style={styles.proFeature}>
+                <MaterialCommunityIcons name="infinity" size={20} color={colors.primary} />
+                <Text style={styles.proFeatureText}>Unlimited quote analyses</Text>
+              </View>
+              <View style={styles.proFeature}>
+                <MaterialCommunityIcons name="headset" size={20} color={colors.primary} />
+                <Text style={styles.proFeatureText}>Priority support</Text>
+              </View>
+              <View style={styles.proFeature}>
+                <MaterialCommunityIcons name="palette" size={20} color={colors.primary} />
+                <Text style={styles.proFeatureText}>Custom branding</Text>
+              </View>
+            </View>
+
+            <Button
+              mode="outlined"
+              onPress={handleCancelSubscription}
+              style={styles.cancelButton}
+              textColor={colors.error}
+            >
+              Cancel Subscription
+            </Button>
+
+            <Text style={styles.cancelHint}>
+              Your subscription will remain active until the end of your billing period
+            </Text>
+          </View>
+        </Surface>
+      )}
+
+      {/* Upgrade Section for Free Users */}
+      {!isPro && (
       <Surface style={styles.planCard}>
         <View style={styles.planHeader}>
           <Text style={styles.planName}>QuoteMate Pro</Text>
@@ -174,7 +455,7 @@ export function PaywallScreen() {
           style={styles.upgradeButton}
           contentStyle={styles.upgradeButtonContent}
           loading={isUpgrading}
-          disabled={isUpgrading}
+          disabled={isUpgrading || products.length === 0}
         >
           Start Pro Subscription
         </Button>
@@ -183,7 +464,9 @@ export function PaywallScreen() {
           Cancel anytime. Subscriptions automatically renew unless cancelled 24 hours before the end of the period.
         </Text>
       </Surface>
+      )}
 
+      {!isPro && (
       <Surface style={styles.freeCard}>
         <Text style={styles.freeTitle}>Free Plan</Text>
         <Text style={styles.freeText}>
@@ -192,14 +475,17 @@ export function PaywallScreen() {
           • Upgrade anytime for unlimited quotes
         </Text>
       </Surface>
+      )}
 
       <Button
         mode="text"
         onPress={() => navigation.goBack()}
         style={styles.backButton}
       >
-        Maybe Later
+        {isPro ? 'Back to Settings' : 'Maybe Later'}
       </Button>
+      </WebContainer>
+
     </ScrollView>
   );
 }
@@ -208,6 +494,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  scrollContent: {
+    // paddingBottom is now dynamic using insets.bottom in the component
   },
   loadingContainer: {
     justifyContent: 'center',
@@ -310,6 +599,54 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   backButton: {
-    marginBottom: 40,
+    marginTop: 8,
+    // marginBottom handled by scrollContent paddingBottom with insets
+  },
+  proStatusSection: {
+    alignItems: 'center',
+  },
+  proBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.warningBg,
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  proStatusTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: colors.secondary,
+    marginLeft: 12,
+  },
+  proStatusText: {
+    fontSize: 16,
+    color: colors.onSurface,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  proFeatures: {
+    alignSelf: 'stretch',
+    marginBottom: 32,
+  },
+  proFeature: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  proFeatureText: {
+    fontSize: 14,
+    marginLeft: 12,
+    color: colors.onSurface,
+  },
+  cancelButton: {
+    marginBottom: 12,
+    borderColor: colors.error,
+  },
+  cancelHint: {
+    fontSize: 12,
+    color: colors.onSurface,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });

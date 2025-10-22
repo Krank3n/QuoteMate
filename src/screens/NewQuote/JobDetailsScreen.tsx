@@ -22,6 +22,8 @@ import {
   Card,
   Chip,
   ActivityIndicator,
+  Dialog,
+  Portal,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
@@ -34,6 +36,7 @@ import { JobTemplate } from '../../types';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
 import { generateId } from '../../utils/generateId';
 import { bunningsApi } from '../../services/bunningsApi';
+import { WebContainer } from '../../components/WebContainer';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
@@ -48,6 +51,8 @@ export function JobDetailsScreen() {
   const [jobName, setJobName] = useState('');
   const [jobDescription, setJobDescription] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisErrorDialogVisible, setAnalysisErrorDialogVisible] = useState(false);
+  const [analysisErrorMessage, setAnalysisErrorMessage] = useState('');
 
   // Check if editing an existing quote
   const isEditingExisting = currentQuote && currentQuote.materials.length > 0;
@@ -66,6 +71,14 @@ export function JobDetailsScreen() {
       if (template) {
         setSelectedTemplate(template);
         setCustomParams(currentQuote.job.customParams || {});
+      }
+    }
+
+    // Set default template to 'custom' if no template is selected
+    if (!selectedTemplate) {
+      const customTemplate = JOB_TEMPLATES.find((t) => t.id === 'custom');
+      if (customTemplate) {
+        setSelectedTemplate(customTemplate);
       }
     }
   }, [currentQuote]);
@@ -170,34 +183,16 @@ export function JobDetailsScreen() {
       console.error('Analysis error:', error);
 
       // Show user-friendly error with options
-      Alert.alert(
-        'AI Analysis Failed',
-        `Unable to generate materials list automatically.\n\n${
-          error.message.includes('API key')
-            ? 'API key is not configured.'
-            : error.message.includes('429')
-            ? 'Rate limit exceeded. Please try again in a moment.'
-            : error.message.includes('401') || error.message.includes('403')
-            ? 'API authentication failed. Please check your API key.'
-            : 'The AI service is temporarily unavailable.'
-        }\n\nWould you like to:`,
-        [
-          {
-            text: 'Try Again',
-            onPress: () => handleAnalyzeCustomJob(),
-          },
-          {
-            text: 'Enter Manually',
-            onPress: () => handleSkipToManualEntry(),
-            style: 'default',
-          },
-          {
-            text: 'Cancel',
-            style: 'cancel',
-          },
-        ],
-        { cancelable: true }
-      );
+      const errorDetail = error.message.includes('API key')
+        ? 'API key is not configured.'
+        : error.message.includes('429')
+        ? 'Rate limit exceeded. Please try again in a moment.'
+        : error.message.includes('401') || error.message.includes('403')
+        ? 'API authentication failed. Please check your API key.'
+        : 'The AI service is temporarily unavailable.';
+
+      setAnalysisErrorMessage(`Unable to generate materials list automatically.\n\n${errorDetail}\n\nWould you like to:`);
+      setAnalysisErrorDialogVisible(true);
     } finally {
       setIsAnalyzing(false);
     }
@@ -211,8 +206,12 @@ export function JobDetailsScreen() {
       return;
     }
 
+    // Template is auto-selected now, but check just in case
     if (!selectedTemplate) {
-      Alert.alert('Missing Information', 'Please select a job template');
+      const customTemplate = JOB_TEMPLATES.find((t) => t.id === 'custom');
+      if (customTemplate) {
+        setSelectedTemplate(customTemplate);
+      }
       return;
     }
 
@@ -226,6 +225,11 @@ export function JobDetailsScreen() {
           customerEmail,
           customerPhone,
           jobAddress,
+          job: {
+            ...currentQuote.job,
+            name: jobName || currentQuote.job.name,
+            description: jobDescription,
+          },
         };
         updateQuote(updatedQuote);
         navigation.navigate('MaterialsList');
@@ -255,6 +259,7 @@ export function JobDetailsScreen() {
       job = {
         ...currentQuote.job,
         name: jobName || currentQuote.job.name,
+        description: jobDescription,
         customParams,
       };
     }
@@ -275,19 +280,24 @@ export function JobDetailsScreen() {
     navigation.navigate('MaterialsList');
   };
 
-  return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+  const scrollContent = (
+    <ScrollView
+      style={[
+        styles.container,
+        Platform.OS === 'web' && { height: '100%', overflow: 'scroll', display: 'block' as any }
+      ]}
+      contentContainerStyle={[
+        styles.scrollContent,
+        Platform.OS === 'web' && { flexGrow: 0, display: 'block' as any }
+      ]}
+      keyboardShouldPersistTaps="handled"
     >
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.section}>
-        <Title style={styles.sectionTitle}>Customer Details</Title>
+      <WebContainer>
+      <Surface style={[styles.paramsSection, styles.firstSection]}>
+        <View style={styles.sectionTitleContainer}>
+          <MaterialCommunityIcons name="account" size={24} color={colors.primary} style={styles.sectionIcon} />
+          <Title style={styles.sectionTitle}>Customer Details</Title>
+        </View>
 
         <TextInput
           label="Customer Name *"
@@ -325,8 +335,9 @@ export function JobDetailsScreen() {
           multiline
           numberOfLines={2}
         />
-      </View>
+      </Surface>
 
+      {/* Template Selection - Commented out for now
       <View style={styles.section}>
         <Title style={styles.sectionTitle}>Select Job Template</Title>
         {isEditingExisting && (
@@ -368,57 +379,52 @@ export function JobDetailsScreen() {
           ))}
         </View>
       </View>
+      */}
 
-      {/* Custom Job - AI Description */}
-      {selectedTemplate && selectedTemplate.id === 'custom' && (
-        <Surface style={styles.paramsSection}>
+      {/* Job Description */}
+      <Surface style={styles.paramsSection}>
+        <View style={styles.sectionTitleContainer}>
+          <MaterialCommunityIcons name="hammer-wrench" size={24} color={colors.primary} style={styles.sectionIcon} />
           <Title style={styles.sectionTitle}>Job Description</Title>
-          {isEditingExisting ? (
-            <Text style={styles.helperText}>
-              Job description is locked when editing. To change it, create a new quote.
-            </Text>
-          ) : (
-            <Text style={styles.helperText}>
-              Describe the job in detail. AI will analyze it and suggest materials, or skip to enter materials manually.
-            </Text>
-          )}
+        </View>
+        <Text style={styles.helperText}>
+          Describe the job in detail. AI will analyze it and suggest materials, or skip to enter materials manually.
+        </Text>
 
-          <TextInput
-            label="Job Name (Optional)"
-            value={jobName}
-            onChangeText={setJobName}
-            mode="outlined"
-            style={styles.input}
-            placeholder="e.g., Backyard Deck Renovation"
-            multiline
-            numberOfLines={3}
-          />
+        <TextInput
+          label="Job Name (Optional)"
+          value={jobName}
+          onChangeText={setJobName}
+          mode="outlined"
+          style={styles.input}
+          placeholder="e.g., Backyard Deck Renovation"
+          multiline
+          numberOfLines={3}
+        />
 
-          <TextInput
-            label="Job Description *"
-            value={jobDescription}
-            onChangeText={setJobDescription}
-            mode="outlined"
-            style={styles.input}
-            multiline
-            numberOfLines={6}
-            placeholder="e.g., Build a 5x4 meter outdoor deck with 10 steps leading down to the garden. Need to replace old timber and add handrails."
-            disabled={isEditingExisting}
-          />
+        <TextInput
+          label="Job Description *"
+          value={jobDescription}
+          onChangeText={setJobDescription}
+          mode="outlined"
+          style={styles.input}
+          multiline
+          numberOfLines={6}
+          placeholder="e.g., Build a 5x4 meter outdoor deck with 10 steps leading down to the garden. Need to replace old timber and add handrails."
+        />
 
-          {!isEditingExisting && (
-            <Button
-              mode="text"
-              onPress={handleSkipToManualEntry}
-              style={styles.skipButton}
-              icon="pencil"
-              disabled={!customerName.trim()}
-            >
-              Skip AI & Enter Materials Manually
-            </Button>
-          )}
-        </Surface>
-      )}
+        {!isEditingExisting && (
+          <Button
+            mode="text"
+            onPress={handleSkipToManualEntry}
+            style={styles.skipButton}
+            icon="pencil"
+            disabled={!customerName.trim()}
+          >
+            Skip AI & Enter Materials Manually
+          </Button>
+        )}
+      </Surface>
 
       {/* Standard Template Parameters */}
       {selectedTemplate && selectedTemplate.id !== 'custom' && selectedTemplate.requiredParams.length > 0 && (
@@ -461,17 +467,44 @@ export function JobDetailsScreen() {
           onPress={handleNext}
           style={styles.nextButton}
           disabled={
-            !selectedTemplate ||
             !customerName.trim() ||
             isAnalyzing ||
-            (selectedTemplate?.id === 'custom' && !jobDescription.trim() && !isEditingExisting)
+            (!jobDescription.trim() && !isEditingExisting)
           }
           loading={isAnalyzing}
         >
-          {isAnalyzing ? 'Analyzing...' : (selectedTemplate?.id === 'custom' && !isEditingExisting ? 'Analyze & Continue' : 'Next: Materials')}
+          {isAnalyzing ? 'Analyzing...' : (!isEditingExisting ? 'Analyze & Continue' : 'Next: Materials')}
         </Button>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </WebContainer>
+    </ScrollView>
+  );
+
+  return (
+    <>
+      <Portal>
+        <Dialog visible={analysisErrorDialogVisible} onDismiss={() => setAnalysisErrorDialogVisible(false)}>
+          <Dialog.Title>AI Analysis Failed</Dialog.Title>
+          <Dialog.Content>
+            <Text>{analysisErrorMessage}</Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setAnalysisErrorDialogVisible(false)}>Cancel</Button>
+            <Button onPress={() => { setAnalysisErrorDialogVisible(false); handleSkipToManualEntry(); }}>Enter Manually</Button>
+            <Button onPress={() => { setAnalysisErrorDialogVisible(false); handleAnalyzeCustomJob(); }}>Try Again</Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+      <KeyboardAvoidingView
+        style={Platform.OS === 'web'
+          ? { height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' } as any
+          : { flex: 1 }
+        }
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        {scrollContent}
+      </KeyboardAvoidingView>
+    </>
   );
 }
 
@@ -502,10 +535,18 @@ const styles = StyleSheet.create({
   section: {
     padding: 20,
   },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionIcon: {
+    marginRight: 8,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 16,
+    marginBottom: 0,
   },
   input: {
     marginBottom: 20,
@@ -547,6 +588,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     elevation: 2,
     backgroundColor: colors.surface,
+  },
+  firstSection: {
+    marginTop: 20,
   },
   nextButton: {
     marginHorizontal: 20,
