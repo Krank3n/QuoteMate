@@ -1,7 +1,7 @@
 {
-  "name": "quotemate",
+  "name": "@quotemate/app",
   "version": "1.0.0",
-  "main": "node_modules/expo/AppEntry.js",
+  "main": "App.tsx",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -14,6 +14,7 @@
     "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/native": "^7.0.14",
     "@react-navigation/stack": "^7.0.0",
+    "@stripe/stripe-js": "^8.1.0",
     "date-fns": "^2.30.0",
     "expo": "~52.0.0",
     "expo-asset": "~11.0.5",
@@ -28,6 +29,7 @@
     "expo-router": "~4.0.14",
     "expo-sharing": "~13.0.1",
     "expo-status-bar": "~2.0.0",
+    "firebase": "^12.4.0",
     "react": "18.3.1",
     "react-native": "0.76.9",
     "react-native-dotenv": "^3.4.11",
@@ -45,6 +47,5 @@
     "@babel/core": "^7.23.5",
     "@types/react": "~18.3.12",
     "typescript": "^5.3.3"
-  },
-  "private": true
+  }
 }

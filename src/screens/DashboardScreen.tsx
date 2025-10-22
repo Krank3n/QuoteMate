@@ -15,6 +15,8 @@ import {
   Divider,
   Menu,
   IconButton,
+  Dialog,
+  Portal,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
@@ -29,12 +31,15 @@ import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
 import { generateQuotePDF } from '../utils/pdfGenerator';
+import { WebContainer } from '../components/WebContainer';
 
 export function DashboardScreen() {
   const navigation = useNavigation<any>();
   const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus } = useStore();
 
   const [menuVisible, setMenuVisible] = useState<string | null>(null);
+  const [emailDialogVisible, setEmailDialogVisible] = useState(false);
+  const [emailQuote, setEmailQuote] = useState<Quote | null>(null);
 
   // Calculate quick stats
   const totalQuotes = quotes.length;
@@ -97,31 +102,65 @@ export function DashboardScreen() {
 
   const handleSendQuote = async (quote: Quote) => {
     try {
-      // Check if email is available
-      const isAvailable = await MailComposer.isAvailableAsync();
-      if (!isAvailable) {
-        Alert.alert('Email Not Available', 'Email is not configured on this device. Please set up an email account first.');
-        return;
-      }
+      if (Platform.OS === 'web') {
+        // Generate PDF HTML
+        const html = await generateQuotePDF(quote, businessSettings);
+        const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
 
-      // Generate PDF with custom filename
-      const html = await generateQuotePDF(quote, businessSettings);
-      const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-      const { uri } = await Print.printToFileAsync({ html, base64: false });
+        // Create a hidden iframe to print the PDF
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        document.body.appendChild(iframe);
 
-      // Compose email
-      const result = await MailComposer.composeAsync({
-        recipients: quote.customerEmail ? [quote.customerEmail] : [],
-        subject: `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`,
-        body: `Hi ${quote.customerName},\n\nPlease find attached your quotation for ${quote.job.name}.\n\nTotal: ${formatCurrency(quote.total)}\n\nThis quote is valid for 30 days from the date of issue.\n\nIf you have any questions, please don't hesitate to contact us.\n\nBest regards,\n${businessSettings?.businessName || 'Your Business'}`,
-        attachments: [uri],
-      });
+        const iframeDoc = iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(html);
+          iframeDoc.close();
 
-      // Update quote status to 'sent' if email was sent
-      if (result.status === 'sent') {
-        const updatedQuote = { ...quote, status: 'sent' as const };
-        await saveQuote(updatedQuote);
-        Alert.alert('Success', 'Quote sent successfully and marked as sent!');
+          // Wait for content to load then trigger print dialog
+          iframe.onload = () => {
+            setTimeout(() => {
+              iframe.contentWindow?.print();
+              // Clean up after a delay
+              setTimeout(() => {
+                document.body.removeChild(iframe);
+              }, 1000);
+            }, 250);
+          };
+        }
+
+        // Show email client selector dialog immediately
+        setEmailQuote(quote);
+        setEmailDialogVisible(true);
+      } else{
+        // Mobile platforms
+        // Check if email is available
+        const isAvailable = await MailComposer.isAvailableAsync();
+        if (!isAvailable) {
+          Alert.alert('Email Not Available', 'Email is not configured on this device. Please set up an email account first.');
+          return;
+        }
+
+        // Generate PDF with custom filename
+        const html = await generateQuotePDF(quote, businessSettings);
+        const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
+        const { uri } = await Print.printToFileAsync({ html, base64: false });
+
+        // Compose email
+        const result = await MailComposer.composeAsync({
+          recipients: quote.customerEmail ? [quote.customerEmail] : [],
+          subject: `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`,
+          body: `Hi ${quote.customerName},\n\nPlease find attached your quotation for ${quote.job.name}.\n\nTotal: ${formatCurrency(quote.total)}\n\nThis quote is valid for 30 days from the date of issue.\n\nIf you have any questions, please don't hesitate to contact us.\n\nBest regards,\n${businessSettings?.businessName || 'Your Business'}`,
+          attachments: [uri],
+        });
+
+        // Update quote status to 'sent' if email was sent
+        if (result.status === 'sent') {
+          const updatedQuote = { ...quote, status: 'sent' as const };
+          await saveQuote(updatedQuote);
+          Alert.alert('Success', 'Quote sent successfully and marked as sent!');
+        }
       }
     } catch (error) {
       console.error('Send error:', error);
@@ -129,20 +168,131 @@ export function DashboardScreen() {
     }
   };
 
+  const handleEmailViaGmail = (quote: Quote) => {
+    const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
+    const emailBody =
+      `Hi ${quote.customerName},\n\n` +
+      `Please find your quotation for ${quote.job.name}.\n\n` +
+      `Total: ${formatCurrency(quote.total)}\n\n` +
+      `This quote is valid for 30 days from the date of issue.\n\n` +
+      `If you have any questions, please don't hesitate to contact us.\n\n` +
+      `Best regards,\n${businessSettings?.businessName || 'Your Business'}\n\n` +
+      `---\n` +
+      `Note: A print dialog has opened with the quote PDF. Please save it as PDF and attach it to this email.`;
+
+    const recipient = quote.customerEmail || '';
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(recipient)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
+    window.open(gmailUrl, '_blank');
+
+    // Update quote status
+    const updatedQuote = { ...quote, status: 'sent' as const };
+    saveQuote(updatedQuote);
+    setEmailDialogVisible(false);
+  };
+
+  const handleEmailViaOutlook = (quote: Quote) => {
+    const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
+    const emailBody =
+      `Hi ${quote.customerName},\n\n` +
+      `Please find your quotation for ${quote.job.name}.\n\n` +
+      `Total: ${formatCurrency(quote.total)}\n\n` +
+      `This quote is valid for 30 days from the date of issue.\n\n` +
+      `If you have any questions, please don't hesitate to contact us.\n\n` +
+      `Best regards,\n${businessSettings?.businessName || 'Your Business'}\n\n` +
+      `---\n` +
+      `Note: A print dialog has opened with the quote PDF. Please save it as PDF and attach it to this email.`;
+
+    const recipient = quote.customerEmail || '';
+    const outlookUrl = `https://outlook.live.com/mail/0/deeplink/compose?to=${encodeURIComponent(recipient)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
+    window.open(outlookUrl, '_blank');
+
+    // Update quote status
+    const updatedQuote = { ...quote, status: 'sent' as const };
+    saveQuote(updatedQuote);
+    setEmailDialogVisible(false);
+  };
+
+  const handleEmailViaYahoo = (quote: Quote) => {
+    const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
+    const emailBody =
+      `Hi ${quote.customerName},\n\n` +
+      `Please find your quotation for ${quote.job.name}.\n\n` +
+      `Total: ${formatCurrency(quote.total)}\n\n` +
+      `This quote is valid for 30 days from the date of issue.\n\n` +
+      `If you have any questions, please don't hesitate to contact us.\n\n` +
+      `Best regards,\n${businessSettings?.businessName || 'Your Business'}\n\n` +
+      `---\n` +
+      `Note: A print dialog has opened with the quote PDF. Please save it as PDF and attach it to this email.`;
+
+    const recipient = quote.customerEmail || '';
+    const yahooUrl = `https://compose.mail.yahoo.com/?to=${encodeURIComponent(recipient)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
+    window.open(yahooUrl, '_blank');
+
+    // Update quote status
+    const updatedQuote = { ...quote, status: 'sent' as const };
+    saveQuote(updatedQuote);
+    setEmailDialogVisible(false);
+  };
+
+  const handleCopyEmailText = async (quote: Quote) => {
+    try {
+      const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
+      const emailBody =
+        `Hi ${quote.customerName},\n\n` +
+        `Please find your quotation for ${quote.job.name}.\n\n` +
+        `Total: ${formatCurrency(quote.total)}\n\n` +
+        `This quote is valid for 30 days from the date of issue.\n\n` +
+        `If you have any questions, please don't hesitate to contact us.\n\n` +
+        `Best regards,\n${businessSettings?.businessName || 'Your Business'}\n\n` +
+        `---\n` +
+        `Note: A print dialog has opened with the quote PDF. Please save it as PDF and attach it to this email.`;
+
+      const recipient = quote.customerEmail || '';
+      const emailText = `To: ${recipient}\nSubject: ${subject}\n\n${emailBody}`;
+      await navigator.clipboard.writeText(emailText);
+      Alert.alert('Copied!', 'Email text copied to clipboard. You can paste it into your email client.');
+
+      // Update quote status
+      const updatedQuote = { ...quote, status: 'sent' as const };
+      await saveQuote(updatedQuote);
+      setEmailDialogVisible(false);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to copy to clipboard');
+    }
+  };
+
   const handleShareQuote = async (quote: Quote) => {
     try {
       const html = await generateQuotePDF(quote, businessSettings);
       const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-      const { uri } = await Print.printToFileAsync({ html });
 
-      if (Platform.OS === 'ios') {
-        await Sharing.shareAsync(uri, { dialogTitle: filename });
+      if (Platform.OS === 'web') {
+        // On web, use browser's native print functionality
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.document.title = filename;
+          printWindow.onload = () => {
+            printWindow.focus();
+            printWindow.print();
+          };
+        } else {
+          Alert.alert('Error', 'Please allow popups to export PDF');
+        }
       } else {
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) {
+        // Mobile platforms
+        const { uri } = await Print.printToFileAsync({ html });
+
+        if (Platform.OS === 'ios') {
           await Sharing.shareAsync(uri, { dialogTitle: filename });
         } else {
-          Alert.alert('PDF Created', `PDF saved to: ${uri}`);
+          const isAvailable = await Sharing.isAvailableAsync();
+          if (isAvailable) {
+            await Sharing.shareAsync(uri, { dialogTitle: filename });
+          } else {
+            Alert.alert('PDF Created', `PDF saved to: ${uri}`);
+          }
         }
       }
     } catch (error) {
@@ -155,24 +305,42 @@ export function DashboardScreen() {
     try {
       const html = await generateQuotePDF(quote, businessSettings);
       const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-      const { uri } = await Print.printToFileAsync({ html });
 
-      Alert.alert(
-        'PDF Exported',
-        `${filename} created successfully`,
-        [
-          {
-            text: 'Share',
-            onPress: async () => {
-              const isAvailable = await Sharing.isAvailableAsync();
-              if (isAvailable) {
-                await Sharing.shareAsync(uri, { dialogTitle: filename });
-              }
+      if (Platform.OS === 'web') {
+        // On web, use browser's native print functionality
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.document.title = filename;
+          printWindow.onload = () => {
+            printWindow.focus();
+            printWindow.print();
+          };
+        } else {
+          Alert.alert('Error', 'Please allow popups to export PDF');
+        }
+      } else {
+        // Mobile platforms
+        const { uri } = await Print.printToFileAsync({ html });
+
+        Alert.alert(
+          'PDF Exported',
+          `${filename} created successfully`,
+          [
+            {
+              text: 'Share',
+              onPress: async () => {
+                const isAvailable = await Sharing.isAvailableAsync();
+                if (isAvailable) {
+                  await Sharing.shareAsync(uri, { dialogTitle: filename });
+                }
+              },
             },
-          },
-          { text: 'OK' },
-        ]
-      );
+            { text: 'OK' },
+          ]
+        );
+      }
     } catch (error) {
       console.error('Export error:', error);
       Alert.alert('Error', 'Failed to export quote. Please try again.');
@@ -180,13 +348,15 @@ export function DashboardScreen() {
   };
 
   return (
+    <>
     <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Title style={styles.greeting}>
-          G'day, {businessSettings?.businessName || 'Mate'}!
-        </Title>
-        <Paragraph>Ready to create some quotes?</Paragraph>
-      </View>
+      <WebContainer>
+        <View style={styles.header}>
+          <Title style={styles.greeting}>
+            G'day, {businessSettings?.businessName || 'Mate'}!
+          </Title>
+          <Paragraph>Ready to create some quotes?</Paragraph>
+        </View>
 
       {/* New Quote Button */}
       <Button
@@ -340,7 +510,55 @@ export function DashboardScreen() {
           </Text>
         </View>
       )}
+      </WebContainer>
     </ScrollView>
+
+    {/* Email Client Selector Dialog */}
+    <Portal>
+      <Dialog visible={emailDialogVisible} onDismiss={() => setEmailDialogVisible(false)}>
+        <Dialog.Title>Send Quote</Dialog.Title>
+        <Dialog.Content>
+          <Text style={{ marginBottom: 16 }}>Choose how to send your quote:</Text>
+          <View style={{ gap: 8 }}>
+            <Button
+              mode="contained"
+              icon="google"
+              onPress={() => emailQuote && handleEmailViaGmail(emailQuote)}
+              style={{ marginBottom: 8 }}
+            >
+              Gmail
+            </Button>
+            <Button
+              mode="contained"
+              icon="microsoft-outlook"
+              onPress={() => emailQuote && handleEmailViaOutlook(emailQuote)}
+              style={{ marginBottom: 8 }}
+            >
+              Outlook
+            </Button>
+            <Button
+              mode="contained"
+              icon="yahoo"
+              onPress={() => emailQuote && handleEmailViaYahoo(emailQuote)}
+              style={{ marginBottom: 8 }}
+            >
+              Yahoo Mail
+            </Button>
+            <Button
+              mode="outlined"
+              icon="content-copy"
+              onPress={() => emailQuote && handleCopyEmailText(emailQuote)}
+            >
+              Copy Email Text
+            </Button>
+          </View>
+        </Dialog.Content>
+        <Dialog.Actions>
+          <Button onPress={() => setEmailDialogVisible(false)}>Cancel</Button>
+        </Dialog.Actions>
+      </Dialog>
+    </Portal>
+  </>
   );
 }
 

@@ -50,15 +50,21 @@ export function QuotePreviewScreen() {
       };
 
       await saveQuote(updatedQuote);
-      Alert.alert('Success', 'Quote saved successfully!', [
-        {
-          text: 'OK',
-          onPress: () => {
-            // Navigate back to main app (closes the modal)
-            navigation.getParent()?.goBack();
+
+      // On web, navigate immediately after success
+      if (Platform.OS === 'web') {
+        navigation.getParent()?.navigate('Main', { screen: 'Dashboard' });
+      } else {
+        Alert.alert('Success', 'Quote saved successfully!', [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Navigate back to Dashboard (closes the modal and goes to home)
+              navigation.getParent()?.navigate('Main', { screen: 'Dashboard' });
+            },
           },
-        },
-      ]);
+        ]);
+      }
     } catch (error) {
       Alert.alert('Error', 'Failed to save quote. Please try again.');
     } finally {
@@ -89,30 +95,51 @@ export function QuotePreviewScreen() {
       const dateStr = format(new Date(), 'dd-MMM-yyyy');
       const filename = `Quote_${sanitizedCustomer}_${sanitizedJob}_${dateStr}.pdf`;
 
-      const { uri } = await Print.printToFileAsync({ html });
+      if (Platform.OS === 'web') {
+        // On web, use browser's native print functionality
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
 
-      // Copy to proper filename for sharing
-      const newUri = `${FileSystem.cacheDirectory}${filename}`;
-      await FileSystem.copyAsync({
-        from: uri,
-        to: newUri,
-      });
+          // Set the document title to the filename
+          printWindow.document.title = filename;
 
-      if (Platform.OS === 'ios') {
-        await Sharing.shareAsync(newUri, {
-          UTI: 'com.adobe.pdf',
-          mimeType: 'application/pdf',
-        });
+          // Wait for content to load before triggering print
+          printWindow.onload = () => {
+            printWindow.focus();
+            printWindow.print();
+          };
+        } else {
+          Alert.alert('Error', 'Please allow popups to export PDF');
+        }
       } else {
-        // On Android, copy to Downloads folder with proper name
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) {
+        // Mobile platforms - use expo-print
+        const { uri } = await Print.printToFileAsync({ html });
+
+        // Copy to proper filename for sharing
+        const newUri = `${FileSystem.cacheDirectory}${filename}`;
+        await FileSystem.copyAsync({
+          from: uri,
+          to: newUri,
+        });
+
+        if (Platform.OS === 'ios') {
           await Sharing.shareAsync(newUri, {
+            UTI: 'com.adobe.pdf',
             mimeType: 'application/pdf',
-            dialogTitle: 'Share Quote',
           });
         } else {
-          Alert.alert('PDF Created', `${filename} saved successfully`);
+          // On Android, copy to Downloads folder with proper name
+          const isAvailable = await Sharing.isAvailableAsync();
+          if (isAvailable) {
+            await Sharing.shareAsync(newUri, {
+              mimeType: 'application/pdf',
+              dialogTitle: 'Share Quote',
+            });
+          } else {
+            Alert.alert('PDF Created', `${filename} saved successfully`);
+          }
         }
       }
     } catch (error) {
@@ -253,6 +280,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 220,
     flexGrow: 1,
+    maxWidth: '800px',
+    overflow: 'scroll',
+    margin: 'auto',
+    width: '100%',
+    height: '100vh',
   },
   section: {
     margin: 16,
