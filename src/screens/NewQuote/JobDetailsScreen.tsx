@@ -55,7 +55,7 @@ export function JobDetailsScreen() {
   const [analysisErrorMessage, setAnalysisErrorMessage] = useState('');
 
   // Check if editing an existing quote
-  const isEditingExisting = currentQuote && currentQuote.materials.length > 0;
+  const isEditingExisting = !!(currentQuote && currentQuote.materials.length > 0);
 
   useEffect(() => {
     if (currentQuote) {
@@ -145,10 +145,13 @@ export function JobDetailsScreen() {
       // Convert LLM materials to app materials format
       const baseMaterials = convertLLMMaterialsToMaterials(analysis.materials);
 
-      // Add IDs to materials
+      // Add IDs to materials and ensure all required fields are present
       const materials = baseMaterials.map((m) => ({
-        ...m,
         id: generateId(),
+        name: m.name || 'Unknown Material',
+        quantity: m.quantity || 1,
+        unit: m.unit || 'each',
+        searchTerm: m.searchTerm,
         price: 0,
         totalPrice: 0,
         manualPriceOverride: false,

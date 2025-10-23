@@ -47,16 +47,21 @@ export function PaywallScreen() {
       setLoading(false);
     });
 
+    let purchaseUpdateSubscription: any;
+    let purchaseErrorSubscription: any;
+
     try {
-      setupPurchaseListener();
+      const listeners = setupPurchaseListener();
+      purchaseUpdateSubscription = listeners.purchaseUpdateSubscription;
+      purchaseErrorSubscription = listeners.purchaseErrorSubscription;
     } catch (error) {
       console.error('Failed to setup purchase listener:', error);
     }
 
     return () => {
       try {
-        RNIap.purchaseUpdatedListener?.remove?.();
-        RNIap.purchaseErrorListener?.remove?.();
+        purchaseUpdateSubscription?.remove();
+        purchaseErrorSubscription?.remove();
       } catch (error) {
         console.error('Error removing listeners:', error);
       }
@@ -158,12 +163,15 @@ export function PaywallScreen() {
           }
         }
       );
+
+      return { purchaseUpdateSubscription, purchaseErrorSubscription };
     } catch (error: any) {
       console.error('Error setting up purchase listeners:', error);
       // Don't show alert for E_IAP_NOT_AVAILABLE during setup
       if (error?.code !== 'E_IAP_NOT_AVAILABLE') {
         setIsUpgrading(false);
       }
+      return { purchaseUpdateSubscription: null, purchaseErrorSubscription: null };
     }
   };
 
@@ -218,7 +226,7 @@ export function PaywallScreen() {
 
   const getProductPrice = (productId: string): string => {
     const product = products.find(p => p.productId === productId);
-    return product?.localizedPrice || '$19';
+    return (product as any)?.localizedPrice || '$19';
   };
 
   const handleCancelSubscription = () => {

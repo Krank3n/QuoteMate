@@ -634,7 +634,7 @@ export function MaterialsListScreen() {
 
               {!isSearching && searchResults.length === 0 && searchQuery && (
                 <View style={styles.emptyResults}>
-                  <Text style={styles.emptyText}>
+                  <Text style={styles.emptyResultsText}>
                     No products found. Try a different search term or add manually.
                   </Text>
                 </View>
@@ -684,8 +684,8 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && {
       display: 'flex' as any,
       flexDirection: 'column' as any,
-      height: '100vh',
-      overflow: 'hidden',
+      height: '100vh' as any,
+      overflow: 'hidden' as any,
     }),
   },
   scrollView: {
@@ -702,7 +702,7 @@ const styles = StyleSheet.create({
       margin: 'auto' as any,
       width: '100%',
       paddingBottom: 20,
-      height: '0px',
+      height: '0px' as any,
     }),
   },
   listView: {
@@ -886,7 +886,7 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: 'center',
   },
-  emptyText: {
+  emptyResultsText: {
     fontSize: 14,
     color: colors.onSurface,
     textAlign: 'center',

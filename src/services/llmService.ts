@@ -263,7 +263,7 @@ export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): Par
     name: m.name,
     searchTerm: m.searchTerm,
     quantity: m.quantity,
-    unit: m.unit,
+    unit: m.unit as 'each' | 'm' | 'L' | 'kg' | 'box' | 'pack',
     price: 0,
     totalPrice: 0,
     manualPriceOverride: false,

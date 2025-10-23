@@ -280,11 +280,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 220,
     flexGrow: 1,
-    maxWidth: '800px',
-    overflow: 'scroll',
-    margin: 'auto',
+    maxWidth: '800px' as any,
+    overflow: 'scroll' as any,
+    margin: 'auto' as any,
     width: '100%',
-    height: '100vh',
+    height: '100vh' as any,
   },
   section: {
     margin: 16,

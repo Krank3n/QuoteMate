@@ -99,7 +99,7 @@ class BillingService {
       console.log('💳 Purchasing subscription:', sku);
       const purchase = await RNIap.requestSubscription({ sku });
       console.log('✅ Purchase successful:', purchase);
-      return purchase;
+      return purchase as RNIap.SubscriptionPurchase | null;
     } catch (error: any) {
       if (error?.code === 'E_USER_CANCELLED') {
         console.log('ℹ️ User cancelled purchase');

@@ -154,7 +154,7 @@ class UnifiedBillingService {
         return {
           isPremium: hasActive,
           subscriptionId: firstSub?.productId || null,
-          expiryDate: firstSub?.transactionDate || null,
+          expiryDate: firstSub?.transactionDate ? String(firstSub.transactionDate) : null,
           platform: Platform.OS as 'ios' | 'android',
         };
       }

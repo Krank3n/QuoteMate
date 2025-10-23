@@ -258,8 +258,8 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && {
       display: 'flex' as any,
       flexDirection: 'column' as any,
-      height: '100vh',
-      overflow: 'hidden',
+      height: '100vh' as any,
+      overflow: 'hidden' as any,
     }),
   },
   scrollView: {
@@ -277,7 +277,7 @@ const styles = StyleSheet.create({
       margin: 'auto' as any,
       width: '100%',
       paddingBottom: 20,
-      height: '0px',
+      height: '0px' as any,
     }),
   },
   section: {
