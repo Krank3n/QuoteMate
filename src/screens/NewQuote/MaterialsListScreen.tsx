@@ -11,6 +11,7 @@ import {
   Alert,
   FlatList,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import {
   Text,
@@ -55,6 +56,13 @@ export function MaterialsListScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<BunningsItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Delete confirmation dialog state
+  const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
+  const [materialToDelete, setMaterialToDelete] = useState<string | null>(null);
+
+  // Unpriced materials warning dialog state
+  const [unpricedDialogVisible, setUnpricedDialogVisible] = useState(false);
 
   // Memoize text input handlers to prevent flickering
   const handleEditNameChange = useCallback((text: string) => {
@@ -303,24 +311,20 @@ export function MaterialsListScreen() {
   };
 
   const handleDeleteMaterial = (materialId: string) => {
-    Alert.alert(
-      'Delete Material',
-      'Are you sure you want to remove this material?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            const updatedMaterials = materials.filter((m) => m.id !== materialId);
-            updateQuote({
-              ...currentQuote,
-              materials: updatedMaterials,
-            });
-          },
-        },
-      ]
-    );
+    setMaterialToDelete(materialId);
+    setDeleteDialogVisible(true);
+  };
+
+  const confirmDeleteMaterial = () => {
+    if (materialToDelete) {
+      const updatedMaterials = materials.filter((m) => m.id !== materialToDelete);
+      updateQuote({
+        ...currentQuote,
+        materials: updatedMaterials,
+      });
+    }
+    setDeleteDialogVisible(false);
+    setMaterialToDelete(null);
   };
 
   const handleFetchSinglePrice = async () => {
@@ -379,25 +383,24 @@ export function MaterialsListScreen() {
 
     const hasUnpricedMaterials = materials.some((m) => m.price === 0);
     if (hasUnpricedMaterials) {
-      Alert.alert(
-        'Unpriced Materials',
-        'Some materials don\'t have prices. Do you want to continue?',
-        [
-          { text: 'Go Back', style: 'cancel' },
-          {
-            text: 'Continue',
-            onPress: () => navigation.navigate('LaborMarkup'),
-          },
-        ]
-      );
+      setUnpricedDialogVisible(true);
     } else {
       navigation.navigate('LaborMarkup');
     }
   };
 
+  const proceedWithUnpricedMaterials = () => {
+    setUnpricedDialogVisible(false);
+    navigation.navigate('LaborMarkup');
+  };
+
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.scrollView}>
+      <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+      >
         {materials.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>No materials yet</Text>
@@ -406,7 +409,7 @@ export function MaterialsListScreen() {
             </Text>
           </View>
         ) : (
-          <List.Section>
+          <List.Section style={styles.listView}>
             {materials.map((material) => (
               <List.Item
                 key={material.id}
@@ -631,7 +634,7 @@ export function MaterialsListScreen() {
 
               {!isSearching && searchResults.length === 0 && searchQuery && (
                 <View style={styles.emptyResults}>
-                  <Text style={styles.emptyText}>
+                  <Text style={styles.emptyResultsText}>
                     No products found. Try a different search term or add manually.
                   </Text>
                 </View>
@@ -645,6 +648,30 @@ export function MaterialsListScreen() {
             </Button>
           </Dialog.Actions>
         </Dialog>
+
+        {/* Delete Material Confirmation Dialog */}
+        <Dialog visible={deleteDialogVisible} onDismiss={() => setDeleteDialogVisible(false)}>
+          <Dialog.Title>Delete Material</Dialog.Title>
+          <Dialog.Content>
+            <Text>Are you sure you want to remove this material?</Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setDeleteDialogVisible(false)}>Cancel</Button>
+            <Button onPress={confirmDeleteMaterial} textColor={colors.error}>Delete</Button>
+          </Dialog.Actions>
+        </Dialog>
+
+        {/* Unpriced Materials Warning Dialog */}
+        <Dialog visible={unpricedDialogVisible} onDismiss={() => setUnpricedDialogVisible(false)}>
+          <Dialog.Title>Unpriced Materials</Dialog.Title>
+          <Dialog.Content>
+            <Text>Some materials don't have prices. Do you want to continue?</Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setUnpricedDialogVisible(false)}>Go Back</Button>
+            <Button onPress={proceedWithUnpricedMaterials}>Continue</Button>
+          </Dialog.Actions>
+        </Dialog>
       </Portal>
     </View>
   );
@@ -654,9 +681,36 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+    ...(Platform.OS === 'web' && {
+      display: 'flex' as any,
+      flexDirection: 'column' as any,
+      height: '100vh' as any,
+      overflow: 'hidden' as any,
+    }),
   },
   scrollView: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      overflow: 'auto' as any,
+      flexShrink: 1,
+    }),
+  },
+  scrollContent: {
+    flexGrow: 1,
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+      margin: 'auto' as any,
+      width: '100%',
+      paddingBottom: 20,
+      height: '0px' as any,
+    }),
+  },
+  listView: {
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+      margin: '0 auto' as any,
+      width: '100%',
+    }),
   },
   listItem: {
     backgroundColor: colors.surface,
@@ -736,6 +790,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderColor: colors.border,
+    ...(Platform.OS === 'web' && {
+      flexShrink: 0,
+      position: 'sticky' as any,
+      bottom: 0,
+      margin: '0 auto' as any,
+      width: '100%',
+      boxShadow: '0 -2px 8px rgba(0,0,0,0.1)' as any,
+    }),
   },
   nextButton: {
     paddingVertical: 8,
@@ -768,6 +830,10 @@ const styles = StyleSheet.create({
   },
   searchDialog: {
     maxHeight: '80%',
+    ...(Platform.OS === 'web' && {
+      maxWidth: 600,
+      alignSelf: 'center' as any,
+    }),
   },
   searchContainer: {
     minHeight: 200,
@@ -820,7 +886,7 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: 'center',
   },
-  emptyText: {
+  emptyResultsText: {
     fontSize: 14,
     color: colors.onSurface,
     textAlign: 'center',

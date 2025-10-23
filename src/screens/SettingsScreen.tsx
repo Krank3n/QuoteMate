@@ -32,6 +32,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../store/useStore';
 import { BusinessSettings } from '../types';
 import { colors } from '../theme';
+import { WebContainer } from '../components/WebContainer';
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
@@ -162,7 +163,53 @@ export function SettingsScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <Surface style={styles.card}>
+        <WebContainer>
+          {/* Subscription Section - Moved to Top */}
+          <Surface style={styles.card}>
+            <Title style={styles.sectionTitle}>Subscription</Title>
+
+            <View style={styles.subscriptionInfo}>
+              {subscriptionStatus?.isPro ? (
+                <>
+                  <View style={styles.proBadge}>
+                    <MaterialCommunityIcons name="crown" size={24} color={colors.secondary} />
+                    <Text style={styles.proText}>Pro Member</Text>
+                  </View>
+                  <Text style={styles.proStatusText}>
+                    You have unlimited quote analyses. Thank you for your support!
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate('Paywall' as never)}
+                    style={styles.manageSubscriptionLink}
+                  >
+                    <Text style={styles.manageSubscriptionText}>Manage Subscription</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <View style={styles.quotaInfo}>
+                    <Text style={styles.quotaText}>
+                      Free Plan: {subscriptionStatus?.quotesThisMonth || 0} of {subscriptionStatus?.freeQuotesLimit || 5} quote analyses used this month
+                    </Text>
+                  </View>
+                  <Text style={styles.upgradeDescription}>
+                    Get unlimited quote analyses, priority support, and more.
+                  </Text>
+                  <Button
+                    mode="contained"
+                    onPress={() => navigation.navigate('Paywall' as never)}
+                    style={styles.upgradeButton}
+                    contentStyle={styles.upgradeButtonContent}
+                    icon="crown"
+                  >
+                    Upgrade to Pro
+                  </Button>
+                </>
+              )}
+            </View>
+          </Surface>
+
+          <Surface style={styles.card}>
           <Title style={styles.sectionTitle}>Business Information</Title>
 
           <TextInput
@@ -345,43 +392,6 @@ export function SettingsScreen() {
           )}
         </Surface>
 
-        <Surface style={styles.card}>
-          <Title style={styles.sectionTitle}>Subscription</Title>
-
-          <View style={styles.subscriptionInfo}>
-            {subscriptionStatus?.isPro ? (
-              <>
-                <View style={styles.proBadge}>
-                  <MaterialCommunityIcons name="crown" size={24} color={colors.secondary} />
-                  <Text style={styles.proText}>Pro Member</Text>
-                </View>
-                <Text style={styles.helperText}>
-                  You have unlimited quote analyses. Thank you for your support!
-                </Text>
-              </>
-            ) : (
-              <>
-                <View style={styles.quotaInfo}>
-                  <Text style={styles.quotaText}>
-                    Free Plan: {subscriptionStatus?.quotesThisMonth || 0} of {subscriptionStatus?.freeQuotesLimit || 5} quote analyses used this month
-                  </Text>
-                </View>
-                <Button
-                  mode="contained"
-                  onPress={() => navigation.navigate('Paywall' as never)}
-                  style={styles.upgradeButtonSmall}
-                  icon="crown"
-                >
-                  Upgrade to Pro - $19/month
-                </Button>
-                <Text style={styles.upgradeHint}>
-                  Get unlimited quote analyses, priority support, and more
-                </Text>
-              </>
-            )}
-          </View>
-        </Surface>
-
         <Divider style={styles.divider} />
 
         <View style={styles.infoSection}>
@@ -401,6 +411,7 @@ export function SettingsScreen() {
         >
           Save Settings
         </Button>
+        </WebContainer>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -541,13 +552,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  upgradeButtonSmall: {
-    marginBottom: 8,
+  upgradeButton: {
+    marginTop: 16,
   },
-  upgradeHint: {
-    fontSize: 12,
+  upgradeButtonContent: {
+    paddingVertical: 8,
+  },
+  upgradeDescription: {
+    fontSize: 14,
     color: colors.onSurface,
-    textAlign: 'center',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  proStatusText: {
+    fontSize: 14,
+    color: colors.onSurface,
+    marginBottom: 16,
+  },
+  manageSubscriptionLink: {
+    alignSelf: 'flex-start',
+  },
+  manageSubscriptionText: {
+    fontSize: 12,
+    color: colors.primary,
+    textDecorationLine: 'underline',
   },
   switchRow: {
     flexDirection: 'row',
@@ -573,7 +601,7 @@ const styles = StyleSheet.create({
   },
   infoBox: {
     flexDirection: 'row',
-    backgroundColor: colors.primaryBg,
+    backgroundColor: colors.surface,
     padding: 12,
     borderRadius: 8,
     marginTop: 8,
