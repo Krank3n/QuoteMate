@@ -11,7 +11,8 @@ import { stripeConfig } from '../config/stripeConfig';
 const STRIPE_PUBLISHABLE_KEY = stripeConfig.publishableKey;
 
 const API_BASE_URL = process.env.API_BASE_URL ||
-  Constants.expoConfig?.extra?.apiBaseUrl || '';
+  Constants.expoConfig?.extra?.apiBaseUrl ||
+  'https://us-central1-hansendev.cloudfunctions.net';
 
 class StripeService {
   private stripe: Stripe | null = null;
