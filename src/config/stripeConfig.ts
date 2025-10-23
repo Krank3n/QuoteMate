@@ -13,7 +13,8 @@ const STRIPE_MODE = process.env.STRIPE_MODE ||
 // Test/Sandbox keys and prices
 const TEST_CONFIG = {
   publishableKey: process.env.STRIPE_TEST_PUBLISHABLE_KEY ||
-    Constants.expoConfig?.extra?.stripeTestPublishableKey || '',
+    Constants.expoConfig?.extra?.stripeTestPublishableKey ||
+    'pk_test_51SKDEO1K6tFQ1Wx6172zT4DOJKYHb1woFzWTtgaPTs36ToaUpdOQWqvICITtuBqe9r2ZwItSQvQ4cTAUnwKDmBYL00TmAQtOIV',
   secretKey: process.env.STRIPE_TEST_SECRET_KEY ||
     Constants.expoConfig?.extra?.stripeTestSecretKey || '',
   prices: {
