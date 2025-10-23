@@ -92,8 +92,8 @@ class SubscriptionSyncService {
       if (status.isPremium) {
         await useSubscriptionStore.getState().setPremium(
           true,
-          status.subscriptionId,
-          status.expiryDate
+          status.subscriptionId || undefined,
+          status.expiryDate || undefined
         );
       } else {
         await useSubscriptionStore.getState().setPremium(false);
@@ -121,8 +121,8 @@ class SubscriptionSyncService {
         const status = await unifiedBillingService.getSubscriptionStatus(currentUser.uid);
         await useSubscriptionStore.getState().setPremium(
           status.isPremium,
-          status.subscriptionId,
-          status.expiryDate
+          status.subscriptionId || undefined,
+          status.expiryDate || undefined
         );
       } else {
         await this.syncNativeSubscription();
