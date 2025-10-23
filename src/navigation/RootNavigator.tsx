@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -53,6 +54,10 @@ function NewQuoteNavigator() {
         headerTitleStyle: {
           fontWeight: 'bold',
         },
+        // Enable scrolling for new quote screens on web
+        ...(Platform.OS === 'web' && {
+          contentStyle: { overflow: 'auto' }
+        })
       }}
     >
       <NewQuoteStack.Screen
@@ -106,8 +111,9 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
-          paddingBottom: insets.bottom + 16,
-          height: 60 + insets.bottom,
+          paddingTop: 10,
+          paddingBottom: Platform.OS === 'android' ? Math.max(insets.bottom, 10) : insets.bottom + 10,
+          height: Platform.OS === 'android' ? 60 + Math.max(insets.bottom, 0) : 'auto',
         },
         headerStyle: {
           backgroundColor: colors.primary,
@@ -142,12 +148,28 @@ function MainTabs() {
  */
 export function RootNavigator() {
   return (
-    <RootStack.Navigator screenOptions={{ headerShown: false }}>
+    <RootStack.Navigator
+      screenOptions={{
+        headerShown: false,
+        // Enable scrolling for modals on web
+        ...(Platform.OS === 'web' && {
+          contentStyle: { overflow: 'auto' }
+        })
+      }}
+    >
       <RootStack.Screen name="Main" component={MainTabs} />
       <RootStack.Screen
         name="NewQuote"
         component={NewQuoteNavigator}
-        options={{ presentation: 'modal' }}
+        options={{
+          presentation: 'modal',
+          ...(Platform.OS === 'web' && {
+            contentStyle: {
+              overflow: 'auto',
+              maxHeight: '90vh',
+            }
+          })
+        }}
       />
       <RootStack.Screen
         name="Paywall"
@@ -158,6 +180,12 @@ export function RootNavigator() {
           headerStyle: { backgroundColor: colors.primary },
           headerTintColor: colors.white,
           title: 'Upgrade to Pro',
+          ...(Platform.OS === 'web' && {
+            contentStyle: {
+              overflow: 'auto',
+              maxHeight: '90vh',
+            }
+          })
         }}
       />
     </RootStack.Navigator>

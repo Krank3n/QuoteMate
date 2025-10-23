@@ -5,10 +5,19 @@
 
 import { ANTHROPIC_API_KEY } from '@env';
 import { Material } from '../types';
+import { Platform } from 'react-native';
 
+// For web, use Firebase Functions URL
+// For mobile, call Anthropic API directly
+// Use local emulator for development, production URL when deployed
+const IS_DEV = __DEV__;
+const FIREBASE_FUNCTIONS_URL = IS_DEV
+  ? 'http://127.0.0.1:5001/hansendev/us-central1'
+  : 'https://us-central1-hansendev.cloudfunctions.net';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
-console.log('🔧 Anthropic API Config:', {
+console.log('🔧 LLM Service Config:', {
+  platform: Platform.OS,
   hasApiKey: !!ANTHROPIC_API_KEY,
   keyLength: ANTHROPIC_API_KEY?.length || 0,
 });
@@ -37,8 +46,14 @@ export async function analyzeJobDescription(
   jobDescription: string,
   retryCount: number = 3
 ): Promise<LLMResponse> {
+  // On web, use Firebase Functions to avoid CORS issues
+  if (Platform.OS === 'web') {
+    return analyzeViaFirebaseFunction(jobDescription, retryCount);
+  }
+
+  // On mobile, call Anthropic API directly
   if (!ANTHROPIC_API_KEY) {
-    console.warn('ANTHROPIC_API_KEY not set, using fallback');
+    console.warn('ANTHROPIC_API_KEY not set');
     throw new Error('API key not configured');
   }
 
@@ -93,6 +108,53 @@ export async function analyzeJobDescription(
   }
 
   // All retries failed
+  throw new Error(
+    lastError?.message || 'Failed to analyze job description after multiple attempts'
+  );
+}
+
+/**
+ * Analyze job description via Firebase Cloud Function (for web)
+ */
+async function analyzeViaFirebaseFunction(
+  jobDescription: string,
+  retryCount: number = 3
+): Promise<LLMResponse> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < retryCount; attempt++) {
+    try {
+      const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/analyzeJobDescription`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ jobDescription }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        materials: data.materials || [],
+        estimatedHours: data.estimatedHours || 8,
+        jobSummary: data.jobSummary || '',
+      };
+    } catch (error) {
+      lastError = error as Error;
+      console.error(`Firebase Function attempt ${attempt + 1} failed:`, error);
+
+      if (attempt < retryCount - 1) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
   throw new Error(
     lastError?.message || 'Failed to analyze job description after multiple attempts'
   );
@@ -201,7 +263,7 @@ export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): Par
     name: m.name,
     searchTerm: m.searchTerm,
     quantity: m.quantity,
-    unit: m.unit,
+    unit: m.unit as 'each' | 'm' | 'L' | 'kg' | 'box' | 'pack',
     price: 0,
     totalPrice: 0,
     manualPriceOverride: false,
