@@ -48,7 +48,54 @@ class StripeService {
   }
 
   /**
+   * Create a subscription with embedded payment (no redirect)
+   */
+  async createSubscriptionWithPayment(
+    priceId: string,
+    userId: string,
+    paymentMethodId: string
+  ): Promise<{ subscriptionId: string; clientSecret?: string; requiresAction: boolean }> {
+    if (!this.isInitialized || !this.stripe) {
+      throw new Error('Stripe not initialized');
+    }
+
+    try {
+      console.log('🔄 Creating subscription with payment...');
+
+      const response = await fetch(`${API_BASE_URL}/createSubscriptionWithPayment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          priceId,
+          userId,
+          paymentMethodId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ Subscription created:', data.subscriptionId);
+
+      return {
+        subscriptionId: data.subscriptionId,
+        clientSecret: data.clientSecret,
+        requiresAction: data.requiresAction,
+      };
+    } catch (error: any) {
+      console.error('❌ Error creating subscription:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Create a checkout session and redirect to Stripe checkout
+   * (Legacy method - kept for backward compatibility)
    */
   async createCheckoutSession(priceId: string, userId: string): Promise<void> {
     if (!this.isInitialized || !this.stripe) {

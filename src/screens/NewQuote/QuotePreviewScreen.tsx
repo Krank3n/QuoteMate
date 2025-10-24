@@ -51,16 +51,17 @@ export function QuotePreviewScreen() {
 
       await saveQuote(updatedQuote);
 
-      // On web, navigate immediately after success
+      // On web, dismiss the modal immediately
       if (Platform.OS === 'web') {
-        navigation.getParent()?.navigate('Main', { screen: 'Dashboard' });
+        navigation.getParent()?.goBack();
       } else {
+        // iOS & Android - Show Alert then dismiss modal
         Alert.alert('Success', 'Quote saved successfully!', [
           {
             text: 'OK',
             onPress: () => {
-              // Navigate back to Dashboard (closes the modal and goes to home)
-              navigation.getParent()?.navigate('Main', { screen: 'Dashboard' });
+              // Dismiss the NewQuote modal
+              navigation.getParent()?.goBack();
             },
           },
         ]);
@@ -151,12 +152,13 @@ export function QuotePreviewScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-    >
-      {/* Quote Details Preview */}
-      <Surface style={styles.section}>
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Quote Details Preview */}
+        <Surface style={styles.section}>
         <Title style={styles.sectionTitle}>Customer</Title>
         <Text style={styles.text}>{currentQuote.customerName}</Text>
         {currentQuote.customerEmail && <Text style={styles.subtext}>{currentQuote.customerEmail}</Text>}
@@ -268,12 +270,17 @@ export function QuotePreviewScreen() {
           Save Quote
         </Button>
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  scrollView: {
     flex: 1,
     backgroundColor: colors.background,
   },

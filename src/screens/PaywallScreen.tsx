@@ -24,6 +24,7 @@ import { useSubscriptionStore } from '../store/subscriptionStore';
 import { unifiedBillingService } from '../services/unifiedBillingService';
 import { auth } from '../config/firebase';
 import { WebContainer } from '../components/WebContainer';
+import { PaymentModal } from '../components/PaymentModal';
 
 export function PaywallScreen() {
   const navigation = useNavigation<any>();
@@ -35,6 +36,8 @@ export function PaywallScreen() {
   const [loading, setLoading] = useState(true);
   const [iapNotAvailable, setIapNotAvailable] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
   // Use subscriptionStatus from useStore which has the accurate count
   const quotesUsed = subscriptionStatus?.quotesThisMonth || quoteCount;
@@ -196,21 +199,20 @@ export function PaywallScreen() {
       console.log('📦 First product:', firstProduct);
 
       if (Platform.OS === 'web') {
-        // For web, get Firebase user ID (should always exist due to auth guard)
+        // For web, show payment modal instead of redirecting
         const currentUser = auth.currentUser;
         console.log('👤 Current user:', currentUser?.uid);
 
         if (!currentUser) {
-          // This should not happen due to auth guard, but handle it gracefully
           Alert.alert('Error', 'Please sign in to purchase a subscription');
           setIsUpgrading(false);
           return;
         }
 
-        console.log('✅ Proceeding with purchase for user:', currentUser.uid);
-        // This will redirect to Stripe Checkout
-        await unifiedBillingService.purchaseSubscription(firstProduct.productId, currentUser.uid);
-        // Redirect happens, so loading state will persist
+        console.log('✅ Opening payment modal');
+        setSelectedProduct(firstProduct);
+        setShowPaymentModal(true);
+        setIsUpgrading(false);
       } else {
         // For mobile, use native IAP
         await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
@@ -221,6 +223,40 @@ export function PaywallScreen() {
       if (error?.code !== 'E_USER_CANCELLED') {
         Alert.alert('Error', error?.message || 'Failed to start purchase. Please try again.');
       }
+    }
+  };
+
+  const handlePaymentSuccess = async () => {
+    setShowPaymentModal(false);
+
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
+
+      // Update local subscription status
+      const subscriptionStatus = {
+        isPro: true,
+        quotesThisMonth: 0,
+        freeQuotesLimit: 5,
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      };
+
+      // Save to AsyncStorage
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await AsyncStorage.setItem('@quotemate:subscription', JSON.stringify(subscriptionStatus));
+
+      // Reload subscription in UI
+      await useStore.getState().loadSubscription();
+
+      Alert.alert(
+        'Success!',
+        'Welcome to QuoteMate Pro! You now have unlimited quotes.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+    } catch (error) {
+      console.error('Error updating subscription status:', error);
+      Alert.alert('Success!', 'Your payment was processed. Please restart the app to see your Pro features.');
     }
   };
 
@@ -258,24 +294,40 @@ export function PaywallScreen() {
         if (currentUser) {
           const { stripeService } = require('../services/stripeService');
           try {
+            console.log('🔄 Initializing Stripe service...');
+            await stripeService.initialize();
+
+            console.log('🔄 Creating portal session for user:', currentUser.uid);
             const portalUrl = await stripeService.createPortalSession(currentUser.uid);
 
-            // Open Stripe portal
-            window.open(portalUrl, '_blank');
+            console.log('✅ Portal URL received:', portalUrl);
+            console.log('🔀 Redirecting to Stripe Customer Portal...');
 
-            Alert.alert(
-              'Manage Subscription',
-              'We\'ve opened the Stripe Customer Portal where you can confirm your cancellation and provide feedback.',
-              [{ text: 'OK' }]
-            );
-          } catch (portalError) {
-            console.error('Error opening portal:', portalError);
-            Alert.alert(
-              'Error',
-              'Failed to open the Stripe Customer Portal. Please try again or contact support.',
-              [{ text: 'OK' }]
-            );
+            // Open Stripe portal in the same window
+            window.location.href = portalUrl;
+          } catch (portalError: any) {
+            console.error('❌ Error opening portal:', portalError);
+
+            // Check if it's a "customer not found" error
+            if (portalError?.message?.includes('No Stripe customer found') ||
+                portalError?.message?.includes('customer')) {
+              Alert.alert(
+                'No Subscription Found',
+                'It looks like you don\'t have an active Stripe subscription yet. The subscription might have been created locally for testing.\n\nTo cancel, you can:\n1. Clear your browser data\n2. Sign out and sign back in\n3. Contact support at support@quotemate.com',
+                [{ text: 'OK' }]
+              );
+            } else {
+              Alert.alert(
+                'Error',
+                `Failed to open the Stripe Customer Portal.\n\nError: ${portalError?.message || 'Unknown error'}\n\nPlease try again or contact support.`,
+                [{ text: 'OK' }]
+              );
+            }
+            setIsCancelling(false);
           }
+        } else {
+          Alert.alert('Error', 'Please sign in to manage your subscription.');
+          setIsCancelling(false);
         }
       } else {
         // For native platforms, show instructions
@@ -286,11 +338,15 @@ export function PaywallScreen() {
             : 'To cancel your subscription, open the Play Store app, tap Menu > Subscriptions, and select QuoteMate.',
           [{ text: 'OK' }]
         );
+        setIsCancelling(false);
       }
-    } catch (error) {
-      console.error('Error handling cancellation:', error);
-      Alert.alert('Error', 'Failed to process cancellation. Please contact support.');
-    } finally {
+    } catch (error: any) {
+      console.error('❌ Error handling cancellation:', error);
+      Alert.alert(
+        'Error',
+        `Failed to process cancellation.\n\nError: ${error?.message || 'Unknown error'}\n\nPlease contact support.`,
+        [{ text: 'OK' }]
+      );
       setIsCancelling(false);
     }
   };
@@ -408,6 +464,8 @@ export function PaywallScreen() {
               onPress={handleCancelSubscription}
               style={styles.cancelButton}
               textColor={colors.error}
+              loading={isCancelling}
+              disabled={isCancelling}
             >
               Cancel Subscription
             </Button>
@@ -494,6 +552,18 @@ export function PaywallScreen() {
       </Button>
       </WebContainer>
 
+      {/* Payment Modal for Web */}
+      {Platform.OS === 'web' && selectedProduct && (
+        <PaymentModal
+          visible={showPaymentModal}
+          onDismiss={() => setShowPaymentModal(false)}
+          onSuccess={handlePaymentSuccess}
+          priceId={selectedProduct.productId}
+          userId={auth.currentUser?.uid || ''}
+          productName={selectedProduct.title || 'QuoteMate Pro'}
+          price={selectedProduct.localizedPrice || selectedProduct.price || '$19.00'}
+        />
+      )}
     </ScrollView>
   );
 }

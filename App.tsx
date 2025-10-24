@@ -11,6 +11,8 @@ import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
+import { Elements } from '@stripe/react-stripe-js';
+import { loadStripe } from '@stripe/stripe-js';
 
 import { useStore } from './src/store/useStore';
 import { theme } from './src/theme';
@@ -20,6 +22,10 @@ import { AuthScreen } from './src/screens/AuthScreen';
 import { subscriptionSyncService } from './src/services/subscriptionSyncService';
 import { auth } from './src/config/firebase';
 import { stripeService } from './src/services/stripeService';
+import { stripeConfig } from './src/config/stripeConfig';
+
+// Initialize Stripe for web
+const stripePromise = Platform.OS === 'web' ? loadStripe(stripeConfig.publishableKey) : null;
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -146,12 +152,24 @@ export default function App() {
     );
   }
 
+  const appContent = (
+    <>
+      <StatusBar style="light" />
+      {isOnboarded ? <RootNavigator /> : <OnboardingScreen />}
+    </>
+  );
+
   return (
     <SafeAreaProvider>
       <PaperProvider theme={theme}>
         <NavigationContainer>
-          <StatusBar style="light" />
-          {isOnboarded ? <RootNavigator /> : <OnboardingScreen />}
+          {Platform.OS === 'web' && stripePromise ? (
+            <Elements stripe={stripePromise}>
+              {appContent}
+            </Elements>
+          ) : (
+            appContent
+          )}
         </NavigationContainer>
       </PaperProvider>
     </SafeAreaProvider>

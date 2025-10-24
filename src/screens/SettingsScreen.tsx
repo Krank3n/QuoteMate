@@ -33,6 +33,8 @@ import { useStore } from '../store/useStore';
 import { BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
+import { auth } from '../config/firebase';
+import { signOut } from 'firebase/auth';
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
@@ -151,6 +153,38 @@ export function SettingsScreen() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log('🔓 Signing out...');
+              await signOut(auth);
+              console.log('✅ Signed out successfully');
+
+              // On web, force a page reload to reset the app state
+              if (Platform.OS === 'web') {
+                window.location.reload();
+              }
+            } catch (error: any) {
+              console.error('❌ Error signing out:', error);
+              Alert.alert('Error', 'Failed to sign out. Please try again.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -411,6 +445,33 @@ export function SettingsScreen() {
         >
           Save Settings
         </Button>
+
+        {/* Logout Button - Only show on web */}
+        {Platform.OS === 'web' && auth.currentUser && (
+          <>
+            <Divider style={styles.divider} />
+            <Surface style={styles.logoutCard}>
+              <View style={styles.logoutSection}>
+                <View style={styles.userInfo}>
+                  <MaterialCommunityIcons name="account" size={24} color={colors.onSurface} />
+                  <View style={styles.userDetails}>
+                    <Text style={styles.userEmail}>{auth.currentUser.email}</Text>
+                    <Text style={styles.userIdText}>User ID: {auth.currentUser.uid.slice(0, 8)}...</Text>
+                  </View>
+                </View>
+                <Button
+                  mode="outlined"
+                  onPress={handleLogout}
+                  style={styles.logoutButton}
+                  icon="logout"
+                  textColor={colors.error}
+                >
+                  Sign Out
+                </Button>
+              </View>
+            </Surface>
+          </>
+        )}
         </WebContainer>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -612,5 +673,38 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text,
     lineHeight: 18,
+  },
+  logoutCard: {
+    padding: 16,
+    marginBottom: 80,
+    borderRadius: 8,
+    elevation: 2,
+    backgroundColor: colors.surface,
+  },
+  logoutSection: {
+    alignItems: 'center',
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    alignSelf: 'stretch',
+  },
+  userDetails: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  userEmail: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  userIdText: {
+    fontSize: 12,
+    color: colors.onSurface,
+  },
+  logoutButton: {
+    borderColor: colors.error,
+    alignSelf: 'stretch',
   },
 });

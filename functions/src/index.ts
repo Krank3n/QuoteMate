@@ -70,6 +70,11 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
       });
 
       console.log('Created checkout session:', session.id);
+      console.log('Checkout session URL:', session.url);
+
+      if (!session.url) {
+        throw new Error('Stripe did not return a checkout URL');
+      }
 
       res.status(200).json({
         sessionId: session.id,
@@ -77,6 +82,104 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
       });
     } catch (error: any) {
       console.error('Error creating checkout session:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Create a subscription with payment method (for embedded checkout)
+ * This allows users to subscribe without redirecting to Stripe's hosted page
+ */
+export const createSubscriptionWithPayment = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { priceId, userId, paymentMethodId } = req.body;
+
+      if (!priceId || !userId || !paymentMethodId) {
+        res.status(400).json({ error: 'Missing required parameters' });
+        return;
+      }
+
+      console.log('Creating subscription for user:', userId);
+
+      // Check if customer already exists
+      let customerId: string;
+      const customerList = await stripe.customers.search({
+        query: `metadata['firebaseUserId']:'${userId}'`,
+        limit: 1,
+      });
+
+      if (customerList.data.length > 0) {
+        customerId = customerList.data[0].id;
+        console.log('Found existing customer:', customerId);
+      } else {
+        // Create new customer
+        const customer = await stripe.customers.create({
+          metadata: {
+            firebaseUserId: userId,
+          },
+          payment_method: paymentMethodId,
+          invoice_settings: {
+            default_payment_method: paymentMethodId,
+          },
+        });
+        customerId = customer.id;
+        console.log('Created new customer:', customerId);
+      }
+
+      // Attach payment method to customer if not already attached
+      try {
+        await stripe.paymentMethods.attach(paymentMethodId, {
+          customer: customerId,
+        });
+      } catch (attachError: any) {
+        // Payment method might already be attached
+        console.log('Payment method attach info:', attachError.message);
+      }
+
+      // Create subscription
+      const subscription = await stripe.subscriptions.create({
+        customer: customerId,
+        items: [{ price: priceId }],
+        default_payment_method: paymentMethodId,
+        expand: ['latest_invoice.payment_intent'],
+        metadata: {
+          userId,
+        },
+      });
+
+      console.log('Created subscription:', subscription.id);
+
+      // Check if payment requires action (3D Secure)
+      const invoice = subscription.latest_invoice as any;
+      const paymentIntent = invoice?.payment_intent;
+
+      if (paymentIntent?.status === 'requires_action') {
+        res.status(200).json({
+          subscriptionId: subscription.id,
+          clientSecret: paymentIntent.client_secret,
+          requiresAction: true,
+        });
+      } else if (paymentIntent?.status === 'succeeded') {
+        res.status(200).json({
+          subscriptionId: subscription.id,
+          requiresAction: false,
+          status: 'active',
+        });
+      } else {
+        res.status(400).json({
+          error: 'Payment failed',
+          status: paymentIntent?.status,
+        });
+      }
+    } catch (error: any) {
+      console.error('Error creating subscription:', error);
       res.status(500).json({ error: error.message });
     }
   });
