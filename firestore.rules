@@ -1,15 +1,37 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can only read/write their own user document
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // Helper function to check if user is authenticated and owns the resource
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
     }
 
-    // Users can only read their own subscription data
+    // Users collection - each user has their own data
+    match /users/{userId} {
+      // User can only access their own data
+      allow read, write: if isOwner(userId);
+
+      // Quotes subcollection
+      match /quotes/{quoteId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Settings subcollection
+      match /settings/{settingId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Profile subcollection
+      match /profile/{profileId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Subscriptions collection (used by Stripe webhooks and subscription sync)
     match /subscriptions/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      // Only backend (admin) can write subscription data
+      // Users can read their own subscription
+      allow read: if isOwner(userId);
+      // Only backend (admin/Cloud Functions) can write subscription data
       allow write: if false;
     }
 

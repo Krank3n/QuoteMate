@@ -23,6 +23,7 @@ import { subscriptionSyncService } from './src/services/subscriptionSyncService'
 import { auth } from './src/config/firebase';
 import { stripeService } from './src/services/stripeService';
 import { stripeConfig } from './src/config/stripeConfig';
+import { firestoreService } from './src/services/firestoreService';
 
 // Initialize Stripe for web
 const stripePromise = Platform.OS === 'web' ? loadStripe(stripeConfig.publishableKey) : null;
@@ -37,9 +38,41 @@ export default function App() {
 
   useEffect(() => {
     // Listen to authentication state changes
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       console.log('🔐 Auth state changed:', currentUser ? 'Signed in' : 'Not signed in');
       setUser(currentUser);
+
+      // When user signs in, reload data from Firestore and set up listeners
+      if (currentUser) {
+        console.log('👤 User signed in, syncing data from cloud...');
+        await Promise.all([
+          loadQuotes(),
+          loadBusinessSettings(),
+          checkOnboarding(),
+        ]);
+
+        // Set up real-time listeners for cross-device sync
+        firestoreService.listenToQuotes((quotes) => {
+          console.log('📡 Real-time quotes update received');
+          useStore.setState({ quotes });
+        });
+
+        firestoreService.listenToBusinessSettings((settings) => {
+          console.log('📡 Real-time settings update received');
+          if (settings) {
+            useStore.setState({ businessSettings: settings });
+          }
+        });
+
+        firestoreService.listenToOnboardingStatus((isOnboarded) => {
+          console.log('📡 Real-time onboarding update received');
+          useStore.setState({ isOnboarded });
+        });
+      } else {
+        // User signed out, clean up listeners
+        console.log('🔌 User signed out, cleaning up listeners');
+        firestoreService.cleanup();
+      }
     });
 
     return unsubscribe;
@@ -67,9 +100,10 @@ export default function App() {
 
     initialize();
 
-    // Cleanup subscription listeners on unmount
+    // Cleanup subscription and Firestore listeners on unmount
     return () => {
       subscriptionSyncService.cleanup();
+      firestoreService.cleanup();
     };
   }, []);
 

@@ -4,10 +4,11 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView } from 'react-native';
+import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Linking } from 'react-native';
 import { Text, TextInput, Button, Surface, Title } from 'react-native-paper';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import Logo from '../../assets/quote-mate.svg';
 import { auth } from '../config/firebase';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
@@ -129,13 +130,14 @@ export function AuthScreen() {
       >
         <WebContainer>
           <View style={styles.header}>
+            <Logo width={120} height={120} style={styles.logo} />
             <Title style={styles.title}>
-              {isSignUp ? 'Create Account' : 'Welcome Back'}
+              {isSignUp ? 'Create Account' : 'Welcome to QuoteMate'}
             </Title>
             <Text style={styles.subtitle}>
               {isSignUp
                 ? 'Sign up to save your quotes and access premium features'
-                : 'Sign in to access your quotes and subscriptions'
+                : 'Sign in or create an account to get started'
               }
             </Text>
           </View>
@@ -226,6 +228,18 @@ export function AuthScreen() {
               }
             </Button>
           </Surface>
+
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Need help? </Text>
+            <Button
+              mode="text"
+              onPress={() => Linking.openURL('https://hansendev.com.au/#contact')}
+              style={styles.helpButton}
+              labelStyle={styles.helpButtonLabel}
+            >
+              Contact Support
+            </Button>
+          </View>
         </WebContainer>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -235,7 +249,7 @@ export function AuthScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.surface, // Match the logo background
   },
   scrollContent: {
     flexGrow: 1,
@@ -245,6 +259,11 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 32,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    marginBottom: 16,
   },
   title: {
     fontSize: 28,
@@ -307,5 +326,24 @@ const styles = StyleSheet.create({
   },
   googleButtonContent: {
     paddingVertical: 16,
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+    flexWrap: 'wrap',
+  },
+  footerText: {
+    fontSize: 14,
+    color: colors.onSurface,
+    opacity: 0.7,
+  },
+  helpButton: {
+    marginVertical: -8,
+    marginHorizontal: -4,
+  },
+  helpButtonLabel: {
+    fontSize: 14,
   },
 });
