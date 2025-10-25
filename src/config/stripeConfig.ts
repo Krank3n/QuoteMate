@@ -15,8 +15,6 @@ const TEST_CONFIG = {
   publishableKey: process.env.STRIPE_TEST_PUBLISHABLE_KEY ||
     Constants.expoConfig?.extra?.stripeTestPublishableKey ||
     'pk_test_51SKDEO1K6tFQ1Wx6172zT4DOJKYHb1woFzWTtgaPTs36ToaUpdOQWqvICITtuBqe9r2ZwItSQvQ4cTAUnwKDmBYL00TmAQtOIV',
-  secretKey: process.env.STRIPE_TEST_SECRET_KEY ||
-    Constants.expoConfig?.extra?.stripeTestSecretKey || '',
   prices: {
     monthly: process.env.STRIPE_TEST_MONTHLY_PRICE ||
       Constants.expoConfig?.extra?.stripeTestMonthlyPrice ||
@@ -28,11 +26,12 @@ const TEST_CONFIG = {
 };
 
 // Live/Production keys and prices
+// IMPORTANT: Only publishable keys should be in client-side code!
+// Secret keys must ONLY be used server-side (Firebase Functions)
 const LIVE_CONFIG = {
   publishableKey: process.env.STRIPE_LIVE_PUBLISHABLE_KEY ||
-    Constants.expoConfig?.extra?.stripeLivePublishableKey || '',
-  secretKey: process.env.STRIPE_LIVE_SECRET_KEY ||
-    Constants.expoConfig?.extra?.stripeLiveSecretKey || '',
+    Constants.expoConfig?.extra?.stripeLivePublishableKey ||
+    'pk_live_51RYfKGP9RWVZbpEuxY9jbBxeMPtQjQAvCxB6vdCiQfruCfnJpAkZkfOP0fluRU5a6H1TLXFJbbaDt8RlFr2ujbSZ00ipxzTSJx',
   prices: {
     monthly: process.env.STRIPE_LIVE_MONTHLY_PRICE ||
       Constants.expoConfig?.extra?.stripeLiveMonthlyPrice ||
@@ -51,7 +50,7 @@ export const stripeConfig = {
   mode: STRIPE_MODE as 'test' | 'live',
   isTestMode,
   publishableKey: activeConfig.publishableKey,
-  secretKey: activeConfig.secretKey,
+  // REMOVED: secretKey should NEVER be in client-side code
   prices: {
     monthly: activeConfig.prices.monthly,
     yearly: activeConfig.prices.yearly,
