@@ -65,14 +65,15 @@ export function OnboardingScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.header}>
-          <Title style={styles.title}>Welcome to QuoteMate</Title>
-          <Paragraph style={styles.subtitle}>
-            Let's set up your business details
-          </Paragraph>
-        </View>
+        <View style={styles.contentWrapper}>
+          <View style={styles.header}>
+            <Title style={styles.title}>Welcome to QuoteMate</Title>
+            <Paragraph style={styles.subtitle}>
+              Let's set up your business details
+            </Paragraph>
+          </View>
 
-        <Surface style={styles.card}>
+          <Surface style={styles.card}>
           <Text style={styles.sectionTitle}>Business Information</Text>
 
           <TextInput
@@ -144,15 +145,16 @@ export function OnboardingScreen() {
           />
         </Surface>
 
-        <Button
-          mode="contained"
-          onPress={handleComplete}
-          style={styles.button}
-          loading={isLoading}
-          disabled={isLoading}
-        >
-          Get Started
-        </Button>
+          <Button
+            mode="contained"
+            onPress={handleComplete}
+            style={styles.button}
+            loading={isLoading}
+            disabled={isLoading}
+          >
+            Get Started
+          </Button>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -165,6 +167,11 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
+    alignItems: 'center',
+  },
+  contentWrapper: {
+    width: '100%',
+    maxWidth: 800,
   },
   header: {
     marginBottom: 24,
