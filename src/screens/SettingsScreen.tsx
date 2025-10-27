@@ -24,6 +24,8 @@ import {
   IconButton,
   Chip,
   Switch,
+  Dialog,
+  Portal,
 } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -33,10 +35,12 @@ import { useStore } from '../store/useStore';
 import { BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
+import { auth } from '../config/firebase';
+import { signOut } from 'firebase/auth';
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
-  const { businessSettings, setBusinessSettings, subscriptionStatus } = useStore();
+  const { businessSettings, setBusinessSettings, subscriptionStatus, clearAllData } = useStore();
 
   const [businessName, setBusinessName] = useState('');
   const [abn, setAbn] = useState('');
@@ -51,6 +55,7 @@ export function SettingsScreen() {
   const [store2, setStore2] = useState('');
   const [store3, setStore3] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
 
   // Load current settings
   useEffect(() => {
@@ -150,6 +155,80 @@ export function SettingsScreen() {
       alert('Failed to save settings. Please try again.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    console.log('🚪 handleLogout called');
+    setShowLogoutDialog(true);
+  };
+
+  const confirmLogout = async () => {
+    setShowLogoutDialog(false);
+
+    try {
+      console.log('🔓 User confirmed logout, starting sign out process...');
+
+      // Step 1: Sign out from Firebase first to trigger auth state change
+      console.log('🔐 Step 1: Signing out from Firebase...');
+      await signOut(auth);
+      console.log('✅ Step 1: Signed out from Firebase');
+
+      // Step 2: Clear all app data
+      console.log('🧹 Step 2: Clearing all local data...');
+      await clearAllData();
+      console.log('✅ Step 2: Local data cleared');
+
+      // Step 3: On web, clear all browser storage and reload
+      if (Platform.OS === 'web') {
+        console.log('🧹 Step 3: Clearing all browser storage...');
+
+        // Clear ALL localStorage including Firebase auth to ensure complete logout
+        try {
+          console.log('🧹 Step 3a: Clearing localStorage...');
+          localStorage.clear();
+          console.log('✅ Step 3a: localStorage cleared');
+        } catch (e) {
+          console.warn('Could not clear localStorage:', e);
+        }
+
+        // Clear sessionStorage
+        try {
+          console.log('🧹 Step 3b: Clearing sessionStorage...');
+          sessionStorage.clear();
+          console.log('✅ Step 3b: sessionStorage cleared');
+        } catch (e) {
+          console.warn('Could not clear sessionStorage:', e);
+        }
+
+        // Clear IndexedDB (where Firebase stores auth)
+        try {
+          console.log('🧹 Step 3c: Clearing IndexedDB...');
+          if (window.indexedDB) {
+            const dbs = await window.indexedDB.databases();
+            console.log('🧹 Found IndexedDB databases:', dbs.map(db => db.name));
+            for (const db of dbs) {
+              if (db.name) {
+                console.log(`🧹 Deleting IndexedDB: ${db.name}`);
+                window.indexedDB.deleteDatabase(db.name);
+              }
+            }
+            console.log('✅ Step 3c: IndexedDB cleared');
+          }
+        } catch (e) {
+          console.warn('Could not clear IndexedDB:', e);
+        }
+
+        console.log('🔄 Step 4: Reloading page...');
+        // Use replace to ensure we don't go back to the authenticated state
+        window.location.replace(window.location.origin);
+      } else {
+        console.log('📱 Mobile platform - navigation should handle redirect');
+      }
+    } catch (error: any) {
+      console.error('❌ Error during sign out:', error);
+      console.error('❌ Error details:', error.message, error.code);
+      alert('Failed to sign out. Please try again.');
     }
   };
 
@@ -411,8 +490,58 @@ export function SettingsScreen() {
         >
           Save Settings
         </Button>
+
+        {/* Logout Button - Only show on web */}
+        {Platform.OS === 'web' && auth.currentUser && (
+          <>
+            <Divider style={styles.divider} />
+            <Surface style={styles.logoutCard}>
+              <View style={styles.logoutSection}>
+                <View style={styles.userInfo}>
+                  <MaterialCommunityIcons name="account" size={24} color={colors.onSurface} />
+                  <View style={styles.userDetails}>
+                    <Text style={styles.userEmail}>{auth.currentUser.email}</Text>
+                    <Text style={styles.userIdText}>User ID: {auth.currentUser.uid.slice(0, 8)}...</Text>
+                  </View>
+                </View>
+                <Button
+                  mode="outlined"
+                  onPress={handleLogout}
+                  style={styles.logoutButton}
+                  icon="logout"
+                  textColor={colors.error}
+                >
+                  Sign Out
+                </Button>
+              </View>
+            </Surface>
+          </>
+        )}
         </WebContainer>
       </ScrollView>
+
+      {/* Logout Confirmation Dialog */}
+      <Portal>
+        <Dialog
+          visible={showLogoutDialog}
+          onDismiss={() => setShowLogoutDialog(false)}
+          style={styles.logoutDialog}
+        >
+          <Dialog.Icon icon="logout" />
+          <Dialog.Title style={styles.dialogTitle}>Sign Out</Dialog.Title>
+          <Dialog.Content>
+            <Text style={styles.dialogText}>
+              Are you sure you want to sign out? All local data will be cleared.
+            </Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setShowLogoutDialog(false)}>Cancel</Button>
+            <Button onPress={confirmLogout} textColor={colors.error}>
+              Sign Out
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </KeyboardAvoidingView>
   );
 }
@@ -612,5 +741,53 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text,
     lineHeight: 18,
+  },
+  logoutCard: {
+    padding: 16,
+    marginBottom: 80,
+    borderRadius: 8,
+    elevation: 2,
+    backgroundColor: colors.surface,
+  },
+  logoutSection: {
+    alignItems: 'center',
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    alignSelf: 'stretch',
+  },
+  userDetails: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  userEmail: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  userIdText: {
+    fontSize: 12,
+    color: colors.onSurface,
+  },
+  logoutButton: {
+    borderColor: colors.error,
+    alignSelf: 'stretch',
+  },
+  logoutDialog: {
+    maxWidth: 800,
+    width: '90%',
+    alignSelf: 'center',
+  },
+  dialogTitle: {
+    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  dialogText: {
+    fontSize: 16,
+    lineHeight: 24,
+    textAlign: 'center',
   },
 });
