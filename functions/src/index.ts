@@ -83,6 +83,81 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
 });
 
 /**
+ * Create a Payment Intent for embedded checkout
+ * Used for Stripe Elements embedded in the app
+ * Creates a subscription with payment
+ */
+export const createPaymentIntent = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { priceId, userId } = req.body;
+
+      if (!priceId || !userId) {
+        res.status(400).json({ error: 'Missing required parameters' });
+        return;
+      }
+
+      console.log('Creating subscription for user:', userId);
+
+      // Find or create Stripe customer
+      let customerId: string;
+      const customerList = await stripe.customers.search({
+        query: `metadata['firebaseUserId']:'${userId}'`,
+        limit: 1,
+      });
+
+      if (customerList.data.length > 0) {
+        customerId = customerList.data[0].id;
+        console.log('Found existing customer:', customerId);
+      } else {
+        const customer = await stripe.customers.create({
+          metadata: {
+            firebaseUserId: userId,
+          },
+        });
+        customerId = customer.id;
+        console.log('Created new customer:', customerId);
+      }
+
+      // Create the subscription with payment pending
+      const subscription = await stripe.subscriptions.create({
+        customer: customerId,
+        items: [{ price: priceId }],
+        payment_behavior: 'default_incomplete',
+        payment_settings: {
+          save_default_payment_method: 'on_subscription',
+          payment_method_types: ['card'],
+        },
+        expand: ['latest_invoice.payment_intent'],
+        metadata: {
+          userId,
+        },
+      });
+
+      const invoice = subscription.latest_invoice as any;
+      const paymentIntent = invoice.payment_intent;
+
+      console.log('Created subscription:', subscription.id);
+      console.log('Payment intent:', paymentIntent.id);
+
+      res.status(200).json({
+        clientSecret: paymentIntent.client_secret,
+        subscriptionId: subscription.id,
+        customerId,
+      });
+    } catch (error: any) {
+      console.error('Error creating subscription:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
  * Create a Stripe Customer Portal Session
  * Allows users to manage their subscription
  */

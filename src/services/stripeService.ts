@@ -47,7 +47,49 @@ class StripeService {
   }
 
   /**
+   * Create a Payment Intent for embedded checkout
+   */
+  async createPaymentIntent(priceId: string, userId: string): Promise<string> {
+    if (!this.isInitialized || !this.stripe) {
+      throw new Error('Stripe not initialized');
+    }
+
+    try {
+      console.log('🔄 Creating payment intent...');
+
+      const response = await fetch(`${API_BASE_URL}/createPaymentIntent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          priceId,
+          userId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ Payment intent created');
+
+      if (!data.clientSecret) {
+        throw new Error('No client secret returned from server');
+      }
+
+      return data.clientSecret;
+    } catch (error: any) {
+      console.error('❌ Error creating payment intent:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Create a checkout session and redirect to Stripe checkout
+   * (Legacy method for full-page redirect)
    */
   async createCheckoutSession(priceId: string, userId: string): Promise<void> {
     if (!this.isInitialized || !this.stripe) {
