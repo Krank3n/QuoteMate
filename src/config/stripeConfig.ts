@@ -11,11 +11,11 @@ const STRIPE_MODE = process.env.STRIPE_MODE ||
   'test';
 
 // Test/Sandbox keys and prices
+// NOTE: Only publishable keys are safe for client-side code
+// Secret keys are stored securely in Firebase Functions
 const TEST_CONFIG = {
   publishableKey: process.env.STRIPE_TEST_PUBLISHABLE_KEY ||
     Constants.expoConfig?.extra?.stripeTestPublishableKey || '',
-  secretKey: process.env.STRIPE_TEST_SECRET_KEY ||
-    Constants.expoConfig?.extra?.stripeTestSecretKey || '',
   prices: {
     monthly: process.env.STRIPE_TEST_MONTHLY_PRICE ||
       Constants.expoConfig?.extra?.stripeTestMonthlyPrice ||
@@ -30,8 +30,6 @@ const TEST_CONFIG = {
 const LIVE_CONFIG = {
   publishableKey: process.env.STRIPE_LIVE_PUBLISHABLE_KEY ||
     Constants.expoConfig?.extra?.stripeLivePublishableKey || '',
-  secretKey: process.env.STRIPE_LIVE_SECRET_KEY ||
-    Constants.expoConfig?.extra?.stripeLiveSecretKey || '',
   prices: {
     monthly: process.env.STRIPE_LIVE_MONTHLY_PRICE ||
       Constants.expoConfig?.extra?.stripeLiveMonthlyPrice ||
@@ -50,7 +48,6 @@ export const stripeConfig = {
   mode: STRIPE_MODE as 'test' | 'live',
   isTestMode,
   publishableKey: activeConfig.publishableKey,
-  secretKey: activeConfig.secretKey,
   prices: {
     monthly: activeConfig.prices.monthly,
     yearly: activeConfig.prices.yearly,
