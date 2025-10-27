@@ -24,6 +24,7 @@ import { useSubscriptionStore } from '../store/subscriptionStore';
 import { unifiedBillingService } from '../services/unifiedBillingService';
 import { auth } from '../config/firebase';
 import { WebContainer } from '../components/WebContainer';
+import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
 
 export function PaywallScreen() {
   const navigation = useNavigation<any>();
@@ -35,6 +36,8 @@ export function PaywallScreen() {
   const [loading, setLoading] = useState(true);
   const [iapNotAvailable, setIapNotAvailable] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
   // Use subscriptionStatus from useStore which has the accurate count
   const quotesUsed = subscriptionStatus?.quotesThisMonth || quoteCount;
@@ -208,9 +211,10 @@ export function PaywallScreen() {
         }
 
         console.log('✅ Proceeding with purchase for user:', currentUser.uid);
-        // This will redirect to Stripe Checkout
-        await unifiedBillingService.purchaseSubscription(firstProduct.productId, currentUser.uid);
-        // Redirect happens, so loading state will persist
+        // Show embedded checkout modal
+        setSelectedProduct(firstProduct);
+        setShowCheckoutModal(true);
+        setIsUpgrading(false);
       } else {
         // For mobile, use native IAP
         await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
@@ -355,7 +359,39 @@ export function PaywallScreen() {
   // Check if user is Pro
   const isPro = subscriptionStatus?.isPro || false;
 
+  const handleCheckoutSuccess = () => {
+    setShowCheckoutModal(false);
+    setPremium(true);
+    Alert.alert('Success!', 'Your subscription is now active. Thank you for upgrading!');
+    // Reload subscription status
+    unifiedBillingService.checkSubscriptionStatus(auth.currentUser?.uid || '').then((status) => {
+      if (status.isPremium) {
+        setPremium(true);
+      }
+    });
+  };
+
+  const handleCheckoutDismiss = () => {
+    setShowCheckoutModal(false);
+    setSelectedProduct(null);
+  };
+
   return (
+    <>
+      {/* Stripe Checkout Modal */}
+      {showCheckoutModal && selectedProduct && auth.currentUser && (
+        <StripeCheckoutModal
+          visible={showCheckoutModal}
+          onDismiss={handleCheckoutDismiss}
+          onSuccess={handleCheckoutSuccess}
+          priceId={selectedProduct.productId}
+          userId={auth.currentUser.uid}
+          planName={selectedProduct.title || 'Pro Monthly'}
+          amount={getProductPrice(selectedProduct.productId)}
+        />
+      )}
+
+
     <ScrollView
       style={styles.container}
       contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 20 }]}
@@ -495,6 +531,7 @@ export function PaywallScreen() {
       </WebContainer>
 
     </ScrollView>
+    </>
   );
 }
 
