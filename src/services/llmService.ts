@@ -9,9 +9,9 @@ import { Platform } from 'react-native';
 
 // For web, use Firebase Functions URL
 // For mobile, call Anthropic API directly
-// Use local emulator for development, production URL when deployed
-const IS_DEV = __DEV__;
-const FIREBASE_FUNCTIONS_URL = IS_DEV
+// Always use production URL unless explicitly running emulator
+const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
+const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
   ? 'http://127.0.0.1:5001/hansendev/us-central1'
   : 'https://us-central1-hansendev.cloudfunctions.net';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
@@ -20,6 +20,8 @@ console.log('🔧 LLM Service Config:', {
   platform: Platform.OS,
   hasApiKey: !!ANTHROPIC_API_KEY,
   keyLength: ANTHROPIC_API_KEY?.length || 0,
+  useEmulator: USE_EMULATOR,
+  functionsUrl: FIREBASE_FUNCTIONS_URL,
 });
 
 interface LLMMaterial {

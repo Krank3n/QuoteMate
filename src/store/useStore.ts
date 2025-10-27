@@ -8,6 +8,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { Quote, BusinessSettings, Material, SubscriptionStatus } from '../types';
 import { updateQuoteCalculations } from '../utils/quoteCalculator';
+import { firestoreService } from '../services/firestoreService';
+import { auth } from '../config/firebase';
 
 interface AppState {
   // Business settings
@@ -39,6 +41,9 @@ interface AppState {
   isOnboarded: boolean;
   setOnboarded: (value: boolean) => Promise<void>;
   checkOnboarding: () => Promise<void>;
+
+  // Cleanup
+  clearAllData: () => Promise<void>;
 }
 
 // Storage keys
@@ -72,11 +77,17 @@ export const useStore = create<AppState>((set, get) => ({
   // Business settings
   setBusinessSettings: async (settings: BusinessSettings) => {
     try {
+      // Save to local storage
       await AsyncStorage.setItem(
         STORAGE_KEYS.BUSINESS_SETTINGS,
         JSON.stringify(settings)
       );
       set({ businessSettings: settings });
+
+      // Sync to Firestore if user is signed in
+      if (auth.currentUser) {
+        await firestoreService.saveBusinessSettings(settings);
+      }
     } catch (error) {
       console.error('Failed to save business settings:', error);
       throw error;
@@ -85,10 +96,30 @@ export const useStore = create<AppState>((set, get) => ({
 
   loadBusinessSettings: async () => {
     try {
+      // If user is signed in, try loading from Firestore first
+      if (auth.currentUser) {
+        const cloudSettings = await firestoreService.loadBusinessSettings();
+        if (cloudSettings) {
+          // Save to local storage for offline access
+          await AsyncStorage.setItem(
+            STORAGE_KEYS.BUSINESS_SETTINGS,
+            JSON.stringify(cloudSettings)
+          );
+          set({ businessSettings: cloudSettings });
+          return;
+        }
+      }
+
+      // Fallback to local storage
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.BUSINESS_SETTINGS);
       if (stored) {
         const settings: BusinessSettings = JSON.parse(stored);
         set({ businessSettings: settings });
+
+        // Sync to cloud if user is signed in but no cloud data exists
+        if (auth.currentUser) {
+          await firestoreService.saveBusinessSettings(settings);
+        }
       }
     } catch (error) {
       console.error('Failed to load business settings:', error);
@@ -145,14 +176,15 @@ export const useStore = create<AppState>((set, get) => ({
       const existingIndex = quotes.findIndex((q) => q.id === quote.id);
       let updatedQuotes: Quote[];
       const isNewQuote = existingIndex < 0;
+      const calculatedQuote = updateQuoteCalculations(quote);
 
       if (existingIndex >= 0) {
         // Update existing quote
         updatedQuotes = [...quotes];
-        updatedQuotes[existingIndex] = updateQuoteCalculations(quote);
+        updatedQuotes[existingIndex] = calculatedQuote;
       } else {
         // Add new quote
-        updatedQuotes = [...quotes, updateQuoteCalculations(quote)];
+        updatedQuotes = [...quotes, calculatedQuote];
       }
 
       // Save to AsyncStorage
@@ -162,6 +194,11 @@ export const useStore = create<AppState>((set, get) => ({
       );
 
       set({ quotes: updatedQuotes, currentQuote: null });
+
+      // Sync to Firestore if user is signed in
+      if (auth.currentUser) {
+        await firestoreService.saveQuote(calculatedQuote);
+      }
 
       // Increment quote count for new quotes only
       if (isNewQuote) {
@@ -185,6 +222,11 @@ export const useStore = create<AppState>((set, get) => ({
       );
 
       set({ quotes: updatedQuotes });
+
+      // Delete from Firestore if user is signed in
+      if (auth.currentUser) {
+        await firestoreService.deleteQuote(quoteId);
+      }
     } catch (error) {
       console.error('Failed to delete quote:', error);
       throw error;
@@ -231,6 +273,21 @@ export const useStore = create<AppState>((set, get) => ({
   // Load quotes from storage
   loadQuotes: async () => {
     try {
+      // If user is signed in, try loading from Firestore first
+      if (auth.currentUser) {
+        const cloudQuotes = await firestoreService.loadQuotes();
+        if (cloudQuotes.length > 0) {
+          // Save to local storage for offline access
+          await AsyncStorage.setItem(
+            STORAGE_KEYS.QUOTES,
+            JSON.stringify(cloudQuotes)
+          );
+          set({ quotes: cloudQuotes });
+          return;
+        }
+      }
+
+      // Fallback to local storage
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.QUOTES);
       if (stored) {
         const quotes: Quote[] = JSON.parse(stored, (key, value) => {
@@ -241,6 +298,15 @@ export const useStore = create<AppState>((set, get) => ({
           return value;
         });
         set({ quotes });
+
+        // Sync to cloud if user is signed in but no cloud data exists
+        if (auth.currentUser && quotes.length > 0) {
+          console.log('📤 Syncing local quotes to Firestore...');
+          for (const quote of quotes) {
+            await firestoreService.saveQuote(quote);
+          }
+          console.log('✅ Local quotes synced to Firestore');
+        }
       }
     } catch (error) {
       console.error('Failed to load quotes:', error);
@@ -343,6 +409,11 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDED, JSON.stringify(value));
       set({ isOnboarded: value });
+
+      // Sync to Firestore if user is signed in
+      if (auth.currentUser) {
+        await firestoreService.saveOnboardingStatus(value);
+      }
     } catch (error) {
       console.error('Failed to save onboarding status:', error);
     }
@@ -350,12 +421,64 @@ export const useStore = create<AppState>((set, get) => ({
 
   checkOnboarding: async () => {
     try {
+      // If user is signed in, try loading from Firestore first
+      if (auth.currentUser) {
+        const cloudStatus = await firestoreService.loadOnboardingStatus();
+        if (cloudStatus) {
+          // Save to local storage for offline access
+          await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDED, JSON.stringify(cloudStatus));
+          set({ isOnboarded: cloudStatus });
+          return;
+        }
+      }
+
+      // Fallback to local storage
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDED);
       if (stored) {
-        set({ isOnboarded: JSON.parse(stored) });
+        const isOnboarded = JSON.parse(stored);
+        set({ isOnboarded });
+
+        // Sync to cloud if user is signed in but no cloud data exists
+        if (auth.currentUser && isOnboarded) {
+          await firestoreService.saveOnboardingStatus(isOnboarded);
+        }
       }
     } catch (error) {
       console.error('Failed to check onboarding status:', error);
+    }
+  },
+
+  // Clear all data (for logout)
+  clearAllData: async () => {
+    try {
+      console.log('🧹 clearAllData: Starting to clear all app data...');
+      console.log('🧹 clearAllData: Storage keys to remove:', Object.values(STORAGE_KEYS));
+
+      // Clear AsyncStorage
+      console.log('🧹 clearAllData: Removing items from AsyncStorage...');
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.QUOTES,
+        STORAGE_KEYS.BUSINESS_SETTINGS,
+        STORAGE_KEYS.ONBOARDED,
+        STORAGE_KEYS.SUBSCRIPTION,
+      ]);
+      console.log('✅ clearAllData: AsyncStorage cleared');
+
+      // Reset store state to initial values
+      console.log('🧹 clearAllData: Resetting store state...');
+      set({
+        businessSettings: null,
+        quotes: [],
+        currentQuote: null,
+        isOnboarded: false,
+        subscriptionStatus: null,
+      });
+      console.log('✅ clearAllData: Store state reset');
+
+      console.log('✅ clearAllData: All app data cleared successfully');
+    } catch (error) {
+      console.error('❌ clearAllData: Failed to clear app data:', error);
+      throw error;
     }
   },
 }));

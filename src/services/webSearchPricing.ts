@@ -9,10 +9,17 @@ import { Platform } from 'react-native';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
 // Firebase Functions URL configuration
-const IS_DEV = __DEV__;
-const FIREBASE_FUNCTIONS_URL = IS_DEV
+// Always use production URL unless explicitly running emulator
+const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
+const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
   ? 'http://127.0.0.1:5001/hansendev/us-central1'
   : 'https://us-central1-hansendev.cloudfunctions.net';
+
+console.log('🔧 Web Search Pricing Config:', {
+  platform: Platform.OS,
+  useEmulator: USE_EMULATOR,
+  functionsUrl: FIREBASE_FUNCTIONS_URL,
+});
 
 interface PriceSearchResult {
   price: number | null;
