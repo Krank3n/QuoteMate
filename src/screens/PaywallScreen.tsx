@@ -362,23 +362,64 @@ export function PaywallScreen() {
   const handleCheckoutSuccess = async () => {
     setShowCheckoutModal(false);
 
-    // Wait a moment for Stripe webhooks to process
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      // Wait a moment for Stripe to process the subscription
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Reload subscription data from Firestore (which was updated by webhook or previous sync)
-    await loadSubscription();
+      // Query Stripe directly for subscription status
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        Alert.alert('Error', 'User not authenticated');
+        return;
+      }
 
-    // Show success message
-    Alert.alert(
-      '🎉 Welcome to Pro!',
-      'Your subscription is now active. You now have unlimited quote analyses!',
-      [
-        {
-          text: 'Get Started',
-          onPress: () => navigation.goBack(),
-        }
-      ]
-    );
+      const { stripeService } = require('../services/stripeService');
+      const status = await stripeService.checkSubscriptionStatus(currentUser.uid);
+
+      if (status.isPremium) {
+        // Update subscription status in Firestore and local storage
+        const subscriptionStatus = {
+          isPro: true,
+          quotesThisMonth: 0, // Reset quota for new Pro user
+          freeQuotesLimit: 5,
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: status.expiryDate ? new Date(status.expiryDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        };
+
+        // Save to Firestore
+        const { firestoreService } = require('../services/firestoreService');
+        await firestoreService.saveSubscriptionStatus(subscriptionStatus);
+
+        // Reload subscription in UI
+        await loadSubscription();
+
+        // Show success message
+        Alert.alert(
+          '🎉 Welcome to Pro!',
+          'Your subscription is now active. You now have unlimited quote analyses!',
+          [
+            {
+              text: 'Get Started',
+              onPress: () => navigation.goBack(),
+            }
+          ]
+        );
+      } else {
+        // Subscription not active yet, ask user to wait
+        Alert.alert(
+          'Processing...',
+          'Your subscription is still being processed. Please check back in a moment.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error checking subscription:', error);
+      Alert.alert(
+        'Error',
+        'Failed to verify subscription. Please refresh the page or contact support.',
+        [{ text: 'OK' }]
+      );
+    }
   };
 
   const handleCheckoutDismiss = () => {
