@@ -112,8 +112,8 @@ function MainTabs() {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
           paddingTop: 10,
-          paddingBottom: Platform.OS === 'android' ? Math.max(insets.bottom, 10) : insets.bottom + 10,
-          height: Platform.OS === 'android' ? 60 + Math.max(insets.bottom, 0) : 'auto',
+          paddingBottom: insets.bottom + 10,
+          height: Platform.OS === 'android' ? 70 + insets.bottom : 'auto',
         },
         headerStyle: {
           backgroundColor: colors.primary,
