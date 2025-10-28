@@ -236,7 +236,7 @@ export const useStore = create<AppState>((set, get) => ({
   // Duplicate quote
   duplicateQuote: async (quote: Quote) => {
     try {
-      const { quotes } = get();
+      const { quotes, incrementQuoteCount } = get();
 
       // Create a copy with new ID and timestamps
       const duplicatedQuote: Quote = {
@@ -264,6 +264,14 @@ export const useStore = create<AppState>((set, get) => ({
       );
 
       set({ quotes: updatedQuotes });
+
+      // Increment quote count since this creates a new quote
+      await incrementQuoteCount();
+
+      // Sync to Firestore if authenticated
+      if (auth.currentUser) {
+        await firestoreService.saveQuote(duplicatedQuote);
+      }
     } catch (error) {
       console.error('Failed to duplicate quote:', error);
       throw error;
@@ -316,6 +324,34 @@ export const useStore = create<AppState>((set, get) => ({
   // Subscription
   loadSubscription: async () => {
     try {
+      // If user is authenticated, prioritize Firestore data
+      if (auth.currentUser) {
+        const firestoreSubscription = await firestoreService.loadSubscriptionStatus();
+        if (firestoreSubscription) {
+          const now = new Date();
+          const periodEnd = new Date(firestoreSubscription.currentPeriodEnd);
+
+          // Check if we need to reset monthly count
+          if (now > periodEnd) {
+            const newSubscription: SubscriptionStatus = {
+              ...firestoreSubscription,
+              quotesThisMonth: 0,
+              currentPeriodStart: getMonthStart(),
+              currentPeriodEnd: getMonthEnd(),
+            };
+            await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(newSubscription));
+            await firestoreService.saveSubscriptionStatus(newSubscription);
+            set({ subscriptionStatus: newSubscription });
+          } else {
+            // Save to local storage for offline access
+            await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(firestoreSubscription));
+            set({ subscriptionStatus: firestoreSubscription });
+          }
+          return;
+        }
+      }
+
+      // Fallback to local storage if not authenticated or no Firestore data
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.SUBSCRIPTION);
       if (stored) {
         const subscription: SubscriptionStatus = JSON.parse(stored, (key, value) => {
@@ -337,9 +373,17 @@ export const useStore = create<AppState>((set, get) => ({
             currentPeriodEnd: getMonthEnd(),
           };
           await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(newSubscription));
+          // Sync to Firestore if authenticated
+          if (auth.currentUser) {
+            await firestoreService.saveSubscriptionStatus(newSubscription);
+          }
           set({ subscriptionStatus: newSubscription });
         } else {
           set({ subscriptionStatus: subscription });
+          // Sync to Firestore if authenticated and no cloud data exists
+          if (auth.currentUser) {
+            await firestoreService.saveSubscriptionStatus(subscription);
+          }
         }
       } else {
         // Initialize subscription for first time
@@ -351,6 +395,10 @@ export const useStore = create<AppState>((set, get) => ({
           freeQuotesLimit: 5,
         };
         await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(newSubscription));
+        // Sync to Firestore if authenticated
+        if (auth.currentUser) {
+          await firestoreService.saveSubscriptionStatus(newSubscription);
+        }
         set({ subscriptionStatus: newSubscription });
       }
     } catch (error) {
@@ -370,6 +418,11 @@ export const useStore = create<AppState>((set, get) => ({
 
       await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updatedSubscription));
       set({ subscriptionStatus: updatedSubscription });
+
+      // Sync to Firestore if authenticated
+      if (auth.currentUser) {
+        await firestoreService.saveSubscriptionStatus(updatedSubscription);
+      }
     } catch (error) {
       console.error('Failed to increment quote count:', error);
     }
@@ -398,6 +451,11 @@ export const useStore = create<AppState>((set, get) => ({
 
       await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updatedSubscription));
       set({ subscriptionStatus: updatedSubscription });
+
+      // Sync to Firestore if authenticated
+      if (auth.currentUser) {
+        await firestoreService.saveSubscriptionStatus(updatedSubscription);
+      }
     } catch (error) {
       console.error('Failed to upgrade subscription:', error);
       throw error;

@@ -38,19 +38,26 @@ export function StripeCheckoutForm({
     setErrorMessage(null);
 
     try {
-      const { error } = await stripe.confirmPayment({
+      const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
+        redirect: 'if_required', // Only redirect if authentication is absolutely required
         confirmParams: {
-          return_url: `${window.location.origin}/?payment=success`,
+          return_url: `${window.location.origin}/?payment=success`, // Fallback for required redirects
         },
       });
 
       if (error) {
+        // Payment failed
         setErrorMessage(error.message || 'An error occurred');
         setIsProcessing(false);
-      } else {
-        // Payment succeeded
+      } else if (paymentIntent && paymentIntent.status === 'succeeded') {
+        // Payment succeeded without redirect
+        console.log('✅ Payment succeeded:', paymentIntent.id);
         onSuccess();
+      } else {
+        // Payment requires additional action (shouldn't reach here with redirect: 'if_required')
+        console.log('Payment status:', paymentIntent?.status);
+        setIsProcessing(false);
       }
     } catch (err: any) {
       console.error('Payment error:', err);

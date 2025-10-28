@@ -71,6 +71,12 @@ export function DashboardScreen() {
   };
 
   const handleDuplicateQuote = async (quote: Quote) => {
+    // Check if user can create a new quote
+    if (!canCreateQuote()) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
+
     try {
       await duplicateQuote(quote);
       Alert.alert('Success', 'Quote duplicated successfully!');
