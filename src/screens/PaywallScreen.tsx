@@ -29,7 +29,7 @@ import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
 export function PaywallScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
-  const { subscriptionStatus } = useStore();
+  const { subscriptionStatus, loadSubscription } = useStore();
   const { quoteCount, setPremium } = useSubscriptionStore();
   const [isUpgrading, setIsUpgrading] = useState(false);
   const [products, setProducts] = useState<RNIap.Subscription[]>([]);
@@ -359,16 +359,26 @@ export function PaywallScreen() {
   // Check if user is Pro
   const isPro = subscriptionStatus?.isPro || false;
 
-  const handleCheckoutSuccess = () => {
+  const handleCheckoutSuccess = async () => {
     setShowCheckoutModal(false);
-    setPremium(true);
-    Alert.alert('Success!', 'Your subscription is now active. Thank you for upgrading!');
-    // Reload subscription status
-    unifiedBillingService.checkSubscriptionStatus(auth.currentUser?.uid || '').then((status) => {
-      if (status.isPremium) {
-        setPremium(true);
-      }
-    });
+
+    // Wait a moment for Stripe webhooks to process
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Reload subscription data from Firestore (which was updated by webhook or previous sync)
+    await loadSubscription();
+
+    // Show success message
+    Alert.alert(
+      '🎉 Welcome to Pro!',
+      'Your subscription is now active. You now have unlimited quote analyses!',
+      [
+        {
+          text: 'Get Started',
+          onPress: () => navigation.goBack(),
+        }
+      ]
+    );
   };
 
   const handleCheckoutDismiss = () => {

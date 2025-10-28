@@ -43,6 +43,7 @@ export default function App() {
           loadQuotes(),
           loadBusinessSettings(),
           checkOnboarding(),
+          loadSubscription(),
         ]);
 
         // Set up real-time listeners for cross-device sync
@@ -61,6 +62,13 @@ export default function App() {
         firestoreService.listenToOnboardingStatus((isOnboarded) => {
           console.log('📡 Real-time onboarding update received');
           useStore.setState({ isOnboarded });
+        });
+
+        firestoreService.listenToSubscriptionStatus((subscriptionStatus) => {
+          console.log('📡 Real-time subscription status update received');
+          if (subscriptionStatus) {
+            useStore.setState({ subscriptionStatus });
+          }
         });
       } else {
         // User signed out, clean up listeners
@@ -106,12 +114,13 @@ export default function App() {
     if (Platform.OS === 'web' && user) {
       const checkStripeReturn = async () => {
         try {
-          // Check if URL has session_id parameter (return from Stripe)
           const urlParams = new URLSearchParams(window.location.search);
           const sessionId = urlParams.get('session_id');
+          const paymentSuccess = urlParams.get('payment');
 
+          // Handle hosted checkout return (session_id parameter)
           if (sessionId) {
-            console.log('🎉 Returned from Stripe checkout, checking subscription status...');
+            console.log('🎉 Returned from Stripe hosted checkout, checking subscription status...');
 
             // Wait a bit for Stripe to process the subscription
             await new Promise(resolve => setTimeout(resolve, 2000));
@@ -136,6 +145,50 @@ export default function App() {
               // Save to AsyncStorage
               const AsyncStorage = require('@react-native-async-storage/async-storage').default;
               await AsyncStorage.setItem('@quotemate:subscription', JSON.stringify(subscriptionStatus));
+
+              // Sync to Firestore
+              await firestoreService.saveSubscriptionStatus(subscriptionStatus);
+
+              // Reload subscription in UI
+              await loadSubscription();
+
+              alert('🎉 Subscription activated! You now have unlimited quote analyses.');
+            }
+
+            // Clean up URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+
+          // Handle embedded checkout return (payment=success parameter)
+          if (paymentSuccess === 'success') {
+            console.log('🎉 Returned from payment authentication, checking subscription status...');
+
+            // Wait a bit for Stripe webhooks to process
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Query subscription status from Stripe
+            const status = await stripeService.checkSubscriptionStatus(user.uid);
+
+            console.log('Subscription status from Stripe:', status);
+
+            if (status.isPremium) {
+              console.log('✅ Subscription active! Updating local storage...');
+
+              // Update local subscription status
+              const subscriptionStatus = {
+                isPro: true,
+                quotesThisMonth: 0,
+                freeQuotesLimit: 5,
+                currentPeriodStart: new Date(),
+                currentPeriodEnd: status.expiryDate ? new Date(status.expiryDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+              };
+
+              // Save to AsyncStorage
+              const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+              await AsyncStorage.setItem('@quotemate:subscription', JSON.stringify(subscriptionStatus));
+
+              // Sync to Firestore
+              await firestoreService.saveSubscriptionStatus(subscriptionStatus);
 
               // Reload subscription in UI
               await loadSubscription();

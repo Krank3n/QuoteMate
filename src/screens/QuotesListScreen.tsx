@@ -37,7 +37,7 @@ type FilterStatus = 'all' | 'draft' | 'sent' | 'accepted' | 'rejected';
 
 export function QuotesListScreen() {
   const navigation = useNavigation<any>();
-  const { quotes, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings } = useStore();
+  const { quotes, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings, canCreateQuote } = useStore();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
@@ -69,6 +69,12 @@ export function QuotesListScreen() {
   });
 
   const handleNewQuote = () => {
+    // Check if user can create a new quote
+    if (!canCreateQuote()) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
+
     createNewQuote();
     navigation.navigate('NewQuote' as never);
   };
@@ -107,6 +113,12 @@ export function QuotesListScreen() {
   };
 
   const handleDuplicateQuote = async (quote: Quote) => {
+    // Check if user can create a new quote
+    if (!canCreateQuote()) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
+
     try {
       await duplicateQuote(quote);
       Alert.alert('Success', 'Quote duplicated successfully!');
