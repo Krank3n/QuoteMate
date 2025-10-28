@@ -97,6 +97,36 @@ class BillingService {
       }
 
       console.log('💳 Purchasing subscription:', sku);
+
+      // For Android, we need to get the subscription offers
+      if (Platform.OS === 'android') {
+        // Get the product details to extract subscription offers
+        const products = await RNIap.getSubscriptions({ skus: [sku] });
+        console.log('📦 Product details:', JSON.stringify(products, null, 2));
+
+        if (!products || products.length === 0) {
+          throw new Error('Product not found');
+        }
+
+        const product = products[0];
+
+        // Check if subscriptionOfferDetails exists (Android)
+        if ((product as any).subscriptionOfferDetails && (product as any).subscriptionOfferDetails.length > 0) {
+          const offerToken = (product as any).subscriptionOfferDetails[0].offerToken;
+          console.log('📝 Using offer token:', offerToken);
+
+          const purchase = await RNIap.requestSubscription({
+            sku,
+            subscriptionOffers: [{ sku, offerToken }]
+          });
+          console.log('✅ Purchase successful:', purchase);
+          return purchase as RNIap.SubscriptionPurchase | null;
+        } else {
+          console.warn('⚠️ No subscription offers found, attempting without offers');
+        }
+      }
+
+      // For iOS or if no offers found, use simple request
       const purchase = await RNIap.requestSubscription({ sku });
       console.log('✅ Purchase successful:', purchase);
       return purchase as RNIap.SubscriptionPurchase | null;
