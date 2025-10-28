@@ -1,7 +1,11 @@
 import * as functions from 'firebase-functions';
+import * as admin from 'firebase-admin';
 import Stripe from 'stripe';
 import cors from 'cors';
 import fetch from 'node-fetch';
+
+// Initialize Firebase Admin
+admin.initializeApp();
 
 // Initialize Stripe with mode toggle (test or live)
 const stripeMode = process.env.STRIPE_MODE || 'test';
@@ -198,6 +202,92 @@ export const createPortalSession = functions.https.onRequest((req, res) => {
       res.status(200).json({ url: session.url });
     } catch (error: any) {
       console.error('Error creating portal session:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Cancel Subscription
+ * Cancels a user's subscription and logs the cancellation reason
+ */
+export const cancelSubscription = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { userId, reason, feedback } = req.body;
+
+      if (!userId || !reason) {
+        res.status(400).json({ error: 'Missing required parameters' });
+        return;
+      }
+
+      console.log('🚫 Canceling subscription for user:', userId);
+
+      // Find customer by Firebase user ID in Stripe metadata
+      const customerList = await stripe.customers.search({
+        query: `metadata['firebaseUserId']:'${userId}'`,
+        limit: 1,
+      });
+
+      if (customerList.data.length === 0) {
+        res.status(404).json({ error: 'Customer not found' });
+        return;
+      }
+
+      const customerId = customerList.data[0].id;
+
+      // Get active subscriptions for this customer
+      const subscriptions = await stripe.subscriptions.list({
+        customer: customerId,
+        status: 'active',
+        limit: 1,
+      });
+
+      if (subscriptions.data.length === 0) {
+        res.status(404).json({ error: 'No active subscription found' });
+        return;
+      }
+
+      const subscription = subscriptions.data[0];
+
+      // Cancel the subscription at period end (don't cancel immediately)
+      const canceledSubscription = await stripe.subscriptions.update(subscription.id, {
+        cancel_at_period_end: true,
+      });
+
+      console.log('✅ Subscription canceled at period end:', subscription.id);
+
+      // Save cancellation reason to Firestore
+      const db = admin.firestore();
+      const cancellationRef = db.collection('cancellations').doc();
+
+      await cancellationRef.set({
+        userId,
+        userEmail: customerList.data[0].email || null,
+        subscriptionId: subscription.id,
+        customerId,
+        reason,
+        feedback: feedback || null,
+        canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+        periodEnd: new Date(subscription.current_period_end * 1000),
+        platform: 'web',
+      });
+
+      console.log('📝 Cancellation reason saved to Firestore');
+
+      res.status(200).json({
+        success: true,
+        message: 'Subscription canceled successfully',
+        cancelAtPeriodEnd: canceledSubscription.cancel_at_period_end,
+        periodEnd: new Date(canceledSubscription.current_period_end * 1000).toISOString(),
+      });
+    } catch (error: any) {
+      console.error('❌ Error canceling subscription:', error);
       res.status(500).json({ error: error.message });
     }
   });
