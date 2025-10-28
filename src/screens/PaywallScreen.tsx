@@ -25,6 +25,7 @@ import { unifiedBillingService } from '../services/unifiedBillingService';
 import { auth } from '../config/firebase';
 import { WebContainer } from '../components/WebContainer';
 import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
+import { CancellationReasonModal } from '../components/CancellationReasonModal';
 
 export function PaywallScreen() {
   const navigation = useNavigation<any>();
@@ -38,6 +39,7 @@ export function PaywallScreen() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [showCancellationModal, setShowCancellationModal] = useState(false);
 
   // Use subscriptionStatus from useStore which has the accurate count
   const quotesUsed = subscriptionStatus?.quotesThisMonth || quoteCount;
@@ -234,66 +236,81 @@ export function PaywallScreen() {
   };
 
   const handleCancelSubscription = () => {
-    // Show "Are you sure?" confirmation
-    Alert.alert(
-      'Cancel Subscription?',
-      'Are you sure you want to cancel your Pro subscription? You can provide feedback during the cancellation process in the Stripe portal.',
-      [
-        {
-          text: 'Keep Subscription',
-          style: 'cancel',
-        },
-        {
-          text: 'Yes, Cancel',
-          style: 'destructive',
-          onPress: confirmCancelSubscription,
-        },
-      ]
-    );
+    if (Platform.OS === 'web') {
+      // Show cancellation reason modal
+      setShowCancellationModal(true);
+    } else {
+      // For native platforms, show instructions
+      Alert.alert(
+        'Cancel Subscription',
+        Platform.OS === 'ios'
+          ? 'To cancel your subscription, go to Settings > Your Name > Subscriptions on your iPhone.'
+          : 'To cancel your subscription, open the Play Store app, tap Menu > Subscriptions, and select QuoteMate.',
+        [{ text: 'OK' }]
+      );
+    }
   };
 
-  const confirmCancelSubscription = async () => {
+  const confirmCancelSubscription = async (reason: string, feedback: string) => {
     setIsCancelling(true);
     try {
       const currentUser = auth.currentUser;
-
-      if (Platform.OS === 'web') {
-        // For web, open Stripe Customer Portal to manage subscription
-        if (currentUser) {
-          const { stripeService } = require('../services/stripeService');
-          try {
-            const portalUrl = await stripeService.createPortalSession(currentUser.uid);
-
-            // Open Stripe portal
-            window.open(portalUrl, '_blank');
-
-            Alert.alert(
-              'Manage Subscription',
-              'We\'ve opened the Stripe Customer Portal where you can confirm your cancellation and provide feedback.',
-              [{ text: 'OK' }]
-            );
-          } catch (portalError) {
-            console.error('Error opening portal:', portalError);
-            Alert.alert(
-              'Error',
-              'Failed to open the Stripe Customer Portal. Please try again or contact support.',
-              [{ text: 'OK' }]
-            );
-          }
-        }
-      } else {
-        // For native platforms, show instructions
-        Alert.alert(
-          'Cancel Subscription',
-          Platform.OS === 'ios'
-            ? 'To cancel your subscription, go to Settings > Your Name > Subscriptions on your iPhone.'
-            : 'To cancel your subscription, open the Play Store app, tap Menu > Subscriptions, and select QuoteMate.',
-          [{ text: 'OK' }]
-        );
+      if (!currentUser) {
+        Alert.alert('Error', 'User not authenticated');
+        return;
       }
-    } catch (error) {
-      console.error('Error handling cancellation:', error);
-      Alert.alert('Error', 'Failed to process cancellation. Please contact support.');
+
+      // Call backend to cancel subscription
+      const API_BASE_URL = process.env.API_BASE_URL || 'https://us-central1-hansendev.cloudfunctions.net';
+      const response = await fetch(`${API_BASE_URL}/cancelSubscription`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: currentUser.uid,
+          reason,
+          feedback,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to cancel subscription');
+      }
+
+      // Close modal
+      setShowCancellationModal(false);
+
+      // Update local subscription status
+      const updatedSubscription = {
+        ...subscriptionStatus,
+        isPro: true, // Still Pro until period end
+        cancelAtPeriodEnd: true,
+      };
+
+      // Save to Firestore
+      const { firestoreService } = require('../services/firestoreService');
+      await firestoreService.saveSubscriptionStatus(updatedSubscription);
+
+      // Reload subscription
+      await loadSubscription();
+
+      // Show success message with period end date
+      const periodEndDate = new Date(data.periodEnd).toLocaleDateString();
+      Alert.alert(
+        '✅ Subscription Canceled',
+        `Your subscription has been canceled. You'll continue to have Pro access until ${periodEndDate}.\n\nThank you for your feedback!`,
+        [{ text: 'OK' }]
+      );
+    } catch (error: any) {
+      console.error('Error canceling subscription:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to cancel subscription. Please try again or contact support.',
+        [{ text: 'OK' }]
+      );
     } finally {
       setIsCancelling(false);
     }
@@ -442,6 +459,14 @@ export function PaywallScreen() {
         />
       )}
 
+      {/* Cancellation Reason Modal */}
+      <CancellationReasonModal
+        visible={showCancellationModal}
+        onDismiss={() => setShowCancellationModal(false)}
+        onConfirm={confirmCancelSubscription}
+        isLoading={isCancelling}
+        periodEndDate={subscriptionStatus?.currentPeriodEnd}
+      />
 
     <ScrollView
       style={styles.container}
@@ -475,6 +500,19 @@ export function PaywallScreen() {
               Thank you for your support! You have unlimited access to all Pro features.
             </Text>
 
+            {subscriptionStatus?.currentPeriodEnd && (
+              <View style={styles.billingInfo}>
+                <MaterialCommunityIcons name="calendar-clock" size={20} color={colors.primary} />
+                <Text style={styles.billingText}>
+                  Next billing date: {subscriptionStatus.currentPeriodEnd.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  })}
+                </Text>
+              </View>
+            )}
+
             <View style={styles.proFeatures}>
               <View style={styles.proFeature}>
                 <MaterialCommunityIcons name="infinity" size={20} color={colors.primary} />
@@ -500,7 +538,13 @@ export function PaywallScreen() {
             </Button>
 
             <Text style={styles.cancelHint}>
-              Your subscription will remain active until the end of your billing period
+              {subscriptionStatus?.currentPeriodEnd
+                ? `Your subscription will remain active until ${subscriptionStatus.currentPeriodEnd.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  })}`
+                : 'Your subscription will remain active until the end of your billing period'}
             </Text>
           </View>
         </Surface>
@@ -720,6 +764,21 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     textAlign: 'center',
     marginBottom: 24,
+  },
+  billingInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryBg,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 24,
+    gap: 8,
+  },
+  billingText: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: '500',
   },
   proFeatures: {
     alignSelf: 'stretch',
