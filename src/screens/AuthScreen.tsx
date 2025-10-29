@@ -1,16 +1,22 @@
 /**
  * Authentication Screen
- * Handles sign in and sign up for web users
+ * Handles sign in and sign up for all platforms (web, iOS, Android)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView } from 'react-native';
 import { Text, TextInput, Button, Surface, Title } from 'react-native-paper';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import * as Google from 'expo-auth-session/providers/google';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as WebBrowser from 'expo-web-browser';
 import { auth } from '../config/firebase';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
+
+// Needed for expo-auth-session to work properly
+WebBrowser.maybeCompleteAuthSession();
 
 export function AuthScreen() {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -19,6 +25,43 @@ export function AuthScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
+
+  // Configure Google Sign-In for mobile (iOS/Android)
+  // On web, we use Firebase popup instead of expo-auth-session
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    iosClientId: process.env.GOOGLE_OAUTH_IOS_CLIENT_ID || undefined,
+    androidClientId: process.env.GOOGLE_OAUTH_ANDROID_CLIENT_ID || undefined,
+    webClientId: process.env.GOOGLE_OAUTH_WEB_CLIENT_ID || undefined,
+  });
+
+  // Check if Apple Authentication is available (iOS only)
+  useEffect(() => {
+    const checkAppleAuth = async () => {
+      console.log('🍎 Checking Apple Authentication availability...');
+      console.log('Platform:', Platform.OS);
+      const isAvailable = await AppleAuthentication.isAvailableAsync();
+      console.log('🍎 Apple Authentication available:', isAvailable);
+      setAppleAuthAvailable(isAvailable);
+    };
+    checkAppleAuth();
+  }, []);
+
+  // Handle Google Sign-In response (mobile)
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { id_token } = response.params;
+      const credential = GoogleAuthProvider.credential(id_token);
+      signInWithCredential(auth, credential)
+        .then(() => {
+          console.log('✅ Google Sign-In successful (mobile)');
+        })
+        .catch((error) => {
+          console.error('Google Sign-In error:', error);
+          setError('Failed to sign in with Google');
+        });
+    }
+  }, [response]);
 
   const handleSignIn = async () => {
     if (!email || !password) {
@@ -71,17 +114,18 @@ export function AuthScreen() {
   };
 
   const handleGoogleSignIn = async () => {
-    if (Platform.OS !== 'web') {
-      setError('Google Sign-In is only available on web');
-      return;
-    }
-
     setLoading(true);
     setError('');
 
     try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      if (Platform.OS === 'web') {
+        // Web: Use Firebase popup
+        const provider = new GoogleAuthProvider();
+        await signInWithPopup(auth, provider);
+      } else {
+        // Mobile: Use expo-auth-session
+        await promptAsync();
+      }
       // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       console.error('Google sign in error:', err);
@@ -91,6 +135,46 @@ export function AuthScreen() {
         setError('Pop-up blocked. Please allow pop-ups for this site.');
       } else {
         setError('Failed to sign in with Google. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    if (!appleAuthAvailable) {
+      setError('Apple Sign-In is not available on this device');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      // Sign in with Firebase using Apple credential
+      const { identityToken } = credential;
+      if (identityToken) {
+        const provider = new OAuthProvider('apple.com');
+        const firebaseCredential = provider.credential({
+          idToken: identityToken,
+        });
+        await signInWithCredential(auth, firebaseCredential);
+        console.log('✅ Apple Sign-In successful');
+      }
+      // Navigation will happen automatically when auth state changes
+    } catch (err: any) {
+      console.error('Apple sign in error:', err);
+      if (err.code === 'ERR_REQUEST_CANCELED') {
+        setError('Sign-in cancelled');
+      } else {
+        setError('Failed to sign in with Apple. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -145,12 +229,24 @@ export function AuthScreen() {
               <Text style={styles.errorText}>{error}</Text>
             ) : null}
 
+            {/* Apple Sign-In Button (iOS only) */}
+            {appleAuthAvailable && (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                cornerRadius={5}
+                style={styles.appleButton}
+                onPress={handleAppleSignIn}
+              />
+            )}
+
+            {/* Google Sign-In Button (All platforms) */}
             <Button
               mode="contained"
               onPress={handleGoogleSignIn}
               style={styles.googleButton}
               contentStyle={styles.googleButtonContent}
-              disabled={loading}
+              disabled={loading || (Platform.OS !== 'web' && !request)}
               icon={() => <MaterialCommunityIcons name="google" size={24} color="#fff" />}
             >
               Continue with Google
@@ -300,6 +396,11 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     color: colors.onSurface,
     opacity: 0.6,
+  },
+  appleButton: {
+    width: '100%',
+    height: 50,
+    marginBottom: 16,
   },
   googleButton: {
     marginBottom: 24,

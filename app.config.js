@@ -20,7 +20,8 @@ export default {
             deploymentTarget: "15.1"
           }
         }
-      ]
+      ],
+      "expo-apple-authentication"
     ],
     splash: {
       image: "./assets/splash.png",
@@ -32,7 +33,8 @@ export default {
     ],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.quotemate.app"
+      bundleIdentifier: "com.quotemate.app",
+      usesAppleSignIn: true
     },
     android: {
       adaptiveIcon: {

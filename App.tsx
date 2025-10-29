@@ -27,8 +27,8 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription } = useStore();
 
-  // On web, require authentication
-  const requiresAuth = Platform.OS === 'web';
+  // Require authentication on all platforms for account syncing
+  const requiresAuth = true;
 
   useEffect(() => {
     // Listen to authentication state changes
@@ -219,8 +219,9 @@ export default function App() {
     );
   }
 
-  // On web, require authentication before showing the app
+  // Require authentication on all platforms before showing the app
   if (requiresAuth && !user) {
+    console.log('📱 Showing auth screen - user not signed in');
     return (
       <SafeAreaProvider>
         <PaperProvider theme={theme}>
