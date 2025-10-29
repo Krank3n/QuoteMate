@@ -29,6 +29,7 @@ export function AuthScreen() {
 
   // Configure Google Sign-In for mobile (iOS/Android)
   // On web, we use Firebase popup instead of expo-auth-session
+  // Use production Android client ID - it needs the Play Store SHA-1 configured
   const [request, response, promptAsync] = Google.useAuthRequest({
     iosClientId: process.env.GOOGLE_OAUTH_IOS_CLIENT_ID || undefined,
     androidClientId: process.env.GOOGLE_OAUTH_ANDROID_CLIENT_ID || undefined,
