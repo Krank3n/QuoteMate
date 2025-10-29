@@ -1,7 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getAuth, setPersistence, browserLocalPersistence, initializeAuth, getReactNativePersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // Firebase configuration from environment variables
 // Note: Firebase API keys are safe to be public - they identify your project,
@@ -18,12 +20,15 @@ const firebaseConfig = {
 // Initialize Firebase only if it hasn't been initialized already
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firebase services
-export const auth = getAuth(app);
+// Initialize Firebase Auth with platform-specific persistence
+export const auth = Platform.OS === 'web'
+  ? getAuth(app)
+  : initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage)
+    });
 
-// Set persistence to local by default (allows auth to persist across sessions)
-// This will be explicitly cleared during logout
-if (typeof window !== 'undefined') {
+// Set persistence for web
+if (Platform.OS === 'web') {
   setPersistence(auth, browserLocalPersistence).catch((error) => {
     console.error('Failed to set auth persistence:', error);
   });
