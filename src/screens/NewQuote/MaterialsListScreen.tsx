@@ -376,11 +376,7 @@ export function MaterialsListScreen() {
   };
 
   const handleNext = () => {
-    if (materials.length === 0) {
-      Alert.alert('No Materials', 'Please add at least one material');
-      return;
-    }
-
+    // Allow proceeding with no materials (labor-only quotes)
     const hasUnpricedMaterials = materials.some((m) => m.price === 0);
     if (hasUnpricedMaterials) {
       setUnpricedDialogVisible(true);
@@ -403,9 +399,9 @@ export function MaterialsListScreen() {
       >
         {materials.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>No materials yet</Text>
+            <Text style={styles.emptyText}>No materials required</Text>
             <Text style={styles.emptySubtext}>
-              Tap + to add materials or fetch prices from Bunnings
+              This will be a labor-only quote. Tap + if you need to add materials.
             </Text>
           </View>
         ) : (
@@ -485,7 +481,6 @@ export function MaterialsListScreen() {
           onPress={handleNext}
           style={styles.nextButton}
           labelStyle={styles.nextButtonLabel}
-          disabled={materials.length === 0}
         >
           Next: Labor & Markup
         </Button>

@@ -162,6 +162,9 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
       </div>
 
       <h3>Materials</h3>
+      ${quote.materials.length === 0 ? `
+      <p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>
+      ` : `
       <table>
         <thead>
           <tr>
@@ -190,6 +193,7 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
           </tr>
         </tbody>
       </table>
+      `}
 
       <h3>Labor</h3>
       <table>
