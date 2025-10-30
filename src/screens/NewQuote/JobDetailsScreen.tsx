@@ -40,7 +40,7 @@ import { WebContainer } from '../../components/WebContainer';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
-  const { currentQuote, updateQuote } = useStore();
+  const { currentQuote, updateQuote, quotes } = useStore();
 
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
@@ -54,8 +54,8 @@ export function JobDetailsScreen() {
   const [analysisErrorDialogVisible, setAnalysisErrorDialogVisible] = useState(false);
   const [analysisErrorMessage, setAnalysisErrorMessage] = useState('');
 
-  // Check if editing an existing quote
-  const isEditingExisting = !!(currentQuote && currentQuote.materials.length > 0);
+  // Check if editing an existing quote (by checking if it exists in saved quotes)
+  const isEditingExisting = !!(currentQuote && quotes.find(q => q.id === currentQuote.id));
 
   useEffect(() => {
     if (currentQuote) {

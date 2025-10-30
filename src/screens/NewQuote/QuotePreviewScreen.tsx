@@ -172,17 +172,21 @@ export function QuotePreviewScreen() {
 
       <Surface style={styles.section}>
         <Title style={styles.sectionTitle}>Materials ({currentQuote.materials.length})</Title>
-        {currentQuote.materials.map((material) => (
-          <View key={material.id} style={styles.itemRow}>
-            <View style={styles.itemInfo}>
-              <Text style={styles.itemName}>{material.name}</Text>
-              <Text style={styles.itemDetails}>
-                {material.quantity} {material.unit} × {formatCurrency(material.price)}
-              </Text>
+        {currentQuote.materials.length === 0 ? (
+          <Text style={styles.subtext}>No materials required - Labor only</Text>
+        ) : (
+          currentQuote.materials.map((material) => (
+            <View key={material.id} style={styles.itemRow}>
+              <View style={styles.itemInfo}>
+                <Text style={styles.itemName}>{material.name}</Text>
+                <Text style={styles.itemDetails}>
+                  {material.quantity} {material.unit} × {formatCurrency(material.price)}
+                </Text>
+              </View>
+              <Text style={styles.itemTotal}>{formatCurrency(material.totalPrice)}</Text>
             </View>
-            <Text style={styles.itemTotal}>{formatCurrency(material.totalPrice)}</Text>
-          </View>
-        ))}
+          ))
+        )}
         <Divider style={styles.divider} />
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Materials Subtotal</Text>
