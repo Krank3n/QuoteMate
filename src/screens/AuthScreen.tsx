@@ -270,7 +270,8 @@ export function AuthScreen() {
               mode="outlined"
               keyboardType="email-address"
               autoCapitalize="none"
-              autoComplete="email"
+              autoComplete={isSignUp ? 'username' : 'email'}
+              textContentType={isSignUp ? 'username' : 'emailAddress'}
               style={styles.input}
               disabled={loading}
             />
@@ -283,6 +284,7 @@ export function AuthScreen() {
               secureTextEntry
               autoCapitalize="none"
               autoComplete={isSignUp ? 'new-password' : 'current-password'}
+              textContentType={isSignUp ? 'newPassword' : 'password'}
               style={styles.input}
               disabled={loading}
             />
@@ -296,6 +298,7 @@ export function AuthScreen() {
                 secureTextEntry
                 autoCapitalize="none"
                 autoComplete="new-password"
+                textContentType="newPassword"
                 style={styles.input}
                 disabled={loading}
               />
