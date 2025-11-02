@@ -12,6 +12,7 @@ import {
   FlatList,
   TouchableOpacity,
   Platform,
+  Linking,
 } from 'react-native';
 import {
   Text,
@@ -34,6 +35,7 @@ import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
 import { bunningsApi } from '../../services/bunningsApi';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
+import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 
@@ -101,9 +103,16 @@ export function MaterialsListScreen() {
     let failedCount = 0;
 
     // Determine which pricing method to use
-    const useBunningsApi = businessSettings?.useBunningsApi === true; // Default to false
-    const hardwareStores = businessSettings?.hardwareStores || ['https://www.bunnings.com.au/'];
-    const methodName = useBunningsApi ? 'Bunnings API' : 'AI estimation';
+    const useBunningsApi = businessSettings?.useBunningsApi === true;
+    const useReeceApi = businessSettings?.useReeceApi === true;
+    const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
+
+    let methodName = 'AI estimation';
+    if (useBunningsApi) {
+      methodName = 'Bunnings API';
+    } else if (useReeceApi) {
+      methodName = 'Reece API';
+    }
 
     try {
       const updatedMaterials = [...materials];
@@ -120,7 +129,7 @@ export function MaterialsListScreen() {
         const searchTerm = material.searchTerm || material.name;
 
         if (useBunningsApi) {
-          // Use Bunnings API (original method)
+          // Use Bunnings API
           const result = await bunningsApi.findAndPriceMaterial(searchTerm);
 
           if (result) {
@@ -128,6 +137,24 @@ export function MaterialsListScreen() {
             material.price = result.price.priceIncGst;
             material.totalPrice = material.price * material.quantity;
             material.manualPriceOverride = false;
+            fetchedCount++;
+          } else {
+            failedCount++;
+          }
+        } else if (useReeceApi) {
+          // Use Reece API for plumbing supplies
+          const result = await searchReeceMaterialPrice(searchTerm);
+
+          if (result.price) {
+            material.price = result.price;
+            material.totalPrice = material.price * material.quantity;
+            material.manualPriceOverride = false;
+
+            // Store additional info if available
+            if (result.productName) {
+              material.name = result.productName;
+            }
+
             fetchedCount++;
           } else {
             failedCount++;
@@ -276,6 +303,42 @@ export function MaterialsListScreen() {
     setSearchResults([]);
   };
 
+  const handleOpenInStore = (material: Material) => {
+    // Get the first selected store or default to Bunnings
+    const stores = businessSettings?.hardwareStores || ['bunnings.com.au'];
+    const firstStore = stores[0];
+
+    // Determine search term
+    const searchTerm = material.searchTerm || material.name;
+    const encodedSearch = encodeURIComponent(searchTerm);
+
+    // Generate store URL based on the store domain
+    let storeUrl = '';
+
+    if (firstStore.includes('bunnings.com.au')) {
+      storeUrl = `https://www.bunnings.com.au/search/products?q=${encodedSearch}`;
+    } else if (firstStore.includes('reece.com.au')) {
+      storeUrl = `https://www.reece.com.au/search?q=${encodedSearch}`;
+    } else if (firstStore.includes('mitre10.com.au')) {
+      storeUrl = `https://www.mitre10.com.au/search?q=${encodedSearch}`;
+    } else if (firstStore.includes('flexihire.com.au')) {
+      storeUrl = `https://www.flexihire.com.au/equipment?q=${encodedSearch}`;
+    } else {
+      // Generic store - use Google search
+      storeUrl = `https://www.google.com/search?q=${encodedSearch}+site:${firstStore}`;
+    }
+
+    // Open URL
+    if (Platform.OS === 'web') {
+      window.open(storeUrl, '_blank');
+    } else {
+      Linking.openURL(storeUrl).catch((err) => {
+        Alert.alert('Error', 'Could not open store link');
+        console.error('Failed to open URL:', err);
+      });
+    }
+  };
+
   const handleEditMaterial = (material: Material) => {
     setEditingMaterial(material);
     setEditName(material.name);
@@ -420,6 +483,12 @@ export function MaterialsListScreen() {
                       {formatCurrency(material.totalPrice)}
                     </Text>
                     <View style={styles.itemActions}>
+                      <IconButton
+                        icon="open-in-new"
+                        size={20}
+                        onPress={() => handleOpenInStore(material)}
+                        iconColor={colors.primary}
+                      />
                       <IconButton
                         icon="pencil"
                         size={20}

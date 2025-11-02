@@ -68,6 +68,14 @@ export interface TemplateParam {
   defaultValue?: number;
 }
 
+export type TradeType = 'all' | 'carpenter' | 'plumber' | 'electrician' | 'cleaner';
+
+export interface HardwareStore {
+  name: string;
+  url: string;
+  description: string;
+}
+
 export interface BusinessSettings {
   businessName: string;
   abn?: string;
@@ -77,9 +85,13 @@ export interface BusinessSettings {
   logoUri?: string; // Local file URI for company logo
   defaultLaborRate: number;
   defaultMarkup: number;
+  // Trade type
+  tradeType?: TradeType; // Default: 'all'
   // Price fetching settings
   useBunningsApi?: boolean; // If true, use Bunnings API. If false/undefined, use AI estimation (default: false)
-  hardwareStores?: string[]; // Up to 3 hardware store URLs for AI price estimation context
+  useReeceApi?: boolean; // If true and tradeType is plumber, use Reece API for plumbing supplies
+  hardwareStores?: string[]; // Selected hardware store URLs
+  customStores?: string[]; // Custom store URLs added by user
 }
 
 // Bunnings API types
