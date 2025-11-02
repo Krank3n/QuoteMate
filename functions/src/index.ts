@@ -663,7 +663,6 @@ Important:
 Example:
 {"price": 15.90, "productName": "Treated Pine H3 90x45mm 2.4m", "store": "Bunnings (estimated)", "confidence": "medium"}`;
 
-      // Call Anthropic API
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -690,7 +689,6 @@ Example:
 
       const data = await response.json();
 
-      // Handle different response formats
       let textContent = '';
       if (data.content && Array.isArray(data.content)) {
         const textBlock = data.content.find((block: any) => block.type === 'text');
@@ -705,10 +703,7 @@ Example:
         return;
       }
 
-      // Parse JSON response
       let jsonStr = textContent.trim();
-
-      // Remove markdown code blocks if present
       if (jsonStr.startsWith('```json')) {
         jsonStr = jsonStr.replace(/```json\n?/, '').replace(/\n?```$/, '');
       } else if (jsonStr.startsWith('```')) {
@@ -720,12 +715,307 @@ Example:
       res.status(200).json({
         price: result.price || null,
         productName: result.productName,
-        store: result.store || 'Bunnings (estimated)',
+        store: result.store || 'Hardware Store (AI estimated)',
         url: undefined,
       });
     } catch (error: any) {
       console.error('Error searching material price:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Reece API Endpoints
+ * Integration with Reece Group API for plumbing supplies
+ * API Docs: https://docs.api.reecegroup.com.au/latest/index.html#tag/Pricing
+ *
+ * Setup instructions:
+ * 1. Register for API access at https://developers.reecegroup.com.au/
+ * 2. Obtain API credentials (client_id, client_secret)
+ * 3. Set up Firebase config: firebase functions:config:set reece.client_id="xxx" reece.client_secret="xxx"
+ */
+
+// Token cache to avoid requesting a new token on every call
+let reeceTokenCache: { token: string; expiresAt: number } | null = null;
+
+/**
+ * Get OAuth token for Reece API
+ */
+async function getReeceAuthToken(): Promise<string | null> {
+  try {
+    // Check if we have a valid cached token
+    if (reeceTokenCache && reeceTokenCache.expiresAt > Date.now()) {
+      return reeceTokenCache.token;
+    }
+
+    const reeceClientId = functions.config().reece?.client_id || process.env.REECE_CLIENT_ID;
+    const reeceClientSecret = functions.config().reece?.client_secret || process.env.REECE_CLIENT_SECRET;
+
+    if (!reeceClientId || !reeceClientSecret) {
+      console.log('Reece API credentials not configured');
+      return null;
+    }
+
+    // Request OAuth token
+    const tokenResponse = await fetch('https://api.reecegroup.com.au/oauth/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: reeceClientId,
+        client_secret: reeceClientSecret,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      console.error('Failed to get Reece OAuth token:', errorText);
+      return null;
+    }
+
+    const tokenData = await tokenResponse.json();
+    const token = tokenData.access_token;
+    const expiresIn = tokenData.expires_in || 3600; // Default to 1 hour
+
+    // Cache the token (with 5 minute buffer before expiry)
+    reeceTokenCache = {
+      token,
+      expiresAt: Date.now() + (expiresIn - 300) * 1000,
+    };
+
+    return token;
+  } catch (error: any) {
+    console.error('Error getting Reece auth token:', error);
+    return null;
+  }
+}
+
+/**
+ * Check if Reece API is available and configured
+ */
+export const checkReeceApi = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    try {
+      const token = await getReeceAuthToken();
+      const available = !!token;
+
+      res.status(200).json({ available });
+    } catch (error: any) {
+      console.error('Error checking Reece API:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Search for a product in Reece catalog
+ */
+export const searchReeceProduct = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { productName } = req.body;
+
+      if (!productName) {
+        res.status(400).json({ error: 'Missing productName' });
+        return;
+      }
+
+      // Get OAuth token
+      const token = await getReeceAuthToken();
+      if (!token) {
+        console.log('Reece API credentials not configured - returning null');
+        res.status(200).json({ product: null });
+        return;
+      }
+
+      // Search for product using the catalog/search endpoint
+      console.log('Searching Reece catalog for:', productName);
+      const searchResponse = await fetch(
+        `https://api.reecegroup.com.au/api/v1/catalog/search?query=${encodeURIComponent(productName)}&limit=5`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+          },
+        }
+      );
+
+      if (!searchResponse.ok) {
+        const errorText = await searchResponse.text();
+        console.error('Reece product search failed:', searchResponse.status, errorText);
+        res.status(200).json({ product: null });
+        return;
+      }
+
+      const searchData = await searchResponse.json();
+
+      // Return the first matching product if found
+      if (searchData.products && searchData.products.length > 0) {
+        const product = searchData.products[0];
+        console.log('Found product:', product.itemNumber, product.description);
+
+        res.status(200).json({
+          product: {
+            itemNumber: product.itemNumber,
+            description: product.description,
+            brand: product.brand,
+            category: product.category,
+          },
+        });
+      } else {
+        console.log('No products found for:', productName);
+        res.status(200).json({ product: null });
+      }
+    } catch (error: any) {
+      console.error('Error searching Reece product:', error);
+      res.status(200).json({ product: null });
+    }
+  });
+});
+
+/**
+ * Get price for a Reece product
+ */
+export const getReecePrice = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { itemNumber } = req.body;
+
+      if (!itemNumber) {
+        res.status(400).json({ error: 'Missing itemNumber' });
+        return;
+      }
+
+      // Get OAuth token
+      const token = await getReeceAuthToken();
+      if (!token) {
+        console.log('Reece API credentials not configured - returning null');
+        res.status(200).json({ price: null });
+        return;
+      }
+
+      // Get pricing using the pricing endpoint
+      console.log('Getting price for Reece item:', itemNumber);
+      const priceResponse = await fetch(
+        `https://api.reecegroup.com.au/api/v1/pricing/${encodeURIComponent(itemNumber)}`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+          },
+        }
+      );
+
+      if (!priceResponse.ok) {
+        const errorText = await priceResponse.text();
+        console.error('Reece price fetch failed:', priceResponse.status, errorText);
+        res.status(200).json({ price: null });
+        return;
+      }
+
+      const priceData = await priceResponse.json();
+
+      // Extract price (prefer GST-inclusive price)
+      const price = priceData.priceIncGst || priceData.price;
+
+      if (price != null) {
+        console.log('Found price for', itemNumber, ':', price);
+        res.status(200).json({
+          price,
+          currency: priceData.currency || 'AUD',
+          priceIncGst: priceData.priceIncGst,
+        });
+      } else {
+        console.log('No price available for:', itemNumber);
+        res.status(200).json({ price: null });
+      }
+    } catch (error: any) {
+      console.error('Error getting Reece price:', error);
+      res.status(200).json({ price: null });
+    }
+  });
+});
+
+/**
+ * Get inventory for a Reece product
+ */
+export const getReeceInventory = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { itemNumber, branchCode } = req.body;
+
+      if (!itemNumber) {
+        res.status(400).json({ error: 'Missing itemNumber' });
+        return;
+      }
+
+      // Get OAuth token
+      const token = await getReeceAuthToken();
+      if (!token) {
+        console.log('Reece API credentials not configured - returning null');
+        res.status(200).json({ inventory: null });
+        return;
+      }
+
+      // Get inventory using the inventory endpoint
+      const url = branchCode
+        ? `https://api.reecegroup.com.au/api/v1/inventory/${encodeURIComponent(itemNumber)}?branchCode=${encodeURIComponent(branchCode)}`
+        : `https://api.reecegroup.com.au/api/v1/inventory/${encodeURIComponent(itemNumber)}`;
+
+      console.log('Getting inventory for Reece item:', itemNumber, branchCode ? `at ${branchCode}` : '');
+      const inventoryResponse = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!inventoryResponse.ok) {
+        const errorText = await inventoryResponse.text();
+        console.error('Reece inventory fetch failed:', inventoryResponse.status, errorText);
+        res.status(200).json({ inventory: null });
+        return;
+      }
+
+      const inventoryData = await inventoryResponse.json();
+
+      if (inventoryData) {
+        console.log('Found inventory for', itemNumber);
+        res.status(200).json({
+          inventory: {
+            itemNumber: inventoryData.itemNumber,
+            branchCode: inventoryData.branchCode,
+            quantityAvailable: inventoryData.quantityAvailable || 0,
+          },
+        });
+      } else {
+        console.log('No inventory data for:', itemNumber);
+        res.status(200).json({ inventory: null });
+      }
+    } catch (error: any) {
+      console.error('Error getting Reece inventory:', error);
+      res.status(200).json({ inventory: null });
     }
   });
 });
