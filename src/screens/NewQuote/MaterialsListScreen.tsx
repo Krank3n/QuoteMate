@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   Platform,
   Linking,
+  Image,
 } from 'react-native';
 import {
   Text,
@@ -37,7 +38,41 @@ import { bunningsApi } from '../../services/bunningsApi';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  searchMaterialWithWebScraping,
+  ProductMatch,
+  PricingResult,
+  getBestMatch,
+} from '../../services/webScrapingPricing';
+import {
+  getFavoriteProduct,
+  saveFavoriteProduct,
+} from '../../services/materialFavorites';
+import MaterialMatchSelector from '../../components/MaterialMatchSelector';
+import {
+  findBestMatchForMaterial,
+  checkScraperHealth,
+} from '../../services/bunningsScraperClient';
 
+// Format time ago helper
+function formatTimeAgo(isoTimestamp: string): string {
+  const now = new Date();
+  const then = new Date(isoTimestamp);
+  const secondsAgo = Math.floor((now.getTime() - then.getTime()) / 1000);
+
+  if (secondsAgo < 60) {
+    return 'Just now';
+  } else if (secondsAgo < 3600) {
+    const minutes = Math.floor(secondsAgo / 60);
+    return `${minutes} min${minutes > 1 ? 's' : ''} ago`;
+  } else if (secondsAgo < 86400) {
+    const hours = Math.floor(secondsAgo / 3600);
+    return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  } else {
+    const days = Math.floor(secondsAgo / 86400);
+    return `${days} day${days > 1 ? 's' : ''} ago`;
+  }
+}
 
 export function MaterialsListScreen() {
   const navigation = useNavigation<any>();
@@ -66,6 +101,15 @@ export function MaterialsListScreen() {
   // Unpriced materials warning dialog state
   const [unpricedDialogVisible, setUnpricedDialogVisible] = useState(false);
 
+  // Match selector state for web scraping pricing
+  const [matchSelectorVisible, setMatchSelectorVisible] = useState(false);
+  const [pendingMatches, setPendingMatches] = useState<ProductMatch[]>([]);
+  const [pendingMaterialIndex, setPendingMaterialIndex] = useState<number>(-1);
+  const [pendingMaterialName, setPendingMaterialName] = useState<string>('');
+
+  // Expanded materials state for accordion
+  const [expandedMaterials, setExpandedMaterials] = useState<Set<string>>(new Set());
+
   // Memoize text input handlers to prevent flickering
   const handleEditNameChange = useCallback((text: string) => {
     setEditName(text);
@@ -81,6 +125,18 @@ export function MaterialsListScreen() {
 
   const handleSearchQueryChange = useCallback((text: string) => {
     setSearchQuery(text);
+  }, []);
+
+  const toggleMaterialExpanded = useCallback((materialId: string) => {
+    setExpandedMaterials(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(materialId)) {
+        newSet.delete(materialId);
+      } else {
+        newSet.add(materialId);
+      }
+      return newSet;
+    });
   }, []);
 
   // Early return after all hooks have been called
@@ -105,10 +161,13 @@ export function MaterialsListScreen() {
     // Determine which pricing method to use
     const useBunningsApi = businessSettings?.useBunningsApi === true;
     const useReeceApi = businessSettings?.useReeceApi === true;
+    const useScraperApi = process.env.BUNNINGS_SCRAPER_URL ? true : false;
     const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
 
-    let methodName = 'AI estimation';
-    if (useBunningsApi) {
+    let methodName = 'Intelligent pricing (web search + AI estimation)';
+    if (useScraperApi) {
+      methodName = 'Bunnings Scraper (Real Prices)';
+    } else if (useBunningsApi) {
       methodName = 'Bunnings API';
     } else if (useReeceApi) {
       methodName = 'Reece API';
@@ -128,7 +187,71 @@ export function MaterialsListScreen() {
 
         const searchTerm = material.searchTerm || material.name;
 
-        if (useBunningsApi) {
+        if (useScraperApi) {
+          // Use Bunnings Scraper API (Priority #1 - Real Prices)
+          try {
+            console.log(`🔍 Scraper: Searching for "${searchTerm}"...`);
+            const product = await findBestMatchForMaterial(searchTerm);
+
+            if (product && product.price > 0) {
+              material.price = product.price;
+              material.totalPrice = product.price * material.quantity;
+              material.manualPriceOverride = false;
+              material.pricingSource = 'scraper';
+
+              if (product.itemNumber) {
+                material.bunningsItemNumber = product.itemNumber;
+              }
+
+              if (product.productUrl) {
+                material.productUrl = product.productUrl;
+              }
+
+              if (product.imageUrl) {
+                material.imageUrl = product.imageUrl;
+              }
+
+              if (product.description) {
+                material.description = product.description;
+              }
+
+              // Only save brand if it's not just the store name
+              if (product.brand &&
+                  product.brand.toLowerCase() !== 'bunnings' &&
+                  product.brand.toLowerCase() !== 'bunnings.com.au') {
+                material.brand = product.brand;
+              }
+
+              if (product.stockCheckedAt) {
+                material.stockCheckedAt = product.stockCheckedAt;
+              }
+
+              fetchedCount++;
+              console.log(`✅ Scraper: ${product.productName} - $${product.price}`);
+            } else {
+              console.log('⚠️ Scraper: No product found with price, trying next method...');
+              throw new Error('No product found with price');
+            }
+          } catch (error) {
+            console.log('❌ Scraper failed, falling back to next pricing method:', error);
+
+            // Fallback to next method
+            if (useBunningsApi) {
+              const result = await bunningsApi.findAndPriceMaterial(searchTerm);
+              if (result) {
+                material.bunningsItemNumber = result.item.itemNumber;
+                material.price = result.price.priceIncGst;
+                material.totalPrice = material.price * material.quantity;
+                material.manualPriceOverride = false;
+                fetchedCount++;
+              } else {
+                failedCount++;
+              }
+            } else {
+              failedCount++;
+            }
+          }
+        } else if (useBunningsApi) {
           // Use Bunnings API
           const result = await bunningsApi.findAndPriceMaterial(searchTerm);
 
@@ -137,6 +260,22 @@ export function MaterialsListScreen() {
             material.price = result.price.priceIncGst;
             material.totalPrice = material.price * material.quantity;
             material.manualPriceOverride = false;
+            material.pricingSource = 'api';
+
+            // Store additional info from Bunnings API
+            if (result.item.productName) {
+              material.name = result.item.productName;
+            }
+            // Only save brand if it's not just the store name
+            if (result.item.brand &&
+                result.item.brand.toLowerCase() !== 'bunnings' &&
+                result.item.brand.toLowerCase() !== 'bunnings.com.au') {
+              material.brand = result.item.brand;
+            }
+            if (result.item.description) {
+              material.description = result.item.description;
+            }
+
             fetchedCount++;
           } else {
             failedCount++;
@@ -149,10 +288,14 @@ export function MaterialsListScreen() {
             material.price = result.price;
             material.totalPrice = material.price * material.quantity;
             material.manualPriceOverride = false;
+            material.pricingSource = 'api';
 
             // Store additional info if available
             if (result.productName) {
               material.name = result.productName;
+            }
+            if (result.store) {
+              material.description = `Available at ${result.store}`;
             }
 
             fetchedCount++;
@@ -160,27 +303,131 @@ export function MaterialsListScreen() {
             failedCount++;
           }
         } else {
-          // Use AI price estimation with Claude
-          const result = await searchMaterialPrice(searchTerm, hardwareStores);
+          // Use Web Scraping with Favorites (NEW METHOD)
 
-          if (result.price) {
-            material.price = result.price;
-            material.totalPrice = material.price * material.quantity;
-            material.manualPriceOverride = false;
+          // 1. Check for saved favorite first
+          const favorite = await getFavoriteProduct(material.name, material.searchTerm);
 
-            // Store additional info if available
-            if (result.productName) {
-              material.name = result.productName;
+          if (favorite) {
+            // Use favorite product's last known price (user can manually update if needed)
+            console.log(`Using favorite for "${searchTerm}":`, favorite.productName);
+            material.favoriteProduct = favorite;
+            // Note: Favorite stores the product info but not price (prices change)
+            // So we still need to search, but we'll auto-select the favorite
+          }
+
+          // 2. Search hardware stores with web scraping
+          const results = await searchMaterialWithWebScraping(
+            material.name,
+            searchTerm,
+            material.quantity,
+            material.unit,
+            hardwareStores
+          );
+
+          if (results.length > 0 && results[0].matches.length > 0) {
+            const allMatches = results.flatMap(r => r.matches);
+            const quantityAdj = results[0].quantityAdjustment;
+
+            // 3. Check if we have a favorite match in results
+            let selectedMatch: ProductMatch | null = null;
+
+            if (favorite) {
+              // Try to find the favorite product in matches
+              selectedMatch = allMatches.find(
+                m =>
+                  m.productName === favorite.productName ||
+                  m.itemNumber === favorite.itemNumber
+              ) || null;
             }
 
-            fetchedCount++;
+            // 4. If no favorite or favorite not found, get best match
+            if (!selectedMatch) {
+              selectedMatch = getBestMatch(results);
+            }
+
+            // 5. If multiple high-confidence matches and no favorite, prompt user
+            const highConfidenceMatches = allMatches.filter(m => m.confidence === 'high');
+            if (!favorite && highConfidenceMatches.length > 1 && !selectedMatch) {
+              // Pause and ask user to select
+              setPendingMatches(highConfidenceMatches);
+              setPendingMaterialIndex(i);
+              setPendingMaterialName(material.name);
+              setMatchSelectorVisible(true);
+
+              // Wait for user selection before continuing
+              // (This will be handled by the modal callback)
+              setIsFetchingPrices(false);
+              return; // Exit early, user will resume after selection
+            }
+
+            // 6. Apply selected product to material
+            if (selectedMatch) {
+              material.price = selectedMatch.price;
+              material.totalPrice = selectedMatch.price * material.quantity;
+              material.manualPriceOverride = false;
+              material.pricingSource = 'scraper';
+
+              // Apply quantity adjustment if needed
+              if (quantityAdj && quantityAdj.adjustedQuantity !== material.quantity) {
+                material.quantity = quantityAdj.adjustedQuantity;
+                material.totalPrice = selectedMatch.price * material.quantity;
+              }
+
+              // Store product details
+              if (selectedMatch.itemNumber) {
+                material.bunningsItemNumber = selectedMatch.itemNumber;
+              }
+              if (selectedMatch.productUrl) {
+                material.productUrl = selectedMatch.productUrl;
+              }
+              if (selectedMatch.description) {
+                material.description = selectedMatch.description;
+              }
+              // Only save brand if it's not just the store name
+              if (selectedMatch.brand &&
+                  selectedMatch.brand.toLowerCase() !== 'bunnings' &&
+                  selectedMatch.brand.toLowerCase() !== 'bunnings.com.au' &&
+                  selectedMatch.brand.toLowerCase() !== 'reece' &&
+                  selectedMatch.brand.toLowerCase() !== 'mitre 10') {
+                material.brand = selectedMatch.brand;
+              }
+              if (selectedMatch.stockCheckedAt) {
+                material.stockCheckedAt = selectedMatch.stockCheckedAt;
+              }
+
+              fetchedCount++;
+            } else {
+              failedCount++;
+            }
           } else {
-            failedCount++;
+            // Web scraping failed, fall back to AI estimation
+            console.log(`Web scraping failed for "${searchTerm}", trying AI estimation...`);
+            const aiResult = await searchMaterialPrice(searchTerm, hardwareStores);
+
+            if (aiResult.price) {
+              material.price = aiResult.price;
+              material.totalPrice = material.price * material.quantity;
+              material.manualPriceOverride = false;
+              material.pricingSource = 'ai';
+
+              if (aiResult.productName) {
+                material.name = aiResult.productName;
+              }
+              if (aiResult.store) {
+                material.description = `Estimated from ${aiResult.store}`;
+              }
+
+              fetchedCount++;
+              console.log(`AI estimation succeeded for "${searchTerm}": $${aiResult.price}`);
+            } else {
+              failedCount++;
+            }
           }
         }
 
         // Update UI progressively (skip if dialogs are open to avoid flickering)
-        if (!editDialogVisible && !searchDialogVisible) {
+        if (!editDialogVisible && !searchDialogVisible && !matchSelectorVisible) {
           updateQuote({
             ...currentQuote,
             materials: [...updatedMaterials],
@@ -188,7 +435,7 @@ export function MaterialsListScreen() {
         }
 
         // Small delay to avoid overwhelming the API
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
       // Final update to ensure all changes are saved
@@ -218,6 +465,76 @@ export function MaterialsListScreen() {
     } finally {
       setIsFetchingPrices(false);
     }
+  };
+
+  const handleMatchSelected = async (match: ProductMatch, saveAsFavorite: boolean) => {
+    setMatchSelectorVisible(false);
+
+    // Apply the selected match to the pending material
+    const updatedMaterials = [...materials];
+    const material = updatedMaterials[pendingMaterialIndex];
+
+    if (material) {
+      material.price = match.price;
+      material.totalPrice = match.price * material.quantity;
+      material.manualPriceOverride = false;
+      material.pricingSource = 'scraper';
+
+      if (match.itemNumber) {
+        material.bunningsItemNumber = match.itemNumber;
+      }
+      if (match.productUrl) {
+        material.productUrl = match.productUrl;
+      }
+      if (match.description) {
+        material.description = match.description;
+      }
+      // Only save brand if it's not just the store name
+      if (match.brand &&
+          match.brand.toLowerCase() !== 'bunnings' &&
+          match.brand.toLowerCase() !== 'bunnings.com.au' &&
+          match.brand.toLowerCase() !== 'reece' &&
+          match.brand.toLowerCase() !== 'mitre 10') {
+        material.brand = match.brand;
+      }
+      if (match.stockCheckedAt) {
+        material.stockCheckedAt = match.stockCheckedAt;
+      }
+
+      // Save as favorite if requested
+      if (saveAsFavorite) {
+        const favoriteMapping = {
+          productName: match.productName,
+          store: match.store,
+          productUrl: match.productUrl,
+          itemNumber: match.itemNumber,
+          dimensions: match.dimensions,
+          unit: match.unit,
+        };
+        material.favoriteProduct = favoriteMapping;
+        await saveFavoriteProduct(material.name, material.searchTerm, favoriteMapping);
+      }
+
+      updateQuote({
+        ...currentQuote,
+        materials: updatedMaterials,
+      });
+
+      Alert.alert('Price Updated', `${match.productName} - ${formatCurrency(match.price)}`);
+    }
+
+    // Resume fetching remaining materials
+    // Note: This is simplified - in production you'd want to resume from where you left off
+    setPendingMatches([]);
+    setPendingMaterialIndex(-1);
+    setPendingMaterialName('');
+  };
+
+  const handleMatchCanceled = () => {
+    setMatchSelectorVisible(false);
+    setPendingMatches([]);
+    setPendingMaterialIndex(-1);
+    setPendingMaterialName('');
   };
 
   const handleSearchProducts = async () => {
@@ -304,7 +621,21 @@ export function MaterialsListScreen() {
   };
 
   const handleOpenInStore = (material: Material) => {
-    // Get the first selected store or default to Bunnings
+    // If we have a direct product URL (from scraper or API), use it!
+    if (material.productUrl) {
+      console.log(`🔗 Opening product URL: ${material.productUrl}`);
+      if (Platform.OS === 'web') {
+        window.open(material.productUrl, '_blank');
+      } else {
+        Linking.openURL(material.productUrl).catch((err) => {
+          Alert.alert('Error', 'Could not open product link');
+          console.error('Failed to open URL:', err);
+        });
+      }
+      return;
+    }
+
+    // Otherwise, construct a search URL as fallback
     const stores = businessSettings?.hardwareStores || ['bunnings.com.au'];
     const firstStore = stores[0];
 
@@ -327,6 +658,8 @@ export function MaterialsListScreen() {
       // Generic store - use Google search
       storeUrl = `https://www.google.com/search?q=${encodedSearch}+site:${firstStore}`;
     }
+
+    console.log(`🔍 Opening search URL: ${storeUrl}`);
 
     // Open URL
     if (Platform.OS === 'web') {
@@ -360,6 +693,7 @@ export function MaterialsListScreen() {
             unit: editUnit,
             price: parseFloat(editPrice) || 0,
             manualPriceOverride: true,
+            pricingSource: 'manual',
           })
         : m
     );
@@ -409,6 +743,20 @@ export function MaterialsListScreen() {
 
         if (result) {
           setEditPrice(result.price.priceIncGst.toString());
+          // Update the editing material to include pricingSource and metadata
+          if (editingMaterial) {
+            editingMaterial.pricingSource = 'api';
+            if (result.item.productName) {
+              editingMaterial.name = result.item.productName;
+              setEditName(result.item.productName);
+            }
+            // Only save brand if it's not just the store name
+            if (result.item.brand &&
+                result.item.brand.toLowerCase() !== 'bunnings' &&
+                result.item.brand.toLowerCase() !== 'bunnings.com.au') {
+              editingMaterial.brand = result.item.brand;
+            }
+          }
           Alert.alert('Success', `Found price: ${formatCurrency(result.price.priceIncGst)}`);
         } else {
           Alert.alert(
@@ -422,6 +770,14 @@ export function MaterialsListScreen() {
 
         if (result.price) {
           setEditPrice(result.price.toString());
+          // Update the editing material to include pricingSource
+          if (editingMaterial) {
+            editingMaterial.pricingSource = 'ai';
+            if (result.productName) {
+              editingMaterial.name = result.productName;
+              setEditName(result.productName);
+            }
+          }
           Alert.alert('Estimated Price', `Estimated price: ${formatCurrency(result.price)}\n\nNote: This is an AI estimate, not a live price.`);
         } else {
           Alert.alert(
@@ -469,42 +825,108 @@ export function MaterialsListScreen() {
           </View>
         ) : (
           <List.Section style={styles.listView}>
-            {materials.map((material) => (
-              <List.Item
-                key={material.id}
-                title={material.name}
-                description={`${material.quantity} ${material.unit} × ${formatCurrency(
-                  material.price
-                )}`}
-                left={(props) => <List.Icon {...props} icon="package-variant" />}
-                right={() => (
-                  <View style={styles.itemRight}>
-                    <Text style={styles.itemTotal}>
-                      {formatCurrency(material.totalPrice)}
-                    </Text>
-                    <View style={styles.itemActions}>
-                      <IconButton
-                        icon="open-in-new"
-                        size={20}
-                        onPress={() => handleOpenInStore(material)}
-                        iconColor={colors.primary}
-                      />
-                      <IconButton
-                        icon="pencil"
-                        size={20}
-                        onPress={() => handleEditMaterial(material)}
-                      />
-                      <IconButton
-                        icon="delete"
-                        size={20}
-                        onPress={() => handleDeleteMaterial(material.id)}
-                      />
+            {materials.map((material) => {
+              const isExpanded = expandedMaterials.has(material.id);
+
+              // Check if brand is meaningful (not just "Bunnings" or the store name)
+              const hasMeaningfulBrand = material.brand &&
+                material.brand.toLowerCase() !== 'bunnings' &&
+                material.brand.toLowerCase() !== 'bunnings.com.au' &&
+                material.brand.toLowerCase() !== 'reece' &&
+                material.brand.toLowerCase() !== 'mitre 10';
+
+              const hasDetails = material.imageUrl || material.description || hasMeaningfulBrand || material.stockCheckedAt || material.bunningsItemNumber;
+              const showLink = material.pricingSource === 'scraper' || material.pricingSource === 'api';
+              const isAiEstimate = material.pricingSource === 'ai';
+
+              return (
+                <List.Accordion
+                  key={material.id}
+                  title={material.name}
+                  description={
+                    <View>
+                      <Text style={styles.materialDescription}>
+                        {material.quantity} {material.unit} × {formatCurrency(material.price)}
+                      </Text>
+                      {isAiEstimate && (
+                        <Text style={styles.aiEstimateLabel}>AI Estimate</Text>
+                      )}
                     </View>
-                  </View>
-                )}
-                style={styles.listItem}
-              />
-            ))}
+                  }
+                  left={(props) => <List.Icon {...props} icon="package-variant" />}
+                  right={() => (
+                    <View style={styles.itemRight}>
+                      <Text style={styles.itemTotal}>
+                        {formatCurrency(material.totalPrice)}
+                      </Text>
+                      <View style={styles.itemActions}>
+                        {showLink && (
+                          <IconButton
+                            icon="open-in-new"
+                            size={20}
+                            onPress={() => handleOpenInStore(material)}
+                            iconColor={colors.primary}
+                          />
+                        )}
+                        <IconButton
+                          icon="pencil"
+                          size={20}
+                          onPress={() => handleEditMaterial(material)}
+                        />
+                        <IconButton
+                          icon="delete"
+                          size={20}
+                          onPress={() => handleDeleteMaterial(material.id)}
+                        />
+                      </View>
+                    </View>
+                  )}
+                  expanded={isExpanded}
+                  onPress={() => hasDetails && toggleMaterialExpanded(material.id)}
+                  style={styles.listItem}
+                >
+                  {hasDetails && (
+                    <View style={styles.expandedContent}>
+                      <View style={styles.detailsContainer}>
+                        {material.imageUrl && (
+                          <Image
+                            source={{ uri: material.imageUrl }}
+                            style={styles.productImage}
+                            resizeMode="contain"
+                          />
+                        )}
+                        <View style={styles.detailsColumn}>
+                          {material.description && (
+                            <View style={styles.detailRow}>
+                              <Text style={styles.detailLabel}>Description:</Text>
+                              <Text style={styles.detailValue}>{material.description}</Text>
+                            </View>
+                          )}
+                          {hasMeaningfulBrand && (
+                            <View style={styles.detailRow}>
+                              <Text style={styles.detailLabel}>Brand:</Text>
+                              <Text style={styles.detailValue}>{material.brand}</Text>
+                            </View>
+                          )}
+                          {material.stockCheckedAt && (
+                            <View style={styles.detailRow}>
+                              <Text style={styles.detailLabel}>Last checked:</Text>
+                              <Text style={styles.detailValue}>{formatTimeAgo(material.stockCheckedAt)}</Text>
+                            </View>
+                          )}
+                          {material.bunningsItemNumber && (
+                            <View style={styles.detailRow}>
+                              <Text style={styles.detailLabel}>Item #:</Text>
+                              <Text style={styles.detailValue}>{material.bunningsItemNumber}</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  )}
+                </List.Accordion>
+              );
+            })}
           </List.Section>
         )}
 
@@ -531,7 +953,7 @@ export function MaterialsListScreen() {
 
           {(businessSettings?.useBunningsApi === false || businessSettings?.useBunningsApi === undefined) && (
             <Text style={styles.disclaimerText}>
-              Note: Awaiting Bunnings API approval. Prices are AI estimates only.
+              Note: Using intelligent pricing (attempts real store data, falls back to AI estimates).
             </Text>
           )}
         </View>
@@ -737,6 +1159,16 @@ export function MaterialsListScreen() {
           </Dialog.Actions>
         </Dialog>
       </Portal>
+
+      {/* Material Match Selector Modal */}
+      <MaterialMatchSelector
+        visible={matchSelectorVisible}
+        materialName={pendingMaterialName}
+        matches={pendingMatches}
+        quantityAdjustment={undefined}
+        onSelect={handleMatchSelected}
+        onCancel={handleMatchCanceled}
+      />
     </View>
   );
 }
@@ -954,5 +1386,56 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.onSurface,
     textAlign: 'center',
+  },
+  materialDescription: {
+    fontSize: 14,
+    color: colors.onSurface,
+  },
+  aiEstimateLabel: {
+    fontSize: 11,
+    color: colors.onSurface,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  expandedContent: {
+    backgroundColor: colors.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  detailsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  productImage: {
+    width: Platform.OS === 'web' ? 100 : 80,
+    height: Platform.OS === 'web' ? 100 : 80,
+    borderRadius: 8,
+    backgroundColor: colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  detailsColumn: {
+    flex: 1,
+    minWidth: 200,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  detailLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.onSurface,
+    marginRight: 8,
+    minWidth: 80,
+  },
+  detailValue: {
+    fontSize: 13,
+    color: colors.text,
+    flex: 1,
   },
 });
