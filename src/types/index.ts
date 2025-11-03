@@ -10,6 +10,24 @@ export interface Material {
   totalPrice: number;
   manualPriceOverride: boolean;
   searchTerm?: string;
+  productUrl?: string; // Link to the actual product page
+  favoriteProduct?: FavoriteProductMapping; // User's preferred product for this material
+  // Pricing and product metadata
+  pricingSource?: 'scraper' | 'api' | 'ai' | 'manual'; // Where the price came from
+  imageUrl?: string; // Product image URL
+  description?: string; // Product description
+  brand?: string; // Product brand
+  stockLevel?: string; // Stock availability (deprecated, use stockCheckedAt)
+  stockCheckedAt?: string; // ISO timestamp of when stock was last checked
+}
+
+export interface FavoriteProductMapping {
+  productName: string;
+  store: string;
+  productUrl?: string;
+  itemNumber?: string;
+  dimensions?: string;
+  unit?: string;
 }
 
 export interface Job {
