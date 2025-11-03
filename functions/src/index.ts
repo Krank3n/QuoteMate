@@ -1019,3 +1019,206 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
     }
   });
 });
+
+/**
+ * Fetch HTML from hardware store search URL
+ * Used as CORS proxy for web platform with anti-scraping bypass
+ */
+export const fetchStoreHTML = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { url } = req.body;
+
+      if (!url) {
+        res.status(400).json({ error: 'Missing url' });
+        return;
+      }
+
+      console.log('Fetching HTML from:', url);
+
+      // Option 1: Try with ScraperAPI if configured (most reliable)
+      const scraperApiKey = functions.config().scraperapi?.key || process.env.SCRAPERAPI_KEY;
+
+      if (scraperApiKey) {
+        console.log('Using ScraperAPI for enhanced scraping...');
+        try {
+          const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(url)}&country_code=au&render=true`;
+          const scraperResponse = await fetch(scraperUrl);
+
+          if (scraperResponse.ok) {
+            const html = await scraperResponse.text();
+            console.log('✅ ScraperAPI succeeded, HTML length:', html.length);
+            res.status(200).json({ html, method: 'scraperapi' });
+            return;
+          }
+          console.warn('ScraperAPI failed:', scraperResponse.status);
+        } catch (scraperError) {
+          console.error('ScraperAPI error:', scraperError);
+        }
+      }
+
+      // Option 2: Enhanced direct fetch with realistic browser fingerprinting
+      console.log('Trying enhanced direct fetch with realistic headers...');
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-AU,en-US;q=0.9,en;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Cache-Control': 'max-age=0',
+          'DNT': '1',
+        },
+      });
+
+      if (!response.ok) {
+        console.error('Enhanced fetch failed:', response.status);
+        res.status(response.status).json({
+          error: `Failed to fetch: ${response.statusText}`,
+          method: 'direct',
+        });
+        return;
+      }
+
+      const html = await response.text();
+      console.log('✅ Enhanced fetch succeeded, HTML length:', html.length);
+      res.status(200).json({ html, method: 'direct' });
+    } catch (error: any) {
+      console.error('Error fetching store HTML:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Parse hardware store search results using Claude AI
+ * Used as proxy for web platform to avoid CORS and API key exposure
+ */
+export const parseProductsHTML = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { html, searchTerm, store, requestedQuantity, requestedUnit } = req.body;
+
+      if (!html || !searchTerm || !store) {
+        res.status(400).json({ error: 'Missing required parameters' });
+        return;
+      }
+
+      const anthropicApiKey = functions.config().anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+
+      if (!anthropicApiKey) {
+        res.status(500).json({ error: 'Anthropic API key not configured' });
+        return;
+      }
+
+      const prompt = `You are an expert at parsing Australian hardware store websites and matching products.
+
+**Search Details:**
+- Store: ${store}
+- Search term: "${searchTerm}"
+- Requested quantity: ${requestedQuantity} ${requestedUnit}
+
+**Task:**
+1. Parse the HTML search results below
+2. Find the 2-3 BEST matching products for the search term
+3. Extract: product name, price (inc GST), dimensions, item number, stock level
+4. Determine if quantity adjustment is needed (e.g., timber sold in fixed lengths)
+5. Rank by relevance: prefer exact matches, then similar products, then alternatives
+
+**Important Guidelines:**
+- Prices MUST be in AUD and include GST (Australian stores display inc-GST prices)
+- For length-based materials (timber, piping): check if sold in fixed lengths vs. cut-to-length
+- If sold in fixed lengths and quantity doesn't match, calculate how many pieces needed
+- Example: Need 3m, sold in 2.4m lengths → buy 2 pieces (2 × 2.4m = 4.8m ≥ 3m)
+- Confidence scoring:
+  - HIGH: Exact product match with correct dimensions
+  - MEDIUM: Similar product, might need verification
+  - LOW: Alternative product, different brand/spec
+
+**HTML Content:**
+${html.substring(0, 50000)} ${html.length > 50000 ? '... (truncated)' : ''}
+
+**Return ONLY valid JSON (no markdown, no explanations):**
+\`\`\`json
+{
+  "matches": [
+    {
+      "productName": "Product name as shown on store",
+      "description": "Brief description from listing",
+      "price": 12.50,
+      "pricePerUnit": "$12.50 / metre" (if shown),
+      "unit": "each|m|L|kg|pack|box",
+      "dimensions": "2.4m length" or "90x45mm" (if applicable),
+      "itemNumber": "123456",
+      "brand": "Brand name",
+      "stockLevel": "in-stock|low-stock|out-of-stock|unknown",
+      "productUrl": "Full product page URL",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "quantityAdjustment": {
+    "originalQuantity": ${requestedQuantity},
+    "adjustedQuantity": 2,
+    "reason": "Need ${requestedQuantity}${requestedUnit} but sold in 2.4m lengths, buying 2 pieces (4.8m total)"
+  } (ONLY if adjustment needed, otherwise omit)
+}
+\`\`\`
+
+If no products found, return: {"matches": [], "quantityAdjustment": null}`;
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicApiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 4096,
+          temperature: 0.2,
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API returned ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json();
+      const content = data.content[0];
+
+      if (content.type !== 'text') {
+        throw new Error('Unexpected response type from Claude');
+      }
+
+      res.status(200).json({ parsed: content.text });
+    } catch (error: any) {
+      console.error('Error parsing products HTML:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
