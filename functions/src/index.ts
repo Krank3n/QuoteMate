@@ -1103,6 +1103,100 @@ export const fetchStoreHTML = functions.https.onRequest((req, res) => {
 });
 
 /**
+ * Clean up transcribed text and generate job title
+ * Used for voice-to-text feature on web platform
+ */
+export const cleanupTranscription = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { transcribedText } = req.body;
+
+      if (!transcribedText) {
+        res.status(400).json({ error: 'Missing transcribedText' });
+        return;
+      }
+
+      const anthropicApiKey = functions.config().anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+
+      if (!anthropicApiKey) {
+        res.status(500).json({ error: 'Anthropic API key not configured' });
+        return;
+      }
+
+      const prompt = `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title.
+
+Transcribed Text: "${transcribedText}"
+
+Tasks:
+1. Fix any transcription errors or unclear phrases
+2. Improve grammar and formatting while keeping the tradie's natural language
+3. Keep all important details (measurements, materials, locations, etc.)
+4. Generate a short, professional job title (3-7 words)
+
+Provide a JSON response with this structure:
+{
+  "cleanedDescription": "The cleaned and formatted description",
+  "suggestedTitle": "Short Job Title"
+}
+
+Return ONLY valid JSON, no other text.`;
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicApiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 1000,
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API returned ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json();
+      const content = data.content[0].text;
+
+      // Parse the JSON response
+      let jsonStr = content.trim();
+
+      // Remove markdown code blocks if present
+      if (jsonStr.startsWith('```json')) {
+        jsonStr = jsonStr.replace(/```json\n?/, '').replace(/\n?```$/, '');
+      } else if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replace(/```\n?/, '').replace(/\n?```$/, '');
+      }
+
+      const parsed = JSON.parse(jsonStr);
+
+      res.status(200).json({
+        cleanedDescription: parsed.cleanedDescription || transcribedText,
+        suggestedTitle: parsed.suggestedTitle || '',
+      });
+    } catch (error: any) {
+      console.error('Error cleaning up transcription:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
  * Parse hardware store search results using Claude AI
  * Used as proxy for web platform to avoid CORS and API key exposure
  */

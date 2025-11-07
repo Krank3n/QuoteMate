@@ -271,3 +271,159 @@ export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): Par
     manualPriceOverride: false,
   }));
 }
+
+/**
+ * Clean up transcribed text and generate a job title
+ * @param transcribedText - Raw text from voice transcription
+ * @returns Cleaned description and suggested title
+ */
+export async function cleanupTranscriptionAndGenerateTitle(
+  transcribedText: string
+): Promise<{ cleanedDescription: string; suggestedTitle: string }> {
+  // On web, use Firebase Functions
+  if (Platform.OS === 'web') {
+    return cleanupViaFirebaseFunction(transcribedText);
+  }
+
+  // On mobile, call Anthropic API directly
+  if (!ANTHROPIC_API_KEY) {
+    console.warn('ANTHROPIC_API_KEY not set');
+    throw new Error('API key not configured');
+  }
+
+  try {
+    const prompt = createCleanupPrompt(transcribedText);
+
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 1000,
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API returned ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+    const content = data.content[0].text;
+
+    // Parse the JSON response
+    const result = parseCleanupResponse(content);
+    return result;
+  } catch (error) {
+    console.error('Text cleanup failed:', error);
+    // Fallback: return original text with a basic title
+    return {
+      cleanedDescription: transcribedText,
+      suggestedTitle: extractSimpleTitle(transcribedText),
+    };
+  }
+}
+
+/**
+ * Clean up transcription via Firebase Cloud Function (for web)
+ */
+async function cleanupViaFirebaseFunction(
+  transcribedText: string
+): Promise<{ cleanedDescription: string; suggestedTitle: string }> {
+  try {
+    const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/cleanupTranscription`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ transcribedText }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    return {
+      cleanedDescription: data.cleanedDescription || transcribedText,
+      suggestedTitle: data.suggestedTitle || '',
+    };
+  } catch (error) {
+    console.error('Firebase cleanup function failed:', error);
+    return {
+      cleanedDescription: transcribedText,
+      suggestedTitle: extractSimpleTitle(transcribedText),
+    };
+  }
+}
+
+/**
+ * Create the prompt for text cleanup and title generation
+ */
+function createCleanupPrompt(transcribedText: string): string {
+  return `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title.
+
+Transcribed Text: "${transcribedText}"
+
+Tasks:
+1. Fix any transcription errors or unclear phrases
+2. Improve grammar and formatting while keeping the tradie's natural language
+3. Keep all important details (measurements, materials, locations, etc.)
+4. Generate a short, professional job title (3-7 words)
+
+Provide a JSON response with this structure:
+{
+  "cleanedDescription": "The cleaned and formatted description",
+  "suggestedTitle": "Short Job Title"
+}
+
+Return ONLY valid JSON, no other text.`;
+}
+
+/**
+ * Parse the cleanup response
+ */
+function parseCleanupResponse(content: string): { cleanedDescription: string; suggestedTitle: string } {
+  try {
+    // Extract JSON from potential markdown code blocks
+    let jsonStr = content.trim();
+
+    // Remove markdown code blocks if present
+    if (jsonStr.startsWith('```json')) {
+      jsonStr = jsonStr.replace(/```json\n?/, '').replace(/\n?```$/, '');
+    } else if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/```\n?/, '').replace(/\n?```$/, '');
+    }
+
+    const parsed = JSON.parse(jsonStr);
+
+    return {
+      cleanedDescription: parsed.cleanedDescription || '',
+      suggestedTitle: parsed.suggestedTitle || '',
+    };
+  } catch (error) {
+    console.error('Failed to parse cleanup response:', error);
+    throw new Error('Invalid response from LLM');
+  }
+}
+
+/**
+ * Extract a simple title from text as fallback
+ */
+function extractSimpleTitle(text: string): string {
+  // Take first sentence or first 50 chars, whichever is shorter
+  const firstSentence = text.split(/[.!?]/)[0];
+  const title = firstSentence.length > 50 ? firstSentence.substring(0, 47) + '...' : firstSentence;
+  return title || 'Custom Job';
+}

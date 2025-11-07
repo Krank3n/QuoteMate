@@ -16,6 +16,7 @@ import { SettingsScreen } from '../screens/SettingsScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
+import { CustomerDetailsScreen } from '../screens/NewQuote/CustomerDetailsScreen';
 import { MaterialsListScreen } from '../screens/NewQuote/MaterialsListScreen';
 import { LaborMarkupScreen } from '../screens/NewQuote/LaborMarkupScreen';
 import { QuotePreviewScreen } from '../screens/NewQuote/QuotePreviewScreen';
@@ -31,6 +32,7 @@ export type RootTabParamList = {
 
 export type NewQuoteStackParamList = {
   JobDetails: undefined;
+  CustomerDetails: undefined;
   MaterialsList: undefined;
   LaborMarkup: undefined;
   QuotePreview: undefined;
@@ -64,6 +66,11 @@ function NewQuoteNavigator() {
         name="JobDetails"
         component={JobDetailsScreen}
         options={{ title: 'New Quote - Job Details' }}
+      />
+      <NewQuoteStack.Screen
+        name="CustomerDetails"
+        component={CustomerDetailsScreen}
+        options={{ title: 'Customer Details' }}
       />
       <NewQuoteStack.Screen
         name="MaterialsList"
@@ -163,12 +170,6 @@ export function RootNavigator() {
         component={NewQuoteNavigator}
         options={{
           presentation: 'modal',
-          ...(Platform.OS === 'web' && {
-            contentStyle: {
-              overflow: 'auto',
-              maxHeight: '90vh',
-            }
-          })
         }}
       />
       <RootStack.Screen

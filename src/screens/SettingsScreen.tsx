@@ -42,6 +42,7 @@ import {
   getDefaultStoresForTrade,
   TRADE_TYPE_LABELS
 } from '../constants/tradeStores';
+import { FixedBottomButton } from '../components/FixedBottomButton';
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
@@ -295,11 +296,7 @@ export function SettingsScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
+    <View style={styles.container}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -560,16 +557,6 @@ export function SettingsScreen() {
           </Text>
         </View>
 
-        <Button
-          mode="contained"
-          onPress={handleSave}
-          style={styles.button}
-          loading={isLoading}
-          disabled={isLoading}
-        >
-          Save Settings
-        </Button>
-
         {/* Sign Out Section */}
         {auth.currentUser && (
           <>
@@ -599,6 +586,14 @@ export function SettingsScreen() {
         )}
         </WebContainer>
       </ScrollView>
+
+      {/* Fixed Save Button */}
+      <FixedBottomButton
+        label="Save Settings"
+        onPress={handleSave}
+        disabled={isLoading}
+        loading={isLoading}
+      />
 
       {/* Logout Confirmation Dialog */}
       <Portal>
@@ -661,7 +656,7 @@ export function SettingsScreen() {
           </Dialog.Actions>
         </Dialog>
       </Portal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -669,11 +664,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+    ...(Platform.OS === 'web' && {
+      display: 'flex' as any,
+      flexDirection: 'column' as any,
+      height: '100vh' as any,
+      overflow: 'hidden' as any,
+    }),
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 220,
+    paddingBottom: 120,
     flexGrow: 1,
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+      margin: 'auto' as any,
+      width: '100%',
+    }),
   },
   card: {
     padding: 20,
@@ -696,11 +702,6 @@ const styles = StyleSheet.create({
   },
   input: {
     marginBottom: 20,
-  },
-  button: {
-    marginTop: 12,
-    marginBottom: 80,
-    paddingVertical: 8,
   },
   helperText: {
     fontSize: 14,
