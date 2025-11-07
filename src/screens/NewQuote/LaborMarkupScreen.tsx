@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { formatCurrency, calculateQuote } from '../../utils/quoteCalculator';
+import { FixedBottomButton } from '../../components/FixedBottomButton';
 
 export function LaborMarkupScreen() {
   const navigation = useNavigation<any>();
@@ -102,7 +103,7 @@ export function LaborMarkupScreen() {
           </Dialog.Actions>
         </Dialog>
       </Portal>
-      <View style={styles.container}>
+      <View style={styles.outerContainer}>
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
@@ -222,16 +223,13 @@ export function LaborMarkupScreen() {
           </Text>
         </View>
       </Surface>
+        </ScrollView>
 
-        <Button
-          mode="contained"
+        <FixedBottomButton
+          label="Next: Preview Quote"
           onPress={handleNext}
-          style={styles.nextButton}
-        >
-          Next: Preview Quote
-        </Button>
-      </ScrollView>
-    </View>
+        />
+      </View>
     </>
   );
 
@@ -252,7 +250,7 @@ export function LaborMarkupScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  outerContainer: {
     flex: 1,
     backgroundColor: colors.background,
     ...(Platform.OS === 'web' && {
@@ -270,7 +268,7 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
-    paddingBottom: 220,
+    paddingBottom: 120,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
@@ -344,11 +342,5 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: colors.primary,
-  },
-  nextButton: {
-    marginHorizontal: 20,
-    marginTop: 24,
-    marginBottom: 80,
-    paddingVertical: 8,
   },
 });

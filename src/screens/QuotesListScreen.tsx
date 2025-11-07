@@ -7,31 +7,26 @@ import React, { useState } from 'react';
 import { View, StyleSheet, FlatList, Alert, Platform, Pressable } from 'react-native';
 import {
   Text,
-  Card,
   Searchbar,
   Chip,
   FAB,
-  Menu,
-  IconButton,
   Dialog,
   Portal,
   Button,
-  RadioButton,
 } from 'react-native-paper';
 import { format } from 'date-fns';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
 import * as MailComposer from 'expo-mail-composer';
 
 import { useStore } from '../store/useStore';
 import { Quote } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { generateQuotePDF } from '../utils/pdfGenerator';
+import { generateQuotePDF, exportQuotePDF } from '../utils/pdfGenerator';
 import { WebContainer } from '../components/WebContainer';
+import { QuoteCard } from '../components/QuoteCard';
 
 type FilterStatus = 'all' | 'draft' | 'sent' | 'accepted' | 'rejected';
 
@@ -41,7 +36,6 @@ export function QuotesListScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
-  const [menuVisible, setMenuVisible] = useState<string | null>(null);
   const [statusDialogVisible, setStatusDialogVisible] = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<'draft' | 'sent' | 'accepted' | 'rejected'>('draft');
@@ -127,72 +121,9 @@ export function QuotesListScreen() {
     }
   };
 
-  const handleSendQuote = async (quote: Quote) => {
-    try {
-      if (Platform.OS === 'web') {
-        // Generate PDF HTML
-        const html = await generateQuotePDF(quote, businessSettings);
-        const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-
-        // Create a hidden iframe to print the PDF
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        document.body.appendChild(iframe);
-
-        const iframeDoc = iframe.contentWindow?.document;
-        if (iframeDoc) {
-          iframeDoc.open();
-          iframeDoc.write(html);
-          iframeDoc.close();
-
-          // Wait for content to load then trigger print dialog
-          iframe.onload = () => {
-            setTimeout(() => {
-              iframe.contentWindow?.print();
-              // Clean up after a delay
-              setTimeout(() => {
-                document.body.removeChild(iframe);
-              }, 1000);
-            }, 250);
-          };
-        }
-
-        // Show email client selector dialog immediately
-        setEmailQuote(quote);
-        setEmailDialogVisible(true);
-      } else {
-        // Mobile platforms
-        // Check if email is available
-        const isAvailable = await MailComposer.isAvailableAsync();
-        if (!isAvailable) {
-          Alert.alert('Email Not Available', 'Email is not configured on this device. Please set up an email account first.');
-          return;
-        }
-
-        // Generate PDF with custom filename
-        const html = await generateQuotePDF(quote, businessSettings);
-        const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-        const { uri } = await Print.printToFileAsync({ html, base64: false });
-
-        // Compose email
-        const result = await MailComposer.composeAsync({
-          recipients: quote.customerEmail ? [quote.customerEmail] : [],
-          subject: `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`,
-          body: `Hi ${quote.customerName},\n\nPlease find attached your quotation for ${quote.job.name}.\n\nTotal: ${formatCurrency(quote.total)}\n\nThis quote is valid for 30 days from the date of issue.\n\nIf you have any questions, please don't hesitate to contact us.\n\nBest regards,\n${businessSettings?.businessName || 'Your Business'}`,
-          attachments: [uri],
-        });
-
-        // Update quote status to 'sent' if email was sent
-        if (result.status === 'sent') {
-          const updatedQuote = { ...quote, status: 'sent' as const };
-          await saveQuote(updatedQuote);
-          Alert.alert('Success', 'Quote sent successfully and marked as sent!');
-        }
-      }
-    } catch (error) {
-      console.error('Send error:', error);
-      Alert.alert('Error', 'Failed to send quote. Please try again.');
-    }
+  const handleOpenEmailDialog = (quote: Quote) => {
+    setEmailQuote(quote);
+    setEmailDialogVisible(true);
   };
 
   const handleEmailViaGmail = (quote: Quote) => {
@@ -288,182 +219,17 @@ export function QuotesListScreen() {
     }
   };
 
-  const handleShareQuote = async (quote: Quote) => {
-    try {
-      const html = await generateQuotePDF(quote, businessSettings);
-      const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-
-      if (Platform.OS === 'web') {
-        // On web, use browser's native print functionality
-        const printWindow = window.open('', '_blank');
-        if (printWindow) {
-          printWindow.document.write(html);
-          printWindow.document.close();
-          printWindow.document.title = filename;
-          printWindow.onload = () => {
-            printWindow.focus();
-            printWindow.print();
-          };
-        } else {
-          Alert.alert('Error', 'Please allow popups to export PDF');
-        }
-      } else {
-        // Mobile platforms
-        const { uri } = await Print.printToFileAsync({ html });
-
-        if (Platform.OS === 'ios') {
-          await Sharing.shareAsync(uri, { dialogTitle: filename });
-        } else {
-          const isAvailable = await Sharing.isAvailableAsync();
-          if (isAvailable) {
-            await Sharing.shareAsync(uri, { dialogTitle: filename });
-          } else {
-            Alert.alert('PDF Created', `PDF saved to: ${uri}`);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Share error:', error);
-      Alert.alert('Error', 'Failed to share quote. Please try again.');
-    }
-  };
-
-  const handleExportQuote = async (quote: Quote) => {
-    try {
-      const html = await generateQuotePDF(quote, businessSettings);
-      const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-
-      if (Platform.OS === 'web') {
-        // On web, use browser's native print functionality
-        const printWindow = window.open('', '_blank');
-        if (printWindow) {
-          printWindow.document.write(html);
-          printWindow.document.close();
-          printWindow.document.title = filename;
-          printWindow.onload = () => {
-            printWindow.focus();
-            printWindow.print();
-          };
-        } else {
-          Alert.alert('Error', 'Please allow popups to export PDF');
-        }
-      } else {
-        // Mobile platforms
-        const { uri } = await Print.printToFileAsync({ html });
-
-        Alert.alert(
-          'PDF Exported',
-          `${filename} created successfully`,
-          [
-            {
-              text: 'Share',
-              onPress: async () => {
-                const isAvailable = await Sharing.isAvailableAsync();
-                if (isAvailable) {
-                  await Sharing.shareAsync(uri, { dialogTitle: filename });
-                }
-              },
-            },
-            { text: 'OK' },
-          ]
-        );
-      }
-    } catch (error) {
-      console.error('Export error:', error);
-      Alert.alert('Error', 'Failed to export quote. Please try again.');
-    }
-  };
-
   const renderQuoteCard = ({ item: quote }: { item: Quote }) => (
-    <Card style={styles.card}>
-      <Card.Content>
-        <View style={styles.cardHeader}>
-          <View style={styles.cardInfo}>
-            <Text style={styles.customerName}>{quote.customerName}</Text>
-            <Text style={styles.jobName}>{quote.job.name}</Text>
-            <View style={styles.metaRow}>
-              <MaterialCommunityIcons name="calendar" size={14} color={colors.onSurface} />
-              <Text style={styles.date}>
-                {format(new Date(quote.updatedAt), 'dd MMM yyyy')}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.cardActions}>
-            <Text style={styles.total}>{formatCurrency(quote.total)}</Text>
-            <Chip
-              style={[styles.statusChip, getStatusChipStyle(quote.status)]}
-              textStyle={styles.statusText}
-              onPress={() => handleOpenStatusDialog(quote)}
-            >
-              {quote.status}
-            </Chip>
-
-            <Menu
-              visible={menuVisible === quote.id}
-              onDismiss={() => setMenuVisible(null)}
-              anchor={
-                <IconButton
-                  icon="dots-vertical"
-                  size={20}
-                  onPress={() => setMenuVisible(quote.id)}
-                />
-              }
-            >
-              <Menu.Item
-                leadingIcon="pencil"
-                onPress={() => {
-                  setMenuVisible(null);
-                  handleEditQuote(quote);
-                }}
-                title="Edit"
-              />
-              <Menu.Item
-                leadingIcon="email"
-                onPress={() => {
-                  setMenuVisible(null);
-                  handleSendQuote(quote);
-                }}
-                title="Send via Email"
-              />
-              <Menu.Item
-                leadingIcon="content-copy"
-                onPress={() => {
-                  setMenuVisible(null);
-                  handleDuplicateQuote(quote);
-                }}
-                title="Duplicate"
-              />
-              <Menu.Item
-                leadingIcon="share"
-                onPress={() => {
-                  setMenuVisible(null);
-                  handleShareQuote(quote);
-                }}
-                title="Share"
-              />
-              <Menu.Item
-                leadingIcon="file-pdf-box"
-                onPress={() => {
-                  setMenuVisible(null);
-                  handleExportQuote(quote);
-                }}
-                title="Export PDF"
-              />
-              <Menu.Item
-                leadingIcon="delete"
-                onPress={() => {
-                  setMenuVisible(null);
-                  handleDeleteQuote(quote.id);
-                }}
-                title="Delete"
-                titleStyle={{ color: colors.error }}
-              />
-            </Menu>
-          </View>
-        </View>
-      </Card.Content>
-    </Card>
+    <QuoteCard
+      quote={quote}
+      businessSettings={businessSettings}
+      onEdit={handleEditQuote}
+      onDelete={handleDeleteQuote}
+      onDuplicate={handleDuplicateQuote}
+      onSave={saveQuote}
+      onStatusChange={handleOpenStatusDialog}
+      onEmailDialogOpen={handleOpenEmailDialog}
+    />
   );
 
   return (
@@ -508,24 +274,27 @@ export function QuotesListScreen() {
           Accepted
         </Chip>
       </View>
+      </WebContainer>
 
       {/* Quotes List */}
-      <FlatList
-        data={filteredQuotes}
-        renderItem={renderQuoteCard}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <MaterialCommunityIcons
-              name="file-document-outline"
-              size={64}
-              color={colors.disabled}
-            />
-            <Text style={styles.emptyText}>No quotes found</Text>
-          </View>
-        }
-      />
+      <WebContainer style={styles.listContainer}>
+        <FlatList
+          data={filteredQuotes}
+          renderItem={renderQuoteCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          style={styles.flatList}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <MaterialCommunityIcons
+                name="file-document-outline"
+                size={64}
+                color={colors.disabled}
+              />
+              <Text style={styles.emptyText}>No quotes found</Text>
+            </View>
+          }
+        />
       </WebContainer>
 
       {/* New Quote FAB */}
@@ -681,19 +450,6 @@ export function QuotesListScreen() {
   );
 }
 
-function getStatusChipStyle(status: string) {
-  switch (status) {
-    case 'accepted':
-      return { backgroundColor: colors.successBg };
-    case 'sent':
-      return { backgroundColor: colors.warningBg };
-    case 'rejected':
-      return { backgroundColor: colors.errorBg };
-    default:
-      return { backgroundColor: colors.infoBg };
-  }
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -713,54 +469,14 @@ const styles = StyleSheet.create({
     marginRight: 8,
     backgroundColor: colors.surface,
   },
-  listContent: {
-    padding: 16,
-  },
-  card: {
-    marginBottom: 12,
-    backgroundColor: colors.surface,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  cardInfo: {
+  listContainer: {
     flex: 1,
   },
-  customerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+  flatList: {
+    flex: 1,
   },
-  jobName: {
-    fontSize: 14,
-    color: colors.onSurface,
-    marginBottom: 8,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  date: {
-    fontSize: 12,
-    color: colors.onSurface,
-    marginLeft: 4,
-  },
-  cardActions: {
-    alignItems: 'flex-end',
-  },
-  total: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.primary,
-    marginBottom: 8,
-  },
-  statusChip: {
-    marginBottom: 8,
-  },
-  statusText: {
-    fontSize: 12,
-    textTransform: 'capitalize',
+  listContent: {
+    padding: 16,
   },
   emptyState: {
     alignItems: 'center',

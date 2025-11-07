@@ -14,7 +14,7 @@ const STORE_SEARCH_URLS: Record<string, (searchTerm: string) => string> = {
   'bunnings.com.au': (term) =>
     `https://www.bunnings.com.au/search/products?q=${encodeURIComponent(term)}&sort=BoostOrder`,
   'mitre10.com.au': (term) =>
-    `https://www.mitre10.com.au/search?q=${encodeURIComponent(term)}`,
+    `https://www.mitre10.com.au/catalogsearch/result?q=${encodeURIComponent(term)}&viewType=GRID&flag=product`,
   'reece.com.au': (term) =>
     `https://www.reece.com.au/search?query=${encodeURIComponent(term)}`,
   'middy.com.au': (term) =>
