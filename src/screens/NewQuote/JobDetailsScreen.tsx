@@ -35,6 +35,8 @@ import {
 
 import { useStore } from '../../store/useStore';
 import { JOB_TEMPLATES } from '../../data/jobTemplates';
+import { NICHE_TEMPLATES, getTemplatesForNiche, getNicheTemplateById, NicheJobTemplate } from '../../data/nicheTemplates';
+import { getTradeCategoryById, getTradeNicheById, PRICING_METHODS } from '../../constants/tradeCategories';
 import { createJobFromTemplate } from '../../utils/materialsEstimator';
 import { colors } from '../../theme';
 import { JobTemplate } from '../../types';
@@ -46,15 +48,16 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
-  const { currentQuote, updateQuote, quotes } = useStore();
+  const { currentQuote, updateQuote, quotes, businessSettings } = useStore();
 
-  const [selectedTemplate, setSelectedTemplate] = useState<JobTemplate | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<JobTemplate | NicheJobTemplate | null>(null);
   const [customParams, setCustomParams] = useState<Record<string, number>>({});
   const [jobName, setJobName] = useState('');
   const [jobDescription, setJobDescription] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisErrorDialogVisible, setAnalysisErrorDialogVisible] = useState(false);
   const [analysisErrorMessage, setAnalysisErrorMessage] = useState('');
+  const [useCustomMode, setUseCustomMode] = useState(true); // Default to custom (AI) mode
 
   // Voice recording states
   const [isRecording, setIsRecording] = useState(false);
@@ -71,10 +74,24 @@ export function JobDetailsScreen() {
   const rotateAnim = useState(new Animated.Value(0))[0];
   const webRecognitionRef = useRef<any>(null);
 
+  // Template carousel expand/collapse state
+  const [isTemplateCarouselExpanded, setIsTemplateCarouselExpanded] = useState(false);
+  const carouselHeightAnim = useRef(new Animated.Value(0)).current; // 0 = collapsed, 1 = expanded
+
   // Keep ref in sync with state
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
+
+  // Animate carousel expansion/collapse
+  useEffect(() => {
+    Animated.spring(carouselHeightAnim, {
+      toValue: isTemplateCarouselExpanded ? 1 : 0,
+      useNativeDriver: false,
+      tension: 50,
+      friction: 7,
+    }).start();
+  }, [isTemplateCarouselExpanded]);
 
   // Check if editing an existing quote (by checking if it exists in saved quotes)
   const isEditingExisting = !!(currentQuote && quotes.find(q => q.id === currentQuote.id));
@@ -156,13 +173,19 @@ export function JobDetailsScreen() {
     console.log('Accumulated:', startingDescriptionRef.current);
 
     // If results count is 1 and we have a previous transcript that's different,
-    // it means recognition restarted - save the old one first
+    // it means recognition restarted - check if it's a refinement or new segment
     if (allResults.length === 1 && lastTranscriptRef.current && lastTranscriptRef.current !== currentTranscript) {
       const lastLower = lastTranscriptRef.current.toLowerCase();
       const currentLower = currentTranscript.toLowerCase();
 
+      // Check if current starts with a similar beginning to last (refinement/correction)
+      // Get first 3 words of each
+      const lastWords = lastLower.split(/\s+/).slice(0, 3).join(' ');
+      const currentWords = currentLower.split(/\s+/).slice(0, 3).join(' ');
+      const isRefinement = lastWords === currentWords;
+
       // Check if this is truly a new segment (not just a refinement)
-      if (!currentLower.includes(lastLower) && !lastLower.includes(currentLower)) {
+      if (!isRefinement && !currentLower.includes(lastLower) && !lastLower.includes(currentLower)) {
         console.log('🔄 NEW SEGMENT DETECTED - saving previous:', lastTranscriptRef.current);
         const newAccumulated = startingDescriptionRef.current
           ? startingDescriptionRef.current + ' ' + lastTranscriptRef.current
@@ -170,6 +193,23 @@ export function JobDetailsScreen() {
 
         startingDescriptionRef.current = newAccumulated;
         console.log('✅ Accumulated now:', startingDescriptionRef.current);
+
+        // Display ONLY accumulated text for this frame, next result will add current
+        setJobDescription(startingDescriptionRef.current);
+        lastTranscriptRef.current = currentTranscript;
+        console.log('Displayed (after segment save):', startingDescriptionRef.current);
+        return; // Exit early to avoid double display
+      } else if (isRefinement) {
+        console.log('🔧 REFINEMENT DETECTED - replacing with better recognition');
+        // This is a refinement of what was already said, just update the display
+        const displayText = startingDescriptionRef.current
+          ? startingDescriptionRef.current + ' ' + currentTranscript
+          : currentTranscript;
+
+        setJobDescription(displayText);
+        lastTranscriptRef.current = currentTranscript;
+        console.log('Displayed (refinement):', displayText);
+        return;
       }
     }
 
@@ -406,20 +446,50 @@ export function JobDetailsScreen() {
     } else {
       // Start recording - append to existing description
       console.log('🎤 Starting native recording...');
+
       try {
-        console.log('📝 Step 1: Requesting permissions...');
-        setIsRequestingPermission(true);
+        console.log('📝 Step 1: Checking current permission status...');
 
-        const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-        console.log('📝 Permission result:', result);
+        // First check if we already have permission
+        const currentStatus = await ExpoSpeechRecognitionModule.getPermissionsAsync();
+        console.log('📝 Current permission status:', currentStatus);
 
-        setIsRequestingPermission(false);
+        let result = currentStatus;
 
-        if (!result.granted) {
-          console.log('❌ Permission denied');
-          Alert.alert('Permission Required', 'Microphone permission is required for voice recording');
-          return;
+        // Only request if not already granted
+        if (!currentStatus.granted) {
+          console.log('📝 Permission not granted, requesting...');
+          setIsRequestingPermission(true);
+
+          // Add a timeout to prevent infinite loading
+          const permissionPromise = ExpoSpeechRecognitionModule.requestPermissionsAsync();
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Permission request timed out')), 10000)
+          );
+
+          try {
+            result = await Promise.race([permissionPromise, timeoutPromise]) as any;
+            console.log('📝 Permission result:', result);
+          } catch (timeoutError) {
+            console.error('⏱️ Permission request timed out');
+            setIsRequestingPermission(false);
+            Alert.alert(
+              'Permission Request Failed',
+              'The permission dialog did not appear. Please check:\n\n1. Go to Android Settings > Apps > QuoteMate > Permissions\n2. Enable Microphone permission\n3. Try again'
+            );
+            return;
+          }
+
+          setIsRequestingPermission(false);
+
+          if (!result.granted) {
+            console.log('❌ Permission denied');
+            Alert.alert('Permission Required', 'Microphone permission is required for voice recording');
+            return;
+          }
         }
+
+        console.log('✅ Permission granted');
 
         // Check if speech recognition is available
         console.log('📝 Step 2: Checking availability...');
@@ -446,7 +516,9 @@ export function JobDetailsScreen() {
       } catch (error: any) {
         console.error('❌ Failed to start recording:', error);
         console.error('Error details:', JSON.stringify(error, null, 2));
+        // Ensure we always reset the loading state
         setIsRequestingPermission(false);
+        setIsRecording(false);
         Alert.alert(
           'Error Starting Recording',
           `Failed to start voice recording: ${error?.message || 'Unknown error'}\n\nPlease check:\n1. Microphone permission is granted\n2. Speech recognition is available on your device\n3. Internet connection (for cloud recognition)`
@@ -556,7 +628,64 @@ export function JobDetailsScreen() {
 
     // Start AI analysis in background (non-blocking)
     setIsAnalyzing(true);
-    analyzeJobDescription(jobDescription)
+
+    // Prepare trade context from business settings (supports multi-select)
+    const tradeContext = businessSettings ? (() => {
+      let categoryNames: string[] = [];
+      let nicheNames: string[] = [];
+      let allSuggestedMaterials: string[] = [];
+      let pricingMethod: string | undefined;
+
+      // Try new multi-select fields first
+      if (businessSettings.tradeCategories && businessSettings.tradeCategories.length > 0) {
+        categoryNames = businessSettings.tradeCategories
+          .map(id => getTradeCategoryById(id)?.name)
+          .filter((n): n is string => !!n);
+
+        if (businessSettings.tradeNiches && businessSettings.tradeNiches.length > 0) {
+          businessSettings.tradeCategories.forEach(catId => {
+            businessSettings.tradeNiches?.forEach(nicheId => {
+              const niche = getTradeNicheById(catId, nicheId);
+              if (niche) {
+                nicheNames.push(niche.name);
+                allSuggestedMaterials.push(...(niche.commonServices || []));
+                if (!pricingMethod && niche.pricingMethods && niche.pricingMethods.length > 0) {
+                  pricingMethod = niche.pricingMethods[0].label;
+                }
+              }
+            });
+          });
+        }
+      } else if (businessSettings.tradeCategory) {
+        // Fallback to legacy single-select
+        const category = getTradeCategoryById(businessSettings.tradeCategory);
+        if (category) categoryNames.push(category.name);
+
+        if (businessSettings.tradeNiche) {
+          const niche = getTradeNicheById(businessSettings.tradeCategory, businessSettings.tradeNiche);
+          if (niche) {
+            nicheNames.push(niche.name);
+            allSuggestedMaterials.push(...(niche.commonServices || []));
+            if (niche.pricingMethods && niche.pricingMethods.length > 0) {
+              pricingMethod = niche.pricingMethods[0].label;
+            }
+          }
+        }
+      }
+
+      // Remove duplicates from suggested materials
+      const uniqueMaterials = Array.from(new Set(allSuggestedMaterials));
+
+      return {
+        categoryName: categoryNames.join(', '),
+        nicheName: nicheNames.join(', '),
+        suggestedMaterials: uniqueMaterials.length > 0 ? uniqueMaterials : undefined,
+        pricingMethod,
+        selectedStore: businessSettings.selectedStore || 'bunnings',
+      };
+    })() : undefined;
+
+    analyzeJobDescription(jobDescription, tradeContext)
       .then((analysis) => {
         // Convert LLM materials to app materials format
         const baseMaterials = convertLLMMaterialsToMaterials(analysis.materials);
@@ -606,17 +735,13 @@ export function JobDetailsScreen() {
   const handleNext = () => {
     if (!currentQuote) return;
 
-    // Template is auto-selected now, but check just in case
-    if (!selectedTemplate) {
-      const customTemplate = JOB_TEMPLATES.find((t) => t.id === 'custom');
-      if (customTemplate) {
-        setSelectedTemplate(customTemplate);
+    // CUSTOM MODE: Use AI to analyze description
+    if (useCustomMode) {
+      if (!jobDescription.trim()) {
+        Alert.alert('Missing Information', 'Please describe the job or select a template');
+        return;
       }
-      return;
-    }
 
-    // Handle custom job differently
-    if (selectedTemplate.id === 'custom') {
       // If editing existing quote, just navigate without re-analyzing
       if (isEditingExisting) {
         const updatedQuote = {
@@ -631,36 +756,41 @@ export function JobDetailsScreen() {
         navigation.navigate('CustomerDetails');
         return;
       }
-      // Only analyze for new custom jobs
+
+      // Analyze custom job with AI
       handleAnalyzeCustomJob();
       return;
     }
 
-    let materials = currentQuote.materials;
-    let estimatedHours = currentQuote.laborHours;
-    let job = currentQuote.job;
-
-    // Only regenerate materials if this is a new quote without materials
-    if (!isEditingExisting) {
-      const templateData = createJobFromTemplate(
-        selectedTemplate,
-        customParams,
-        jobName || selectedTemplate.name
-      );
-      materials = templateData.materials;
-      estimatedHours = templateData.estimatedHours;
-      job = templateData.job;
-    } else {
-      // Update job details but keep existing materials
-      job = {
-        ...currentQuote.job,
-        name: jobName || currentQuote.job.name,
-        description: jobDescription,
-        customParams,
-      };
+    // TEMPLATE MODE: Use parameters from selected template
+    if (!selectedTemplate) {
+      Alert.alert('Missing Information', 'Please select a template or describe your job');
+      return;
     }
 
-    // Update quote with job details (preserve materials)
+    // Validate parameters are filled in
+    const nicheTemplate = selectedTemplate as NicheJobTemplate;
+    if (nicheTemplate.requiredParams && nicheTemplate.requiredParams.length > 0) {
+      const missingParams = nicheTemplate.requiredParams.filter(
+        param => !customParams[param.key] || customParams[param.key] === 0
+      );
+      if (missingParams.length > 0) {
+        Alert.alert(
+          'Missing Parameters',
+          `Please fill in: ${missingParams.map(p => p.label).join(', ')}`
+        );
+        return;
+      }
+    }
+
+    // Create job from template with parameters using the materialsEstimator utility
+    const { job, materials, estimatedHours } = createJobFromTemplate(
+      selectedTemplate,
+      customParams,
+      jobName || selectedTemplate.name
+    );
+
+    // Update quote with template-generated materials
     const updatedQuote = {
       ...currentQuote,
       job,
@@ -694,59 +824,221 @@ export function JobDetailsScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <WebContainer>
-      {/* Template Selection - Commented out for now
-      <View style={styles.section}>
-        <Title style={styles.sectionTitle}>Select Job Template</Title>
-        {isEditingExisting && (
-          <Text style={styles.helperText}>
-            Template is locked when editing an existing quote.
-          </Text>
-        )}
+      {/* Niche-Specific Quick Templates */}
+      {businessSettings && !isEditingExisting && (() => {
+        // Get all templates from user's selected categories and niches
+        const allTemplates: NicheJobTemplate[] = [];
 
-        <View style={styles.templatesGrid}>
-          {JOB_TEMPLATES.map((template) => (
+        // First, try to get templates from new multi-select fields
+        if (businessSettings.tradeCategories && businessSettings.tradeCategories.length > 0) {
+          businessSettings.tradeCategories.forEach(categoryId => {
+            if (businessSettings.tradeNiches && businessSettings.tradeNiches.length > 0) {
+              // Get templates for each selected niche
+              businessSettings.tradeNiches.forEach(nicheId => {
+                const templates = getTemplatesForNiche(categoryId, nicheId);
+                allTemplates.push(...templates);
+              });
+            } else {
+              // No niches selected, get all templates for this category
+              const category = getTradeCategoryById(categoryId);
+              if (category) {
+                category.niches.forEach(niche => {
+                  const templates = getTemplatesForNiche(categoryId, niche.id);
+                  allTemplates.push(...templates);
+                });
+              }
+            }
+          });
+        } else if (businessSettings.tradeCategory && businessSettings.tradeNiche) {
+          // Fallback: Use legacy single-select fields
+          allTemplates.push(...getTemplatesForNiche(businessSettings.tradeCategory, businessSettings.tradeNiche));
+        }
+
+        // Remove duplicates by ID
+        const uniqueTemplates = Array.from(new Map(allTemplates.map(t => [t.id, t])).values());
+
+        if (uniqueTemplates.length === 0) return null;
+
+        return (
+          <Surface style={[styles.paramsSection, styles.firstSection, styles.templateSection]}>
             <TouchableOpacity
-              key={template.id}
-              onPress={() => handleTemplateSelect(template)}
-              style={styles.templateCardWrapper}
-              disabled={isEditingExisting}
+              style={styles.sectionTitleContainer}
+              onPress={() => setIsTemplateCarouselExpanded(!isTemplateCarouselExpanded)}
+              activeOpacity={0.7}
             >
-              <Card
-                style={[
-                  styles.templateCard,
-                  selectedTemplate?.id === template.id && styles.selectedCard,
-                  isEditingExisting && styles.disabledCard,
-                ]}
-              >
-                <Card.Content>
-                  <MaterialCommunityIcons
-                    name={getTemplateIcon(template.id)}
-                    size={32}
-                    color={
-                      selectedTemplate?.id === template.id
-                        ? colors.primary
-                        : colors.onSurface
-                    }
-                  />
-                  <Text style={styles.templateName}>{template.name}</Text>
-                  <Text style={styles.templateDesc}>{template.description}</Text>
-                </Card.Content>
-              </Card>
+              <View style={styles.sectionTitleRow}>
+                <MaterialCommunityIcons name="briefcase-outline" size={24} color={colors.primary} style={styles.sectionIcon} />
+                <Title style={styles.sectionTitle}>Select Job Type</Title>
+                <MaterialCommunityIcons
+                  name={isTemplateCarouselExpanded ? "chevron-up" : "chevron-down"}
+                  size={24}
+                  color={colors.primary}
+                  style={styles.expandIcon}
+                />
+              </View>
+              <Text style={styles.helperText}>
+                {isTemplateCarouselExpanded
+                  ? 'Choose a template for quick setup, or start with a custom job description.'
+                  : `Tap to view ${uniqueTemplates.length + 1} job type${uniqueTemplates.length > 0 ? 's' : ''}`
+                }
+              </Text>
             </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-      */}
 
-      {/* Job Description */}
-      <Surface style={[styles.paramsSection, styles.firstSection]}>
-        <View style={styles.sectionTitleContainer}>
-          <MaterialCommunityIcons name="hammer-wrench" size={24} color={colors.primary} style={styles.sectionIcon} />
-          <Title style={styles.sectionTitle}>Job Description</Title>
-        </View>
-        <Text style={styles.helperText}>
-          Tap the microphone to describe the job with your voice, or type it manually below.
-        </Text>
+            <Animated.View style={{
+              height: carouselHeightAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [100, 220], // Collapsed shows just one row, expanded shows more
+              }),
+              overflow: 'hidden',
+            }}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.templateScroll}
+                onScrollBeginDrag={() => {
+                  if (!isTemplateCarouselExpanded) {
+                    setIsTemplateCarouselExpanded(true);
+                  }
+                }}
+              >
+              {/* Custom Job Card (first option) */}
+              <TouchableOpacity
+                style={[
+                  styles.quickTemplateCard,
+                  useCustomMode && !selectedTemplate && styles.quickTemplateCardSelected,
+                ]}
+                onPress={() => {
+                  setUseCustomMode(true);
+                  setSelectedTemplate(null);
+                  setCustomParams({});
+                  // Don't clear jobName or jobDescription - preserve user's custom input
+                  // Auto-collapse after selection
+                  setTimeout(() => setIsTemplateCarouselExpanded(false), 300);
+                }}
+              >
+                <MaterialCommunityIcons
+                  name="pencil-outline"
+                  size={32}
+                  color={useCustomMode && !selectedTemplate ? colors.primary : colors.textMuted}
+                  style={styles.quickTemplateIcon}
+                />
+                <Text style={[
+                  styles.quickTemplateName,
+                  useCustomMode && !selectedTemplate && styles.quickTemplateNameSelected,
+                ]}>Custom Job</Text>
+                <Text style={styles.quickTemplateDesc}>Describe your own job</Text>
+                <View style={styles.quickTemplateBadge}>
+                  <MaterialCommunityIcons name="brain" size={12} color={colors.secondary} />
+                  <Text style={styles.quickTemplateBadgeText}>AI Powered</Text>
+                </View>
+                {useCustomMode && !selectedTemplate && (
+                  <MaterialCommunityIcons
+                    name="check-circle"
+                    size={20}
+                    color={colors.success}
+                    style={styles.quickTemplateCheck}
+                  />
+                )}
+              </TouchableOpacity>
+
+              {/* Template Cards */}
+              {uniqueTemplates.map((template) => (
+              <TouchableOpacity
+                key={template.id}
+                style={[
+                  styles.quickTemplateCard,
+                  selectedTemplate?.id === template.id && styles.quickTemplateCardSelected,
+                ]}
+                onPress={() => {
+                  // Switch to template mode
+                  setUseCustomMode(false);
+                  setSelectedTemplate(template);
+                  setJobName(template.name);
+                  setJobDescription(template.description);
+
+                  // Initialize params with default values
+                  if (template.requiredParams && template.requiredParams.length > 0) {
+                    const params: Record<string, number> = {};
+                    template.requiredParams.forEach(param => {
+                      params[param.key] = param.defaultValue || 0;
+                    });
+                    setCustomParams(params);
+                  }
+
+                  // Auto-collapse after selection
+                  setTimeout(() => setIsTemplateCarouselExpanded(false), 300);
+                }}
+              >
+                <MaterialCommunityIcons
+                  name={template.icon as any}
+                  size={32}
+                  color={selectedTemplate?.id === template.id ? colors.primary : colors.textMuted}
+                  style={styles.quickTemplateIcon}
+                />
+                <Text style={[
+                  styles.quickTemplateName,
+                  selectedTemplate?.id === template.id && styles.quickTemplateNameSelected,
+                ]}>{template.name}</Text>
+                <Text style={styles.quickTemplateDesc}>{template.description}</Text>
+                <View style={styles.quickTemplateBadge}>
+                  <MaterialCommunityIcons name="lightning-bolt" size={12} color={colors.secondary} />
+                  <Text style={styles.quickTemplateBadgeText}>{(PRICING_METHODS as any)[template.pricingMethod]?.label || template.pricingMethod}</Text>
+                </View>
+                {selectedTemplate?.id === template.id && (
+                  <MaterialCommunityIcons
+                    name="check-circle"
+                    size={20}
+                    color={colors.success}
+                    style={styles.quickTemplateCheck}
+                  />
+                )}
+              </TouchableOpacity>
+              ))}
+              </ScrollView>
+            </Animated.View>
+          </Surface>
+        );
+      })()}
+
+      {/* Template Parameters OR Custom Job Description */}
+      {!useCustomMode && selectedTemplate && (selectedTemplate as NicheJobTemplate).requiredParams && (selectedTemplate as NicheJobTemplate).requiredParams.length > 0 ? (
+        // TEMPLATE MODE: Show parameter inputs
+        <Surface style={styles.paramsSection}>
+          <View style={styles.sectionTitleContainer}>
+            <MaterialCommunityIcons name="format-list-numbered" size={24} color={colors.primary} style={styles.sectionIcon} />
+            <Title style={styles.sectionTitle}>Job Details</Title>
+          </View>
+          <Text style={styles.helperText}>
+            Enter the measurements for this {selectedTemplate.name.toLowerCase()} job.
+          </Text>
+
+          {(selectedTemplate as NicheJobTemplate).requiredParams.map((param) => (
+            <View key={param.key} style={styles.paramInputContainer}>
+              <TextInput
+                label={param.label}
+                value={customParams[param.key]?.toString() || ''}
+                onChangeText={(text) => {
+                  const value = parseFloat(text) || 0;
+                  setCustomParams({ ...customParams, [param.key]: value });
+                }}
+                mode="outlined"
+                keyboardType="decimal-pad"
+                style={styles.paramInput}
+                right={param.unit ? <TextInput.Affix text={param.unit} /> : undefined}
+              />
+            </View>
+          ))}
+        </Surface>
+      ) : (
+        // CUSTOM MODE: Show voice/text input (merged into one Surface)
+        <Surface style={styles.paramsSection}>
+          <View style={styles.sectionTitleContainer}>
+            <MaterialCommunityIcons name="hammer-wrench" size={24} color={colors.primary} style={styles.sectionIcon} />
+            <Title style={styles.sectionTitle}>Custom Job Description</Title>
+          </View>
+          <Text style={styles.helperText}>
+            Tap the microphone to describe the job with your voice, or type it manually below.
+          </Text>
 
         {/* Beautiful Record Button */}
         {(
@@ -943,44 +1235,12 @@ export function JobDetailsScreen() {
           multiline
           numberOfLines={2}
           disabled={isProcessingVoice}
+          autoComplete="off"
+          textContentType="none"
         />
-      </Surface>
-
-      {/* Standard Template Parameters */}
-      {selectedTemplate && selectedTemplate.id !== 'custom' && selectedTemplate.requiredParams.length > 0 && (
-        <Surface style={styles.paramsSection}>
-          <Title style={styles.sectionTitle}>Job Parameters</Title>
-          {isEditingExisting && (
-            <Text style={styles.helperText}>
-              Parameters are locked when editing. To change them, create a new quote.
-            </Text>
-          )}
-
-          <TextInput
-            label="Job Name (Optional)"
-            value={jobName}
-            onChangeText={setJobName}
-            mode="outlined"
-            style={styles.input}
-            placeholder={selectedTemplate.name}
-            multiline
-            numberOfLines={2}
-          />
-
-          {selectedTemplate.requiredParams.map((param) => (
-            <TextInput
-              key={param.key}
-              label={`${param.label} ${param.unit ? `(${param.unit})` : ''}`}
-              value={customParams[param.key]?.toString() || ''}
-              onChangeText={(value) => handleParamChange(param.key, value)}
-              mode="outlined"
-              style={styles.input}
-              keyboardType="decimal-pad"
-              disabled={isEditingExisting}
-            />
-          ))}
         </Surface>
       )}
+
           </WebContainer>
         </ScrollView>
 
@@ -1002,7 +1262,10 @@ export function JobDetailsScreen() {
         <FixedBottomButton
           label="Next: Customer Details"
           onPress={handleNext}
-          disabled={(!jobDescription.trim() || !jobName.trim()) && !isEditingExisting}
+          disabled={
+            (useCustomMode && !jobDescription.trim()) ||
+            (!useCustomMode && !selectedTemplate)
+          }
         />
       </View>
     </>
@@ -1056,9 +1319,13 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   sectionTitleContainer: {
+    marginBottom: 16,
+  },
+  sectionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
   sectionIcon: {
     marginRight: 8,
@@ -1067,6 +1334,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 0,
+    flex: 1,
+  },
+  expandIcon: {
+    marginLeft: 'auto',
   },
   input: {
     marginBottom: 20,
@@ -1247,6 +1518,9 @@ const styles = StyleSheet.create({
   firstSection: {
     marginTop: 20,
   },
+  templateSection: {
+    marginBottom: 16, // Consistent spacing with next section
+  },
   skipAiContainer: {
     paddingHorizontal: 20,
     paddingTop: 12,
@@ -1302,5 +1576,97 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#1565C0',
     lineHeight: 18,
+  },
+  // Niche template styles
+  templateScroll: {
+    marginBottom: 0,
+  },
+  quickTemplateCard: {
+    width: 160,
+    backgroundColor: colors.surfaceLight,
+    borderRadius: 12,
+    padding: 16,
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: colors.outline,
+  },
+  quickTemplateIcon: {
+    marginBottom: 8,
+  },
+  quickTemplateName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  quickTemplateDesc: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: 8,
+    lineHeight: 16,
+  },
+  quickTemplateBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.secondary + '20',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  quickTemplateBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.secondary,
+    marginLeft: 4,
+  },
+  pricingMethodInfo: {
+    marginTop: 8,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.outline,
+  },
+  pricingMethodLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  pricingMethodChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  pricingMethodChip: {
+    height: 28,
+    backgroundColor: colors.primary + '15',
+    marginRight: 0,
+  },
+  pricingMethodChipText: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  quickTemplateCardSelected: {
+    borderColor: colors.primary,
+    borderWidth: 2,
+    backgroundColor: colors.primary + '10',
+  },
+  quickTemplateNameSelected: {
+    color: colors.primary,
+  },
+  quickTemplateCheck: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+  },
+  paramInputContainer: {
+    marginBottom: 12,
+  },
+  paramInput: {
+    backgroundColor: colors.surface,
+  },
+  switchModeButton: {
+    marginTop: 16,
   },
 });

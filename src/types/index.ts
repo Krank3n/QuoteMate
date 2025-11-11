@@ -105,11 +105,19 @@ export interface BusinessSettings {
   defaultMarkup: number;
   // Trade type
   tradeType?: TradeType; // Default: 'all'
+  // New: Trade category and niche for improved targeting (multi-select)
+  tradeCategories?: string[]; // e.g., ['plumbing', 'carpentry']
+  tradeNiches?: string[]; // e.g., ['drain_services', 'outdoor']
+  // Legacy single-select fields (kept for backwards compatibility)
+  tradeCategory?: string;
+  tradeNiche?: string;
   // Price fetching settings
   useBunningsApi?: boolean; // If true, use Bunnings API. If false/undefined, use AI estimation (default: false)
   useReeceApi?: boolean; // If true and tradeType is plumber, use Reece API for plumbing supplies
-  hardwareStores?: string[]; // Selected hardware store URLs
-  customStores?: string[]; // Custom store URLs added by user
+  selectedStore?: string; // Single selected hardware store (e.g., 'bunnings', 'mitre10')
+  // Legacy fields (kept for backwards compatibility)
+  hardwareStores?: string[]; // DEPRECATED - use selectedStore instead
+  customStores?: string[]; // DEPRECATED - Custom store URLs added by user
 }
 
 // Bunnings API types

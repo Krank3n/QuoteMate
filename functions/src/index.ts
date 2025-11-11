@@ -513,7 +513,7 @@ export const analyzeJobDescription = functions.https.onRequest((req, res) => {
     }
 
     try {
-      const { jobDescription } = req.body;
+      const { jobDescription, tradeContext } = req.body;
 
       if (!jobDescription) {
         res.status(400).json({ error: 'Missing jobDescription' });
@@ -528,9 +528,41 @@ export const analyzeJobDescription = functions.https.onRequest((req, res) => {
         return;
       }
 
-      const prompt = `You are an expert Australian tradie assistant. Analyze the following job description and generate a detailed materials list with Bunnings search terms.
+      // Build trade context section
+      let contextSection = '';
+      if (tradeContext) {
+        contextSection = '\n\nTrade Context:';
+        if (tradeContext.categoryName) {
+          contextSection += `\n- Trade Category: ${tradeContext.categoryName}`;
+        }
+        if (tradeContext.nicheName) {
+          contextSection += `\n- Specialty/Niche: ${tradeContext.nicheName}`;
+        }
+        if (tradeContext.pricingMethod) {
+          contextSection += `\n- Typical Pricing Method: ${tradeContext.pricingMethod}`;
+        }
+        if (tradeContext.suggestedMaterials && tradeContext.suggestedMaterials.length > 0) {
+          contextSection += `\n- Common Materials for This Type of Job: ${tradeContext.suggestedMaterials.join(', ')}`;
+          contextSection += '\n  (Consider these materials, but also include any others that would be needed)';
+        }
+      }
 
-Job Description: "${jobDescription}"
+      // Determine which stores will be searched
+      const stores = tradeContext?.hardwareStores || ['bunnings.com.au'];
+      const storeNames = stores.map((url: string) => {
+        if (url.includes('bunnings')) return 'Bunnings';
+        if (url.includes('mitre10')) return 'Mitre 10';
+        if (url.includes('reece')) return 'Reece';
+        if (url.includes('middy')) return 'Middy\'s';
+        return url;
+      });
+      const storesText = storeNames.join(', ');
+
+      const prompt = `You are an expert Australian tradie assistant specializing in construction and trade work. Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.
+
+Job Description: "${jobDescription}"${contextSection}
+
+Hardware Stores that will be searched: ${storesText}
 
 Provide a JSON response with the following structure:
 {
@@ -539,7 +571,7 @@ Provide a JSON response with the following structure:
   "materials": [
     {
       "name": "Material name as it should appear in quote",
-      "searchTerm": "Specific Bunnings search term (be very specific with brands/sizes)",
+      "searchTerm": "Generic product search term (material type, size, specs - NOT brand-specific)",
       "quantity": <number>,
       "unit": "each|m|L|kg|box|pack",
       "reasoning": "Why this material is needed"
@@ -548,12 +580,17 @@ Provide a JSON response with the following structure:
 }
 
 Guidelines:
-- Use specific Bunnings product terms (e.g., "treated pine H3 90x45 2.4m" not just "timber")
-- Include all materials: timber, screws, nails, stain/paint, concrete, etc.
-- Be realistic with quantities - round up for waste
-- Include safety/prep materials if relevant (sandpaper, drop sheets, etc.)
-- Estimate labor hours realistically for an experienced tradie
-- Common Australian brands: Bunnings, Ozito, Ramset, Selleys, Dunlop, etc.
+- Use GENERIC product terms that work across ${storesText}
+- Specify material type, size, and specs but avoid brand-specific names
+- GOOD examples: "brass stop valve 15mm quarter turn", "treated pine H3 90x45 2.4m", "PTFE thread tape 12mm"
+- BAD examples: "Kinetic valve", "Ozito drill", "Ramset anchor" (these are brand-specific)
+- Use common material specifications: timber grades (H3/H4), dimensions, thread sizes, capacities
+- Include all materials needed: primary materials, fasteners, adhesives, finishes, etc.
+- Be realistic with quantities - round up for waste (typically 10-15% extra)
+- Include safety/prep materials if relevant (sandpaper, drop sheets, cleaning supplies, etc.)
+- Estimate labor hours realistically for an experienced tradie in this specialty
+- Consider the suggested materials but don't limit yourself to only those
+- Think about what a professional ${tradeContext?.nicheName || 'tradie'} would need for this job
 
 Return ONLY valid JSON, no other text.`;
 
@@ -1313,6 +1350,135 @@ If no products found, return: {"matches": [], "quantityAdjustment": null}`;
     } catch (error: any) {
       console.error('Error parsing products HTML:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Select the best matching product from alternatives using Claude AI
+ * Used by OpenAI Web Search pricing to intelligently pick the correct product
+ */
+export const selectBestProduct = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { products, requestedProductName, originalSearchTerm } = req.body;
+
+      if (!products || !Array.isArray(products) || products.length === 0) {
+        res.status(400).json({ error: 'Products array is required' });
+        return;
+      }
+
+      if (products.length === 1) {
+        res.status(200).json({
+          selectedIndex: 1,
+          reasoning: 'Only one product found'
+        });
+        return;
+      }
+
+      const anthropicApiKey = functions.config().anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+
+      if (!anthropicApiKey) {
+        console.error('Missing Anthropic API key');
+        res.status(200).json({
+          selectedIndex: 1,
+          reasoning: 'No AI selection available - using first product'
+        });
+        return;
+      }
+
+      console.log(`🤖 Selecting best product from ${products.length} options for: "${requestedProductName}"`);
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicApiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-sonnet-20241022',
+          max_tokens: 1024,
+          temperature: 0,
+          messages: [
+            {
+              role: 'user',
+              content: `You are an expert at matching products for Australian hardware stores.
+
+USER REQUESTED: "${requestedProductName}"
+ORIGINAL SEARCH TERM: "${originalSearchTerm || requestedProductName}"
+
+FOUND PRODUCTS:
+${products.map((p: any, i: number) => `
+${i + 1}. ${p.productName}
+   - Brand: ${p.brand || 'Unknown'}
+   - Price: $${p.price}
+   - Description: ${p.description || 'N/A'}
+   - Item #: ${p.itemNumber || 'N/A'}
+   - Store: ${p.store}
+`).join('\n')}
+
+Select the BEST matching product based on:
+1. Brand similarity (exact brand match is best)
+2. Product type/category match (e.g., "flexible connector" vs "rubber collar")
+3. Size/specifications match (e.g., "100mm" vs "100mm")
+4. Price reasonableness (extremely cheap items may be wrong category)
+5. Product description similarity
+
+Return ONLY valid JSON (no markdown):
+{
+  "selectedIndex": 1,
+  "reasoning": "Brief explanation of why this product is the best match"
+}
+
+The selectedIndex should be 1-based (first product is 1, second is 2, etc.).`,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Claude API error:', response.status, errorText);
+        res.status(200).json({
+          selectedIndex: 1,
+          reasoning: 'Claude API error - using first product'
+        });
+        return;
+      }
+
+      const data: any = await response.json();
+      const content = data.content?.[0]?.text || '';
+
+      // Parse JSON from response
+      let jsonStr = content.trim();
+      if (jsonStr.startsWith('```json')) {
+        jsonStr = jsonStr.replace(/```json\n?/, '').replace(/\n?```$/, '');
+      } else if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replace(/```\n?/, '').replace(/\n?```$/, '');
+      }
+
+      const selection = JSON.parse(jsonStr);
+      const selectedIndex = selection.selectedIndex || 1;
+      const reasoning = selection.reasoning || 'Selected by AI';
+
+      console.log(`✅ Selected product ${selectedIndex}: ${reasoning}`);
+
+      res.status(200).json({
+        selectedIndex,
+        reasoning
+      });
+    } catch (error: any) {
+      console.error('Error selecting best product:', error);
+      res.status(200).json({
+        selectedIndex: 1,
+        reasoning: 'Error during selection - using first product'
+      });
     }
   });
 });
