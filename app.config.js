@@ -21,7 +21,17 @@ export default {
           }
         }
       ],
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "expo-speech-recognition",
+        {
+          microphonePermission: "Allow QuoteMate to use your microphone for voice-to-text job descriptions.",
+          speechRecognitionPermission: "Allow QuoteMate to use speech recognition for voice-to-text job descriptions.",
+          android: {
+            requireOnDeviceRecognition: false
+          }
+        }
+      ]
     ],
     splash: {
       image: "./assets/splash.png",
@@ -38,13 +48,13 @@ export default {
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: "./assets/adaptive-icon.png",
+        foregroundImage: "./assets/logo-lrg-margin.png",
         backgroundColor: "#1E293B"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
       versionCode: 20,
-      permissions: [],
-      blockedPermissions: ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"]
+      permissions: ["android.permission.RECORD_AUDIO"],
+      blockedPermissions: ["android.permission.CAMERA"]
     },
     web: {
       favicon: "./assets/favicon.png"

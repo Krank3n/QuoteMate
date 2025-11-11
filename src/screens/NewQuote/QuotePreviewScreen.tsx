@@ -15,19 +15,16 @@ import {
   SegmentedButtons,
 } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
-import { format } from 'date-fns';
-
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
-import { generateQuotePDF } from '../../utils/pdfGenerator';
+import { exportQuotePDF } from '../../utils/pdfGenerator';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function QuotePreviewScreen() {
   const navigation = useNavigation<any>();
   const { currentQuote, saveQuote, businessSettings } = useStore();
+  const insets = useSafeAreaInsets();
 
   const [notes, setNotes] = useState(currentQuote?.notes || '');
   const [status, setStatus] = useState(currentQuote?.status || 'draft');
@@ -51,16 +48,21 @@ export function QuotePreviewScreen() {
 
       await saveQuote(updatedQuote);
 
-      // On web, navigate immediately after success
+      // Close the modal first, THEN navigate to dashboard
+      // The parent is the NewQuoteStack, we need to go back from that to close the modal
+      const root = navigation.getParent();
+
       if (Platform.OS === 'web') {
-        navigation.getParent()?.navigate('Main', { screen: 'Dashboard' });
+        // On web, just go back to close the modal
+        root?.goBack();
       } else {
+        // On mobile, show success alert then close modal
         Alert.alert('Success', 'Quote saved successfully!', [
           {
             text: 'OK',
             onPress: () => {
-              // Navigate back to Dashboard (closes the modal and goes to home)
-              navigation.getParent()?.navigate('Main', { screen: 'Dashboard' });
+              // Go back closes the NewQuote modal stack
+              root?.goBack();
             },
           },
         ]);
@@ -72,76 +74,15 @@ export function QuotePreviewScreen() {
     }
   };
 
-
   const handleExportPDF = async () => {
     try {
       setIsExporting(true);
 
       // Update quote with current notes before generating PDF
       const quoteWithNotes = { ...currentQuote, notes };
-      const html = await generateQuotePDF(quoteWithNotes, businessSettings);
 
-      // Format filename: Quote_CustomerName_JobName_09-Jan-2025.pdf
-      const sanitizedCustomer = currentQuote.customerName
-        .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special characters
-        .replace(/\s+/g, '_')             // Replace spaces with underscores
-        .substring(0, 30);                // Limit length
-
-      const sanitizedJob = currentQuote.job.name
-        .replace(/[^a-zA-Z0-9\s]/g, '')
-        .replace(/\s+/g, '_')
-        .substring(0, 30);
-
-      const dateStr = format(new Date(), 'dd-MMM-yyyy');
-      const filename = `Quote_${sanitizedCustomer}_${sanitizedJob}_${dateStr}.pdf`;
-
-      if (Platform.OS === 'web') {
-        // On web, use browser's native print functionality
-        const printWindow = window.open('', '_blank');
-        if (printWindow) {
-          printWindow.document.write(html);
-          printWindow.document.close();
-
-          // Set the document title to the filename
-          printWindow.document.title = filename;
-
-          // Wait for content to load before triggering print
-          printWindow.onload = () => {
-            printWindow.focus();
-            printWindow.print();
-          };
-        } else {
-          Alert.alert('Error', 'Please allow popups to export PDF');
-        }
-      } else {
-        // Mobile platforms - use expo-print
-        const { uri } = await Print.printToFileAsync({ html });
-
-        // Copy to proper filename for sharing
-        const newUri = `${FileSystem.cacheDirectory}${filename}`;
-        await FileSystem.copyAsync({
-          from: uri,
-          to: newUri,
-        });
-
-        if (Platform.OS === 'ios') {
-          await Sharing.shareAsync(newUri, {
-            UTI: 'com.adobe.pdf',
-            mimeType: 'application/pdf',
-          });
-        } else {
-          // On Android, copy to Downloads folder with proper name
-          const isAvailable = await Sharing.isAvailableAsync();
-          if (isAvailable) {
-            await Sharing.shareAsync(newUri, {
-              mimeType: 'application/pdf',
-              dialogTitle: 'Share Quote',
-            });
-          } else {
-            Alert.alert('PDF Created', `${filename} saved successfully`);
-          }
-        }
-      }
+      // Use unified PDF export function
+      await exportQuotePDF(quoteWithNotes, businessSettings, 'export');
     } catch (error) {
       console.error('Export error:', error);
       Alert.alert('Error', 'Failed to export PDF. Please try again.');
@@ -151,10 +92,11 @@ export function QuotePreviewScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-    >
+    <View style={styles.outerContainer}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+      >
       {/* Quote Details Preview */}
       <Surface style={styles.section}>
         <Title style={styles.sectionTitle}>Customer</Title>
@@ -249,8 +191,9 @@ export function QuotePreviewScreen() {
           placeholder="Add any additional notes for this quote..."
         />
       </Surface>
+      </ScrollView>
 
-      <View style={styles.actions}>
+      <View style={[styles.bottomActions, Platform.OS !== 'web' && { paddingBottom: insets.bottom + 20 }]}>
         <Button
           mode="outlined"
           onPress={handleExportPDF}
@@ -272,26 +215,35 @@ export function QuotePreviewScreen() {
           Save Quote
         </Button>
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  outerContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+    ...(Platform.OS === 'web' && {
+      maxHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+    }),
+  },
   container: {
     flex: 1,
     backgroundColor: colors.background,
   },
   scrollContent: {
-    paddingBottom: 220,
-    flexGrow: 1,
-    maxWidth: '800px' as any,
-    overflow: 'scroll' as any,
-    margin: 'auto' as any,
-    width: '100%',
-    height: '100vh' as any,
+    padding: 16,
+    paddingBottom: 16,
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+      marginHorizontal: 'auto' as any,
+      width: '100%',
+    }),
   },
   section: {
-    margin: 16,
+    marginBottom: 16,
     padding: 16,
     borderRadius: 8,
     elevation: 2,
@@ -348,7 +300,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   totalSection: {
-    margin: 16,
+    marginBottom: 16,
     padding: 16,
     borderRadius: 8,
     elevation: 3,
@@ -368,12 +320,21 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: colors.primary,
   },
-  actions: {
+  bottomActions: {
     padding: 16,
-    paddingBottom: 80,
+    paddingTop: 12,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+    ...(Platform.OS === 'web' && {
+      flexShrink: 0,
+      boxShadow: '0 -2px 10px rgba(0,0,0,0.1)' as any,
+      position: 'relative' as any,
+      top: '-3.2rem' as any,
+    }),
   },
   actionButton: {
-    marginBottom: 12,
-    paddingVertical: 8,
+    marginBottom: 8,
+    paddingVertical: 6,
   },
 });
