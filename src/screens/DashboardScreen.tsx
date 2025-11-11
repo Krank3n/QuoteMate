@@ -4,17 +4,13 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, Pressable } from 'react-native';
 import {
   Text,
   Surface,
   Title,
   Button,
-  Card,
   Paragraph,
-  Divider,
-  Menu,
-  IconButton,
   Dialog,
   Portal,
 } from 'react-native-paper';
@@ -32,14 +28,17 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
 import { generateQuotePDF } from '../utils/pdfGenerator';
 import { WebContainer } from '../components/WebContainer';
+import { QuoteCard } from '../components/QuoteCard';
 
 export function DashboardScreen() {
   const navigation = useNavigation<any>();
   const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus } = useStore();
 
-  const [menuVisible, setMenuVisible] = useState<string | null>(null);
   const [emailDialogVisible, setEmailDialogVisible] = useState(false);
   const [emailQuote, setEmailQuote] = useState<Quote | null>(null);
+  const [statusDialogVisible, setStatusDialogVisible] = useState(false);
+  const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<'draft' | 'sent' | 'accepted' | 'rejected'>('draft');
 
   // Calculate quick stats
   const totalQuotes = quotes.length;
@@ -267,89 +266,31 @@ export function DashboardScreen() {
     }
   };
 
-  const handleShareQuote = async (quote: Quote) => {
-    try {
-      const html = await generateQuotePDF(quote, businessSettings);
-      const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-
-      if (Platform.OS === 'web') {
-        // On web, use browser's native print functionality
-        const printWindow = window.open('', '_blank');
-        if (printWindow) {
-          printWindow.document.write(html);
-          printWindow.document.close();
-          printWindow.document.title = filename;
-          printWindow.onload = () => {
-            printWindow.focus();
-            printWindow.print();
-          };
-        } else {
-          Alert.alert('Error', 'Please allow popups to export PDF');
-        }
-      } else {
-        // Mobile platforms
-        const { uri } = await Print.printToFileAsync({ html });
-
-        if (Platform.OS === 'ios') {
-          await Sharing.shareAsync(uri, { dialogTitle: filename });
-        } else {
-          const isAvailable = await Sharing.isAvailableAsync();
-          if (isAvailable) {
-            await Sharing.shareAsync(uri, { dialogTitle: filename });
-          } else {
-            Alert.alert('PDF Created', `PDF saved to: ${uri}`);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Share error:', error);
-      Alert.alert('Error', 'Failed to share quote. Please try again.');
-    }
+  const handleOpenEmailDialog = (quote: Quote) => {
+    setEmailQuote(quote);
+    setEmailDialogVisible(true);
   };
 
-  const handleExportQuote = async (quote: Quote) => {
+  const handleOpenStatusDialog = (quote: Quote) => {
+    setSelectedQuote(quote);
+    setSelectedStatus(quote.status);
+    setStatusDialogVisible(true);
+  };
+
+  const handleUpdateStatus = async () => {
+    if (!selectedQuote) return;
+
     try {
-      const html = await generateQuotePDF(quote, businessSettings);
-      const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-
-      if (Platform.OS === 'web') {
-        // On web, use browser's native print functionality
-        const printWindow = window.open('', '_blank');
-        if (printWindow) {
-          printWindow.document.write(html);
-          printWindow.document.close();
-          printWindow.document.title = filename;
-          printWindow.onload = () => {
-            printWindow.focus();
-            printWindow.print();
-          };
-        } else {
-          Alert.alert('Error', 'Please allow popups to export PDF');
-        }
-      } else {
-        // Mobile platforms
-        const { uri } = await Print.printToFileAsync({ html });
-
-        Alert.alert(
-          'PDF Exported',
-          `${filename} created successfully`,
-          [
-            {
-              text: 'Share',
-              onPress: async () => {
-                const isAvailable = await Sharing.isAvailableAsync();
-                if (isAvailable) {
-                  await Sharing.shareAsync(uri, { dialogTitle: filename });
-                }
-              },
-            },
-            { text: 'OK' },
-          ]
-        );
-      }
+      const updatedQuote = {
+        ...selectedQuote,
+        status: selectedStatus,
+        updatedAt: new Date(),
+      };
+      await saveQuote(updatedQuote);
+      setStatusDialogVisible(false);
+      setSelectedQuote(null);
     } catch (error) {
-      console.error('Export error:', error);
-      Alert.alert('Error', 'Failed to export quote. Please try again.');
+      Alert.alert('Error', 'Failed to update quote status. Please try again.');
     }
   };
 
@@ -408,89 +349,17 @@ export function DashboardScreen() {
           <Text style={styles.sectionTitle}>Recent Quotes</Text>
 
           {recentQuotes.map((quote) => (
-            <Card key={quote.id} style={styles.quoteCard}>
-              <Card.Content>
-                <View style={styles.quoteHeader}>
-                  <View style={styles.quoteInfo}>
-                    <Text style={styles.quoteName}>{quote.customerName}</Text>
-                    <Text style={styles.quoteJob}>{quote.job.name}</Text>
-                  </View>
-                  <View style={styles.quoteRight}>
-                    <View style={styles.quotePrice}>
-                      <Text style={styles.quoteTotal}>{formatCurrency(quote.total)}</Text>
-                      <Text style={[styles.quoteStatus, getStatusStyle(quote.status)]}>
-                        {quote.status}
-                      </Text>
-                    </View>
-                    <Menu
-                      visible={menuVisible === quote.id}
-                      onDismiss={() => setMenuVisible(null)}
-                      anchor={
-                        <IconButton
-                          icon="dots-vertical"
-                          size={20}
-                          onPress={() => setMenuVisible(quote.id)}
-                        />
-                      }
-                    >
-                      <Menu.Item
-                        leadingIcon="pencil"
-                        onPress={() => {
-                          setMenuVisible(null);
-                          handleEditQuote(quote);
-                        }}
-                        title="Edit"
-                      />
-                      <Menu.Item
-                        leadingIcon="email"
-                        onPress={() => {
-                          setMenuVisible(null);
-                          handleSendQuote(quote);
-                        }}
-                        title="Send via Email"
-                      />
-                      <Menu.Item
-                        leadingIcon="content-copy"
-                        onPress={() => {
-                          setMenuVisible(null);
-                          handleDuplicateQuote(quote);
-                        }}
-                        title="Duplicate"
-                      />
-                      <Menu.Item
-                        leadingIcon="share"
-                        onPress={() => {
-                          setMenuVisible(null);
-                          handleShareQuote(quote);
-                        }}
-                        title="Share"
-                      />
-                      <Menu.Item
-                        leadingIcon="file-pdf-box"
-                        onPress={() => {
-                          setMenuVisible(null);
-                          handleExportQuote(quote);
-                        }}
-                        title="Export PDF"
-                      />
-                      <Menu.Item
-                        leadingIcon="delete"
-                        onPress={() => {
-                          setMenuVisible(null);
-                          handleDeleteQuote(quote.id);
-                        }}
-                        title="Delete"
-                        titleStyle={{ color: colors.error }}
-                      />
-                    </Menu>
-                  </View>
-                </View>
-                <Divider style={styles.divider} />
-                <Text style={styles.quoteDate}>
-                  {format(new Date(quote.updatedAt), 'dd MMM yyyy')}
-                </Text>
-              </Card.Content>
-            </Card>
+            <QuoteCard
+              key={quote.id}
+              quote={quote}
+              businessSettings={businessSettings}
+              onEdit={handleEditQuote}
+              onDelete={handleDeleteQuote}
+              onDuplicate={handleDuplicateQuote}
+              onSave={saveQuote}
+              onStatusChange={handleOpenStatusDialog}
+              onEmailDialogOpen={handleOpenEmailDialog}
+            />
           ))}
 
           <Button
@@ -519,8 +388,104 @@ export function DashboardScreen() {
       </WebContainer>
     </ScrollView>
 
-    {/* Email Client Selector Dialog */}
+    {/* Status Change Dialog */}
     <Portal>
+      <Dialog visible={statusDialogVisible} onDismiss={() => setStatusDialogVisible(false)}>
+        <Dialog.Title>Change Quote Status</Dialog.Title>
+        <Dialog.Content>
+          <View style={styles.statusOptions}>
+            <Pressable
+              style={[
+                styles.statusOption,
+                selectedStatus === 'draft' && styles.statusOptionSelected,
+              ]}
+              onPress={() => setSelectedStatus('draft')}
+            >
+              <View style={styles.statusOptionContent}>
+                <View style={[styles.statusDot, { backgroundColor: colors.info }]} />
+                <Text style={[
+                  styles.statusOptionText,
+                  selectedStatus === 'draft' && styles.statusOptionTextSelected,
+                ]}>
+                  Draft
+                </Text>
+              </View>
+              {selectedStatus === 'draft' && (
+                <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
+              )}
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.statusOption,
+                selectedStatus === 'sent' && styles.statusOptionSelected,
+              ]}
+              onPress={() => setSelectedStatus('sent')}
+            >
+              <View style={styles.statusOptionContent}>
+                <View style={[styles.statusDot, { backgroundColor: colors.warning }]} />
+                <Text style={[
+                  styles.statusOptionText,
+                  selectedStatus === 'sent' && styles.statusOptionTextSelected,
+                ]}>
+                  Sent
+                </Text>
+              </View>
+              {selectedStatus === 'sent' && (
+                <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
+              )}
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.statusOption,
+                selectedStatus === 'accepted' && styles.statusOptionSelected,
+              ]}
+              onPress={() => setSelectedStatus('accepted')}
+            >
+              <View style={styles.statusOptionContent}>
+                <View style={[styles.statusDot, { backgroundColor: colors.success }]} />
+                <Text style={[
+                  styles.statusOptionText,
+                  selectedStatus === 'accepted' && styles.statusOptionTextSelected,
+                ]}>
+                  Accepted
+                </Text>
+              </View>
+              {selectedStatus === 'accepted' && (
+                <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
+              )}
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.statusOption,
+                selectedStatus === 'rejected' && styles.statusOptionSelected,
+              ]}
+              onPress={() => setSelectedStatus('rejected')}
+            >
+              <View style={styles.statusOptionContent}>
+                <View style={[styles.statusDot, { backgroundColor: colors.rejected }]} />
+                <Text style={[
+                  styles.statusOptionText,
+                  selectedStatus === 'rejected' && styles.statusOptionTextSelected,
+                ]}>
+                  Rejected
+                </Text>
+              </View>
+              {selectedStatus === 'rejected' && (
+                <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
+              )}
+            </Pressable>
+          </View>
+        </Dialog.Content>
+        <Dialog.Actions>
+          <Button onPress={() => setStatusDialogVisible(false)}>Cancel</Button>
+          <Button onPress={handleUpdateStatus}>Update</Button>
+        </Dialog.Actions>
+      </Dialog>
+
+      {/* Email Client Selector Dialog */}
       <Dialog visible={emailDialogVisible} onDismiss={() => setEmailDialogVisible(false)}>
         <Dialog.Title>Send Quote</Dialog.Title>
         <Dialog.Content>
@@ -566,19 +531,6 @@ export function DashboardScreen() {
     </Portal>
   </>
   );
-}
-
-function getStatusStyle(status: string) {
-  switch (status) {
-    case 'accepted':
-      return { color: colors.success };
-    case 'sent':
-      return { color: colors.secondary };
-    case 'rejected':
-      return { color: colors.error };
-    default:
-      return { color: colors.onSurface };
-  }
 }
 
 const styles = StyleSheet.create({
@@ -636,52 +588,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 12,
   },
-  quoteCard: {
-    marginBottom: 12,
-    backgroundColor: colors.surface,
-  },
-  quoteHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  quoteInfo: {
-    flex: 1,
-  },
-  quoteRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  quoteName: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  quoteJob: {
-    fontSize: 14,
-    color: colors.onSurface,
-  },
-  quotePrice: {
-    alignItems: 'flex-end',
-    marginRight: -8,
-  },
-  quoteTotal: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.primary,
-    marginBottom: 4,
-  },
-  quoteStatus: {
-    fontSize: 12,
-    textTransform: 'capitalize',
-  },
-  divider: {
-    marginVertical: 12,
-  },
-  quoteDate: {
-    fontSize: 12,
-    color: colors.onSurface,
-  },
   viewAllButton: {
     marginTop: 8,
   },
@@ -701,5 +607,42 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     marginTop: 8,
     textAlign: 'center',
+  },
+  statusOptions: {
+    gap: 12,
+  },
+  statusOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceLight,
+  },
+  statusOptionSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.successBg,
+  },
+  statusOptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 12,
+  },
+  statusOptionText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.textDark,
+    textTransform: 'capitalize',
+  },
+  statusOptionTextSelected: {
+    color: colors.primary,
+    fontWeight: '600',
   },
 });

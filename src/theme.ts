@@ -39,6 +39,7 @@ export const theme = {
     // Border colors
     border: '#334155',
     borderLight: '#1E293B',
+    outline: '#475569',
 
     // Status colors - Bright for dark mode
     error: '#EF4444',

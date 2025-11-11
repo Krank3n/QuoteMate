@@ -15,7 +15,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { useStore } from './src/store/useStore';
 import { theme } from './src/theme';
 import { RootNavigator } from './src/navigation/RootNavigator';
-import { OnboardingScreen } from './src/screens/OnboardingScreen';
+import { NewOnboardingScreen } from './src/screens/NewOnboardingScreen';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { subscriptionSyncService } from './src/services/subscriptionSyncService';
 import { auth } from './src/config/firebase';
@@ -239,7 +239,7 @@ export default function App() {
       <PaperProvider theme={theme}>
         <NavigationContainer>
           <StatusBar style="light" />
-          {isOnboarded ? <RootNavigator /> : <OnboardingScreen />}
+          {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
         </NavigationContainer>
       </PaperProvider>
     </SafeAreaProvider>

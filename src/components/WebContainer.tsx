@@ -19,8 +19,12 @@ export function WebContainer({ children, style, maxWidth = 800 }: WebContainerPr
     return <>{children}</>;
   }
 
+  // Extract flex from style to apply to wrapper
+  const styleArray = Array.isArray(style) ? style : [style];
+  const hasFlex = styleArray.some(s => s && typeof s === 'object' && 'flex' in s);
+
   return (
-    <View style={styles.webWrapper}>
+    <View style={[styles.webWrapper, hasFlex && { flex: 1 }]}>
       <View style={[styles.webContainer, { maxWidth }, style]}>
         {children}
       </View>

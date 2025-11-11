@@ -4,11 +4,13 @@
  */
 
 import * as FileSystem from 'expo-file-system';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { format } from 'date-fns';
 import { Quote, BusinessSettings } from '../types';
 import { formatCurrency } from './quoteCalculator';
 import { colors } from '../theme';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 
 export async function generateQuotePDF(quote: Quote, businessSettings: BusinessSettings | null): Promise<string> {
   const business = businessSettings || {
@@ -242,4 +244,104 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
     </body>
     </html>
     `;
+}
+
+/**
+ * Export PDF with consistent filename and platform-specific handling
+ * @param quote - The quote to export
+ * @param businessSettings - Business settings for the PDF
+ * @param action - 'export' (download/save) or 'share' (share sheet)
+ */
+export async function exportQuotePDF(
+  quote: Quote,
+  businessSettings: BusinessSettings | null,
+  action: 'export' | 'share' = 'export'
+): Promise<void> {
+  try {
+    // Generate PDF HTML
+    const html = await generateQuotePDF(quote, businessSettings);
+
+    // Format filename: Quote_CustomerName_JobName_09-Jan-2025.pdf
+    const sanitizedCustomer = quote.customerName
+      .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special characters
+      .replace(/\s+/g, '_')             // Replace spaces with underscores
+      .substring(0, 30);                // Limit length
+
+    const sanitizedJob = quote.job.name
+      .replace(/[^a-zA-Z0-9\s]/g, '')
+      .replace(/\s+/g, '_')
+      .substring(0, 30);
+
+    const dateStr = format(new Date(quote.updatedAt), 'dd-MMM-yyyy');
+    const filename = `Quote_${sanitizedCustomer}_${sanitizedJob}_${dateStr}.pdf`;
+
+    if (Platform.OS === 'web') {
+      // On web, use browser's native print functionality
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
+
+        // Set the document title to the filename
+        printWindow.document.title = filename;
+
+        // Wait for content to load before triggering print
+        printWindow.onload = () => {
+          printWindow.focus();
+          printWindow.print();
+        };
+      } else {
+        Alert.alert('Error', 'Please allow popups to export PDF');
+      }
+    } else {
+      // Mobile platforms - use expo-print
+      const { uri } = await Print.printToFileAsync({ html });
+
+      // Copy to proper filename for sharing
+      const newUri = `${FileSystem.cacheDirectory}${filename}`;
+      await FileSystem.copyAsync({
+        from: uri,
+        to: newUri,
+      });
+
+      if (action === 'share') {
+        // Share the PDF
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) {
+          await Sharing.shareAsync(newUri, {
+            UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
+            mimeType: 'application/pdf',
+            dialogTitle: filename,
+          });
+        } else {
+          Alert.alert('PDF Created', `${filename} saved successfully`);
+        }
+      } else {
+        // Export - show options to share
+        Alert.alert(
+          'PDF Exported',
+          `${filename} created successfully`,
+          [
+            {
+              text: 'Share',
+              onPress: async () => {
+                const isAvailable = await Sharing.isAvailableAsync();
+                if (isAvailable) {
+                  await Sharing.shareAsync(newUri, {
+                    UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
+                    mimeType: 'application/pdf',
+                    dialogTitle: filename,
+                  });
+                }
+              },
+            },
+            { text: 'OK' },
+          ]
+        );
+      }
+    }
+  } catch (error) {
+    console.error('PDF export error:', error);
+    Alert.alert('Error', 'Failed to export PDF. Please try again.');
+  }
 }

@@ -28,6 +28,8 @@ import {
   Divider,
 } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import LottieView from 'lottie-react-native';
 import { generateId } from '../../utils/generateId';
 
 import { useStore } from '../../store/useStore';
@@ -37,13 +39,15 @@ import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalcu
 import { bunningsApi } from '../../services/bunningsApi';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice } from '../../services/reeceApi';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   searchMaterialWithWebScraping,
   ProductMatch,
   PricingResult,
   getBestMatch,
 } from '../../services/webScrapingPricing';
+import {
+  searchMaterialWithOpenAIDirect,
+} from '../../services/openAIDirectPricing';
 import {
   getFavoriteProduct,
   saveFavoriteProduct,
@@ -53,6 +57,43 @@ import {
   findBestMatchForMaterial,
   checkScraperHealth,
 } from '../../services/bunningsScraperClient';
+import {
+  searchProductWithScraper,
+  ScraperProduct,
+} from '../../services/bunningsScraperService';
+import { FixedBottomButton } from '../../components/FixedBottomButton';
+
+// AI Analysis Loading State with Lottie Animation
+function AiAnalyzingState() {
+  const animationRef = React.useRef<LottieView>(null);
+
+  React.useEffect(() => {
+    // Ensure animation plays on iOS
+    if (animationRef.current) {
+      animationRef.current.play();
+    }
+  }, []);
+
+  return (
+    <View style={styles.aiAnalyzingContainer}>
+      <View style={styles.lottieWrapper}>
+        <LottieView
+          ref={animationRef}
+          source={require('../../../assets/materials-loading.json')}
+          autoPlay={true}
+          loop={true}
+          speed={1}
+          style={styles.lottieAnimation}
+          resizeMode="contain"
+        />
+      </View>
+      <Text style={styles.aiAnalyzingTitle}>Analyzing your job...</Text>
+      <Text style={styles.aiAnalyzingSubtitle}>
+        AI is generating materials list based on your job description
+      </Text>
+    </View>
+  );
+}
 
 // Format time ago helper
 function formatTimeAgo(isoTimestamp: string): string {
@@ -77,9 +118,10 @@ function formatTimeAgo(isoTimestamp: string): string {
 export function MaterialsListScreen() {
   const navigation = useNavigation<any>();
   const { currentQuote, updateQuote, businessSettings } = useStore();
-  const insets = useSafeAreaInsets();
 
   const [isFetchingPrices, setIsFetchingPrices] = useState(false);
+  const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
+  const [initialMaterialCount, setInitialMaterialCount] = useState(0);
   const [editDialogVisible, setEditDialogVisible] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
   const [editName, setEditName] = useState('');
@@ -91,7 +133,7 @@ export function MaterialsListScreen() {
   // Product search state
   const [searchDialogVisible, setSearchDialogVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<BunningsItem[]>([]);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
   // Delete confirmation dialog state
@@ -139,6 +181,36 @@ export function MaterialsListScreen() {
     });
   }, []);
 
+  // Detect if AI is analyzing (materials list is empty on first load for custom jobs)
+  React.useEffect(() => {
+    if (currentQuote && currentQuote.materials.length === 0 && currentQuote.job.template === 'custom') {
+      setIsAiAnalyzing(true);
+      setInitialMaterialCount(0);
+
+      // Poll for materials being added (AI analysis completing)
+      const checkInterval = setInterval(() => {
+        const quote = useStore.getState().currentQuote;
+        if (quote && quote.materials.length > 0) {
+          setIsAiAnalyzing(false);
+          clearInterval(checkInterval);
+        }
+      }, 500);
+
+      // Timeout after 30 seconds
+      const timeout = setTimeout(() => {
+        setIsAiAnalyzing(false);
+        clearInterval(checkInterval);
+      }, 30000);
+
+      return () => {
+        clearInterval(checkInterval);
+        clearTimeout(timeout);
+      };
+    } else {
+      setIsAiAnalyzing(false);
+    }
+  }, [currentQuote?.id]);
+
   // Early return after all hooks have been called
   if (!currentQuote) {
     return null;
@@ -160,18 +232,33 @@ export function MaterialsListScreen() {
 
     // Determine which pricing method to use
     const useBunningsApi = businessSettings?.useBunningsApi === true;
-    const useReeceApi = businessSettings?.useReeceApi === true;
+    const useReeceApi = false; // Disabled - API coming soon
     const useScraperApi = process.env.BUNNINGS_SCRAPER_URL ? true : false;
-    const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
 
-    let methodName = 'Intelligent pricing (web search + AI estimation)';
-    if (useScraperApi) {
+    // Get selected store (single store only now)
+    const selectedStore = businessSettings?.selectedStore || 'bunnings';
+    const storeUrl = selectedStore === 'bunnings' ? 'bunnings.com.au' :
+                     selectedStore === 'mitre10' ? 'mitre10.com.au' :
+                     selectedStore === 'reece' ? 'reece.com.au' : 'bunnings.com.au';
+
+    const hardwareStores = [storeUrl]; // Single store array for backwards compatibility
+
+    console.log('💡 Pricing method settings:', {
+      selectedStore,
+      storeUrl,
+      useScraperApi,
+      useBunningsApi,
+      scraperUrl: process.env.BUNNINGS_SCRAPER_URL,
+    });
+
+    let methodName = 'AI estimation';
+    if (useScraperApi && selectedStore === 'bunnings') {
       methodName = 'Bunnings Scraper (Real Prices)';
     } else if (useBunningsApi) {
       methodName = 'Bunnings API';
-    } else if (useReeceApi) {
-      methodName = 'Reece API';
     }
+
+    console.log(`📊 Using pricing method: ${methodName}`);
 
     try {
       const updatedMaterials = [...materials];
@@ -547,39 +634,170 @@ export function MaterialsListScreen() {
     setSearchResults([]);
 
     try {
-      const results = await bunningsApi.searchItem(searchQuery, 20);
-      setSearchResults(results);
+      // Get selected store (could be from selectedStore or first hardwareStore)
+      const selectedStore = businessSettings?.selectedStore || 'bunnings';
+      const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
+      const firstStore = hardwareStores[0];
+      const useScraperApi = process.env.BUNNINGS_SCRAPER_URL ? true : false;
 
-      if (results.length === 0) {
-        Alert.alert(
-          'No Results',
-          'No products found. The Bunnings Sandbox may have limited data. Try:\n\n• Adding the material manually\n• Using a different search term\n• Entering a Bunnings item number directly'
+      // Check if the selected store is Bunnings
+      const isBunnings = selectedStore === 'bunnings' || firstStore.includes('bunnings.com.au');
+
+      if (isBunnings && useScraperApi) {
+        // Use Bunnings Scraper for search (returns up to 10 results by default)
+        console.log(`🔍 Searching Bunnings via scraper for: "${searchQuery}"`);
+
+        // Use the dedicated bunningsScraperService for more control
+        const scraperResponse = await searchProductWithScraper(searchQuery, 10);
+
+        if (scraperResponse && scraperResponse.success && scraperResponse.results.length > 0) {
+          // Convert scraper results to display format
+          const products = scraperResponse.results.map(product => ({
+            productName: product.productName,
+            description: product.description || '',
+            itemNumber: product.itemNumber || '',
+            brand: product.brand || '',
+            price: product.price,
+            productUrl: product.productUrl,
+            imageUrl: product.imageUrl,
+            store: 'bunnings.com.au',
+            stockLevel: product.stockLevel,
+            isScraperResult: true,
+            confidence: product.confidence,
+          }));
+
+          setSearchResults(products);
+          console.log(`✅ Found ${products.length} products from scraper`);
+        } else {
+          // Fallback to web scraping method
+          console.log('⚠️ Scraper returned no results, trying web scraping fallback...');
+          const scraperResults = await searchMaterialWithWebScraping(
+            searchQuery,
+            searchQuery,
+            1,
+            'each',
+            [firstStore]
+          );
+
+          const products = scraperResults.flatMap(r => r.matches).map(match => ({
+            productName: match.productName,
+            description: match.description || '',
+            itemNumber: match.itemNumber || '',
+            brand: match.brand || '',
+            price: match.price,
+            productUrl: match.productUrl,
+            imageUrl: match.imageUrl,
+            store: match.store,
+            isScraperResult: true,
+          }));
+
+          setSearchResults(products);
+
+          if (products.length === 0) {
+            Alert.alert(
+              'No Results',
+              `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Checking your internet connection`
+            );
+          }
+        }
+      } else if (isBunnings) {
+        // Fallback to Bunnings API if scraper not available
+        console.log(`🔍 Searching Bunnings via API for: "${searchQuery}"`);
+        const results = await bunningsApi.searchItem(searchQuery, 20);
+        setSearchResults(results.map(item => ({ ...item, isScraperResult: false })));
+
+        if (results.length === 0) {
+          Alert.alert(
+            'No Results',
+            'No products found. The Bunnings API may have limited data. Try:\n\n• Adding the material manually\n• Using a different search term'
+          );
+        }
+      } else {
+        // For other stores, use web scraping
+        console.log(`🔍 Searching ${firstStore} via scraper for: "${searchQuery}"`);
+        const scraperResults = await searchMaterialWithWebScraping(
+          searchQuery,
+          searchQuery,
+          1,
+          'each',
+          [firstStore]
         );
+
+        const products = scraperResults.flatMap(r => r.matches).map(match => ({
+          productName: match.productName,
+          description: match.description || '',
+          itemNumber: match.itemNumber || '',
+          brand: match.brand || '',
+          price: match.price,
+          productUrl: match.productUrl,
+          imageUrl: match.imageUrl,
+          store: match.store,
+          isScraperResult: true,
+        }));
+
+        setSearchResults(products);
+
+        if (products.length === 0) {
+          Alert.alert(
+            'No Results',
+            `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Selecting a different hardware store in Settings`
+          );
+        }
       }
     } catch (error) {
+      console.error('Search error:', error);
       Alert.alert('Search Error', 'Failed to search products. Please try again.');
     } finally {
       setIsSearching(false);
     }
   };
 
-  const handleSelectProduct = async (item: BunningsItem) => {
+  const handleSelectProduct = async (item: any) => {
     setSearchDialogVisible(false);
 
-    // Fetch price for the selected item
-    const price = await bunningsApi.getPrice(item.itemNumber);
+    let newMaterial: Material;
 
-    const newMaterial: Material = {
-      id: generateId(),
-      name: item.productName || item.description,
-      quantity: 1,
-      unit: 'each',
-      bunningsItemNumber: item.itemNumber,
-      price: price?.priceIncGst || 0,
-      totalPrice: price?.priceIncGst || 0,
-      manualPriceOverride: false,
-      searchTerm: item.description,
-    };
+    if (item.isScraperResult) {
+      // Handle scraper results with full metadata
+      newMaterial = {
+        id: generateId(),
+        name: item.productName,
+        quantity: 1,
+        unit: 'each',
+        bunningsItemNumber: item.itemNumber,
+        price: item.price || 0,
+        totalPrice: item.price || 0,
+        manualPriceOverride: false,
+        searchTerm: item.productName,
+        pricingSource: 'scraper',
+        productUrl: item.productUrl,
+        imageUrl: item.imageUrl,
+        description: item.description,
+        brand: item.brand &&
+               item.brand.toLowerCase() !== 'bunnings' &&
+               item.brand.toLowerCase() !== 'bunnings.com.au'
+          ? item.brand
+          : undefined,
+        stockLevel: item.stockLevel,
+        stockCheckedAt: new Date().toISOString(), // Mark when we checked
+      };
+    } else {
+      // Handle Bunnings API results
+      const price = await bunningsApi.getPrice(item.itemNumber);
+
+      newMaterial = {
+        id: generateId(),
+        name: item.productName || item.description,
+        quantity: 1,
+        unit: 'each',
+        bunningsItemNumber: item.itemNumber,
+        price: price?.priceIncGst || 0,
+        totalPrice: price?.priceIncGst || 0,
+        manualPriceOverride: false,
+        searchTerm: item.description,
+        pricingSource: 'api',
+      };
+    }
 
     updateQuote({
       ...currentQuote,
@@ -614,7 +832,18 @@ export function MaterialsListScreen() {
   };
 
   const handleAddMaterial = () => {
-    // Show search dialog instead of directly adding
+    // Check if Bunnings is the first selected store
+    const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
+    const firstStore = hardwareStores[0];
+    const isBunnings = firstStore.includes('bunnings.com.au');
+
+    if (!isBunnings) {
+      // For non-Bunnings stores, add material manually
+      handleAddMaterialManually();
+      return;
+    }
+
+    // Show search dialog for Bunnings
     setSearchDialogVisible(true);
     setSearchQuery('');
     setSearchResults([]);
@@ -651,7 +880,7 @@ export function MaterialsListScreen() {
     } else if (firstStore.includes('reece.com.au')) {
       storeUrl = `https://www.reece.com.au/search?q=${encodedSearch}`;
     } else if (firstStore.includes('mitre10.com.au')) {
-      storeUrl = `https://www.mitre10.com.au/search?q=${encodedSearch}`;
+      storeUrl = `https://www.mitre10.com.au/catalogsearch/result?q=${encodedSearch}&viewType=GRID&flag=product`;
     } else if (firstStore.includes('flexihire.com.au')) {
       storeUrl = `https://www.flexihire.com.au/equipment?q=${encodedSearch}`;
     } else {
@@ -816,7 +1045,9 @@ export function MaterialsListScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
       >
-        {materials.length === 0 ? (
+        {isAiAnalyzing ? (
+            <AiAnalyzingState />
+        ) : materials.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>No materials required</Text>
             <Text style={styles.emptySubtext}>
@@ -840,52 +1071,58 @@ export function MaterialsListScreen() {
               const isAiEstimate = material.pricingSource === 'ai';
 
               return (
-                <List.Accordion
-                  key={material.id}
-                  title={material.name}
-                  description={
-                    <View>
-                      <Text style={styles.materialDescription}>
-                        {material.quantity} {material.unit} × {formatCurrency(material.price)}
-                      </Text>
-                      {isAiEstimate && (
-                        <Text style={styles.aiEstimateLabel}>AI Estimate</Text>
-                      )}
-                    </View>
-                  }
-                  left={(props) => <List.Icon {...props} icon="package-variant" />}
-                  right={() => (
-                    <View style={styles.itemRight}>
-                      <Text style={styles.itemTotal}>
-                        {formatCurrency(material.totalPrice)}
-                      </Text>
-                      <View style={styles.itemActions}>
-                        {showLink && (
+                <View key={material.id} style={styles.listItem}>
+                  <TouchableOpacity
+                    onPress={() => hasDetails && toggleMaterialExpanded(material.id)}
+                    disabled={!hasDetails}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.accordionHeader}>
+                      <MaterialCommunityIcons
+                        name="package-variant"
+                        size={24}
+                        color={colors.onSurface}
+                        style={styles.accordionIcon}
+                      />
+                      <View style={styles.accordionContent}>
+                        <Text style={styles.accordionTitle}>{material.name}</Text>
+                        <View>
+                          <Text style={styles.materialDescription}>
+                            {material.quantity} {material.unit} × {formatCurrency(material.price)}
+                          </Text>
+                          {isAiEstimate && (
+                            <Text style={styles.aiEstimateLabel}>AI Estimate</Text>
+                          )}
+                        </View>
+                      </View>
+                      <View style={styles.itemRight}>
+                        <Text style={styles.itemTotal}>
+                          {formatCurrency(material.totalPrice)}
+                        </Text>
+                        <View style={styles.itemActions}>
+                          {showLink && (
+                            <IconButton
+                              icon="open-in-new"
+                              size={20}
+                              onPress={() => handleOpenInStore(material)}
+                              iconColor={colors.primary}
+                            />
+                          )}
                           <IconButton
-                            icon="open-in-new"
+                            icon="pencil"
                             size={20}
-                            onPress={() => handleOpenInStore(material)}
-                            iconColor={colors.primary}
+                            onPress={() => handleEditMaterial(material)}
                           />
-                        )}
-                        <IconButton
-                          icon="pencil"
-                          size={20}
-                          onPress={() => handleEditMaterial(material)}
-                        />
-                        <IconButton
-                          icon="delete"
-                          size={20}
-                          onPress={() => handleDeleteMaterial(material.id)}
-                        />
+                          <IconButton
+                            icon="delete"
+                            size={20}
+                            onPress={() => handleDeleteMaterial(material.id)}
+                          />
+                        </View>
                       </View>
                     </View>
-                  )}
-                  expanded={isExpanded}
-                  onPress={() => hasDetails && toggleMaterialExpanded(material.id)}
-                  style={styles.listItem}
-                >
-                  {hasDetails && (
+                  </TouchableOpacity>
+                  {hasDetails && isExpanded && (
                     <View style={styles.expandedContent}>
                       <View style={styles.detailsContainer}>
                         {material.imageUrl && (
@@ -924,7 +1161,7 @@ export function MaterialsListScreen() {
                       </View>
                     </View>
                   )}
-                </List.Accordion>
+                </View>
               );
             })}
           </List.Section>
@@ -938,24 +1175,8 @@ export function MaterialsListScreen() {
             icon="plus"
             contentStyle={styles.addButtonContent}
           >
-            Add
+            Add Material
           </Button>
-
-          <Button
-            mode="outlined"
-            onPress={handleFetchPrices}
-            style={styles.actionButton}
-            loading={isFetchingPrices}
-            disabled={isFetchingPrices || materials.length === 0}
-          >
-            Fetch Prices
-          </Button>
-
-          {(businessSettings?.useBunningsApi === false || businessSettings?.useBunningsApi === undefined) && (
-            <Text style={styles.disclaimerText}>
-              Note: Using intelligent pricing (attempts real store data, falls back to AI estimates).
-            </Text>
-          )}
         </View>
 
         <View style={styles.summary}>
@@ -966,16 +1187,26 @@ export function MaterialsListScreen() {
         </View>
       </ScrollView>
 
-      <View style={[styles.bottomActions, { paddingBottom: insets.bottom + 20 }]}>
-        <Button
-          mode="contained"
-          onPress={handleNext}
-          style={styles.nextButton}
-          labelStyle={styles.nextButtonLabel}
-        >
-          Next: Labor & Markup
-        </Button>
-      </View>
+      {/* Optional Fetch Prices - Secondary Action */}
+      {materials.length > 0 && (
+        <View style={styles.fetchPricesContainer}>
+          <Button
+            mode="outlined"
+            onPress={handleFetchPrices}
+            style={styles.fetchPricesButton}
+            loading={isFetchingPrices}
+            disabled={isFetchingPrices}
+          >
+            Fetch Prices
+          </Button>
+        </View>
+      )}
+
+      {/* Primary Navigation - Next Step */}
+      <FixedBottomButton
+        label="Next: Labor & Markup"
+        onPress={handleNext}
+      />
 
       {/* Edit Material Dialog */}
       <Portal>
@@ -988,6 +1219,8 @@ export function MaterialsListScreen() {
               onChangeText={handleEditNameChange}
               mode="outlined"
               style={styles.dialogInput}
+              multiline
+              numberOfLines={2}
             />
 
             <TextInput
@@ -1059,7 +1292,19 @@ export function MaterialsListScreen() {
           onDismiss={() => setSearchDialogVisible(false)}
           style={styles.searchDialog}
         >
-          <Dialog.Title>Add Material from Bunnings</Dialog.Title>
+          <Dialog.Title>
+            Add Material from {
+              (() => {
+                const stores = businessSettings?.hardwareStores || ['bunnings.com.au'];
+                const firstStore = stores[0];
+                if (firstStore.includes('bunnings.com.au')) return 'Bunnings';
+                if (firstStore.includes('reece.com.au')) return 'Reece';
+                if (firstStore.includes('mitre10.com.au')) return 'Mitre 10';
+                if (firstStore.includes('flexihire.com.au')) return 'Flexihire';
+                return firstStore.replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/$/, '');
+              })()
+            }
+          </Dialog.Title>
           <Dialog.Content>
             <View style={styles.searchContainer}>
               <TextInput
@@ -1093,22 +1338,46 @@ export function MaterialsListScreen() {
                   </Text>
                   <FlatList
                     data={searchResults}
-                    keyExtractor={(item) => item.itemNumber}
+                    keyExtractor={(item, index) => item.itemNumber || `result-${index}`}
                     style={styles.resultsList}
                     renderItem={({ item }) => (
                       <TouchableOpacity
                         style={styles.resultItem}
                         onPress={() => handleSelectProduct(item)}
                       >
+                        {item.imageUrl && (
+                          <Image
+                            source={{ uri: item.imageUrl }}
+                            style={styles.resultImage}
+                            resizeMode="contain"
+                          />
+                        )}
                         <View style={styles.resultInfo}>
                           <Text style={styles.resultName}>
                             {item.productName || item.description}
                           </Text>
                           <Text style={styles.resultDetails}>
-                            Item #: {item.itemNumber}
-                            {item.brand && ` • ${item.brand}`}
+                            {item.itemNumber && `Item #: ${item.itemNumber}`}
+                            {item.brand && item.brand.toLowerCase() !== 'bunnings' && ` • ${item.brand}`}
                             {item.uom && ` • ${item.uom}`}
                           </Text>
+                          {item.price > 0 && (
+                            <Text style={styles.resultPrice}>
+                              {formatCurrency(item.price)}
+                            </Text>
+                          )}
+                          {item.stockLevel && item.stockLevel !== 'unknown' && (
+                            <Text style={[
+                              styles.resultStock,
+                              item.stockLevel === 'in-stock' && styles.resultStockInStock,
+                              item.stockLevel === 'low-stock' && styles.resultStockLowStock,
+                              item.stockLevel === 'out-of-stock' && styles.resultStockOutOfStock,
+                            ]}>
+                              {item.stockLevel === 'in-stock' ? '✓ In Stock' :
+                               item.stockLevel === 'low-stock' ? '⚠ Low Stock' :
+                               '✗ Out of Stock'}
+                            </Text>
+                          )}
                         </View>
                         <IconButton icon="chevron-right" size={20} />
                       </TouchableOpacity>
@@ -1212,9 +1481,29 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     marginBottom: 1,
   },
+  accordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    paddingRight: 8,
+  },
+  accordionIcon: {
+    marginRight: 16,
+  },
+  accordionContent: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  accordionTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.text,
+    marginBottom: 4,
+  },
   itemRight: {
     flexDirection: 'column',
     alignItems: 'flex-end',
+    marginLeft: 8,
   },
   itemTotal: {
     fontSize: 16,
@@ -1243,25 +1532,38 @@ const styles = StyleSheet.create({
   },
   actions: {
     padding: 20,
+    paddingBottom: 8,
   },
   addButton: {
     alignSelf: 'flex-end',
     marginTop: 0,
-    marginBottom: 24,
+    marginBottom: 0,
   },
   addButtonContent: {
     flexDirection: 'row-reverse',
   },
-  actionButton: {
-    marginBottom: 12,
+  fetchPricesContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: colors.surfaceGray3,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    ...(Platform.OS === 'web' && {
+      flexShrink: 0,
+      margin: '0 auto' as any,
+      width: '100%',
+    }),
   },
-  disclaimerText: {
-    fontSize: 11,
+  fetchPricesButton: {
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  fetchPricesHint: {
+    fontSize: 12,
     color: colors.onSurface,
-    fontStyle: 'italic',
-    marginTop: 8,
-    marginBottom: 4,
     textAlign: 'center',
+    marginTop: 4,
   },
   summary: {
     flexDirection: 'row',
@@ -1280,26 +1582,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: colors.primary,
-  },
-  bottomActions: {
-    padding: 20,
-    backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderColor: colors.border,
-    ...(Platform.OS === 'web' && {
-      flexShrink: 0,
-      position: 'sticky' as any,
-      bottom: 0,
-      margin: '0 auto' as any,
-      width: '100%',
-      boxShadow: '0 -2px 8px rgba(0,0,0,0.1)' as any,
-    }),
-  },
-  nextButton: {
-    paddingVertical: 8,
-  },
-  nextButtonLabel: {
-    color: colors.white,
   },
   dialogInput: {
     marginBottom: 12,
@@ -1366,6 +1648,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 12,
   },
+  resultImage: {
+    width: 60,
+    height: 60,
+    marginRight: 12,
+    borderRadius: 8,
+    backgroundColor: colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   resultInfo: {
     flex: 1,
   },
@@ -1377,6 +1668,26 @@ const styles = StyleSheet.create({
   resultDetails: {
     fontSize: 12,
     color: colors.onSurface,
+    marginBottom: 4,
+  },
+  resultPrice: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+    marginBottom: 4,
+  },
+  resultStock: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  resultStockInStock: {
+    color: '#2e7d32',
+  },
+  resultStockLowStock: {
+    color: '#f57c00',
+  },
+  resultStockOutOfStock: {
+    color: colors.error,
   },
   emptyResults: {
     padding: 20,
@@ -1437,5 +1748,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text,
     flex: 1,
+  },
+  // AI Analyzing State with Lottie
+  aiAnalyzingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    margin: 'auto',
+    minHeight: 300,
+    minWidth: 300,
+    maxWidth: 500,
+  },
+  lottieWrapper: {
+    width: 250,
+    height: 250,
+    marginBottom: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lottieAnimation: {
+    width: 250,
+    height: 250,
+  },
+  aiAnalyzingTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  aiAnalyzingSubtitle: {
+    fontSize: 14,
+    color: colors.onSurface,
+    textAlign: 'center',
+    marginBottom: 24,
   },
 });

@@ -23,7 +23,6 @@ import {
   Divider,
   IconButton,
   Chip,
-  Switch,
   Dialog,
   Portal,
 } from 'react-native-paper';
@@ -42,6 +41,14 @@ import {
   getDefaultStoresForTrade,
   TRADE_TYPE_LABELS
 } from '../constants/tradeStores';
+import {
+  TRADE_CATEGORIES,
+  TradeCategory,
+  TradeNiche,
+  getTradeCategoryById,
+  getTradeNicheById,
+} from '../constants/tradeCategories';
+import { FixedBottomButton } from '../components/FixedBottomButton';
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
@@ -56,14 +63,13 @@ export function SettingsScreen() {
   const [laborRate, setLaborRate] = useState('85');
   const [markup, setMarkup] = useState('20');
   const [tradeType, setTradeType] = useState<TradeType>('all');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedNiches, setSelectedNiches] = useState<string[]>([]);
   const [useBunningsApi, setUseBunningsApi] = useState(false);
   const [useReeceApi, setUseReeceApi] = useState(false);
-  const [selectedStores, setSelectedStores] = useState<string[]>([]);
-  const [customStores, setCustomStores] = useState<string[]>([]);
-  const [newCustomStore, setNewCustomStore] = useState('');
+  const [selectedStore, setSelectedStore] = useState<string>('bunnings'); // Single store selection
   const [isLoading, setIsLoading] = useState(false);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
-  const [showAddStoreDialog, setShowAddStoreDialog] = useState(false);
 
   // Load current settings
   useEffect(() => {
@@ -81,28 +87,80 @@ export function SettingsScreen() {
       const loadedTradeType = businessSettings.tradeType || 'all';
       setTradeType(loadedTradeType);
 
+      // Load trade categories and niches (prioritize new multi-select fields)
+      setSelectedCategories(businessSettings.tradeCategories || (businessSettings.tradeCategory ? [businessSettings.tradeCategory] : []));
+      setSelectedNiches(businessSettings.tradeNiches || (businessSettings.tradeNiche ? [businessSettings.tradeNiche] : []));
+
       setUseBunningsApi(businessSettings.useBunningsApi === true);
-      setUseReeceApi(businessSettings.useReeceApi === true);
+      setUseReeceApi(false); // Always false - API coming soon
 
-      // Load selected stores or use defaults for trade type
-      const stores = businessSettings.hardwareStores || getDefaultStoresForTrade(loadedTradeType);
-      setSelectedStores(stores);
-
-      // Load custom stores
-      setCustomStores(businessSettings.customStores || []);
+      // Load selected store (single store only now)
+      const store = businessSettings.selectedStore || 'bunnings';
+      setSelectedStore(store);
     }
   }, [businessSettings]);
 
-  // Update selected stores when trade type changes
+  // Update selected store when trade type changes
   const handleTradeTypeChange = (newTradeType: TradeType) => {
     setTradeType(newTradeType);
-    // Reset to default stores for the new trade type
-    const defaultStores = getDefaultStoresForTrade(newTradeType);
-    setSelectedStores(defaultStores);
+    // Reset to Bunnings as default
+    setSelectedStore('bunnings');
 
     // Reece API is disabled by default (no API access currently)
     setUseReeceApi(false);
   };
+
+  // Handle trade category toggle (multi-select)
+  const handleCategoryToggle = (categoryId: string) => {
+    setSelectedCategories(prev => {
+      if (prev.includes(categoryId)) {
+        // Remove category and its niches
+        const category = getTradeCategoryById(categoryId);
+        const nicheIds = category?.niches.map(n => n.id) || [];
+        setSelectedNiches(niches => niches.filter(n => !nicheIds.includes(n)));
+        return prev.filter(c => c !== categoryId);
+      } else {
+        // Add category
+        return [...prev, categoryId];
+      }
+    });
+  };
+
+  // Handle trade niche toggle (multi-select)
+  const handleNicheToggle = (nicheId: string, categoryId: string) => {
+    setSelectedNiches(prev => {
+      // If clicking on "All [Category] Services" (id === 'all')
+      if (nicheId === 'all') {
+        const category = getTradeCategoryById(categoryId);
+        if (!category) return prev;
+
+        const allNicheIds = category.niches.map(n => n.id);
+        const allSelected = allNicheIds.every(id => prev.includes(id));
+
+        if (allSelected) {
+          // Deselect all niches from this category
+          return prev.filter(n => !allNicheIds.includes(n));
+        } else {
+          // Select all niches from this category
+          const otherNiches = prev.filter(n => !allNicheIds.includes(n));
+          return [...otherNiches, ...allNicheIds];
+        }
+      }
+
+      // Normal toggle for non-"all" niches
+      if (prev.includes(nicheId)) {
+        return prev.filter(n => n !== nicheId);
+      } else {
+        return [...prev, nicheId];
+      }
+    });
+  };
+
+  // Get all niches from selected categories
+  const availableNiches = selectedCategories.flatMap(catId => {
+    const category = getTradeCategoryById(catId);
+    return category?.niches.map(niche => ({ ...niche, categoryId: catId })) || [];
+  });
 
   const handlePickLogo = async () => {
     try {
@@ -146,50 +204,14 @@ export function SettingsScreen() {
     );
   };
 
-  const handleToggleStore = (storeUrl: string) => {
-    if (selectedStores.includes(storeUrl)) {
-      setSelectedStores(selectedStores.filter(s => s !== storeUrl));
-    } else {
-      setSelectedStores([...selectedStores, storeUrl]);
-    }
-  };
-
-  const handleAddCustomStore = () => {
-    if (!newCustomStore.trim()) {
-      return;
-    }
-
-    // Normalize the URL (remove http/https/www)
-    let normalizedUrl = newCustomStore.trim().toLowerCase();
-    normalizedUrl = normalizedUrl.replace(/^https?:\/\//, '');
-    normalizedUrl = normalizedUrl.replace(/^www\./, '');
-    normalizedUrl = normalizedUrl.replace(/\/$/, '');
-
-    if (customStores.includes(normalizedUrl) || selectedStores.includes(normalizedUrl)) {
-      Alert.alert('Store Already Added', 'This store is already in your list.');
-      return;
-    }
-
-    setCustomStores([...customStores, normalizedUrl]);
-    setSelectedStores([...selectedStores, normalizedUrl]);
-    setNewCustomStore('');
-    setShowAddStoreDialog(false);
-  };
-
-  const handleRemoveCustomStore = (storeUrl: string) => {
-    setCustomStores(customStores.filter(s => s !== storeUrl));
-    setSelectedStores(selectedStores.filter(s => s !== storeUrl));
+  // Handle store selection (single store only)
+  const handleStoreSelect = (storeId: string) => {
+    setSelectedStore(storeId);
   };
 
   const handleSave = async () => {
     if (!businessName.trim()) {
       alert('Please enter your business name');
-      return;
-    }
-
-    // Validate that at least one store is selected
-    if (selectedStores.length === 0) {
-      alert('Please select at least one hardware store');
       return;
     }
 
@@ -203,10 +225,11 @@ export function SettingsScreen() {
       defaultLaborRate: parseFloat(laborRate) || 85,
       defaultMarkup: parseFloat(markup) || 20,
       tradeType: tradeType,
+      tradeCategories: selectedCategories.length > 0 ? selectedCategories : undefined,
+      tradeNiches: selectedNiches.length > 0 ? selectedNiches : undefined,
       useBunningsApi: false, // API not available, always use AI estimation
       useReeceApi: false, // API not available, always use AI estimation
-      hardwareStores: selectedStores.length > 0 ? selectedStores : undefined,
-      customStores: customStores.length > 0 ? customStores : undefined,
+      selectedStore: selectedStore, // Single store selection
     };
 
     try {
@@ -295,11 +318,7 @@ export function SettingsScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
+    <View style={styles.container}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -463,89 +482,325 @@ export function SettingsScreen() {
           />
         </Surface>
 
-        {/* Trade Type Selection */}
+        {/* Trade Category Selection */}
         <Surface style={styles.card}>
-          <Title style={styles.sectionTitle}>Trade Type</Title>
+          <Title style={styles.sectionTitle}>Trade Categories</Title>
           <Text style={styles.helperText}>
-            Select your trade to get relevant store recommendations
+            Select all categories that apply to your business (multi-select)
           </Text>
 
-          <View style={styles.pillContainer}>
-            {(Object.keys(TRADE_TYPE_LABELS) as TradeType[]).map((trade) => (
-              <Chip
-                key={trade}
-                selected={tradeType === trade}
-                onPress={() => handleTradeTypeChange(trade)}
-                style={[
-                  styles.tradePill,
-                  tradeType === trade && styles.tradePillSelected
-                ]}
-                textStyle={tradeType === trade && styles.tradePillTextSelected}
-                mode={tradeType === trade ? 'flat' : 'outlined'}
-              >
-                {TRADE_TYPE_LABELS[trade]}
-              </Chip>
-            ))}
+          <View style={styles.categoryGrid}>
+            {TRADE_CATEGORIES.map((category) => {
+              const isSelected = selectedCategories.includes(category.id);
+              return (
+                <TouchableOpacity
+                  key={category.id}
+                  style={[
+                    styles.categoryCard,
+                    isSelected && styles.categoryCardSelected,
+                  ]}
+                  onPress={() => handleCategoryToggle(category.id)}
+                >
+                  {isSelected && (
+                    <View style={styles.categoryCheckmark}>
+                      <MaterialCommunityIcons name="check-circle" size={20} color={colors.primary} />
+                    </View>
+                  )}
+                  <View style={[styles.categoryIconContainer, { backgroundColor: category.color + '20' }]}>
+                    <MaterialCommunityIcons
+                      name={category.icon as any}
+                      size={28}
+                      color={isSelected ? colors.primary : category.color}
+                    />
+                  </View>
+                  <View style={styles.categoryNameContainer}>
+                    <Text
+                      style={[
+                        styles.categoryName,
+                        isSelected && styles.categoryNameSelected
+                      ]}
+                      numberOfLines={3}
+                      ellipsizeMode="tail"
+                    >
+                      {category.name}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </Surface>
 
-        {/* Hardware Store Selection */}
-        <Surface style={styles.card}>
-          <Title style={styles.sectionTitle}>Hardware Stores</Title>
-          <Text style={styles.helperText}>
-            Select stores for price estimation context. AI will estimate prices based on typical pricing from these stores.
-          </Text>
+        {/* Trade Niche Selection (shown when categories are selected) */}
+        {selectedCategories.length > 0 && availableNiches.length > 0 && (
+          <Surface style={styles.card}>
+            <Title style={styles.sectionTitle}>Specialties / Niches</Title>
+            <Text style={styles.helperText}>
+              Select all specific areas of expertise within your selected categories (multi-select)
+            </Text>
 
             <View style={styles.pillContainer}>
-              {getStoresForTrade(tradeType).map((store) => (
-                <Chip
-                  key={store.url}
-                  selected={selectedStores.includes(store.url)}
-                  onPress={() => handleToggleStore(store.url)}
-                  style={[
-                    styles.storePill,
-                    selectedStores.includes(store.url) && styles.storePillSelected
-                  ]}
-                  textStyle={selectedStores.includes(store.url) && styles.storePillTextSelected}
-                  mode={selectedStores.includes(store.url) ? 'flat' : 'outlined'}
-                >
-                  {store.name}
-                </Chip>
-              ))}
-
-              {/* Custom stores */}
-              {customStores.map((storeUrl) => (
-                <Chip
-                  key={storeUrl}
-                  selected={selectedStores.includes(storeUrl)}
-                  onPress={() => handleToggleStore(storeUrl)}
-                  onClose={() => handleRemoveCustomStore(storeUrl)}
-                  style={[
-                    styles.storePill,
-                    selectedStores.includes(storeUrl) && styles.storePillSelected
-                  ]}
-                  textStyle={selectedStores.includes(storeUrl) && styles.storePillTextSelected}
-                  mode={selectedStores.includes(storeUrl) ? 'flat' : 'outlined'}
-                >
-                  {storeUrl}
-                </Chip>
-              ))}
-
-              {/* Add Custom Store Button */}
-              <Chip
-                icon="plus"
-                onPress={() => setShowAddStoreDialog(true)}
-                style={styles.addStorePill}
-                mode="outlined"
-              >
-                Add Custom Store
-              </Chip>
+              {availableNiches.map((niche) => {
+                const isSelected = selectedNiches.includes(niche.id);
+                return (
+                  <Chip
+                    key={`${niche.categoryId}-${niche.id}`}
+                    selected={isSelected}
+                    onPress={() => handleNicheToggle(niche.id, niche.categoryId)}
+                    style={[
+                      styles.nichePill,
+                      isSelected && styles.nichePillSelected
+                    ]}
+                    textStyle={[
+                      isSelected && styles.nichePillTextSelected,
+                      isSelected && { color: colors.surface }
+                    ]}
+                    mode={isSelected ? 'flat' : 'outlined'}
+                    icon={({ size }) => (
+                      <MaterialCommunityIcons
+                        name={niche.icon as any}
+                        size={size}
+                        color={isSelected ? colors.surface : colors.primary}
+                      />
+                    )}
+                  >
+                    {niche.name}
+                  </Chip>
+                );
+              })}
             </View>
+          </Surface>
+        )}
+
+        {/* Hardware Store Selection */}
+        <Surface style={styles.card}>
+          <Title style={styles.sectionTitle}>Hardware Store</Title>
+          <Text style={styles.helperText}>
+            Select your preferred hardware store for pricing
+          </Text>
+
+          {/* Accurate Pricing Section */}
+          <View style={styles.storeCategory}>
+            <View style={styles.storeCategoryHeader}>
+              <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
+              <Text style={styles.storeCategoryTitle}>More Accurate Pricing</Text>
+            </View>
+            <Text style={styles.storeCategoryDescription}>
+              Stores with more reliable web search pricing or API access.
+            </Text>
+
+            {/* Bunnings - Available */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                selectedStore === 'bunnings' && styles.storeRadioOptionSelected
+              ]}
+              onPress={() => handleStoreSelect('bunnings')}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={[
+                  styles.radioButton,
+                  selectedStore === 'bunnings' && styles.radioButtonSelected
+                ]}>
+                  {selectedStore === 'bunnings' && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Bunnings</Text>
+                  <Text style={styles.storeMethod}>Web Search</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons
+                name="check-circle"
+                size={20}
+                color="#4CAF50"
+              />
+            </TouchableOpacity>
+
+            {/* Reece - Coming Soon */}
+            <TouchableOpacity
+              style={[styles.storeRadioOption, styles.storeRadioOptionDisabled]}
+              disabled={true}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={styles.radioButton}>
+                  <View style={styles.radioButtonDisabled} />
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={[styles.storeName, styles.storeNameDisabled]}>Reece</Text>
+                  <Text style={styles.storeMethod}>API Integration</Text>
+                </View>
+              </View>
+              <View style={styles.comingSoonBadge}>
+                <Text style={styles.comingSoonText}>Coming Soon</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {/* Guestimates Section */}
+          <View style={styles.storeCategory}>
+            <View style={styles.storeCategoryHeader}>
+              <MaterialCommunityIcons name="approximately-equal" size={20} color="#FF9800" />
+              <Text style={styles.storeCategoryTitle}>Guestimates</Text>
+            </View>
+            <Text style={styles.storeCategoryDescription}>
+              AI-estimated pricing based on typical product costs
+            </Text>
+
+            {/* Mitre 10 */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                selectedStore === 'mitre10' && styles.storeRadioOptionSelected
+              ]}
+              onPress={() => handleStoreSelect('mitre10')}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={[
+                  styles.radioButton,
+                  selectedStore === 'mitre10' && styles.radioButtonSelected
+                ]}>
+                  {selectedStore === 'mitre10' && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Mitre 10</Text>
+                  <Text style={styles.storeMethod}>AI Estimation</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons
+                name="approximately-equal"
+                size={20}
+                color="#FF9800"
+              />
+            </TouchableOpacity>
+
+            {/* Home Timber & Hardware */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                selectedStore === 'hth' && styles.storeRadioOptionSelected
+              ]}
+              onPress={() => handleStoreSelect('hth')}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={[
+                  styles.radioButton,
+                  selectedStore === 'hth' && styles.radioButtonSelected
+                ]}>
+                  {selectedStore === 'hth' && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Home Timber & Hardware</Text>
+                  <Text style={styles.storeMethod}>AI Estimation</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons
+                name="approximately-equal"
+                size={20}
+                color="#FF9800"
+              />
+            </TouchableOpacity>
+
+            {/* Total Tools */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                selectedStore === 'totaltools' && styles.storeRadioOptionSelected
+              ]}
+              onPress={() => handleStoreSelect('totaltools')}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={[
+                  styles.radioButton,
+                  selectedStore === 'totaltools' && styles.radioButtonSelected
+                ]}>
+                  {selectedStore === 'totaltools' && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Total Tools</Text>
+                  <Text style={styles.storeMethod}>AI Estimation</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons
+                name="approximately-equal"
+                size={20}
+                color="#FF9800"
+              />
+            </TouchableOpacity>
+
+            {/* Flexihire */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                selectedStore === 'flexihire' && styles.storeRadioOptionSelected
+              ]}
+              onPress={() => handleStoreSelect('flexihire')}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={[
+                  styles.radioButton,
+                  selectedStore === 'flexihire' && styles.radioButtonSelected
+                ]}>
+                  {selectedStore === 'flexihire' && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Flexihire</Text>
+                  <Text style={styles.storeMethod}>AI Estimation</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons
+                name="approximately-equal"
+                size={20}
+                color="#FF9800"
+              />
+            </TouchableOpacity>
+
+            {/* Sydney Solvents */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                selectedStore === 'sydneysolvents' && styles.storeRadioOptionSelected
+              ]}
+              onPress={() => handleStoreSelect('sydneysolvents')}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={[
+                  styles.radioButton,
+                  selectedStore === 'sydneysolvents' && styles.radioButtonSelected
+                ]}>
+                  {selectedStore === 'sydneysolvents' && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Sydney Solvents</Text>
+                  <Text style={styles.storeMethod}>AI Estimation</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons
+                name="approximately-equal"
+                size={20}
+                color="#FF9800"
+              />
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.infoBox}>
             <MaterialCommunityIcons name="information" size={20} color={colors.primary} />
             <Text style={styles.infoBoxText}>
-              Select the stores where you typically purchase materials. AI will use this context for price estimates.
+              {selectedStore === 'bunnings'
+                ? "Bunnings is selected. Real prices will be fetched using the Bunnings scraper when available."
+                : "Using AI estimation for typical product pricing."
+              }
             </Text>
           </View>
         </Surface>
@@ -559,16 +814,6 @@ export function SettingsScreen() {
             Quoting tool for Australian tradies with AI and Bunnings integration
           </Text>
         </View>
-
-        <Button
-          mode="contained"
-          onPress={handleSave}
-          style={styles.button}
-          loading={isLoading}
-          disabled={isLoading}
-        >
-          Save Settings
-        </Button>
 
         {/* Sign Out Section */}
         {auth.currentUser && (
@@ -600,6 +845,14 @@ export function SettingsScreen() {
         </WebContainer>
       </ScrollView>
 
+      {/* Fixed Save Button */}
+      <FixedBottomButton
+        label="Save Settings"
+        onPress={handleSave}
+        disabled={isLoading}
+        loading={isLoading}
+      />
+
       {/* Logout Confirmation Dialog */}
       <Portal>
         <Dialog
@@ -621,47 +874,8 @@ export function SettingsScreen() {
             </Button>
           </Dialog.Actions>
         </Dialog>
-
-        {/* Add Custom Store Dialog */}
-        <Dialog
-          visible={showAddStoreDialog}
-          onDismiss={() => {
-            setShowAddStoreDialog(false);
-            setNewCustomStore('');
-          }}
-          style={styles.logoutDialog}
-        >
-          <Dialog.Icon icon="store-plus" />
-          <Dialog.Title style={styles.dialogTitle}>Add Custom Store</Dialog.Title>
-          <Dialog.Content>
-            <Text style={styles.dialogHelperText}>
-              Enter the store website URL (no need for http:// or www.)
-            </Text>
-            <TextInput
-              label="Store URL"
-              value={newCustomStore}
-              onChangeText={setNewCustomStore}
-              mode="outlined"
-              placeholder="example.com.au"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.dialogInput}
-            />
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => {
-              setShowAddStoreDialog(false);
-              setNewCustomStore('');
-            }}>
-              Cancel
-            </Button>
-            <Button onPress={handleAddCustomStore} mode="contained">
-              Add Store
-            </Button>
-          </Dialog.Actions>
-        </Dialog>
       </Portal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -669,11 +883,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+    ...(Platform.OS === 'web' && {
+      display: 'flex' as any,
+      flexDirection: 'column' as any,
+      height: '100vh' as any,
+      overflow: 'hidden' as any,
+    }),
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 220,
+    paddingBottom: 120,
     flexGrow: 1,
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+      margin: 'auto' as any,
+      width: '100%',
+    }),
   },
   card: {
     padding: 20,
@@ -696,11 +921,6 @@ const styles = StyleSheet.create({
   },
   input: {
     marginBottom: 20,
-  },
-  button: {
-    marginTop: 12,
-    marginBottom: 80,
-    paddingVertical: 8,
   },
   helperText: {
     fontSize: 14,
@@ -841,11 +1061,22 @@ const styles = StyleSheet.create({
   switchLabel: {
     flex: 1,
     marginRight: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  switchTextContainer: {
+    flex: 1,
+    marginLeft: 12,
   },
   switchTitle: {
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
+  },
+  switchDescription: {
+    fontSize: 13,
+    color: colors.onSurface,
+    lineHeight: 18,
   },
   switchSubtitle: {
     fontSize: 13,
@@ -970,5 +1201,173 @@ const styles = StyleSheet.create({
     marginRight: 0,
     marginBottom: 0,
     borderStyle: 'dashed',
+  },
+  categoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  categoryCard: {
+    width: Platform.OS === 'web' ? 'calc(25% - 9px)' as any : '30.5%',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 8,
+    paddingTop: 12,
+    paddingBottom: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.outline + '30',
+    height: 120,
+    flexDirection: 'column',
+  },
+  categoryCardSelected: {
+    borderColor: colors.primary,
+    borderWidth: 2,
+    backgroundColor: colors.primary + '10',
+  },
+  categoryCheckmark: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 1,
+  },
+  categoryIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+    flexShrink: 0,
+  },
+  categoryNameContainer: {
+    width: '100%',
+    paddingHorizontal: 4,
+    flexShrink: 1,
+    maxWidth: '100%',
+    overflow: 'hidden',
+  },
+  categoryName: {
+    fontSize: 10,
+    textAlign: 'center',
+    color: colors.text,
+    lineHeight: 13,
+    flexShrink: 1,
+  },
+  categoryNameSelected: {
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  nichePill: {
+    marginRight: 0,
+    marginBottom: 0,
+  },
+  nichePillSelected: {
+    backgroundColor: colors.primary,
+  },
+  nichePillTextSelected: {
+    color: colors.surface,
+    fontWeight: '600',
+  },
+  storeCategory: {
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  storeCategoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  storeCategoryTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+    color: colors.text,
+  },
+  storeCategoryDescription: {
+    fontSize: 13,
+    color: colors.onSurface,
+    marginBottom: 12,
+    marginLeft: 28,
+  },
+  storeRadioOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.outline + '30',
+    marginBottom: 8,
+    backgroundColor: colors.surface,
+  },
+  storeRadioOptionSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '10',
+  },
+  storeRadioOptionDisabled: {
+    opacity: 0.5,
+    backgroundColor: colors.surface,
+  },
+  storeRadioLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  radioButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: colors.outline,
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioButtonSelected: {
+    borderColor: colors.primary,
+  },
+  radioButtonInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.primary,
+  },
+  radioButtonDisabled: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.outline,
+  },
+  storeInfo: {
+    flex: 1,
+  },
+  storeName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  storeNameDisabled: {
+    color: colors.onSurface,
+  },
+  storeMethod: {
+    fontSize: 12,
+    color: colors.onSurface,
+  },
+  comingSoonBadge: {
+    backgroundColor: colors.primary + '20',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  comingSoonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.primary,
   },
 });
