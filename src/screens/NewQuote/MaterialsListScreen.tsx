@@ -46,6 +46,9 @@ import {
   getBestMatch,
 } from '../../services/webScrapingPricing';
 import {
+  searchMaterialWithOpenAIDirect,
+} from '../../services/openAIDirectPricing';
+import {
   getFavoriteProduct,
   saveFavoriteProduct,
 } from '../../services/materialFavorites';
@@ -54,6 +57,10 @@ import {
   findBestMatchForMaterial,
   checkScraperHealth,
 } from '../../services/bunningsScraperClient';
+import {
+  searchProductWithScraper,
+  ScraperProduct,
+} from '../../services/bunningsScraperService';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 
 // AI Analysis Loading State with Lottie Animation
@@ -225,18 +232,33 @@ export function MaterialsListScreen() {
 
     // Determine which pricing method to use
     const useBunningsApi = businessSettings?.useBunningsApi === true;
-    const useReeceApi = businessSettings?.useReeceApi === true;
+    const useReeceApi = false; // Disabled - API coming soon
     const useScraperApi = process.env.BUNNINGS_SCRAPER_URL ? true : false;
-    const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
 
-    let methodName = 'Intelligent pricing (web search + AI estimation)';
-    if (useScraperApi) {
+    // Get selected store (single store only now)
+    const selectedStore = businessSettings?.selectedStore || 'bunnings';
+    const storeUrl = selectedStore === 'bunnings' ? 'bunnings.com.au' :
+                     selectedStore === 'mitre10' ? 'mitre10.com.au' :
+                     selectedStore === 'reece' ? 'reece.com.au' : 'bunnings.com.au';
+
+    const hardwareStores = [storeUrl]; // Single store array for backwards compatibility
+
+    console.log('💡 Pricing method settings:', {
+      selectedStore,
+      storeUrl,
+      useScraperApi,
+      useBunningsApi,
+      scraperUrl: process.env.BUNNINGS_SCRAPER_URL,
+    });
+
+    let methodName = 'AI estimation';
+    if (useScraperApi && selectedStore === 'bunnings') {
       methodName = 'Bunnings Scraper (Real Prices)';
     } else if (useBunningsApi) {
       methodName = 'Bunnings API';
-    } else if (useReeceApi) {
-      methodName = 'Reece API';
     }
+
+    console.log(`📊 Using pricing method: ${methodName}`);
 
     try {
       const updatedMaterials = [...materials];
@@ -612,45 +634,71 @@ export function MaterialsListScreen() {
     setSearchResults([]);
 
     try {
-      // Get the first selected hardware store
+      // Get selected store (could be from selectedStore or first hardwareStore)
+      const selectedStore = businessSettings?.selectedStore || 'bunnings';
       const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
       const firstStore = hardwareStores[0];
       const useScraperApi = process.env.BUNNINGS_SCRAPER_URL ? true : false;
 
-      // Check if the first store is Bunnings
-      const isBunnings = firstStore.includes('bunnings.com.au');
+      // Check if the selected store is Bunnings
+      const isBunnings = selectedStore === 'bunnings' || firstStore.includes('bunnings.com.au');
 
       if (isBunnings && useScraperApi) {
-        // Use Bunnings Scraper for search
+        // Use Bunnings Scraper for search (returns up to 10 results by default)
         console.log(`🔍 Searching Bunnings via scraper for: "${searchQuery}"`);
-        const scraperResults = await searchMaterialWithWebScraping(
-          searchQuery,
-          searchQuery,
-          1,
-          'each',
-          [firstStore]
-        );
 
-        // Convert scraper results to a format we can display
-        const products = scraperResults.flatMap(r => r.matches).map(match => ({
-          productName: match.productName,
-          description: match.description || '',
-          itemNumber: match.itemNumber || '',
-          brand: match.brand || '',
-          price: match.price,
-          productUrl: match.productUrl,
-          imageUrl: match.imageUrl,
-          store: match.store,
-          isScraperResult: true,
-        }));
+        // Use the dedicated bunningsScraperService for more control
+        const scraperResponse = await searchProductWithScraper(searchQuery, 10);
 
-        setSearchResults(products);
+        if (scraperResponse && scraperResponse.success && scraperResponse.results.length > 0) {
+          // Convert scraper results to display format
+          const products = scraperResponse.results.map(product => ({
+            productName: product.productName,
+            description: product.description || '',
+            itemNumber: product.itemNumber || '',
+            brand: product.brand || '',
+            price: product.price,
+            productUrl: product.productUrl,
+            imageUrl: product.imageUrl,
+            store: 'bunnings.com.au',
+            stockLevel: product.stockLevel,
+            isScraperResult: true,
+            confidence: product.confidence,
+          }));
 
-        if (products.length === 0) {
-          Alert.alert(
-            'No Results',
-            `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Checking your internet connection`
+          setSearchResults(products);
+          console.log(`✅ Found ${products.length} products from scraper`);
+        } else {
+          // Fallback to web scraping method
+          console.log('⚠️ Scraper returned no results, trying web scraping fallback...');
+          const scraperResults = await searchMaterialWithWebScraping(
+            searchQuery,
+            searchQuery,
+            1,
+            'each',
+            [firstStore]
           );
+
+          const products = scraperResults.flatMap(r => r.matches).map(match => ({
+            productName: match.productName,
+            description: match.description || '',
+            itemNumber: match.itemNumber || '',
+            brand: match.brand || '',
+            price: match.price,
+            productUrl: match.productUrl,
+            imageUrl: match.imageUrl,
+            store: match.store,
+            isScraperResult: true,
+          }));
+
+          setSearchResults(products);
+
+          if (products.length === 0) {
+            Alert.alert(
+              'No Results',
+              `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Checking your internet connection`
+            );
+          }
         }
       } else if (isBunnings) {
         // Fallback to Bunnings API if scraper not available
@@ -710,7 +758,7 @@ export function MaterialsListScreen() {
     let newMaterial: Material;
 
     if (item.isScraperResult) {
-      // Handle scraper results
+      // Handle scraper results with full metadata
       newMaterial = {
         id: generateId(),
         name: item.productName,
@@ -725,9 +773,13 @@ export function MaterialsListScreen() {
         productUrl: item.productUrl,
         imageUrl: item.imageUrl,
         description: item.description,
-        brand: item.brand && item.brand.toLowerCase() !== 'bunnings' && item.brand.toLowerCase() !== 'bunnings.com.au'
+        brand: item.brand &&
+               item.brand.toLowerCase() !== 'bunnings' &&
+               item.brand.toLowerCase() !== 'bunnings.com.au'
           ? item.brand
           : undefined,
+        stockLevel: item.stockLevel,
+        stockCheckedAt: new Date().toISOString(), // Mark when we checked
       };
     } else {
       // Handle Bunnings API results
@@ -1286,22 +1338,46 @@ export function MaterialsListScreen() {
                   </Text>
                   <FlatList
                     data={searchResults}
-                    keyExtractor={(item) => item.itemNumber}
+                    keyExtractor={(item, index) => item.itemNumber || `result-${index}`}
                     style={styles.resultsList}
                     renderItem={({ item }) => (
                       <TouchableOpacity
                         style={styles.resultItem}
                         onPress={() => handleSelectProduct(item)}
                       >
+                        {item.imageUrl && (
+                          <Image
+                            source={{ uri: item.imageUrl }}
+                            style={styles.resultImage}
+                            resizeMode="contain"
+                          />
+                        )}
                         <View style={styles.resultInfo}>
                           <Text style={styles.resultName}>
                             {item.productName || item.description}
                           </Text>
                           <Text style={styles.resultDetails}>
-                            Item #: {item.itemNumber}
-                            {item.brand && ` • ${item.brand}`}
+                            {item.itemNumber && `Item #: ${item.itemNumber}`}
+                            {item.brand && item.brand.toLowerCase() !== 'bunnings' && ` • ${item.brand}`}
                             {item.uom && ` • ${item.uom}`}
                           </Text>
+                          {item.price > 0 && (
+                            <Text style={styles.resultPrice}>
+                              {formatCurrency(item.price)}
+                            </Text>
+                          )}
+                          {item.stockLevel && item.stockLevel !== 'unknown' && (
+                            <Text style={[
+                              styles.resultStock,
+                              item.stockLevel === 'in-stock' && styles.resultStockInStock,
+                              item.stockLevel === 'low-stock' && styles.resultStockLowStock,
+                              item.stockLevel === 'out-of-stock' && styles.resultStockOutOfStock,
+                            ]}>
+                              {item.stockLevel === 'in-stock' ? '✓ In Stock' :
+                               item.stockLevel === 'low-stock' ? '⚠ Low Stock' :
+                               '✗ Out of Stock'}
+                            </Text>
+                          )}
                         </View>
                         <IconButton icon="chevron-right" size={20} />
                       </TouchableOpacity>
@@ -1572,6 +1648,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 12,
   },
+  resultImage: {
+    width: 60,
+    height: 60,
+    marginRight: 12,
+    borderRadius: 8,
+    backgroundColor: colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   resultInfo: {
     flex: 1,
   },
@@ -1583,6 +1668,26 @@ const styles = StyleSheet.create({
   resultDetails: {
     fontSize: 12,
     color: colors.onSurface,
+    marginBottom: 4,
+  },
+  resultPrice: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+    marginBottom: 4,
+  },
+  resultStock: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  resultStockInStock: {
+    color: '#2e7d32',
+  },
+  resultStockLowStock: {
+    color: '#f57c00',
+  },
+  resultStockOutOfStock: {
+    color: colors.error,
   },
   emptyResults: {
     padding: 20,

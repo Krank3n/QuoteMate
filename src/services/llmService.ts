@@ -41,16 +41,24 @@ interface LLMResponse {
 /**
  * Analyze a job description and generate a materials list
  * @param jobDescription - Natural language description of the job
+ * @param tradeContext - Optional trade category and niche information
  * @param retryCount - Number of retry attempts (default: 3)
  * @returns Materials list and estimated hours
  */
 export async function analyzeJobDescription(
   jobDescription: string,
+  tradeContext?: {
+    categoryName?: string;
+    nicheName?: string;
+    suggestedMaterials?: string[];
+    pricingMethod?: string;
+    selectedStore?: string; // Which store will be used for pricing
+  },
   retryCount: number = 3
 ): Promise<LLMResponse> {
   // On web, use Firebase Functions to avoid CORS issues
   if (Platform.OS === 'web') {
-    return analyzeViaFirebaseFunction(jobDescription, retryCount);
+    return analyzeViaFirebaseFunction(jobDescription, tradeContext, retryCount);
   }
 
   // On mobile, call Anthropic API directly
@@ -64,7 +72,7 @@ export async function analyzeJobDescription(
   // Retry loop
   for (let attempt = 0; attempt < retryCount; attempt++) {
     try {
-      const prompt = createPrompt(jobDescription);
+      const prompt = createPrompt(jobDescription, tradeContext);
 
       const response = await fetch(ANTHROPIC_API_URL, {
         method: 'POST',
@@ -120,6 +128,13 @@ export async function analyzeJobDescription(
  */
 async function analyzeViaFirebaseFunction(
   jobDescription: string,
+  tradeContext?: {
+    categoryName?: string;
+    nicheName?: string;
+    suggestedMaterials?: string[];
+    pricingMethod?: string;
+    selectedStore?: string; // Which store will be used for pricing
+  },
   retryCount: number = 3
 ): Promise<LLMResponse> {
   let lastError: Error | null = null;
@@ -131,7 +146,7 @@ async function analyzeViaFirebaseFunction(
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ jobDescription }),
+        body: JSON.stringify({ jobDescription, tradeContext }),
       });
 
       if (!response.ok) {
@@ -165,10 +180,47 @@ async function analyzeViaFirebaseFunction(
 /**
  * Create the prompt for the LLM
  */
-function createPrompt(jobDescription: string): string {
-  return `You are an expert Australian tradie assistant. Analyze the following job description and generate a detailed materials list with Bunnings search terms.
+function createPrompt(
+  jobDescription: string,
+  tradeContext?: {
+    categoryName?: string;
+    nicheName?: string;
+    suggestedMaterials?: string[];
+    pricingMethod?: string;
+    selectedStore?: string; // Which store will be used for pricing
+  }
+): string {
+  let contextSection = '';
 
-Job Description: "${jobDescription}"
+  if (tradeContext) {
+    contextSection = '\n\nTrade Context:';
+    if (tradeContext.categoryName) {
+      contextSection += `\n- Trade Category: ${tradeContext.categoryName}`;
+    }
+    if (tradeContext.nicheName) {
+      contextSection += `\n- Specialty/Niche: ${tradeContext.nicheName}`;
+    }
+    if (tradeContext.pricingMethod) {
+      contextSection += `\n- Typical Pricing Method: ${tradeContext.pricingMethod}`;
+    }
+    if (tradeContext.suggestedMaterials && tradeContext.suggestedMaterials.length > 0) {
+      contextSection += `\n- Common Materials for This Type of Job: ${tradeContext.suggestedMaterials.join(', ')}`;
+      contextSection += '\n  (Consider these materials, but also include any others that would be needed)';
+    }
+  }
+
+  // Determine which store will be used for pricing
+  const selectedStore = tradeContext?.selectedStore || 'bunnings';
+  let storeName = 'Bunnings';
+  if (selectedStore === 'mitre10') storeName = 'Mitre 10';
+  if (selectedStore === 'reece') storeName = 'Reece';
+  if (selectedStore === 'bunnings') storeName = 'Bunnings';
+
+  return `You are an expert Australian tradie assistant specializing in construction and trade work. Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.
+
+Job Description: "${jobDescription}"${contextSection}
+
+Hardware Store for pricing: ${storeName}
 
 Provide a JSON response with the following structure:
 {
@@ -177,7 +229,7 @@ Provide a JSON response with the following structure:
   "materials": [
     {
       "name": "Material name as it should appear in quote",
-      "searchTerm": "Specific Bunnings search term (be very specific with brands/sizes)",
+      "searchTerm": "Generic product search term (material type, size, specs - NOT brand-specific)",
       "quantity": <number>,
       "unit": "each|m|L|kg|box|pack",
       "reasoning": "Why this material is needed"
@@ -186,12 +238,17 @@ Provide a JSON response with the following structure:
 }
 
 Guidelines:
-- Use specific Bunnings product terms (e.g., "treated pine H3 90x45 2.4m" not just "timber")
-- Include all materials: timber, screws, nails, stain/paint, concrete, etc.
-- Be realistic with quantities - round up for waste
-- Include safety/prep materials if relevant (sandpaper, drop sheets, etc.)
-- Estimate labor hours realistically for an experienced tradie
-- Common Australian brands: Bunnings, Ozito, Ramset, Selleys, Dunlop, etc.
+- Use GENERIC product terms suitable for ${storeName}
+- Specify material type, size, and specs but avoid brand-specific names
+- GOOD examples: "brass stop valve 15mm quarter turn", "treated pine H3 90x45 2.4m", "PTFE thread tape 12mm"
+- BAD examples: "Kinetic valve", "Ozito drill", "Ramset anchor" (these are brand-specific)
+- Use common material specifications: timber grades (H3/H4), dimensions, thread sizes, capacities
+- Include all materials needed: primary materials, fasteners, adhesives, finishes, etc.
+- Be realistic with quantities - round up for waste (typically 10-15% extra)
+- Include safety/prep materials if relevant (sandpaper, drop sheets, cleaning supplies, etc.)
+- Estimate labor hours realistically for an experienced tradie in this specialty
+- Consider the suggested materials but don't limit yourself to only those
+- Think about what a professional ${tradeContext?.nicheName || 'tradie'} would need for this job
 
 Return ONLY valid JSON, no other text.`;
 }

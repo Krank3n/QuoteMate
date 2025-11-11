@@ -43,6 +43,7 @@ export interface ProductMatch {
   stockLevel?: 'in-stock' | 'low-stock' | 'out-of-stock' | 'unknown';
   stockCheckedAt?: string; // ISO timestamp of when stock was checked
   productUrl?: string;
+  imageUrl?: string; // Product image URL
   store: string;
   confidence: 'high' | 'medium' | 'low'; // How well it matches the search
 }
