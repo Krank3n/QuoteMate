@@ -24,6 +24,7 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Text,
   TextInput,
@@ -68,6 +69,7 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
 
 export function NewOnboardingScreen() {
   const { setBusinessSettings, setOnboarded } = useStore();
+  const insets = useSafeAreaInsets();
 
   // Current step
   const [currentStep, setCurrentStep] = useState(1);
@@ -190,13 +192,50 @@ export function NewOnboardingScreen() {
     });
   };
 
-  // Handle niche toggle (multi-select)
-  const handleNicheToggle = (nicheId: string) => {
+  // Handle niche toggle (multi-select with parent/child logic)
+  const handleNicheToggle = (nicheId: string, categoryId: string) => {
+    const category = getTradeCategoryById(categoryId);
+    if (!category) return;
+
+    const isAllOption = nicheId === 'all';
+    // Create composite keys for this category's niches
+    const categoryNicheKeys = category.niches.map(n => `${categoryId}_${n.id}`);
+    const childNicheKeys = categoryNicheKeys.filter(key => !key.endsWith('_all'));
+    const allKey = `${categoryId}_all`;
+    const currentKey = `${categoryId}_${nicheId}`;
+
     setSelectedNiches(prev => {
-      if (prev.includes(nicheId)) {
-        return prev.filter(n => n !== nicheId);
+      if (isAllOption) {
+        // Toggling "All Services" option for this category
+        if (prev.includes(allKey)) {
+          // Deselect "all" and all children of this category
+          return prev.filter(n => !categoryNicheKeys.includes(n));
+        } else {
+          // Select "all" and all children of this category
+          const otherNiches = prev.filter(n => !categoryNicheKeys.includes(n));
+          return [...otherNiches, ...categoryNicheKeys];
+        }
       } else {
-        return [...prev, nicheId];
+        // Toggling a specific child service
+        if (prev.includes(currentKey)) {
+          // Deselecting a child - also deselect "all" for this category if it's selected
+          return prev.filter(n => n !== currentKey && n !== allKey);
+        } else {
+          // Selecting a child
+          const newNiches = [...prev, currentKey];
+
+          // Check if all children of this category are now selected
+          const allChildrenSelected = childNicheKeys.every(key =>
+            newNiches.includes(key)
+          );
+
+          // If all children are selected, also select "all" for this category
+          if (allChildrenSelected && !newNiches.includes(allKey)) {
+            newNiches.push(allKey);
+          }
+
+          return newNiches;
+        }
       }
     });
   };
@@ -295,6 +334,12 @@ export function NewOnboardingScreen() {
                      firstCategory === 'carpentry' ? 'carpenter' :
                      firstCategory === 'cleaning' ? 'cleaner' : 'all';
 
+    // Extract just the niche IDs without category prefix (remove the categoryId_ prefix)
+    const nicheIds = selectedNiches.map(key => {
+      const parts = key.split('_');
+      return parts.slice(1).join('_'); // Handle IDs that might have underscores
+    });
+
     const settings: BusinessSettings = {
       businessName: businessName.trim(),
       abn: abn.trim() || undefined,
@@ -306,7 +351,7 @@ export function NewOnboardingScreen() {
       defaultMarkup: parseFloat(markup) || 20,
       tradeType: tradeType,
       tradeCategories: selectedCategories.length > 0 ? selectedCategories : undefined,
-      tradeNiches: selectedNiches.length > 0 ? selectedNiches : undefined,
+      tradeNiches: nicheIds.length > 0 ? nicheIds : undefined,
       useBunningsApi: false,
       useReeceApi: false,
       hardwareStores: selectedStores.length > 0 ? selectedStores : undefined,
@@ -352,15 +397,7 @@ export function NewOnboardingScreen() {
 
   // Step 1: Company Name
   const renderStep1CompanyName = () => (
-    <Animated.View
-      style={[
-        styles.stepContainer,
-        {
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }],
-        },
-      ]}
-    >
+    <View style={styles.stepContainer}>
       <View style={styles.stepHeader}>
         <MaterialCommunityIcons
           name="office-building"
@@ -388,20 +425,12 @@ export function NewOnboardingScreen() {
           textContentType="organizationName"
         />
       </Surface>
-    </Animated.View>
+    </View>
   );
 
   // Step 2: Trade Category
   const renderStep2TradeCategory = () => (
-    <Animated.View
-      style={[
-        styles.stepContainer,
-        {
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }],
-        },
-      ]}
-    >
+    <View style={styles.stepContainer}>
       <View style={styles.stepHeader}>
         <MaterialCommunityIcons
           name="hammer-wrench"
@@ -455,7 +484,7 @@ export function NewOnboardingScreen() {
           })}
         </View>
       </ScrollView>
-    </Animated.View>
+    </View>
   );
 
   // Step 3: Trade Niche
@@ -463,15 +492,7 @@ export function NewOnboardingScreen() {
     if (selectedCategories.length === 0) return null;
 
     return (
-      <Animated.View
-        style={[
-          styles.stepContainer,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
+      <View style={styles.stepContainer}>
         <View style={styles.stepHeader}>
           <MaterialCommunityIcons
             name="tools"
@@ -515,13 +536,14 @@ export function NewOnboardingScreen() {
 
                   {/* Niches for this category */}
                   {categoryNiches.map((niche) => {
-                    const isSelected = selectedNiches.includes(niche.id);
+                    const nicheKey = `${categoryId}_${niche.id}`;
+                    const isSelected = selectedNiches.includes(nicheKey);
                     const isAllOption = niche.id === 'all';
 
                     return (
                       <TouchableOpacity
                         key={`${niche.categoryId}-${niche.id}`}
-                        onPress={() => handleNicheToggle(niche.id)}
+                        onPress={() => handleNicheToggle(niche.id, categoryId)}
                         style={[
                           styles.nicheCard,
                           isAllOption && styles.nicheCardAll,
@@ -572,7 +594,7 @@ export function NewOnboardingScreen() {
             })}
           </View>
         </ScrollView>
-      </Animated.View>
+      </View>
     );
   };
 
@@ -586,18 +608,12 @@ export function NewOnboardingScreen() {
                       firstCategory === 'electrical' ? 'electrician' :
                       firstCategory === 'carpentry' ? 'carpenter' :
                       firstCategory === 'cleaning' ? 'cleaner' : 'all';
-    const stores = getStoresForTrade(tradeType);
+
+    // Get single selected store (first one if multiple, for backward compatibility)
+    const selectedStore = selectedStores[0] || '';
 
     return (
-      <Animated.View
-        style={[
-          styles.stepContainer,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
+      <View style={styles.stepContainer}>
         <View style={styles.stepHeader}>
           <MaterialCommunityIcons
             name="store"
@@ -607,77 +623,175 @@ export function NewOnboardingScreen() {
           />
           <Title style={styles.stepTitle}>Where do you shop?</Title>
           <Paragraph style={styles.stepDescription}>
-            Select your preferred stores for materials pricing
+            Select your preferred hardware store for pricing
           </Paragraph>
         </View>
 
         <ScrollView style={styles.scrollableContent}>
-          <View style={styles.pillContainer}>
-            {stores.map((store) => (
-              <Chip
-                key={store.url}
-                selected={selectedStores.includes(store.url)}
-                onPress={() => handleToggleStore(store.url)}
-                style={[
-                  styles.storePill,
-                  selectedStores.includes(store.url) && styles.storePillSelected,
-                ]}
-                textStyle={selectedStores.includes(store.url) && styles.storePillTextSelected}
-                mode={selectedStores.includes(store.url) ? 'flat' : 'outlined'}
-              >
-                {store.name}
-              </Chip>
-            ))}
+          {/* More Accurate Pricing Section */}
+          <View style={styles.storeCategory}>
+            <View style={styles.storeCategoryHeader}>
+              <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
+              <Text style={styles.storeCategoryTitle}>More Accurate Pricing</Text>
+            </View>
+            <Text style={styles.storeCategoryDescription}>
+              Stores with more reliable web search pricing or API access.
+            </Text>
 
-            {customStores.map((storeUrl) => (
-              <Chip
-                key={storeUrl}
-                selected={selectedStores.includes(storeUrl)}
-                onPress={() => handleToggleStore(storeUrl)}
-                onClose={() => handleRemoveCustomStore(storeUrl)}
-                style={[
-                  styles.storePill,
-                  selectedStores.includes(storeUrl) && styles.storePillSelected,
-                ]}
-                textStyle={selectedStores.includes(storeUrl) && styles.storePillTextSelected}
-                mode={selectedStores.includes(storeUrl) ? 'flat' : 'outlined'}
-              >
-                {storeUrl}
-              </Chip>
-            ))}
-
-            <Chip
-              icon="plus"
-              onPress={() => setShowAddStoreDialog(true)}
-              style={styles.addStorePill}
-              mode="outlined"
+            {/* Bunnings */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                selectedStore === 'bunnings.com.au' && styles.storeRadioOptionSelected
+              ]}
+              onPress={() => setSelectedStores(['bunnings.com.au'])}
             >
-              Add Custom Store
-            </Chip>
+              <View style={styles.storeRadioLeft}>
+                <View style={[
+                  styles.radioButton,
+                  selectedStore === 'bunnings.com.au' && styles.radioButtonSelected
+                ]}>
+                  {selectedStore === 'bunnings.com.au' && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Bunnings</Text>
+                  <Text style={styles.storeMethod}>Web Search</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons
+                name="check-circle"
+                size={20}
+                color="#4CAF50"
+              />
+            </TouchableOpacity>
+
+            {/* Reece - Coming Soon */}
+            <TouchableOpacity
+              style={[styles.storeRadioOption, styles.storeRadioOptionDisabled]}
+              disabled={true}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={styles.radioButton}>
+                  <View style={styles.radioButtonDisabled} />
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={[styles.storeName, styles.storeNameDisabled]}>Reece</Text>
+                  <Text style={styles.storeMethod}>API Integration</Text>
+                </View>
+              </View>
+              <View style={styles.comingSoonBadge}>
+                <Text style={styles.comingSoonText}>Coming Soon</Text>
+              </View>
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.infoBox}>
-            <MaterialCommunityIcons name="information" size={20} color={colors.primary} />
-            <Text style={styles.infoBoxText}>
-              AI will use these stores as context for estimating material prices
+          {/* Guestimates Section */}
+          <View style={styles.storeCategory}>
+            <View style={styles.storeCategoryHeader}>
+              <MaterialCommunityIcons name="approximately-equal" size={20} color="#FF9800" />
+              <Text style={styles.storeCategoryTitle}>Guestimates</Text>
+            </View>
+            <Text style={styles.storeCategoryDescription}>
+              AI-estimated pricing based on typical product costs
             </Text>
+
+            {/* Mitre 10 */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                selectedStore === 'mitre10.com.au' && styles.storeRadioOptionSelected
+              ]}
+              onPress={() => setSelectedStores(['mitre10.com.au'])}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={[
+                  styles.radioButton,
+                  selectedStore === 'mitre10.com.au' && styles.radioButtonSelected
+                ]}>
+                  {selectedStore === 'mitre10.com.au' && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Mitre 10</Text>
+                  <Text style={styles.storeMethod}>AI Estimation</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons
+                name="approximately-equal"
+                size={20}
+                color="#FF9800"
+              />
+            </TouchableOpacity>
+
+            {/* Home Timber & Hardware */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                selectedStore === 'hth.com.au' && styles.storeRadioOptionSelected
+              ]}
+              onPress={() => setSelectedStores(['hth.com.au'])}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={[
+                  styles.radioButton,
+                  selectedStore === 'hth.com.au' && styles.radioButtonSelected
+                ]}>
+                  {selectedStore === 'hth.com.au' && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Home Timber & Hardware</Text>
+                  <Text style={styles.storeMethod}>AI Estimation</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons
+                name="approximately-equal"
+                size={20}
+                color="#FF9800"
+              />
+            </TouchableOpacity>
+
+            {/* Total Tools */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                selectedStore === 'totaltools.com.au' && styles.storeRadioOptionSelected
+              ]}
+              onPress={() => setSelectedStores(['totaltools.com.au'])}
+            >
+              <View style={styles.storeRadioLeft}>
+                <View style={[
+                  styles.radioButton,
+                  selectedStore === 'totaltools.com.au' && styles.radioButtonSelected
+                ]}>
+                  {selectedStore === 'totaltools.com.au' && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Total Tools</Text>
+                  <Text style={styles.storeMethod}>AI Estimation</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons
+                name="approximately-equal"
+                size={20}
+                color="#FF9800"
+              />
+            </TouchableOpacity>
           </View>
         </ScrollView>
-      </Animated.View>
+      </View>
     );
   };
 
   // Step 5: Other Details
   const renderStep5Details = () => (
-    <Animated.View
-      style={[
-        styles.stepContainer,
-        {
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }],
-        },
-      ]}
-    >
+    <View style={styles.stepContainer}>
       <View style={styles.stepHeader}>
         <MaterialCommunityIcons
           name="information"
@@ -801,113 +915,115 @@ export function NewOnboardingScreen() {
           />
         </Surface>
       </ScrollView>
-    </Animated.View>
+    </View>
   );
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={styles.container}>
-        {/* Progress Indicator */}
-        <OnboardingProgress
-          currentStep={currentStep}
-          totalSteps={5}
-          steps={ONBOARDING_STEPS}
-        />
+    <View style={styles.container}>
+      {/* Progress Indicator */}
+      <OnboardingProgress
+        currentStep={currentStep}
+        totalSteps={5}
+        steps={ONBOARDING_STEPS}
+      />
 
-        {/* Step Content */}
-        <View style={styles.content}>
-          {renderStepContent()}
-        </View>
+      {/* Step Content - Scrollable */}
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {renderStepContent()}
+      </ScrollView>
 
-        {/* Navigation Buttons */}
-        <View style={styles.navigationContainer}>
-          {currentStep > 1 && (
-            <Button
-              mode="outlined"
-              onPress={handleBack}
-              style={styles.backButton}
-              icon="arrow-left"
-            >
-              Back
+      {/* Navigation Buttons - Fixed to Bottom */}
+      <View style={[
+        styles.navigationContainer,
+        { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 32 : 16) }
+      ]}>
+        {currentStep > 1 && (
+          <Button
+            mode="outlined"
+            onPress={handleBack}
+            style={styles.backButton}
+            icon="arrow-left"
+          >
+            Back
+          </Button>
+        )}
+
+        <View style={styles.navigationRight}>
+          {currentStep === 5 && (
+            <Button mode="text" onPress={handleSkip} style={styles.skipButton}>
+              Skip
             </Button>
           )}
-
-          <View style={styles.navigationRight}>
-            {currentStep === 5 && (
-              <Button mode="text" onPress={handleSkip} style={styles.skipButton}>
-                Skip
-              </Button>
-            )}
-            <Button
-              mode="contained"
-              onPress={handleNext}
-              style={styles.nextButton}
-              loading={isLoading}
-              disabled={isLoading}
-              icon={currentStep === 5 ? 'check' : 'arrow-right'}
-              contentStyle={styles.nextButtonContent}
-            >
-              {currentStep === 5 ? 'Complete' : 'Next'}
-            </Button>
-          </View>
-        </View>
-
-        {/* Add Custom Store Dialog */}
-        <Portal>
-          <Dialog
-            visible={showAddStoreDialog}
-            onDismiss={() => {
-              setShowAddStoreDialog(false);
-              setNewCustomStore('');
-            }}
-            style={styles.dialog}
+          <Button
+            mode="contained"
+            onPress={handleNext}
+            style={styles.nextButton}
+            loading={isLoading}
+            disabled={isLoading}
+            icon={currentStep === 5 ? 'check' : 'arrow-right'}
+            contentStyle={styles.nextButtonContent}
           >
-            <Dialog.Icon icon="store-plus" />
-            <Dialog.Title style={styles.dialogTitle}>Add Custom Store</Dialog.Title>
-            <Dialog.Content>
-              <Text style={styles.dialogHelperText}>
-                Enter the store website URL (no need for http:// or www.)
-              </Text>
-              <TextInput
-                label="Store URL"
-                value={newCustomStore}
-                onChangeText={setNewCustomStore}
-                mode="outlined"
-                placeholder="example.com.au"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.dialogInput}
-                autoComplete="off"
-                textContentType="URL"
-              />
-            </Dialog.Content>
-            <Dialog.Actions>
-              <Button
-                onPress={() => {
-                  setShowAddStoreDialog(false);
-                  setNewCustomStore('');
-                }}
-              >
-                Cancel
-              </Button>
-              <Button onPress={handleAddCustomStore} mode="contained">
-                Add Store
-              </Button>
-            </Dialog.Actions>
-          </Dialog>
-        </Portal>
-
-        {/* Success Animation */}
-        <CelebrationAnimation
-          visible={showSuccess}
-          onComplete={handleSuccessComplete}
-          message="Welcome to QuoteMate!"
-        />
+            {currentStep === 5 ? 'Complete' : 'Next'}
+          </Button>
+        </View>
       </View>
-    </KeyboardAvoidingView>
+
+      {/* Add Custom Store Dialog */}
+      <Portal>
+        <Dialog
+          visible={showAddStoreDialog}
+          onDismiss={() => {
+            setShowAddStoreDialog(false);
+            setNewCustomStore('');
+          }}
+          style={styles.dialog}
+        >
+          <Dialog.Icon icon="store-plus" />
+          <Dialog.Title style={styles.dialogTitle}>Add Custom Store</Dialog.Title>
+          <Dialog.Content>
+            <Text style={styles.dialogHelperText}>
+              Enter the store website URL (no need for http:// or www.)
+            </Text>
+            <TextInput
+              label="Store URL"
+              value={newCustomStore}
+              onChangeText={setNewCustomStore}
+              mode="outlined"
+              placeholder="example.com.au"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.dialogInput}
+              autoComplete="off"
+              textContentType="URL"
+            />
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button
+              onPress={() => {
+                setShowAddStoreDialog(false);
+                setNewCustomStore('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onPress={handleAddCustomStore} mode="contained">
+              Add Store
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
+      {/* Success Animation */}
+      <CelebrationAnimation
+        visible={showSuccess}
+        onComplete={handleSuccessComplete}
+        message="Welcome to QuoteMate!"
+      />
+    </View>
   );
 }
 
@@ -916,11 +1032,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  content: {
+  scrollView: {
     flex: 1,
   },
+  scrollContent: {
+    paddingBottom: 100,
+    flexGrow: 1,
+  },
   stepContainer: {
-    flex: 1,
     padding: 20,
   },
   stepHeader: {
@@ -945,7 +1064,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   scrollableContent: {
-    flex: 1,
+    marginBottom: 16,
   },
   card: {
     padding: 16,
@@ -1081,35 +1200,116 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
+    alignItems: 'center',
   },
   serviceChip: {
     height: 28,
     marginRight: 0,
+    justifyContent: 'center',
   },
   serviceChipText: {
     fontSize: 11,
+    lineHeight: 14,
+    paddingVertical: 0,
+    marginVertical: 0,
   },
-  pillContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  storeCategory: {
+    marginTop: 16,
     marginBottom: 16,
   },
-  storePill: {
-    marginRight: 0,
-    marginBottom: 0,
+  storeCategoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
-  storePillSelected: {
+  storeCategoryTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+    color: colors.text,
+  },
+  storeCategoryDescription: {
+    fontSize: 13,
+    color: colors.onSurface,
+    marginBottom: 12,
+    marginLeft: 28,
+  },
+  storeRadioOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.outline + '30',
+    marginBottom: 8,
+    backgroundColor: colors.surface,
+  },
+  storeRadioOptionSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '10',
+  },
+  storeRadioOptionDisabled: {
+    opacity: 0.5,
+    backgroundColor: colors.surface,
+  },
+  storeRadioLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  radioButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: colors.outline,
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioButtonSelected: {
+    borderColor: colors.primary,
+  },
+  radioButtonInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     backgroundColor: colors.primary,
   },
-  storePillTextSelected: {
-    color: colors.surface,
-    fontWeight: '600',
+  radioButtonDisabled: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.outline,
   },
-  addStorePill: {
-    marginRight: 0,
-    marginBottom: 0,
-    borderStyle: 'dashed',
+  storeInfo: {
+    flex: 1,
+  },
+  storeName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  storeNameDisabled: {
+    color: colors.onSurface,
+  },
+  storeMethod: {
+    fontSize: 12,
+    color: colors.onSurface,
+  },
+  comingSoonBadge: {
+    backgroundColor: colors.primary + '20',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  comingSoonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.primary,
   },
   infoBox: {
     flexDirection: 'row',
@@ -1168,11 +1368,11 @@ const styles = StyleSheet.create({
   navigationContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    padding: 20,
-    paddingTop: 12,
+    paddingHorizontal: 20,
+    paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: colors.outline,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background,
   },
   navigationRight: {
     flexDirection: 'row',

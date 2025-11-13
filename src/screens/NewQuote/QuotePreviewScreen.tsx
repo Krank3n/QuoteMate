@@ -20,6 +20,7 @@ import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { exportQuotePDF } from '../../utils/pdfGenerator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SuccessModal } from '../../components/SuccessModal';
 
 export function QuotePreviewScreen() {
   const navigation = useNavigation<any>();
@@ -30,6 +31,7 @@ export function QuotePreviewScreen() {
   const [status, setStatus] = useState(currentQuote?.status || 'draft');
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   if (!currentQuote) {
     return null;
@@ -48,30 +50,24 @@ export function QuotePreviewScreen() {
 
       await saveQuote(updatedQuote);
 
-      // Close the modal first, THEN navigate to dashboard
-      // The parent is the NewQuoteStack, we need to go back from that to close the modal
-      const root = navigation.getParent();
-
-      if (Platform.OS === 'web') {
-        // On web, just go back to close the modal
-        root?.goBack();
-      } else {
-        // On mobile, show success alert then close modal
-        Alert.alert('Success', 'Quote saved successfully!', [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Go back closes the NewQuote modal stack
-              root?.goBack();
-            },
-          },
-        ]);
-      }
+      // Show success modal
+      setShowSuccessModal(true);
     } catch (error) {
       Alert.alert('Error', 'Failed to save quote. Please try again.');
-    } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleSuccessModalDismiss = () => {
+    setShowSuccessModal(false);
+    setIsSaving(false);
+
+    // Clear currentQuote from store
+    useStore.setState({ currentQuote: null });
+
+    // Navigate back to Dashboard by closing the modal
+    // Get the root navigator (RootStack) and go back to Main
+    navigation.getParent()?.goBack();
   };
 
   const handleExportPDF = async () => {
@@ -93,6 +89,15 @@ export function QuotePreviewScreen() {
 
   return (
     <View style={styles.outerContainer}>
+      <SuccessModal
+        visible={showSuccessModal}
+        onDismiss={handleSuccessModalDismiss}
+        title="Quote Saved!"
+        message="Your quote has been saved successfully and is ready to share with your customer."
+        buttonText="Back to Dashboard"
+        icon="check-circle"
+      />
+
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
@@ -193,7 +198,7 @@ export function QuotePreviewScreen() {
       </Surface>
       </ScrollView>
 
-      <View style={[styles.bottomActions, Platform.OS !== 'web' && { paddingBottom: insets.bottom + 20 }]}>
+      <View style={[styles.bottomActions, { paddingBottom: Math.max(insets.bottom, 16) }]}>
         <Button
           mode="outlined"
           onPress={handleExportPDF}
@@ -235,11 +240,12 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 16,
+    paddingBottom: 100,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
       marginHorizontal: 'auto' as any,
       width: '100%',
+      paddingBottom: 16,
     }),
   },
   section: {
@@ -321,20 +327,22 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   bottomActions: {
-    padding: 16,
-    paddingTop: 12,
+    flexDirection: 'row',
+    padding: 20,
+    paddingTop: 16,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderColor: colors.border,
+    gap: 12,
     ...(Platform.OS === 'web' && {
       flexShrink: 0,
-      boxShadow: '0 -2px 10px rgba(0,0,0,0.1)' as any,
-      position: 'relative' as any,
-      top: '-3.2rem' as any,
+      margin: '0 auto' as any,
+      width: '100%',
+      boxShadow: '0 -2px 8px rgba(0,0,0,0.1)' as any,
     }),
   },
   actionButton: {
-    marginBottom: 8,
-    paddingVertical: 6,
+    flex: 1,
+    paddingVertical: 8,
   },
 });
