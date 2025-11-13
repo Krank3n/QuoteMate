@@ -1248,7 +1248,7 @@ export function JobDetailsScreen() {
         </ScrollView>
 
         {/* Bottom Action Buttons - Row layout */}
-        <View style={[styles.bottomActionsContainer, { paddingBottom: Math.max(insets.bottom, 32) }]}>
+        <View style={[styles.bottomActionsContainer, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 48 : 16) }]}>
           {/* Skip AI Button - Only show for custom jobs */}
           {!isEditingExisting && useCustomMode && (
             <Button

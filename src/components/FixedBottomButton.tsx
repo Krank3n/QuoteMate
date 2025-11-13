@@ -39,7 +39,7 @@ export function FixedBottomButton({
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.bottomActions, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 32 : 16) }]}>
+    <View style={[styles.bottomActions, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 48 : 16) }]}>
       <Button
         mode={mode}
         onPress={onPress}

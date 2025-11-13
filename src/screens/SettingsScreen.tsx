@@ -881,6 +881,7 @@ export function SettingsScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    marginBottom: Platform.OS === 'android' ? -32 : 0,
     flex: 1,
     backgroundColor: colors.background,
     ...(Platform.OS === 'web' && {
