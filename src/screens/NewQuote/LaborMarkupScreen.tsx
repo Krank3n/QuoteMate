@@ -268,7 +268,7 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
-    paddingBottom: 120,
+    paddingBottom: 100,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,

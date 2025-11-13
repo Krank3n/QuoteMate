@@ -169,6 +169,17 @@ export function MaterialsListScreen() {
     setSearchQuery(text);
   }, []);
 
+  // Memoize expensive computations
+  const materialsSubtotal = React.useMemo(
+    () => materials.reduce((sum, m) => sum + m.totalPrice, 0),
+    [materials]
+  );
+
+  const hasUnpricedMaterials = React.useMemo(
+    () => materials.some((m) => m.price === 0),
+    [materials]
+  );
+
   const toggleMaterialExpanded = useCallback((materialId: string) => {
     setExpandedMaterials(prev => {
       const newSet = new Set(prev);
@@ -183,7 +194,8 @@ export function MaterialsListScreen() {
 
   // Detect if AI is analyzing (materials list is empty on first load for custom jobs)
   React.useEffect(() => {
-    if (currentQuote && currentQuote.materials.length === 0 && currentQuote.job.template === 'custom') {
+    // Don't show AI analyzing if user explicitly skipped AI
+    if (currentQuote && currentQuote.materials.length === 0 && currentQuote.job.template === 'custom' && !currentQuote.aiSkipped) {
       setIsAiAnalyzing(true);
       setInitialMaterialCount(0);
 
@@ -1461,6 +1473,7 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
+    paddingBottom: 100,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,

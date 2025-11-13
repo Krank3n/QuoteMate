@@ -193,7 +193,8 @@ export const useStore = create<AppState>((set, get) => ({
         JSON.stringify(updatedQuotes)
       );
 
-      set({ quotes: updatedQuotes, currentQuote: null });
+      // Update quotes in state but keep currentQuote (will be cleared on navigation)
+      set({ quotes: updatedQuotes });
 
       // Sync to Firestore if user is signed in
       if (auth.currentUser) {
