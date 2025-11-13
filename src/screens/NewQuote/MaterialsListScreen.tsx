@@ -115,6 +115,37 @@ function formatTimeAgo(isoTimestamp: string): string {
   }
 }
 
+// Memoized search input component to prevent re-renders
+const SearchInput = React.memo(({
+  value,
+  onChangeText,
+  onSearch,
+  isSearching
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+  onSearch: () => void;
+  isSearching: boolean;
+}) => (
+  <TextInput
+    label="Search Products"
+    value={value}
+    onChangeText={onChangeText}
+    mode="outlined"
+    placeholder="e.g., treated pine 90x45"
+    style={styles.searchInput}
+    right={
+      <TextInput.Icon
+        icon="magnify"
+        onPress={onSearch}
+        disabled={isSearching}
+      />
+    }
+    onSubmitEditing={onSearch}
+    autoFocus={false}
+  />
+));
+
 export function MaterialsListScreen() {
   const navigation = useNavigation<any>();
   const { currentQuote, updateQuote, businessSettings } = useStore();
@@ -169,6 +200,9 @@ export function MaterialsListScreen() {
     setSearchQuery(text);
   }, []);
 
+  // Get materials safely - before any hooks that depend on it
+  const materials = currentQuote?.materials || [];
+
   // Memoize expensive computations
   const materialsSubtotal = React.useMemo(
     () => materials.reduce((sum, m) => sum + m.totalPrice, 0),
@@ -222,13 +256,6 @@ export function MaterialsListScreen() {
       setIsAiAnalyzing(false);
     }
   }, [currentQuote?.id]);
-
-  // Early return after all hooks have been called
-  if (!currentQuote) {
-    return null;
-  }
-
-  const materials = currentQuote.materials;
 
   const handleFetchPrices = async () => {
     if (materials.length === 0) {
@@ -629,14 +656,14 @@ export function MaterialsListScreen() {
     setPendingMaterialName('');
   };
 
-  const handleMatchCanceled = () => {
+  const handleMatchCanceled = useCallback(() => {
     setMatchSelectorVisible(false);
     setPendingMatches([]);
     setPendingMaterialIndex(-1);
     setPendingMaterialName('');
-  };
+  }, []);
 
-  const handleSearchProducts = async () => {
+  const handleSearchProducts = useCallback(async () => {
     if (!searchQuery.trim()) {
       Alert.alert('Enter Search Term', 'Please enter a product name or description to search');
       return;
@@ -706,10 +733,31 @@ export function MaterialsListScreen() {
           setSearchResults(products);
 
           if (products.length === 0) {
-            Alert.alert(
-              'No Results',
-              `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Checking your internet connection`
-            );
+            // Final fallback to AI estimation
+            console.log('⚠️ Web scraping also returned no results, trying AI estimation...');
+            const aiResult = await searchMaterialPrice(searchQuery, [firstStore]);
+
+            if (aiResult.price) {
+              const estimatedProduct = {
+                productName: aiResult.productName || searchQuery,
+                description: aiResult.store ? `Estimated from ${aiResult.store}` : 'AI Estimated Price',
+                itemNumber: '',
+                brand: '',
+                price: aiResult.price,
+                productUrl: undefined,
+                imageUrl: undefined,
+                store: aiResult.store || firstStore,
+                isScraperResult: false,
+                isAiEstimate: true,
+              };
+              setSearchResults([estimatedProduct]);
+              console.log(`✅ AI estimation provided fallback result: $${aiResult.price}`);
+            } else {
+              Alert.alert(
+                'No Results',
+                `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Checking your internet connection`
+              );
+            }
           }
         }
       } else if (isBunnings) {
@@ -750,10 +798,31 @@ export function MaterialsListScreen() {
         setSearchResults(products);
 
         if (products.length === 0) {
-          Alert.alert(
-            'No Results',
-            `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Selecting a different hardware store in Settings`
-          );
+          // Final fallback to AI estimation
+          console.log('⚠️ Web scraping returned no results, trying AI estimation...');
+          const aiResult = await searchMaterialPrice(searchQuery, [firstStore]);
+
+          if (aiResult.price) {
+            const estimatedProduct = {
+              productName: aiResult.productName || searchQuery,
+              description: aiResult.store ? `Estimated from ${aiResult.store}` : 'AI Estimated Price',
+              itemNumber: '',
+              brand: '',
+              price: aiResult.price,
+              productUrl: undefined,
+              imageUrl: undefined,
+              store: aiResult.store || firstStore,
+              isScraperResult: false,
+              isAiEstimate: true,
+            };
+            setSearchResults([estimatedProduct]);
+            console.log(`✅ AI estimation provided fallback result: $${aiResult.price}`);
+          } else {
+            Alert.alert(
+              'No Results',
+              `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Selecting a different hardware store in Settings`
+            );
+          }
         }
       }
     } catch (error) {
@@ -762,14 +831,28 @@ export function MaterialsListScreen() {
     } finally {
       setIsSearching(false);
     }
-  };
+  }, [searchQuery, businessSettings]);
 
   const handleSelectProduct = async (item: any) => {
     setSearchDialogVisible(false);
 
     let newMaterial: Material;
 
-    if (item.isScraperResult) {
+    if (item.isAiEstimate) {
+      // Handle AI-estimated results
+      newMaterial = {
+        id: generateId(),
+        name: item.productName,
+        quantity: 1,
+        unit: 'each',
+        price: item.price || 0,
+        totalPrice: item.price || 0,
+        manualPriceOverride: false,
+        searchTerm: item.productName,
+        pricingSource: 'ai',
+        description: item.description,
+      };
+    } else if (item.isScraperResult) {
       // Handle scraper results with full metadata
       newMaterial = {
         id: generateId(),
@@ -1035,20 +1118,24 @@ export function MaterialsListScreen() {
     }
   };
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     // Allow proceeding with no materials (labor-only quotes)
-    const hasUnpricedMaterials = materials.some((m) => m.price === 0);
     if (hasUnpricedMaterials) {
       setUnpricedDialogVisible(true);
     } else {
       navigation.navigate('LaborMarkup');
     }
-  };
+  }, [hasUnpricedMaterials, navigation]);
 
   const proceedWithUnpricedMaterials = () => {
     setUnpricedDialogVisible(false);
     navigation.navigate('LaborMarkup');
   };
+
+  // Handle null currentQuote case
+  if (!currentQuote) {
+    return null;
+  }
 
   return (
     <View style={styles.container}>
@@ -1194,7 +1281,7 @@ export function MaterialsListScreen() {
         <View style={styles.summary}>
           <Text style={styles.summaryLabel}>Materials Subtotal:</Text>
           <Text style={styles.summaryValue}>
-            {formatCurrency(materials.reduce((sum, m) => sum + m.totalPrice, 0))}
+            {formatCurrency(materialsSubtotal)}
           </Text>
         </View>
       </ScrollView>
@@ -1319,21 +1406,11 @@ export function MaterialsListScreen() {
           </Dialog.Title>
           <Dialog.Content>
             <View style={styles.searchContainer}>
-              <TextInput
-                label="Search Products"
+              <SearchInput
                 value={searchQuery}
                 onChangeText={handleSearchQueryChange}
-                mode="outlined"
-                placeholder="e.g., treated pine 90x45"
-                style={styles.searchInput}
-                right={
-                  <TextInput.Icon
-                    icon="magnify"
-                    onPress={handleSearchProducts}
-                    disabled={isSearching}
-                  />
-                }
-                onSubmitEditing={handleSearchProducts}
+                onSearch={handleSearchProducts}
+                isSearching={isSearching}
               />
 
               {isSearching && (

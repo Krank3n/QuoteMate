@@ -198,7 +198,7 @@ export function QuotePreviewScreen() {
       </Surface>
       </ScrollView>
 
-      <View style={[styles.bottomActions, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View style={[styles.bottomActions, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 48 : 16) }]}>
         <Button
           mode="outlined"
           onPress={handleExportPDF}
