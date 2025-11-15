@@ -798,7 +798,7 @@ export function SettingsScreen() {
             <MaterialCommunityIcons name="information" size={20} color={colors.primary} />
             <Text style={styles.infoBoxText}>
               {selectedStore === 'bunnings'
-                ? "Bunnings is selected. Real prices will be fetched using the Bunnings scraper when available."
+                ? "Bunnings is selected. Real prices will be fetched using the Bunnings web search when available."
                 : "Using AI estimation for typical product pricing."
               }
             </Text>
@@ -851,6 +851,7 @@ export function SettingsScreen() {
         onPress={handleSave}
         disabled={isLoading}
         loading={isLoading}
+        disableSolidBackground={true}
       />
 
       {/* Logout Confirmation Dialog */}
@@ -881,6 +882,7 @@ export function SettingsScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    marginBottom: Platform.OS === 'android' ? -48 : 0,
     flex: 1,
     backgroundColor: colors.background,
     ...(Platform.OS === 'web' && {
@@ -891,7 +893,7 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
-    padding: 20,
+    padding: 16,
     paddingBottom: 120,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {

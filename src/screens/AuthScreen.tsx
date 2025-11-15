@@ -4,8 +4,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView } from 'react-native';
-import { Text, TextInput, Button, Surface, Title } from 'react-native-paper';
+import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, Animated } from 'react-native';
+import { Text, TextInput, Button, Surface, Title, ActivityIndicator } from 'react-native-paper';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Google from 'expo-auth-session/providers/google';
@@ -26,6 +26,11 @@ export function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
+  const [isProcessingOAuth, setIsProcessingOAuth] = useState(false);
+
+  // Animation values
+  const fadeAnim = useState(new Animated.Value(0))[0];
+  const logoScale = useState(new Animated.Value(0.8))[0];
 
   // Configure Google Sign-In for mobile (iOS/Android)
   // On web, we use Firebase popup instead of expo-auth-session
@@ -39,6 +44,25 @@ export function AuthScreen() {
     androidClientId: androidClientId || undefined,
     webClientId: process.env.GOOGLE_OAUTH_WEB_CLIENT_ID || undefined,
   });
+
+  // Initialize screen with animation
+  useEffect(() => {
+    // Animate in immediately - no artificial delay needed
+    // App.tsx already handles auth state checking
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.spring(logoScale, {
+        toValue: 1,
+        tension: 40,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
   // Check if Apple Authentication is available (iOS only)
   useEffect(() => {
@@ -55,15 +79,18 @@ export function AuthScreen() {
   // Handle Google Sign-In response (mobile)
   useEffect(() => {
     if (response?.type === 'success') {
+      setIsProcessingOAuth(true);
       const { id_token } = response.params;
       const credential = GoogleAuthProvider.credential(id_token);
       signInWithCredential(auth, credential)
         .then(() => {
           console.log('✅ Google Sign-In successful (mobile)');
+          // Keep loading state - App.tsx will handle navigation
         })
         .catch((error) => {
           console.error('Google Sign-In error:', error);
           setError('Failed to sign in with Google');
+          setIsProcessingOAuth(false);
         });
     }
   }, [response]);
@@ -125,13 +152,15 @@ export function AuthScreen() {
     try {
       if (Platform.OS === 'web') {
         // Web: Use Firebase popup
+        setIsProcessingOAuth(true);
         const provider = new GoogleAuthProvider();
         await signInWithPopup(auth, provider);
+        // Keep loading state - App.tsx will handle navigation
       } else {
         // Mobile: Use expo-auth-session
         await promptAsync();
+        // OAuth state will be handled by response useEffect
       }
-      // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       console.error('Google sign in error:', err);
       if (err.code === 'auth/popup-closed-by-user') {
@@ -141,8 +170,12 @@ export function AuthScreen() {
       } else {
         setError('Failed to sign in with Google. Please try again.');
       }
-    } finally {
+      setIsProcessingOAuth(false);
       setLoading(false);
+    } finally {
+      if (Platform.OS !== 'web') {
+        setLoading(false);
+      }
     }
   };
 
@@ -166,14 +199,15 @@ export function AuthScreen() {
       // Sign in with Firebase using Apple credential
       const { identityToken } = credential;
       if (identityToken) {
+        setIsProcessingOAuth(true);
         const provider = new OAuthProvider('apple.com');
         const firebaseCredential = provider.credential({
           idToken: identityToken,
         });
         await signInWithCredential(auth, firebaseCredential);
         console.log('✅ Apple Sign-In successful');
+        // Keep loading state - App.tsx will handle navigation
       }
-      // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       console.error('Apple sign in error:', err);
       if (err.code === 'ERR_REQUEST_CANCELED') {
@@ -181,8 +215,12 @@ export function AuthScreen() {
       } else {
         setError('Failed to sign in with Apple. Please try again.');
       }
-    } finally {
+      setIsProcessingOAuth(false);
       setLoading(false);
+    } finally {
+      if (!isProcessingOAuth) {
+        setLoading(false);
+      }
     }
   };
 
@@ -207,6 +245,23 @@ export function AuthScreen() {
     }
   };
 
+  // Show loading screen when processing OAuth
+  if (isProcessingOAuth) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Animated.View style={[styles.logoContainer, { transform: [{ scale: logoScale }] }]}>
+          <Image
+            source={require('../../assets/logo-scaled.png')}
+            style={styles.logoLarge}
+            resizeMode="contain"
+          />
+        </Animated.View>
+        <ActivityIndicator size="large" color={colors.primary} style={styles.loadingSpinner} />
+        <Text style={styles.loadingText}>Signing you in...</Text>
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -217,17 +272,23 @@ export function AuthScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <WebContainer>
-          <View style={styles.header}>
-            <Title style={styles.title}>
-              {isSignUp ? 'Create Account' : 'Welcome Back'}
-            </Title>
-            <Text style={styles.subtitle}>
-              {isSignUp
-                ? 'Sign up to save your quotes and access premium features'
-                : 'Sign in to access your quotes and subscriptions'
-              }
-            </Text>
-          </View>
+          <Animated.View style={[styles.animatedContent, { opacity: fadeAnim }]}>
+            <View style={styles.header}>
+              <Image
+                source={require('../../assets/logo-scaled.png')}
+                style={styles.logo}
+                resizeMode="contain"
+              />
+              <Title style={styles.title}>
+                {isSignUp ? 'Join QuoteMate' : 'Welcome to QuoteMate'}
+              </Title>
+              <Text style={styles.subtitle}>
+                {isSignUp
+                  ? 'Create an account to save your quotes, sync across devices, and access premium features'
+                  : 'Sign in to access your quotes and continue where you left off'
+                }
+              </Text>
+            </View>
 
           <Surface style={styles.formCard}>
             {error ? (
@@ -330,6 +391,7 @@ export function AuthScreen() {
               }
             </Button>
           </Surface>
+          </Animated.View>
         </WebContainer>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -339,12 +401,42 @@ export function AuthScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#1E293B', // Match logo background color
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
     padding: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#1E293B',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  logoContainer: {
+    marginBottom: 40,
+  },
+  logoLarge: {
+    width: 200,
+    height: 200,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    marginBottom: 24,
+  },
+  loadingSpinner: {
+    marginVertical: 20,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: colors.text,
+    marginTop: 16,
+  },
+  animatedContent: {
+    width: '100%',
   },
   header: {
     alignItems: 'center',
@@ -361,6 +453,7 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     textAlign: 'center',
     paddingHorizontal: 20,
+    lineHeight: 24,
   },
   formCard: {
     padding: 24,
@@ -369,6 +462,7 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     width: '100%',
     alignSelf: 'center',
+    backgroundColor: colors.surfaceGray3,
   },
   input: {
     marginBottom: 16,

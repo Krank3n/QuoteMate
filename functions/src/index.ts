@@ -1300,7 +1300,7 @@ ${html.substring(0, 50000)} ${html.length > 50000 ? '... (truncated)' : ''}
       "itemNumber": "123456",
       "brand": "Brand name",
       "stockLevel": "in-stock|low-stock|out-of-stock|unknown",
-      "productUrl": "Full product page URL",
+      "productUrl": "Full product page URL (MUST be null if not found in HTML - DO NOT use example.com or any placeholder)",
       "confidence": "high|medium|low"
     }
   ],

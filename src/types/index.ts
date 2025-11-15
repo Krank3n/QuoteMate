@@ -60,6 +60,7 @@ export interface Quote {
   total: number;
   status: 'draft' | 'sent' | 'accepted' | 'rejected';
   notes?: string;
+  aiSkipped?: boolean; // Flag to indicate AI analysis was intentionally skipped
 }
 
 export interface JobTemplate {

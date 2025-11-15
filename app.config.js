@@ -2,7 +2,7 @@ export default {
   expo: {
     name: "QuoteMate",
     slug: "quotemate",
-    version: "1.0.13",
+    version: "1.0.20",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -48,11 +48,11 @@ export default {
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: "./assets/logo-lrg-margin.png",
+        foregroundImage: "./assets/adaptive-icon-new.png",
         backgroundColor: "#1E293B"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 20,
+      versionCode: 28,
       permissions: ["android.permission.RECORD_AUDIO"],
       blockedPermissions: ["android.permission.CAMERA"]
     },

@@ -276,6 +276,8 @@ export function CustomerDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    // height: "100%",
+    // height: '100vh' as any,
     backgroundColor: colors.background,
     ...(Platform.OS === 'web' && {
       display: 'flex' as any,
@@ -292,7 +294,7 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 100,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,

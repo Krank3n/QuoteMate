@@ -62,6 +62,7 @@ import {
   ScraperProduct,
 } from '../../services/bunningsScraperService';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
+import { BUNNINGS_SCRAPER_URL } from '@env';
 
 // AI Analysis Loading State with Lottie Animation
 function AiAnalyzingState() {
@@ -114,6 +115,37 @@ function formatTimeAgo(isoTimestamp: string): string {
     return `${days} day${days > 1 ? 's' : ''} ago`;
   }
 }
+
+// Memoized search input component to prevent re-renders
+const SearchInput = React.memo(({
+  value,
+  onChangeText,
+  onSearch,
+  isSearching
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+  onSearch: () => void;
+  isSearching: boolean;
+}) => (
+  <TextInput
+    label="Search Products"
+    value={value}
+    onChangeText={onChangeText}
+    mode="outlined"
+    placeholder="e.g., treated pine 90x45"
+    style={styles.searchInput}
+    right={
+      <TextInput.Icon
+        icon="magnify"
+        onPress={onSearch}
+        disabled={isSearching}
+      />
+    }
+    onSubmitEditing={onSearch}
+    autoFocus={false}
+  />
+));
 
 export function MaterialsListScreen() {
   const navigation = useNavigation<any>();
@@ -169,6 +201,20 @@ export function MaterialsListScreen() {
     setSearchQuery(text);
   }, []);
 
+  // Get materials safely - before any hooks that depend on it
+  const materials = currentQuote?.materials || [];
+
+  // Memoize expensive computations
+  const materialsSubtotal = React.useMemo(
+    () => materials.reduce((sum, m) => sum + m.totalPrice, 0),
+    [materials]
+  );
+
+  const hasUnpricedMaterials = React.useMemo(
+    () => materials.some((m) => m.price === 0),
+    [materials]
+  );
+
   const toggleMaterialExpanded = useCallback((materialId: string) => {
     setExpandedMaterials(prev => {
       const newSet = new Set(prev);
@@ -183,7 +229,8 @@ export function MaterialsListScreen() {
 
   // Detect if AI is analyzing (materials list is empty on first load for custom jobs)
   React.useEffect(() => {
-    if (currentQuote && currentQuote.materials.length === 0 && currentQuote.job.template === 'custom') {
+    // Don't show AI analyzing if user explicitly skipped AI
+    if (currentQuote && currentQuote.materials.length === 0 && currentQuote.job.template === 'custom' && !currentQuote.aiSkipped) {
       setIsAiAnalyzing(true);
       setInitialMaterialCount(0);
 
@@ -211,13 +258,6 @@ export function MaterialsListScreen() {
     }
   }, [currentQuote?.id]);
 
-  // Early return after all hooks have been called
-  if (!currentQuote) {
-    return null;
-  }
-
-  const materials = currentQuote.materials;
-
   const handleFetchPrices = async () => {
     if (materials.length === 0) {
       Alert.alert('No Materials', 'Please add materials first');
@@ -233,7 +273,7 @@ export function MaterialsListScreen() {
     // Determine which pricing method to use
     const useBunningsApi = businessSettings?.useBunningsApi === true;
     const useReeceApi = false; // Disabled - API coming soon
-    const useScraperApi = process.env.BUNNINGS_SCRAPER_URL ? true : false;
+    const useScraperApi = BUNNINGS_SCRAPER_URL ? true : false;
 
     // Get selected store (single store only now)
     const selectedStore = businessSettings?.selectedStore || 'bunnings';
@@ -248,7 +288,7 @@ export function MaterialsListScreen() {
       storeUrl,
       useScraperApi,
       useBunningsApi,
-      scraperUrl: process.env.BUNNINGS_SCRAPER_URL,
+      scraperUrl: BUNNINGS_SCRAPER_URL,
     });
 
     let methodName = 'AI estimation';
@@ -322,20 +362,67 @@ export function MaterialsListScreen() {
           } catch (error) {
             console.log('❌ Scraper failed, falling back to next pricing method:', error);
 
-            // Fallback to next method
+            // Fallback to next method: try Bunnings API first, then AI estimation
             if (useBunningsApi) {
+              console.log('🔄 Trying Bunnings API fallback...');
               const result = await bunningsApi.findAndPriceMaterial(searchTerm);
               if (result) {
                 material.bunningsItemNumber = result.item.itemNumber;
                 material.price = result.price.priceIncGst;
                 material.totalPrice = material.price * material.quantity;
                 material.manualPriceOverride = false;
+                material.pricingSource = 'api';
                 fetchedCount++;
+                console.log(`✅ Bunnings API fallback succeeded: $${result.price.priceIncGst}`);
               } else {
-                failedCount++;
+                // Bunnings API also failed, try AI estimation as final fallback
+                console.log('🔄 Bunnings API failed, trying AI estimation fallback...');
+                const aiResult = await searchMaterialPrice(searchTerm, hardwareStores);
+
+                if (aiResult.price) {
+                  material.price = aiResult.price;
+                  material.totalPrice = material.price * material.quantity;
+                  material.manualPriceOverride = false;
+                  material.pricingSource = 'ai';
+
+                  if (aiResult.productName) {
+                    material.name = aiResult.productName;
+                  }
+                  if (aiResult.store) {
+                    material.description = `Estimated from ${aiResult.store}`;
+                  }
+
+                  fetchedCount++;
+                  console.log(`✅ AI estimation fallback succeeded: $${aiResult.price}`);
+                } else {
+                  failedCount++;
+                  console.log('❌ All fallback methods failed');
+                }
               }
             } else {
-              failedCount++;
+              // No Bunnings API, fall back directly to AI estimation
+              console.log('🔄 Trying AI estimation fallback...');
+              const aiResult = await searchMaterialPrice(searchTerm, hardwareStores);
+
+              if (aiResult.price) {
+                material.price = aiResult.price;
+                material.totalPrice = material.price * material.quantity;
+                material.manualPriceOverride = false;
+                material.pricingSource = 'ai';
+
+                if (aiResult.productName) {
+                  material.name = aiResult.productName;
+                }
+                if (aiResult.store) {
+                  material.description = `Estimated from ${aiResult.store}`;
+                }
+
+                fetchedCount++;
+                console.log(`✅ AI estimation fallback succeeded: $${aiResult.price}`);
+              } else {
+                failedCount++;
+                console.log('❌ AI estimation fallback failed');
+              }
             }
           }
         } else if (useBunningsApi) {
@@ -617,14 +704,14 @@ export function MaterialsListScreen() {
     setPendingMaterialName('');
   };
 
-  const handleMatchCanceled = () => {
+  const handleMatchCanceled = useCallback(() => {
     setMatchSelectorVisible(false);
     setPendingMatches([]);
     setPendingMaterialIndex(-1);
     setPendingMaterialName('');
-  };
+  }, []);
 
-  const handleSearchProducts = async () => {
+  const handleSearchProducts = useCallback(async () => {
     if (!searchQuery.trim()) {
       Alert.alert('Enter Search Term', 'Please enter a product name or description to search');
       return;
@@ -638,7 +725,7 @@ export function MaterialsListScreen() {
       const selectedStore = businessSettings?.selectedStore || 'bunnings';
       const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
       const firstStore = hardwareStores[0];
-      const useScraperApi = process.env.BUNNINGS_SCRAPER_URL ? true : false;
+      const useScraperApi = BUNNINGS_SCRAPER_URL ? true : false;
 
       // Check if the selected store is Bunnings
       const isBunnings = selectedStore === 'bunnings' || firstStore.includes('bunnings.com.au');
@@ -694,10 +781,31 @@ export function MaterialsListScreen() {
           setSearchResults(products);
 
           if (products.length === 0) {
-            Alert.alert(
-              'No Results',
-              `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Checking your internet connection`
-            );
+            // Final fallback to AI estimation
+            console.log('⚠️ Web scraping also returned no results, trying AI estimation...');
+            const aiResult = await searchMaterialPrice(searchQuery, [firstStore]);
+
+            if (aiResult.price) {
+              const estimatedProduct = {
+                productName: aiResult.productName || searchQuery,
+                description: aiResult.store ? `Estimated from ${aiResult.store}` : 'AI Estimated Price',
+                itemNumber: '',
+                brand: '',
+                price: aiResult.price,
+                productUrl: undefined,
+                imageUrl: undefined,
+                store: aiResult.store || firstStore,
+                isScraperResult: false,
+                isAiEstimate: true,
+              };
+              setSearchResults([estimatedProduct]);
+              console.log(`✅ AI estimation provided fallback result: $${aiResult.price}`);
+            } else {
+              Alert.alert(
+                'No Results',
+                `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Checking your internet connection`
+              );
+            }
           }
         }
       } else if (isBunnings) {
@@ -738,10 +846,31 @@ export function MaterialsListScreen() {
         setSearchResults(products);
 
         if (products.length === 0) {
-          Alert.alert(
-            'No Results',
-            `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Selecting a different hardware store in Settings`
-          );
+          // Final fallback to AI estimation
+          console.log('⚠️ Web scraping returned no results, trying AI estimation...');
+          const aiResult = await searchMaterialPrice(searchQuery, [firstStore]);
+
+          if (aiResult.price) {
+            const estimatedProduct = {
+              productName: aiResult.productName || searchQuery,
+              description: aiResult.store ? `Estimated from ${aiResult.store}` : 'AI Estimated Price',
+              itemNumber: '',
+              brand: '',
+              price: aiResult.price,
+              productUrl: undefined,
+              imageUrl: undefined,
+              store: aiResult.store || firstStore,
+              isScraperResult: false,
+              isAiEstimate: true,
+            };
+            setSearchResults([estimatedProduct]);
+            console.log(`✅ AI estimation provided fallback result: $${aiResult.price}`);
+          } else {
+            Alert.alert(
+              'No Results',
+              `No products found on ${firstStore}. Try:\n\n• Adding the material manually\n• Using a different search term\n• Selecting a different hardware store in Settings`
+            );
+          }
         }
       }
     } catch (error) {
@@ -750,14 +879,28 @@ export function MaterialsListScreen() {
     } finally {
       setIsSearching(false);
     }
-  };
+  }, [searchQuery, businessSettings]);
 
   const handleSelectProduct = async (item: any) => {
     setSearchDialogVisible(false);
 
     let newMaterial: Material;
 
-    if (item.isScraperResult) {
+    if (item.isAiEstimate) {
+      // Handle AI-estimated results
+      newMaterial = {
+        id: generateId(),
+        name: item.productName,
+        quantity: 1,
+        unit: 'each',
+        price: item.price || 0,
+        totalPrice: item.price || 0,
+        manualPriceOverride: false,
+        searchTerm: item.productName,
+        pricingSource: 'ai',
+        description: item.description,
+      };
+    } else if (item.isScraperResult) {
       // Handle scraper results with full metadata
       newMaterial = {
         id: generateId(),
@@ -1023,20 +1166,24 @@ export function MaterialsListScreen() {
     }
   };
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     // Allow proceeding with no materials (labor-only quotes)
-    const hasUnpricedMaterials = materials.some((m) => m.price === 0);
     if (hasUnpricedMaterials) {
       setUnpricedDialogVisible(true);
     } else {
       navigation.navigate('LaborMarkup');
     }
-  };
+  }, [hasUnpricedMaterials, navigation]);
 
   const proceedWithUnpricedMaterials = () => {
     setUnpricedDialogVisible(false);
     navigation.navigate('LaborMarkup');
   };
+
+  // Handle null currentQuote case
+  if (!currentQuote) {
+    return null;
+  }
 
   return (
     <View style={styles.container}>
@@ -1182,30 +1329,18 @@ export function MaterialsListScreen() {
         <View style={styles.summary}>
           <Text style={styles.summaryLabel}>Materials Subtotal:</Text>
           <Text style={styles.summaryValue}>
-            {formatCurrency(materials.reduce((sum, m) => sum + m.totalPrice, 0))}
+            {formatCurrency(materialsSubtotal)}
           </Text>
         </View>
       </ScrollView>
 
-      {/* Optional Fetch Prices - Secondary Action */}
-      {materials.length > 0 && (
-        <View style={styles.fetchPricesContainer}>
-          <Button
-            mode="outlined"
-            onPress={handleFetchPrices}
-            style={styles.fetchPricesButton}
-            loading={isFetchingPrices}
-            disabled={isFetchingPrices}
-          >
-            Fetch Prices
-          </Button>
-        </View>
-      )}
-
-      {/* Primary Navigation - Next Step */}
       <FixedBottomButton
         label="Next: Labor & Markup"
         onPress={handleNext}
+        secondaryLabel={materials.length > 0 ? "Fetch Prices" : undefined}
+        secondaryOnPress={materials.length > 0 ? handleFetchPrices : undefined}
+        secondaryLoading={isFetchingPrices}
+        secondaryDisabled={isFetchingPrices}
       />
 
       {/* Edit Material Dialog */}
@@ -1307,21 +1442,11 @@ export function MaterialsListScreen() {
           </Dialog.Title>
           <Dialog.Content>
             <View style={styles.searchContainer}>
-              <TextInput
-                label="Search Products"
+              <SearchInput
                 value={searchQuery}
                 onChangeText={handleSearchQueryChange}
-                mode="outlined"
-                placeholder="e.g., treated pine 90x45"
-                style={styles.searchInput}
-                right={
-                  <TextInput.Icon
-                    icon="magnify"
-                    onPress={handleSearchProducts}
-                    disabled={isSearching}
-                  />
-                }
-                onSubmitEditing={handleSearchProducts}
+                onSearch={handleSearchProducts}
+                isSearching={isSearching}
               />
 
               {isSearching && (
@@ -1449,7 +1574,7 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && {
       display: 'flex' as any,
       flexDirection: 'column' as any,
-      height: '100vh' as any,
+      height: '100%' as any,
       overflow: 'hidden' as any,
     }),
   },
@@ -1461,12 +1586,12 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
+    paddingBottom: 100,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
       margin: 'auto' as any,
       width: '100%',
-      paddingBottom: 20,
       height: '0px' as any,
     }),
   },
@@ -1541,29 +1666,6 @@ const styles = StyleSheet.create({
   },
   addButtonContent: {
     flexDirection: 'row-reverse',
-  },
-  fetchPricesContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 16,
-    backgroundColor: colors.surfaceGray3,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    ...(Platform.OS === 'web' && {
-      flexShrink: 0,
-      margin: '0 auto' as any,
-      width: '100%',
-    }),
-  },
-  fetchPricesButton: {
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  fetchPricesHint: {
-    fontSize: 12,
-    color: colors.onSurface,
-    textAlign: 'center',
-    marginTop: 4,
   },
   summary: {
     flexDirection: 'row',

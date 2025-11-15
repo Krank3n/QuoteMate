@@ -29,4 +29,19 @@ web-build/
 # Build
 /tmp
 /out-tsc
-*.log@krank3n__quotemate.jks
+*.log
+
+# Android Keystore & Signing
+*.keystore
+*.jks
+keystore.properties
+android/keystore.properties
+android/app/upload.keystore
+android/app/release.keystore
+android/app/release-new.keystore
+@krank3n__quotemate.jks
+
+# Android Build Outputs
+*.aab
+*.apk
+android/app/build/outputs/
