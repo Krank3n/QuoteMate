@@ -21,6 +21,9 @@ interface SuccessModalProps {
   message?: string;
   buttonText?: string;
   icon?: string;
+  secondaryButtonText?: string;
+  secondaryOnPress?: () => void;
+  secondaryLoading?: boolean;
 }
 
 // Simple confetti piece
@@ -40,6 +43,9 @@ export function SuccessModal({
   message = 'Your action was completed successfully.',
   buttonText = 'Done',
   icon = 'check-circle',
+  secondaryButtonText,
+  secondaryOnPress,
+  secondaryLoading = false,
 }: SuccessModalProps) {
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -223,15 +229,29 @@ export function SuccessModal({
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
 
-          <Button
-            mode="contained"
-            onPress={onDismiss}
-            style={styles.button}
-            buttonColor={colors.success}
-            textColor={colors.white}
-          >
-            {buttonText}
-          </Button>
+          <View style={styles.buttonContainer}>
+            {secondaryButtonText && secondaryOnPress && (
+              <Button
+                mode="outlined"
+                onPress={secondaryOnPress}
+                style={[styles.button, styles.secondaryButton]}
+                textColor={colors.primary}
+                loading={secondaryLoading}
+                disabled={secondaryLoading}
+              >
+                {secondaryButtonText}
+              </Button>
+            )}
+            <Button
+              mode="contained"
+              onPress={onDismiss}
+              style={styles.button}
+              buttonColor={colors.success}
+              textColor={colors.white}
+            >
+              {buttonText}
+            </Button>
+          </View>
         </Animated.View>
       </Modal>
     </Portal>
@@ -293,8 +313,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 24,
   },
+  buttonContainer: {
+    width: '100%',
+    gap: 12,
+  },
   button: {
     width: '100%',
     paddingVertical: 6,
+  },
+  secondaryButton: {
+    borderColor: colors.primary,
   },
 });

@@ -1586,7 +1586,7 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 140,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
@@ -1657,7 +1657,7 @@ const styles = StyleSheet.create({
   },
   actions: {
     padding: 20,
-    paddingBottom: 8,
+    marginBottom: 8,
   },
   addButton: {
     alignSelf: 'flex-end',

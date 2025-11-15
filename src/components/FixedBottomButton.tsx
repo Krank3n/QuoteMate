@@ -142,7 +142,7 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     borderWidth: 2,
-    marginHorizontal: 10,
+    // marginHorizontal: 10,
     borderColor: colors.primary,
     flex: 1,
     margin: 0,

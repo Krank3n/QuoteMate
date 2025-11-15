@@ -97,6 +97,9 @@ export function QuotePreviewScreen() {
         message="Your quote has been saved successfully and is ready to share with your customer."
         buttonText="Back to Dashboard"
         icon="check-circle"
+        secondaryButtonText="Export PDF"
+        secondaryOnPress={handleExportPDF}
+        secondaryLoading={isExporting}
       />
 
       <ScrollView
@@ -204,10 +207,6 @@ export function QuotePreviewScreen() {
         onPress={handleSave}
         loading={isSaving}
         disabled={isSaving}
-        secondaryLabel="Export PDF"
-        secondaryOnPress={handleExportPDF}
-        secondaryLoading={isExporting}
-        secondaryDisabled={isExporting}
       />
     </View>
   );
@@ -229,7 +228,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 100,
+    paddingBottom: 140,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
       marginHorizontal: 'auto' as any,

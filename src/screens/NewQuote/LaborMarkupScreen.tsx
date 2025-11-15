@@ -268,15 +268,14 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
-    paddingBottom: 100,
-    marginBottom: 120,
-
+    paddingBottom: 140,
+    marginBottom: 20,
+    overflow: 'scroll' as any ,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
       margin: 'auto' as any,
       width: '100%',
-      paddingBottom: 20,
       height: '0px' as any,
     }),
   },
