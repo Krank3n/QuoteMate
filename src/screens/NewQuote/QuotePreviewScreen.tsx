@@ -198,6 +198,7 @@ export function QuotePreviewScreen() {
           multiline
           numberOfLines={4}
           placeholder="Add any additional notes for this quote..."
+          style={styles.notesInput}
         />
       </Surface>
       </ScrollView>
@@ -313,5 +314,9 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: colors.primary,
+  },
+  notesInput: {
+    textAlignVertical: 'top',
+    paddingTop: 8,
   },
 });
