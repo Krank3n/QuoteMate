@@ -62,6 +62,7 @@ import {
   ScraperProduct,
 } from '../../services/bunningsScraperService';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
+import { BUNNINGS_SCRAPER_URL } from '@env';
 
 // AI Analysis Loading State with Lottie Animation
 function AiAnalyzingState() {
@@ -272,7 +273,7 @@ export function MaterialsListScreen() {
     // Determine which pricing method to use
     const useBunningsApi = businessSettings?.useBunningsApi === true;
     const useReeceApi = false; // Disabled - API coming soon
-    const useScraperApi = process.env.BUNNINGS_SCRAPER_URL ? true : false;
+    const useScraperApi = BUNNINGS_SCRAPER_URL ? true : false;
 
     // Get selected store (single store only now)
     const selectedStore = businessSettings?.selectedStore || 'bunnings';
@@ -287,7 +288,7 @@ export function MaterialsListScreen() {
       storeUrl,
       useScraperApi,
       useBunningsApi,
-      scraperUrl: process.env.BUNNINGS_SCRAPER_URL,
+      scraperUrl: BUNNINGS_SCRAPER_URL,
     });
 
     let methodName = 'AI estimation';
@@ -361,20 +362,67 @@ export function MaterialsListScreen() {
           } catch (error) {
             console.log('❌ Scraper failed, falling back to next pricing method:', error);
 
-            // Fallback to next method
+            // Fallback to next method: try Bunnings API first, then AI estimation
             if (useBunningsApi) {
+              console.log('🔄 Trying Bunnings API fallback...');
               const result = await bunningsApi.findAndPriceMaterial(searchTerm);
               if (result) {
                 material.bunningsItemNumber = result.item.itemNumber;
                 material.price = result.price.priceIncGst;
                 material.totalPrice = material.price * material.quantity;
                 material.manualPriceOverride = false;
+                material.pricingSource = 'api';
                 fetchedCount++;
+                console.log(`✅ Bunnings API fallback succeeded: $${result.price.priceIncGst}`);
               } else {
-                failedCount++;
+                // Bunnings API also failed, try AI estimation as final fallback
+                console.log('🔄 Bunnings API failed, trying AI estimation fallback...');
+                const aiResult = await searchMaterialPrice(searchTerm, hardwareStores);
+
+                if (aiResult.price) {
+                  material.price = aiResult.price;
+                  material.totalPrice = material.price * material.quantity;
+                  material.manualPriceOverride = false;
+                  material.pricingSource = 'ai';
+
+                  if (aiResult.productName) {
+                    material.name = aiResult.productName;
+                  }
+                  if (aiResult.store) {
+                    material.description = `Estimated from ${aiResult.store}`;
+                  }
+
+                  fetchedCount++;
+                  console.log(`✅ AI estimation fallback succeeded: $${aiResult.price}`);
+                } else {
+                  failedCount++;
+                  console.log('❌ All fallback methods failed');
+                }
               }
             } else {
-              failedCount++;
+              // No Bunnings API, fall back directly to AI estimation
+              console.log('🔄 Trying AI estimation fallback...');
+              const aiResult = await searchMaterialPrice(searchTerm, hardwareStores);
+
+              if (aiResult.price) {
+                material.price = aiResult.price;
+                material.totalPrice = material.price * material.quantity;
+                material.manualPriceOverride = false;
+                material.pricingSource = 'ai';
+
+                if (aiResult.productName) {
+                  material.name = aiResult.productName;
+                }
+                if (aiResult.store) {
+                  material.description = `Estimated from ${aiResult.store}`;
+                }
+
+                fetchedCount++;
+                console.log(`✅ AI estimation fallback succeeded: $${aiResult.price}`);
+              } else {
+                failedCount++;
+                console.log('❌ AI estimation fallback failed');
+              }
             }
           }
         } else if (useBunningsApi) {
@@ -677,7 +725,7 @@ export function MaterialsListScreen() {
       const selectedStore = businessSettings?.selectedStore || 'bunnings';
       const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
       const firstStore = hardwareStores[0];
-      const useScraperApi = process.env.BUNNINGS_SCRAPER_URL ? true : false;
+      const useScraperApi = BUNNINGS_SCRAPER_URL ? true : false;
 
       // Check if the selected store is Bunnings
       const isBunnings = selectedStore === 'bunnings' || firstStore.includes('bunnings.com.au');
@@ -1286,25 +1334,13 @@ export function MaterialsListScreen() {
         </View>
       </ScrollView>
 
-      {/* Optional Fetch Prices - Secondary Action */}
-      {materials.length > 0 && (
-        <View style={styles.fetchPricesContainer}>
-          <Button
-            mode="outlined"
-            onPress={handleFetchPrices}
-            style={styles.fetchPricesButton}
-            loading={isFetchingPrices}
-            disabled={isFetchingPrices}
-          >
-            Fetch Prices
-          </Button>
-        </View>
-      )}
-
-      {/* Primary Navigation - Next Step */}
       <FixedBottomButton
         label="Next: Labor & Markup"
         onPress={handleNext}
+        secondaryLabel={materials.length > 0 ? "Fetch Prices" : undefined}
+        secondaryOnPress={materials.length > 0 ? handleFetchPrices : undefined}
+        secondaryLoading={isFetchingPrices}
+        secondaryDisabled={isFetchingPrices}
       />
 
       {/* Edit Material Dialog */}
@@ -1538,7 +1574,7 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && {
       display: 'flex' as any,
       flexDirection: 'column' as any,
-      height: '100vh' as any,
+      height: '100%' as any,
       overflow: 'hidden' as any,
     }),
   },
@@ -1556,7 +1592,6 @@ const styles = StyleSheet.create({
       maxWidth: 800,
       margin: 'auto' as any,
       width: '100%',
-      paddingBottom: 20,
       height: '0px' as any,
     }),
   },
@@ -1631,29 +1666,6 @@ const styles = StyleSheet.create({
   },
   addButtonContent: {
     flexDirection: 'row-reverse',
-  },
-  fetchPricesContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 16,
-    backgroundColor: colors.surfaceGray3,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    ...(Platform.OS === 'web' && {
-      flexShrink: 0,
-      margin: '0 auto' as any,
-      width: '100%',
-    }),
-  },
-  fetchPricesButton: {
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  fetchPricesHint: {
-    fontSize: 12,
-    color: colors.onSurface,
-    textAlign: 'center',
-    marginTop: 4,
   },
   summary: {
     flexDirection: 'row',

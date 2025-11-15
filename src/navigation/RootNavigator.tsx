@@ -161,6 +161,12 @@ export function RootNavigator() {
         // Enable scrolling for modals on web
         ...(Platform.OS === 'web' && {
           contentStyle: { overflow: 'auto' }
+        }),
+        // Disable safe area for iOS to allow full height cards
+        ...(Platform.OS === 'ios' && {
+          safeAreaInsets: { top: 0, bottom: 0 },
+          detachPreviousScreen: false,
+          contentStyle: { flex: 1 },
         })
       }}
     >
@@ -169,7 +175,7 @@ export function RootNavigator() {
         name="NewQuote"
         component={NewQuoteNavigator}
         options={{
-          presentation: 'modal',
+          presentation: 'card',
         }}
       />
       <RootStack.Screen

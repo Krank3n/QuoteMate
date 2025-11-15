@@ -25,6 +25,16 @@ interface FixedBottomButtonProps {
   icon?: string;
   /** Custom button style */
   buttonStyle?: object;
+  /** Optional secondary button label */
+  secondaryLabel?: string;
+  /** Optional secondary button press handler */
+  secondaryOnPress?: () => void;
+  /** Optional secondary button loading state */
+  secondaryLoading?: boolean;
+  /** Optional secondary button disabled state */
+  secondaryDisabled?: boolean;
+  /** Disable the solid background block - useful when transparency is desired */
+  disableSolidBackground?: boolean;
 }
 
 export function FixedBottomButton({
@@ -35,33 +45,80 @@ export function FixedBottomButton({
   mode = 'contained',
   icon,
   buttonStyle,
+  secondaryLabel,
+  secondaryOnPress,
+  secondaryLoading = false,
+  secondaryDisabled = false,
+  disableSolidBackground = false,
 }: FixedBottomButtonProps) {
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.bottomActions, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 48 : 16) }]}>
-      <Button
-        mode={mode}
-        onPress={onPress}
-        style={[styles.button, buttonStyle]}
-        labelStyle={styles.buttonLabel}
-        disabled={disabled}
-        loading={loading}
-        icon={icon}
+    <>
+      {/* Solid background that extends to the very bottom */}
+      {!disableSolidBackground && Platform.OS !== 'ios' && <View style={styles.solidBackground} />}
+
+      <View
+        style={[
+          styles.bottomActions,
+             Platform.OS !== 'ios' && { marginBottom: Math.max(insets.bottom, 16) }
+        ]}
+        needsOffscreenAlphaCompositing={false}
+        renderToHardwareTextureAndroid={true}
       >
-        {label}
-      </Button>
-    </View>
+        {secondaryLabel && secondaryOnPress && (
+          <Button
+            mode="outlined"
+            onPress={secondaryOnPress}
+            style={styles.secondaryButton}
+            labelStyle={styles.secondaryButtonLabel}
+            disabled={secondaryDisabled}
+            loading={secondaryLoading}
+          >
+            {secondaryLoading ? '' : secondaryLabel}
+          </Button>
+        )}
+        <Button
+          mode={mode}
+          onPress={onPress}
+          style={[styles.button, buttonStyle, secondaryLabel && styles.buttonWithSecondary]}
+          labelStyle={styles.buttonLabel}
+          disabled={disabled}
+          loading={loading}
+          icon={icon}
+        >
+          {loading ? '' : label}
+        </Button>
+      </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
+  solidBackground: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 60, // Covers button area + safe area
+    backgroundColor: colors.surface,
+    zIndex: 1,
+  },
   bottomActions: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    padding: 16,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
+    position: "absolute",
+    bottom: 0,
+    width: '100%',
+    flexDirection: 'row',
+    gap: 12,
     borderColor: colors.border,
+    zIndex: 2, // Above the solid background
+    ...(Platform.OS === 'android' && {
+      elevation: 8, // Add shadow/elevation for Android
+      backgroundColor: colors.surface, // Ensure solid background
+    }),
     ...(Platform.OS === 'web' && {
       flexShrink: 0,
       position: 'sticky' as any,
@@ -72,9 +129,27 @@ const styles = StyleSheet.create({
     }),
   },
   button: {
-    paddingVertical: 8,
+    flex: 1,
+    margin: 0,
+  },
+  buttonWithSecondary: {
+    flex: 1,
   },
   buttonLabel: {
     color: colors.white,
+    marginVertical: 16,
+    marginHorizontal: 10,
+  },
+  secondaryButton: {
+    borderWidth: 2,
+    marginHorizontal: 10,
+    borderColor: colors.primary,
+    flex: 1,
+    margin: 0,
+  },
+  secondaryButtonLabel: {
+    color: colors.primary,
+    marginVertical: 16,
+    marginHorizontal: 0,
   },
 });

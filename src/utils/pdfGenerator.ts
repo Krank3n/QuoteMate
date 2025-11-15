@@ -42,6 +42,60 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
     <head>
       <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
       <style>
+        @media print {
+          /* Prevent page breaks inside these elements */
+          .header, .info-section, .summary, .section-wrapper {
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+
+          /* Prevent page breaks after headings */
+          h2, h3 {
+            page-break-after: avoid;
+            break-after: avoid;
+            orphans: 3;
+            widows: 3;
+          }
+
+          /* Add space before sections to allow natural page breaks */
+          .info-section, .summary, .section-wrapper {
+            page-break-before: auto;
+            break-before: auto;
+            margin-top: 20px;
+          }
+
+          /* Prevent table rows from splitting */
+          tr {
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+
+          /* Add margin before tables */
+          table {
+            page-break-before: auto;
+            break-before: auto;
+            margin-top: 15px;
+          }
+
+          /* For very long tables that must break across pages */
+          table thead {
+            display: table-header-group;
+          }
+
+          /* Ensure minimum spacing when sections do break */
+          .section-wrapper {
+            padding-top: 10px;
+            padding-bottom: 10px;
+          }
+
+          /* If a section must break, add margin on continuation */
+          .section-wrapper::after {
+            content: "";
+            display: block;
+            margin-bottom: 20px;
+          }
+        }
+
         body {
           font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
           padding: 40px;
@@ -131,6 +185,9 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
           color: ${colors.primaryDark};
           margin-bottom: 10px;
         }
+        .section-wrapper {
+          margin-bottom: 20px;
+        }
       </style>
     </head>
     <body>
@@ -163,49 +220,53 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
         <p>${quote.job.description}</p>
       </div>
 
-      <h3>Materials</h3>
-      ${quote.materials.length === 0 ? `
-      <p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>
-      ` : `
-      <table>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Quantity</th>
-            <th>Unit Price</th>
-            <th>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${quote.materials
-            .map(
-              (m) => `
+      <div class="section-wrapper">
+        <h3>Materials</h3>
+        ${quote.materials.length === 0 ? `
+        <p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>
+        ` : `
+        <table>
+          <thead>
             <tr>
-              <td>${m.name}</td>
-              <td>${m.quantity} ${m.unit}</td>
-              <td>${formatCurrency(m.price)}</td>
-              <td>${formatCurrency(m.totalPrice)}</td>
+              <th>Item</th>
+              <th>Quantity</th>
+              <th>Unit Price</th>
+              <th>Total</th>
             </tr>
-          `
-            )
-            .join('')}
-          <tr class="total-row">
-            <td colspan="3">Materials Subtotal</td>
-            <td>${formatCurrency(quote.materialsSubtotal)}</td>
-          </tr>
-        </tbody>
-      </table>
-      `}
+          </thead>
+          <tbody>
+            ${quote.materials
+              .map(
+                (m) => `
+              <tr>
+                <td>${m.name}</td>
+                <td>${m.quantity} ${m.unit}</td>
+                <td>${formatCurrency(m.price)}</td>
+                <td>${formatCurrency(m.totalPrice)}</td>
+              </tr>
+            `
+              )
+              .join('')}
+            <tr class="total-row">
+              <td colspan="3">Materials Subtotal</td>
+              <td>${formatCurrency(quote.materialsSubtotal)}</td>
+            </tr>
+          </tbody>
+        </table>
+        `}
+      </div>
 
-      <h3>Labor</h3>
-      <table>
-        <tbody>
-          <tr>
-            <td>Labor (${quote.laborHours} hours @ ${formatCurrency(quote.laborRate)}/hr)</td>
-            <td>${formatCurrency(quote.laborTotal)}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="section-wrapper">
+        <h3>Labor</h3>
+        <table>
+          <tbody>
+            <tr>
+              <td>Labor (${quote.laborHours} hours @ ${formatCurrency(quote.laborRate)}/hr)</td>
+              <td>${formatCurrency(quote.laborTotal)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <div class="summary">
         <div class="summary-row">

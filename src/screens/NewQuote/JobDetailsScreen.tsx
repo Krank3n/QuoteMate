@@ -818,11 +818,16 @@ export function JobDetailsScreen() {
           </Dialog.Actions>
         </Dialog>
       </Portal>
-      <View style={styles.container}>
+      <KeyboardAvoidingView
+        style={[styles.container]}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={-48}
+      >
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={true}
         >
           <WebContainer>
       {/* Niche-Specific Quick Templates */}
@@ -1247,40 +1252,17 @@ export function JobDetailsScreen() {
           </WebContainer>
         </ScrollView>
 
-        {/* Bottom Action Buttons - Row layout */}
-        <View style={[styles.bottomActionsContainer, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 48 : 16) }]}>
-          {/* Skip AI Button - Only show for custom jobs */}
-          {!isEditingExisting && useCustomMode && (
-            <Button
-              mode="outlined"
-              onPress={handleSkipToManualEntry}
-              style={styles.skipAiButton}
-              labelStyle={styles.skipAiButtonLabel}
-              textColor={colors.primary}
-              icon="file-edit-outline"
-            >
-              Skip AI
-            </Button>
-          )}
-
-          {/* Next Button */}
-          <Button
-            mode="contained"
-            onPress={handleNext}
-            style={[
-              styles.nextButton,
-              (!isEditingExisting && useCustomMode) ? styles.nextButtonShared : styles.nextButtonFull
-            ]}
-            labelStyle={styles.nextButtonLabel}
-            disabled={
-              (useCustomMode && !jobDescription.trim()) ||
-              (!useCustomMode && !selectedTemplate)
-            }
-          >
-            Next: Customer Details
-          </Button>
-        </View>
-      </View>
+        <FixedBottomButton
+          label="Next: Customer Details"
+          onPress={handleNext}
+          disabled={
+            (useCustomMode && !jobDescription.trim()) ||
+            (!useCustomMode && !selectedTemplate)
+          }
+          secondaryLabel={!isEditingExisting && useCustomMode ? "Skip AI" : undefined}
+          secondaryOnPress={!isEditingExisting && useCustomMode ? handleSkipToManualEntry : undefined}
+        />
+      </KeyboardAvoidingView>
     </>
   );
 }
@@ -1319,7 +1301,7 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
-    paddingBottom: 120,
+    paddingBottom: 200,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
@@ -1329,7 +1311,7 @@ const styles = StyleSheet.create({
     }),
   },
   section: {
-    padding: 20,
+    padding: 16,
   },
   sectionTitleContainer: {
     marginBottom: 16,
@@ -1533,42 +1515,6 @@ const styles = StyleSheet.create({
   },
   templateSection: {
     marginBottom: 16, // Consistent spacing with next section
-  },
-  bottomActionsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    gap: 12,
-    ...(Platform.OS === 'web' && {
-      flexShrink: 0,
-      margin: '0 auto' as any,
-      width: '100%',
-      boxShadow: '0 -2px 8px rgba(0,0,0,0.1)' as any,
-    }),
-  },
-  skipAiButton: {
-    borderWidth: 2,
-    borderColor: colors.primary,
-    flex: 1,
-    paddingVertical: 8,
-  },
-  skipAiButtonLabel: {
-    fontSize: 14,
-  },
-  nextButton: {
-    paddingVertical: 8,
-  },
-  nextButtonShared: {
-    flex: 1,
-  },
-  nextButtonFull: {
-    flex: 1,
-  },
-  nextButtonLabel: {
-    color: colors.white,
   },
   helperText: {
     fontSize: 13,
