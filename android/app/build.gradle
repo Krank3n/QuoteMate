@@ -4,8 +4,19 @@ apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
-// Default version for dev builds
-def appVersion = [version: "1.0.0", versionCode: 1]
+// Read version from app.config.js
+def configFile = new File(projectRoot, 'app.config.js')
+def configText = configFile.exists() ? configFile.text : ""
+
+// Extract version
+def versionMatch = configText =~ /version:\s*["']([^"']+)["']/
+def appVersionString = versionMatch ? versionMatch[0][1] : "1.0.0"
+
+// Extract versionCode
+def versionCodeMatch = configText =~ /versionCode:\s*(\d+)/
+def appVersionCode = versionCodeMatch ? versionCodeMatch[0][1].toInteger() : 1
+
+def appVersion = [version: appVersionString, versionCode: appVersionCode]
 
 // Load keystore properties for release signing
 def keystorePropertiesFile = rootProject.file("keystore.properties")
