@@ -196,10 +196,16 @@ async function parseProductsWithClaude(
 
     const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
 
-    // Add store to each match
+    // Add store to each match and filter out invalid URLs
     const matches = (parsed.matches || []).map((match: any) => ({
       ...match,
       store,
+      // Filter out placeholder/invalid URLs like example.com
+      productUrl: match.productUrl &&
+                  !match.productUrl.includes('example.com') &&
+                  (match.productUrl.startsWith('http://') || match.productUrl.startsWith('https://'))
+        ? match.productUrl
+        : undefined,
     }));
 
     return {

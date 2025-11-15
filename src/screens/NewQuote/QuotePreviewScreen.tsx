@@ -21,6 +21,7 @@ import { formatCurrency } from '../../utils/quoteCalculator';
 import { exportQuotePDF } from '../../utils/pdfGenerator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SuccessModal } from '../../components/SuccessModal';
+import { FixedBottomButton } from '../../components/FixedBottomButton';
 
 export function QuotePreviewScreen() {
   const navigation = useNavigation<any>();
@@ -198,28 +199,16 @@ export function QuotePreviewScreen() {
       </Surface>
       </ScrollView>
 
-      <View style={[styles.bottomActions, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 48 : 16) }]}>
-        <Button
-          mode="outlined"
-          onPress={handleExportPDF}
-          style={styles.actionButton}
-          loading={isExporting}
-          disabled={isExporting}
-          icon="file-pdf-box"
-        >
-          Export PDF
-        </Button>
-
-        <Button
-          mode="contained"
-          onPress={handleSave}
-          style={styles.actionButton}
-          loading={isSaving}
-          disabled={isSaving}
-        >
-          Save Quote
-        </Button>
-      </View>
+      <FixedBottomButton
+        label="Save Quote"
+        onPress={handleSave}
+        loading={isSaving}
+        disabled={isSaving}
+        secondaryLabel="Export PDF"
+        secondaryOnPress={handleExportPDF}
+        secondaryLoading={isExporting}
+        secondaryDisabled={isExporting}
+      />
     </View>
   );
 }
@@ -325,24 +314,5 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: colors.primary,
-  },
-  bottomActions: {
-    flexDirection: 'row',
-    padding: 20,
-    paddingTop: 16,
-    backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderColor: colors.border,
-    gap: 12,
-    ...(Platform.OS === 'web' && {
-      flexShrink: 0,
-      margin: '0 auto' as any,
-      width: '100%',
-      boxShadow: '0 -2px 8px rgba(0,0,0,0.1)' as any,
-    }),
-  },
-  actionButton: {
-    flex: 1,
-    paddingVertical: 8,
   },
 });
