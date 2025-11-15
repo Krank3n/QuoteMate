@@ -1,6 +1,6 @@
 {
   "name": "@quotemate/app",
-  "version": "1.0.25",
+  "version": "1.0.29",
   "main": "index.js",
   "scripts": {
     "start": "expo start --dev-client",
@@ -14,7 +14,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
     "@expo/vector-icons": "~14.0.4",
-    "@lottiefiles/dotlottie-react": "^0.13.5",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/native": "^7.0.14",
