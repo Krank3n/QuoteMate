@@ -1,4 +1,4 @@
-import * as RNIap from 'react-native-iap';
+import * as RNIap from 'expo-iap';
 import { Platform } from 'react-native';
 
 // Subscription product IDs (these must match what you create in Google Play Console)

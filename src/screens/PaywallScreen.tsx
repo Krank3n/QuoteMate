@@ -14,7 +14,7 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
-import * as RNIap from 'react-native-iap';
+import * as RNIap from 'expo-iap';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useStore } from '../store/useStore';
