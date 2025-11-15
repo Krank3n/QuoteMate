@@ -37,7 +37,7 @@ export function isScraperAvailable(): boolean {
   const available = !!(BUNNINGS_SCRAPER_URL && BUNNINGS_SCRAPER_API_KEY);
 
   if (!available) {
-    console.log('⚠️ Bunnings scraper not configured - will use OpenAI web search fallback');
+    console.log('⚠️ Bunnings websearch not configured - will use OpenAI web search fallback');
   }
 
   return available;

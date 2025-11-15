@@ -14,6 +14,7 @@ import {
   Platform,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Text,
   TextInput,
@@ -49,6 +50,7 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
   const { currentQuote, updateQuote, quotes, businessSettings } = useStore();
+  const insets = useSafeAreaInsets();
 
   const [selectedTemplate, setSelectedTemplate] = useState<JobTemplate | NicheJobTemplate | null>(null);
   const [customParams, setCustomParams] = useState<Record<string, number>>({});
@@ -322,19 +324,16 @@ export function JobDetailsScreen() {
       setJobName(currentQuote.job.name);
       setJobDescription(currentQuote.job.description || '');
 
-      // Load template if exists
+      // Load template if exists and it's not 'custom'
       const template = JOB_TEMPLATES.find((t) => t.id === currentQuote.job.template);
-      if (template) {
+      if (template && template.id !== 'custom') {
         setSelectedTemplate(template);
         setCustomParams(currentQuote.job.customParams || {});
-      }
-    }
-
-    // Set default template to 'custom' if no template is selected
-    if (!selectedTemplate) {
-      const customTemplate = JOB_TEMPLATES.find((t) => t.id === 'custom');
-      if (customTemplate) {
-        setSelectedTemplate(customTemplate);
+        setUseCustomMode(false); // Switch to template mode
+      } else {
+        // It's a custom job
+        setSelectedTemplate(null);
+        setUseCustomMode(true);
       }
     }
   }, [currentQuote]);
@@ -591,6 +590,7 @@ export function JobDetailsScreen() {
       job,
       materials: [], // Empty - user will add manually
       laborHours: 8,
+      aiSkipped: true, // Flag that AI was intentionally skipped
     };
 
     updateQuote(updatedQuote);
@@ -619,6 +619,7 @@ export function JobDetailsScreen() {
       job,
       materials: [], // Empty for now, will be populated in background
       laborHours: 8,
+      aiSkipped: false, // Explicitly mark that AI is being used
     };
 
     updateQuote(updatedQuote);
@@ -817,11 +818,16 @@ export function JobDetailsScreen() {
           </Dialog.Actions>
         </Dialog>
       </Portal>
-      <View style={styles.container}>
+      <KeyboardAvoidingView
+        style={[styles.container]}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={-48}
+      >
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={true}
         >
           <WebContainer>
       {/* Niche-Specific Quick Templates */}
@@ -905,13 +911,15 @@ export function JobDetailsScreen() {
               <TouchableOpacity
                 style={[
                   styles.quickTemplateCard,
-                  useCustomMode && !selectedTemplate && styles.quickTemplateCardSelected,
+                  useCustomMode && styles.quickTemplateCardSelected,
                 ]}
                 onPress={() => {
                   setUseCustomMode(true);
                   setSelectedTemplate(null);
                   setCustomParams({});
-                  // Don't clear jobName or jobDescription - preserve user's custom input
+                  // Clear jobName and jobDescription when switching back to custom
+                  setJobName('');
+                  setJobDescription('');
                   // Auto-collapse after selection
                   setTimeout(() => setIsTemplateCarouselExpanded(false), 300);
                 }}
@@ -919,19 +927,19 @@ export function JobDetailsScreen() {
                 <MaterialCommunityIcons
                   name="pencil-outline"
                   size={32}
-                  color={useCustomMode && !selectedTemplate ? colors.primary : colors.textMuted}
+                  color={useCustomMode ? colors.primary : colors.textMuted}
                   style={styles.quickTemplateIcon}
                 />
                 <Text style={[
                   styles.quickTemplateName,
-                  useCustomMode && !selectedTemplate && styles.quickTemplateNameSelected,
+                  useCustomMode && styles.quickTemplateNameSelected,
                 ]}>Custom Job</Text>
                 <Text style={styles.quickTemplateDesc}>Describe your own job</Text>
                 <View style={styles.quickTemplateBadge}>
                   <MaterialCommunityIcons name="brain" size={12} color={colors.secondary} />
                   <Text style={styles.quickTemplateBadgeText}>AI Powered</Text>
                 </View>
-                {useCustomMode && !selectedTemplate && (
+                {useCustomMode && (
                   <MaterialCommunityIcons
                     name="check-circle"
                     size={20}
@@ -1244,21 +1252,6 @@ export function JobDetailsScreen() {
           </WebContainer>
         </ScrollView>
 
-        {/* Skip AI Button - Fixed above Next button */}
-        {!isEditingExisting && (
-          <View style={styles.skipAiContainer}>
-            <Button
-              mode="outlined"
-              onPress={handleSkipToManualEntry}
-              style={styles.skipAiButton}
-              textColor={colors.primary}
-              icon="file-edit-outline"
-            >
-              Skip AI & Enter Materials Manually
-            </Button>
-          </View>
-        )}
-
         <FixedBottomButton
           label="Next: Customer Details"
           onPress={handleNext}
@@ -1266,8 +1259,10 @@ export function JobDetailsScreen() {
             (useCustomMode && !jobDescription.trim()) ||
             (!useCustomMode && !selectedTemplate)
           }
+          secondaryLabel={!isEditingExisting && useCustomMode ? "Skip AI" : undefined}
+          secondaryOnPress={!isEditingExisting && useCustomMode ? handleSkipToManualEntry : undefined}
         />
-      </View>
+      </KeyboardAvoidingView>
     </>
   );
 }
@@ -1306,7 +1301,7 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
-    paddingBottom: 120,
+    paddingBottom: 200,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
@@ -1316,7 +1311,7 @@ const styles = StyleSheet.create({
     }),
   },
   section: {
-    padding: 20,
+    padding: 16,
   },
   sectionTitleContainer: {
     marginBottom: 16,
@@ -1520,23 +1515,6 @@ const styles = StyleSheet.create({
   },
   templateSection: {
     marginBottom: 16, // Consistent spacing with next section
-  },
-  skipAiContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 16,
-    backgroundColor: colors.surfaceGray3,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    ...(Platform.OS === 'web' && {
-      flexShrink: 0,
-      margin: '0 auto' as any,
-      width: '100%',
-    }),
-  },
-  skipAiButton: {
-    borderWidth: 2,
-    borderColor: colors.primary,
   },
   helperText: {
     fontSize: 13,

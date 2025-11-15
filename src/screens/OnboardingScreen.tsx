@@ -256,7 +256,7 @@ export function OnboardingScreen() {
               onChangeText={setEmail}
               mode="outlined"
               style={styles.input}
-              placeholder="your.email@example.com"
+              placeholder="your.email@domain.com.au"
               keyboardType="email-address"
               autoCapitalize="none"
             />
@@ -431,7 +431,7 @@ export function OnboardingScreen() {
               value={newCustomStore}
               onChangeText={setNewCustomStore}
               mode="outlined"
-              placeholder="example.com.au"
+              placeholder="storename.com.au"
               autoCapitalize="none"
               autoCorrect={false}
               style={styles.dialogInput}

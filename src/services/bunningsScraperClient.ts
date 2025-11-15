@@ -5,8 +5,18 @@
  * to fetch real product data and pricing.
  */
 
-const SCRAPER_API_URL = process.env.BUNNINGS_SCRAPER_URL || 'http://localhost:3002';
-const SCRAPER_API_KEY = process.env.BUNNINGS_SCRAPER_API_KEY || 'your-secret-api-key-here-change-this';
+import { BUNNINGS_SCRAPER_URL, BUNNINGS_SCRAPER_API_KEY } from '@env';
+
+// Defensive fallbacks for production builds
+const SCRAPER_API_URL = BUNNINGS_SCRAPER_URL || 'http://165.22.151.190';
+const SCRAPER_API_KEY = BUNNINGS_SCRAPER_API_KEY || '666d9a00cd10ee9a034215ec3cebc188cbf3e21c789093128e8bc1829c9b3266';
+
+// Log configuration on module load (only once)
+console.log('🔧 Bunnings Scraper Config:', {
+  url: SCRAPER_API_URL,
+  hasApiKey: !!SCRAPER_API_KEY,
+  apiKeyLength: SCRAPER_API_KEY?.length || 0,
+});
 
 export interface ScraperProduct {
   productName: string;

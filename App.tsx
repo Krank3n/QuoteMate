@@ -5,9 +5,9 @@
 
 import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
+import { Platform, View, Image, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
-import { Provider as PaperProvider } from 'react-native-paper';
+import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -25,10 +25,18 @@ import { firestoreService } from './src/services/firestoreService';
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
+  const [userDataLoaded, setUserDataLoaded] = useState(false);
   const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription } = useStore();
 
+  // ===== TESTING FLAGS =====
+  // Set SKIP_AUTH_FOR_TESTING to true to bypass login and test onboarding
+  const SKIP_AUTH_FOR_TESTING = false;
+  // Set FORCE_ONBOARDING to true to always show onboarding (even if completed)
+  const FORCE_ONBOARDING = false;
+  // =========================
+
   // Require authentication on all platforms for account syncing
-  const requiresAuth = true;
+  const requiresAuth = !SKIP_AUTH_FOR_TESTING;
 
   useEffect(() => {
     // Listen to authentication state changes
@@ -39,12 +47,16 @@ export default function App() {
       // When user signs in, reload data from Firestore and set up listeners
       if (currentUser) {
         console.log('👤 User signed in, syncing data from cloud...');
+        setUserDataLoaded(false); // Reset when new user signs in
+
         await Promise.all([
           loadQuotes(),
           loadBusinessSettings(),
           checkOnboarding(),
           loadSubscription(),
         ]);
+
+        setUserDataLoaded(true); // Mark user data as loaded
 
         // Set up real-time listeners for cross-device sync
         firestoreService.listenToQuotes((quotes) => {
@@ -74,6 +86,7 @@ export default function App() {
         // User signed out, clean up listeners
         console.log('🔌 User signed out, cleaning up listeners');
         firestoreService.cleanup();
+        setUserDataLoaded(false);
       }
     });
 
@@ -208,12 +221,20 @@ export default function App() {
     }
   }, [user]);
 
-  if (isLoading) {
-    // Show a simple loading view while initializing
+  // Show loading screen while initializing OR while user data is being loaded after auth
+  if (isLoading || (user && !userDataLoaded)) {
     return (
       <SafeAreaProvider>
         <PaperProvider theme={theme}>
-          <StatusBar style="light" />
+          <View style={appStyles.loadingContainer}>
+            <StatusBar style="light" />
+            <Image
+              source={require('./assets/logo-scaled.png')}
+              style={appStyles.loadingLogo}
+              resizeMode="contain"
+            />
+            <ActivityIndicator size="large" color={theme.colors.primary} style={appStyles.loadingSpinner} />
+          </View>
         </PaperProvider>
       </SafeAreaProvider>
     );
@@ -225,7 +246,7 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <PaperProvider theme={theme}>
-          <NavigationContainer>
+          <NavigationContainer key="auth">
             <StatusBar style="light" />
             <AuthScreen />
           </NavigationContainer>
@@ -237,11 +258,28 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <PaperProvider theme={theme}>
-        <NavigationContainer>
+        <NavigationContainer key="main">
           <StatusBar style="light" />
-          {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
+          {(isOnboarded && !FORCE_ONBOARDING) ? <RootNavigator /> : <NewOnboardingScreen />}
         </NavigationContainer>
       </PaperProvider>
     </SafeAreaProvider>
   );
 }
+
+const appStyles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#1E293B', // Match logo background color
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingLogo: {
+    width: 180,
+    height: 180,
+    marginBottom: 32,
+  },
+  loadingSpinner: {
+    marginTop: 16,
+  },
+});
