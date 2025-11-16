@@ -44,7 +44,8 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.quotemate.app",
-      usesAppleSignIn: true
+      usesAppleSignIn: true,
+      buildNumber: "2"
     },
     android: {
       adaptiveIcon: {
