@@ -43,7 +43,7 @@ export default {
     ],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.quotemate.app",
+      bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
       buildNumber: "3"
     },
