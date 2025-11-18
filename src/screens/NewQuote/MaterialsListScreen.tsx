@@ -1332,7 +1332,7 @@ export function MaterialsListScreen() {
             {formatCurrency(materialsSubtotal)}
           </Text>
         </View>
-      </ScrollView>
+       </ScrollView>
 
       <FixedBottomButton
         label="Next: Labor & Markup"

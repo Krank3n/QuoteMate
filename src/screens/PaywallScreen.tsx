@@ -14,7 +14,6 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
-import * as RNIap from 'expo-iap';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useStore } from '../store/useStore';
@@ -33,7 +32,7 @@ export function PaywallScreen() {
   const { subscriptionStatus, loadSubscription } = useStore();
   const { quoteCount, setPremium } = useSubscriptionStore();
   const [isUpgrading, setIsUpgrading] = useState(false);
-  const [products, setProducts] = useState<RNIap.Subscription[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [iapNotAvailable, setIapNotAvailable] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -126,9 +125,18 @@ export function PaywallScreen() {
   };
 
   const setupPurchaseListener = () => {
+    // Only set up purchase listeners on mobile platforms
+    if (Platform.OS === 'web') {
+      console.log('ℹ️ Purchase listeners not needed on web');
+      return { purchaseUpdateSubscription: null, purchaseErrorSubscription: null };
+    }
+
     try {
+      // Dynamically require expo-iap only on mobile platforms
+      const RNIap = require('expo-iap');
+
       const purchaseUpdateSubscription = RNIap.purchaseUpdatedListener(
-        async (purchase: RNIap.SubscriptionPurchase) => {
+        async (purchase: any) => {
           try {
             console.log('Purchase updated:', purchase);
             const receipt = purchase.transactionReceipt;
@@ -155,7 +163,7 @@ export function PaywallScreen() {
       );
 
       const purchaseErrorSubscription = RNIap.purchaseErrorListener(
-        (error: RNIap.PurchaseError) => {
+        (error: any) => {
           try {
             console.error('Purchase error:', error);
             if (error.code !== 'E_USER_CANCELLED' && error.code !== 'E_IAP_NOT_AVAILABLE') {

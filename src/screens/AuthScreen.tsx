@@ -11,6 +11,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
+import * as Crypto from 'expo-crypto';
 import { auth } from '../config/firebase';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
@@ -189,12 +190,24 @@ export function AuthScreen() {
     setError('');
 
     try {
+      // Generate a secure random nonce for Apple Sign In
+      const nonce = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      const hashedNonce = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        nonce
+      );
+
+      console.log('🍎 Starting Apple Sign-In with nonce...');
+
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce,
       });
+
+      console.log('🍎 Apple credential received, signing in with Firebase...');
 
       // Sign in with Firebase using Apple credential
       const { identityToken } = credential;
@@ -203,10 +216,13 @@ export function AuthScreen() {
         const provider = new OAuthProvider('apple.com');
         const firebaseCredential = provider.credential({
           idToken: identityToken,
+          rawNonce: nonce, // Pass the unhashed nonce to Firebase
         });
         await signInWithCredential(auth, firebaseCredential);
         console.log('✅ Apple Sign-In successful');
         // Keep loading state - App.tsx will handle navigation
+      } else {
+        throw new Error('No identity token returned from Apple');
       }
     } catch (err: any) {
       console.error('Apple sign in error:', err);
@@ -271,7 +287,7 @@ export function AuthScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <WebContainer>
+        <WebContainer maxWidth={500}>
           <Animated.View style={[styles.animatedContent, { opacity: fadeAnim }]}>
             <View style={styles.header}>
               <Image
@@ -459,7 +475,7 @@ const styles = StyleSheet.create({
     padding: 24,
     borderRadius: 12,
     elevation: 4,
-    maxWidth: 400,
+    maxWidth: 440,
     width: '100%',
     alignSelf: 'center',
     backgroundColor: colors.surfaceGray3,
