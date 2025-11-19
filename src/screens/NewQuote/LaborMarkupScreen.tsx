@@ -40,6 +40,41 @@ export function LaborMarkupScreen() {
     }
   }, [currentQuote]);
 
+  // Save changes when navigating back
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      if (!currentQuote) return;
+
+      const hours = parseFloat(laborHours) || 0;
+      const rate = parseFloat(laborRate) || 0;
+      const markupPercent = parseFloat(markup) || 0;
+
+      const calculation = calculateQuote(
+        currentQuote.materials,
+        rate,
+        hours,
+        markupPercent
+      );
+
+      // Save labor and calculated values before leaving
+      const updatedQuote = {
+        ...currentQuote,
+        laborHours: hours,
+        laborRate: rate,
+        markup: markupPercent,
+        laborTotal: calculation.laborTotal,
+        materialsSubtotal: calculation.materialsSubtotal,
+        subtotal: calculation.subtotal,
+        markupAmount: calculation.markupAmount,
+        gst: calculation.gst,
+        total: calculation.total,
+      };
+      updateQuote(updatedQuote);
+    });
+
+    return unsubscribe;
+  }, [navigation, currentQuote, laborHours, laborRate, markup, updateQuote]);
+
   if (!currentQuote) {
     return null;
   }

@@ -91,6 +91,27 @@ export function CustomerDetailsScreen() {
     }
   }, [currentQuote]);
 
+  // Save changes when navigating back
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      if (!currentQuote) return;
+
+      // Save any changes before leaving
+      if (customerName.trim()) {
+        const updatedQuote = {
+          ...currentQuote,
+          customerName: customerName.trim(),
+          customerEmail: customerEmail.trim(),
+          customerPhone: customerPhone.trim(),
+          jobAddress: jobAddress.trim(),
+        };
+        updateQuote(updatedQuote);
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, currentQuote, customerName, customerEmail, customerPhone, jobAddress, updateQuote]);
+
   const handleSelectCustomer = (customer: CustomerInfo) => {
     setCustomerName(customer.name);
     setCustomerEmail(customer.email || '');

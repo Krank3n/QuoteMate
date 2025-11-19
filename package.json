@@ -8,7 +8,7 @@
     "android": "npm run android:clean && expo run:android --variant playDebug",
     "android:clean": "$HOME/Library/Android/sdk/platform-tools/adb uninstall com.quotemate.app 2>/dev/null || true",
     "ios": "npm run ios:clean && expo run:ios",
-    "ios:clean": "xcrun simctl uninstall booted com.quotemate.app 2>/dev/null || true",
+    "ios:clean": "xcrun simctl uninstall booted com.hansendev.quotemate 2>/dev/null || true",
     "web": "expo start --web"
   },
   "dependencies": {

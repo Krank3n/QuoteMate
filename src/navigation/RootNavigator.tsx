@@ -14,10 +14,12 @@ import { DashboardScreen } from '../screens/DashboardScreen';
 import { QuotesListScreen } from '../screens/QuotesListScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
+import { ViewQuoteScreen } from '../screens/ViewQuoteScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
 import { CustomerDetailsScreen } from '../screens/NewQuote/CustomerDetailsScreen';
 import { MaterialsListScreen } from '../screens/NewQuote/MaterialsListScreen';
+import { AddMaterialScreen } from '../screens/NewQuote/AddMaterialScreen';
 import { LaborMarkupScreen } from '../screens/NewQuote/LaborMarkupScreen';
 import { QuotePreviewScreen } from '../screens/NewQuote/QuotePreviewScreen';
 
@@ -34,6 +36,7 @@ export type NewQuoteStackParamList = {
   JobDetails: undefined;
   CustomerDetails: undefined;
   MaterialsList: undefined;
+  AddMaterial: { materialId?: string } | undefined;
   LaborMarkup: undefined;
   QuotePreview: undefined;
 };
@@ -76,6 +79,11 @@ function NewQuoteNavigator() {
         name="MaterialsList"
         component={MaterialsListScreen}
         options={{ title: 'Materials' }}
+      />
+      <NewQuoteStack.Screen
+        name="AddMaterial"
+        component={AddMaterialScreen}
+        options={{ title: 'Add Material' }}
       />
       <NewQuoteStack.Screen
         name="LaborMarkup"
@@ -171,6 +179,14 @@ export function RootNavigator() {
       }}
     >
       <RootStack.Screen name="Main" component={MainTabs} />
+      <RootStack.Screen
+        name="ViewQuote"
+        component={ViewQuoteScreen}
+        options={{
+          presentation: 'card',
+          headerShown: false,
+        }}
+      />
       <RootStack.Screen
         name="NewQuote"
         component={NewQuoteNavigator}

@@ -338,6 +338,28 @@ export function JobDetailsScreen() {
     }
   }, [currentQuote]);
 
+  // Save changes when navigating back
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      if (!currentQuote) return;
+
+      // Save any changes to job name and description before leaving
+      if (jobName.trim() || jobDescription.trim()) {
+        const updatedQuote = {
+          ...currentQuote,
+          job: {
+            ...currentQuote.job,
+            name: jobName.trim() || currentQuote.job.name,
+            description: jobDescription.trim(),
+          },
+        };
+        updateQuote(updatedQuote);
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, currentQuote, jobName, jobDescription, updateQuote]);
+
   const handleVoiceRecording = async () => {
     console.log('🎤 handleVoiceRecording called, Platform:', Platform.OS);
 
@@ -736,7 +758,7 @@ export function JobDetailsScreen() {
   const handleNext = () => {
     if (!currentQuote) return;
 
-    // CUSTOM MODE: Use AI to analyze description
+    // CUSTOM MODE: Create job and navigate (AI generation happens on MaterialsList screen)
     if (useCustomMode) {
       if (!jobDescription.trim()) {
         Alert.alert('Missing Information', 'Please describe the job or select a template');
@@ -758,8 +780,25 @@ export function JobDetailsScreen() {
         return;
       }
 
-      // Analyze custom job with AI
-      handleAnalyzeCustomJob();
+      // Create job without AI analysis - user will trigger it manually from MaterialsList screen
+      const job = {
+        id: generateId(),
+        name: jobName || 'Custom Job',
+        description: jobDescription,
+        template: 'custom' as const,
+        estimatedHours: 8, // Default hours
+      };
+
+      const updatedQuote = {
+        ...currentQuote,
+        job,
+        materials: [], // Empty - user will generate or add manually from MaterialsList screen
+        laborHours: 8,
+        aiSkipped: false, // Not skipped, just deferred to MaterialsList screen
+      };
+
+      updateQuote(updatedQuote);
+      navigation.navigate('CustomerDetails');
       return;
     }
 
@@ -1244,8 +1283,6 @@ export function JobDetailsScreen() {
             (useCustomMode && !jobDescription.trim()) ||
             (!useCustomMode && !selectedTemplate)
           }
-          secondaryLabel={!isEditingExisting && useCustomMode ? "Skip AI" : undefined}
-          secondaryOnPress={!isEditingExisting && useCustomMode ? handleSkipToManualEntry : undefined}
         />
       </KeyboardAvoidingView>
     </>
