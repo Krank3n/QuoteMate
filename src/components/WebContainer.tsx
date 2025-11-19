@@ -1,7 +1,8 @@
 /**
  * WebContainer Component
- * Wraps content with a max-width on web for better UI
- * Mobile apps remain unchanged (full width)
+ * Wraps content with a max-width (default 800px) and centers it on web only
+ * Native mobile platforms (iOS/Android) render children directly without wrapper
+ * This ensures proper layout and touch handling on mobile devices including iPad
  */
 
 import React from 'react';
@@ -14,11 +15,13 @@ interface WebContainerProps {
 }
 
 export function WebContainer({ children, style, maxWidth = 800 }: WebContainerProps) {
+  // On native mobile (iOS/Android), render children directly without wrapper
+  // This prevents layout issues on iPad and ensures proper touch handling
   if (Platform.OS !== 'web') {
-    // On mobile, just render children without wrapper
     return <>{children}</>;
   }
 
+  // On web, apply centered max-width container for better desktop UX
   // Extract flex from style to apply to wrapper
   const styleArray = Array.isArray(style) ? style : [style];
   const hasFlex = styleArray.some(s => s && typeof s === 'object' && 'flex' in s);

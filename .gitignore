@@ -27,6 +27,7 @@ web-build/
 *~
 
 # Build
+build/
 /tmp
 /out-tsc
 *.log

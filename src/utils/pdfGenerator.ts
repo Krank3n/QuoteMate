@@ -6,6 +6,7 @@
 import * as FileSystem from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as MailComposer from 'expo-mail-composer';
 import { format } from 'date-fns';
 import { Quote, BusinessSettings } from '../types';
 import { formatCurrency } from './quoteCalculator';
@@ -43,6 +44,14 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
       <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
       <style>
         @media print {
+          /* Set page margins for all pages */
+          @page {
+            margin-top: 40px;
+            margin-bottom: 40px;
+            margin-left: 40px;
+            margin-right: 40px;
+          }
+
           /* Prevent page breaks inside these elements */
           .header, .info-section, .summary, .section-wrapper {
             page-break-inside: avoid;
@@ -378,11 +387,32 @@ export async function exportQuotePDF(
           Alert.alert('PDF Created', `${filename} saved successfully`);
         }
       } else {
-        // Export - show options to share
+        // Export - show options to share or email
         Alert.alert(
           'PDF Exported',
           `${filename} created successfully`,
           [
+            {
+              text: 'Email',
+              onPress: async () => {
+                try {
+                  const isAvailable = await MailComposer.isAvailableAsync();
+                  if (isAvailable) {
+                    await MailComposer.composeAsync({
+                      subject: `Quote for ${quote.customerName} - ${quote.job.name}`,
+                      recipients: quote.customerEmail ? [quote.customerEmail] : [],
+                      body: `Please find attached your quote for ${quote.job.name}.\n\nTotal: ${formatCurrency(quote.total)}\n\nThank you for your interest!`,
+                      attachments: [newUri],
+                    });
+                  } else {
+                    Alert.alert('Error', 'Email is not available on this device');
+                  }
+                } catch (error) {
+                  console.error('Email error:', error);
+                  Alert.alert('Error', 'Failed to compose email');
+                }
+              },
+            },
             {
               text: 'Share',
               onPress: async () => {

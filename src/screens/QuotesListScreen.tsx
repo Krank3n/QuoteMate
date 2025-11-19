@@ -73,9 +73,25 @@ export function QuotesListScreen() {
     navigation.navigate('NewQuote' as never);
   };
 
-  const handleEditQuote = (quote: Quote) => {
+  const handleViewQuote = (quoteId: string) => {
+    navigation.navigate('ViewQuote' as never, { quoteId } as never);
+  };
+
+  const handleEditQuote = (quote: Quote, section?: 'customer' | 'job' | 'materials' | 'labor') => {
     setCurrentQuote(quote);
-    navigation.navigate('NewQuote' as never);
+
+    // Navigate to specific section if provided
+    if (section) {
+      const screenMap = {
+        customer: 'CustomerDetails',
+        job: 'JobDetails',
+        materials: 'MaterialsList',
+        labor: 'LaborMarkup',
+      };
+      navigation.navigate('NewQuote' as never, { screen: screenMap[section] } as never);
+    } else {
+      navigation.navigate('NewQuote' as never);
+    }
   };
 
   const handleDeleteQuote = async (quoteId: string) => {
@@ -223,6 +239,7 @@ export function QuotesListScreen() {
     <QuoteCard
       quote={quote}
       businessSettings={businessSettings}
+      onView={handleViewQuote}
       onEdit={handleEditQuote}
       onDelete={handleDeleteQuote}
       onDuplicate={handleDuplicateQuote}

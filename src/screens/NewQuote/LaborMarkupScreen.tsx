@@ -40,6 +40,41 @@ export function LaborMarkupScreen() {
     }
   }, [currentQuote]);
 
+  // Save changes when navigating back
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      if (!currentQuote) return;
+
+      const hours = parseFloat(laborHours) || 0;
+      const rate = parseFloat(laborRate) || 0;
+      const markupPercent = parseFloat(markup) || 0;
+
+      const calculation = calculateQuote(
+        currentQuote.materials,
+        rate,
+        hours,
+        markupPercent
+      );
+
+      // Save labor and calculated values before leaving
+      const updatedQuote = {
+        ...currentQuote,
+        laborHours: hours,
+        laborRate: rate,
+        markup: markupPercent,
+        laborTotal: calculation.laborTotal,
+        materialsSubtotal: calculation.materialsSubtotal,
+        subtotal: calculation.subtotal,
+        markupAmount: calculation.markupAmount,
+        gst: calculation.gst,
+        total: calculation.total,
+      };
+      updateQuote(updatedQuote);
+    });
+
+    return unsubscribe;
+  }, [navigation, currentQuote, laborHours, laborRate, markup, updateQuote]);
+
   if (!currentQuote) {
     return null;
   }
@@ -268,15 +303,14 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
-    paddingBottom: 100,
-    marginBottom: 120,
-
+    paddingBottom: 140,
+    marginBottom: 20,
+    overflow: 'scroll' as any ,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
       margin: 'auto' as any,
       width: '100%',
-      paddingBottom: 20,
       height: '0px' as any,
     }),
   },

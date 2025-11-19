@@ -49,6 +49,7 @@ import {
   getTradeNicheById,
 } from '../constants/tradeCategories';
 import { FixedBottomButton } from '../components/FixedBottomButton';
+import { AlertModal } from '../components/AlertModal';
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
@@ -70,6 +71,8 @@ export function SettingsScreen() {
   const [selectedStore, setSelectedStore] = useState<string>('bunnings'); // Single store selection
   const [isLoading, setIsLoading] = useState(false);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
 
   // Load current settings
   useEffect(() => {
@@ -235,9 +238,9 @@ export function SettingsScreen() {
     try {
       setIsLoading(true);
       await setBusinessSettings(settings);
-      alert('Settings saved successfully!');
+      setShowSuccessModal(true);
     } catch (error) {
-      alert('Failed to save settings. Please try again.');
+      setShowErrorModal(true);
     } finally {
       setIsLoading(false);
     }
@@ -847,11 +850,12 @@ export function SettingsScreen() {
 
       {/* Fixed Save Button */}
       <FixedBottomButton
+        mode={'contained'}
         label="Save Settings"
         onPress={handleSave}
         disabled={isLoading}
         loading={isLoading}
-        disableSolidBackground={true}
+        disableSolidBackground={false}
       />
 
       {/* Logout Confirmation Dialog */}
@@ -876,6 +880,24 @@ export function SettingsScreen() {
           </Dialog.Actions>
         </Dialog>
       </Portal>
+
+      {/* Success Modal */}
+      <AlertModal
+        visible={showSuccessModal}
+        onDismiss={() => setShowSuccessModal(false)}
+        type="success"
+        title="Settings Saved!"
+        message="Your business settings have been saved successfully."
+      />
+
+      {/* Error Modal */}
+      <AlertModal
+        visible={showErrorModal}
+        onDismiss={() => setShowErrorModal(false)}
+        type="error"
+        title="Save Failed"
+        message="Failed to save settings. Please try again."
+      />
     </View>
   );
 }

@@ -1,5 +1,12 @@
-import * as RNIap from 'react-native-iap';
 import { Platform } from 'react-native';
+
+// Safely import expo-iap only if available
+let RNIap: any = null;
+try {
+  RNIap = require('expo-iap');
+} catch (error) {
+  console.log('ℹ️ expo-iap not available on this platform');
+}
 
 // Subscription product IDs (these must match what you create in Google Play Console)
 export const SUBSCRIPTION_SKUS = {
@@ -21,6 +28,10 @@ class BillingService {
    */
   async initialize(): Promise<boolean> {
     try {
+      if (!RNIap) {
+        console.log('ℹ️ In-app purchases not available on this platform');
+        return false;
+      }
       if (this.isInitialized) {
         console.log('ℹ️ Billing service already initialized');
         return true;

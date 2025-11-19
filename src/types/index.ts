@@ -28,6 +28,8 @@ export interface FavoriteProductMapping {
   itemNumber?: string;
   dimensions?: string;
   unit?: string;
+  price?: number; // Last known price
+  imageUrl?: string; // Product image
 }
 
 export interface Job {

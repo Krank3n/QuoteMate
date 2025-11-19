@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity, Share, Linking } from 'react-native';
 import {
   Text,
   Button,
@@ -13,12 +13,15 @@ import {
   Divider,
   TextInput,
   SegmentedButtons,
+  Dialog,
+  Portal,
+  IconButton,
 } from 'react-native-paper';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
-import { exportQuotePDF } from '../../utils/pdfGenerator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SuccessModal } from '../../components/SuccessModal';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -31,7 +34,6 @@ export function QuotePreviewScreen() {
   const [notes, setNotes] = useState(currentQuote?.notes || '');
   const [status, setStatus] = useState(currentQuote?.status || 'draft');
   const [isSaving, setIsSaving] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   if (!currentQuote) {
@@ -71,21 +73,77 @@ export function QuotePreviewScreen() {
     navigation.getParent()?.goBack();
   };
 
-  const handleExportPDF = async () => {
+  const handleSendQuote = () => {
+    setSendDialogVisible(true);
+  };
+
+  const handleSendEmail = async () => {
+    setSendDialogVisible(false);
+
+    const subject = `Quote from ${businessSettings?.businessName || 'Your Business'}`;
+    const body = `Hi ${currentQuote.customerName},\n\nPlease find attached your quote for ${currentQuote.job.name}.\n\nTotal: ${formatCurrency(currentQuote.total)}\n\nThank you!`;
+    const email = currentQuote.customerEmail || '';
+
+    const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
     try {
-      setIsExporting(true);
-
-      // Update quote with current notes before generating PDF
-      const quoteWithNotes = { ...currentQuote, notes };
-
-      // Use unified PDF export function
-      await exportQuotePDF(quoteWithNotes, businessSettings, 'export');
+      await Linking.openURL(url);
     } catch (error) {
-      console.error('Export error:', error);
-      Alert.alert('Error', 'Failed to export PDF. Please try again.');
-    } finally {
-      setIsExporting(false);
+      Alert.alert('Error', 'Could not open email client');
     }
+  };
+
+  const handleSendSMS = async () => {
+    setSendDialogVisible(false);
+
+    const message = `Hi ${currentQuote.customerName}, your quote for ${currentQuote.job.name} is ready. Total: ${formatCurrency(currentQuote.total)}`;
+    const phone = currentQuote.customerPhone || '';
+
+    const url = Platform.OS === 'ios'
+      ? `sms:${phone}&body=${encodeURIComponent(message)}`
+      : `sms:${phone}?body=${encodeURIComponent(message)}`;
+
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      Alert.alert('Error', 'Could not open SMS');
+    }
+  };
+
+  const handleShare = async () => {
+    setSendDialogVisible(false);
+
+    try {
+      const message = `Quote for ${currentQuote.customerName}\n${currentQuote.job.name}\nTotal: ${formatCurrency(currentQuote.total)}`;
+
+      await Share.share({
+        message,
+        title: 'Share Quote',
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Could not share quote');
+    }
+  };
+
+  const handleExport = async () => {
+    setSendDialogVisible(false);
+    await handleExportPDF();
+  };
+
+  const handleEditCustomer = () => {
+    navigation.navigate('CustomerDetails');
+  };
+
+  const handleEditJob = () => {
+    navigation.navigate('JobDetails');
+  };
+
+  const handleEditMaterials = () => {
+    navigation.navigate('MaterialsList');
+  };
+
+  const handleEditLabor = () => {
+    navigation.navigate('LaborMarkup');
   };
 
   return (
@@ -97,6 +155,8 @@ export function QuotePreviewScreen() {
         message="Your quote has been saved successfully and is ready to share with your customer."
         buttonText="Back to Dashboard"
         icon="check-circle"
+        quote={currentQuote}
+        businessSettings={businessSettings}
       />
 
       <ScrollView
@@ -104,22 +164,36 @@ export function QuotePreviewScreen() {
         contentContainerStyle={styles.scrollContent}
       >
       {/* Quote Details Preview */}
-      <Surface style={styles.section}>
-        <Title style={styles.sectionTitle}>Customer</Title>
-        <Text style={styles.text}>{currentQuote.customerName}</Text>
-        {currentQuote.customerEmail && <Text style={styles.subtext}>{currentQuote.customerEmail}</Text>}
-        {currentQuote.customerPhone && <Text style={styles.subtext}>{currentQuote.customerPhone}</Text>}
-        {currentQuote.jobAddress && <Text style={styles.subtext}>{currentQuote.jobAddress}</Text>}
-      </Surface>
+      <TouchableOpacity onPress={handleEditCustomer} activeOpacity={0.7}>
+        <Surface style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Title style={styles.sectionTitle}>Customer</Title>
+            <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
+          </View>
+          <Text style={styles.text}>{currentQuote.customerName}</Text>
+          {currentQuote.customerEmail && <Text style={styles.subtext}>{currentQuote.customerEmail}</Text>}
+          {currentQuote.customerPhone && <Text style={styles.subtext}>{currentQuote.customerPhone}</Text>}
+          {currentQuote.jobAddress && <Text style={styles.subtext}>{currentQuote.jobAddress}</Text>}
+        </Surface>
+      </TouchableOpacity>
 
-      <Surface style={styles.section}>
-        <Title style={styles.sectionTitle}>Job</Title>
-        <Text style={styles.text}>{currentQuote.job.name}</Text>
-        <Text style={styles.subtext}>{currentQuote.job.description}</Text>
-      </Surface>
+      <TouchableOpacity onPress={handleEditJob} activeOpacity={0.7}>
+        <Surface style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Title style={styles.sectionTitle}>Job</Title>
+            <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
+          </View>
+          <Text style={styles.text}>{currentQuote.job.name}</Text>
+          <Text style={styles.subtext}>{currentQuote.job.description}</Text>
+        </Surface>
+      </TouchableOpacity>
 
-      <Surface style={styles.section}>
-        <Title style={styles.sectionTitle}>Materials ({currentQuote.materials.length})</Title>
+      <TouchableOpacity onPress={handleEditMaterials} activeOpacity={0.7}>
+        <Surface style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Title style={styles.sectionTitle}>Materials ({currentQuote.materials.length})</Title>
+            <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
+          </View>
         {currentQuote.materials.length === 0 ? (
           <Text style={styles.subtext}>No materials required - Labor only</Text>
         ) : (
@@ -140,17 +214,23 @@ export function QuotePreviewScreen() {
           <Text style={styles.summaryLabel}>Materials Subtotal</Text>
           <Text style={styles.summaryValue}>{formatCurrency(currentQuote.materialsSubtotal)}</Text>
         </View>
-      </Surface>
+        </Surface>
+      </TouchableOpacity>
 
-      <Surface style={styles.section}>
-        <Title style={styles.sectionTitle}>Labor</Title>
+      <TouchableOpacity onPress={handleEditLabor} activeOpacity={0.7}>
+        <Surface style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Title style={styles.sectionTitle}>Labor</Title>
+            <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
+          </View>
         <View style={styles.summaryRow}>
           <Text style={styles.text}>
             {currentQuote.laborHours} hours @ {formatCurrency(currentQuote.laborRate)}/hr
           </Text>
           <Text style={styles.summaryValue}>{formatCurrency(currentQuote.laborTotal)}</Text>
         </View>
-      </Surface>
+        </Surface>
+      </TouchableOpacity>
 
       <Surface style={styles.totalSection}>
         <View style={styles.summaryRow}>
@@ -195,6 +275,7 @@ export function QuotePreviewScreen() {
           multiline
           numberOfLines={4}
           placeholder="Add any additional notes for this quote..."
+          style={styles.notesInput}
         />
       </Surface>
       </ScrollView>
@@ -204,10 +285,6 @@ export function QuotePreviewScreen() {
         onPress={handleSave}
         loading={isSaving}
         disabled={isSaving}
-        secondaryLabel="Export PDF"
-        secondaryOnPress={handleExportPDF}
-        secondaryLoading={isExporting}
-        secondaryDisabled={isExporting}
       />
     </View>
   );
@@ -229,7 +306,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 100,
+    paddingBottom: 140,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
       marginHorizontal: 'auto' as any,
@@ -244,9 +321,16 @@ const styles = StyleSheet.create({
     elevation: 2,
     backgroundColor: colors.surface,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
+    margin: 0,
     marginBottom: 12,
   },
   text: {
@@ -314,5 +398,37 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: colors.primary,
+  },
+  notesInput: {
+    textAlignVertical: 'top',
+    paddingTop: 8,
+  },
+  dialogText: {
+    fontSize: 14,
+    color: colors.onSurface,
+    marginBottom: 16,
+  },
+  sendOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: colors.surfaceLight,
+  },
+  sendOptionText: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  sendOptionTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  sendOptionSubtitle: {
+    fontSize: 13,
+    color: colors.onSurface,
   },
 });

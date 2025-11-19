@@ -338,6 +338,28 @@ export function JobDetailsScreen() {
     }
   }, [currentQuote]);
 
+  // Save changes when navigating back
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      if (!currentQuote) return;
+
+      // Save any changes to job name and description before leaving
+      if (jobName.trim() || jobDescription.trim()) {
+        const updatedQuote = {
+          ...currentQuote,
+          job: {
+            ...currentQuote.job,
+            name: jobName.trim() || currentQuote.job.name,
+            description: jobDescription.trim(),
+          },
+        };
+        updateQuote(updatedQuote);
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, currentQuote, jobName, jobDescription, updateQuote]);
+
   const handleVoiceRecording = async () => {
     console.log('🎤 handleVoiceRecording called, Platform:', Platform.OS);
 
@@ -736,7 +758,7 @@ export function JobDetailsScreen() {
   const handleNext = () => {
     if (!currentQuote) return;
 
-    // CUSTOM MODE: Use AI to analyze description
+    // CUSTOM MODE: Create job and navigate (AI generation happens on MaterialsList screen)
     if (useCustomMode) {
       if (!jobDescription.trim()) {
         Alert.alert('Missing Information', 'Please describe the job or select a template');
@@ -758,8 +780,25 @@ export function JobDetailsScreen() {
         return;
       }
 
-      // Analyze custom job with AI
-      handleAnalyzeCustomJob();
+      // Create job without AI analysis - user will trigger it manually from MaterialsList screen
+      const job = {
+        id: generateId(),
+        name: jobName || 'Custom Job',
+        description: jobDescription,
+        template: 'custom' as const,
+        estimatedHours: 8, // Default hours
+      };
+
+      const updatedQuote = {
+        ...currentQuote,
+        job,
+        materials: [], // Empty - user will generate or add manually from MaterialsList screen
+        laborHours: 8,
+        aiSkipped: false, // Not skipped, just deferred to MaterialsList screen
+      };
+
+      updateQuote(updatedQuote);
+      navigation.navigate('CustomerDetails');
       return;
     }
 
@@ -874,7 +913,12 @@ export function JobDetailsScreen() {
             >
               <View style={styles.sectionTitleRow}>
                 <MaterialCommunityIcons name="briefcase-outline" size={24} color={colors.primary} style={styles.sectionIcon} />
-                <Title style={styles.sectionTitle}>Select Job Type</Title>
+                <Title style={styles.sectionTitle}>
+                  {isTemplateCarouselExpanded
+                    ? 'Select Job Type'
+                    : `${uniqueTemplates.length + 1} Job Types Available`
+                  }
+                </Title>
                 <MaterialCommunityIcons
                   name={isTemplateCarouselExpanded ? "chevron-up" : "chevron-down"}
                   size={24}
@@ -882,18 +926,12 @@ export function JobDetailsScreen() {
                   style={styles.expandIcon}
                 />
               </View>
-              <Text style={styles.helperText}>
-                {isTemplateCarouselExpanded
-                  ? 'Choose a template for quick setup, or start with a custom job description.'
-                  : `Tap to view ${uniqueTemplates.length + 1} job type${uniqueTemplates.length > 0 ? 's' : ''}`
-                }
-              </Text>
             </TouchableOpacity>
 
             <Animated.View style={{
               height: carouselHeightAnim.interpolate({
                 inputRange: [0, 1],
-                outputRange: [100, 220], // Collapsed shows just one row, expanded shows more
+                outputRange: [Platform.OS === 'web' ? 160 : 80, 160], // Collapsed shows just one row, expanded shows more
               }),
               overflow: 'hidden',
             }}>
@@ -924,29 +962,22 @@ export function JobDetailsScreen() {
                   setTimeout(() => setIsTemplateCarouselExpanded(false), 300);
                 }}
               >
-                <MaterialCommunityIcons
-                  name="pencil-outline"
-                  size={32}
-                  color={useCustomMode ? colors.primary : colors.textMuted}
-                  style={styles.quickTemplateIcon}
-                />
-                <Text style={[
-                  styles.quickTemplateName,
-                  useCustomMode && styles.quickTemplateNameSelected,
-                ]}>Custom Job</Text>
+                <View style={styles.quickTemplateHeader}>
+                  <MaterialCommunityIcons
+                    name="pencil-outline"
+                    size={28}
+                    color={useCustomMode ? colors.primary : colors.textMuted}
+                  />
+                  <Text style={[
+                    styles.quickTemplateName,
+                    useCustomMode && styles.quickTemplateNameSelected,
+                  ]}>Custom Job</Text>
+                </View>
                 <Text style={styles.quickTemplateDesc}>Describe your own job</Text>
                 <View style={styles.quickTemplateBadge}>
                   <MaterialCommunityIcons name="brain" size={12} color={colors.secondary} />
                   <Text style={styles.quickTemplateBadgeText}>AI Powered</Text>
                 </View>
-                {useCustomMode && (
-                  <MaterialCommunityIcons
-                    name="check-circle"
-                    size={20}
-                    color={colors.success}
-                    style={styles.quickTemplateCheck}
-                  />
-                )}
               </TouchableOpacity>
 
               {/* Template Cards */}
@@ -977,29 +1008,22 @@ export function JobDetailsScreen() {
                   setTimeout(() => setIsTemplateCarouselExpanded(false), 300);
                 }}
               >
-                <MaterialCommunityIcons
-                  name={template.icon as any}
-                  size={32}
-                  color={selectedTemplate?.id === template.id ? colors.primary : colors.textMuted}
-                  style={styles.quickTemplateIcon}
-                />
-                <Text style={[
-                  styles.quickTemplateName,
-                  selectedTemplate?.id === template.id && styles.quickTemplateNameSelected,
-                ]}>{template.name}</Text>
+                <View style={styles.quickTemplateHeader}>
+                  <MaterialCommunityIcons
+                    name={template.icon as any}
+                    size={28}
+                    color={selectedTemplate?.id === template.id ? colors.primary : colors.textMuted}
+                  />
+                  <Text style={[
+                    styles.quickTemplateName,
+                    selectedTemplate?.id === template.id && styles.quickTemplateNameSelected,
+                  ]}>{template.name}</Text>
+                </View>
                 <Text style={styles.quickTemplateDesc}>{template.description}</Text>
                 <View style={styles.quickTemplateBadge}>
                   <MaterialCommunityIcons name="lightning-bolt" size={12} color={colors.secondary} />
                   <Text style={styles.quickTemplateBadgeText}>{(PRICING_METHODS as any)[template.pricingMethod]?.label || template.pricingMethod}</Text>
                 </View>
-                {selectedTemplate?.id === template.id && (
-                  <MaterialCommunityIcons
-                    name="check-circle"
-                    size={20}
-                    color={colors.success}
-                    style={styles.quickTemplateCheck}
-                  />
-                )}
               </TouchableOpacity>
               ))}
               </ScrollView>
@@ -1259,8 +1283,6 @@ export function JobDetailsScreen() {
             (useCustomMode && !jobDescription.trim()) ||
             (!useCustomMode && !selectedTemplate)
           }
-          secondaryLabel={!isEditingExisting && useCustomMode ? "Skip AI" : undefined}
-          secondaryOnPress={!isEditingExisting && useCustomMode ? handleSkipToManualEntry : undefined}
         />
       </KeyboardAvoidingView>
     </>
@@ -1315,6 +1337,9 @@ const styles = StyleSheet.create({
   },
   sectionTitleContainer: {
     marginBottom: 16,
+    // marginTop: 16,
+    flexDirection: "row",
+    alignItems: "center",
   },
   sectionTitleRow: {
     flexDirection: 'row',
@@ -1506,6 +1531,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 20,
     padding: 16,
+    paddingTop: 16,
     borderRadius: 8,
     elevation: 2,
     backgroundColor: colors.surface,
@@ -1568,14 +1594,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.outline,
   },
-  quickTemplateIcon: {
+  quickTemplateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 8,
+    gap: 8,
   },
   quickTemplateName: {
     fontSize: 15,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 4,
+    flex: 1,
   },
   quickTemplateDesc: {
     fontSize: 12,
