@@ -49,6 +49,7 @@ export const theme = {
     rejected: '#EF4444',
 
     // Status background colors - Darker, muted
+    primaryBg: '#064E3B', // Dark green background for primary elements
     successBg: '#064E3B',
     warningBg: '#78350F',
     errorBg: '#7F1D1D',

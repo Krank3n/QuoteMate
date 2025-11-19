@@ -47,6 +47,7 @@ import {
   saveFavoriteProduct,
   removeFavoriteProduct,
 } from '../../services/materialFavorites';
+import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { BUNNINGS_SCRAPER_URL } from '@env';
 
 type TabValue = 'search' | 'saved';
@@ -477,7 +478,11 @@ export function AddMaterialScreen() {
 
   // Render Search & Add Tab
   const renderSearchTab = () => (
-    <ScrollView style={styles.tabContent} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      style={styles.tabContent}
+      contentContainerStyle={styles.scrollContent}
+      keyboardShouldPersistTaps="handled"
+    >
       {/* Search Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Search Products</Text>
@@ -633,15 +638,6 @@ export function AddMaterialScreen() {
             color={colors.primary}
           />
         </View>
-
-        <Button
-          mode="contained"
-          onPress={handleAddManually}
-          style={styles.addButton}
-          icon={isEditMode ? "check" : "plus"}
-        >
-          {isEditMode ? 'Update Material' : 'Add to Quote'}
-        </Button>
       </View>
     </ScrollView>
   );
@@ -746,6 +742,15 @@ export function AddMaterialScreen() {
 
       {/* Tab Content */}
       {activeTab === 'search' ? renderSearchTab() : renderSavedTab()}
+
+      {/* Fixed Bottom Button - Only show in search tab */}
+      {activeTab === 'search' && (
+        <FixedBottomButton
+          label={isEditMode ? 'Update Material' : 'Add to Quote'}
+          onPress={handleAddManually}
+          icon={isEditMode ? 'check' : 'plus'}
+        />
+      )}
     </View>
   );
 }
@@ -763,6 +768,9 @@ const styles = StyleSheet.create({
   },
   tabContent: {
     flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 140,
   },
   section: {
     padding: 16,
@@ -883,9 +891,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     flex: 1,
     marginRight: 12,
-  },
-  addButton: {
-    marginTop: 8,
   },
   savedList: {
     paddingHorizontal: 16,

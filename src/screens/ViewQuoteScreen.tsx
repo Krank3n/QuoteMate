@@ -19,6 +19,7 @@ import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { SendQuoteButton } from '../components/SendQuoteButton';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function ViewQuoteScreen() {
   const navigation = useNavigation<any>();
@@ -26,6 +27,7 @@ export function ViewQuoteScreen() {
   const quoteId = route.params?.quoteId;
 
   const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote } = useStore();
+  const insets = useSafeAreaInsets();
 
   const [displayQuote, setDisplayQuote] = useState(null);
 
@@ -87,7 +89,10 @@ export function ViewQuoteScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.scrollContent}
+      >
         <TouchableOpacity onPress={() => handleEditSection('customer')} activeOpacity={0.7}>
           <Surface style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -184,11 +189,20 @@ export function ViewQuoteScreen() {
         )}
       </ScrollView>
 
-      <View style={styles.actions}>
+      {/* Fixed bottom section with solid background */}
+      {Platform.OS !== 'ios' && <View style={styles.solidBackground} />}
+
+      <View
+        style={[
+          styles.actions,
+          Platform.OS !== 'ios' && { marginBottom: Math.max(insets.bottom, 16) }
+        ]}
+      >
         <Button
           mode="outlined"
           onPress={() => navigation.goBack()}
           style={styles.button}
+          labelStyle={styles.buttonLabel}
         >
           Close
         </Button>
@@ -221,6 +235,9 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 16,
+  },
+  scrollContent: {
+    paddingBottom: 140,
   },
   section: {
     marginBottom: 16,
@@ -306,6 +323,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: colors.primary,
   },
+  solidBackground: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 60,
+    backgroundColor: colors.surface,
+    zIndex: 1,
+  },
   actions: {
     flexDirection: 'row',
     gap: 12,
@@ -313,9 +339,30 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+    position: 'absolute',
+    bottom: 0,
+    width: '100%',
+    zIndex: 2,
+    ...Platform.select({
+      android: {
+        elevation: 8,
+      },
+      web: {
+        flexShrink: 0,
+        position: 'sticky' as any,
+        bottom: 0,
+        boxShadow: '0 -2px 8px rgba(0,0,0,0.1)' as any,
+      },
+    }),
   },
   button: {
     flex: 1,
+    margin: 0,
+  },
+  buttonLabel: {
+    color: colors.white,
+    marginVertical: 16,
+    marginHorizontal: 10,
   },
   dialogText: {
     fontSize: 14,

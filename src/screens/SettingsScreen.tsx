@@ -850,11 +850,12 @@ export function SettingsScreen() {
 
       {/* Fixed Save Button */}
       <FixedBottomButton
+        mode={'contained'}
         label="Save Settings"
         onPress={handleSave}
         disabled={isLoading}
         loading={isLoading}
-        disableSolidBackground={true}
+        disableSolidBackground={false}
       />
 
       {/* Logout Confirmation Dialog */}

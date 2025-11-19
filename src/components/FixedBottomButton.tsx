@@ -215,6 +215,7 @@ export function FixedBottomButton({
           onPress={onPress}
           style={[styles.button, buttonStyle, secondaryLabel && styles.buttonWithSecondary]}
           labelStyle={styles.buttonLabel}
+          contentStyle={styles.buttonContent}
           disabled={disabled}
           loading={loading}
           icon={icon}
@@ -271,6 +272,9 @@ const styles = StyleSheet.create({
     color: colors.white,
     marginVertical: 16,
     marginHorizontal: 10,
+  },
+  buttonContent: {
+    gap: 8, // Space between icon and label
   },
   secondaryButton: {
     borderWidth: 2,

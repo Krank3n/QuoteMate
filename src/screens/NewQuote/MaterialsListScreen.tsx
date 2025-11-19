@@ -916,7 +916,7 @@ export function MaterialsListScreen() {
               style={styles.generateButton}
               icon="auto-fix"
             >
-              Generate List with AI
+              Generate Suggested Items
             </Button>
           </View>
         ) : (

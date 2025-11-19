@@ -182,6 +182,8 @@ export function SendQuoteButton({
         onPress={() => setSendDialogVisible(true)}
         style={buttonStyle}
         icon={buttonIcon}
+        contentStyle={styles.buttonContent}
+        labelStyle={styles.buttonLabel}
       >
         {buttonLabel}
       </Button>
@@ -284,6 +286,12 @@ export function SendQuoteButton({
 }
 
 const styles = StyleSheet.create({
+  buttonContent: {
+    paddingVertical: 8,
+  },
+  buttonLabel: {
+    marginVertical: 8,
+  },
   modalContainer: {
     flex: 1,
     alignItems: 'center',
