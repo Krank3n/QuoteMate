@@ -496,7 +496,6 @@ const styles = StyleSheet.create({
     padding: 24,
     borderRadius: 12,
     elevation: 4,
-    maxWidth: 440,
     width: '100%',
     alignSelf: 'center',
     backgroundColor: colors.surfaceGray3,
