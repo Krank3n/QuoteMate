@@ -54,7 +54,7 @@ echo "✅ Build complete!"
 echo ""
 
 # Copy to project root
-AAB_PATH="android/app/build/outputs/bundle/playRelease/app-play-release.aab"
+AAB_PATH="android/app/build/outputs/bundle/release/app-release.aab"
 OUTPUT_NAME="app-production-v${VERSION}.aab"
 
 if [ -f "$AAB_PATH" ]; then
