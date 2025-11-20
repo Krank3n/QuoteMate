@@ -127,7 +127,9 @@ android {
     }
     packagingOptions {
         jniLibs {
-            useLegacyPackaging (findProperty('expo.useLegacyPackaging')?.toBoolean() ?: false)
+            // Set useLegacyPackaging to false to keep native libraries uncompressed
+            // This is required for 16KB page size support (Android 15+)
+            useLegacyPackaging false
         }
     }
     androidResources {
