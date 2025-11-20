@@ -433,7 +433,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     padding: 20,
+    minHeight: '100%',
   },
   loadingContainer: {
     flex: 1,
@@ -468,12 +470,14 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 32,
+    width: '100%',
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
     marginBottom: 8,
     color: colors.onBackground,
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
@@ -481,6 +485,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 20,
     lineHeight: 24,
+    maxWidth: 500,
   },
   formCard: {
     padding: 24,
