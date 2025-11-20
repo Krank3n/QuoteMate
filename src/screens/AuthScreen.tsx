@@ -298,26 +298,27 @@ export function AuthScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <WebContainer maxWidth={500}>
-          <Animated.View style={[styles.animatedContent, { opacity: fadeAnim }]}>
-            <View style={styles.header}>
-              <Image
-                source={require('../../assets/logo-scaled.png')}
-                style={styles.logo}
-                resizeMode="contain"
-              />
-              <Title style={styles.title}>
-                {isSignUp ? 'Join QuoteMate' : 'Welcome to QuoteMate'}
-              </Title>
-              <Text style={styles.subtitle}>
-                {isSignUp
-                  ? 'Create an account to save your quotes, sync across devices, and access premium features'
-                  : 'Sign in to access your quotes and continue where you left off'
-                }
-              </Text>
-            </View>
+        <View style={styles.contentWrapper}>
+          <WebContainer maxWidth={500}>
+            <Animated.View style={[styles.animatedContent, { opacity: fadeAnim }]}>
+              <View style={styles.header}>
+                <Image
+                  source={require('../../assets/logo-scaled.png')}
+                  style={styles.logo}
+                  resizeMode="contain"
+                />
+                <Title style={styles.title}>
+                  {isSignUp ? 'Join QuoteMate' : 'Welcome to QuoteMate'}
+                </Title>
+                <Text style={styles.subtitle}>
+                  {isSignUp
+                    ? 'Create an account to save your quotes, sync across devices, and access premium features'
+                    : 'Sign in to access your quotes and continue where you left off'
+                  }
+                </Text>
+              </View>
 
-          <Surface style={styles.formCard}>
+            <Surface style={styles.formCard}>
             {error ? (
               <Text style={styles.errorText}>{error}</Text>
             ) : null}
@@ -417,9 +418,10 @@ export function AuthScreen() {
                 : "Don't have an account? Sign Up"
               }
             </Button>
-          </Surface>
-          </Animated.View>
-        </WebContainer>
+            </Surface>
+            </Animated.View>
+          </WebContainer>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -433,9 +435,12 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    alignItems: 'center',
     padding: 20,
-    minHeight: '100%',
+  },
+  contentWrapper: {
+    width: '100%',
+    maxWidth: 500,
+    alignSelf: 'center',
   },
   loadingContainer: {
     flex: 1,
