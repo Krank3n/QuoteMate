@@ -35,7 +35,7 @@ import { BusinessSettings, TradeType, HardwareStore } from '../types';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { auth } from '../config/firebase';
-import { signOut } from 'firebase/auth';
+import { signOut, deleteUser } from 'firebase/auth';
 import {
   getStoresForTrade,
   getDefaultStoresForTrade,
@@ -71,6 +71,7 @@ export function SettingsScreen() {
   const [selectedStore, setSelectedStore] = useState<string>('bunnings'); // Single store selection
   const [isLoading, setIsLoading] = useState(false);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+  const [showDeleteAccountDialog, setShowDeleteAccountDialog] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
 
@@ -317,6 +318,76 @@ export function SettingsScreen() {
       console.error('❌ Error during sign out:', error);
       console.error('❌ Error details:', error.message, error.code);
       alert('Failed to sign out. Please try again.');
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    console.log('🗑️ handleDeleteAccount called');
+    setShowDeleteAccountDialog(true);
+  };
+
+  const confirmDeleteAccount = async () => {
+    setShowDeleteAccountDialog(false);
+
+    try {
+      console.log('🗑️ User confirmed account deletion, starting deletion process...');
+
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error('No user is currently signed in');
+      }
+
+      // Step 1: Clear all local app data first
+      console.log('🧹 Step 1: Clearing all local data...');
+      await clearAllData();
+      console.log('✅ Step 1: Local data cleared');
+
+      // Step 2: Delete user account from Firebase
+      console.log('🗑️ Step 2: Deleting Firebase user account...');
+      await deleteUser(currentUser);
+      console.log('✅ Step 2: Firebase account deleted');
+
+      // Step 3: On web, clear all browser storage and reload
+      if (Platform.OS === 'web') {
+        console.log('🧹 Step 3: Clearing all browser storage...');
+
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+          if (window.indexedDB) {
+            const dbs = await window.indexedDB.databases();
+            for (const db of dbs) {
+              if (db.name) {
+                window.indexedDB.deleteDatabase(db.name);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Could not clear browser storage:', e);
+        }
+
+        console.log('🔄 Step 4: Reloading page...');
+        window.location.replace(window.location.origin);
+      } else {
+        console.log('📱 Mobile platform - navigation should handle redirect');
+      }
+    } catch (error: any) {
+      console.error('❌ Error during account deletion:', error);
+      console.error('❌ Error details:', error.message, error.code);
+
+      if (error.code === 'auth/requires-recent-login') {
+        Alert.alert(
+          'Re-authentication Required',
+          'For security, you need to sign in again before deleting your account. Please sign out and sign back in, then try again.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Deletion Failed',
+          'Failed to delete account: ' + (error.message || 'Unknown error'),
+          [{ text: 'OK' }]
+        );
+      }
     }
   };
 
@@ -841,6 +912,15 @@ export function SettingsScreen() {
                 >
                   Sign Out
                 </Button>
+                <Button
+                  mode="text"
+                  onPress={handleDeleteAccount}
+                  style={styles.deleteAccountButton}
+                  icon="delete-forever"
+                  textColor={colors.error}
+                >
+                  Delete Account
+                </Button>
               </View>
             </Surface>
           </>
@@ -876,6 +956,36 @@ export function SettingsScreen() {
             <Button onPress={() => setShowLogoutDialog(false)}>Cancel</Button>
             <Button onPress={confirmLogout} textColor={colors.error}>
               Sign Out
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+
+        {/* Delete Account Confirmation Dialog */}
+        <Dialog
+          visible={showDeleteAccountDialog}
+          onDismiss={() => setShowDeleteAccountDialog(false)}
+          style={styles.logoutDialog}
+        >
+          <Dialog.Icon icon="delete-forever" />
+          <Dialog.Title style={styles.dialogTitle}>Delete Account</Dialog.Title>
+          <Dialog.Content>
+            <Text style={styles.dialogText}>
+              Are you sure you want to permanently delete your account? This action cannot be undone.
+            </Text>
+            <Text style={[styles.dialogText, { marginTop: 12, fontWeight: '600' }]}>
+              All your data will be permanently deleted:
+            </Text>
+            <Text style={styles.dialogText}>
+              • Business settings{'\n'}
+              • All quotes and projects{'\n'}
+              • Subscription information{'\n'}
+              • Account credentials
+            </Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setShowDeleteAccountDialog(false)}>Cancel</Button>
+            <Button onPress={confirmDeleteAccount} textColor={colors.error}>
+              Delete Permanently
             </Button>
           </Dialog.Actions>
         </Dialog>
@@ -1168,6 +1278,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     alignSelf: 'stretch',
     paddingVertical: 4,
+    marginBottom: 8,
+  },
+  deleteAccountButton: {
+    alignSelf: 'stretch',
   },
   logoutDialog: {
     maxWidth: 800,

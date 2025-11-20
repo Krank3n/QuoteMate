@@ -190,15 +190,18 @@ export function PaywallScreen() {
 
   const handleUpgrade = async () => {
     console.log('💳 handleUpgrade clicked');
+    console.log('Platform:', Platform.OS);
 
     if (products.length === 0) {
       console.log('❌ No products available');
       Alert.alert(
         'Not Available',
-        'Subscription products are not available yet. Please make sure:\n\n' +
-        '1. You installed the app from Play Store test link\n' +
-        '2. Subscriptions are created and ACTIVE in Play Console\n' +
-        '3. Wait a few minutes after creating subscriptions'
+        Platform.OS === 'ios'
+          ? 'Subscription products are not available yet. Please try again later or contact support.'
+          : 'Subscription products are not available yet. Please make sure:\n\n' +
+            '1. You installed the app from Play Store test link\n' +
+            '2. Subscriptions are created and ACTIVE in Play Console\n' +
+            '3. Wait a few minutes after creating subscriptions'
       );
       return;
     }
@@ -208,26 +211,29 @@ export function PaywallScreen() {
       const firstProduct = products[0];
       console.log('📦 First product:', firstProduct);
 
-      if (Platform.OS === 'web') {
-        // For web, get Firebase user ID (should always exist due to auth guard)
+      if (Platform.OS === 'ios') {
+        // iOS MUST use Apple IAP only (App Store guidelines 3.1.1)
+        console.log('🍎 Using Apple IAP for iOS');
+        await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
+      } else if (Platform.OS === 'android') {
+        // Android uses Google Play IAP
+        console.log('🤖 Using Google Play IAP for Android');
+        await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
+      } else if (Platform.OS === 'web') {
+        // Web uses Stripe (multi-platform service - Guideline 3.1.3b)
         const currentUser = auth.currentUser;
-        console.log('👤 Current user:', currentUser?.uid);
+        console.log('🌐 Using Stripe for web, user:', currentUser?.uid);
 
         if (!currentUser) {
-          // This should not happen due to auth guard, but handle it gracefully
           Alert.alert('Error', 'Please sign in to purchase a subscription');
           setIsUpgrading(false);
           return;
         }
 
-        console.log('✅ Proceeding with purchase for user:', currentUser.uid);
-        // Show embedded checkout modal
+        console.log('✅ Proceeding with Stripe checkout for user:', currentUser.uid);
         setSelectedProduct(firstProduct);
         setShowCheckoutModal(true);
         setIsUpgrading(false);
-      } else {
-        // For mobile, use native IAP
-        await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
       }
     } catch (error: any) {
       console.error('❌ Error in handleUpgrade:', error);

@@ -226,8 +226,19 @@ export function AuthScreen() {
       }
     } catch (err: any) {
       console.error('Apple sign in error:', err);
+      console.error('Apple sign in error code:', err?.code);
+      console.error('Apple sign in error message:', err?.message);
+      console.error('Apple sign in error details:', JSON.stringify(err, null, 2));
+
       if (err.code === 'ERR_REQUEST_CANCELED') {
         setError('Sign-in cancelled');
+      } else if (err.code === 'auth/invalid-credential') {
+        setError('Apple Sign-In credential invalid. Please contact support.');
+      } else if (err.code === 'auth/operation-not-allowed') {
+        setError('Apple Sign-In is not enabled. Please contact support.');
+      } else if (err.message?.includes('auth/')) {
+        // Show Firebase-specific error
+        setError(`Sign-in error: ${err.code || err.message}`);
       } else {
         setError('Failed to sign in with Apple. Please try again.');
       }
