@@ -69,12 +69,12 @@ Once you have the keystore set up:
 # Or manually
 cd android
 ./gradlew clean
-./gradlew bundlePlayRelease
+./gradlew bundleRelease
 ```
 
 The AAB will be at:
 ```
-android/app/build/outputs/bundle/playRelease/app-play-release.aab
+android/app/build/outputs/bundle/release/app-release.aab
 ```
 
 ## Why the Anthropic API Doesn't Work in Test Builds

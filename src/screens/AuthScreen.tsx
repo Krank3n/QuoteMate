@@ -226,8 +226,19 @@ export function AuthScreen() {
       }
     } catch (err: any) {
       console.error('Apple sign in error:', err);
+      console.error('Apple sign in error code:', err?.code);
+      console.error('Apple sign in error message:', err?.message);
+      console.error('Apple sign in error details:', JSON.stringify(err, null, 2));
+
       if (err.code === 'ERR_REQUEST_CANCELED') {
         setError('Sign-in cancelled');
+      } else if (err.code === 'auth/invalid-credential') {
+        setError('Apple Sign-In credential invalid. Please contact support.');
+      } else if (err.code === 'auth/operation-not-allowed') {
+        setError('Apple Sign-In is not enabled. Please contact support.');
+      } else if (err.message?.includes('auth/')) {
+        // Show Firebase-specific error
+        setError(`Sign-in error: ${err.code || err.message}`);
       } else {
         setError('Failed to sign in with Apple. Please try again.');
       }
@@ -287,26 +298,27 @@ export function AuthScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <WebContainer maxWidth={500}>
-          <Animated.View style={[styles.animatedContent, { opacity: fadeAnim }]}>
-            <View style={styles.header}>
-              <Image
-                source={require('../../assets/logo-scaled.png')}
-                style={styles.logo}
-                resizeMode="contain"
-              />
-              <Title style={styles.title}>
-                {isSignUp ? 'Join QuoteMate' : 'Welcome to QuoteMate'}
-              </Title>
-              <Text style={styles.subtitle}>
-                {isSignUp
-                  ? 'Create an account to save your quotes, sync across devices, and access premium features'
-                  : 'Sign in to access your quotes and continue where you left off'
-                }
-              </Text>
-            </View>
+        <View style={styles.contentWrapper}>
+          <WebContainer maxWidth={500}>
+            <Animated.View style={[styles.animatedContent, { opacity: fadeAnim }]}>
+              <View style={styles.header}>
+                <Image
+                  source={require('../../assets/logo-scaled.png')}
+                  style={styles.logo}
+                  resizeMode="contain"
+                />
+                <Title style={styles.title}>
+                  {isSignUp ? 'Join QuoteMate' : 'Welcome to QuoteMate'}
+                </Title>
+                <Text style={styles.subtitle}>
+                  {isSignUp
+                    ? 'Create an account to save your quotes, sync across devices, and access premium features'
+                    : 'Sign in to access your quotes and continue where you left off'
+                  }
+                </Text>
+              </View>
 
-          <Surface style={styles.formCard}>
+            <Surface style={styles.formCard}>
             {error ? (
               <Text style={styles.errorText}>{error}</Text>
             ) : null}
@@ -406,9 +418,10 @@ export function AuthScreen() {
                 : "Don't have an account? Sign Up"
               }
             </Button>
-          </Surface>
-          </Animated.View>
-        </WebContainer>
+            </Surface>
+            </Animated.View>
+          </WebContainer>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -423,6 +436,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     padding: 20,
+  },
+  contentWrapper: {
+    width: '100%',
+    maxWidth: 500,
+    alignSelf: 'center',
   },
   loadingContainer: {
     flex: 1,
@@ -457,12 +475,14 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 32,
+    width: '100%',
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
     marginBottom: 8,
     color: colors.onBackground,
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
@@ -470,12 +490,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 20,
     lineHeight: 24,
+    maxWidth: 500,
   },
   formCard: {
     padding: 24,
     borderRadius: 12,
     elevation: 4,
-    maxWidth: 440,
     width: '100%',
     alignSelf: 'center',
     backgroundColor: colors.surfaceGray3,

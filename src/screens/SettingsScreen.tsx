@@ -23,8 +23,6 @@ import {
   Divider,
   IconButton,
   Chip,
-  Dialog,
-  Portal,
 } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -35,7 +33,7 @@ import { BusinessSettings, TradeType, HardwareStore } from '../types';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { auth } from '../config/firebase';
-import { signOut } from 'firebase/auth';
+import { signOut, deleteUser } from 'firebase/auth';
 import {
   getStoresForTrade,
   getDefaultStoresForTrade,
@@ -70,7 +68,8 @@ export function SettingsScreen() {
   const [useReeceApi, setUseReeceApi] = useState(false);
   const [selectedStore, setSelectedStore] = useState<string>('bunnings'); // Single store selection
   const [isLoading, setIsLoading] = useState(false);
-  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
 
@@ -248,11 +247,11 @@ export function SettingsScreen() {
 
   const handleLogout = () => {
     console.log('🚪 handleLogout called');
-    setShowLogoutDialog(true);
+    setShowLogoutModal(true);
   };
 
   const confirmLogout = async () => {
-    setShowLogoutDialog(false);
+    setShowLogoutModal(false);
 
     try {
       console.log('🔓 User confirmed logout, starting sign out process...');
@@ -317,6 +316,76 @@ export function SettingsScreen() {
       console.error('❌ Error during sign out:', error);
       console.error('❌ Error details:', error.message, error.code);
       alert('Failed to sign out. Please try again.');
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    console.log('🗑️ handleDeleteAccount called');
+    setShowDeleteAccountModal(true);
+  };
+
+  const confirmDeleteAccount = async () => {
+    setShowDeleteAccountModal(false);
+
+    try {
+      console.log('🗑️ User confirmed account deletion, starting deletion process...');
+
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error('No user is currently signed in');
+      }
+
+      // Step 1: Clear all local app data first
+      console.log('🧹 Step 1: Clearing all local data...');
+      await clearAllData();
+      console.log('✅ Step 1: Local data cleared');
+
+      // Step 2: Delete user account from Firebase
+      console.log('🗑️ Step 2: Deleting Firebase user account...');
+      await deleteUser(currentUser);
+      console.log('✅ Step 2: Firebase account deleted');
+
+      // Step 3: On web, clear all browser storage and reload
+      if (Platform.OS === 'web') {
+        console.log('🧹 Step 3: Clearing all browser storage...');
+
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+          if (window.indexedDB) {
+            const dbs = await window.indexedDB.databases();
+            for (const db of dbs) {
+              if (db.name) {
+                window.indexedDB.deleteDatabase(db.name);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Could not clear browser storage:', e);
+        }
+
+        console.log('🔄 Step 4: Reloading page...');
+        window.location.replace(window.location.origin);
+      } else {
+        console.log('📱 Mobile platform - navigation should handle redirect');
+      }
+    } catch (error: any) {
+      console.error('❌ Error during account deletion:', error);
+      console.error('❌ Error details:', error.message, error.code);
+
+      if (error.code === 'auth/requires-recent-login') {
+        Alert.alert(
+          'Re-authentication Required',
+          'For security, you need to sign in again before deleting your account. Please sign out and sign back in, then try again.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Deletion Failed',
+          'Failed to delete account: ' + (error.message || 'Unknown error'),
+          [{ text: 'OK' }]
+        );
+      }
     }
   };
 
@@ -841,6 +910,15 @@ export function SettingsScreen() {
                 >
                   Sign Out
                 </Button>
+                <Button
+                  mode="text"
+                  onPress={handleDeleteAccount}
+                  style={styles.deleteAccountButton}
+                  icon="delete-forever"
+                  textColor={colors.error}
+                >
+                  Delete Account
+                </Button>
               </View>
             </Surface>
           </>
@@ -858,28 +936,35 @@ export function SettingsScreen() {
         disableSolidBackground={false}
       />
 
-      {/* Logout Confirmation Dialog */}
-      <Portal>
-        <Dialog
-          visible={showLogoutDialog}
-          onDismiss={() => setShowLogoutDialog(false)}
-          style={styles.logoutDialog}
-        >
-          <Dialog.Icon icon="logout" />
-          <Dialog.Title style={styles.dialogTitle}>Sign Out</Dialog.Title>
-          <Dialog.Content>
-            <Text style={styles.dialogText}>
-              Are you sure you want to sign out? All local data will be cleared.
-            </Text>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setShowLogoutDialog(false)}>Cancel</Button>
-            <Button onPress={confirmLogout} textColor={colors.error}>
-              Sign Out
-            </Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
+      {/* Logout Confirmation Modal */}
+      <AlertModal
+        visible={showLogoutModal}
+        onDismiss={() => setShowLogoutModal(false)}
+        type="warning"
+        icon="logout"
+        title="Sign Out"
+        message="Are you sure you want to sign out? All local data will be cleared."
+        primaryButtonText="Sign Out"
+        primaryButtonAction={confirmLogout}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => setShowLogoutModal(false)}
+        showConfetti={false}
+      />
+
+      {/* Delete Account Confirmation Modal */}
+      <AlertModal
+        visible={showDeleteAccountModal}
+        onDismiss={() => setShowDeleteAccountModal(false)}
+        type="error"
+        icon="delete-forever"
+        title="Delete Account"
+        message={`Are you sure you want to permanently delete your account? This action cannot be undone.\n\nAll your data will be permanently deleted:\n• Business settings\n• All quotes and projects\n• Subscription information\n• Account credentials`}
+        primaryButtonText="Delete Permanently"
+        primaryButtonAction={confirmDeleteAccount}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => setShowDeleteAccountModal(false)}
+        showConfetti={false}
+      />
 
       {/* Success Modal */}
       <AlertModal
@@ -1168,30 +1253,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     alignSelf: 'stretch',
     paddingVertical: 4,
+    marginBottom: 8,
   },
-  logoutDialog: {
-    maxWidth: 800,
-    width: '90%',
-    alignSelf: 'center',
-  },
-  dialogTitle: {
-    textAlign: 'center',
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  dialogText: {
-    fontSize: 16,
-    lineHeight: 24,
-    textAlign: 'center',
-  },
-  dialogHelperText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  dialogInput: {
-    marginTop: 8,
+  deleteAccountButton: {
+    alignSelf: 'stretch',
   },
   pillContainer: {
     flexDirection: 'row',
