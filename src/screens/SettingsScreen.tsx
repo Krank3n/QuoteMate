@@ -23,8 +23,6 @@ import {
   Divider,
   IconButton,
   Chip,
-  Dialog,
-  Portal,
 } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -70,8 +68,8 @@ export function SettingsScreen() {
   const [useReeceApi, setUseReeceApi] = useState(false);
   const [selectedStore, setSelectedStore] = useState<string>('bunnings'); // Single store selection
   const [isLoading, setIsLoading] = useState(false);
-  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
-  const [showDeleteAccountDialog, setShowDeleteAccountDialog] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
 
@@ -249,11 +247,11 @@ export function SettingsScreen() {
 
   const handleLogout = () => {
     console.log('🚪 handleLogout called');
-    setShowLogoutDialog(true);
+    setShowLogoutModal(true);
   };
 
   const confirmLogout = async () => {
-    setShowLogoutDialog(false);
+    setShowLogoutModal(false);
 
     try {
       console.log('🔓 User confirmed logout, starting sign out process...');
@@ -323,11 +321,11 @@ export function SettingsScreen() {
 
   const handleDeleteAccount = () => {
     console.log('🗑️ handleDeleteAccount called');
-    setShowDeleteAccountDialog(true);
+    setShowDeleteAccountModal(true);
   };
 
   const confirmDeleteAccount = async () => {
-    setShowDeleteAccountDialog(false);
+    setShowDeleteAccountModal(false);
 
     try {
       console.log('🗑️ User confirmed account deletion, starting deletion process...');
@@ -938,58 +936,35 @@ export function SettingsScreen() {
         disableSolidBackground={false}
       />
 
-      {/* Logout Confirmation Dialog */}
-      <Portal>
-        <Dialog
-          visible={showLogoutDialog}
-          onDismiss={() => setShowLogoutDialog(false)}
-          style={styles.logoutDialog}
-        >
-          <Dialog.Icon icon="logout" />
-          <Dialog.Title style={styles.dialogTitle}>Sign Out</Dialog.Title>
-          <Dialog.Content>
-            <Text style={styles.dialogText}>
-              Are you sure you want to sign out? All local data will be cleared.
-            </Text>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setShowLogoutDialog(false)}>Cancel</Button>
-            <Button onPress={confirmLogout} textColor={colors.error}>
-              Sign Out
-            </Button>
-          </Dialog.Actions>
-        </Dialog>
+      {/* Logout Confirmation Modal */}
+      <AlertModal
+        visible={showLogoutModal}
+        onDismiss={() => setShowLogoutModal(false)}
+        type="warning"
+        icon="logout"
+        title="Sign Out"
+        message="Are you sure you want to sign out? All local data will be cleared."
+        primaryButtonText="Sign Out"
+        primaryButtonAction={confirmLogout}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => setShowLogoutModal(false)}
+        showConfetti={false}
+      />
 
-        {/* Delete Account Confirmation Dialog */}
-        <Dialog
-          visible={showDeleteAccountDialog}
-          onDismiss={() => setShowDeleteAccountDialog(false)}
-          style={styles.logoutDialog}
-        >
-          <Dialog.Icon icon="delete-forever" />
-          <Dialog.Title style={styles.dialogTitle}>Delete Account</Dialog.Title>
-          <Dialog.Content>
-            <Text style={styles.dialogText}>
-              Are you sure you want to permanently delete your account? This action cannot be undone.
-            </Text>
-            <Text style={[styles.dialogText, { marginTop: 12, fontWeight: '600' }]}>
-              All your data will be permanently deleted:
-            </Text>
-            <Text style={styles.dialogText}>
-              • Business settings{'\n'}
-              • All quotes and projects{'\n'}
-              • Subscription information{'\n'}
-              • Account credentials
-            </Text>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setShowDeleteAccountDialog(false)}>Cancel</Button>
-            <Button onPress={confirmDeleteAccount} textColor={colors.error}>
-              Delete Permanently
-            </Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
+      {/* Delete Account Confirmation Modal */}
+      <AlertModal
+        visible={showDeleteAccountModal}
+        onDismiss={() => setShowDeleteAccountModal(false)}
+        type="error"
+        icon="delete-forever"
+        title="Delete Account"
+        message={`Are you sure you want to permanently delete your account? This action cannot be undone.\n\nAll your data will be permanently deleted:\n• Business settings\n• All quotes and projects\n• Subscription information\n• Account credentials`}
+        primaryButtonText="Delete Permanently"
+        primaryButtonAction={confirmDeleteAccount}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => setShowDeleteAccountModal(false)}
+        showConfetti={false}
+      />
 
       {/* Success Modal */}
       <AlertModal
@@ -1282,30 +1257,6 @@ const styles = StyleSheet.create({
   },
   deleteAccountButton: {
     alignSelf: 'stretch',
-  },
-  logoutDialog: {
-    maxWidth: 800,
-    width: '90%',
-    alignSelf: 'center',
-  },
-  dialogTitle: {
-    textAlign: 'center',
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  dialogText: {
-    fontSize: 16,
-    lineHeight: 24,
-    textAlign: 'center',
-  },
-  dialogHelperText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  dialogInput: {
-    marginTop: 8,
   },
   pillContainer: {
     flexDirection: 'row',
