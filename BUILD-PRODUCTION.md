@@ -66,8 +66,8 @@ SHA256: CE:C6:E2:85:61:E1:B3:43:A8:57:E2:39:D2:65:D5:8D:6A:8B:62:8A:A8:2B:7E:C6:
 
 ## 📦 Current Version
 
-- **Version**: 1.0.30
-- **Build Number**: 38
+- **Version**: 1.0.31
+- **Build Number**: 39
 - **16 KB Page Size Support**: ✅ Enabled
 
 ## 🔧 Manual Build Commands
@@ -174,4 +174,4 @@ Increment the version code in:
 
 ---
 
-**Last Updated**: Version 1.0.30 (Build 38) - November 20, 2025
+**Last Updated**: Version 1.0.31 (Build 39) - November 20, 2025
