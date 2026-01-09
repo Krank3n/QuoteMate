@@ -49,11 +49,11 @@
       <true/>
     </dict>
     <key>NSCameraUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your camera</string>
+    <string>QuoteMate needs camera access to take photos of materials, job sites, or documents to attach to your quotes.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow QuoteMate to use your microphone for voice-to-text job descriptions.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your photos</string>
+    <string>QuoteMate needs access to your photo library to attach images to quotes, such as photos of materials, job sites, or your business logo for custom branding.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Allow QuoteMate to use speech recognition for voice-to-text job descriptions.</string>
     <key>UILaunchStoryboardName</key>
