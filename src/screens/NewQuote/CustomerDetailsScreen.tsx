@@ -26,6 +26,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 
 import { useStore } from '../../store/useStore';
+import { useCurrentDocument, useDocumentMode, useDocumentList } from '../../utils/documentMode';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -40,7 +41,15 @@ interface CustomerInfo {
 
 export function CustomerDetailsScreen() {
   const navigation = useNavigation<any>();
-  const { currentQuote, updateQuote, quotes } = useStore();
+  const mode = useDocumentMode();
+  const { document: currentDocument, update: updateDocument } = useCurrentDocument();
+  const documentList = useDocumentList();
+
+  // For compatibility, alias to currentQuote (used throughout this file)
+  const currentQuote = currentDocument;
+  const updateQuote = updateDocument;
+  // Use combined document list for customer auto-complete
+  const quotes = documentList;
 
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');

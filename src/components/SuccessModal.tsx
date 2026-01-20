@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Quote, BusinessSettings } from '../types';
+import { Quote, Invoice, BusinessSettings } from '../types';
 import { AlertModal } from './AlertModal';
 
 interface SuccessModalProps {
@@ -15,6 +15,7 @@ interface SuccessModalProps {
   buttonText?: string;
   icon?: string;
   quote?: Quote;
+  invoice?: Invoice;
   businessSettings?: BusinessSettings | null;
   // Legacy props for backwards compatibility
   secondaryButtonText?: string;
@@ -30,6 +31,7 @@ export function SuccessModal({
   buttonText = 'Done',
   icon = 'check-circle',
   quote,
+  invoice,
   businessSettings,
   secondaryButtonText,
   secondaryOnPress,
@@ -45,6 +47,7 @@ export function SuccessModal({
       icon={icon}
       primaryButtonText={buttonText}
       quote={quote}
+      invoice={invoice}
       businessSettings={businessSettings}
       secondaryButtonText={secondaryButtonText}
       secondaryButtonAction={secondaryOnPress}

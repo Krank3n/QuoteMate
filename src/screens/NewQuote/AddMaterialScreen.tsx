@@ -30,6 +30,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { generateId } from '../../utils/generateId';
 
 import { useStore } from '../../store/useStore';
+import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
 import { Material } from '../../types';
 import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
@@ -55,7 +56,13 @@ type TabValue = 'search' | 'saved';
 export function AddMaterialScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { currentQuote, updateQuote, businessSettings } = useStore();
+  const mode = useDocumentMode();
+  const { document: currentDocument, update: updateDocument } = useCurrentDocument();
+  const { businessSettings } = useStore();
+
+  // For compatibility, alias to currentQuote (used throughout this file)
+  const currentQuote = currentDocument;
+  const updateQuote = updateDocument;
 
   // Check if we're in edit mode
   const materialId = route.params?.materialId;

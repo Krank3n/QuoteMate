@@ -34,6 +34,7 @@ import LottieView from 'lottie-react-native';
 import { generateId } from '../../utils/generateId';
 
 import { useStore } from '../../store/useStore';
+import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
 import { Material, BunningsItem } from '../../types';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
@@ -124,7 +125,13 @@ function formatTimeAgo(isoTimestamp: string): string {
 
 export function MaterialsListScreen() {
   const navigation = useNavigation<any>();
-  const { currentQuote, updateQuote, businessSettings } = useStore();
+  const mode = useDocumentMode();
+  const { document: currentDocument, update: updateDocument } = useCurrentDocument();
+  const { businessSettings } = useStore();
+
+  // For compatibility, alias to currentQuote (used throughout this file)
+  const currentQuote = currentDocument;
+  const updateQuote = updateDocument;
 
   const [isFetchingPrices, setIsFetchingPrices] = useState(false);
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
@@ -678,11 +685,11 @@ export function MaterialsListScreen() {
         }
 
         // Update UI progressively (skip if dialogs are open to avoid flickering)
-        if (!matchSelectorVisible) {
+        if (!matchSelectorVisible && currentQuote) {
           updateQuote({
             ...currentQuote,
             materials: [...updatedMaterials],
-          });
+          } as any);
         }
 
         // Small delay to avoid overwhelming the API
@@ -690,10 +697,12 @@ export function MaterialsListScreen() {
       }
 
       // Final update to ensure all changes are saved
-      updateQuote({
-        ...currentQuote,
-        materials: [...updatedMaterials],
-      });
+      if (currentQuote) {
+        updateQuote({
+          ...currentQuote,
+          materials: [...updatedMaterials],
+        } as any);
+      }
 
       // Show appropriate message based on results
       if (fetchedCount === 0 && failedCount === 0 && skippedCount > 0) {
@@ -772,10 +781,12 @@ export function MaterialsListScreen() {
         await saveFavoriteProduct(material.name, material.searchTerm, favoriteMapping);
       }
 
-      updateQuote({
-        ...currentQuote,
-        materials: updatedMaterials,
-      });
+      if (currentQuote) {
+        updateQuote({
+          ...currentQuote,
+          materials: updatedMaterials,
+        } as any);
+      }
 
       Alert.alert('Price Updated', `${match.productName} - ${formatCurrency(match.price)}`);
     }
@@ -863,12 +874,12 @@ export function MaterialsListScreen() {
   };
 
   const confirmDeleteMaterial = () => {
-    if (materialToDelete) {
+    if (materialToDelete && currentQuote) {
       const updatedMaterials = materials.filter((m) => m.id !== materialToDelete);
       updateQuote({
         ...currentQuote,
         materials: updatedMaterials,
-      });
+      } as any);
     }
     setDeleteDialogVisible(false);
     setMaterialToDelete(null);

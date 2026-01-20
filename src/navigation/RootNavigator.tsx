@@ -12,9 +12,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { QuotesListScreen } from '../screens/QuotesListScreen';
+import { InvoicesListScreen } from '../screens/InvoicesListScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
 import { ViewQuoteScreen } from '../screens/ViewQuoteScreen';
+import { ViewInvoiceScreen } from '../screens/ViewInvoiceScreen';
+import { RecordPaymentScreen } from '../screens/RecordPaymentScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
 import { CustomerDetailsScreen } from '../screens/NewQuote/CustomerDetailsScreen';
@@ -22,6 +25,7 @@ import { MaterialsListScreen } from '../screens/NewQuote/MaterialsListScreen';
 import { AddMaterialScreen } from '../screens/NewQuote/AddMaterialScreen';
 import { LaborMarkupScreen } from '../screens/NewQuote/LaborMarkupScreen';
 import { QuotePreviewScreen } from '../screens/NewQuote/QuotePreviewScreen';
+import { InvoicePreviewScreen } from '../screens/NewQuote/InvoicePreviewScreen';
 
 import { colors } from '../theme';
 
@@ -29,16 +33,18 @@ import { colors } from '../theme';
 export type RootTabParamList = {
   Dashboard: undefined;
   Quotes: undefined;
+  Invoices: undefined;
   Settings: undefined;
 };
 
 export type NewQuoteStackParamList = {
-  JobDetails: undefined;
-  CustomerDetails: undefined;
-  MaterialsList: undefined;
-  AddMaterial: { materialId?: string } | undefined;
-  LaborMarkup: undefined;
+  JobDetails: { mode?: 'quote' | 'invoice' } | undefined;
+  CustomerDetails: { mode?: 'quote' | 'invoice' } | undefined;
+  MaterialsList: { mode?: 'quote' | 'invoice' } | undefined;
+  AddMaterial: { materialId?: string; mode?: 'quote' | 'invoice' } | undefined;
+  LaborMarkup: { mode?: 'quote' | 'invoice' } | undefined;
   QuotePreview: undefined;
+  InvoicePreview: undefined;
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -100,6 +106,65 @@ function NewQuoteNavigator() {
 }
 
 /**
+ * New Invoice Flow - Stack Navigator (reuses same screens as NewQuote)
+ */
+function NewInvoiceNavigator() {
+  return (
+    <NewQuoteStack.Navigator
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: colors.primary,
+        },
+        headerTintColor: colors.white,
+        headerTitleStyle: {
+          fontWeight: 'bold',
+        },
+        // Enable scrolling for new invoice screens on web
+        ...(Platform.OS === 'web' && {
+          contentStyle: { overflow: 'auto' }
+        })
+      }}
+    >
+      <NewQuoteStack.Screen
+        name="JobDetails"
+        component={JobDetailsScreen}
+        options={{ title: 'New Invoice - Job Details' }}
+        initialParams={{ mode: 'invoice' }}
+      />
+      <NewQuoteStack.Screen
+        name="CustomerDetails"
+        component={CustomerDetailsScreen}
+        options={{ title: 'Customer Details' }}
+        initialParams={{ mode: 'invoice' }}
+      />
+      <NewQuoteStack.Screen
+        name="MaterialsList"
+        component={MaterialsListScreen}
+        options={{ title: 'Materials' }}
+        initialParams={{ mode: 'invoice' }}
+      />
+      <NewQuoteStack.Screen
+        name="AddMaterial"
+        component={AddMaterialScreen}
+        options={{ title: 'Add Material' }}
+        initialParams={{ mode: 'invoice' }}
+      />
+      <NewQuoteStack.Screen
+        name="LaborMarkup"
+        component={LaborMarkupScreen}
+        options={{ title: 'Labor & Markup' }}
+        initialParams={{ mode: 'invoice' }}
+      />
+      <NewQuoteStack.Screen
+        name="InvoicePreview"
+        component={InvoicePreviewScreen}
+        options={{ title: 'Invoice Preview' }}
+      />
+    </NewQuoteStack.Navigator>
+  );
+}
+
+/**
  * Main Tabs Navigator
  */
 function MainTabs() {
@@ -115,6 +180,8 @@ function MainTabs() {
             iconName = 'home';
           } else if (route.name === 'Quotes') {
             iconName = 'file-document-multiple';
+          } else if (route.name === 'Invoices') {
+            iconName = 'receipt';
           } else if (route.name === 'Settings') {
             iconName = 'cog';
           }
@@ -148,6 +215,11 @@ function MainTabs() {
         name="Quotes"
         component={QuotesListScreen}
         options={{ title: 'My Quotes' }}
+      />
+      <Tab.Screen
+        name="Invoices"
+        component={InvoicesListScreen}
+        options={{ title: 'Invoices' }}
       />
       <Tab.Screen
         name="Settings"
@@ -188,8 +260,34 @@ export function RootNavigator() {
         }}
       />
       <RootStack.Screen
+        name="ViewInvoice"
+        component={ViewInvoiceScreen}
+        options={{
+          presentation: 'card',
+          headerShown: false,
+        }}
+      />
+      <RootStack.Screen
+        name="RecordPayment"
+        component={RecordPaymentScreen}
+        options={{
+          presentation: 'modal',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Record Payment',
+        }}
+      />
+      <RootStack.Screen
         name="NewQuote"
         component={NewQuoteNavigator}
+        options={{
+          presentation: 'card',
+        }}
+      />
+      <RootStack.Screen
+        name="NewInvoice"
+        component={NewInvoiceNavigator}
         options={{
           presentation: 'card',
         }}

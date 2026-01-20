@@ -1,0 +1,368 @@
+/**
+ * Invoices List Screen
+ * Display all invoices with search and filter
+ */
+
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, FlatList, Alert } from 'react-native';
+import {
+  Text,
+  Searchbar,
+  Chip,
+  FAB,
+  Dialog,
+  Portal,
+  Button,
+  Menu,
+} from 'react-native-paper';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+
+import { useStore } from '../store/useStore';
+import { Invoice, Quote } from '../types';
+import { colors } from '../theme';
+import { WebContainer } from '../components/WebContainer';
+import { InvoiceCard } from '../components/InvoiceCard';
+import { isInvoiceOverdue } from '../utils/invoiceCalculator';
+
+type FilterStatus = 'all' | 'draft' | 'sent' | 'paid' | 'overdue';
+
+export function InvoicesListScreen() {
+  const navigation = useNavigation<any>();
+  const {
+    invoices,
+    quotes,
+    deleteInvoice,
+    setCurrentInvoice,
+    createNewInvoice,
+    createInvoiceFromQuote,
+    saveInvoice,
+    duplicateInvoice,
+    businessSettings,
+    loadInvoices,
+    loadNextInvoiceNumber,
+  } = useStore();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+  const [fabOpen, setFabOpen] = useState(false);
+  const [quoteDialogVisible, setQuoteDialogVisible] = useState(false);
+
+  // Load invoices on mount
+  useEffect(() => {
+    loadInvoices();
+    loadNextInvoiceNumber();
+  }, []);
+
+  // Refresh invoices when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadInvoices();
+    }, [loadInvoices])
+  );
+
+  // Get convertible quotes (accepted or sent)
+  const convertibleQuotes = quotes.filter(
+    (q) => q.status === 'accepted' || q.status === 'sent'
+  );
+
+  // Filter and search invoices
+  const filteredInvoices = invoices
+    .map((invoice) => {
+      // Add real-time overdue status
+      if (isInvoiceOverdue(invoice) && invoice.status !== 'paid' && invoice.status !== 'cancelled') {
+        return { ...invoice, status: 'overdue' as const };
+      }
+      return invoice;
+    })
+    .filter((invoice) => {
+      // Status filter
+      if (filterStatus !== 'all' && invoice.status !== filterStatus) {
+        return false;
+      }
+
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        return (
+          invoice.customerName.toLowerCase().includes(query) ||
+          invoice.job.name.toLowerCase().includes(query) ||
+          (invoice.invoiceNumber?.toLowerCase().includes(query) || false)
+        );
+      }
+
+      return true;
+    });
+
+  const handleNewInvoice = () => {
+    setFabOpen(false);
+    createNewInvoice();
+    // Navigate to the new invoice creation flow (reuses quote screens)
+    navigation.navigate('NewInvoice' as never, { screen: 'JobDetails' } as never);
+  };
+
+  const handleConvertFromQuote = () => {
+    setFabOpen(false);
+    if (convertibleQuotes.length === 0) {
+      Alert.alert(
+        'No Quotes Available',
+        'You need accepted or sent quotes to convert to an invoice. Create and accept a quote first.'
+      );
+      return;
+    }
+    setQuoteDialogVisible(true);
+  };
+
+  const handleSelectQuote = async (quote: Quote) => {
+    setQuoteDialogVisible(false);
+    const invoice = createInvoiceFromQuote(quote);
+    await saveInvoice(invoice);
+    navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
+  };
+
+  const handleViewInvoice = (invoiceId: string) => {
+    navigation.navigate('ViewInvoice' as never, { invoiceId } as never);
+  };
+
+  const handleEditInvoice = (invoice: Invoice) => {
+    setCurrentInvoice(invoice);
+    navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
+  };
+
+  const handleDeleteInvoice = async (invoiceId: string) => {
+    await deleteInvoice(invoiceId);
+  };
+
+  const handleRecordPayment = (invoice: Invoice) => {
+    navigation.navigate('RecordPayment' as never, { invoiceId: invoice.id } as never);
+  };
+
+  const handleDuplicateInvoice = async (invoice: Invoice) => {
+    try {
+      const newInvoice = await duplicateInvoice(invoice);
+      navigation.navigate('ViewInvoice' as never, { invoiceId: newInvoice.id } as never);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to duplicate invoice. Please try again.');
+    }
+  };
+
+  const renderInvoiceCard = ({ item: invoice }: { item: Invoice }) => (
+    <InvoiceCard
+      invoice={invoice}
+      businessSettings={businessSettings}
+      onView={handleViewInvoice}
+      onEdit={handleEditInvoice}
+      onDelete={handleDeleteInvoice}
+      onRecordPayment={handleRecordPayment}
+      onSave={saveInvoice}
+      onDuplicate={handleDuplicateInvoice}
+    />
+  );
+
+  return (
+    <View style={styles.container}>
+      <WebContainer>
+        {/* Search Bar */}
+        <Searchbar
+          placeholder="Search invoices..."
+          onChangeText={setSearchQuery}
+          value={searchQuery}
+          style={styles.searchBar}
+        />
+
+        {/* Filter Chips */}
+        <View style={styles.filterRow}>
+          <Chip
+            selected={filterStatus === 'all'}
+            onPress={() => setFilterStatus('all')}
+            style={styles.filterChip}
+          >
+            All
+          </Chip>
+          <Chip
+            selected={filterStatus === 'draft'}
+            onPress={() => setFilterStatus('draft')}
+            style={styles.filterChip}
+          >
+            Draft
+          </Chip>
+          <Chip
+            selected={filterStatus === 'sent'}
+            onPress={() => setFilterStatus('sent')}
+            style={styles.filterChip}
+          >
+            Sent
+          </Chip>
+          <Chip
+            selected={filterStatus === 'paid'}
+            onPress={() => setFilterStatus('paid')}
+            style={styles.filterChip}
+          >
+            Paid
+          </Chip>
+          <Chip
+            selected={filterStatus === 'overdue'}
+            onPress={() => setFilterStatus('overdue')}
+            style={styles.filterChip}
+          >
+            Overdue
+          </Chip>
+        </View>
+      </WebContainer>
+
+      {/* Invoices List */}
+      <WebContainer style={styles.listContainer}>
+        <FlatList
+          data={filteredInvoices}
+          renderItem={renderInvoiceCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          style={styles.flatList}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <MaterialCommunityIcons
+                name="receipt"
+                size={64}
+                color={colors.disabled}
+              />
+              <Text style={styles.emptyText}>No invoices found</Text>
+              <Text style={styles.emptySubtext}>
+                Create an invoice or convert a quote
+              </Text>
+            </View>
+          }
+        />
+      </WebContainer>
+
+      {/* FAB with Menu */}
+      <FAB.Group
+        open={fabOpen}
+        visible
+        icon={fabOpen ? 'close' : 'plus'}
+        actions={[
+          {
+            icon: 'file-document-edit',
+            label: 'New Invoice',
+            onPress: handleNewInvoice,
+          },
+          {
+            icon: 'file-replace',
+            label: 'Convert from Quote',
+            onPress: handleConvertFromQuote,
+          },
+        ]}
+        onStateChange={({ open }) => setFabOpen(open)}
+        fabStyle={styles.fab}
+        color={colors.white}
+      />
+
+      {/* Quote Selection Dialog */}
+      <Portal>
+        <Dialog
+          visible={quoteDialogVisible}
+          onDismiss={() => setQuoteDialogVisible(false)}
+          style={styles.dialog}
+        >
+          <Dialog.Title>Select Quote to Convert</Dialog.Title>
+          <Dialog.ScrollArea style={styles.dialogScrollArea}>
+            {convertibleQuotes.map((quote) => (
+              <Button
+                key={quote.id}
+                mode="outlined"
+                onPress={() => handleSelectQuote(quote)}
+                style={styles.quoteButton}
+                contentStyle={styles.quoteButtonContent}
+              >
+                <View style={styles.quoteButtonInner}>
+                  <Text style={styles.quoteButtonTitle}>
+                    {quote.quoteNumber || 'Quote'} - {quote.customerName}
+                  </Text>
+                  <Text style={styles.quoteButtonSubtitle}>{quote.job.name}</Text>
+                </View>
+              </Button>
+            ))}
+          </Dialog.ScrollArea>
+          <Dialog.Actions>
+            <Button onPress={() => setQuoteDialogVisible(false)}>Cancel</Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  searchBar: {
+    margin: 16,
+    elevation: 2,
+    backgroundColor: colors.surface,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterChip: {
+    backgroundColor: colors.surface,
+  },
+  listContainer: {
+    flex: 1,
+  },
+  flatList: {
+    flex: 1,
+  },
+  listContent: {
+    padding: 16,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: colors.onSurface,
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginTop: 4,
+  },
+  fab: {
+    backgroundColor: colors.primary,
+  },
+  dialog: {
+    maxHeight: '70%',
+  },
+  dialogScrollArea: {
+    paddingHorizontal: 16,
+    maxHeight: 300,
+  },
+  quoteButton: {
+    marginBottom: 8,
+    borderColor: colors.border,
+  },
+  quoteButtonContent: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+  },
+  quoteButtonInner: {
+    width: '100%',
+  },
+  quoteButtonTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  quoteButtonSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+});

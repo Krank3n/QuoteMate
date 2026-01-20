@@ -16,13 +16,14 @@ import {
   orderBy,
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
-import { Quote, BusinessSettings, SubscriptionStatus } from '../types';
+import { Quote, BusinessSettings, SubscriptionStatus, Invoice } from '../types';
 
 class FirestoreService {
   private quotesUnsubscribe: Unsubscribe | null = null;
   private settingsUnsubscribe: Unsubscribe | null = null;
   private onboardingUnsubscribe: Unsubscribe | null = null;
   private subscriptionUnsubscribe: Unsubscribe | null = null;
+  private invoicesUnsubscribe: Unsubscribe | null = null;
 
   /**
    * Get the current user ID
@@ -417,6 +418,143 @@ class FirestoreService {
   }
 
   /**
+   * Save an invoice to Firestore
+   */
+  async saveInvoice(invoice: Invoice): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, skipping cloud sync');
+      return;
+    }
+
+    try {
+      const invoiceRef = doc(db, 'users', userId, 'invoices', invoice.id);
+      // Convert undefined values to null for Firestore compatibility
+      await setDoc(invoiceRef, {
+        ...invoice,
+        // Optional string fields - convert undefined to null
+        invoiceNumber: invoice.invoiceNumber || null,
+        customerEmail: invoice.customerEmail || null,
+        customerPhone: invoice.customerPhone || null,
+        jobAddress: invoice.jobAddress || null,
+        notes: invoice.notes || null,
+        sourceQuoteId: invoice.sourceQuoteId || null,
+        paymentNotes: invoice.paymentNotes || null,
+        paymentMethod: invoice.paymentMethod || null,
+        // Optional number fields
+        customPaymentDays: invoice.customPaymentDays ?? null,
+        paidAmount: invoice.paidAmount ?? null,
+        // Date fields
+        createdAt: invoice.createdAt.toISOString(),
+        updatedAt: invoice.updatedAt.toISOString(),
+        issueDate: invoice.issueDate.toISOString(),
+        dueDate: invoice.dueDate.toISOString(),
+        paidDate: invoice.paidDate?.toISOString() || null,
+        syncedAt: new Date().toISOString(),
+      });
+      console.log('✅ Invoice saved to Firestore:', invoice.id);
+    } catch (error) {
+      console.error('❌ Error saving invoice to Firestore:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Load all invoices from Firestore
+   */
+  async loadInvoices(): Promise<Invoice[]> {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, returning empty invoices');
+      return [];
+    }
+
+    try {
+      const invoicesRef = collection(db, 'users', userId, 'invoices');
+      const q = query(invoicesRef, orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+
+      const invoices: Invoice[] = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          ...data,
+          createdAt: new Date(data.createdAt),
+          updatedAt: new Date(data.updatedAt),
+          issueDate: new Date(data.issueDate),
+          dueDate: new Date(data.dueDate),
+          paidDate: data.paidDate ? new Date(data.paidDate) : undefined,
+        } as Invoice;
+      });
+
+      console.log(`✅ Loaded ${invoices.length} invoices from Firestore`);
+      return invoices;
+    } catch (error) {
+      console.error('❌ Error loading invoices from Firestore:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Delete an invoice from Firestore
+   */
+  async deleteInvoice(invoiceId: string): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, skipping cloud delete');
+      return;
+    }
+
+    try {
+      const invoiceRef = doc(db, 'users', userId, 'invoices', invoiceId);
+      await deleteDoc(invoiceRef);
+      console.log('✅ Invoice deleted from Firestore:', invoiceId);
+    } catch (error) {
+      console.error('❌ Error deleting invoice from Firestore:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Listen to invoices changes in real-time
+   */
+  listenToInvoices(callback: (invoices: Invoice[]) => void): Unsubscribe | null {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, skipping invoices listener');
+      return null;
+    }
+
+    try {
+      const invoicesRef = collection(db, 'users', userId, 'invoices');
+      const q = query(invoicesRef, orderBy('createdAt', 'desc'));
+
+      this.invoicesUnsubscribe = onSnapshot(q, (snapshot) => {
+        const invoices: Invoice[] = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            ...data,
+            createdAt: new Date(data.createdAt),
+            updatedAt: new Date(data.updatedAt),
+            issueDate: new Date(data.issueDate),
+            dueDate: new Date(data.dueDate),
+            paidDate: data.paidDate ? new Date(data.paidDate) : undefined,
+          } as Invoice;
+        });
+
+        console.log(`📡 Invoices updated from Firestore: ${invoices.length} invoices`);
+        callback(invoices);
+      }, (error) => {
+        console.error('❌ Error in invoices listener:', error);
+      });
+
+      return this.invoicesUnsubscribe;
+    } catch (error) {
+      console.error('❌ Error setting up invoices listener:', error);
+      return null;
+    }
+  }
+
+  /**
    * Clean up all listeners
    */
   cleanup(): void {
@@ -435,6 +573,10 @@ class FirestoreService {
     if (this.subscriptionUnsubscribe) {
       this.subscriptionUnsubscribe();
       this.subscriptionUnsubscribe = null;
+    }
+    if (this.invoicesUnsubscribe) {
+      this.invoicesUnsubscribe();
+      this.invoicesUnsubscribe = null;
     }
     console.log('🧹 Firestore listeners cleaned up');
   }

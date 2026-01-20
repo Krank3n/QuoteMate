@@ -19,6 +19,7 @@ import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { SendQuoteButton } from '../components/SendQuoteButton';
+import { AlertModal } from '../components/AlertModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function ViewQuoteScreen() {
@@ -26,10 +27,12 @@ export function ViewQuoteScreen() {
   const route = useRoute<any>();
   const quoteId = route.params?.quoteId;
 
-  const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote } = useStore();
+  const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote, createInvoiceFromQuote, saveInvoice } = useStore();
   const insets = useSafeAreaInsets();
 
   const [displayQuote, setDisplayQuote] = useState(null);
+  const [showConvertModal, setShowConvertModal] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
 
   // Refresh quote data when screen comes into focus
   // Auto-save if there are pending changes in currentQuote
@@ -77,15 +80,57 @@ export function ViewQuoteScreen() {
     navigation.navigate('NewQuote', { screen: screenMap[section] });
   };
 
+  const handleConvertToInvoice = () => {
+    setShowConvertModal(true);
+  };
+
+  const handleConfirmConvert = async () => {
+    setIsConverting(true);
+    try {
+      const invoice = createInvoiceFromQuote(quote);
+      await saveInvoice(invoice);
+      setShowConvertModal(false);
+      navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
+    } catch (error) {
+      console.error('Failed to convert to invoice:', error);
+    } finally {
+      setIsConverting(false);
+    }
+  };
+
+  // Show convert button for accepted or sent quotes
+  const canConvertToInvoice = quote.status === 'accepted' || quote.status === 'sent';
+
   return (
     <View style={styles.container}>
+      {/* Convert to Invoice Modal */}
+      <AlertModal
+        visible={showConvertModal}
+        onDismiss={() => setShowConvertModal(false)}
+        type="info"
+        icon="file-replace"
+        title="Convert to Invoice"
+        message={`Create an invoice from this quote for ${quote.customerName}?`}
+        showConfetti={false}
+        primaryButtonText="Convert"
+        primaryButtonAction={handleConfirmConvert}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => setShowConvertModal(false)}
+        secondaryButtonLoading={isConverting}
+      />
+
       <View style={styles.header}>
         <IconButton
           icon="arrow-left"
           size={24}
           onPress={() => navigation.goBack()}
         />
-        <Title>Quote Preview</Title>
+        <View style={styles.headerTitleContainer}>
+          <Title>Quote Preview</Title>
+          {displayQuote?.quoteNumber && (
+            <Text style={styles.headerQuoteNumber}>{displayQuote.quoteNumber}</Text>
+          )}
+        </View>
         <View style={{ width: 40 }} />
       </View>
 
@@ -154,7 +199,9 @@ export function ViewQuoteScreen() {
             </View>
           <View style={styles.summaryRow}>
             <Text style={styles.text}>
-              {quote.laborHours} hours @ {formatCurrency(quote.laborRate)}/hr
+              {businessSettings?.showLaborHours
+                ? `${quote.laborHours} hours @ ${formatCurrency(quote.laborRate)}/hr`
+                : 'Labor'}
             </Text>
             <Text style={styles.summaryValue}>{formatCurrency(quote.laborTotal)}</Text>
           </View>
@@ -198,19 +245,39 @@ export function ViewQuoteScreen() {
           Platform.OS !== 'ios' && { marginBottom: Math.max(insets.bottom, 16) }
         ]}
       >
-        <Button
-          mode="outlined"
-          onPress={() => navigation.goBack()}
-          style={styles.button}
-          labelStyle={styles.buttonLabel}
-        >
-          Close
-        </Button>
-        <SendQuoteButton
-          quote={quote}
-          businessSettings={businessSettings}
-          buttonStyle={styles.button}
-        />
+        {canConvertToInvoice ? (
+          <>
+            <Button
+              mode="outlined"
+              onPress={handleConvertToInvoice}
+              style={styles.button}
+              icon="file-replace"
+            >
+              Convert to Invoice
+            </Button>
+            <SendQuoteButton
+              quote={quote}
+              businessSettings={businessSettings}
+              buttonStyle={styles.button}
+            />
+          </>
+        ) : (
+          <>
+            <Button
+              mode="outlined"
+              onPress={() => navigation.goBack()}
+              style={styles.button}
+              labelStyle={styles.buttonLabel}
+            >
+              Close
+            </Button>
+            <SendQuoteButton
+              quote={quote}
+              businessSettings={businessSettings}
+              buttonStyle={styles.button}
+            />
+          </>
+        )}
       </View>
     </View>
   );
@@ -231,6 +298,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  headerTitleContainer: {
+    alignItems: 'center',
+  },
+  headerQuoteNumber: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: '600',
   },
   content: {
     flex: 1,
