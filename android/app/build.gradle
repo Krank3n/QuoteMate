@@ -91,8 +91,8 @@ android {
         applicationId 'com.quotemate.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 41
-        versionName "1.0.33"
+        versionCode 42
+        versionName "1.0.34"
 
         // Enable 16 KB page size support
         ndk {
