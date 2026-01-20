@@ -18,13 +18,22 @@ import {
 import { useNavigation } from '@react-navigation/native';
 
 import { useStore } from '../../store/useStore';
+import { useCurrentDocument, useDocumentMode, getPreviewScreenName } from '../../utils/documentMode';
 import { colors } from '../../theme';
 import { formatCurrency, calculateQuote } from '../../utils/quoteCalculator';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 
 export function LaborMarkupScreen() {
   const navigation = useNavigation<any>();
-  const { currentQuote, updateQuote } = useStore();
+  const mode = useDocumentMode();
+  const { document: currentDocument, update: updateDocument } = useCurrentDocument();
+
+  // For compatibility, alias to currentQuote (used throughout this file)
+  const currentQuote = currentDocument;
+  const updateQuote = updateDocument;
+
+  // Get the appropriate preview screen based on mode
+  const previewScreenName = getPreviewScreenName(mode);
 
   const [laborHours, setLaborHours] = useState('');
   const [laborRate, setLaborRate] = useState('');
@@ -94,8 +103,9 @@ export function LaborMarkupScreen() {
   const handleNext = () => {
     // Validate labor hours and rate
     if (hours === 0 || rate === 0) {
+      const docType = mode === 'invoice' ? 'invoice' : 'quote';
       setWarningMessage(
-        'Labor hours or rate is set to $0. This means no labor cost will be included in the quote.\n\nDo you want to continue?'
+        `Labor hours or rate is set to $0. This means no labor cost will be included in the ${docType}.\n\nDo you want to continue?`
       );
       setWarningDialogVisible(true);
       return;
@@ -121,7 +131,7 @@ export function LaborMarkupScreen() {
 
     updateQuote(updatedQuote);
     setWarningDialogVisible(false);
-    navigation.navigate('QuotePreview');
+    navigation.navigate(previewScreenName);
   };
 
   const scrollContent = (
@@ -261,7 +271,7 @@ export function LaborMarkupScreen() {
         </ScrollView>
 
         <FixedBottomButton
-          label="Next: Preview Quote"
+          label={mode === 'invoice' ? "Next: Preview Invoice" : "Next: Preview Quote"}
           onPress={handleNext}
         />
       </View>

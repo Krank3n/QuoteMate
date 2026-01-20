@@ -35,6 +35,7 @@ import {
 } from 'expo-speech-recognition';
 
 import { useStore } from '../../store/useStore';
+import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
 import { JOB_TEMPLATES } from '../../data/jobTemplates';
 import { NICHE_TEMPLATES, getTemplatesForNiche, getNicheTemplateById, NicheJobTemplate } from '../../data/nicheTemplates';
 import { getTradeCategoryById, getTradeNicheById, PRICING_METHODS } from '../../constants/tradeCategories';
@@ -49,7 +50,13 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
-  const { currentQuote, updateQuote, quotes, businessSettings } = useStore();
+  const mode = useDocumentMode();
+  const { document: currentDocument, update: updateDocument } = useCurrentDocument();
+  const { quotes, invoices, businessSettings } = useStore();
+
+  // For compatibility, alias to currentQuote (used throughout this file)
+  const currentQuote = currentDocument;
+  const updateQuote = updateDocument;
   const insets = useSafeAreaInsets();
 
   const [selectedTemplate, setSelectedTemplate] = useState<JobTemplate | NicheJobTemplate | null>(null);
@@ -95,8 +102,12 @@ export function JobDetailsScreen() {
     }).start();
   }, [isTemplateCarouselExpanded]);
 
-  // Check if editing an existing quote (by checking if it exists in saved quotes)
-  const isEditingExisting = !!(currentQuote && quotes.find(q => q.id === currentQuote.id));
+  // Check if editing an existing document (by checking if it exists in saved quotes/invoices)
+  const isEditingExisting = !!(currentQuote && (
+    mode === 'invoice'
+      ? invoices.find(i => i.id === currentQuote.id)
+      : quotes.find(q => q.id === currentQuote.id)
+  ));
 
   // Speech recognition event handlers
   useSpeechRecognitionEvent('start', () => {
@@ -732,16 +743,21 @@ export function JobDetailsScreen() {
           estimatedHours: analysis.estimatedHours,
         };
 
-        // Get the latest quote state and update it
-        const latestQuote = useStore.getState().currentQuote;
-        if (latestQuote) {
-          const finalQuote = {
-            ...latestQuote,
+        // Get the latest document state and update it
+        const state = useStore.getState();
+        const latestDocument = mode === 'invoice' ? state.currentInvoice : state.currentQuote;
+        if (latestDocument) {
+          const finalDocument = {
+            ...latestDocument,
             job: analyzedJob,
             materials,
             laborHours: analysis.estimatedHours,
           };
-          useStore.getState().updateQuote(finalQuote);
+          if (mode === 'invoice') {
+            state.updateInvoice(finalDocument as any);
+          } else {
+            state.updateQuote(finalDocument as any);
+          }
         }
 
         console.log('✅ AI analysis complete:', materials.length, 'materials generated');

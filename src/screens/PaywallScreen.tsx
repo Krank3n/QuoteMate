@@ -39,6 +39,7 @@ export function PaywallScreen() {
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showCancellationModal, setShowCancellationModal] = useState(false);
+  const [productsLoadError, setProductsLoadError] = useState(false);
 
   // Use subscriptionStatus from useStore which has the accurate count
   const quotesUsed = subscriptionStatus?.quotesThisMonth || quoteCount;
@@ -74,6 +75,7 @@ export function PaywallScreen() {
 
   const loadProducts = async () => {
     setLoading(true);
+    setProductsLoadError(false);
     try {
       console.log('🔍 Loading products...');
       console.log('🔍 Platform:', Platform.OS);
@@ -85,7 +87,9 @@ export function PaywallScreen() {
       console.log('📦 Product count:', availableProducts.length);
 
       if (availableProducts.length === 0) {
-        // Only show alert if we're on Android where we expect subscriptions
+        // Track that products failed to load (for retry functionality)
+        setProductsLoadError(true);
+
         if (Platform.OS === 'android') {
           Alert.alert(
             'No Products Found',
@@ -95,8 +99,11 @@ export function PaywallScreen() {
             '3. Make sure they are ACTIVE\n' +
             '4. Install app from Play Store test link'
           );
+        } else if (Platform.OS === 'ios') {
+          console.log('⚠️ No iOS subscription products found');
         } else if (Platform.OS === 'web') {
           console.log('ℹ️ Web products loaded from configuration');
+          setProductsLoadError(false); // Web has hardcoded products, not an error
         }
       }
       // Convert to RNIap.Subscription format for compatibility
@@ -111,13 +118,15 @@ export function PaywallScreen() {
       setProducts(formattedProducts as any);
     } catch (error: any) {
       console.error('Error loading products:', error);
+      setProductsLoadError(true);
 
       // Handle IAP not available gracefully
       if (error?.code === 'E_IAP_NOT_AVAILABLE' || error?.message?.includes('E_IAP_NOT_AVAILABLE')) {
         console.log('ℹ️ In-app purchases not available on this platform');
         setIapNotAvailable(true);
+        setProductsLoadError(false); // This is expected, not an error
       } else {
-        Alert.alert('Error', 'Failed to load subscription options');
+        Alert.alert('Error', 'Failed to load subscription options. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -460,8 +469,8 @@ export function PaywallScreen() {
 
   return (
     <>
-      {/* Stripe Checkout Modal */}
-      {showCheckoutModal && selectedProduct && auth.currentUser && (
+      {/* Stripe Checkout Modal - Web only (iOS/Android MUST use native IAP per App Store Guidelines 3.1.1) */}
+      {Platform.OS === 'web' && showCheckoutModal && selectedProduct && auth.currentUser && (
         <StripeCheckoutModal
           visible={showCheckoutModal}
           onDismiss={handleCheckoutDismiss}
@@ -602,16 +611,38 @@ export function PaywallScreen() {
           </View>
         </View>
 
-        <Button
-          mode="contained"
-          onPress={handleUpgrade}
-          style={styles.upgradeButton}
-          contentStyle={styles.upgradeButtonContent}
-          loading={isUpgrading}
-          disabled={isUpgrading || products.length === 0}
-        >
-          Start Pro Subscription
-        </Button>
+        {/* Show retry button if products failed to load on iOS/Android */}
+        {productsLoadError && Platform.OS !== 'web' ? (
+          <>
+            <View style={styles.errorStateContainer}>
+              <MaterialCommunityIcons name="alert-circle-outline" size={32} color={colors.warning} />
+              <Text style={styles.errorStateText}>
+                Unable to load subscription options. Please check your internet connection and try again.
+              </Text>
+            </View>
+            <Button
+              mode="contained"
+              onPress={loadProducts}
+              style={styles.upgradeButton}
+              contentStyle={styles.upgradeButtonContent}
+              loading={loading}
+              disabled={loading}
+            >
+              Retry Loading
+            </Button>
+          </>
+        ) : (
+          <Button
+            mode="contained"
+            onPress={handleUpgrade}
+            style={styles.upgradeButton}
+            contentStyle={styles.upgradeButtonContent}
+            loading={isUpgrading}
+            disabled={isUpgrading || products.length === 0}
+          >
+            Start Pro Subscription
+          </Button>
+        )}
 
         <Text style={styles.disclaimer}>
           Cancel anytime. Subscriptions automatically renew unless cancelled 24 hours before the end of the period.
@@ -817,5 +848,19 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  errorStateContainer: {
+    alignItems: 'center',
+    backgroundColor: colors.warningBg,
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  errorStateText: {
+    fontSize: 14,
+    color: colors.warning,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
 });

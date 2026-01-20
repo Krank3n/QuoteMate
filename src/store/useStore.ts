@@ -6,8 +6,9 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
-import { Quote, BusinessSettings, Material, SubscriptionStatus } from '../types';
+import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod } from '../types';
 import { updateQuoteCalculations } from '../utils/quoteCalculator';
+import { calculateDueDate } from '../utils/invoiceCalculator';
 import { firestoreService } from '../services/firestoreService';
 import { auth } from '../config/firebase';
 
@@ -42,6 +43,35 @@ interface AppState {
   setOnboarded: (value: boolean) => Promise<void>;
   checkOnboarding: () => Promise<void>;
 
+  // Quote numbering
+  nextQuoteNumber: number;
+  loadNextQuoteNumber: () => Promise<void>;
+  getNextQuoteNumber: () => Promise<string>;
+
+  // Invoices
+  invoices: Invoice[];
+  currentInvoice: Invoice | null;
+  nextInvoiceNumber: number;
+
+  // Invoice operations
+  createNewInvoice: () => void;
+  createInvoiceFromQuote: (quote: Quote) => Invoice;
+  setCurrentInvoice: (invoice: Invoice | null) => void;
+  updateInvoice: (invoice: Invoice) => void;
+  saveInvoice: (invoice: Invoice) => Promise<void>;
+  deleteInvoice: (invoiceId: string) => Promise<void>;
+  loadInvoices: () => Promise<void>;
+  loadNextInvoiceNumber: () => Promise<void>;
+  getNextInvoiceNumber: () => Promise<string>;
+  recordPayment: (
+    invoiceId: string,
+    amount: number,
+    method: PaymentMethod,
+    notes?: string,
+    paymentDate?: Date
+  ) => Promise<void>;
+  duplicateInvoice: (invoice: Invoice) => Promise<Invoice>;
+
   // Cleanup
   clearAllData: () => Promise<void>;
 }
@@ -52,6 +82,9 @@ const STORAGE_KEYS = {
   BUSINESS_SETTINGS: '@quotemate:business_settings',
   ONBOARDED: '@quotemate:onboarded',
   SUBSCRIPTION: '@quotemate:subscription',
+  NEXT_QUOTE_NUMBER: '@quotemate:next_quote_number',
+  INVOICES: '@quotemate:invoices',
+  NEXT_INVOICE_NUMBER: '@quotemate:next_invoice_number',
 };
 
 // Helper to check if we need to reset monthly count
@@ -73,6 +106,10 @@ export const useStore = create<AppState>((set, get) => ({
   currentQuote: null,
   isOnboarded: false,
   subscriptionStatus: null,
+  nextQuoteNumber: 1,
+  invoices: [],
+  currentInvoice: null,
+  nextInvoiceNumber: 1,
 
   // Business settings
   setBusinessSettings: async (settings: BusinessSettings) => {
@@ -170,13 +207,19 @@ export const useStore = create<AppState>((set, get) => ({
   // Save quote to storage
   saveQuote: async (quote: Quote) => {
     try {
-      const { quotes, incrementQuoteCount } = get();
+      const { quotes, incrementQuoteCount, getNextQuoteNumber } = get();
 
       // Update or add quote
       const existingIndex = quotes.findIndex((q) => q.id === quote.id);
       let updatedQuotes: Quote[];
       const isNewQuote = existingIndex < 0;
-      const calculatedQuote = updateQuoteCalculations(quote);
+      let calculatedQuote = updateQuoteCalculations(quote);
+
+      // Assign quote number for new quotes that don't have one
+      if (isNewQuote && !calculatedQuote.quoteNumber) {
+        const quoteNumber = await getNextQuoteNumber();
+        calculatedQuote = { ...calculatedQuote, quoteNumber };
+      }
 
       if (existingIndex >= 0) {
         // Update existing quote
@@ -507,6 +550,370 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  // Quote numbering
+  loadNextQuoteNumber: async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.NEXT_QUOTE_NUMBER);
+      if (stored) {
+        const nextQuoteNumber = parseInt(stored, 10);
+        set({ nextQuoteNumber });
+      }
+    } catch (error) {
+      console.error('Failed to load next quote number:', error);
+    }
+  },
+
+  getNextQuoteNumber: async () => {
+    const { nextQuoteNumber } = get();
+    const quoteNumber = `Q-${String(nextQuoteNumber).padStart(3, '0')}`;
+
+    // Increment and save for next time
+    const newNextQuoteNumber = nextQuoteNumber + 1;
+    await AsyncStorage.setItem(STORAGE_KEYS.NEXT_QUOTE_NUMBER, String(newNextQuoteNumber));
+    set({ nextQuoteNumber: newNextQuoteNumber });
+
+    return quoteNumber;
+  },
+
+  // Invoice operations
+  createNewInvoice: () => {
+    const { businessSettings } = get();
+    const now = new Date();
+    const newInvoice: Invoice = {
+      id: generateId(),
+      createdAt: now,
+      updatedAt: now,
+      issueDate: now,
+      dueDate: calculateDueDate(now, 'net_14'),
+      customerName: '',
+      job: {
+        id: generateId(),
+        name: '',
+        description: '',
+        template: 'custom',
+      },
+      materials: [],
+      laborRate: businessSettings?.defaultLaborRate || 85,
+      laborHours: 0,
+      laborTotal: 0,
+      materialsSubtotal: 0,
+      markup: businessSettings?.defaultMarkup || 20,
+      markupAmount: 0,
+      subtotal: 0,
+      gst: 0,
+      total: 0,
+      status: 'draft',
+      paymentTerms: 'net_14',
+    };
+
+    set({ currentInvoice: newInvoice });
+  },
+
+  createInvoiceFromQuote: (quote: Quote) => {
+    const now = new Date();
+    const newInvoice: Invoice = {
+      id: generateId(),
+      createdAt: now,
+      updatedAt: now,
+      issueDate: now,
+      dueDate: calculateDueDate(now, 'net_14'),
+      customerName: quote.customerName,
+      customerEmail: quote.customerEmail,
+      customerPhone: quote.customerPhone,
+      jobAddress: quote.jobAddress,
+      job: {
+        ...quote.job,
+        id: generateId(),
+      },
+      materials: quote.materials.map(m => ({
+        ...m,
+        id: generateId(),
+      })),
+      laborRate: quote.laborRate,
+      laborHours: quote.laborHours,
+      laborTotal: quote.laborTotal,
+      materialsSubtotal: quote.materialsSubtotal,
+      markup: quote.markup,
+      markupAmount: quote.markupAmount,
+      subtotal: quote.subtotal,
+      gst: quote.gst,
+      total: quote.total,
+      status: 'draft',
+      paymentTerms: 'net_14',
+      sourceQuoteId: quote.id,
+      notes: quote.notes,
+    };
+
+    set({ currentInvoice: newInvoice });
+    return newInvoice;
+  },
+
+  setCurrentInvoice: (invoice: Invoice | null) => {
+    set({ currentInvoice: invoice });
+  },
+
+  updateInvoice: (invoice: Invoice) => {
+    // Apply same calculations as quotes
+    const updatedInvoice = {
+      ...invoice,
+      laborTotal: invoice.laborRate * invoice.laborHours,
+      materialsSubtotal: invoice.materials.reduce((sum, m) => sum + m.totalPrice, 0),
+    };
+    updatedInvoice.subtotal = updatedInvoice.laborTotal + updatedInvoice.materialsSubtotal;
+    updatedInvoice.markupAmount = updatedInvoice.subtotal * (invoice.markup / 100);
+    const subtotalWithMarkup = updatedInvoice.subtotal + updatedInvoice.markupAmount;
+    updatedInvoice.gst = subtotalWithMarkup * 0.1;
+    updatedInvoice.total = subtotalWithMarkup + updatedInvoice.gst;
+
+    set({ currentInvoice: updatedInvoice });
+  },
+
+  saveInvoice: async (invoice: Invoice) => {
+    try {
+      const { invoices, getNextInvoiceNumber } = get();
+
+      const existingIndex = invoices.findIndex((i) => i.id === invoice.id);
+      const isNewInvoice = existingIndex < 0;
+      let updatedInvoice = { ...invoice, updatedAt: new Date() };
+
+      // Assign invoice number for new invoices that don't have one
+      if (isNewInvoice && !updatedInvoice.invoiceNumber) {
+        const invoiceNumber = await getNextInvoiceNumber();
+        updatedInvoice = { ...updatedInvoice, invoiceNumber };
+      }
+
+      let updatedInvoices: Invoice[];
+      if (existingIndex >= 0) {
+        updatedInvoices = [...invoices];
+        updatedInvoices[existingIndex] = updatedInvoice;
+      } else {
+        updatedInvoices = [...invoices, updatedInvoice];
+      }
+
+      // Save to AsyncStorage
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.INVOICES,
+        JSON.stringify(updatedInvoices)
+      );
+
+      set({ invoices: updatedInvoices });
+
+      // Sync to Firestore if user is signed in
+      if (auth.currentUser) {
+        await firestoreService.saveInvoice(updatedInvoice);
+      }
+    } catch (error) {
+      console.error('Failed to save invoice:', error);
+      throw error;
+    }
+  },
+
+  deleteInvoice: async (invoiceId: string) => {
+    try {
+      const { invoices } = get();
+      const updatedInvoices = invoices.filter((i) => i.id !== invoiceId);
+
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.INVOICES,
+        JSON.stringify(updatedInvoices)
+      );
+
+      set({ invoices: updatedInvoices });
+
+      // Delete from Firestore if user is signed in
+      if (auth.currentUser) {
+        await firestoreService.deleteInvoice(invoiceId);
+      }
+    } catch (error) {
+      console.error('Failed to delete invoice:', error);
+      throw error;
+    }
+  },
+
+  loadInvoices: async () => {
+    try {
+      // If user is signed in, try loading from Firestore first
+      if (auth.currentUser) {
+        const cloudInvoices = await firestoreService.loadInvoices();
+        if (cloudInvoices.length > 0) {
+          // Save to local storage for offline access
+          await AsyncStorage.setItem(
+            STORAGE_KEYS.INVOICES,
+            JSON.stringify(cloudInvoices)
+          );
+          set({ invoices: cloudInvoices });
+          return;
+        }
+      }
+
+      // Fallback to local storage
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.INVOICES);
+      if (stored) {
+        const invoices: Invoice[] = JSON.parse(stored, (key, value) => {
+          // Parse date strings back to Date objects
+          if (
+            key === 'createdAt' ||
+            key === 'updatedAt' ||
+            key === 'issueDate' ||
+            key === 'dueDate' ||
+            key === 'paidDate'
+          ) {
+            return value ? new Date(value) : undefined;
+          }
+          return value;
+        });
+        set({ invoices });
+
+        // Sync to cloud if user is signed in but no cloud data exists
+        if (auth.currentUser && invoices.length > 0) {
+          console.log('📤 Syncing local invoices to Firestore...');
+          for (const invoice of invoices) {
+            await firestoreService.saveInvoice(invoice);
+          }
+          console.log('✅ Local invoices synced to Firestore');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load invoices:', error);
+    }
+  },
+
+  loadNextInvoiceNumber: async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.NEXT_INVOICE_NUMBER);
+      if (stored) {
+        const nextInvoiceNumber = parseInt(stored, 10);
+        set({ nextInvoiceNumber });
+      }
+    } catch (error) {
+      console.error('Failed to load next invoice number:', error);
+    }
+  },
+
+  getNextInvoiceNumber: async () => {
+    const { nextInvoiceNumber } = get();
+    const invoiceNumber = `INV-${String(nextInvoiceNumber).padStart(3, '0')}`;
+
+    // Increment and save for next time
+    const newNextInvoiceNumber = nextInvoiceNumber + 1;
+    await AsyncStorage.setItem(STORAGE_KEYS.NEXT_INVOICE_NUMBER, String(newNextInvoiceNumber));
+    set({ nextInvoiceNumber: newNextInvoiceNumber });
+
+    return invoiceNumber;
+  },
+
+  recordPayment: async (
+    invoiceId: string,
+    amount: number,
+    method: PaymentMethod,
+    notes?: string,
+    paymentDate?: Date
+  ) => {
+    try {
+      const { invoices } = get();
+      const invoice = invoices.find((i) => i.id === invoiceId);
+      if (!invoice) {
+        throw new Error('Invoice not found');
+      }
+
+      const currentPaid = invoice.paidAmount || 0;
+      const newPaidAmount = currentPaid + amount;
+      const amountDue = invoice.total - newPaidAmount;
+
+      // Determine new status
+      let newStatus: Invoice['status'];
+      if (amountDue <= 0) {
+        newStatus = 'paid';
+      } else if (newPaidAmount > 0) {
+        newStatus = 'partial';
+      } else {
+        newStatus = invoice.status;
+      }
+
+      const updatedInvoice: Invoice = {
+        ...invoice,
+        paidAmount: newPaidAmount,
+        paidDate: paymentDate || new Date(),
+        paymentMethod: method,
+        paymentNotes: notes,
+        status: newStatus,
+        updatedAt: new Date(),
+      };
+
+      const updatedInvoices = invoices.map((i) =>
+        i.id === invoiceId ? updatedInvoice : i
+      );
+
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.INVOICES,
+        JSON.stringify(updatedInvoices)
+      );
+
+      set({ invoices: updatedInvoices });
+
+      // Sync to Firestore if user is signed in
+      if (auth.currentUser) {
+        await firestoreService.saveInvoice(updatedInvoice);
+      }
+    } catch (error) {
+      console.error('Failed to record payment:', error);
+      throw error;
+    }
+  },
+
+  duplicateInvoice: async (invoice: Invoice) => {
+    try {
+      const { invoices } = get();
+
+      // Create a copy with new ID and timestamps, reset payment info
+      const duplicatedInvoice: Invoice = {
+        ...invoice,
+        id: generateId(),
+        invoiceNumber: undefined, // Will get new number on save
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        issueDate: new Date(),
+        dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // Default 14 days
+        status: 'draft',
+        // Reset payment tracking
+        paidAmount: undefined,
+        paidDate: undefined,
+        paymentMethod: undefined,
+        paymentNotes: undefined,
+        // Clear source quote link
+        sourceQuoteId: undefined,
+        // Regenerate material IDs
+        materials: invoice.materials.map((m) => ({
+          ...m,
+          id: generateId(),
+        })),
+        job: {
+          ...invoice.job,
+          id: generateId(),
+        },
+      };
+
+      // Save to local storage
+      const updatedInvoices = [...invoices, duplicatedInvoice];
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.INVOICES,
+        JSON.stringify(updatedInvoices)
+      );
+
+      set({ invoices: updatedInvoices, currentInvoice: duplicatedInvoice });
+
+      // Sync to Firestore if user is signed in
+      if (auth.currentUser) {
+        await firestoreService.saveInvoice(duplicatedInvoice);
+      }
+
+      return duplicatedInvoice;
+    } catch (error) {
+      console.error('Failed to duplicate invoice:', error);
+      throw error;
+    }
+  },
+
   // Clear all data (for logout)
   clearAllData: async () => {
     try {
@@ -520,6 +927,8 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.BUSINESS_SETTINGS,
         STORAGE_KEYS.ONBOARDED,
         STORAGE_KEYS.SUBSCRIPTION,
+        STORAGE_KEYS.INVOICES,
+        STORAGE_KEYS.NEXT_INVOICE_NUMBER,
       ]);
       console.log('✅ clearAllData: AsyncStorage cleared');
 
@@ -531,6 +940,9 @@ export const useStore = create<AppState>((set, get) => ({
         currentQuote: null,
         isOnboarded: false,
         subscriptionStatus: null,
+        invoices: [],
+        currentInvoice: null,
+        nextInvoiceNumber: 1,
       });
       console.log('✅ clearAllData: Store state reset');
 

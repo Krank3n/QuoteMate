@@ -26,7 +26,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [userDataLoaded, setUserDataLoaded] = useState(false);
-  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription } = useStore();
+  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber } = useStore();
 
   // ===== TESTING FLAGS =====
   // Set SKIP_AUTH_FOR_TESTING to true to bypass login and test onboarding
@@ -54,6 +54,7 @@ export default function App() {
           loadBusinessSettings(),
           checkOnboarding(),
           loadSubscription(),
+          loadNextQuoteNumber(),
         ]);
 
         setUserDataLoaded(true); // Mark user data as loaded
@@ -102,6 +103,7 @@ export default function App() {
           loadQuotes(),
           loadBusinessSettings(),
           loadSubscription(),
+          loadNextQuoteNumber(),
         ]);
 
         // Initialize subscription sync (syncs across all platforms)

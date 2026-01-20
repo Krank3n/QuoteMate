@@ -43,6 +43,7 @@ export interface Job {
 
 export interface Quote {
   id: string;
+  quoteNumber?: string; // Human-readable reference number (e.g., "Q-001")
   createdAt: Date;
   updatedAt: Date;
   customerName: string;
@@ -97,6 +98,49 @@ export interface HardwareStore {
   description: string;
 }
 
+// Payment method types for business settings
+export type PaymentMethodType = 'bank_transfer' | 'paypal' | 'bpay' | 'payid' | 'other';
+
+export interface BankAccountDetails {
+  enabled?: boolean;
+  accountName?: string;
+  bsb?: string;
+  accountNumber?: string;
+}
+
+export interface BPayDetails {
+  enabled?: boolean;
+  billerCode?: string;
+  referenceNumber?: string;
+}
+
+export interface PayIDDetails {
+  enabled?: boolean;
+  payIdType?: 'phone' | 'email' | 'abn';
+  payIdValue?: string;
+}
+
+export interface PayPalDetails {
+  enabled?: boolean;
+  email?: string;
+}
+
+export interface OtherPaymentDetails {
+  enabled?: boolean;
+  instructions?: string;
+}
+
+export interface PaymentMethodSettings {
+  // Master toggle - show payment section on PDFs
+  showOnDocuments: boolean;
+  // Individual payment methods
+  bankAccount?: BankAccountDetails;
+  paypal?: PayPalDetails;
+  bpay?: BPayDetails;
+  payId?: PayIDDetails;
+  other?: OtherPaymentDetails;
+}
+
 export interface BusinessSettings {
   businessName: string;
   abn?: string;
@@ -118,6 +162,10 @@ export interface BusinessSettings {
   useBunningsApi?: boolean; // If true, use Bunnings API. If false/undefined, use AI estimation (default: false)
   useReeceApi?: boolean; // If true and tradeType is plumber, use Reece API for plumbing supplies
   selectedStore?: string; // Single selected hardware store (e.g., 'bunnings', 'mitre10')
+  // Quote display settings
+  showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)
+  // Payment method settings
+  paymentMethods?: PaymentMethodSettings;
   // Legacy fields (kept for backwards compatibility)
   hardwareStores?: string[]; // DEPRECATED - use selectedStore instead
   customStores?: string[]; // DEPRECATED - Custom store URLs added by user
@@ -172,3 +220,54 @@ export interface SubscriptionStatus {
 }
 
 export type SubscriptionPlan = 'free' | 'pro';
+
+// Invoice types
+export type PaymentTerms = 'due_on_receipt' | 'net_7' | 'net_14' | 'net_30' | 'custom';
+export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'partial' | 'overdue' | 'cancelled';
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'card' | 'cheque' | 'other';
+
+export interface Invoice {
+  id: string;
+  invoiceNumber?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  issueDate: Date;
+  dueDate: Date;
+
+  // Customer (same as Quote)
+  customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  jobAddress?: string;
+
+  // Job & Materials (same as Quote)
+  job: Job;
+  materials: Material[];
+
+  // Pricing (same as Quote)
+  laborRate: number;
+  laborHours: number;
+  laborTotal: number;
+  materialsSubtotal: number;
+  markup: number;
+  markupAmount: number;
+  subtotal: number;
+  gst: number;
+  total: number;
+
+  // Invoice-specific
+  status: InvoiceStatus;
+  paymentTerms: PaymentTerms;
+  customPaymentDays?: number;
+
+  // Payment tracking
+  paidDate?: Date;
+  paidAmount?: number;
+  paymentMethod?: PaymentMethod;
+  paymentNotes?: string;
+
+  // Link to source quote
+  sourceQuoteId?: string;
+
+  notes?: string;
+}

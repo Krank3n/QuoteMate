@@ -27,12 +27,13 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { generateQuotePDF, exportQuotePDF } from '../utils/pdfGenerator';
 import { WebContainer } from '../components/WebContainer';
 import { QuoteCard } from '../components/QuoteCard';
+import { AlertModal } from '../components/AlertModal';
 
 type FilterStatus = 'all' | 'draft' | 'sent' | 'accepted' | 'rejected';
 
 export function QuotesListScreen() {
   const navigation = useNavigation<any>();
-  const { quotes, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings, canCreateQuote } = useStore();
+  const { quotes, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings, canCreateQuote, createInvoiceFromQuote, saveInvoice } = useStore();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
@@ -41,6 +42,9 @@ export function QuotesListScreen() {
   const [selectedStatus, setSelectedStatus] = useState<'draft' | 'sent' | 'accepted' | 'rejected'>('draft');
   const [emailDialogVisible, setEmailDialogVisible] = useState(false);
   const [emailQuote, setEmailQuote] = useState<Quote | null>(null);
+  const [convertModalVisible, setConvertModalVisible] = useState(false);
+  const [quoteToConvert, setQuoteToConvert] = useState<Quote | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
 
   // Filter and search quotes
   const filteredQuotes = quotes.filter((quote) => {
@@ -134,6 +138,27 @@ export function QuotesListScreen() {
       Alert.alert('Success', 'Quote duplicated successfully!');
     } catch (error) {
       Alert.alert('Error', 'Failed to duplicate quote. Please try again.');
+    }
+  };
+
+  const handleConvertToInvoice = (quote: Quote) => {
+    setQuoteToConvert(quote);
+    setConvertModalVisible(true);
+  };
+
+  const handleConfirmConvert = async () => {
+    if (!quoteToConvert) return;
+    setIsConverting(true);
+    try {
+      const invoice = createInvoiceFromQuote(quoteToConvert);
+      await saveInvoice(invoice);
+      setConvertModalVisible(false);
+      setQuoteToConvert(null);
+      navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
+    } catch (error) {
+      console.error('Failed to convert to invoice:', error);
+    } finally {
+      setIsConverting(false);
     }
   };
 
@@ -246,11 +271,34 @@ export function QuotesListScreen() {
       onSave={saveQuote}
       onStatusChange={handleOpenStatusDialog}
       onEmailDialogOpen={handleOpenEmailDialog}
+      onConvertToInvoice={handleConvertToInvoice}
     />
   );
 
   return (
     <View style={styles.container}>
+      {/* Convert to Invoice Modal */}
+      <AlertModal
+        visible={convertModalVisible}
+        onDismiss={() => {
+          setConvertModalVisible(false);
+          setQuoteToConvert(null);
+        }}
+        type="info"
+        icon="file-replace"
+        title="Convert to Invoice"
+        message={quoteToConvert ? `Create an invoice from this quote for ${quoteToConvert.customerName}?` : ''}
+        showConfetti={false}
+        primaryButtonText="Convert"
+        primaryButtonAction={handleConfirmConvert}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => {
+          setConvertModalVisible(false);
+          setQuoteToConvert(null);
+        }}
+        secondaryButtonLoading={isConverting}
+      />
+
       <WebContainer>
         {/* Search Bar */}
         <Searchbar

@@ -225,7 +225,9 @@ export function QuotePreviewScreen() {
           </View>
         <View style={styles.summaryRow}>
           <Text style={styles.text}>
-            {currentQuote.laborHours} hours @ {formatCurrency(currentQuote.laborRate)}/hr
+            {businessSettings?.showLaborHours
+              ? `${currentQuote.laborHours} hours @ ${formatCurrency(currentQuote.laborRate)}/hr`
+              : 'Labor'}
           </Text>
           <Text style={styles.summaryValue}>{formatCurrency(currentQuote.laborTotal)}</Text>
         </View>

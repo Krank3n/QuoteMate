@@ -32,6 +32,7 @@ interface QuoteCardProps {
   onSave: (quote: Quote) => void;
   onStatusChange?: (quote: Quote) => void;
   onEmailDialogOpen?: (quote: Quote) => void;
+  onConvertToInvoice?: (quote: Quote) => void;
 }
 
 export function QuoteCard({
@@ -44,6 +45,7 @@ export function QuoteCard({
   onSave,
   onStatusChange,
   onEmailDialogOpen,
+  onConvertToInvoice,
 }: QuoteCardProps) {
   const [menuVisible, setMenuVisible] = useState(false);
 
@@ -155,6 +157,9 @@ export function QuoteCard({
           <Card.Content style={styles.cardContent}>
             <View style={styles.quoteHeader}>
               <View style={styles.quoteInfo}>
+                {quote.quoteNumber && (
+                  <Text style={styles.quoteNumber}>{quote.quoteNumber}</Text>
+                )}
                 <Text style={styles.quoteName}>{quote.customerName}</Text>
                 <Text style={styles.quoteJob}>{quote.job.name}</Text>
               </View>
@@ -226,6 +231,16 @@ export function QuoteCard({
                     }}
                     title="Export PDF"
                   />
+                  {onConvertToInvoice && (
+                    <Menu.Item
+                      leadingIcon="file-replace"
+                      onPress={() => {
+                        setMenuVisible(false);
+                        onConvertToInvoice(quote);
+                      }}
+                      title="Convert to Invoice"
+                    />
+                  )}
                   <Menu.Item
                     leadingIcon="delete"
                     onPress={() => {
@@ -282,6 +297,12 @@ const styles = StyleSheet.create({
   quoteRight: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  quoteNumber: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
+    marginBottom: 2,
   },
   quoteName: {
     fontSize: 16,

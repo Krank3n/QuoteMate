@@ -14,8 +14,9 @@ import {
   IconButton,
 } from 'react-native-paper';
 import { colors } from '../theme';
-import { Quote, BusinessSettings } from '../types';
+import { Quote, Invoice, BusinessSettings } from '../types';
 import { SendQuoteButton } from './SendQuoteButton';
+import { SendInvoiceButton } from './SendInvoiceButton';
 
 export type AlertType = 'success' | 'warning' | 'error' | 'info';
 
@@ -34,6 +35,8 @@ interface AlertModalProps {
   secondaryButtonLoading?: boolean;
   // Special props for quote-related modals
   quote?: Quote;
+  // Special props for invoice-related modals
+  invoice?: Invoice;
   businessSettings?: BusinessSettings | null;
 }
 
@@ -105,6 +108,7 @@ export function AlertModal({
   secondaryButtonAction,
   secondaryButtonLoading = false,
   quote,
+  invoice,
   businessSettings,
 }: AlertModalProps) {
   const scaleAnim = useRef(new Animated.Value(0)).current;
@@ -313,10 +317,17 @@ export function AlertModal({
           <Text style={styles.message}>{message}</Text>
 
           <View style={styles.buttonContainer}>
-            {/* Quote send button */}
+            {/* Quote or Invoice send button */}
             {quote && businessSettings ? (
               <SendQuoteButton
                 quote={quote}
+                businessSettings={businessSettings}
+                buttonMode="outlined"
+                buttonStyle={[styles.button, styles.secondaryButton]}
+              />
+            ) : invoice && businessSettings ? (
+              <SendInvoiceButton
+                invoice={invoice}
                 businessSettings={businessSettings}
                 buttonMode="outlined"
                 buttonStyle={[styles.button, styles.secondaryButton]}
