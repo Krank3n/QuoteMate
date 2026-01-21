@@ -406,7 +406,7 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
           <tbody>
             <tr>
               <td>${businessSettings?.showLaborHours ? `Labor (${quote.laborHours} hours @ ${formatCurrency(quote.laborRate)}/hr)` : 'Labor'}</td>
-              <td>${formatCurrency(quote.laborTotal)}</td>
+              <td style="text-align: right;">${formatCurrency(quote.laborTotal)}</td>
             </tr>
           </tbody>
         </table>
@@ -865,7 +865,7 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
           <tbody>
             <tr>
               <td>${businessSettings?.showLaborHours ? `Labor (${invoice.laborHours} hours @ ${formatCurrency(invoice.laborRate)}/hr)` : 'Labor'}</td>
-              <td>${formatCurrency(invoice.laborTotal)}</td>
+              <td style="text-align: right;">${formatCurrency(invoice.laborTotal)}</td>
             </tr>
           </tbody>
         </table>

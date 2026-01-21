@@ -20,7 +20,7 @@ import { format } from 'date-fns';
 import { Quote, BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { generateQuotePDF, exportQuotePDF } from '../utils/pdfGenerator';
+import { generateQuotePDF, exportQuotePDF, generatePdfFilename } from '../utils/pdfGenerator';
 
 interface SendQuoteButtonProps {
   quote: Quote;
@@ -73,7 +73,7 @@ export function SendQuoteButton({
       if (Platform.OS === 'web') {
         // Generate PDF HTML
         const html = await generateQuotePDF(quote, businessSettings);
-        const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
+        const filename = generatePdfFilename('Quote', quote.customerName, quote.job.name, new Date(quote.updatedAt));
 
         // Create a hidden iframe to print the PDF
         const iframe = document.createElement('iframe');
@@ -111,7 +111,7 @@ export function SendQuoteButton({
 
         // Generate PDF with custom filename
         const html = await generateQuotePDF(quote, businessSettings);
-        const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
+        const filename = generatePdfFilename('Quote', quote.customerName, quote.job.name, new Date(quote.updatedAt));
         const { uri } = await Print.printToFileAsync({ html, base64: false });
 
         // Compose email

@@ -20,7 +20,7 @@ import { format } from 'date-fns';
 import { Invoice, BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { generateInvoicePDF, exportInvoicePDF } from '../utils/pdfGenerator';
+import { generateInvoicePDF, exportInvoicePDF, generatePdfFilename } from '../utils/pdfGenerator';
 
 interface SendInvoiceButtonProps {
   invoice: Invoice;
@@ -68,7 +68,7 @@ export function SendInvoiceButton({
     try {
       if (Platform.OS === 'web') {
         const html = await generateInvoicePDF(invoice, businessSettings);
-        const filename = `Invoice_${invoice.customerName.replace(/\s+/g, '_')}_${invoice.job.name.replace(/\s+/g, '_')}_${format(invoice.updatedAt, 'dd-MMM-yyyy')}.pdf`;
+        const filename = generatePdfFilename('Invoice', invoice.customerName, invoice.job.name, new Date(invoice.updatedAt));
 
         const iframe = document.createElement('iframe');
         iframe.style.display = 'none';
