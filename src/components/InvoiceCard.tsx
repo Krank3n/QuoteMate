@@ -374,7 +374,8 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 12,
     textTransform: 'capitalize',
-    marginVertical: 0,
+    marginTop: -1,
+    marginBottom: 0,
     lineHeight: 24,
   },
   divider: {

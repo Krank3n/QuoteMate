@@ -1,1847 +1,218 @@
 /**
  * Settings Screen
- * Business configuration and default rates
+ * Main settings menu with navigation to sub-screens
  */
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
-  Alert,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import {
   Text,
-  TextInput,
-  Button,
   Surface,
-  Title,
-  Divider,
-  IconButton,
-  Chip,
-  Switch,
 } from 'react-native-paper';
-import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 
 import { useStore } from '../store/useStore';
-import { BusinessSettings, TradeType, HardwareStore, PaymentMethodSettings } from '../types';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
-import { auth } from '../config/firebase';
-import { signOut, deleteUser } from 'firebase/auth';
-import {
-  getStoresForTrade,
-  getDefaultStoresForTrade,
-  TRADE_TYPE_LABELS
-} from '../constants/tradeStores';
-import {
-  TRADE_CATEGORIES,
-  TradeCategory,
-  TradeNiche,
-  getTradeCategoryById,
-  getTradeNicheById,
-} from '../constants/tradeCategories';
-import { FixedBottomButton } from '../components/FixedBottomButton';
-import { AlertModal } from '../components/AlertModal';
+
+interface SettingsMenuItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: string;
+  screen: string;
+  badge?: string;
+  badgeColor?: string;
+}
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
-  const { businessSettings, setBusinessSettings, subscriptionStatus, clearAllData } = useStore();
+  const { subscriptionStatus } = useStore();
 
-  const [businessName, setBusinessName] = useState('');
-  const [abn, setAbn] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [address, setAddress] = useState('');
-  const [logoUri, setLogoUri] = useState<string | undefined>(undefined);
-  const [laborRate, setLaborRate] = useState('85');
-  const [markup, setMarkup] = useState('20');
-  const [tradeType, setTradeType] = useState<TradeType>('all');
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [selectedNiches, setSelectedNiches] = useState<string[]>([]);
-  const [useBunningsApi, setUseBunningsApi] = useState(false);
-  const [useReeceApi, setUseReeceApi] = useState(false);
-  const [selectedStore, setSelectedStore] = useState<string>('bunnings'); // Single store selection
-  const [showLaborHours, setShowLaborHours] = useState(false); // Toggle for showing labor hours on quotes
-  // Payment method settings
-  const [showPaymentOnDocuments, setShowPaymentOnDocuments] = useState(false);
-  // Bank Transfer
-  const [bankEnabled, setBankEnabled] = useState(false);
-  const [bankAccountName, setBankAccountName] = useState('');
-  const [bankBsb, setBankBsb] = useState('');
-  const [bankAccountNumber, setBankAccountNumber] = useState('');
-  // PayID
-  const [payIdEnabled, setPayIdEnabled] = useState(false);
-  const [payIdType, setPayIdType] = useState<'phone' | 'email' | 'abn'>('phone');
-  const [payIdValue, setPayIdValue] = useState('');
-  // BPAY
-  const [bpayEnabled, setBpayEnabled] = useState(false);
-  const [bpayBillerCode, setBpayBillerCode] = useState('');
-  const [bpayReference, setBpayReference] = useState('');
-  // PayPal
-  const [paypalEnabled, setPaypalEnabled] = useState(false);
-  const [paypalEmail, setPaypalEmail] = useState('');
-  // Other
-  const [otherEnabled, setOtherEnabled] = useState(false);
-  const [otherPaymentInstructions, setOtherPaymentInstructions] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [showErrorModal, setShowErrorModal] = useState(false);
+  const menuItems: SettingsMenuItem[] = [
+    {
+      id: 'business',
+      title: 'Business Profile',
+      subtitle: 'Name, logo, contact details',
+      icon: 'domain',
+      screen: 'BusinessProfile',
+    },
+    {
+      id: 'quotes',
+      title: 'Quote Settings',
+      subtitle: 'Default rates and display options',
+      icon: 'file-document-edit',
+      screen: 'QuoteSettings',
+    },
+    {
+      id: 'payment',
+      title: 'Payment Methods',
+      subtitle: 'Bank, PayID, BPAY, PayPal',
+      icon: 'credit-card',
+      screen: 'PaymentMethods',
+    },
+    {
+      id: 'trade',
+      title: 'Trade & Pricing',
+      subtitle: 'Categories, niches, hardware store',
+      icon: 'store',
+      screen: 'TradePricing',
+    },
+    {
+      id: 'subscription',
+      title: 'Subscription',
+      subtitle: subscriptionStatus?.isPro ? 'Pro Member' : 'Free Plan',
+      icon: 'crown',
+      screen: 'SubscriptionSettings',
+      badge: subscriptionStatus?.isPro ? 'PRO' : undefined,
+      badgeColor: colors.secondary,
+    },
+    {
+      id: 'account',
+      title: 'Account',
+      subtitle: 'Sign out, delete account',
+      icon: 'account',
+      screen: 'AccountSettings',
+    },
+    {
+      id: 'about',
+      title: 'About',
+      subtitle: 'Version info, support',
+      icon: 'information',
+      screen: 'About',
+    },
+  ];
 
-  // Load current settings
-  useEffect(() => {
-    if (businessSettings) {
-      setBusinessName(businessSettings.businessName);
-      setAbn(businessSettings.abn || '');
-      setEmail(businessSettings.email || '');
-      setPhone(businessSettings.phone || '');
-      setAddress(businessSettings.address || '');
-      setLogoUri(businessSettings.logoUri);
-      setLaborRate(businessSettings.defaultLaborRate.toString());
-      setMarkup(businessSettings.defaultMarkup.toString());
-
-      // Load trade type
-      const loadedTradeType = businessSettings.tradeType || 'all';
-      setTradeType(loadedTradeType);
-
-      // Load trade categories and niches (prioritize new multi-select fields)
-      setSelectedCategories(businessSettings.tradeCategories || (businessSettings.tradeCategory ? [businessSettings.tradeCategory] : []));
-      setSelectedNiches(businessSettings.tradeNiches || (businessSettings.tradeNiche ? [businessSettings.tradeNiche] : []));
-
-      setUseBunningsApi(businessSettings.useBunningsApi === true);
-      setUseReeceApi(false); // Always false - API coming soon
-
-      // Load selected store (single store only now)
-      const store = businessSettings.selectedStore || 'bunnings';
-      setSelectedStore(store);
-
-      // Load quote display settings
-      setShowLaborHours(businessSettings.showLaborHours === true);
-
-      // Load payment method settings
-      if (businessSettings.paymentMethods) {
-        const pm = businessSettings.paymentMethods;
-        setShowPaymentOnDocuments(pm.showOnDocuments || false);
-        // Bank Transfer
-        setBankEnabled(pm.bankAccount?.enabled || false);
-        setBankAccountName(pm.bankAccount?.accountName || '');
-        setBankBsb(pm.bankAccount?.bsb || '');
-        setBankAccountNumber(pm.bankAccount?.accountNumber || '');
-        // PayID
-        setPayIdEnabled(pm.payId?.enabled || false);
-        setPayIdType(pm.payId?.payIdType || 'phone');
-        setPayIdValue(pm.payId?.payIdValue || '');
-        // BPAY
-        setBpayEnabled(pm.bpay?.enabled || false);
-        setBpayBillerCode(pm.bpay?.billerCode || '');
-        setBpayReference(pm.bpay?.referenceNumber || '');
-        // PayPal
-        setPaypalEnabled(pm.paypal?.enabled || false);
-        setPaypalEmail(pm.paypal?.email || '');
-        // Other
-        setOtherEnabled(pm.other?.enabled || false);
-        setOtherPaymentInstructions(pm.other?.instructions || '');
-      }
-    }
-  }, [businessSettings]);
-
-  // Update selected store when trade type changes
-  const handleTradeTypeChange = (newTradeType: TradeType) => {
-    setTradeType(newTradeType);
-    // Reset to Bunnings as default
-    setSelectedStore('bunnings');
-
-    // Reece API is disabled by default (no API access currently)
-    setUseReeceApi(false);
-  };
-
-  // Handle trade category toggle (multi-select)
-  const handleCategoryToggle = (categoryId: string) => {
-    setSelectedCategories(prev => {
-      if (prev.includes(categoryId)) {
-        // Remove category and its niches
-        const category = getTradeCategoryById(categoryId);
-        const nicheIds = category?.niches.map(n => n.id) || [];
-        setSelectedNiches(niches => niches.filter(n => !nicheIds.includes(n)));
-        return prev.filter(c => c !== categoryId);
-      } else {
-        // Add category
-        return [...prev, categoryId];
-      }
-    });
-  };
-
-  // Handle trade niche toggle (multi-select)
-  const handleNicheToggle = (nicheId: string, categoryId: string) => {
-    setSelectedNiches(prev => {
-      // If clicking on "All [Category] Services" (id === 'all')
-      if (nicheId === 'all') {
-        const category = getTradeCategoryById(categoryId);
-        if (!category) return prev;
-
-        const allNicheIds = category.niches.map(n => n.id);
-        const allSelected = allNicheIds.every(id => prev.includes(id));
-
-        if (allSelected) {
-          // Deselect all niches from this category
-          return prev.filter(n => !allNicheIds.includes(n));
-        } else {
-          // Select all niches from this category
-          const otherNiches = prev.filter(n => !allNicheIds.includes(n));
-          return [...otherNiches, ...allNicheIds];
-        }
-      }
-
-      // Normal toggle for non-"all" niches
-      if (prev.includes(nicheId)) {
-        return prev.filter(n => n !== nicheId);
-      } else {
-        return [...prev, nicheId];
-      }
-    });
-  };
-
-  // Get all niches from selected categories
-  const availableNiches = selectedCategories.flatMap(catId => {
-    const category = getTradeCategoryById(catId);
-    return category?.niches.map(niche => ({ ...niche, categoryId: catId })) || [];
-  });
-
-  const handlePickLogo = async () => {
-    try {
-      // Request permission
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-      if (permissionResult.granted === false) {
-        Alert.alert('Permission Required', 'Permission to access camera roll is required!');
-        return;
-      }
-
-      // Pick image
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1], // Square logo format
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setLogoUri(result.assets[0].uri);
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
-      console.error('Image picker error:', error);
-    }
-  };
-
-  const handleRemoveLogo = () => {
-    Alert.alert(
-      'Remove Logo',
-      'Are you sure you want to remove your company logo?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => setLogoUri(undefined),
-        },
-      ]
-    );
-  };
-
-  // Handle store selection (single store only)
-  const handleStoreSelect = (storeId: string) => {
-    setSelectedStore(storeId);
-  };
-
-  const handleSave = async () => {
-    if (!businessName.trim()) {
-      alert('Please enter your business name');
-      return;
-    }
-
-    // Build payment methods object (Firestore doesn't accept undefined, so use empty string or omit)
-    const paymentMethods: PaymentMethodSettings = {
-      showOnDocuments: showPaymentOnDocuments,
-      bankAccount: {
-        enabled: bankEnabled,
-        accountName: bankAccountName.trim() || '',
-        bsb: bankBsb.trim() || '',
-        accountNumber: bankAccountNumber.trim() || '',
-      },
-      payId: {
-        enabled: payIdEnabled,
-        payIdType: payIdType,
-        payIdValue: payIdValue.trim() || '',
-      },
-      bpay: {
-        enabled: bpayEnabled,
-        billerCode: bpayBillerCode.trim() || '',
-        referenceNumber: bpayReference.trim() || '',
-      },
-      paypal: {
-        enabled: paypalEnabled,
-        email: paypalEmail.trim() || '',
-      },
-      other: {
-        enabled: otherEnabled,
-        instructions: otherPaymentInstructions.trim() || '',
-      },
-    };
-
-    const settings: BusinessSettings = {
-      businessName: businessName.trim(),
-      abn: abn.trim() || undefined,
-      email: email.trim() || undefined,
-      phone: phone.trim() || undefined,
-      address: address.trim() || undefined,
-      logoUri: logoUri,
-      defaultLaborRate: parseFloat(laborRate) || 85,
-      defaultMarkup: parseFloat(markup) || 20,
-      tradeType: tradeType,
-      tradeCategories: selectedCategories.length > 0 ? selectedCategories : undefined,
-      tradeNiches: selectedNiches.length > 0 ? selectedNiches : undefined,
-      useBunningsApi: false, // API not available, always use AI estimation
-      useReeceApi: false, // API not available, always use AI estimation
-      selectedStore: selectedStore, // Single store selection
-      showLaborHours: showLaborHours, // Show labor hours breakdown on quotes
-      paymentMethods: paymentMethods,
-    };
-
-    try {
-      setIsLoading(true);
-      await setBusinessSettings(settings);
-      setShowSuccessModal(true);
-    } catch (error) {
-      setShowErrorModal(true);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleLogout = () => {
-    console.log('🚪 handleLogout called');
-    setShowLogoutModal(true);
-  };
-
-  const confirmLogout = async () => {
-    setShowLogoutModal(false);
-
-    try {
-      console.log('🔓 User confirmed logout, starting sign out process...');
-
-      // Step 1: Sign out from Firebase first to trigger auth state change
-      console.log('🔐 Step 1: Signing out from Firebase...');
-      await signOut(auth);
-      console.log('✅ Step 1: Signed out from Firebase');
-
-      // Step 2: Clear all app data
-      console.log('🧹 Step 2: Clearing all local data...');
-      await clearAllData();
-      console.log('✅ Step 2: Local data cleared');
-
-      // Step 3: On web, clear all browser storage and reload
-      if (Platform.OS === 'web') {
-        console.log('🧹 Step 3: Clearing all browser storage...');
-
-        // Clear ALL localStorage including Firebase auth to ensure complete logout
-        try {
-          console.log('🧹 Step 3a: Clearing localStorage...');
-          localStorage.clear();
-          console.log('✅ Step 3a: localStorage cleared');
-        } catch (e) {
-          console.warn('Could not clear localStorage:', e);
-        }
-
-        // Clear sessionStorage
-        try {
-          console.log('🧹 Step 3b: Clearing sessionStorage...');
-          sessionStorage.clear();
-          console.log('✅ Step 3b: sessionStorage cleared');
-        } catch (e) {
-          console.warn('Could not clear sessionStorage:', e);
-        }
-
-        // Clear IndexedDB (where Firebase stores auth)
-        try {
-          console.log('🧹 Step 3c: Clearing IndexedDB...');
-          if (window.indexedDB) {
-            const dbs = await window.indexedDB.databases();
-            console.log('🧹 Found IndexedDB databases:', dbs.map(db => db.name));
-            for (const db of dbs) {
-              if (db.name) {
-                console.log(`🧹 Deleting IndexedDB: ${db.name}`);
-                window.indexedDB.deleteDatabase(db.name);
-              }
-            }
-            console.log('✅ Step 3c: IndexedDB cleared');
-          }
-        } catch (e) {
-          console.warn('Could not clear IndexedDB:', e);
-        }
-
-        console.log('🔄 Step 4: Reloading page...');
-        // Use replace to ensure we don't go back to the authenticated state
-        window.location.replace(window.location.origin);
-      } else {
-        console.log('📱 Mobile platform - navigation should handle redirect');
-      }
-    } catch (error: any) {
-      console.error('❌ Error during sign out:', error);
-      console.error('❌ Error details:', error.message, error.code);
-      alert('Failed to sign out. Please try again.');
-    }
-  };
-
-  const handleDeleteAccount = () => {
-    console.log('🗑️ handleDeleteAccount called');
-    setShowDeleteAccountModal(true);
-  };
-
-  const confirmDeleteAccount = async () => {
-    setShowDeleteAccountModal(false);
-
-    try {
-      console.log('🗑️ User confirmed account deletion, starting deletion process...');
-
-      const currentUser = auth.currentUser;
-      if (!currentUser) {
-        throw new Error('No user is currently signed in');
-      }
-
-      // Step 1: Clear all local app data first
-      console.log('🧹 Step 1: Clearing all local data...');
-      await clearAllData();
-      console.log('✅ Step 1: Local data cleared');
-
-      // Step 2: Delete user account from Firebase
-      console.log('🗑️ Step 2: Deleting Firebase user account...');
-      await deleteUser(currentUser);
-      console.log('✅ Step 2: Firebase account deleted');
-
-      // Step 3: On web, clear all browser storage and reload
-      if (Platform.OS === 'web') {
-        console.log('🧹 Step 3: Clearing all browser storage...');
-
-        try {
-          localStorage.clear();
-          sessionStorage.clear();
-          if (window.indexedDB) {
-            const dbs = await window.indexedDB.databases();
-            for (const db of dbs) {
-              if (db.name) {
-                window.indexedDB.deleteDatabase(db.name);
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('Could not clear browser storage:', e);
-        }
-
-        console.log('🔄 Step 4: Reloading page...');
-        window.location.replace(window.location.origin);
-      } else {
-        console.log('📱 Mobile platform - navigation should handle redirect');
-      }
-    } catch (error: any) {
-      console.error('❌ Error during account deletion:', error);
-      console.error('❌ Error details:', error.message, error.code);
-
-      if (error.code === 'auth/requires-recent-login') {
-        Alert.alert(
-          'Re-authentication Required',
-          'For security, you need to sign in again before deleting your account. Please sign out and sign back in, then try again.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert(
-          'Deletion Failed',
-          'Failed to delete account: ' + (error.message || 'Unknown error'),
-          [{ text: 'OK' }]
-        );
-      }
-    }
+  const handleMenuPress = (screen: string) => {
+    navigation.navigate(screen);
   };
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView contentContainerStyle={styles.scrollContent}>
         <WebContainer>
-          {/* Subscription Section - Moved to Top */}
           <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Subscription</Title>
-
-            <View style={styles.subscriptionInfo}>
-              {subscriptionStatus?.isPro ? (
-                <>
-                  <View style={styles.proBadge}>
-                    <MaterialCommunityIcons name="crown" size={24} color={colors.secondary} />
-                    <Text style={styles.proText}>Pro Member</Text>
-                  </View>
-                  <Text style={styles.proStatusText}>
-                    You have unlimited quote analyses. Thank you for your support!
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => navigation.navigate('Paywall' as never)}
-                    style={styles.manageSubscriptionLink}
-                  >
-                    <Text style={styles.manageSubscriptionText}>Manage Subscription</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <View style={styles.quotaInfo}>
-                    <Text style={styles.quotaText}>
-                      Free Plan: {subscriptionStatus?.quotesThisMonth || 0} of {subscriptionStatus?.freeQuotesLimit || 5} quote analyses used this month
-                    </Text>
-                  </View>
-                  <Text style={styles.upgradeDescription}>
-                    Get unlimited quote analyses, priority support, and more.
-                  </Text>
-                  <Button
-                    mode="contained"
-                    onPress={() => navigation.navigate('Paywall' as never)}
-                    style={styles.upgradeButton}
-                    contentStyle={styles.upgradeButtonContent}
-                    icon="crown"
-                  >
-                    Upgrade to Pro
-                  </Button>
-                </>
-              )}
-            </View>
-          </Surface>
-
-          <Surface style={styles.card}>
-          <Title style={styles.sectionTitle}>Business Information</Title>
-
-          <TextInput
-            label="Business Name *"
-            value={businessName}
-            onChangeText={setBusinessName}
-            mode="outlined"
-            style={styles.input}
-          />
-
-          {/* Logo Upload Section */}
-          <View style={styles.logoSection}>
-            <Text style={styles.logoLabel}>Company Logo (Optional)</Text>
-            <Text style={styles.logoHelper}>
-              This will appear on your PDF quotes and invoices
-            </Text>
-
-            {logoUri ? (
-              <View style={styles.logoPreview}>
-                <Image source={{ uri: logoUri }} style={styles.logoImage} resizeMode="contain" />
-                <View style={styles.logoButtons}>
-                  <Button mode="outlined" onPress={handlePickLogo} style={styles.logoButton}>
-                    Change Logo
-                  </Button>
-                  <IconButton
-                    icon="delete"
-                    iconColor={colors.error}
-                    size={24}
-                    onPress={handleRemoveLogo}
-                  />
-                </View>
-              </View>
-            ) : (
-              <TouchableOpacity style={styles.logoUploadBox} onPress={handlePickLogo}>
-                <MaterialCommunityIcons
-                  name="image-plus"
-                  size={48}
-                  color={colors.primary}
-                />
-                <Text style={styles.logoUploadText}>Tap to Upload Logo</Text>
-                <Text style={styles.logoUploadHint}>Recommended: 500x500px (Square)</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <TextInput
-            label="ABN"
-            value={abn}
-            onChangeText={setAbn}
-            mode="outlined"
-            style={styles.input}
-            keyboardType="numeric"
-          />
-
-          <TextInput
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            mode="outlined"
-            style={styles.input}
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
-
-          <TextInput
-            label="Phone"
-            value={phone}
-            onChangeText={setPhone}
-            mode="outlined"
-            style={styles.input}
-            keyboardType="phone-pad"
-          />
-
-          <TextInput
-            label="Business Address"
-            value={address}
-            onChangeText={setAddress}
-            mode="outlined"
-            style={styles.input}
-            multiline
-            numberOfLines={3}
-          />
-        </Surface>
-
-        <Surface style={styles.card}>
-          <Title style={styles.sectionTitle}>Default Rates</Title>
-          <Text style={styles.helperText}>
-            These will be used as defaults for new quotes
-          </Text>
-
-          <TextInput
-            label="Hourly Labor Rate"
-            value={laborRate}
-            onChangeText={setLaborRate}
-            mode="outlined"
-            style={styles.input}
-            keyboardType="decimal-pad"
-            left={<TextInput.Affix text="$" />}
-            right={<TextInput.Affix text="/hr" />}
-          />
-
-          <TextInput
-            label="Markup Percentage"
-            value={markup}
-            onChangeText={setMarkup}
-            mode="outlined"
-            style={styles.input}
-            keyboardType="decimal-pad"
-            right={<TextInput.Affix text="%" />}
-          />
-        </Surface>
-
-        {/* Quote Display Settings */}
-        <Surface style={styles.card}>
-          <Title style={styles.sectionTitle}>Quote Display</Title>
-          <Text style={styles.helperText}>
-            Control what information is shown on quotes
-          </Text>
-
-          <View style={styles.switchRow}>
-            <View style={styles.switchLabel}>
-              <MaterialCommunityIcons name="clock-outline" size={24} color={colors.primary} />
-              <View style={styles.switchTextContainer}>
-                <Text style={styles.switchTitle}>Show Labor Hours</Text>
-                <Text style={styles.switchDescription}>
-                  Display hours breakdown (e.g., "8 hours @ $85/hr") instead of just the labor total
-                </Text>
-              </View>
-            </View>
-            <Switch
-              value={showLaborHours}
-              onValueChange={setShowLaborHours}
-              color={colors.primary}
-            />
-          </View>
-        </Surface>
-
-        {/* Payment Methods Section */}
-        <Surface style={styles.card}>
-          <Title style={styles.sectionTitle}>Payment Methods</Title>
-          <Text style={styles.helperText}>
-            Configure payment details to display on quotes and invoices
-          </Text>
-
-          <View style={styles.switchRow}>
-            <View style={styles.switchLabel}>
-              <MaterialCommunityIcons name="credit-card-outline" size={24} color={colors.primary} />
-              <View style={styles.switchTextContainer}>
-                <Text style={styles.switchTitle}>Show on Documents</Text>
-                <Text style={styles.switchDescription}>
-                  Display enabled payment methods on PDF quotes and invoices
-                </Text>
-              </View>
-            </View>
-            <Switch
-              value={showPaymentOnDocuments}
-              onValueChange={setShowPaymentOnDocuments}
-              color={colors.primary}
-            />
-          </View>
-
-          <View style={styles.paymentMethodsContainer}>
-            {/* Bank Transfer */}
-            <View style={styles.paymentMethodSection}>
-              <View style={styles.paymentMethodHeaderWithToggle}>
-                <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="bank" size={20} color={bankEnabled ? colors.primary : colors.onSurface} />
-                  <Text style={[styles.paymentMethodTitle, !bankEnabled && styles.paymentMethodTitleDisabled]}>Bank Transfer</Text>
-                </View>
-                <Switch
-                  value={bankEnabled}
-                  onValueChange={setBankEnabled}
-                  color={colors.primary}
-                />
-              </View>
-              {bankEnabled && (
-                <>
-                  <TextInput
-                    label="Account Name"
-                    value={bankAccountName}
-                    onChangeText={setBankAccountName}
-                    mode="outlined"
-                    style={styles.paymentInput}
-                    placeholder="e.g., John Smith Trading"
-                  />
-                  <View style={styles.bankDetailsRow}>
-                    <TextInput
-                      label="BSB"
-                      value={bankBsb}
-                      onChangeText={setBankBsb}
-                      mode="outlined"
-                      style={[styles.paymentInput, styles.bsbInput]}
-                      keyboardType="numeric"
-                      placeholder="000-000"
-                      maxLength={7}
-                    />
-                    <TextInput
-                      label="Account Number"
-                      value={bankAccountNumber}
-                      onChangeText={setBankAccountNumber}
-                      mode="outlined"
-                      style={[styles.paymentInput, styles.accountInput]}
-                      keyboardType="numeric"
-                      placeholder="12345678"
-                    />
-                  </View>
-                </>
-              )}
-            </View>
-
-            <Divider style={styles.paymentDivider} />
-
-            {/* PayID */}
-            <View style={styles.paymentMethodSection}>
-              <View style={styles.paymentMethodHeaderWithToggle}>
-                <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="cellphone" size={20} color={payIdEnabled ? colors.primary : colors.onSurface} />
-                  <Text style={[styles.paymentMethodTitle, !payIdEnabled && styles.paymentMethodTitleDisabled]}>PayID</Text>
-                </View>
-                <Switch
-                  value={payIdEnabled}
-                  onValueChange={setPayIdEnabled}
-                  color={colors.primary}
-                />
-              </View>
-              {payIdEnabled && (
-                <>
-                  <View style={styles.payIdTypeRow}>
-                    <Chip
-                      selected={payIdType === 'phone'}
-                      onPress={() => setPayIdType('phone')}
-                      style={styles.payIdTypeChip}
-                      mode={payIdType === 'phone' ? 'flat' : 'outlined'}
-                    >
-                      Phone
-                    </Chip>
-                    <Chip
-                      selected={payIdType === 'email'}
-                      onPress={() => setPayIdType('email')}
-                      style={styles.payIdTypeChip}
-                      mode={payIdType === 'email' ? 'flat' : 'outlined'}
-                    >
-                      Email
-                    </Chip>
-                    <Chip
-                      selected={payIdType === 'abn'}
-                      onPress={() => setPayIdType('abn')}
-                      style={styles.payIdTypeChip}
-                      mode={payIdType === 'abn' ? 'flat' : 'outlined'}
-                    >
-                      ABN
-                    </Chip>
-                  </View>
-                  <TextInput
-                    label={payIdType === 'phone' ? 'Phone Number' : payIdType === 'email' ? 'Email Address' : 'ABN'}
-                    value={payIdValue}
-                    onChangeText={setPayIdValue}
-                    mode="outlined"
-                    style={styles.paymentInput}
-                    keyboardType={payIdType === 'phone' ? 'phone-pad' : payIdType === 'email' ? 'email-address' : 'numeric'}
-                    placeholder={payIdType === 'phone' ? '0412 345 678' : payIdType === 'email' ? 'payments@business.com' : '12 345 678 901'}
-                  />
-                </>
-              )}
-            </View>
-
-            <Divider style={styles.paymentDivider} />
-
-            {/* BPAY */}
-            <View style={styles.paymentMethodSection}>
-              <View style={styles.paymentMethodHeaderWithToggle}>
-                <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="barcode" size={20} color={bpayEnabled ? colors.primary : colors.onSurface} />
-                  <Text style={[styles.paymentMethodTitle, !bpayEnabled && styles.paymentMethodTitleDisabled]}>BPAY</Text>
-                </View>
-                <Switch
-                  value={bpayEnabled}
-                  onValueChange={setBpayEnabled}
-                  color={colors.primary}
-                />
-              </View>
-              {bpayEnabled && (
-                <View style={styles.bankDetailsRow}>
-                  <TextInput
-                    label="Biller Code"
-                    value={bpayBillerCode}
-                    onChangeText={setBpayBillerCode}
-                    mode="outlined"
-                    style={[styles.paymentInput, styles.bsbInput]}
-                    keyboardType="numeric"
-                    placeholder="12345"
-                  />
-                  <TextInput
-                    label="Reference Number"
-                    value={bpayReference}
-                    onChangeText={setBpayReference}
-                    mode="outlined"
-                    style={[styles.paymentInput, styles.accountInput]}
-                    keyboardType="numeric"
-                    placeholder="1234567890"
-                  />
-                </View>
-              )}
-            </View>
-
-            <Divider style={styles.paymentDivider} />
-
-            {/* PayPal */}
-            <View style={styles.paymentMethodSection}>
-              <View style={styles.paymentMethodHeaderWithToggle}>
-                <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="alpha-p-circle" size={20} color={paypalEnabled ? colors.primary : colors.onSurface} />
-                  <Text style={[styles.paymentMethodTitle, !paypalEnabled && styles.paymentMethodTitleDisabled]}>PayPal</Text>
-                </View>
-                <Switch
-                  value={paypalEnabled}
-                  onValueChange={setPaypalEnabled}
-                  color={colors.primary}
-                />
-              </View>
-              {paypalEnabled && (
-                <TextInput
-                  label="PayPal Email"
-                  value={paypalEmail}
-                  onChangeText={setPaypalEmail}
-                  mode="outlined"
-                  style={styles.paymentInput}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  placeholder="payments@business.com"
-                />
-              )}
-            </View>
-
-            <Divider style={styles.paymentDivider} />
-
-            {/* Other Instructions */}
-            <View style={styles.paymentMethodSection}>
-              <View style={styles.paymentMethodHeaderWithToggle}>
-                <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="text-box-outline" size={20} color={otherEnabled ? colors.primary : colors.onSurface} />
-                  <Text style={[styles.paymentMethodTitle, !otherEnabled && styles.paymentMethodTitleDisabled]}>Other</Text>
-                </View>
-                <Switch
-                  value={otherEnabled}
-                  onValueChange={setOtherEnabled}
-                  color={colors.primary}
-                />
-              </View>
-              {otherEnabled && (
-                <TextInput
-                  label="Additional Payment Instructions"
-                  value={otherPaymentInstructions}
-                  onChangeText={setOtherPaymentInstructions}
-                  mode="outlined"
-                  style={styles.paymentInput}
-                  multiline
-                  numberOfLines={3}
-                  placeholder="e.g., Cash accepted on site, Afterpay available..."
-                />
-              )}
-            </View>
-          </View>
-        </Surface>
-
-        {/* Trade Category Selection */}
-        <Surface style={styles.card}>
-          <Title style={styles.sectionTitle}>Trade Categories</Title>
-          <Text style={styles.helperText}>
-            Select all categories that apply to your business (multi-select)
-          </Text>
-
-          <View style={styles.categoryGrid}>
-            {TRADE_CATEGORIES.map((category) => {
-              const isSelected = selectedCategories.includes(category.id);
-              return (
-                <TouchableOpacity
-                  key={category.id}
-                  style={[
-                    styles.categoryCard,
-                    isSelected && styles.categoryCardSelected,
-                  ]}
-                  onPress={() => handleCategoryToggle(category.id)}
-                >
-                  {isSelected && (
-                    <View style={styles.categoryCheckmark}>
-                      <MaterialCommunityIcons name="check-circle" size={20} color={colors.primary} />
-                    </View>
-                  )}
-                  <View style={[styles.categoryIconContainer, { backgroundColor: category.color + '20' }]}>
+            {menuItems.map((item, index) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[
+                  styles.menuItem,
+                  index < menuItems.length - 1 && styles.menuItemBorder,
+                ]}
+                onPress={() => handleMenuPress(item.screen)}
+              >
+                <View style={styles.menuItemLeft}>
+                  <View style={styles.iconContainer}>
                     <MaterialCommunityIcons
-                      name={category.icon as any}
-                      size={28}
-                      color={isSelected ? colors.primary : category.color}
+                      name={item.icon as any}
+                      size={24}
+                      color={colors.primary}
                     />
                   </View>
-                  <View style={styles.categoryNameContainer}>
-                    <Text
-                      style={[
-                        styles.categoryName,
-                        isSelected && styles.categoryNameSelected
-                      ]}
-                      numberOfLines={3}
-                      ellipsizeMode="tail"
-                    >
-                      {category.name}
-                    </Text>
+                  <View style={styles.menuItemText}>
+                    <View style={styles.titleRow}>
+                      <Text style={styles.menuItemTitle}>{item.title}</Text>
+                      {item.badge && (
+                        <View style={[styles.badge, { backgroundColor: item.badgeColor }]}>
+                          <Text style={styles.badgeText}>{item.badge}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.menuItemSubtitle}>{item.subtitle}</Text>
                   </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </Surface>
-
-        {/* Trade Niche Selection (shown when categories are selected) */}
-        {selectedCategories.length > 0 && availableNiches.length > 0 && (
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Specialties / Niches</Title>
-            <Text style={styles.helperText}>
-              Select all specific areas of expertise within your selected categories (multi-select)
-            </Text>
-
-            <View style={styles.pillContainer}>
-              {availableNiches.map((niche) => {
-                const isSelected = selectedNiches.includes(niche.id);
-                return (
-                  <Chip
-                    key={`${niche.categoryId}-${niche.id}`}
-                    selected={isSelected}
-                    onPress={() => handleNicheToggle(niche.id, niche.categoryId)}
-                    style={[
-                      styles.nichePill,
-                      isSelected && styles.nichePillSelected
-                    ]}
-                    textStyle={[
-                      isSelected && styles.nichePillTextSelected,
-                      isSelected && { color: colors.surface }
-                    ]}
-                    mode={isSelected ? 'flat' : 'outlined'}
-                    icon={({ size }) => (
-                      <MaterialCommunityIcons
-                        name={niche.icon as any}
-                        size={size}
-                        color={isSelected ? colors.surface : colors.primary}
-                      />
-                    )}
-                  >
-                    {niche.name}
-                  </Chip>
-                );
-              })}
-            </View>
+                </View>
+                <MaterialCommunityIcons
+                  name="chevron-right"
+                  size={24}
+                  color={colors.onSurface}
+                />
+              </TouchableOpacity>
+            ))}
           </Surface>
-        )}
-
-        {/* Hardware Store Selection */}
-        <Surface style={styles.card}>
-          <Title style={styles.sectionTitle}>Hardware Store</Title>
-          <Text style={styles.helperText}>
-            Select your preferred hardware store for pricing
-          </Text>
-
-          {/* Accurate Pricing Section */}
-          <View style={styles.storeCategory}>
-            <View style={styles.storeCategoryHeader}>
-              <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
-              <Text style={styles.storeCategoryTitle}>More Accurate Pricing</Text>
-            </View>
-            <Text style={styles.storeCategoryDescription}>
-              Stores with more reliable web search pricing or API access.
-            </Text>
-
-            {/* Bunnings - Available */}
-            <TouchableOpacity
-              style={[
-                styles.storeRadioOption,
-                selectedStore === 'bunnings' && styles.storeRadioOptionSelected
-              ]}
-              onPress={() => handleStoreSelect('bunnings')}
-            >
-              <View style={styles.storeRadioLeft}>
-                <View style={[
-                  styles.radioButton,
-                  selectedStore === 'bunnings' && styles.radioButtonSelected
-                ]}>
-                  {selectedStore === 'bunnings' && (
-                    <View style={styles.radioButtonInner} />
-                  )}
-                </View>
-                <View style={styles.storeInfo}>
-                  <Text style={styles.storeName}>Bunnings</Text>
-                  <Text style={styles.storeMethod}>Web Search</Text>
-                </View>
-              </View>
-              <MaterialCommunityIcons
-                name="check-circle"
-                size={20}
-                color="#4CAF50"
-              />
-            </TouchableOpacity>
-
-            {/* Reece - Coming Soon */}
-            <TouchableOpacity
-              style={[styles.storeRadioOption, styles.storeRadioOptionDisabled]}
-              disabled={true}
-            >
-              <View style={styles.storeRadioLeft}>
-                <View style={styles.radioButton}>
-                  <View style={styles.radioButtonDisabled} />
-                </View>
-                <View style={styles.storeInfo}>
-                  <Text style={[styles.storeName, styles.storeNameDisabled]}>Reece</Text>
-                  <Text style={styles.storeMethod}>API Integration</Text>
-                </View>
-              </View>
-              <View style={styles.comingSoonBadge}>
-                <Text style={styles.comingSoonText}>Coming Soon</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          {/* Guestimates Section */}
-          <View style={styles.storeCategory}>
-            <View style={styles.storeCategoryHeader}>
-              <MaterialCommunityIcons name="approximately-equal" size={20} color="#FF9800" />
-              <Text style={styles.storeCategoryTitle}>Guestimates</Text>
-            </View>
-            <Text style={styles.storeCategoryDescription}>
-              AI-estimated pricing based on typical product costs
-            </Text>
-
-            {/* Mitre 10 */}
-            <TouchableOpacity
-              style={[
-                styles.storeRadioOption,
-                selectedStore === 'mitre10' && styles.storeRadioOptionSelected
-              ]}
-              onPress={() => handleStoreSelect('mitre10')}
-            >
-              <View style={styles.storeRadioLeft}>
-                <View style={[
-                  styles.radioButton,
-                  selectedStore === 'mitre10' && styles.radioButtonSelected
-                ]}>
-                  {selectedStore === 'mitre10' && (
-                    <View style={styles.radioButtonInner} />
-                  )}
-                </View>
-                <View style={styles.storeInfo}>
-                  <Text style={styles.storeName}>Mitre 10</Text>
-                  <Text style={styles.storeMethod}>AI Estimation</Text>
-                </View>
-              </View>
-              <MaterialCommunityIcons
-                name="approximately-equal"
-                size={20}
-                color="#FF9800"
-              />
-            </TouchableOpacity>
-
-            {/* Home Timber & Hardware */}
-            <TouchableOpacity
-              style={[
-                styles.storeRadioOption,
-                selectedStore === 'hth' && styles.storeRadioOptionSelected
-              ]}
-              onPress={() => handleStoreSelect('hth')}
-            >
-              <View style={styles.storeRadioLeft}>
-                <View style={[
-                  styles.radioButton,
-                  selectedStore === 'hth' && styles.radioButtonSelected
-                ]}>
-                  {selectedStore === 'hth' && (
-                    <View style={styles.radioButtonInner} />
-                  )}
-                </View>
-                <View style={styles.storeInfo}>
-                  <Text style={styles.storeName}>Home Timber & Hardware</Text>
-                  <Text style={styles.storeMethod}>AI Estimation</Text>
-                </View>
-              </View>
-              <MaterialCommunityIcons
-                name="approximately-equal"
-                size={20}
-                color="#FF9800"
-              />
-            </TouchableOpacity>
-
-            {/* Total Tools */}
-            <TouchableOpacity
-              style={[
-                styles.storeRadioOption,
-                selectedStore === 'totaltools' && styles.storeRadioOptionSelected
-              ]}
-              onPress={() => handleStoreSelect('totaltools')}
-            >
-              <View style={styles.storeRadioLeft}>
-                <View style={[
-                  styles.radioButton,
-                  selectedStore === 'totaltools' && styles.radioButtonSelected
-                ]}>
-                  {selectedStore === 'totaltools' && (
-                    <View style={styles.radioButtonInner} />
-                  )}
-                </View>
-                <View style={styles.storeInfo}>
-                  <Text style={styles.storeName}>Total Tools</Text>
-                  <Text style={styles.storeMethod}>AI Estimation</Text>
-                </View>
-              </View>
-              <MaterialCommunityIcons
-                name="approximately-equal"
-                size={20}
-                color="#FF9800"
-              />
-            </TouchableOpacity>
-
-            {/* Flexihire */}
-            <TouchableOpacity
-              style={[
-                styles.storeRadioOption,
-                selectedStore === 'flexihire' && styles.storeRadioOptionSelected
-              ]}
-              onPress={() => handleStoreSelect('flexihire')}
-            >
-              <View style={styles.storeRadioLeft}>
-                <View style={[
-                  styles.radioButton,
-                  selectedStore === 'flexihire' && styles.radioButtonSelected
-                ]}>
-                  {selectedStore === 'flexihire' && (
-                    <View style={styles.radioButtonInner} />
-                  )}
-                </View>
-                <View style={styles.storeInfo}>
-                  <Text style={styles.storeName}>Flexihire</Text>
-                  <Text style={styles.storeMethod}>AI Estimation</Text>
-                </View>
-              </View>
-              <MaterialCommunityIcons
-                name="approximately-equal"
-                size={20}
-                color="#FF9800"
-              />
-            </TouchableOpacity>
-
-            {/* Sydney Solvents */}
-            <TouchableOpacity
-              style={[
-                styles.storeRadioOption,
-                selectedStore === 'sydneysolvents' && styles.storeRadioOptionSelected
-              ]}
-              onPress={() => handleStoreSelect('sydneysolvents')}
-            >
-              <View style={styles.storeRadioLeft}>
-                <View style={[
-                  styles.radioButton,
-                  selectedStore === 'sydneysolvents' && styles.radioButtonSelected
-                ]}>
-                  {selectedStore === 'sydneysolvents' && (
-                    <View style={styles.radioButtonInner} />
-                  )}
-                </View>
-                <View style={styles.storeInfo}>
-                  <Text style={styles.storeName}>Sydney Solvents</Text>
-                  <Text style={styles.storeMethod}>AI Estimation</Text>
-                </View>
-              </View>
-              <MaterialCommunityIcons
-                name="approximately-equal"
-                size={20}
-                color="#FF9800"
-              />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.infoBox}>
-            <MaterialCommunityIcons name="information" size={20} color={colors.primary} />
-            <Text style={styles.infoBoxText}>
-              {selectedStore === 'bunnings'
-                ? "Bunnings is selected. Real prices will be fetched using the Bunnings web search when available."
-                : "Using AI estimation for typical product pricing."
-              }
-            </Text>
-          </View>
-        </Surface>
-
-        <Divider style={styles.divider} />
-
-        <View style={styles.infoSection}>
-          <Text style={styles.infoTitle}>About QuoteMate</Text>
-          <Text style={styles.infoText}>Version 1.0.0</Text>
-          <Text style={styles.infoText}>
-            Quoting tool for Australian tradies with AI and Bunnings integration
-          </Text>
-        </View>
-
-        {/* Sign Out Section */}
-        {auth.currentUser && (
-          <>
-            <Divider style={styles.divider} />
-            <Surface style={styles.logoutCard}>
-              <View style={styles.logoutSection}>
-                <View style={styles.userInfo}>
-                  <MaterialCommunityIcons name="account-circle" size={40} color={colors.primary} />
-                  <View style={styles.userDetails}>
-                    <Text style={styles.userEmail}>{auth.currentUser.email}</Text>
-                    <Text style={styles.userIdText}>User ID: {auth.currentUser.uid.slice(0, 8)}...</Text>
-                  </View>
-                </View>
-                <Button
-                  mode="outlined"
-                  onPress={handleLogout}
-                  style={styles.logoutButton}
-                  icon="logout"
-                  textColor={colors.error}
-                  buttonColor={colors.surface}
-                >
-                  Sign Out
-                </Button>
-                <Button
-                  mode="text"
-                  onPress={handleDeleteAccount}
-                  style={styles.deleteAccountButton}
-                  icon="delete-forever"
-                  textColor={colors.error}
-                >
-                  Delete Account
-                </Button>
-              </View>
-            </Surface>
-          </>
-        )}
         </WebContainer>
       </ScrollView>
-
-      {/* Fixed Save Button */}
-      <FixedBottomButton
-        mode={'contained'}
-        label="Save Settings"
-        onPress={handleSave}
-        disabled={isLoading}
-        loading={isLoading}
-        disableSolidBackground={false}
-      />
-
-      {/* Logout Confirmation Modal */}
-      <AlertModal
-        visible={showLogoutModal}
-        onDismiss={() => setShowLogoutModal(false)}
-        type="warning"
-        icon="logout"
-        title="Sign Out"
-        message="Are you sure you want to sign out? All local data will be cleared."
-        primaryButtonText="Sign Out"
-        primaryButtonAction={confirmLogout}
-        secondaryButtonText="Cancel"
-        secondaryButtonAction={() => setShowLogoutModal(false)}
-        showConfetti={false}
-      />
-
-      {/* Delete Account Confirmation Modal */}
-      <AlertModal
-        visible={showDeleteAccountModal}
-        onDismiss={() => setShowDeleteAccountModal(false)}
-        type="error"
-        icon="delete-forever"
-        title="Delete Account"
-        message={`Are you sure you want to permanently delete your account? This action cannot be undone.\n\nAll your data will be permanently deleted:\n• Business settings\n• All quotes and projects\n• Subscription information\n• Account credentials`}
-        primaryButtonText="Delete Permanently"
-        primaryButtonAction={confirmDeleteAccount}
-        secondaryButtonText="Cancel"
-        secondaryButtonAction={() => setShowDeleteAccountModal(false)}
-        showConfetti={false}
-      />
-
-      {/* Success Modal */}
-      <AlertModal
-        visible={showSuccessModal}
-        onDismiss={() => setShowSuccessModal(false)}
-        type="success"
-        title="Settings Saved!"
-        message="Your business settings have been saved successfully."
-      />
-
-      {/* Error Modal */}
-      <AlertModal
-        visible={showErrorModal}
-        onDismiss={() => setShowErrorModal(false)}
-        type="error"
-        title="Save Failed"
-        message="Failed to save settings. Please try again."
-      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: Platform.OS === 'android' ? -48 : 0,
     flex: 1,
     backgroundColor: colors.background,
-    ...(Platform.OS === 'web' && {
-      display: 'flex' as any,
-      flexDirection: 'column' as any,
-      height: '100vh' as any,
-      overflow: 'hidden' as any,
-    }),
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 120,
-    flexGrow: 1,
+    paddingBottom: 32,
     ...(Platform.OS === 'web' && {
-      maxWidth: 800,
+      maxWidth: 600,
       margin: 'auto' as any,
       width: '100%',
     }),
   },
   card: {
-    padding: 20,
-    marginBottom: 20,
     borderRadius: 12,
     elevation: 2,
     backgroundColor: colors.surface,
-    ...Platform.select({
-      web: {
-        maxWidth: 600,
-        alignSelf: 'center',
-        width: '100%',
-      },
-    }),
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  input: {
-    marginBottom: 20,
-  },
-  helperText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    marginBottom: 12,
-  },
-  divider: {
-    marginVertical: 20,
-  },
-  infoSection: {
-    paddingVertical: 12,
-  },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  infoText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    marginBottom: 4,
-  },
-  logoSection: {
-    marginBottom: 16,
-    marginTop: 8,
-  },
-  logoLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-    color: colors.text,
-  },
-  logoHelper: {
-    fontSize: 12,
-    color: colors.onSurface,
-    marginBottom: 12,
-  },
-  logoUploadBox: {
-    borderWidth: 2,
-    borderColor: colors.primary,
-    borderStyle: 'dashed',
-    borderRadius: 8,
-    padding: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-  },
-  logoUploadText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.primary,
-    marginTop: 12,
-  },
-  logoUploadHint: {
-    fontSize: 12,
-    color: colors.onSurface,
-    marginTop: 4,
-  },
-  logoPreview: {
-    borderWidth: 1,
-    borderColor: colors.outline,
-    borderRadius: 8,
-    padding: 16,
-    backgroundColor: colors.surfaceLight,
-  },
-  logoImage: {
-    width: '100%',
-    height: 120,
-    marginBottom: 12,
-  },
-  logoButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  logoButton: {
-    flex: 1,
-    marginRight: 8,
-  },
-  subscriptionInfo: {
-    marginTop: 8,
-  },
-  proBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.warningBg,
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  proText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.secondary,
-    marginLeft: 8,
-  },
-  quotaInfo: {
-    backgroundColor: colors.surface,
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  quotaText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  upgradeButton: {
-    marginTop: 16,
-  },
-  upgradeButtonContent: {
-    paddingVertical: 8,
-  },
-  upgradeDescription: {
-    fontSize: 14,
-    color: colors.onSurface,
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  proStatusText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    marginBottom: 16,
-  },
-  manageSubscriptionLink: {
-    alignSelf: 'flex-start',
-  },
-  manageSubscriptionText: {
-    fontSize: 12,
-    color: colors.primary,
-    textDecorationLine: 'underline',
-  },
-  switchRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  switchLabel: {
-    flex: 1,
-    marginRight: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  switchTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  switchTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  switchDescription: {
-    fontSize: 13,
-    color: colors.onSurface,
-    lineHeight: 18,
-  },
-  switchSubtitle: {
-    fontSize: 13,
-    color: colors.onSurface,
-  },
-  smallDivider: {
-    marginVertical: 16,
-  },
-  infoBox: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface,
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-  infoBoxText: {
-    flex: 1,
-    marginLeft: 8,
-    fontSize: 13,
-    color: colors.text,
-    lineHeight: 18,
-  },
-  logoutCard: {
-    padding: 20,
-    marginBottom: 80,
-    borderRadius: 12,
-    elevation: 2,
-    backgroundColor: colors.surface,
-    ...Platform.select({
-      web: {
-        maxWidth: 600,
-        alignSelf: 'center',
-        width: '100%',
-      },
-    }),
-  },
-  logoutSection: {
-    alignItems: 'center',
-  },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    alignSelf: 'stretch',
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.outline + '30',
-  },
-  userDetails: {
-    marginLeft: 16,
-    flex: 1,
-  },
-  userEmail: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-    color: colors.text,
-  },
-  userIdText: {
-    fontSize: 13,
-    color: colors.onSurface,
-  },
-  logoutButton: {
-    borderColor: colors.error,
-    borderWidth: 1.5,
-    alignSelf: 'stretch',
-    paddingVertical: 4,
-    marginBottom: 8,
-  },
-  deleteAccountButton: {
-    alignSelf: 'stretch',
-  },
-  pillContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
-  },
-  tradePill: {
-    marginRight: 0,
-    marginBottom: 0,
-  },
-  tradePillSelected: {
-    backgroundColor: colors.primary,
-  },
-  tradePillTextSelected: {
-    color: colors.surface,
-    fontWeight: '600',
-  },
-  storePill: {
-    marginRight: 0,
-    marginBottom: 0,
-  },
-  storePillSelected: {
-    backgroundColor: colors.primary,
-  },
-  storePillTextSelected: {
-    color: colors.surface,
-    fontWeight: '600',
-  },
-  addStorePill: {
-    marginRight: 0,
-    marginBottom: 0,
-    borderStyle: 'dashed',
-  },
-  categoryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  categoryCard: {
-    width: Platform.OS === 'web' ? 'calc(25% - 9px)' as any : '30.5%',
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 8,
-    paddingTop: 12,
-    paddingBottom: 12,
-    marginBottom: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: colors.outline + '30',
-    height: 120,
-    flexDirection: 'column',
-  },
-  categoryCardSelected: {
-    borderColor: colors.primary,
-    borderWidth: 2,
-    backgroundColor: colors.primary + '10',
-  },
-  categoryCheckmark: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    zIndex: 1,
-  },
-  categoryIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-    flexShrink: 0,
-  },
-  categoryNameContainer: {
-    width: '100%',
-    paddingHorizontal: 4,
-    flexShrink: 1,
-    maxWidth: '100%',
     overflow: 'hidden',
   },
-  categoryName: {
-    fontSize: 10,
-    textAlign: 'center',
-    color: colors.text,
-    lineHeight: 13,
-    flexShrink: 1,
-  },
-  categoryNameSelected: {
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  nichePill: {
-    marginRight: 0,
-    marginBottom: 0,
-  },
-  nichePillSelected: {
-    backgroundColor: colors.primary,
-  },
-  nichePillTextSelected: {
-    color: colors.surface,
-    fontWeight: '600',
-  },
-  storeCategory: {
-    marginTop: 16,
-    marginBottom: 16,
-  },
-  storeCategoryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  storeCategoryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-    color: colors.text,
-  },
-  storeCategoryDescription: {
-    fontSize: 13,
-    color: colors.onSurface,
-    marginBottom: 12,
-    marginLeft: 28,
-  },
-  storeRadioOption: {
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
+    paddingVertical: 16,
     paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: colors.outline + '30',
-    marginBottom: 8,
-    backgroundColor: colors.surface,
   },
-  storeRadioOptionSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary + '10',
+  menuItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.outline + '20',
   },
-  storeRadioOptionDisabled: {
-    opacity: 0.5,
-    backgroundColor: colors.surface,
-  },
-  storeRadioLeft: {
+  menuItemLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  radioButton: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: colors.outline,
-    marginRight: 12,
+  iconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary + '15',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 14,
   },
-  radioButtonSelected: {
-    borderColor: colors.primary,
-  },
-  radioButtonInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: colors.primary,
-  },
-  radioButtonDisabled: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: colors.outline,
-  },
-  storeInfo: {
+  menuItemText: {
     flex: 1,
   },
-  storeName: {
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  menuItemTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: colors.text,
     marginBottom: 2,
   },
-  storeNameDisabled: {
+  menuItemSubtitle: {
+    fontSize: 13,
     color: colors.onSurface,
   },
-  storeMethod: {
-    fontSize: 12,
-    color: colors.onSurface,
-  },
-  comingSoonBadge: {
-    backgroundColor: colors.primary + '20',
+  badge: {
+    marginLeft: 8,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 2,
     borderRadius: 4,
   },
-  comingSoonText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  paymentMethodsContainer: {
-    marginTop: 16,
-  },
-  paymentMethodSection: {
-    marginBottom: 8,
-  },
-  paymentMethodHeaderWithToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  paymentMethodHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  paymentMethodTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    marginLeft: 8,
-    color: colors.text,
-  },
-  paymentMethodTitleDisabled: {
-    color: colors.onSurface,
-  },
-  paymentInput: {
-    marginBottom: 12,
-    backgroundColor: colors.surface,
-  },
-  paymentDivider: {
-    marginVertical: 16,
-  },
-  bankDetailsRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  bsbInput: {
-    flex: 1,
-  },
-  accountInput: {
-    flex: 2,
-  },
-  payIdTypeRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-  },
-  payIdTypeChip: {
-    backgroundColor: colors.surface,
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.surface,
   },
 });
