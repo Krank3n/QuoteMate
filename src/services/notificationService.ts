@@ -4,19 +4,33 @@
  */
 
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { firestoreService } from './firestoreService';
 
-// Configure notification handler
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// Dynamically import expo-notifications to handle cases where native module isn't available
+let Notifications: typeof import('expo-notifications') | null = null;
+let Device: typeof import('expo-device') | null = null;
+
+// Track if native modules are available
+let isNativeModuleAvailable = false;
+
+try {
+  Notifications = require('expo-notifications');
+  Device = require('expo-device');
+  isNativeModuleAvailable = true;
+
+  // Configure notification handler only if module is available
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+} catch (error) {
+  console.log('expo-notifications native module not available (running in Expo Go?)');
+  isNativeModuleAvailable = false;
+}
 
 class NotificationService {
   private expoPushToken: string | null = null;
@@ -24,9 +38,19 @@ class NotificationService {
   private responseListener: any = null;
 
   /**
+   * Check if push notifications are available
+   */
+  isAvailable(): boolean {
+    return isNativeModuleAvailable;
+  }
+
+  /**
    * Get a unique device identifier
    */
   private getDeviceId(): string {
+    if (!Device) {
+      return `${Platform.OS}-unknown-device`;
+    }
     // Use a combination of device properties to create a unique ID
     const deviceName = Device.deviceName || 'unknown';
     const osName = Device.osName || Platform.OS;
@@ -40,6 +64,12 @@ class NotificationService {
    * Returns the Expo push token or null if registration fails
    */
   async registerForPushNotifications(): Promise<string | null> {
+    // Check if native module is available
+    if (!isNativeModuleAvailable || !Notifications || !Device) {
+      console.log('Push notifications not available (native module not loaded)');
+      return null;
+    }
+
     // Push notifications only work on physical devices
     if (!Device.isDevice) {
       console.log('Push notifications only work on physical devices');
@@ -96,9 +126,14 @@ class NotificationService {
    * Set up notification listeners for foreground and background
    */
   setupNotificationListeners(
-    onNotificationReceived?: (notification: Notifications.Notification) => void,
-    onNotificationResponse?: (response: Notifications.NotificationResponse) => void
+    onNotificationReceived?: (notification: any) => void,
+    onNotificationResponse?: (response: any) => void
   ): void {
+    if (!isNativeModuleAvailable || !Notifications) {
+      console.log('Cannot set up notification listeners (native module not available)');
+      return;
+    }
+
     // Listen for notifications received while app is foregrounded
     this.notificationListener = Notifications.addNotificationReceivedListener((notification) => {
       console.log('Notification received in foreground:', notification);
@@ -116,6 +151,10 @@ class NotificationService {
    * Remove notification listeners
    */
   removeNotificationListeners(): void {
+    if (!isNativeModuleAvailable || !Notifications) {
+      return;
+    }
+
     if (this.notificationListener) {
       Notifications.removeNotificationSubscription(this.notificationListener);
       this.notificationListener = null;
@@ -156,6 +195,11 @@ class NotificationService {
     body: string,
     data?: Record<string, any>
   ): Promise<void> {
+    if (!isNativeModuleAvailable || !Notifications) {
+      console.log('Cannot schedule notification (native module not available)');
+      return;
+    }
+
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
