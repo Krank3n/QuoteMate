@@ -6,14 +6,28 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
 import { Platform, View, Image, StyleSheet } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
 
 import { useStore } from './src/store/useStore';
-import { theme } from './src/theme';
+import { theme, colors } from './src/theme';
+
+// Custom navigation theme to match our dark theme
+const navigationTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    primary: colors.primary,
+    background: colors.background,
+    card: colors.surface,
+    text: colors.text,
+    border: colors.border,
+    notification: colors.primary,
+  },
+};
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { NewOnboardingScreen } from './src/screens/NewOnboardingScreen';
 import { AuthScreen } from './src/screens/AuthScreen';
@@ -276,7 +290,7 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <PaperProvider theme={theme}>
-          <NavigationContainer key="auth">
+          <NavigationContainer key="auth" theme={navigationTheme}>
             <StatusBar style="light" />
             <AuthScreen />
           </NavigationContainer>
@@ -288,7 +302,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <PaperProvider theme={theme}>
-        <NavigationContainer key="main">
+        <NavigationContainer key="main" theme={navigationTheme}>
           <StatusBar style="light" />
           {(isOnboarded && !FORCE_ONBOARDING) ? <RootNavigator /> : <NewOnboardingScreen />}
         </NavigationContainer>

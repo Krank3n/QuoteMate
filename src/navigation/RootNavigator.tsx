@@ -19,6 +19,15 @@ import { ViewQuoteScreen } from '../screens/ViewQuoteScreen';
 import { ViewInvoiceScreen } from '../screens/ViewInvoiceScreen';
 import { RecordPaymentScreen } from '../screens/RecordPaymentScreen';
 
+// Settings sub-screens
+import { BusinessProfileScreen } from '../screens/settings/BusinessProfileScreen';
+import { QuoteSettingsScreen } from '../screens/settings/QuoteSettingsScreen';
+import { PaymentMethodsScreen } from '../screens/settings/PaymentMethodsScreen';
+import { TradePricingScreen } from '../screens/settings/TradePricingScreen';
+import { SubscriptionSettingsScreen } from '../screens/settings/SubscriptionSettingsScreen';
+import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen';
+import { AboutScreen } from '../screens/settings/AboutScreen';
+
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
 import { CustomerDetailsScreen } from '../screens/NewQuote/CustomerDetailsScreen';
 import { MaterialsListScreen } from '../screens/NewQuote/MaterialsListScreen';
@@ -307,6 +316,84 @@ export function RootNavigator() {
               maxHeight: '90vh',
             }
           })
+        }}
+      />
+      {/* Settings Sub-screens */}
+      <RootStack.Screen
+        name="BusinessProfile"
+        component={BusinessProfileScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Business Profile',
+        }}
+      />
+      <RootStack.Screen
+        name="QuoteSettings"
+        component={QuoteSettingsScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Quote Settings',
+        }}
+      />
+      <RootStack.Screen
+        name="PaymentMethods"
+        component={PaymentMethodsScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Payment Methods',
+        }}
+      />
+      <RootStack.Screen
+        name="TradePricing"
+        component={TradePricingScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Trade & Pricing',
+        }}
+      />
+      <RootStack.Screen
+        name="SubscriptionSettings"
+        component={SubscriptionSettingsScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Subscription',
+        }}
+      />
+      <RootStack.Screen
+        name="AccountSettings"
+        component={AccountSettingsScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Account',
+        }}
+      />
+      <RootStack.Screen
+        name="About"
+        component={AboutScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'About',
         }}
       />
     </RootStack.Navigator>
