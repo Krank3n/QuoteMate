@@ -31,6 +31,17 @@ export default {
             requireOnDeviceRecognition: false
           }
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          icon: "./assets/icon.png",
+          color: "#f97316",
+          sounds: [],
+          android: {
+            useNextNotificationsApi: true
+          }
+        }
       ]
     ],
     splash: {
