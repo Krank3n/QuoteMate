@@ -21,7 +21,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.29</string>
+    <string>1.0.38</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -31,12 +31,11 @@
         <array>
           <string>quotemate</string>
           <string>com.hansendev.quotemate</string>
-          <string>com.googleusercontent.apps.652758863537-isuaotmpo68rj5lirc40otkevmr8annf</string>
         </array>
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>8</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>
@@ -49,11 +48,11 @@
       <true/>
     </dict>
     <key>NSCameraUsageDescription</key>
-    <string>QuoteMate needs camera access to take photos of materials, job sites, or documents to attach to your quotes.</string>
+    <string>Allow $(PRODUCT_NAME) to access your camera</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow QuoteMate to use your microphone for voice-to-text job descriptions.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>QuoteMate needs access to your photo library to attach images to quotes, such as photos of materials, job sites, or your business logo for custom branding.</string>
+    <string>Allow $(PRODUCT_NAME) to access your photos</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Allow QuoteMate to use speech recognition for voice-to-text job descriptions.</string>
     <key>UILaunchStoryboardName</key>
