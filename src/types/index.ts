@@ -64,6 +64,12 @@ export interface Quote {
   status: 'draft' | 'sent' | 'accepted' | 'rejected';
   notes?: string;
   aiSkipped?: boolean; // Flag to indicate AI analysis was intentionally skipped
+  // Quote acceptance via email link fields
+  acceptanceToken?: string; // 64-char secure token for email acceptance link
+  acceptanceTokenCreatedAt?: Date; // When the token was generated (for 30-day expiration)
+  respondedAt?: Date; // When client accepted/rejected via email link
+  respondedBy?: string; // Client identifier (email or name from form)
+  clientNotes?: string; // Optional feedback from client when responding
 }
 
 export interface JobTemplate {

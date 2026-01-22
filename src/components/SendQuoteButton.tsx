@@ -20,7 +20,9 @@ import { format } from 'date-fns';
 import { Quote, BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { generateQuotePDF, exportQuotePDF } from '../utils/pdfGenerator';
+import { generateQuotePDF, exportQuotePDF, generatePdfFilename } from '../utils/pdfGenerator';
+import { generateAcceptanceLink } from '../services/quoteAcceptanceService';
+import { auth } from '../config/firebase';
 
 interface SendQuoteButtonProps {
   quote: Quote;
@@ -70,10 +72,36 @@ export function SendQuoteButton({
 
   const handleSendQuote = async () => {
     try {
+      // Generate acceptance link for the quote
+      let acceptanceUrl = '';
+      const userId = auth.currentUser?.uid;
+      if (userId) {
+        try {
+          acceptanceUrl = await generateAcceptanceLink(quote.id, userId);
+          console.log('Generated acceptance link:', acceptanceUrl);
+        } catch (linkError) {
+          console.error('Failed to generate acceptance link:', linkError);
+          // Continue without acceptance link - not a fatal error
+        }
+      }
+
+      // Build email body with optional acceptance link
+      const buildEmailBody = () => {
+        let body = `Hi ${quote.customerName},\n\nPlease find attached your quotation for ${quote.job.name}.\n\nTotal: ${formatCurrency(quote.total)}\n\nThis quote is valid for 30 days from the date of issue.`;
+
+        if (acceptanceUrl) {
+          body += `\n\n--- RESPOND TO THIS QUOTE ---\n\nYou can accept or decline this quote directly by clicking the link below:\n\n${acceptanceUrl}\n\n(This link expires in 30 days)`;
+        }
+
+        body += `\n\nIf you have any questions, please don't hesitate to contact us.\n\nBest regards,\n${businessSettings?.businessName || 'Your Business'}`;
+
+        return body;
+      };
+
       if (Platform.OS === 'web') {
         // Generate PDF HTML
         const html = await generateQuotePDF(quote, businessSettings);
-        const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
+        const filename = generatePdfFilename('Quote', quote.customerName, quote.job.name, new Date(quote.updatedAt));
 
         // Create a hidden iframe to print the PDF
         const iframe = document.createElement('iframe');
@@ -111,14 +139,14 @@ export function SendQuoteButton({
 
         // Generate PDF with custom filename
         const html = await generateQuotePDF(quote, businessSettings);
-        const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
+        const filename = generatePdfFilename('Quote', quote.customerName, quote.job.name, new Date(quote.updatedAt));
         const { uri } = await Print.printToFileAsync({ html, base64: false });
 
-        // Compose email
+        // Compose email with acceptance link
         await MailComposer.composeAsync({
           recipients: quote.customerEmail ? [quote.customerEmail] : [],
           subject: `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`,
-          body: `Hi ${quote.customerName},\n\nPlease find attached your quotation for ${quote.job.name}.\n\nTotal: ${formatCurrency(quote.total)}\n\nThis quote is valid for 30 days from the date of issue.\n\nIf you have any questions, please don't hesitate to contact us.\n\nBest regards,\n${businessSettings?.businessName || 'Your Business'}`,
+          body: buildEmailBody(),
           attachments: [uri],
         });
       }

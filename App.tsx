@@ -21,6 +21,7 @@ import { subscriptionSyncService } from './src/services/subscriptionSyncService'
 import { auth } from './src/config/firebase';
 import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
+import { notificationService } from './src/services/notificationService';
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -59,6 +60,31 @@ export default function App() {
 
         setUserDataLoaded(true); // Mark user data as loaded
 
+        // Register for push notifications
+        if (Platform.OS !== 'web') {
+          notificationService.registerForPushNotifications().then((token) => {
+            if (token) {
+              console.log('📱 Push notifications registered');
+            }
+          });
+
+          // Set up notification listeners
+          notificationService.setupNotificationListeners(
+            (notification) => {
+              // Handle notification received while app is open
+              console.log('📬 Notification received:', notification.request.content.title);
+            },
+            (response) => {
+              // Handle user tapping on notification
+              const data = response.notification.request.content.data;
+              if (data?.quoteId && data?.type === 'quote_response') {
+                console.log('📋 Quote response notification tapped, quoteId:', data.quoteId);
+                // Could navigate to the quote here if needed
+              }
+            }
+          );
+        }
+
         // Set up real-time listeners for cross-device sync
         firestoreService.listenToQuotes((quotes) => {
           console.log('📡 Real-time quotes update received');
@@ -84,9 +110,10 @@ export default function App() {
           }
         });
       } else {
-        // User signed out, clean up listeners
+        // User signed out, clean up listeners and notification token
         console.log('🔌 User signed out, cleaning up listeners');
         firestoreService.cleanup();
+        notificationService.removeNotificationListeners();
         setUserDataLoaded(false);
       }
     });
@@ -117,10 +144,11 @@ export default function App() {
 
     initialize();
 
-    // Cleanup subscription and Firestore listeners on unmount
+    // Cleanup subscription, Firestore, and notification listeners on unmount
     return () => {
       subscriptionSyncService.cleanup();
       firestoreService.cleanup();
+      notificationService.removeNotificationListeners();
     };
   }, []);
 

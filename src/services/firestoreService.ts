@@ -48,6 +48,12 @@ class FirestoreService {
         ...quote,
         createdAt: quote.createdAt.toISOString(),
         updatedAt: quote.updatedAt.toISOString(),
+        // Handle new quote acceptance fields
+        acceptanceToken: quote.acceptanceToken || null,
+        acceptanceTokenCreatedAt: quote.acceptanceTokenCreatedAt?.toISOString() || null,
+        respondedAt: quote.respondedAt?.toISOString() || null,
+        respondedBy: quote.respondedBy || null,
+        clientNotes: quote.clientNotes || null,
         syncedAt: new Date().toISOString(),
       });
       console.log('✅ Quote saved to Firestore:', quote.id);
@@ -78,6 +84,9 @@ class FirestoreService {
           ...data,
           createdAt: new Date(data.createdAt),
           updatedAt: new Date(data.updatedAt),
+          // Handle new quote acceptance fields
+          acceptanceTokenCreatedAt: data.acceptanceTokenCreatedAt ? new Date(data.acceptanceTokenCreatedAt) : undefined,
+          respondedAt: data.respondedAt ? new Date(data.respondedAt) : undefined,
         } as Quote;
       });
 
@@ -299,6 +308,9 @@ class FirestoreService {
             ...data,
             createdAt: new Date(data.createdAt),
             updatedAt: new Date(data.updatedAt),
+            // Handle new quote acceptance fields
+            acceptanceTokenCreatedAt: data.acceptanceTokenCreatedAt ? new Date(data.acceptanceTokenCreatedAt) : undefined,
+            respondedAt: data.respondedAt ? new Date(data.respondedAt) : undefined,
           } as Quote;
         });
 
@@ -551,6 +563,52 @@ class FirestoreService {
     } catch (error) {
       console.error('❌ Error setting up invoices listener:', error);
       return null;
+    }
+  }
+
+  /**
+   * Save FCM token for push notifications
+   * Stores the token with device info for multi-device support
+   */
+  async saveFcmToken(token: string, deviceId: string): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, skipping FCM token save');
+      return;
+    }
+
+    try {
+      const tokenRef = doc(db, 'users', userId, 'fcmTokens', deviceId);
+      await setDoc(tokenRef, {
+        token,
+        deviceId,
+        platform: require('react-native').Platform.OS,
+        updatedAt: new Date().toISOString(),
+      });
+      console.log('✅ FCM token saved to Firestore');
+    } catch (error) {
+      console.error('❌ Error saving FCM token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove FCM token when user logs out or disables notifications
+   */
+  async removeFcmToken(deviceId: string): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, skipping FCM token removal');
+      return;
+    }
+
+    try {
+      const tokenRef = doc(db, 'users', userId, 'fcmTokens', deviceId);
+      await deleteDoc(tokenRef);
+      console.log('✅ FCM token removed from Firestore');
+    } catch (error) {
+      console.error('❌ Error removing FCM token:', error);
+      throw error;
     }
   }
 

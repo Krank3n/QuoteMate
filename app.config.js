@@ -2,7 +2,7 @@ export default {
   expo: {
     name: "QuoteMate",
     slug: "quotemate",
-    version: "1.0.33",
+    version: "1.0.38",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -14,7 +14,8 @@ export default {
           android: {
             compileSdkVersion: 35,
             targetSdkVersion: 35,
-            buildToolsVersion: "35.0.0"
+            buildToolsVersion: "35.0.0",
+            useLegacyPackaging: false
           },
           ios: {
             deploymentTarget: "15.2"
@@ -31,6 +32,17 @@ export default {
             requireOnDeviceRecognition: false
           }
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          icon: "./assets/icon.png",
+          color: "#f97316",
+          sounds: [],
+          android: {
+            useNextNotificationsApi: true
+          }
+        }
       ]
     ],
     splash: {
@@ -45,7 +57,7 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
-      buildNumber: "5"
+      buildNumber: "8"
     },
     android: {
       adaptiveIcon: {
@@ -53,7 +65,7 @@ export default {
         backgroundColor: "#1E293B"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 41,
+      versionCode: 46,
       permissions: ["android.permission.RECORD_AUDIO"],
       blockedPermissions: ["android.permission.CAMERA"]
     },

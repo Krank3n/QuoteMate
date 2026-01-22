@@ -1,6 +1,6 @@
 {
   "name": "@quotemate/app",
-  "version": "1.0.33",
+  "version": "1.0.37",
   "main": "index.js",
   "scripts": {
     "start": "expo start --dev-client",
@@ -30,12 +30,14 @@
     "expo-build-properties": "~0.13.3",
     "expo-constants": "~17.0.8",
     "expo-crypto": "~14.0.2",
+    "expo-device": "~7.0.2",
     "expo-file-system": "~18.0.6",
     "expo-font": "~13.0.4",
     "expo-iap": "^3.1.33",
     "expo-image-picker": "~16.0.6",
     "expo-mail-composer": "~14.0.2",
     "expo-modules-core": "~2.2.3",
+    "expo-notifications": "~0.29.13",
     "expo-print": "~14.0.2",
     "expo-router": "~4.0.14",
     "expo-sharing": "~13.0.1",
