@@ -3,7 +3,7 @@
  * Generates materials lists from natural language descriptions
  */
 
-import { ANTHROPIC_API_KEY } from '@env';
+import { ANTHROPIC_API_KEY, GEMINI_API_KEY } from '@env';
 import { Material } from '../types';
 import { Platform } from 'react-native';
 
@@ -15,11 +15,12 @@ const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
   ? 'http://127.0.0.1:5001/hansendev/us-central1'
   : 'https://us-central1-hansendev.cloudfunctions.net';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
 console.log('🔧 LLM Service Config:', {
   platform: Platform.OS,
-  hasApiKey: !!ANTHROPIC_API_KEY,
-  keyLength: ANTHROPIC_API_KEY?.length || 0,
+  hasAnthropicKey: !!ANTHROPIC_API_KEY,
+  hasGeminiKey: !!GEMINI_API_KEY,
   useEmulator: USE_EMULATOR,
   functionsUrl: FIREBASE_FUNCTIONS_URL,
 });
@@ -117,6 +118,14 @@ export async function analyzeJobDescription(
     }
   }
 
+  // All Claude retries failed, try Gemini as fallback
+  console.log('🔄 Claude API failed after retries, trying Gemini fallback...');
+  try {
+    return await analyzeViaGemini(jobDescription, tradeContext);
+  } catch (geminiError) {
+    console.error('Gemini fallback also failed:', geminiError);
+  }
+
   // All retries failed
   throw new Error(
     lastError?.message || 'Failed to analyze job description after multiple attempts'
@@ -172,9 +181,74 @@ async function analyzeViaFirebaseFunction(
     }
   }
 
+  // Try Gemini as fallback
+  console.log('🔄 Claude API failed, trying Gemini fallback...');
+  try {
+    return await analyzeViaGemini(jobDescription, tradeContext);
+  } catch (geminiError) {
+    console.error('Gemini fallback also failed:', geminiError);
+  }
+
   throw new Error(
     lastError?.message || 'Failed to analyze job description after multiple attempts'
   );
+}
+
+/**
+ * Analyze job description via Google Gemini API (fallback)
+ */
+async function analyzeViaGemini(
+  jobDescription: string,
+  tradeContext?: {
+    categoryName?: string;
+    nicheName?: string;
+    suggestedMaterials?: string[];
+    pricingMethod?: string;
+    selectedStore?: string;
+  }
+): Promise<LLMResponse> {
+  if (!GEMINI_API_KEY) {
+    throw new Error('Gemini API key not configured');
+  }
+
+  const prompt = createPrompt(jobDescription, tradeContext);
+
+  const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            {
+              text: prompt,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 2000,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API returned ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  if (!content) {
+    throw new Error('No content in Gemini response');
+  }
+
+  console.log('✅ Gemini fallback succeeded');
+  return parseResponse(content);
 }
 
 /**
@@ -382,8 +456,17 @@ export async function cleanupTranscriptionAndGenerateTitle(
     const result = parseCleanupResponse(content);
     return result;
   } catch (error) {
-    console.error('Text cleanup failed:', error);
-    // Fallback: return original text with a basic title
+    console.error('Text cleanup with Claude failed:', error);
+
+    // Try Gemini as fallback
+    try {
+      console.log('🔄 Trying Gemini fallback for text cleanup...');
+      return await cleanupViaGemini(transcribedText);
+    } catch (geminiError) {
+      console.error('Gemini fallback also failed:', geminiError);
+    }
+
+    // Final fallback: return original text with a basic title
     return {
       cleanedDescription: transcribedText,
       suggestedTitle: extractSimpleTitle(transcribedText),
@@ -418,11 +501,70 @@ async function cleanupViaFirebaseFunction(
     };
   } catch (error) {
     console.error('Firebase cleanup function failed:', error);
+
+    // Try Gemini as fallback
+    try {
+      console.log('🔄 Trying Gemini fallback for text cleanup...');
+      return await cleanupViaGemini(transcribedText);
+    } catch (geminiError) {
+      console.error('Gemini fallback also failed:', geminiError);
+    }
+
     return {
       cleanedDescription: transcribedText,
       suggestedTitle: extractSimpleTitle(transcribedText),
     };
   }
+}
+
+/**
+ * Clean up transcription via Google Gemini API (fallback)
+ */
+async function cleanupViaGemini(
+  transcribedText: string
+): Promise<{ cleanedDescription: string; suggestedTitle: string }> {
+  if (!GEMINI_API_KEY) {
+    throw new Error('Gemini API key not configured');
+  }
+
+  const prompt = createCleanupPrompt(transcribedText);
+
+  const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            {
+              text: prompt,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.5,
+        maxOutputTokens: 1000,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API returned ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  if (!content) {
+    throw new Error('No content in Gemini response');
+  }
+
+  console.log('✅ Gemini cleanup fallback succeeded');
+  return parseCleanupResponse(content);
 }
 
 /**
