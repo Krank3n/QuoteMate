@@ -50,6 +50,17 @@ import {
 } from '../../services/materialFavorites';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { BUNNINGS_SCRAPER_URL } from '@env';
+import { TRADE_CATEGORIES } from '../../constants/tradeCategories';
+
+// Material categories for the picker (derived from trade categories)
+const MATERIAL_CATEGORIES = [
+  { id: '', name: 'No Category', icon: 'folder-outline' },
+  ...TRADE_CATEGORIES.filter(c => c.id !== 'general').map(c => ({
+    id: c.id,
+    name: c.name,
+    icon: c.icon,
+  })),
+];
 
 type TabValue = 'search' | 'saved';
 
@@ -90,6 +101,10 @@ export function AddMaterialScreen() {
   const [manualPrice, setManualPrice] = useState(
     editingMaterial?.price.toString() || ''
   );
+  const [selectedCategory, setSelectedCategory] = useState(
+    editingMaterial?.category || ''
+  );
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
 
   // Update form when editing material changes
@@ -99,6 +114,7 @@ export function AddMaterialScreen() {
       setManualQuantity(editingMaterial.quantity.toString());
       setManualUnit(editingMaterial.unit);
       setManualPrice(editingMaterial.price.toString());
+      setSelectedCategory(editingMaterial.category || '');
       setActiveTab('search'); // Start on manual entry area when editing
     }
   }, [editingMaterial]);
@@ -384,6 +400,7 @@ export function AddMaterialScreen() {
         totalPrice: price * quantity,
         manualPriceOverride: true,
         pricingSource: 'manual',
+        category: selectedCategory || undefined,
       };
       updateMaterialInQuote(updatedMaterial);
     } else {
@@ -397,6 +414,7 @@ export function AddMaterialScreen() {
         totalPrice: price * quantity,
         manualPriceOverride: true,
         pricingSource: 'manual',
+        category: selectedCategory || undefined,
       };
 
       if (saveAsTemplate) {
@@ -635,6 +653,63 @@ export function AddMaterialScreen() {
               style={styles.unitRow}
             />
           </View>
+        </View>
+
+        {/* Category Picker */}
+        <View style={styles.categorySelector}>
+          <Text style={styles.unitLabel}>Category (for grouping)</Text>
+          <TouchableOpacity
+            style={styles.categoryButton}
+            onPress={() => setShowCategoryPicker(!showCategoryPicker)}
+          >
+            <MaterialCommunityIcons
+              name={(MATERIAL_CATEGORIES.find(c => c.id === selectedCategory)?.icon || 'folder-outline') as any}
+              size={20}
+              color={colors.primary}
+            />
+            <Text style={styles.categoryButtonText}>
+              {MATERIAL_CATEGORIES.find(c => c.id === selectedCategory)?.name || 'No Category'}
+            </Text>
+            <MaterialCommunityIcons
+              name={showCategoryPicker ? 'chevron-up' : 'chevron-down'}
+              size={20}
+              color={colors.onSurface}
+            />
+          </TouchableOpacity>
+          {showCategoryPicker && (
+            <View style={styles.categoryList}>
+              {MATERIAL_CATEGORIES.map((cat) => (
+                <TouchableOpacity
+                  key={cat.id}
+                  style={[
+                    styles.categoryItem,
+                    selectedCategory === cat.id && styles.categoryItemSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedCategory(cat.id);
+                    setShowCategoryPicker(false);
+                  }}
+                >
+                  <MaterialCommunityIcons
+                    name={cat.icon as any}
+                    size={18}
+                    color={selectedCategory === cat.id ? colors.primary : colors.onSurface}
+                  />
+                  <Text
+                    style={[
+                      styles.categoryItemText,
+                      selectedCategory === cat.id && styles.categoryItemTextSelected,
+                    ]}
+                  >
+                    {cat.name}
+                  </Text>
+                  {selectedCategory === cat.id && (
+                    <MaterialCommunityIcons name="check" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
 
         <View style={styles.toggleRow}>
@@ -885,6 +960,53 @@ const styles = StyleSheet.create({
   },
   unitRow: {
     marginBottom: 4,
+  },
+  categorySelector: {
+    marginBottom: 16,
+  },
+  categoryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    padding: 12,
+    gap: 8,
+  },
+  categoryButtonText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.text,
+  },
+  categoryList: {
+    marginTop: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    maxHeight: 250,
+    overflow: 'hidden',
+  },
+  categoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  categoryItemSelected: {
+    backgroundColor: colors.primaryBg,
+  },
+  categoryItemText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.text,
+  },
+  categoryItemTextSelected: {
+    color: colors.primary,
+    fontWeight: '600',
   },
   toggleRow: {
     flexDirection: 'row',

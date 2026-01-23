@@ -19,6 +19,8 @@ export interface Material {
   brand?: string; // Product brand
   stockLevel?: string; // Stock availability (deprecated, use stockCheckedAt)
   stockCheckedAt?: string; // ISO timestamp of when stock was last checked
+  // Material categorization
+  category?: string; // Trade category ID (e.g., 'carpentry', 'electrical', 'plumbing')
 }
 
 export interface FavoriteProductMapping {

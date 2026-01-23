@@ -42,7 +42,48 @@ import { bunningsApi } from '../../services/bunningsApi';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
-import { getTradeCategoryById, getTradeNicheById } from '../../constants/tradeCategories';
+import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
+
+// Helper to get category display info
+function getCategoryInfo(categoryId: string | undefined): { name: string; icon: string; color: string } {
+  if (!categoryId) {
+    return { name: 'Uncategorized', icon: 'folder-outline', color: colors.onSurface };
+  }
+  const category = TRADE_CATEGORIES.find(c => c.id === categoryId);
+  if (category) {
+    return { name: category.name, icon: category.icon, color: category.color };
+  }
+  return { name: 'Uncategorized', icon: 'folder-outline', color: colors.onSurface };
+}
+
+// Helper to group materials by category
+function groupMaterialsByCategory(materials: Material[]): Map<string, Material[]> {
+  const grouped = new Map<string, Material[]>();
+
+  materials.forEach(material => {
+    const categoryKey = material.category || '';
+    if (!grouped.has(categoryKey)) {
+      grouped.set(categoryKey, []);
+    }
+    grouped.get(categoryKey)!.push(material);
+  });
+
+  // Sort: categorized items first (alphabetically by category), then uncategorized
+  const sortedMap = new Map<string, Material[]>();
+  const sortedKeys = Array.from(grouped.keys()).sort((a, b) => {
+    if (a === '' && b !== '') return 1; // Uncategorized last
+    if (a !== '' && b === '') return -1;
+    const catA = getCategoryInfo(a).name;
+    const catB = getCategoryInfo(b).name;
+    return catA.localeCompare(catB);
+  });
+
+  sortedKeys.forEach(key => {
+    sortedMap.set(key, grouped.get(key)!);
+  });
+
+  return sortedMap;
+}
 import {
   searchMaterialWithWebScraping,
   ProductMatch,
@@ -932,114 +973,145 @@ export function MaterialsListScreen() {
           </View>
         ) : (
           <List.Section style={styles.listView}>
-            {materials.map((material) => {
-              const isExpanded = expandedMaterials.has(material.id);
+            {(() => {
+              const groupedMaterials = groupMaterialsByCategory(materials);
+              const hasMultipleCategories = groupedMaterials.size > 1 || (groupedMaterials.size === 1 && !groupedMaterials.has(''));
 
-              // Check if brand is meaningful (not just "Bunnings" or the store name)
-              const hasMeaningfulBrand = material.brand &&
-                material.brand.toLowerCase() !== 'bunnings' &&
-                material.brand.toLowerCase() !== 'bunnings.com.au' &&
-                material.brand.toLowerCase() !== 'reece' &&
-                material.brand.toLowerCase() !== 'mitre 10';
+              return Array.from(groupedMaterials.entries()).map(([categoryId, categoryMaterials]) => {
+                const categoryInfo = getCategoryInfo(categoryId);
 
-              const hasDetails = material.imageUrl || material.description || hasMeaningfulBrand || material.stockCheckedAt || material.bunningsItemNumber;
-              const showLink = material.pricingSource === 'scraper' || material.pricingSource === 'api';
-              const isAiEstimate = material.pricingSource === 'ai';
-
-              return (
-                <View key={material.id} style={styles.listItem}>
-                  <TouchableOpacity
-                    onPress={() => hasDetails && toggleMaterialExpanded(material.id)}
-                    disabled={!hasDetails}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.accordionHeader}>
-                      <MaterialCommunityIcons
-                        name="package-variant"
-                        size={24}
-                        color={colors.onSurface}
-                        style={styles.accordionIcon}
-                      />
-                      <View style={styles.accordionContent}>
-                        <Text style={styles.accordionTitle}>{material.name}</Text>
-                        <View>
-                          <Text style={styles.materialDescription}>
-                            {material.quantity} {material.unit} × {formatCurrency(material.price)}
-                          </Text>
-                          {isAiEstimate && (
-                            <Text style={styles.aiEstimateLabel}>AI Estimate</Text>
-                          )}
-                        </View>
-                      </View>
-                      <View style={styles.itemRight}>
-                        <Text style={styles.itemTotal}>
-                          {formatCurrency(material.totalPrice)}
+                return (
+                  <View key={categoryId || 'uncategorized'}>
+                    {/* Category Header - only show if there are multiple categories or items have categories */}
+                    {hasMultipleCategories && (
+                      <View style={styles.categoryHeader}>
+                        <MaterialCommunityIcons
+                          name={categoryInfo.icon as any}
+                          size={20}
+                          color={categoryInfo.color}
+                        />
+                        <Text style={[styles.categoryTitle, { color: categoryInfo.color }]}>
+                          {categoryInfo.name}
                         </Text>
-                        <View style={styles.itemActions}>
-                          {showLink && (
-                            <IconButton
-                              icon="open-in-new"
-                              size={20}
-                              onPress={() => handleOpenInStore(material)}
-                              iconColor={colors.primary}
-                            />
-                          )}
-                          <IconButton
-                            icon="pencil"
-                            size={20}
-                            onPress={() => handleEditMaterial(material)}
-                          />
-                          <IconButton
-                            icon="delete"
-                            size={20}
-                            onPress={() => handleDeleteMaterial(material.id)}
-                          />
-                        </View>
+                        <Text style={styles.categoryCount}>
+                          ({categoryMaterials.length})
+                        </Text>
                       </View>
-                    </View>
-                  </TouchableOpacity>
-                  {hasDetails && isExpanded && (
-                    <View style={styles.expandedContent}>
-                      <View style={styles.detailsContainer}>
-                        {material.imageUrl && (
-                          <Image
-                            source={{ uri: material.imageUrl }}
-                            style={styles.productImage}
-                            resizeMode="contain"
-                          />
-                        )}
-                        <View style={styles.detailsColumn}>
-                          {material.description && (
-                            <View style={styles.detailRow}>
-                              <Text style={styles.detailLabel}>Description:</Text>
-                              <Text style={styles.detailValue}>{material.description}</Text>
+                    )}
+
+                    {/* Materials in this category */}
+                    {categoryMaterials.map((material) => {
+                      const isExpanded = expandedMaterials.has(material.id);
+
+                      // Check if brand is meaningful (not just "Bunnings" or the store name)
+                      const hasMeaningfulBrand = material.brand &&
+                        material.brand.toLowerCase() !== 'bunnings' &&
+                        material.brand.toLowerCase() !== 'bunnings.com.au' &&
+                        material.brand.toLowerCase() !== 'reece' &&
+                        material.brand.toLowerCase() !== 'mitre 10';
+
+                      const hasDetails = material.imageUrl || material.description || hasMeaningfulBrand || material.stockCheckedAt || material.bunningsItemNumber;
+                      const showLink = material.pricingSource === 'scraper' || material.pricingSource === 'api';
+                      const isAiEstimate = material.pricingSource === 'ai';
+
+                      return (
+                        <View key={material.id} style={styles.listItem}>
+                          <TouchableOpacity
+                            onPress={() => hasDetails && toggleMaterialExpanded(material.id)}
+                            disabled={!hasDetails}
+                            activeOpacity={0.7}
+                          >
+                            <View style={styles.accordionHeader}>
+                              <MaterialCommunityIcons
+                                name="package-variant"
+                                size={24}
+                                color={colors.onSurface}
+                                style={styles.accordionIcon}
+                              />
+                              <View style={styles.accordionContent}>
+                                <Text style={styles.accordionTitle}>{material.name}</Text>
+                                <View>
+                                  <Text style={styles.materialDescription}>
+                                    {material.quantity} {material.unit} × {formatCurrency(material.price)}
+                                  </Text>
+                                  {isAiEstimate && (
+                                    <Text style={styles.aiEstimateLabel}>AI Estimate</Text>
+                                  )}
+                                </View>
+                              </View>
+                              <View style={styles.itemRight}>
+                                <Text style={styles.itemTotal}>
+                                  {formatCurrency(material.totalPrice)}
+                                </Text>
+                                <View style={styles.itemActions}>
+                                  {showLink && (
+                                    <IconButton
+                                      icon="open-in-new"
+                                      size={20}
+                                      onPress={() => handleOpenInStore(material)}
+                                      iconColor={colors.primary}
+                                    />
+                                  )}
+                                  <IconButton
+                                    icon="pencil"
+                                    size={20}
+                                    onPress={() => handleEditMaterial(material)}
+                                  />
+                                  <IconButton
+                                    icon="delete"
+                                    size={20}
+                                    onPress={() => handleDeleteMaterial(material.id)}
+                                  />
+                                </View>
+                              </View>
                             </View>
-                          )}
-                          {hasMeaningfulBrand && (
-                            <View style={styles.detailRow}>
-                              <Text style={styles.detailLabel}>Brand:</Text>
-                              <Text style={styles.detailValue}>{material.brand}</Text>
-                            </View>
-                          )}
-                          {material.stockCheckedAt && (
-                            <View style={styles.detailRow}>
-                              <Text style={styles.detailLabel}>Last checked:</Text>
-                              <Text style={styles.detailValue}>{formatTimeAgo(material.stockCheckedAt)}</Text>
-                            </View>
-                          )}
-                          {material.bunningsItemNumber && (
-                            <View style={styles.detailRow}>
-                              <Text style={styles.detailLabel}>Item #:</Text>
-                              <Text style={styles.detailValue}>{material.bunningsItemNumber}</Text>
+                          </TouchableOpacity>
+                          {hasDetails && isExpanded && (
+                            <View style={styles.expandedContent}>
+                              <View style={styles.detailsContainer}>
+                                {material.imageUrl && (
+                                  <Image
+                                    source={{ uri: material.imageUrl }}
+                                    style={styles.productImage}
+                                    resizeMode="contain"
+                                  />
+                                )}
+                                <View style={styles.detailsColumn}>
+                                  {material.description && (
+                                    <View style={styles.detailRow}>
+                                      <Text style={styles.detailLabel}>Description:</Text>
+                                      <Text style={styles.detailValue}>{material.description}</Text>
+                                    </View>
+                                  )}
+                                  {hasMeaningfulBrand && (
+                                    <View style={styles.detailRow}>
+                                      <Text style={styles.detailLabel}>Brand:</Text>
+                                      <Text style={styles.detailValue}>{material.brand}</Text>
+                                    </View>
+                                  )}
+                                  {material.stockCheckedAt && (
+                                    <View style={styles.detailRow}>
+                                      <Text style={styles.detailLabel}>Last checked:</Text>
+                                      <Text style={styles.detailValue}>{formatTimeAgo(material.stockCheckedAt)}</Text>
+                                    </View>
+                                  )}
+                                  {material.bunningsItemNumber && (
+                                    <View style={styles.detailRow}>
+                                      <Text style={styles.detailLabel}>Item #:</Text>
+                                      <Text style={styles.detailValue}>{material.bunningsItemNumber}</Text>
+                                    </View>
+                                  )}
+                                </View>
+                              </View>
                             </View>
                           )}
                         </View>
-                      </View>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
+                      );
+                    })}
+                  </View>
+                );
+              });
+            })()}
           </List.Section>
         )}
 
@@ -1198,6 +1270,25 @@ const styles = StyleSheet.create({
   listItem: {
     backgroundColor: colors.surface,
     marginBottom: 1,
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    marginTop: 8,
+    gap: 8,
+  },
+  categoryTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  categoryCount: {
+    fontSize: 12,
+    color: colors.onSurface,
   },
   accordionHeader: {
     flexDirection: 'row',
