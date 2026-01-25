@@ -60,6 +60,15 @@ export function DashboardScreen() {
   const handleNewQuote = () => {
     // Check if user can create a new quote
     if (!canCreateQuote()) {
+      // On iOS, show alert instead of paywall (Apple requires IAP for subscriptions)
+      if (Platform.OS === 'ios') {
+        Alert.alert(
+          'Quote Limit Reached',
+          'You\'ve reached the free quote limit. Subscription features are coming soon to iOS.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
       navigation.navigate('Paywall' as never);
       return;
     }
@@ -92,6 +101,15 @@ export function DashboardScreen() {
   const handleDuplicateQuote = async (quote: Quote) => {
     // Check if user can create a new quote
     if (!canCreateQuote()) {
+      // On iOS, show alert instead of paywall (Apple requires IAP for subscriptions)
+      if (Platform.OS === 'ios') {
+        Alert.alert(
+          'Quote Limit Reached',
+          'You\'ve reached the free quote limit. Subscription features are coming soon to iOS.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
       navigation.navigate('Paywall' as never);
       return;
     }

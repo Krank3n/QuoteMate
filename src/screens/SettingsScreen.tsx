@@ -36,7 +36,7 @@ export function SettingsScreen() {
   const navigation = useNavigation<any>();
   const { subscriptionStatus } = useStore();
 
-  const menuItems: SettingsMenuItem[] = [
+  const allMenuItems: SettingsMenuItem[] = [
     {
       id: 'business',
       title: 'Business Profile',
@@ -89,6 +89,11 @@ export function SettingsScreen() {
       screen: 'About',
     },
   ];
+
+  // Hide subscription option on iOS (Apple requires using their IAP system)
+  const menuItems = Platform.OS === 'ios'
+    ? allMenuItems.filter(item => item.id !== 'subscription')
+    : allMenuItems;
 
   const handleMenuPress = (screen: string) => {
     navigation.navigate(screen);

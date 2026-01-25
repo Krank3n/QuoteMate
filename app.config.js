@@ -57,7 +57,7 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
-      buildNumber: "8"
+      buildNumber: "9"
     },
     android: {
       adaptiveIcon: {
