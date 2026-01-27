@@ -399,6 +399,46 @@ export function PaywallScreen() {
   // Check if user is Pro
   const isPro = subscriptionStatus?.isPro || false;
 
+  // On iOS, don't show any subscription/Pro content (Apple requires IAP)
+  if (Platform.OS === 'ios') {
+    return (
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 20 }]}
+      >
+        <WebContainer>
+          <View style={styles.header}>
+            <MaterialCommunityIcons
+              name="information"
+              size={80}
+              color={colors.primary}
+            />
+            <Title style={styles.title}>Quote Limit</Title>
+            <Text style={styles.subtitle}>
+              You've used {quotesUsed} of {quotesLimit} free quotes.
+            </Text>
+          </View>
+
+          <Surface style={styles.planCard}>
+            <Text style={styles.featureText}>
+              Additional quote analyses will be available in a future update.
+              {'\n\n'}
+              For now, you can continue to view and edit your existing quotes.
+            </Text>
+          </Surface>
+
+          <Button
+            mode="text"
+            onPress={() => navigation.goBack()}
+            style={styles.backButton}
+          >
+            Go Back
+          </Button>
+        </WebContainer>
+      </ScrollView>
+    );
+  }
+
   const handleCheckoutSuccess = async () => {
     setShowCheckoutModal(false);
 
