@@ -90,10 +90,7 @@ export function SettingsScreen() {
     },
   ];
 
-  // Hide subscription option on iOS (Apple requires using their IAP system)
-  const menuItems = Platform.OS === 'ios'
-    ? allMenuItems.filter(item => item.id !== 'subscription')
-    : allMenuItems;
+  const menuItems = allMenuItems;
 
   const handleMenuPress = (screen: string) => {
     navigation.navigate(screen);

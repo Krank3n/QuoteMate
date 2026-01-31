@@ -9,7 +9,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Platform,
 } from 'react-native';
 import {
   Text,
@@ -27,30 +26,6 @@ import { WebContainer } from '../../components/WebContainer';
 export function SubscriptionSettingsScreen() {
   const navigation = useNavigation<any>();
   const { subscriptionStatus } = useStore();
-
-  // On iOS, show a different message since Apple requires using their IAP
-  if (Platform.OS === 'ios') {
-    return (
-      <View style={styles.container}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <WebContainer>
-            <Surface style={styles.card}>
-              <Title style={styles.sectionTitle}>Your Subscription</Title>
-              <View style={styles.subscriptionInfo}>
-                <View style={styles.freeStatusContainer}>
-                  <MaterialCommunityIcons name="information" size={32} color={colors.primary} />
-                  <Text style={styles.freeStatusTitle}>iOS Subscriptions</Text>
-                </View>
-                <Text style={styles.upgradeDescription}>
-                  Subscription features are coming soon to iOS. In the meantime, you can continue using the free tier with {subscriptionStatus?.freeQuotesLimit || 5} quote analyses.
-                </Text>
-              </View>
-            </Surface>
-          </WebContainer>
-        </ScrollView>
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container}>
