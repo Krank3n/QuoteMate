@@ -79,16 +79,20 @@ class UnifiedBillingService {
         ];
       } else {
         // For native, get from App Store / Google Play
+        // expo-iap 3.x products use 'id' (not 'productId') and 'displayPrice' (not 'localizedPrice')
         const nativeProducts = await nativeBillingService.getProducts();
-        return nativeProducts.map((product: any) => ({
-          id: product.productId,
-          title: product.title || 'QuoteMate Pro',
-          description: product.description || 'Unlimited quotes',
-          price: product.localizedPrice || '$19.00',
-          priceValue: product.price || 19.0,
-          currency: product.currency || 'USD',
-          period: product.productId.includes('yearly') ? 'yearly' : 'monthly',
-        }));
+        return nativeProducts.map((product: any) => {
+          const productId = product.id || product.productId;
+          return {
+            id: productId,
+            title: product.title || product.displayName || 'QuoteMate Pro',
+            description: product.description || 'Unlimited quotes',
+            price: product.displayPrice || product.localizedPrice || '$19.00',
+            priceValue: product.price || 19.0,
+            currency: product.currency || 'USD',
+            period: productId?.includes('yearly') ? 'yearly' as const : 'monthly' as const,
+          };
+        });
       }
     } catch (error) {
       console.error('❌ Error getting products:', error);

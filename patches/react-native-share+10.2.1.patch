@@ -1,0 +1,26 @@
+diff --git a/node_modules/react-native-share/ios/RNShare.h b/node_modules/react-native-share/ios/RNShare.h
+index 1234567..abcdefg 100644
+--- a/node_modules/react-native-share/ios/RNShare.h
++++ b/node_modules/react-native-share/ios/RNShare.h
+@@ -9,7 +9,7 @@
+ #endif
+
+ #if RCT_NEW_ARCH_ENABLED
+-#import <RNShareSpec/RNShareSpec.h>
++#import "RNShareSpec.h"
+ #endif
+
+ @interface RNShare : NSObject <RCTBridgeModule, UIDocumentPickerDelegate>
+diff --git a/node_modules/react-native-share/ios/RNShare.mm b/node_modules/react-native-share/ios/RNShare.mm
+index 1234567..abcdefg 100644
+--- a/node_modules/react-native-share/ios/RNShare.mm
++++ b/node_modules/react-native-share/ios/RNShare.mm
+@@ -26,7 +26,7 @@
+ #import "RNShareUtils.h"
+
+ #if RCT_NEW_ARCH_ENABLED
+-#import <RNShareSpec/RNShareSpec.h>
++#import "RNShareSpec.h"
+ #endif
+
+ @implementation RNShare

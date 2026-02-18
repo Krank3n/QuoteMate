@@ -48,7 +48,7 @@ class SubscriptionSyncService {
     }
 
     const userId = currentUser.uid;
-    const subscriptionRef = doc(db, 'subscriptions', userId);
+    const subscriptionRef = doc(db, 'users', userId, 'profile', 'subscription');
 
     // Listen to subscription changes
     this.unsubscribeListener = onSnapshot(
@@ -56,8 +56,8 @@ class SubscriptionSyncService {
       (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
-          const isPremium = data.status === 'active';
-          const subscriptionId = data.subscriptionId || null;
+          const isPremium = data.isPro === true;
+          const subscriptionId = data.subscriptionId || data.transactionId || null;
           const expiryDate = data.currentPeriodEnd || null;
 
           console.log('📡 Subscription updated from Firestore:', {

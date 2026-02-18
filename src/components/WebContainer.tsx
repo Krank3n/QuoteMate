@@ -15,10 +15,10 @@ interface WebContainerProps {
 }
 
 export function WebContainer({ children, style, maxWidth = 800 }: WebContainerProps) {
-  // On native mobile (iOS/Android), render children directly without wrapper
+  // On native mobile (iOS/Android), render children with flex container
   // This prevents layout issues on iPad and ensures proper touch handling
   if (Platform.OS !== 'web') {
-    return <>{children}</>;
+    return <View style={style}>{children}</View>;
   }
 
   // On web, apply centered max-width container for better desktop UX

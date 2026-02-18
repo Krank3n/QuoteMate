@@ -87,23 +87,13 @@ export function PaywallScreen() {
       console.log('📦 Product count:', availableProducts.length);
 
       if (availableProducts.length === 0) {
-        // Track that products failed to load (for retry functionality)
         setProductsLoadError(true);
 
-        if (Platform.OS === 'android') {
-          Alert.alert(
-            'No Products Found',
-            'Subscription products are not set up yet. Please:\n\n' +
-            '1. Create subscriptions in Google Play Console\n' +
-            '2. Use product IDs:\n   • quotemate_premium_monthly\n   • quotemate_premium_yearly\n' +
-            '3. Make sure they are ACTIVE\n' +
-            '4. Install app from Play Store test link'
-          );
-        } else if (Platform.OS === 'ios') {
-          console.log('⚠️ No iOS subscription products found');
-        } else if (Platform.OS === 'web') {
-          console.log('ℹ️ Web products loaded from configuration');
-          setProductsLoadError(false); // Web has hardcoded products, not an error
+        if (Platform.OS === 'web') {
+          console.log('Web products loaded from configuration');
+          setProductsLoadError(false);
+        } else {
+          console.log('No subscription products found on', Platform.OS);
         }
       }
       // Convert to RNIap.Subscription format for compatibility
@@ -120,11 +110,13 @@ export function PaywallScreen() {
       console.error('Error loading products:', error);
       setProductsLoadError(true);
 
-      // Handle IAP not available gracefully
-      if (error?.code === 'E_IAP_NOT_AVAILABLE' || error?.message?.includes('E_IAP_NOT_AVAILABLE')) {
-        console.log('ℹ️ In-app purchases not available on this platform');
+      // Handle IAP not available gracefully (expo-iap 3.x uses kebab-case error codes)
+      const code = error?.code;
+      const msg = error?.message || '';
+      if (code === 'iap-not-available' || code === 'E_IAP_NOT_AVAILABLE' || msg.includes('iap-not-available') || msg.includes('E_IAP_NOT_AVAILABLE')) {
+        console.log('In-app purchases not available on this device');
         setIapNotAvailable(true);
-        setProductsLoadError(false); // This is expected, not an error
+        setProductsLoadError(false);
       } else {
         Alert.alert('Error', 'Failed to load subscription options. Please try again.');
       }
@@ -148,8 +140,40 @@ export function PaywallScreen() {
         async (purchase: any) => {
           try {
             console.log('Purchase updated:', purchase);
-            const receipt = purchase.transactionReceipt;
-            if (receipt) {
+            // expo-iap 3.x: check purchaseToken (not transactionReceipt)
+            const hasValidPurchase = purchase.purchaseToken || purchase.transactionReceipt || purchase.id;
+            if (hasValidPurchase) {
+              // Send receipt to server for validation
+              const currentUser = auth.currentUser;
+              if (currentUser) {
+                const API_BASE_URL = process.env.API_BASE_URL || 'https://us-central1-hansendev.cloudfunctions.net';
+                const endpoint = Platform.OS === 'ios' ? 'validateAppleReceipt' : 'validateGoogleReceipt';
+                try {
+                  console.log(`📤 Sending receipt to ${endpoint}...`);
+                  const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      userId: currentUser.uid,
+                      transactionId: purchase.transactionId || purchase.id,
+                      productId: purchase.productId,
+                      purchaseToken: purchase.purchaseToken || null,
+                    }),
+                  });
+                  const data = await response.json();
+                  if (data.success) {
+                    console.log('✅ Server-side receipt validation succeeded');
+                    // Reload subscription from Firestore
+                    await loadSubscription();
+                  } else {
+                    console.warn('⚠️ Server validation returned error, falling back to local:', data.error);
+                  }
+                } catch (serverError) {
+                  console.warn('⚠️ Server validation failed, falling back to local:', serverError);
+                }
+              }
+
+              // Always set local premium as fallback
               await setPremium(
                 true,
                 purchase.productId,
@@ -175,7 +199,8 @@ export function PaywallScreen() {
         (error: any) => {
           try {
             console.error('Purchase error:', error);
-            if (error.code !== 'E_USER_CANCELLED' && error.code !== 'E_IAP_NOT_AVAILABLE') {
+            const errorCode = error.code;
+          if (errorCode !== 'user-cancelled' && errorCode !== 'E_USER_CANCELLED' && errorCode !== 'iap-not-available' && errorCode !== 'E_IAP_NOT_AVAILABLE') {
               Alert.alert('Purchase Failed', error.message || 'An error occurred during purchase');
             }
           } catch (alertError) {
@@ -189,8 +214,8 @@ export function PaywallScreen() {
       return { purchaseUpdateSubscription, purchaseErrorSubscription };
     } catch (error: any) {
       console.error('Error setting up purchase listeners:', error);
-      // Don't show alert for E_IAP_NOT_AVAILABLE during setup
-      if (error?.code !== 'E_IAP_NOT_AVAILABLE') {
+      // Don't show alert for iap-not-available during setup
+      if (error?.code !== 'iap-not-available' && error?.code !== 'E_IAP_NOT_AVAILABLE') {
         setIsUpgrading(false);
       }
       return { purchaseUpdateSubscription: null, purchaseErrorSubscription: null };
@@ -202,15 +227,10 @@ export function PaywallScreen() {
     console.log('Platform:', Platform.OS);
 
     if (products.length === 0) {
-      console.log('❌ No products available');
+      console.log('No products available');
       Alert.alert(
         'Not Available',
-        Platform.OS === 'ios'
-          ? 'Subscription products are not available yet. Please try again later or contact support.'
-          : 'Subscription products are not available yet. Please make sure:\n\n' +
-            '1. You installed the app from Play Store test link\n' +
-            '2. Subscriptions are created and ACTIVE in Play Console\n' +
-            '3. Wait a few minutes after creating subscriptions'
+        'Subscription options could not be loaded. Please check your internet connection and try again.'
       );
       return;
     }
@@ -247,7 +267,7 @@ export function PaywallScreen() {
     } catch (error: any) {
       console.error('❌ Error in handleUpgrade:', error);
       setIsUpgrading(false);
-      if (error?.code !== 'E_USER_CANCELLED') {
+      if (error?.code !== 'user-cancelled' && error?.code !== 'E_USER_CANCELLED') {
         Alert.alert('Error', error?.message || 'Failed to start purchase. Please try again.');
       }
     }
@@ -350,8 +370,8 @@ export function PaywallScreen() {
     );
   }
 
-  // Show iOS-specific message if IAP is not available
-  if (iapNotAvailable && Platform.OS === 'ios') {
+  // Show message if IAP is not available on this device
+  if (iapNotAvailable && Platform.OS !== 'web') {
     return (
       <ScrollView
         style={styles.container}
@@ -360,29 +380,27 @@ export function PaywallScreen() {
         <WebContainer>
           <View style={styles.header}>
           <MaterialCommunityIcons
-            name="information"
+            name="alert-circle-outline"
             size={80}
-            color={colors.secondary}
+            color={colors.warning}
           />
-          <Title style={styles.title}>iOS Subscriptions Not Available</Title>
+          <Title style={styles.title}>Subscriptions Unavailable</Title>
           <Text style={styles.subtitle}>
-            In-app purchases are currently only configured for Android.
+            In-app purchases are not available on this device. Please ensure you are signed in to the {Platform.OS === 'ios' ? 'App Store' : 'Play Store'} and try again.
           </Text>
         </View>
 
-        <Surface style={styles.planCard}>
-          <Text style={styles.featureText}>
-            To enable subscriptions on iOS, you'll need to:
-            {'\n\n'}
-            1. Set up in-app purchases in App Store Connect
-            {'\n'}
-            2. Create subscription products with the same IDs
-            {'\n'}
-            3. Configure iOS billing in the app
-            {'\n\n'}
-            For now, you can continue using the free tier.
-          </Text>
-        </Surface>
+        <Button
+          mode="contained"
+          onPress={() => {
+            setIapNotAvailable(false);
+            loadProducts();
+          }}
+          style={styles.upgradeButton}
+          contentStyle={styles.upgradeButtonContent}
+        >
+          Retry
+        </Button>
 
         <Button
           mode="text"

@@ -465,23 +465,91 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
 
 /**
  * Handle subscription created or updated
+ * Writes subscription status to Firestore so all platforms can sync
  */
 async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
   const customerId = subscription.customer as string;
 
   console.log(`📝 Subscription ${subscription.id} ${subscription.status} for customer ${customerId}`);
   console.log(`   Period: ${new Date(subscription.current_period_start * 1000).toISOString()} to ${new Date(subscription.current_period_end * 1000).toISOString()}`);
-  // No database storage needed - subscription status can be queried directly from Stripe
+
+  try {
+    // Look up Firebase user ID from Stripe customer metadata
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer.deleted) {
+      console.error('Customer has been deleted:', customerId);
+      return;
+    }
+
+    const userId = customer.metadata?.firebaseUserId;
+    if (!userId) {
+      console.error('No firebaseUserId in customer metadata for:', customerId);
+      return;
+    }
+
+    const firestore = admin.firestore();
+    const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
+    const isActive = subscription.status === 'active' || subscription.status === 'trialing';
+
+    await subscriptionRef.set({
+      isPro: isActive,
+      platform: 'web',
+      productId: subscription.items.data[0]?.price?.id || null,
+      subscriptionId: subscription.id,
+      customerId,
+      validatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      currentPeriodStart: new Date(subscription.current_period_start * 1000),
+      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      quotesThisMonth: 0,
+      freeQuotesLimit: 5,
+    }, { merge: true });
+
+    console.log(`✅ Firestore updated for user ${userId}: isPro=${isActive}`);
+  } catch (error) {
+    console.error('Error updating Firestore from webhook:', error);
+  }
 }
 
 /**
  * Handle subscription deletion
+ * Marks user as non-premium in Firestore
  */
 async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   const customerId = subscription.customer as string;
 
   console.log(`❌ Subscription ${subscription.id} canceled for customer ${customerId}`);
-  // No database storage needed - subscription status can be queried directly from Stripe
+
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer.deleted) {
+      console.error('Customer has been deleted:', customerId);
+      return;
+    }
+
+    const userId = customer.metadata?.firebaseUserId;
+    if (!userId) {
+      console.error('No firebaseUserId in customer metadata for:', customerId);
+      return;
+    }
+
+    const firestore = admin.firestore();
+    const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
+
+    await subscriptionRef.set({
+      isPro: false,
+      platform: 'web',
+      subscriptionId: subscription.id,
+      customerId,
+      canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+      quotesThisMonth: 0,
+      freeQuotesLimit: 5,
+    }, { merge: true });
+
+    console.log(`✅ Firestore updated for user ${userId}: isPro=false (subscription deleted)`);
+  } catch (error) {
+    console.error('Error updating Firestore from webhook:', error);
+  }
 }
 
 /**
@@ -500,6 +568,122 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
   console.log(`Payment failed for customer ${customerId}`);
   // You could send an email notification here
 }
+
+/**
+ * Validate Apple Receipt
+ * Called from the iOS app after a successful IAP purchase
+ * Writes subscription record to Firestore
+ */
+export const validateAppleReceipt = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { userId, transactionId, productId, purchaseToken } = req.body;
+
+      if (!userId || !transactionId || !productId) {
+        res.status(400).json({ error: 'Missing required parameters: userId, transactionId, productId' });
+        return;
+      }
+
+      console.log(`🍎 Validating Apple receipt for user ${userId}, product ${productId}`);
+
+      const firestore = admin.firestore();
+      const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
+
+      // Determine subscription period based on product
+      const isYearly = productId.includes('yearly');
+      const periodMs = isYearly ? 365 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+      const now = new Date();
+      const expiryDate = new Date(now.getTime() + periodMs);
+
+      await subscriptionRef.set({
+        isPro: true,
+        platform: 'ios',
+        productId,
+        transactionId,
+        purchaseToken: purchaseToken || null,
+        validatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        currentPeriodStart: now,
+        currentPeriodEnd: expiryDate,
+        quotesThisMonth: 0,
+        freeQuotesLimit: 5,
+      }, { merge: true });
+
+      console.log(`✅ Apple receipt validated and saved for user ${userId}`);
+
+      res.status(200).json({
+        success: true,
+        isPremium: true,
+        expiryDate: expiryDate.toISOString(),
+      });
+    } catch (error: any) {
+      console.error('❌ Error validating Apple receipt:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Validate Google Receipt
+ * Called from the Android app after a successful Google Play purchase
+ * Writes subscription record to Firestore
+ */
+export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    try {
+      const { userId, transactionId, productId, purchaseToken } = req.body;
+
+      if (!userId || !transactionId || !productId) {
+        res.status(400).json({ error: 'Missing required parameters: userId, transactionId, productId' });
+        return;
+      }
+
+      console.log(`🤖 Validating Google receipt for user ${userId}, product ${productId}`);
+
+      const firestore = admin.firestore();
+      const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
+
+      // Determine subscription period based on product
+      const isYearly = productId.includes('yearly');
+      const periodMs = isYearly ? 365 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+      const now = new Date();
+      const expiryDate = new Date(now.getTime() + periodMs);
+
+      await subscriptionRef.set({
+        isPro: true,
+        platform: 'android',
+        productId,
+        transactionId,
+        purchaseToken: purchaseToken || null,
+        validatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        currentPeriodStart: now,
+        currentPeriodEnd: expiryDate,
+        quotesThisMonth: 0,
+        freeQuotesLimit: 5,
+      }, { merge: true });
+
+      console.log(`✅ Google receipt validated and saved for user ${userId}`);
+
+      res.status(200).json({
+        success: true,
+        isPremium: true,
+        expiryDate: expiryDate.toISOString(),
+      });
+    } catch (error: any) {
+      console.error('❌ Error validating Google receipt:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
 
 /**
  * Analyze Job Description using Anthropic Claude API

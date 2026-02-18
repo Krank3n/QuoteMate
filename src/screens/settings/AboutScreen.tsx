@@ -86,7 +86,7 @@ export function AboutScreen() {
 
             <TouchableOpacity
               style={styles.linkRow}
-              onPress={() => handleLinkPress('mailto:support@quotemate.app')}
+              onPress={() => handleLinkPress('mailto:tom@hansendev.com.au')}
             >
               <MaterialCommunityIcons name="email-outline" size={20} color={colors.primary} />
               <Text style={styles.linkText}>Contact Support</Text>
@@ -95,7 +95,7 @@ export function AboutScreen() {
 
             <TouchableOpacity
               style={styles.linkRow}
-              onPress={() => handleLinkPress('https://quotemate.app/privacy')}
+              onPress={() => handleLinkPress('https://hansendev.com.au/projects/quotemate-privacy')}
             >
               <MaterialCommunityIcons name="shield-lock-outline" size={20} color={colors.primary} />
               <Text style={styles.linkText}>Privacy Policy</Text>
@@ -104,7 +104,7 @@ export function AboutScreen() {
 
             <TouchableOpacity
               style={styles.linkRow}
-              onPress={() => handleLinkPress('https://quotemate.app/terms')}
+              onPress={() => handleLinkPress('https://hansendev.com.au/projects/quotemate-terms')}
             >
               <MaterialCommunityIcons name="file-document-outline" size={20} color={colors.primary} />
               <Text style={styles.linkText}>Terms of Service</Text>
@@ -113,7 +113,7 @@ export function AboutScreen() {
           </Surface>
 
           <Text style={styles.copyright}>
-            © 2024-2025 Hansen Dev. All rights reserved.
+            © 2024-2026 Hansen Dev. All rights reserved.
           </Text>
         </WebContainer>
       </ScrollView>

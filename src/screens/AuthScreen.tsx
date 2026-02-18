@@ -325,13 +325,18 @@ export function AuthScreen() {
 
             {/* Apple Sign-In Button (iOS only) */}
             {appleAuthAvailable && (
-              <AppleAuthentication.AppleAuthenticationButton
-                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-                cornerRadius={5}
-                style={styles.appleButton}
+              <Button
+                mode="contained"
                 onPress={handleAppleSignIn}
-              />
+                style={styles.appleButtonCustom}
+                contentStyle={styles.appleButtonContent}
+                disabled={loading}
+                icon={() => <MaterialCommunityIcons name="apple" size={24} color="#fff" />}
+                buttonColor="#000"
+                textColor="#fff"
+              >
+                Sign in with Apple
+              </Button>
             )}
 
             {/* Google Sign-In Button (All platforms) */}
@@ -535,10 +540,12 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     opacity: 0.6,
   },
-  appleButton: {
-    width: '100%',
-    height: 50,
+  appleButtonCustom: {
     marginBottom: 16,
+    backgroundColor: '#000',
+  },
+  appleButtonContent: {
+    paddingVertical: 16,
   },
   googleButton: {
     marginBottom: 24,
