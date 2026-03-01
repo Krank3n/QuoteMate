@@ -4,7 +4,7 @@
  */
 
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../config/firebase';
+import { functions, auth } from '../config/firebase';
 
 // Firebase Function base URL
 const FUNCTIONS_BASE_URL = 'https://us-central1-hansendev.cloudfunctions.net';
@@ -32,12 +32,14 @@ export async function generateAcceptanceLink(
   userId: string
 ): Promise<string> {
   try {
+    const idToken = await auth.currentUser?.getIdToken();
     const response = await fetch(`${FUNCTIONS_BASE_URL}/generateQuoteAcceptanceLink`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
       },
-      body: JSON.stringify({ quoteId, userId }),
+      body: JSON.stringify({ quoteId }),
     });
 
     if (!response.ok) {

@@ -5,6 +5,7 @@
  */
 
 import { Platform } from 'react-native';
+import { auth } from '../config/firebase';
 
 // Firebase Functions URL configuration
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
@@ -53,10 +54,12 @@ export async function searchReeceProduct(
     // For now, we'll use Firebase Functions to handle Reece API calls
     // This avoids exposing API keys in the client
     if (Platform.OS === 'web') {
+      const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/searchReeceProduct`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({ productName }),
       });
@@ -89,10 +92,12 @@ export async function getReecePrice(
     console.log('💰 Getting Reece price for item:', itemNumber);
 
     if (Platform.OS === 'web') {
+      const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/getReecePrice`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({ itemNumber }),
       });
@@ -164,10 +169,12 @@ export async function getReeceInventory(
     console.log('📦 Getting Reece inventory for:', itemNumber, 'at branch:', branchCode);
 
     if (Platform.OS === 'web') {
+      const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/getReeceInventory`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({ itemNumber, branchCode }),
       });
@@ -194,8 +201,12 @@ export async function getReeceInventory(
 export async function checkReeceApiStatus(): Promise<boolean> {
   try {
     // Try to make a simple API call to check if credentials are configured
+    const idToken = await auth.currentUser?.getIdToken();
     const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/checkReeceApi`, {
       method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+      },
     });
 
     if (!response.ok) {

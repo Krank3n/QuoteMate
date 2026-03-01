@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { loadStripe, Stripe } from '@stripe/stripe-js';
 import Constants from 'expo-constants';
 import { stripeConfig } from '../config/stripeConfig';
+import { auth } from '../config/firebase';
 
 /**
  * Stripe Service for Web Platform
@@ -57,14 +58,15 @@ class StripeService {
     try {
       console.log('🔄 Creating payment intent...');
 
+      const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`${API_BASE_URL}/createPaymentIntent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({
           priceId,
-          userId,
         }),
       });
 
@@ -100,14 +102,15 @@ class StripeService {
       console.log('🔄 Creating checkout session...');
 
       // Call your backend to create a checkout session
+      const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`${API_BASE_URL}/createCheckoutSession`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({
           priceId,
-          userId,
           successUrl: `${window.location.origin}/?session_id={CHECKOUT_SESSION_ID}`,
           cancelUrl: `${window.location.origin}/?canceled=true`,
         }),
@@ -143,13 +146,14 @@ class StripeService {
    */
   async createPortalSession(userId: string): Promise<string> {
     try {
+      const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`${API_BASE_URL}/createPortalSession`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          userId,
           returnUrl: window.location.origin,
         }),
       });
@@ -171,12 +175,14 @@ class StripeService {
     expiryDate: string | null;
   }> {
     try {
+      const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`${API_BASE_URL}/getSubscriptionStatus`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({}),
       });
 
       const data = await response.json();

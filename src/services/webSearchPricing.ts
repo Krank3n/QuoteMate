@@ -5,6 +5,7 @@
 
 import { ANTHROPIC_API_KEY } from '@env';
 import { Platform } from 'react-native';
+import { auth } from '../config/firebase';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
@@ -165,10 +166,12 @@ async function searchPriceViaFirebaseFunction(
   try {
     console.log('🔍 Estimating price via Firebase Function for:', materialName);
 
+    const idToken = await auth.currentUser?.getIdToken();
     const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/searchMaterialPrice`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
       },
       body: JSON.stringify({
         materialName,

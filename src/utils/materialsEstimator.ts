@@ -13,25 +13,146 @@ interface JobInput {
 }
 
 /**
+ * Safe math expression evaluator using recursive descent parsing.
+ * Supports: +, -, *, /, parentheses, Math.ceil/floor/round, named variables, numeric literals.
+ * Replaces unsafe `new Function()` to prevent code injection.
+ */
+class ExpressionParser {
+  private pos = 0;
+  private expr: string;
+  private params: Record<string, number>;
+
+  constructor(expr: string, params: Record<string, number>) {
+    this.expr = expr;
+    this.params = params;
+  }
+
+  parse(): number {
+    const result = this.parseAddSub();
+    this.skipWhitespace();
+    if (this.pos < this.expr.length) {
+      throw new Error(`Unexpected character '${this.expr[this.pos]}' at position ${this.pos}`);
+    }
+    return result;
+  }
+
+  private skipWhitespace(): void {
+    while (this.pos < this.expr.length && /\s/.test(this.expr[this.pos])) {
+      this.pos++;
+    }
+  }
+
+  private parseAddSub(): number {
+    let left = this.parseMulDiv();
+    this.skipWhitespace();
+    while (this.pos < this.expr.length && (this.expr[this.pos] === '+' || this.expr[this.pos] === '-')) {
+      const op = this.expr[this.pos];
+      this.pos++;
+      const right = this.parseMulDiv();
+      left = op === '+' ? left + right : left - right;
+      this.skipWhitespace();
+    }
+    return left;
+  }
+
+  private parseMulDiv(): number {
+    let left = this.parseUnary();
+    this.skipWhitespace();
+    while (this.pos < this.expr.length && (this.expr[this.pos] === '*' || this.expr[this.pos] === '/')) {
+      const op = this.expr[this.pos];
+      this.pos++;
+      const right = this.parseUnary();
+      left = op === '*' ? left * right : left / right;
+      this.skipWhitespace();
+    }
+    return left;
+  }
+
+  private parseUnary(): number {
+    this.skipWhitespace();
+    if (this.pos < this.expr.length && this.expr[this.pos] === '-') {
+      this.pos++;
+      return -this.parsePrimary();
+    }
+    if (this.pos < this.expr.length && this.expr[this.pos] === '+') {
+      this.pos++;
+    }
+    return this.parsePrimary();
+  }
+
+  private parsePrimary(): number {
+    this.skipWhitespace();
+
+    // Parenthesized expression
+    if (this.expr[this.pos] === '(') {
+      this.pos++; // skip '('
+      const result = this.parseAddSub();
+      this.skipWhitespace();
+      if (this.expr[this.pos] !== ')') {
+        throw new Error(`Expected ')' at position ${this.pos}`);
+      }
+      this.pos++; // skip ')'
+      return result;
+    }
+
+    // Number literal
+    if (/[0-9.]/.test(this.expr[this.pos])) {
+      const start = this.pos;
+      while (this.pos < this.expr.length && /[0-9.]/.test(this.expr[this.pos])) {
+        this.pos++;
+      }
+      return parseFloat(this.expr.slice(start, this.pos));
+    }
+
+    // Identifier: variable name or Math.ceil/floor/round
+    if (/[a-zA-Z_]/.test(this.expr[this.pos])) {
+      const start = this.pos;
+      while (this.pos < this.expr.length && /[a-zA-Z0-9_.]/.test(this.expr[this.pos])) {
+        this.pos++;
+      }
+      const name = this.expr.slice(start, this.pos);
+
+      // Math functions
+      if (name === 'Math.ceil' || name === 'Math.floor' || name === 'Math.round') {
+        this.skipWhitespace();
+        if (this.expr[this.pos] !== '(') {
+          throw new Error(`Expected '(' after ${name}`);
+        }
+        this.pos++; // skip '('
+        const arg = this.parseAddSub();
+        this.skipWhitespace();
+        if (this.expr[this.pos] !== ')') {
+          throw new Error(`Expected ')' after ${name} argument`);
+        }
+        this.pos++; // skip ')'
+        if (name === 'Math.ceil') return Math.ceil(arg);
+        if (name === 'Math.floor') return Math.floor(arg);
+        return Math.round(arg);
+      }
+
+      // Variable lookup
+      if (name in this.params) {
+        return this.params[name];
+      }
+
+      throw new Error(`Unknown variable '${name}'`);
+    }
+
+    throw new Error(`Unexpected character '${this.expr[this.pos] || 'EOF'}' at position ${this.pos}`);
+  }
+}
+
+/**
  * Safely evaluate a formula with given parameters
  * @param formula - The formula string (e.g., "steps * 2")
  * @param params - The parameters object (e.g., { steps: 15 })
  */
 function evaluateFormula(formula: string, params: Record<string, number>): number {
   try {
-    // Create a safe evaluation context with Math and params
-    const context = { Math, ...params };
-
-    // Build the function string
-    const paramNames = Object.keys(context);
-    const paramValues = Object.values(context);
-
-    // Create and execute the function
-    const func = new Function(...paramNames, `return ${formula}`);
-    const result = func(...paramValues);
-
-    // Return rounded result
-    return Math.round(result * 100) / 100; // Round to 2 decimal places
+    const parser = new ExpressionParser(formula, params);
+    const result = parser.parse();
+    // Round to 2 decimal places
+    return Math.round(result * 100) / 100;
   } catch (error) {
     console.error(`Error evaluating formula "${formula}":`, error);
     return 0;

@@ -368,6 +368,54 @@ export function DashboardScreen() {
           <Paragraph>Ready to create some quotes?</Paragraph>
         </View>
 
+      {/* Quote Usage Counter */}
+      {subscriptionStatus && !subscriptionStatus.isPro && (
+        <Surface style={styles.quotaCard}>
+          <View style={styles.quotaContent}>
+            <View style={styles.quotaTextContainer}>
+              <Text style={styles.quotaTitle}>
+                {subscriptionStatus.freeQuotesLimit - subscriptionStatus.quotesThisMonth > 0
+                  ? `${subscriptionStatus.freeQuotesLimit - subscriptionStatus.quotesThisMonth} of ${subscriptionStatus.freeQuotesLimit} quotes remaining`
+                  : 'No quotes remaining this month'}
+              </Text>
+              <Text style={styles.quotaSubtext}>
+                {subscriptionStatus.freeQuotesLimit - subscriptionStatus.quotesThisMonth > 0
+                  ? 'Free plan resets monthly'
+                  : 'Upgrade to Pro for unlimited quotes'}
+              </Text>
+            </View>
+            <View style={styles.quotaBarContainer}>
+              <View style={styles.quotaBarBackground}>
+                <View
+                  style={[
+                    styles.quotaBarFill,
+                    {
+                      width: `${Math.min((subscriptionStatus.quotesThisMonth / subscriptionStatus.freeQuotesLimit) * 100, 100)}%`,
+                      backgroundColor:
+                        subscriptionStatus.quotesThisMonth >= subscriptionStatus.freeQuotesLimit
+                          ? colors.error
+                          : subscriptionStatus.quotesThisMonth >= subscriptionStatus.freeQuotesLimit - 1
+                          ? colors.warning
+                          : colors.primary,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          </View>
+          {subscriptionStatus.quotesThisMonth >= subscriptionStatus.freeQuotesLimit && (
+            <Button
+              mode="contained"
+              compact
+              onPress={() => navigation.navigate('Paywall' as never)}
+              style={styles.quotaUpgradeButton}
+            >
+              Upgrade to Pro
+            </Button>
+          )}
+        </Surface>
+      )}
+
       {/* New Quote Button */}
       <Button
         mode="contained"
@@ -611,6 +659,47 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 4,
+  },
+  quotaCard: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+    elevation: 2,
+  },
+  quotaContent: {
+    gap: 8,
+  },
+  quotaTextContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  quotaTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  quotaSubtext: {
+    fontSize: 12,
+    color: colors.onSurface,
+  },
+  quotaBarContainer: {
+    marginTop: 4,
+  },
+  quotaBarBackground: {
+    height: 6,
+    backgroundColor: colors.surfaceLight,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  quotaBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  quotaUpgradeButton: {
+    marginTop: 12,
   },
   newQuoteButton: {
     marginHorizontal: 20,

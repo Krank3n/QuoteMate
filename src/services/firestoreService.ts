@@ -14,6 +14,9 @@ import {
   Unsubscribe,
   query,
   orderBy,
+  runTransaction,
+  increment,
+  Timestamp,
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { Quote, BusinessSettings, SubscriptionStatus, Invoice } from '../types';
@@ -608,6 +611,80 @@ class FirestoreService {
       console.log('✅ FCM token removed from Firestore');
     } catch (error) {
       console.error('❌ Error removing FCM token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Atomically check and increment the quote quota (server-side enforcement).
+   * Returns the updated quota info, or throws if quota exceeded.
+   */
+  async checkAndIncrementQuota(): Promise<{ allowed: boolean; quotesThisMonth: number; freeQuotesLimit: number; isPro: boolean }> {
+    const userId = this.getUserId();
+    if (!userId) {
+      throw new Error('No user signed in');
+    }
+
+    try {
+      const subscriptionRef = doc(db, 'users', userId, 'profile', 'subscription');
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+      const result = await runTransaction(db, async (transaction) => {
+        const subscriptionDoc = await transaction.get(subscriptionRef);
+        let data = subscriptionDoc.exists() ? subscriptionDoc.data()! : {
+          isPro: false,
+          quotesThisMonth: 0,
+          currentPeriodStart: monthStart.toISOString(),
+          currentPeriodEnd: monthEnd.toISOString(),
+          freeQuotesLimit: 5,
+        };
+
+        // Check if we need to reset monthly count (new month)
+        const periodEnd = new Date(data.currentPeriodEnd);
+        if (now > periodEnd) {
+          data = {
+            ...data,
+            quotesThisMonth: 0,
+            currentPeriodStart: monthStart.toISOString(),
+            currentPeriodEnd: monthEnd.toISOString(),
+          };
+        }
+
+        // Pro users always allowed
+        if (data.isPro) {
+          const newCount = (data.quotesThisMonth || 0) + 1;
+          transaction.set(subscriptionRef, {
+            ...data,
+            quotesThisMonth: newCount,
+            syncedAt: new Date().toISOString(),
+          });
+          return { allowed: true, quotesThisMonth: newCount, freeQuotesLimit: data.freeQuotesLimit || 5, isPro: true };
+        }
+
+        // Free users: check quota
+        const currentCount = data.quotesThisMonth || 0;
+        const limit = data.freeQuotesLimit || 5;
+
+        if (currentCount >= limit) {
+          return { allowed: false, quotesThisMonth: currentCount, freeQuotesLimit: limit, isPro: false };
+        }
+
+        // Increment and save
+        const newCount = currentCount + 1;
+        transaction.set(subscriptionRef, {
+          ...data,
+          quotesThisMonth: newCount,
+          syncedAt: new Date().toISOString(),
+        });
+
+        return { allowed: true, quotesThisMonth: newCount, freeQuotesLimit: limit, isPro: false };
+      });
+
+      return result;
+    } catch (error) {
+      console.error('❌ Error checking quota:', error);
       throw error;
     }
   }

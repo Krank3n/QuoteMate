@@ -26,6 +26,31 @@ const stripe = new Stripe(stripeSecretKey, {
 const corsHandler = cors({ origin: true });
 
 /**
+ * Verify Firebase Auth token from Authorization header.
+ * Returns the decoded token (with uid) or sends a 401 response.
+ */
+async function verifyAuth(
+  req: functions.https.Request,
+  res: functions.Response
+): Promise<admin.auth.DecodedIdToken | null> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing or invalid Authorization header' });
+    return null;
+  }
+
+  const idToken = authHeader.split('Bearer ')[1];
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    return decodedToken;
+  } catch (error) {
+    console.error('Auth token verification failed:', error);
+    res.status(401).json({ error: 'Invalid or expired auth token' });
+    return null;
+  }
+}
+
+/**
  * Create a Stripe Checkout Session
  * Called from the web app when user wants to subscribe
  */
@@ -36,10 +61,14 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
       return;
     }
 
-    try {
-      const { priceId, userId, successUrl, cancelUrl } = req.body;
+    const decodedToken = await verifyAuth(req, res);
+      if (!decodedToken) return;
+      const userId = decodedToken.uid;
 
-      if (!priceId || !userId) {
+      try {
+      const { priceId, successUrl, cancelUrl } = req.body;
+
+      if (!priceId) {
         res.status(400).json({ error: 'Missing required parameters' });
         return;
       }
@@ -98,10 +127,14 @@ export const createPaymentIntent = functions.https.onRequest((req, res) => {
       return;
     }
 
-    try {
-      const { priceId, userId } = req.body;
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+    const userId = decodedToken.uid;
 
-      if (!priceId || !userId) {
+    try {
+      const { priceId } = req.body;
+
+      if (!priceId) {
         res.status(400).json({ error: 'Missing required parameters' });
         return;
       }
@@ -172,13 +205,12 @@ export const createPortalSession = functions.https.onRequest((req, res) => {
       return;
     }
 
-    try {
-      const { userId, returnUrl } = req.body;
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+    const userId = decodedToken.uid;
 
-      if (!userId) {
-        res.status(400).json({ error: 'Missing userId' });
-        return;
-      }
+    try {
+      const { returnUrl } = req.body;
 
       // Find customer by Firebase user ID in metadata
       const customerList = await stripe.customers.search({
@@ -218,10 +250,14 @@ export const cancelSubscription = functions.https.onRequest((req, res) => {
       return;
     }
 
-    try {
-      const { userId, reason, feedback } = req.body;
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+    const userId = decodedToken.uid;
 
-      if (!userId || !reason) {
+    try {
+      const { reason, feedback } = req.body;
+
+      if (!reason) {
         res.status(400).json({ error: 'Missing required parameters' });
         return;
       }
@@ -304,6 +340,9 @@ export const logCancellationFeedback = functions.https.onRequest((req, res) => {
       return;
     }
 
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+
     try {
       const { userId, userEmail, reason, feedback, timestamp } = req.body;
 
@@ -334,13 +373,11 @@ export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
       return;
     }
 
-    try {
-      const { userId } = req.body;
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+    const userId = decodedToken.uid;
 
-      if (!userId) {
-        res.status(400).json({ error: 'Missing userId' });
-        return;
-      }
+    try {
 
       // Find customer by Firebase user ID in Stripe metadata
       const customerList = await stripe.customers.search({
@@ -570,9 +607,110 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
 }
 
 /**
+ * Check and Increment Quote Quota (Server-Side Enforcement)
+ * Atomically checks if the user can create a quote and increments the count.
+ * Uses Firestore transactions to prevent race conditions.
+ */
+export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+    const userId = decodedToken.uid;
+
+    try {
+      const db = admin.firestore();
+      const subscriptionRef = db.doc(`users/${userId}/profile/subscription`);
+
+      const result = await db.runTransaction(async (transaction) => {
+        const subscriptionDoc = await transaction.get(subscriptionRef);
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+        let subscriptionData = subscriptionDoc.exists ? subscriptionDoc.data()! : {
+          isPro: false,
+          quotesThisMonth: 0,
+          currentPeriodStart: monthStart,
+          currentPeriodEnd: monthEnd,
+          freeQuotesLimit: 5,
+        };
+
+        // Check if we need to reset monthly count (new month)
+        const periodEnd = subscriptionData.currentPeriodEnd?.toDate?.() ||
+          new Date(subscriptionData.currentPeriodEnd);
+        if (now > periodEnd) {
+          subscriptionData = {
+            ...subscriptionData,
+            quotesThisMonth: 0,
+            currentPeriodStart: monthStart,
+            currentPeriodEnd: monthEnd,
+          };
+        }
+
+        // Pro users can always create quotes
+        if (subscriptionData.isPro) {
+          const newCount = (subscriptionData.quotesThisMonth || 0) + 1;
+          transaction.set(subscriptionRef, {
+            ...subscriptionData,
+            quotesThisMonth: newCount,
+            currentPeriodStart: subscriptionData.currentPeriodStart || monthStart,
+            currentPeriodEnd: subscriptionData.currentPeriodEnd || monthEnd,
+          }, { merge: true });
+          return { allowed: true, quotesThisMonth: newCount, freeQuotesLimit: subscriptionData.freeQuotesLimit || 5, isPro: true };
+        }
+
+        // Free users: check quota
+        const currentCount = subscriptionData.quotesThisMonth || 0;
+        const limit = subscriptionData.freeQuotesLimit || 5;
+
+        if (currentCount >= limit) {
+          return { allowed: false, quotesThisMonth: currentCount, freeQuotesLimit: limit, isPro: false };
+        }
+
+        // Increment and save
+        const newCount = currentCount + 1;
+        transaction.set(subscriptionRef, {
+          ...subscriptionData,
+          quotesThisMonth: newCount,
+          currentPeriodStart: subscriptionData.currentPeriodStart || monthStart,
+          currentPeriodEnd: subscriptionData.currentPeriodEnd || monthEnd,
+        }, { merge: true });
+
+        return { allowed: true, quotesThisMonth: newCount, freeQuotesLimit: limit, isPro: false };
+      });
+
+      if (!result.allowed) {
+        res.status(403).json({
+          error: 'Quote limit reached',
+          quotesThisMonth: result.quotesThisMonth,
+          freeQuotesLimit: result.freeQuotesLimit,
+          isPro: result.isPro,
+        });
+        return;
+      }
+
+      res.status(200).json({
+        success: true,
+        quotesThisMonth: result.quotesThisMonth,
+        freeQuotesLimit: result.freeQuotesLimit,
+        isPro: result.isPro,
+      });
+    } catch (error: any) {
+      console.error('Error checking quota:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
  * Validate Apple Receipt
  * Called from the iOS app after a successful IAP purchase
- * Writes subscription record to Firestore
+ * Validates receipt with Apple's servers and writes subscription record to Firestore
  */
 export const validateAppleReceipt = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -581,24 +719,77 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
       return;
     }
 
-    try {
-      const { userId, transactionId, productId, purchaseToken } = req.body;
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+    const userId = decodedToken.uid;
 
-      if (!userId || !transactionId || !productId) {
-        res.status(400).json({ error: 'Missing required parameters: userId, transactionId, productId' });
+    try {
+      const { transactionId, productId, purchaseToken } = req.body;
+
+      if (!transactionId || !productId) {
+        res.status(400).json({ error: 'Missing required parameters: transactionId, productId' });
         return;
       }
 
       console.log(`🍎 Validating Apple receipt for user ${userId}, product ${productId}`);
 
+      // Validate receipt with Apple's servers
+      const receiptData = purchaseToken || transactionId;
+      const sharedSecret = functions.config().apple?.shared_secret || process.env.APPLE_SHARED_SECRET || '';
+
+      let appleValidated = false;
+      let appleExpiryDate: Date | null = null;
+
+      if (sharedSecret && receiptData) {
+        try {
+          // Try production first, then sandbox
+          for (const url of [
+            'https://buy.itunes.apple.com/verifyReceipt',
+            'https://sandbox.itunes.apple.com/verifyReceipt',
+          ]) {
+            const appleRes = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                'receipt-data': receiptData,
+                'password': sharedSecret,
+                'exclude-old-transactions': true,
+              }),
+            });
+
+            const appleData = await appleRes.json() as any;
+
+            // Status 0 = valid, 21007 = sandbox receipt sent to production (retry with sandbox)
+            if (appleData.status === 0) {
+              appleValidated = true;
+              // Extract expiry from latest receipt info
+              const latestInfo = appleData.latest_receipt_info;
+              if (latestInfo && latestInfo.length > 0) {
+                const latestExpiry = Math.max(...latestInfo.map((r: any) => parseInt(r.expires_date_ms || '0', 10)));
+                if (latestExpiry > 0) {
+                  appleExpiryDate = new Date(latestExpiry);
+                }
+              }
+              break;
+            } else if (appleData.status !== 21007) {
+              console.warn(`Apple validation failed with status ${appleData.status} at ${url}`);
+            }
+          }
+        } catch (appleError) {
+          console.warn('Apple receipt validation API call failed, falling back to trust-based:', appleError);
+        }
+      } else {
+        console.warn('Apple shared secret not configured, skipping server validation');
+      }
+
       const firestore = admin.firestore();
       const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
 
-      // Determine subscription period based on product
+      // Determine subscription period
       const isYearly = productId.includes('yearly');
       const periodMs = isYearly ? 365 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
       const now = new Date();
-      const expiryDate = new Date(now.getTime() + periodMs);
+      const expiryDate = appleExpiryDate || new Date(now.getTime() + periodMs);
 
       await subscriptionRef.set({
         isPro: true,
@@ -606,6 +797,7 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
         productId,
         transactionId,
         purchaseToken: purchaseToken || null,
+        appleValidated,
         validatedAt: admin.firestore.FieldValue.serverTimestamp(),
         currentPeriodStart: now,
         currentPeriodEnd: expiryDate,
@@ -613,11 +805,12 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
         freeQuotesLimit: 5,
       }, { merge: true });
 
-      console.log(`✅ Apple receipt validated and saved for user ${userId}`);
+      console.log(`✅ Apple receipt ${appleValidated ? 'validated' : 'saved (unvalidated)'} for user ${userId}`);
 
       res.status(200).json({
         success: true,
         isPremium: true,
+        validated: appleValidated,
         expiryDate: expiryDate.toISOString(),
       });
     } catch (error: any) {
@@ -639,24 +832,72 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       return;
     }
 
-    try {
-      const { userId, transactionId, productId, purchaseToken } = req.body;
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+    const userId = decodedToken.uid;
 
-      if (!userId || !transactionId || !productId) {
-        res.status(400).json({ error: 'Missing required parameters: userId, transactionId, productId' });
+    try {
+      const { transactionId, productId, purchaseToken } = req.body;
+
+      if (!transactionId || !productId) {
+        res.status(400).json({ error: 'Missing required parameters: transactionId, productId' });
         return;
       }
 
       console.log(`🤖 Validating Google receipt for user ${userId}, product ${productId}`);
 
+      let googleValidated = false;
+      let googleExpiryDate: Date | null = null;
+
+      // Validate with Google Play Developer API if service account is configured
+      const googleServiceAccount = functions.config().google?.service_account_json || process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+      const googlePackageName = functions.config().google?.package_name || process.env.GOOGLE_PACKAGE_NAME || 'com.quotemate.app';
+
+      if (googleServiceAccount && purchaseToken) {
+        try {
+          // Get access token using service account
+          const serviceAccount = typeof googleServiceAccount === 'string'
+            ? JSON.parse(googleServiceAccount) : googleServiceAccount;
+
+          const { google } = require('googleapis');
+          const authClient = new google.auth.JWT(
+            serviceAccount.client_email,
+            undefined,
+            serviceAccount.private_key,
+            ['https://www.googleapis.com/auth/androidpublisher']
+          );
+
+          const androidPublisher = google.androidpublisher({ version: 'v3', auth: authClient });
+          const googleRes = await androidPublisher.purchases.subscriptions.get({
+            packageName: googlePackageName,
+            subscriptionId: productId,
+            token: purchaseToken,
+          });
+
+          if (googleRes.data) {
+            const expiryTimeMs = parseInt(googleRes.data.expiryTimeMillis || '0', 10);
+            if (expiryTimeMs > Date.now()) {
+              googleValidated = true;
+              googleExpiryDate = new Date(expiryTimeMs);
+            } else {
+              console.warn('Google subscription expired');
+            }
+          }
+        } catch (googleError) {
+          console.warn('Google Play validation failed, falling back to trust-based:', googleError);
+        }
+      } else {
+        console.warn('Google service account not configured or no purchase token, skipping server validation');
+      }
+
       const firestore = admin.firestore();
       const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
 
-      // Determine subscription period based on product
+      // Determine subscription period
       const isYearly = productId.includes('yearly');
       const periodMs = isYearly ? 365 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
       const now = new Date();
-      const expiryDate = new Date(now.getTime() + periodMs);
+      const expiryDate = googleExpiryDate || new Date(now.getTime() + periodMs);
 
       await subscriptionRef.set({
         isPro: true,
@@ -664,6 +905,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
         productId,
         transactionId,
         purchaseToken: purchaseToken || null,
+        googleValidated,
         validatedAt: admin.firestore.FieldValue.serverTimestamp(),
         currentPeriodStart: now,
         currentPeriodEnd: expiryDate,
@@ -671,11 +913,12 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
         freeQuotesLimit: 5,
       }, { merge: true });
 
-      console.log(`✅ Google receipt validated and saved for user ${userId}`);
+      console.log(`✅ Google receipt ${googleValidated ? 'validated' : 'saved (unvalidated)'} for user ${userId}`);
 
       res.status(200).json({
         success: true,
         isPremium: true,
+        validated: googleValidated,
         expiryDate: expiryDate.toISOString(),
       });
     } catch (error: any) {
@@ -695,6 +938,9 @@ export const analyzeJobDescription = functions.https.onRequest((req, res) => {
       res.status(405).send('Method Not Allowed');
       return;
     }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
 
     try {
       const { jobDescription, tradeContext } = req.body;
@@ -840,6 +1086,9 @@ export const searchMaterialPrice = functions.https.onRequest((req, res) => {
       res.status(405).send('Method Not Allowed');
       return;
     }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
 
     try {
       const { materialName, hardwareStoreUrls } = req.body;
@@ -1019,6 +1268,9 @@ async function getReeceAuthToken(): Promise<string | null> {
  */
 export const checkReeceApi = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+
     try {
       const token = await getReeceAuthToken();
       const available = !!token;
@@ -1040,6 +1292,9 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
       res.status(405).send('Method Not Allowed');
       return;
     }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
 
     try {
       const { productName } = req.body;
@@ -1113,6 +1368,9 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
       return;
     }
 
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+
     try {
       const { itemNumber } = req.body;
 
@@ -1181,6 +1439,9 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
       res.status(405).send('Method Not Allowed');
       return;
     }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
 
     try {
       const { itemNumber, branchCode } = req.body;
@@ -1251,6 +1512,9 @@ export const fetchStoreHTML = functions.https.onRequest((req, res) => {
       res.status(405).send('Method Not Allowed');
       return;
     }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
 
     try {
       const { url } = req.body;
@@ -1333,6 +1597,9 @@ export const cleanupTranscription = functions.https.onRequest((req, res) => {
       res.status(405).send('Method Not Allowed');
       return;
     }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
 
     try {
       const { transcribedText } = req.body;
@@ -1427,6 +1694,9 @@ export const parseProductsHTML = functions.https.onRequest((req, res) => {
       res.status(405).send('Method Not Allowed');
       return;
     }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
 
     try {
       const { html, searchTerm, store, requestedQuantity, requestedUnit } = req.body;
@@ -1548,6 +1818,9 @@ export const selectBestProduct = functions.https.onRequest((req, res) => {
       res.status(405).send('Method Not Allowed');
       return;
     }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
 
     try {
       const { products, requestedProductName, originalSearchTerm } = req.body;
@@ -1687,11 +1960,15 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
       return;
     }
 
-    try {
-      const { quoteId, userId } = req.body;
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+    const userId = decodedToken.uid;
 
-      if (!quoteId || !userId) {
-        res.status(400).json({ success: false, error: 'Missing quoteId or userId' });
+    try {
+      const { quoteId } = req.body;
+
+      if (!quoteId) {
+        res.status(400).json({ success: false, error: 'Missing quoteId' });
         return;
       }
 
@@ -1713,6 +1990,13 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
       await quoteRef.update({
         acceptanceToken: token,
         acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Also store in dedicated tokens collection for O(1) lookup
+      await db.collection('quoteAcceptanceTokens').doc(token).set({
+        userId,
+        quoteId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       // Build the acceptance URL
@@ -1754,28 +2038,52 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
       console.log(`🔍 Looking up quote by acceptance token`);
 
       const db = admin.firestore();
-
-      // Search for the quote with this token across all users
-      const usersSnapshot = await db.collection('users').get();
       let foundQuote: any = null;
       let businessSettings: any = null;
 
-      for (const userDoc of usersSnapshot.docs) {
-        const quotesSnapshot = await userDoc.ref
-          .collection('quotes')
-          .where('acceptanceToken', '==', token)
-          .limit(1)
-          .get();
+      // O(1) lookup via dedicated tokens collection
+      const tokenDoc = await db.collection('quoteAcceptanceTokens').doc(token).get();
 
-        if (!quotesSnapshot.empty) {
-          foundQuote = quotesSnapshot.docs[0].data();
+      if (tokenDoc.exists) {
+        const tokenData = tokenDoc.data()!;
+        const quoteDoc = await db.collection('users').doc(tokenData.userId)
+          .collection('quotes').doc(tokenData.quoteId).get();
 
-          // Get business settings for this user
-          const settingsDoc = await userDoc.ref.collection('settings').doc('business').get();
+        if (quoteDoc.exists) {
+          foundQuote = quoteDoc.data();
+
+          const settingsDoc = await db.collection('users').doc(tokenData.userId)
+            .collection('settings').doc('business').get();
           if (settingsDoc.exists) {
             businessSettings = settingsDoc.data();
           }
-          break;
+        }
+      } else {
+        // Fallback: legacy scan for tokens created before the migration
+        const usersSnapshot = await db.collection('users').get();
+        for (const userDoc of usersSnapshot.docs) {
+          const quotesSnapshot = await userDoc.ref
+            .collection('quotes')
+            .where('acceptanceToken', '==', token)
+            .limit(1)
+            .get();
+
+          if (!quotesSnapshot.empty) {
+            foundQuote = quotesSnapshot.docs[0].data();
+
+            // Migrate this token to the new collection for future lookups
+            await db.collection('quoteAcceptanceTokens').doc(token).set({
+              userId: userDoc.id,
+              quoteId: quotesSnapshot.docs[0].id,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            const settingsDoc = await userDoc.ref.collection('settings').doc('business').get();
+            if (settingsDoc.exists) {
+              businessSettings = settingsDoc.data();
+            }
+            break;
+          }
         }
       }
 
@@ -1867,32 +2175,58 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
       console.log(`📝 Processing quote response: ${response}`);
 
       const db = admin.firestore();
-
-      // Find the quote by token
-      const usersSnapshot = await db.collection('users').get();
       let foundQuoteRef: admin.firestore.DocumentReference | null = null;
       let foundQuote: any = null;
       let foundUserId: string = '';
       let businessSettings: any = null;
 
-      for (const userDoc of usersSnapshot.docs) {
-        const quotesSnapshot = await userDoc.ref
-          .collection('quotes')
-          .where('acceptanceToken', '==', token)
-          .limit(1)
-          .get();
+      // O(1) lookup via dedicated tokens collection
+      const tokenDoc = await db.collection('quoteAcceptanceTokens').doc(token).get();
 
-        if (!quotesSnapshot.empty) {
-          foundQuoteRef = quotesSnapshot.docs[0].ref;
-          foundQuote = quotesSnapshot.docs[0].data();
-          foundUserId = userDoc.id;
+      if (tokenDoc.exists) {
+        const tokenData = tokenDoc.data()!;
+        foundUserId = tokenData.userId;
+        const quoteDoc = await db.collection('users').doc(tokenData.userId)
+          .collection('quotes').doc(tokenData.quoteId).get();
 
-          // Get business settings
-          const settingsDoc = await userDoc.ref.collection('settings').doc('business').get();
+        if (quoteDoc.exists) {
+          foundQuoteRef = quoteDoc.ref;
+          foundQuote = quoteDoc.data();
+
+          const settingsDoc = await db.collection('users').doc(tokenData.userId)
+            .collection('settings').doc('business').get();
           if (settingsDoc.exists) {
             businessSettings = settingsDoc.data();
           }
-          break;
+        }
+      } else {
+        // Fallback: legacy scan for tokens created before the migration
+        const usersSnapshot = await db.collection('users').get();
+        for (const userDoc of usersSnapshot.docs) {
+          const quotesSnapshot = await userDoc.ref
+            .collection('quotes')
+            .where('acceptanceToken', '==', token)
+            .limit(1)
+            .get();
+
+          if (!quotesSnapshot.empty) {
+            foundQuoteRef = quotesSnapshot.docs[0].ref;
+            foundQuote = quotesSnapshot.docs[0].data();
+            foundUserId = userDoc.id;
+
+            // Migrate this token to the new collection
+            await db.collection('quoteAcceptanceTokens').doc(token).set({
+              userId: userDoc.id,
+              quoteId: quotesSnapshot.docs[0].id,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            const settingsDoc = await userDoc.ref.collection('settings').doc('business').get();
+            if (settingsDoc.exists) {
+              businessSettings = settingsDoc.data();
+            }
+            break;
+          }
         }
       }
 

@@ -207,13 +207,41 @@ export const useStore = create<AppState>((set, get) => ({
   // Save quote to storage
   saveQuote: async (quote: Quote) => {
     try {
-      const { quotes, incrementQuoteCount, getNextQuoteNumber } = get();
+      const { quotes, getNextQuoteNumber, subscriptionStatus } = get();
 
       // Update or add quote
       const existingIndex = quotes.findIndex((q) => q.id === quote.id);
-      let updatedQuotes: Quote[];
       const isNewQuote = existingIndex < 0;
       let calculatedQuote = updateQuoteCalculations(quote);
+
+      // For new quotes, enforce quota server-side (atomic check + increment)
+      if (isNewQuote && auth.currentUser) {
+        try {
+          const quotaResult = await firestoreService.checkAndIncrementQuota();
+          if (!quotaResult.allowed) {
+            throw new Error('QUOTA_EXCEEDED');
+          }
+          // Update local subscription state with server-authoritative count
+          if (subscriptionStatus) {
+            const updatedSubscription: SubscriptionStatus = {
+              ...subscriptionStatus,
+              quotesThisMonth: quotaResult.quotesThisMonth,
+            };
+            await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updatedSubscription));
+            set({ subscriptionStatus: updatedSubscription });
+          }
+        } catch (quotaError: any) {
+          if (quotaError.message === 'QUOTA_EXCEEDED') {
+            throw quotaError;
+          }
+          // If quota check fails (network error), fall back to client-side check
+          console.warn('Server quota check failed, using client-side check:', quotaError);
+          const { canCreateQuote } = get();
+          if (!canCreateQuote()) {
+            throw new Error('QUOTA_EXCEEDED');
+          }
+        }
+      }
 
       // Assign quote number for new quotes that don't have one
       if (isNewQuote && !calculatedQuote.quoteNumber) {
@@ -221,6 +249,7 @@ export const useStore = create<AppState>((set, get) => ({
         calculatedQuote = { ...calculatedQuote, quoteNumber };
       }
 
+      let updatedQuotes: Quote[];
       if (existingIndex >= 0) {
         // Update existing quote
         updatedQuotes = [...quotes];
@@ -244,8 +273,9 @@ export const useStore = create<AppState>((set, get) => ({
         await firestoreService.saveQuote(calculatedQuote);
       }
 
-      // Increment quote count for new quotes only
-      if (isNewQuote) {
+      // For new quotes when not authenticated, do client-side increment
+      if (isNewQuote && !auth.currentUser) {
+        const { incrementQuoteCount } = get();
         await incrementQuoteCount();
       }
     } catch (error) {
@@ -280,7 +310,37 @@ export const useStore = create<AppState>((set, get) => ({
   // Duplicate quote
   duplicateQuote: async (quote: Quote) => {
     try {
-      const { quotes, incrementQuoteCount } = get();
+      const { quotes, subscriptionStatus } = get();
+
+      // Enforce quota server-side for new duplicate
+      if (auth.currentUser) {
+        try {
+          const quotaResult = await firestoreService.checkAndIncrementQuota();
+          if (!quotaResult.allowed) {
+            throw new Error('QUOTA_EXCEEDED');
+          }
+          if (subscriptionStatus) {
+            const updatedSubscription: SubscriptionStatus = {
+              ...subscriptionStatus,
+              quotesThisMonth: quotaResult.quotesThisMonth,
+            };
+            await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updatedSubscription));
+            set({ subscriptionStatus: updatedSubscription });
+          }
+        } catch (quotaError: any) {
+          if (quotaError.message === 'QUOTA_EXCEEDED') {
+            throw quotaError;
+          }
+          console.warn('Server quota check failed, using client-side check:', quotaError);
+          const { canCreateQuote } = get();
+          if (!canCreateQuote()) {
+            throw new Error('QUOTA_EXCEEDED');
+          }
+        }
+      } else {
+        const { incrementQuoteCount } = get();
+        await incrementQuoteCount();
+      }
 
       // Create a copy with new ID and timestamps
       const duplicatedQuote: Quote = {
@@ -308,9 +368,6 @@ export const useStore = create<AppState>((set, get) => ({
       );
 
       set({ quotes: updatedQuotes });
-
-      // Increment quote count since this creates a new quote
-      await incrementQuoteCount();
 
       // Sync to Firestore if authenticated
       if (auth.currentUser) {

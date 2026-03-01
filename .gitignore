@@ -46,3 +46,6 @@ android/app/release-new.keystore
 *.aab
 *.apk
 android/app/build/outputs/
+
+# iOS Provisioning Profiles
+*.mobileprovision

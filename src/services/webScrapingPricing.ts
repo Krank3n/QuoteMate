@@ -6,6 +6,7 @@
  */
 
 import { Platform } from 'react-native';
+import { auth } from '../config/firebase';
 
 const FIREBASE_FUNCTION_URL = 'https://us-central1-hansendev.cloudfunctions.net';
 
@@ -106,9 +107,10 @@ async function fetchStoreSearchHTML(
 
       // Try Firebase Function as fallback (has even more bypass strategies)
       console.log('Attempting Firebase Function fallback with anti-scraping bypass...');
+      const idToken = await auth.currentUser?.getIdToken();
       const fbResponse = await fetch(`${FIREBASE_FUNCTION_URL}/fetchStoreHTML`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
         body: JSON.stringify({ url: searchUrl }),
       });
 
@@ -135,9 +137,10 @@ async function fetchStoreSearchHTML(
     // Last attempt: Try Firebase Function
     try {
       console.log('Last attempt: Firebase Function...');
+      const idToken2 = await auth.currentUser?.getIdToken();
       const fbResponse = await fetch(`${FIREBASE_FUNCTION_URL}/fetchStoreHTML`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken2}` },
         body: JSON.stringify({ url: searchUrl }),
       });
 
@@ -168,9 +171,10 @@ async function parseProductsWithClaude(
 ): Promise<PricingResult> {
   try {
     // Use Firebase Function for both web and mobile to avoid React Native compatibility issues
+    const idToken = await auth.currentUser?.getIdToken();
     const response = await fetch(`${FIREBASE_FUNCTION_URL}/parseProductsHTML`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
       body: JSON.stringify({
         html,
         searchTerm,

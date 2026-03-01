@@ -13,6 +13,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Quote acceptance tokens - only Cloud Functions (admin) can write
+    // Public read needed for acceptance page
+    match /quoteAcceptanceTokens/{tokenId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // Default: deny all access
     match /{document=**} {
       allow read, write: if false;

@@ -6,6 +6,7 @@
 import { ANTHROPIC_API_KEY, GEMINI_API_KEY } from '@env';
 import { Material } from '../types';
 import { Platform } from 'react-native';
+import { auth } from '../config/firebase';
 
 // For web, use Firebase Functions URL
 // For mobile, call Anthropic API directly
@@ -150,10 +151,12 @@ async function analyzeViaFirebaseFunction(
 
   for (let attempt = 0; attempt < retryCount; attempt++) {
     try {
+      const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/analyzeJobDescription`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({ jobDescription, tradeContext }),
       });
@@ -481,10 +484,12 @@ async function cleanupViaFirebaseFunction(
   transcribedText: string
 ): Promise<{ cleanedDescription: string; suggestedTitle: string }> {
   try {
+    const idToken = await auth.currentUser?.getIdToken();
     const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/cleanupTranscription`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
       },
       body: JSON.stringify({ transcribedText }),
     });

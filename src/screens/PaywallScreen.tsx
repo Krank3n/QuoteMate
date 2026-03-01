@@ -157,11 +157,11 @@ export function PaywallScreen() {
                 const endpoint = Platform.OS === 'ios' ? 'validateAppleReceipt' : 'validateGoogleReceipt';
                 try {
                   console.log(`📤 Sending receipt to ${endpoint}...`);
+                  const idToken = await currentUser.getIdToken();
                   const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
                     body: JSON.stringify({
-                      userId: currentUser.uid,
                       transactionId: purchase.transactionId || purchase.id,
                       productId: purchase.productId,
                       purchaseToken: purchase.purchaseToken || null,
@@ -312,13 +312,14 @@ export function PaywallScreen() {
 
       // Call backend to cancel subscription
       const API_BASE_URL = process.env.API_BASE_URL || 'https://us-central1-hansendev.cloudfunctions.net';
+      const idToken = await currentUser.getIdToken();
       const response = await fetch(`${API_BASE_URL}/cancelSubscription`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          userId: currentUser.uid,
           reason,
           feedback,
         }),
