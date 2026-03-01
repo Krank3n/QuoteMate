@@ -73,29 +73,32 @@ export function PaywallScreen() {
     };
   }, []);
 
-  const loadProducts = async () => {
+  const loadProducts = async (retryCount = 0) => {
     setLoading(true);
     setProductsLoadError(false);
     try {
-      console.log('🔍 Loading products...');
-      console.log('🔍 Platform:', Platform.OS);
+      console.log(`[Paywall] Loading products (attempt ${retryCount + 1})...`);
+      console.log('[Paywall] Platform:', Platform.OS);
 
       // Use unified billing service for all platforms
       await unifiedBillingService.initialize();
       const availableProducts = await unifiedBillingService.getProducts();
-      console.log('📦 Found products:', availableProducts);
-      console.log('📦 Product count:', availableProducts.length);
+      console.log('[Paywall] Found products:', availableProducts.length);
 
-      if (availableProducts.length === 0) {
-        setProductsLoadError(true);
-
-        if (Platform.OS === 'web') {
-          console.log('Web products loaded from configuration');
-          setProductsLoadError(false);
-        } else {
-          console.log('No subscription products found on', Platform.OS);
+      if (availableProducts.length === 0 && Platform.OS !== 'web') {
+        // Auto-retry up to 2 more times with increasing delay
+        if (retryCount < 2) {
+          console.log(`[Paywall] No products found, auto-retrying in ${(retryCount + 1) * 2}s...`);
+          setLoading(true);
+          await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000));
+          return loadProducts(retryCount + 1);
         }
+        console.log('[Paywall] No subscription products found after retries on', Platform.OS);
+        setProductsLoadError(true);
+      } else if (availableProducts.length === 0 && Platform.OS === 'web') {
+        console.log('[Paywall] Web products loaded from configuration');
       }
+
       // Convert to RNIap.Subscription format for compatibility
       const formattedProducts = availableProducts.map((p: any) => ({
         productId: p.id,
@@ -107,17 +110,21 @@ export function PaywallScreen() {
       }));
       setProducts(formattedProducts as any);
     } catch (error: any) {
-      console.error('Error loading products:', error);
-      setProductsLoadError(true);
+      console.error('[Paywall] Error loading products:', error);
 
       // Handle IAP not available gracefully (expo-iap 3.x uses kebab-case error codes)
       const code = error?.code;
       const msg = error?.message || '';
       if (code === 'iap-not-available' || code === 'E_IAP_NOT_AVAILABLE' || msg.includes('iap-not-available') || msg.includes('E_IAP_NOT_AVAILABLE')) {
-        console.log('In-app purchases not available on this device');
+        console.log('[Paywall] In-app purchases not available on this device');
         setIapNotAvailable(true);
-        setProductsLoadError(false);
+      } else if (retryCount < 2) {
+        // Auto-retry on error
+        console.log(`[Paywall] Error occurred, auto-retrying in ${(retryCount + 1) * 2}s...`);
+        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000));
+        return loadProducts(retryCount + 1);
       } else {
+        setProductsLoadError(true);
         Alert.alert('Error', 'Failed to load subscription options. Please try again.');
       }
     } finally {

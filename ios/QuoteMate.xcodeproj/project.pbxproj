@@ -7,26 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0A91C4D443018D6E1E3B7ACF /* libPods-QuoteMate.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 21C47BB16CD78C70E397848F /* libPods-QuoteMate.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		611DF21AC73571C0FBDFF806 /* libPods-QuoteMate.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F43303E277803CCBE633BC6 /* libPods-QuoteMate.a */; };
+		6FA1BBF53A748498C8310178 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB9F5FE92CA31F57D5AE0A9 /* ExpoModulesProvider.swift */; };
+		72E1A5B113B15F3041ACFC50 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 8012D63B303C1E110F25359A /* PrivacyInfo.xcprivacy */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		DFC3394177CB13B9E5145AC0 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8178BCA498883C79E028210 /* ExpoModulesProvider.swift */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
-		F8DBBB0C316C828C4CF66305 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D7D341A2DCCD2D6DB24BEE98 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		13B07F961A680F5B00A75B9A /* QuoteMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuoteMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = QuoteMate/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = QuoteMate/Info.plist; sourceTree = "<group>"; };
-		1F43303E277803CCBE633BC6 /* libPods-QuoteMate.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-QuoteMate.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		890B74F8EDDC91D18B42D8A7 /* Pods-QuoteMate.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-QuoteMate.release.xcconfig"; path = "Target Support Files/Pods-QuoteMate/Pods-QuoteMate.release.xcconfig"; sourceTree = "<group>"; };
+		21C47BB16CD78C70E397848F /* libPods-QuoteMate.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-QuoteMate.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		28E5295B5BAE50A55A3831E2 /* Pods-QuoteMate.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-QuoteMate.debug.xcconfig"; path = "Target Support Files/Pods-QuoteMate/Pods-QuoteMate.debug.xcconfig"; sourceTree = "<group>"; };
+		8012D63B303C1E110F25359A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = QuoteMate/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A2A4BC1F02F11FA397DB2098 /* Pods-QuoteMate.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-QuoteMate.release.xcconfig"; path = "Target Support Files/Pods-QuoteMate/Pods-QuoteMate.release.xcconfig"; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = QuoteMate/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		D7D341A2DCCD2D6DB24BEE98 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = QuoteMate/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		D8178BCA498883C79E028210 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-QuoteMate/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		E43E301BC7B1761BDC8C40A0 /* Pods-QuoteMate.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-QuoteMate.debug.xcconfig"; path = "Target Support Files/Pods-QuoteMate/Pods-QuoteMate.debug.xcconfig"; sourceTree = "<group>"; };
+		EAB9F5FE92CA31F57D5AE0A9 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-QuoteMate/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = QuoteMate/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* QuoteMate-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "QuoteMate-Bridging-Header.h"; path = "QuoteMate/QuoteMate-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -37,13 +37,21 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				611DF21AC73571C0FBDFF806 /* libPods-QuoteMate.a in Frameworks */,
+				0A91C4D443018D6E1E3B7ACF /* libPods-QuoteMate.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		10D7398516BB9406C8F1033E /* QuoteMate */ = {
+			isa = PBXGroup;
+			children = (
+				EAB9F5FE92CA31F57D5AE0A9 /* ExpoModulesProvider.swift */,
+			);
+			name = QuoteMate;
+			sourceTree = "<group>";
+		};
 		13B07FAE1A68108700A75B9A /* QuoteMate */ = {
 			isa = PBXGroup;
 			children = (
@@ -53,26 +61,16 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				D7D341A2DCCD2D6DB24BEE98 /* PrivacyInfo.xcprivacy */,
+				8012D63B303C1E110F25359A /* PrivacyInfo.xcprivacy */,
 			);
 			name = QuoteMate;
-			sourceTree = "<group>";
-		};
-		23DE1953751D4A1FB390D99F /* Pods */ = {
-			isa = PBXGroup;
-			children = (
-				E43E301BC7B1761BDC8C40A0 /* Pods-QuoteMate.debug.xcconfig */,
-				890B74F8EDDC91D18B42D8A7 /* Pods-QuoteMate.release.xcconfig */,
-			);
-			name = Pods;
-			path = Pods;
 			sourceTree = "<group>";
 		};
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				1F43303E277803CCBE633BC6 /* libPods-QuoteMate.a */,
+				21C47BB16CD78C70E397848F /* libPods-QuoteMate.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -91,8 +89,8 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				23DE1953751D4A1FB390D99F /* Pods */,
-				A00D04FD6CB5453486CB2BFF /* ExpoModulesProviders */,
+				A22E7E6DF623B8E1CB03EA06 /* Pods */,
+				919F472A0B8CFAD18980DFB0 /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -107,12 +105,22 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		A00D04FD6CB5453486CB2BFF /* ExpoModulesProviders */ = {
+		919F472A0B8CFAD18980DFB0 /* ExpoModulesProviders */ = {
 			isa = PBXGroup;
 			children = (
-				C2B4A280ED7437BCB8657244 /* QuoteMate */,
+				10D7398516BB9406C8F1033E /* QuoteMate */,
 			);
 			name = ExpoModulesProviders;
+			sourceTree = "<group>";
+		};
+		A22E7E6DF623B8E1CB03EA06 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				28E5295B5BAE50A55A3831E2 /* Pods-QuoteMate.debug.xcconfig */,
+				A2A4BC1F02F11FA397DB2098 /* Pods-QuoteMate.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
 			sourceTree = "<group>";
 		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
@@ -124,14 +132,6 @@
 			path = QuoteMate/Supporting;
 			sourceTree = "<group>";
 		};
-		C2B4A280ED7437BCB8657244 /* QuoteMate */ = {
-			isa = PBXGroup;
-			children = (
-				D8178BCA498883C79E028210 /* ExpoModulesProvider.swift */,
-			);
-			name = QuoteMate;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -140,13 +140,13 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "QuoteMate" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				5927388B399A82CA95B24E43 /* [Expo] Configure project */,
+				9F4C91AA4DE595649573ED91 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				6FFF79915FFC59677C232E73 /* [CP] Embed Pods Frameworks */,
+				F53346B8E96ADAEC032E7E14 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -196,7 +196,7 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				F8DBBB0C316C828C4CF66305 /* PrivacyInfo.xcprivacy in Resources */,
+				72E1A5B113B15F3041ACFC50 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -238,43 +238,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		5927388B399A82CA95B24E43 /* [Expo] Configure project */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "[Expo] Configure project";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-QuoteMate/expo-configure-project.sh\"\n";
-		};
-		6FFF79915FFC59677C232E73 /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-QuoteMate/Pods-QuoteMate-frameworks.sh",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermes.framework/hermes",
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputPaths = (
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermes.framework",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-QuoteMate/Pods-QuoteMate-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
@@ -359,6 +322,43 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-QuoteMate/Pods-QuoteMate-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
+		9F4C91AA4DE595649573ED91 /* [Expo] Configure project */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "[Expo] Configure project";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-QuoteMate/expo-configure-project.sh\"\n";
+		};
+		F53346B8E96ADAEC032E7E14 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-QuoteMate/Pods-QuoteMate-frameworks.sh",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermes.framework/hermes",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputPaths = (
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermes.framework",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-QuoteMate/Pods-QuoteMate-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -367,7 +367,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				DFC3394177CB13B9E5145AC0 /* ExpoModulesProvider.swift in Sources */,
+				6FA1BBF53A748498C8310178 /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -376,7 +376,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = E43E301BC7B1761BDC8C40A0 /* Pods-QuoteMate.debug.xcconfig */;
+			baseConfigurationReference = 28E5295B5BAE50A55A3831E2 /* Pods-QuoteMate.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -412,7 +412,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 890B74F8EDDC91D18B42D8A7 /* Pods-QuoteMate.release.xcconfig */;
+			baseConfigurationReference = A2A4BC1F02F11FA397DB2098 /* Pods-QuoteMate.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;

@@ -2,7 +2,7 @@ export default {
   expo: {
     name: "QuoteMate",
     slug: "quotemate",
-    version: "1.0.54",
+    version: "1.0.55",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -47,7 +47,15 @@ export default {
             useNextNotificationsApi: true
           }
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          photosPermission: "QuoteMate needs access to your photo library so you can select a company logo to display on your PDF quotes and invoices. For example, you can upload your business logo to appear in the header of every quote you generate.",
+          cameraPermission: "QuoteMate needs access to your camera so you can take a photo to use as your company logo on PDF quotes and invoices."
+        }
+      ],
+      "expo-iap"
     ],
     splash: {
       image: "./assets/splash.png",
@@ -61,7 +69,7 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
-      buildNumber: "13"
+      buildNumber: "15"
     },
     android: {
       adaptiveIcon: {
