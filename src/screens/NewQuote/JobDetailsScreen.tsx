@@ -29,10 +29,16 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from 'expo-speech-recognition';
+// Safe import — native module may not be available if dev client wasn't rebuilt
+let ExpoSpeechRecognitionModule: any = null;
+let useSpeechRecognitionEvent: any = (_event: string, _callback: Function) => {};
+try {
+  const speechModule = require('expo-speech-recognition');
+  ExpoSpeechRecognitionModule = speechModule.ExpoSpeechRecognitionModule;
+  useSpeechRecognitionEvent = speechModule.useSpeechRecognitionEvent;
+} catch (e) {
+  console.warn('expo-speech-recognition native module not available — speech features disabled');
+}
 
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
@@ -444,6 +450,11 @@ export function JobDetailsScreen() {
     }
 
     // Native: Use expo-speech-recognition
+    if (!ExpoSpeechRecognitionModule) {
+      Alert.alert('Not Available', 'Speech recognition is not available. Please rebuild the dev client.');
+      return;
+    }
+
     if (isRecording) {
       // Stop recording manually
       console.log('🛑 User manually stopped recording');
