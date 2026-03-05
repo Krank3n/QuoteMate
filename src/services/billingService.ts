@@ -10,8 +10,8 @@ try {
 
 // Subscription product IDs (must match App Store Connect & Google Play Console)
 export const SUBSCRIPTION_SKUS = {
-  MONTHLY: 'quotemate_premium_monthly',
-  YEARLY: 'quotemate_premium_yearly',
+  MONTHLY: 'quotemate_pro_monthly',
+  YEARLY: 'quotemate_pro_yearly',
 };
 
 export const SUBSCRIPTION_PRODUCTS = Platform.select({
@@ -41,6 +41,15 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 class BillingService {
   private isInitialized = false;
   private initializationAttempts = 0;
@@ -64,7 +73,7 @@ class BillingService {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           console.log(`[IAP] initConnection attempt ${attempt}/${maxRetries}`);
-          await RNIap.initConnection();
+          await withTimeout(RNIap.initConnection(), 10000, 'initConnection');
           this.isInitialized = true;
           this.initializationAttempts = attempt;
           console.log(`[IAP] Billing service initialized successfully on attempt ${attempt}`);
@@ -173,7 +182,11 @@ class BillingService {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`[IAP] fetchProducts attempt ${attempt}/${maxRetries}`);
-        const products = await RNIap.fetchProducts({ skus, type: 'subs' });
+        const products = await withTimeout(
+          RNIap.fetchProducts({ skus, type: 'subs' }),
+          15000,
+          'fetchProducts'
+        );
         console.log(`[IAP] Attempt ${attempt} returned ${products?.length || 0} products`);
 
         if (products && products.length > 0) {

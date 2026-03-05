@@ -46,11 +46,19 @@ export function PaywallScreen() {
   const quotesLimit = subscriptionStatus?.freeQuotesLimit || 5;
 
   useEffect(() => {
+    // Safety timeout: if loading takes more than 30s, stop the spinner
+    const safetyTimeout = setTimeout(() => {
+      setLoading(false);
+      if (products.length === 0 && Platform.OS !== 'web') {
+        setProductsLoadError(true);
+        console.warn('[Paywall] Safety timeout: forcing loading state off');
+      }
+    }, 30000);
+
     loadProducts().catch(error => {
       console.error('Failed to load products:', error);
-      // Don't crash, just set loading to false
       setLoading(false);
-    });
+    }).finally(() => clearTimeout(safetyTimeout));
 
     let purchaseUpdateSubscription: any;
     let purchaseErrorSubscription: any;
@@ -233,22 +241,11 @@ export function PaywallScreen() {
     console.log('💳 handleUpgrade clicked');
     console.log('Platform:', Platform.OS);
 
-    if (products.length === 0) {
-      console.log('No products available');
-      Alert.alert(
-        'Not Available',
-        'Subscription options could not be loaded. Please check your internet connection and try again.'
-      );
-      return;
-    }
-
     setIsUpgrading(true);
     try {
-      const firstProduct = products[0];
-      console.log('📦 First product:', firstProduct);
-
       if (Platform.OS === 'ios') {
         // iOS MUST use Apple IAP only (App Store guidelines 3.1.1)
+        // requestPurchase works directly with the SKU — no need for pre-fetched products
         console.log('🍎 Using Apple IAP for iOS');
         await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
       } else if (Platform.OS === 'android') {
@@ -266,8 +263,13 @@ export function PaywallScreen() {
           return;
         }
 
+        const webProduct = products.length > 0 ? products[0] : {
+          productId: 'price_default',
+          title: 'Pro Monthly',
+          localizedPrice: '$29',
+        };
         console.log('✅ Proceeding with Stripe checkout for user:', currentUser.uid);
-        setSelectedProduct(firstProduct);
+        setSelectedProduct(webProduct);
         setShowCheckoutModal(true);
         setIsUpgrading(false);
       }
@@ -282,7 +284,7 @@ export function PaywallScreen() {
 
   const getProductPrice = (productId: string): string => {
     const product = products.find(p => p.productId === productId);
-    return (product as any)?.localizedPrice || '$19';
+    return (product as any)?.localizedPrice || '$29';
   };
 
   const handleCancelSubscription = () => {
@@ -637,38 +639,26 @@ export function PaywallScreen() {
           </View>
         </View>
 
-        {/* Show retry button if products failed to load on iOS/Android */}
-        {productsLoadError && Platform.OS !== 'web' ? (
-          <>
-            <View style={styles.errorStateContainer}>
-              <MaterialCommunityIcons name="alert-circle-outline" size={32} color={colors.warning} />
-              <Text style={styles.errorStateText}>
-                Unable to load subscription options. Please check your internet connection and try again.
-              </Text>
-            </View>
-            <Button
-              mode="contained"
-              onPress={loadProducts}
-              style={styles.upgradeButton}
-              contentStyle={styles.upgradeButtonContent}
-              loading={loading}
-              disabled={loading}
-            >
-              Retry Loading
-            </Button>
-          </>
-        ) : (
-          <Button
-            mode="contained"
-            onPress={handleUpgrade}
-            style={styles.upgradeButton}
-            contentStyle={styles.upgradeButtonContent}
-            loading={isUpgrading}
-            disabled={isUpgrading || products.length === 0}
-          >
-            Start Pro Subscription
-          </Button>
+        {/* Show non-blocking warning if products failed to load on iOS/Android */}
+        {productsLoadError && Platform.OS !== 'web' && (
+          <View style={styles.errorStateContainer}>
+            <MaterialCommunityIcons name="alert-circle-outline" size={32} color={colors.warning} />
+            <Text style={styles.errorStateText}>
+              Could not verify pricing from the {Platform.OS === 'ios' ? 'App Store' : 'Play Store'}. You can still subscribe below.
+            </Text>
+          </View>
         )}
+
+        <Button
+          mode="contained"
+          onPress={handleUpgrade}
+          style={styles.upgradeButton}
+          contentStyle={styles.upgradeButtonContent}
+          loading={isUpgrading}
+          disabled={isUpgrading}
+        >
+          Start Pro Subscription
+        </Button>
 
         <Text style={styles.disclaimer}>
           Cancel anytime. Subscriptions automatically renew unless cancelled 24 hours before the end of the period.
