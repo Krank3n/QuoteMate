@@ -21,6 +21,13 @@ def reactNativeAndroidDir = new File(
 )
 
 allprojects {
+  configurations.all {
+    resolutionStrategy {
+      force "org.jetbrains.kotlin:kotlin-stdlib:${rootProject.ext.has('kotlinVersion') ? rootProject.ext.get('kotlinVersion') : project.properties['android.kotlinVersion']}"
+      force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:${rootProject.ext.has('kotlinVersion') ? rootProject.ext.get('kotlinVersion') : project.properties['android.kotlinVersion']}"
+      force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:${rootProject.ext.has('kotlinVersion') ? rootProject.ext.get('kotlinVersion') : project.properties['android.kotlinVersion']}"
+    }
+  }
   repositories {
     maven {
       // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
