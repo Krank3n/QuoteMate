@@ -23,9 +23,10 @@ def reactNativeAndroidDir = new File(
 allprojects {
   configurations.all {
     resolutionStrategy {
-      force "org.jetbrains.kotlin:kotlin-stdlib:${rootProject.ext.has('kotlinVersion') ? rootProject.ext.get('kotlinVersion') : project.properties['android.kotlinVersion']}"
-      force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:${rootProject.ext.has('kotlinVersion') ? rootProject.ext.get('kotlinVersion') : project.properties['android.kotlinVersion']}"
-      force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:${rootProject.ext.has('kotlinVersion') ? rootProject.ext.get('kotlinVersion') : project.properties['android.kotlinVersion']}"
+      force "org.jetbrains.kotlin:kotlin-stdlib:2.1.0"
+      force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.0"
+      force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.1.0"
+      force "org.jetbrains.kotlin:kotlin-stdlib-common:2.1.0"
     }
   }
   repositories {

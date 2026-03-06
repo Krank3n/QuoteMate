@@ -8,16 +8,19 @@
   - File: `functions/src/index.ts`
 - [x] **Fix quote acceptance token lookup** — added `quoteAcceptanceTokens` collection for O(1) lookup with legacy fallback + auto-migration
   - Files: `functions/src/index.ts`, `firestore.rules`
-- [ ] **Add rate limiting** to all Firebase Function endpoints — currently vulnerable to abuse/DOS
+- [x] **Add rate limiting** to all Firebase Function endpoints — Firestore-based rate limiting with per-user (standard: 30/min, heavy: 10/min) and per-IP (public: 60/min) limits
+  - File: `functions/src/index.ts`
 
 ---
 
 ## Critical - Security
 
-- [ ] **Whitelist CORS origins** — `origin: true` allows any domain (CSRF risk)
-  - File: `functions/src/index.ts` (line ~26)
-- [ ] **Add input validation** to all Firebase Function endpoints — no sanitization on any inputs
-- [ ] **Hash quote acceptance tokens** in Firestore — currently stored in plaintext
+- [x] **Whitelist CORS origins** — restricted to Firebase project domains + localhost dev; mobile apps bypass CORS naturally
+  - File: `functions/src/index.ts`
+- [x] **Add input validation** to all Firebase Function endpoints — type checks, length limits, URL validation, domain allowlisting for scraping, HTML escaping for user content
+  - File: `functions/src/index.ts`
+- [x] **Hash quote acceptance tokens** in Firestore — SHA-256 hashed before storage, with automatic migration of legacy unhashed tokens on access
+  - File: `functions/src/index.ts`
 - [ ] **Sanitize error messages** — internal details like "Reece API not configured" exposed to clients
 - [ ] **Review web scraping legality** — user-agent spoofing may violate store ToS
   - File: `src/services/webScrapingPricing.ts` (lines ~74-95)

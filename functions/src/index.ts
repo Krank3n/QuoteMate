@@ -22,8 +22,112 @@ const stripe = new Stripe(stripeSecretKey, {
   apiVersion: '2023-10-16',
 });
 
-// CORS configuration
-const corsHandler = cors({ origin: true });
+// CORS configuration - whitelist allowed origins
+const allowedOrigins = [
+  'https://us-central1-hansendev.cloudfunctions.net',
+  'https://hansendev.web.app',
+  'https://hansendev.firebaseapp.com',
+];
+
+const corsHandler = cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, server-to-server, same-origin)
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    // Allow localhost for development
+    if (origin.startsWith('http://localhost:') || origin === 'http://localhost') {
+      callback(null, true);
+      return;
+    }
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Not allowed by CORS'));
+  },
+});
+
+// Rate limiting via Firestore
+const rateLimitDb = () => admin.firestore();
+
+interface RateLimitConfig {
+  maxRequests: number;
+  windowMs: number;
+}
+
+const RATE_LIMITS = {
+  standard: { maxRequests: 30, windowMs: 60_000 } as RateLimitConfig,
+  heavy: { maxRequests: 10, windowMs: 60_000 } as RateLimitConfig,
+  public: { maxRequests: 60, windowMs: 60_000 } as RateLimitConfig,
+};
+
+async function checkRateLimit(
+  key: string,
+  config: RateLimitConfig,
+  res: functions.Response
+): Promise<boolean> {
+  const now = Date.now();
+  const windowStart = now - config.windowMs;
+  const ref = rateLimitDb().collection('rateLimits').doc(key);
+
+  try {
+    const allowed = await rateLimitDb().runTransaction(async (tx) => {
+      const doc = await tx.get(ref);
+      const data = doc.data();
+      let timestamps: number[] = data?.timestamps ?? [];
+
+      // Remove expired entries
+      timestamps = timestamps.filter((t: number) => t > windowStart);
+
+      if (timestamps.length >= config.maxRequests) {
+        return false;
+      }
+
+      timestamps.push(now);
+      tx.set(ref, { timestamps, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      return true;
+    });
+
+    if (!allowed) {
+      res.status(429).json({ error: 'Too many requests. Please try again later.' });
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Rate limit check failed:', error);
+    // Allow request if rate limit check fails (fail open)
+    return true;
+  }
+}
+
+function getClientIp(req: functions.https.Request): string {
+  return (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+}
+
+// Input validation helpers
+function isNonEmptyString(val: unknown): val is string {
+  return typeof val === 'string' && val.trim().length > 0;
+}
+
+function isValidUrl(val: unknown): boolean {
+  if (!isNonEmptyString(val)) return false;
+  try {
+    const parsed = new URL(val);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeString(val: string, maxLength: number = 1000): string {
+  return val.trim().slice(0, maxLength);
+}
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 /**
  * Verify Firebase Auth token from Authorization header.
@@ -51,6 +155,24 @@ async function verifyAuth(
 }
 
 /**
+ * Verify auth and apply rate limiting in one step.
+ * Returns decoded token or null (response already sent).
+ */
+async function verifyAuthWithRateLimit(
+  req: functions.https.Request,
+  res: functions.Response,
+  limit: RateLimitConfig = RATE_LIMITS.standard
+): Promise<admin.auth.DecodedIdToken | null> {
+  const decodedToken = await verifyAuth(req, res);
+  if (!decodedToken) return null;
+
+  const allowed = await checkRateLimit(`user:${decodedToken.uid}`, limit, res);
+  if (!allowed) return null;
+
+  return decodedToken;
+}
+
+/**
  * Create a Stripe Checkout Session
  * Called from the web app when user wants to subscribe
  */
@@ -61,15 +183,23 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
       if (!decodedToken) return;
       const userId = decodedToken.uid;
 
       try {
       const { priceId, successUrl, cancelUrl } = req.body;
 
-      if (!priceId) {
-        res.status(400).json({ error: 'Missing required parameters' });
+      if (!isNonEmptyString(priceId)) {
+        res.status(400).json({ error: 'Missing or invalid priceId' });
+        return;
+      }
+      if (successUrl && !isValidUrl(successUrl)) {
+        res.status(400).json({ error: 'Invalid successUrl' });
+        return;
+      }
+      if (cancelUrl && !isValidUrl(cancelUrl)) {
+        res.status(400).json({ error: 'Invalid cancelUrl' });
         return;
       }
 
@@ -127,15 +257,15 @@ export const createPaymentIntent = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
     const userId = decodedToken.uid;
 
     try {
       const { priceId } = req.body;
 
-      if (!priceId) {
-        res.status(400).json({ error: 'Missing required parameters' });
+      if (!isNonEmptyString(priceId)) {
+        res.status(400).json({ error: 'Missing or invalid priceId' });
         return;
       }
 
@@ -205,12 +335,17 @@ export const createPortalSession = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
     const userId = decodedToken.uid;
 
     try {
       const { returnUrl } = req.body;
+
+      if (returnUrl && !isValidUrl(returnUrl)) {
+        res.status(400).json({ error: 'Invalid returnUrl' });
+        return;
+      }
 
       // Find customer by Firebase user ID in metadata
       const customerList = await stripe.customers.search({
@@ -250,15 +385,15 @@ export const cancelSubscription = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
     const userId = decodedToken.uid;
 
     try {
       const { reason, feedback } = req.body;
 
-      if (!reason) {
-        res.status(400).json({ error: 'Missing required parameters' });
+      if (!isNonEmptyString(reason)) {
+        res.status(400).json({ error: 'Missing or invalid reason' });
         return;
       }
 
@@ -340,18 +475,27 @@ export const logCancellationFeedback = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
 
     try {
       const { userId, userEmail, reason, feedback, timestamp } = req.body;
 
+      if (!isNonEmptyString(reason)) {
+        res.status(400).json({ error: 'Missing or invalid reason' });
+        return;
+      }
+
+      const safeReason = sanitizeString(reason, 500);
+      const safeFeedback = typeof feedback === 'string' ? sanitizeString(feedback, 2000) : '';
+      const safeEmail = typeof userEmail === 'string' ? sanitizeString(userEmail, 320) : '';
+
       // Log with a special prefix so it's easy to find in logs
       console.log('🚫 ===== CANCELLATION FEEDBACK =====');
-      console.log('📧 User Email:', userEmail);
+      console.log('📧 User Email:', safeEmail);
       console.log('🆔 User ID:', userId);
-      console.log('📝 Reason:', reason);
-      console.log('💬 Additional Feedback:', feedback || 'None provided');
+      console.log('📝 Reason:', safeReason);
+      console.log('💬 Additional Feedback:', safeFeedback || 'None provided');
       console.log('📅 Timestamp:', timestamp);
       console.log('🚫 ==================================');
 
@@ -373,7 +517,7 @@ export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
     const userId = decodedToken.uid;
 
@@ -618,7 +762,7 @@ export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
     const userId = decodedToken.uid;
 
@@ -719,14 +863,14 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
     const userId = decodedToken.uid;
 
     try {
       const { transactionId, productId, purchaseToken } = req.body;
 
-      if (!transactionId || !productId) {
+      if (!isNonEmptyString(transactionId) || !isNonEmptyString(productId)) {
         res.status(400).json({ error: 'Missing required parameters: transactionId, productId' });
         return;
       }
@@ -832,14 +976,14 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
     const userId = decodedToken.uid;
 
     try {
       const { transactionId, productId, purchaseToken } = req.body;
 
-      if (!transactionId || !productId) {
+      if (!isNonEmptyString(transactionId) || !isNonEmptyString(productId)) {
         res.status(400).json({ error: 'Missing required parameters: transactionId, productId' });
         return;
       }
@@ -939,14 +1083,18 @@ export const analyzeJobDescription = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
     if (!decodedToken) return;
 
     try {
       const { jobDescription, tradeContext } = req.body;
 
-      if (!jobDescription) {
-        res.status(400).json({ error: 'Missing jobDescription' });
+      if (!isNonEmptyString(jobDescription)) {
+        res.status(400).json({ error: 'Missing or invalid jobDescription' });
+        return;
+      }
+      if (jobDescription.length > 50000) {
+        res.status(400).json({ error: 'jobDescription exceeds maximum length' });
         return;
       }
 
@@ -1087,14 +1235,18 @@ export const searchMaterialPrice = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
     if (!decodedToken) return;
 
     try {
       const { materialName, hardwareStoreUrls } = req.body;
 
-      if (!materialName) {
-        res.status(400).json({ error: 'Missing materialName' });
+      if (!isNonEmptyString(materialName)) {
+        res.status(400).json({ error: 'Missing or invalid materialName' });
+        return;
+      }
+      if (materialName.length > 500) {
+        res.status(400).json({ error: 'materialName exceeds maximum length' });
         return;
       }
 
@@ -1268,7 +1420,7 @@ async function getReeceAuthToken(): Promise<string | null> {
  */
 export const checkReeceApi = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
 
     try {
@@ -1293,14 +1445,14 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
 
     try {
       const { productName } = req.body;
 
-      if (!productName) {
-        res.status(400).json({ error: 'Missing productName' });
+      if (!isNonEmptyString(productName)) {
+        res.status(400).json({ error: 'Missing or invalid productName' });
         return;
       }
 
@@ -1368,14 +1520,14 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
 
     try {
       const { itemNumber } = req.body;
 
-      if (!itemNumber) {
-        res.status(400).json({ error: 'Missing itemNumber' });
+      if (!isNonEmptyString(itemNumber)) {
+        res.status(400).json({ error: 'Missing or invalid itemNumber' });
         return;
       }
 
@@ -1440,14 +1592,14 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
 
     try {
       const { itemNumber, branchCode } = req.body;
 
-      if (!itemNumber) {
-        res.status(400).json({ error: 'Missing itemNumber' });
+      if (!isNonEmptyString(itemNumber)) {
+        res.status(400).json({ error: 'Missing or invalid itemNumber' });
         return;
       }
 
@@ -1513,14 +1665,22 @@ export const fetchStoreHTML = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
     if (!decodedToken) return;
 
     try {
       const { url } = req.body;
 
-      if (!url) {
-        res.status(400).json({ error: 'Missing url' });
+      if (!isNonEmptyString(url) || !isValidUrl(url)) {
+        res.status(400).json({ error: 'Missing or invalid url' });
+        return;
+      }
+
+      // Only allow fetching from known hardware store domains
+      const allowedDomains = ['bunnings.com.au', 'totaltools.com.au', 'sydneytools.com.au', 'tradetools.com'];
+      const parsedUrl = new URL(url);
+      if (!allowedDomains.some(d => parsedUrl.hostname.endsWith(d))) {
+        res.status(400).json({ error: 'URL domain not allowed' });
         return;
       }
 
@@ -1598,14 +1758,18 @@ export const cleanupTranscription = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
     if (!decodedToken) return;
 
     try {
       const { transcribedText } = req.body;
 
-      if (!transcribedText) {
-        res.status(400).json({ error: 'Missing transcribedText' });
+      if (!isNonEmptyString(transcribedText)) {
+        res.status(400).json({ error: 'Missing or invalid transcribedText' });
+        return;
+      }
+      if (transcribedText.length > 50000) {
+        res.status(400).json({ error: 'transcribedText exceeds maximum length' });
         return;
       }
 
@@ -1695,14 +1859,18 @@ export const parseProductsHTML = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
     if (!decodedToken) return;
 
     try {
       const { html, searchTerm, store, requestedQuantity, requestedUnit } = req.body;
 
-      if (!html || !searchTerm || !store) {
-        res.status(400).json({ error: 'Missing required parameters' });
+      if (!isNonEmptyString(html) || !isNonEmptyString(searchTerm) || !isNonEmptyString(store)) {
+        res.status(400).json({ error: 'Missing required parameters: html, searchTerm, store' });
+        return;
+      }
+      if (html.length > 500000) {
+        res.status(400).json({ error: 'html exceeds maximum size (500KB)' });
         return;
       }
 
@@ -1819,7 +1987,7 @@ export const selectBestProduct = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
     if (!decodedToken) return;
 
     try {
@@ -1949,6 +2117,10 @@ import * as crypto from 'crypto';
 // Token expiration: 30 days in milliseconds
 const TOKEN_EXPIRATION_MS = 30 * 24 * 60 * 60 * 1000;
 
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 /**
  * Generate a secure acceptance token for a quote
  * Creates a 256-bit random token, stores it on the quote, returns the acceptance URL
@@ -1960,15 +2132,15 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
       return;
     }
 
-    const decodedToken = await verifyAuth(req, res);
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
     const userId = decodedToken.uid;
 
     try {
       const { quoteId } = req.body;
 
-      if (!quoteId) {
-        res.status(400).json({ success: false, error: 'Missing quoteId' });
+      if (!isNonEmptyString(quoteId)) {
+        res.status(400).json({ success: false, error: 'Missing or invalid quoteId' });
         return;
       }
 
@@ -1985,15 +2157,16 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
 
       // Generate a 256-bit (32 byte) secure random token
       const token = crypto.randomBytes(32).toString('hex'); // 64 characters
+      const tokenHash = hashToken(token);
 
-      // Store the token and metadata on the quote
+      // Store the hashed token and metadata on the quote
       await quoteRef.update({
-        acceptanceToken: token,
+        acceptanceTokenHash: tokenHash,
         acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // Also store in dedicated tokens collection for O(1) lookup
-      await db.collection('quoteAcceptanceTokens').doc(token).set({
+      // Store hashed token in dedicated collection for O(1) lookup
+      await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
         userId,
         quoteId,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2027,11 +2200,13 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
       return;
     }
 
+    if (!(await checkRateLimit(`ip:${getClientIp(req)}`, RATE_LIMITS.public, res))) return;
+
     try {
       const { token } = req.body;
 
-      if (!token) {
-        res.status(400).json({ success: false, error: 'Missing token' });
+      if (!isNonEmptyString(token) || token.length > 200) {
+        res.status(400).json({ success: false, error: 'Missing or invalid token' });
         return;
       }
 
@@ -2040,9 +2215,15 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
       const db = admin.firestore();
       let foundQuote: any = null;
       let businessSettings: any = null;
+      const tokenHash = hashToken(token);
 
-      // O(1) lookup via dedicated tokens collection
-      const tokenDoc = await db.collection('quoteAcceptanceTokens').doc(token).get();
+      // O(1) lookup via dedicated tokens collection (hashed)
+      let tokenDoc = await db.collection('quoteAcceptanceTokens').doc(tokenHash).get();
+
+      // Fallback: try unhashed doc ID for tokens created before hashing migration
+      if (!tokenDoc.exists) {
+        tokenDoc = await db.collection('quoteAcceptanceTokens').doc(token).get();
+      }
 
       if (tokenDoc.exists) {
         const tokenData = tokenDoc.data()!;
@@ -2057,22 +2238,37 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           if (settingsDoc.exists) {
             businessSettings = settingsDoc.data();
           }
+
+          // Migrate unhashed token to hashed if needed
+          if (tokenDoc.id === token && tokenDoc.id !== tokenHash) {
+            await db.collection('quoteAcceptanceTokens').doc(tokenHash).set(tokenData);
+            await db.collection('quoteAcceptanceTokens').doc(token).delete();
+          }
         }
       } else {
-        // Fallback: legacy scan for tokens created before the migration
+        // Fallback: legacy scan for tokens created before the token collection
         const usersSnapshot = await db.collection('users').get();
         for (const userDoc of usersSnapshot.docs) {
-          const quotesSnapshot = await userDoc.ref
+          // Try hashed field first, then legacy unhashed field
+          let quotesSnapshot = await userDoc.ref
             .collection('quotes')
-            .where('acceptanceToken', '==', token)
+            .where('acceptanceTokenHash', '==', tokenHash)
             .limit(1)
             .get();
+
+          if (quotesSnapshot.empty) {
+            quotesSnapshot = await userDoc.ref
+              .collection('quotes')
+              .where('acceptanceToken', '==', token)
+              .limit(1)
+              .get();
+          }
 
           if (!quotesSnapshot.empty) {
             foundQuote = quotesSnapshot.docs[0].data();
 
-            // Migrate this token to the new collection for future lookups
-            await db.collection('quoteAcceptanceTokens').doc(token).set({
+            // Migrate to hashed token collection for future lookups
+            await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
               userId: userDoc.id,
               quoteId: quotesSnapshot.docs[0].id,
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2159,11 +2355,13 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
       return;
     }
 
+    if (!(await checkRateLimit(`ip:${getClientIp(req)}`, RATE_LIMITS.public, res))) return;
+
     try {
       const { token, response, clientName, clientNotes } = req.body;
 
-      if (!token || !response) {
-        res.status(400).json({ success: false, error: 'Missing token or response' });
+      if (!isNonEmptyString(token) || token.length > 200) {
+        res.status(400).json({ success: false, error: 'Missing or invalid token' });
         return;
       }
 
@@ -2172,6 +2370,9 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         return;
       }
 
+      const safeClientName = typeof clientName === 'string' ? sanitizeString(clientName, 200) : undefined;
+      const safeClientNotes = typeof clientNotes === 'string' ? sanitizeString(clientNotes, 2000) : undefined;
+
       console.log(`📝 Processing quote response: ${response}`);
 
       const db = admin.firestore();
@@ -2179,9 +2380,15 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
       let foundQuote: any = null;
       let foundUserId: string = '';
       let businessSettings: any = null;
+      const tokenHash = hashToken(token);
 
-      // O(1) lookup via dedicated tokens collection
-      const tokenDoc = await db.collection('quoteAcceptanceTokens').doc(token).get();
+      // O(1) lookup via dedicated tokens collection (hashed)
+      let tokenDoc = await db.collection('quoteAcceptanceTokens').doc(tokenHash).get();
+
+      // Fallback: try unhashed doc ID for tokens created before hashing migration
+      if (!tokenDoc.exists) {
+        tokenDoc = await db.collection('quoteAcceptanceTokens').doc(token).get();
+      }
 
       if (tokenDoc.exists) {
         const tokenData = tokenDoc.data()!;
@@ -2198,24 +2405,38 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
           if (settingsDoc.exists) {
             businessSettings = settingsDoc.data();
           }
+
+          // Migrate unhashed token to hashed if needed
+          if (tokenDoc.id === token && tokenDoc.id !== tokenHash) {
+            await db.collection('quoteAcceptanceTokens').doc(tokenHash).set(tokenData);
+            await db.collection('quoteAcceptanceTokens').doc(token).delete();
+          }
         }
       } else {
-        // Fallback: legacy scan for tokens created before the migration
+        // Fallback: legacy scan for tokens created before the token collection
         const usersSnapshot = await db.collection('users').get();
         for (const userDoc of usersSnapshot.docs) {
-          const quotesSnapshot = await userDoc.ref
+          let quotesSnapshot = await userDoc.ref
             .collection('quotes')
-            .where('acceptanceToken', '==', token)
+            .where('acceptanceTokenHash', '==', tokenHash)
             .limit(1)
             .get();
+
+          if (quotesSnapshot.empty) {
+            quotesSnapshot = await userDoc.ref
+              .collection('quotes')
+              .where('acceptanceToken', '==', token)
+              .limit(1)
+              .get();
+          }
 
           if (!quotesSnapshot.empty) {
             foundQuoteRef = quotesSnapshot.docs[0].ref;
             foundQuote = quotesSnapshot.docs[0].data();
             foundUserId = userDoc.id;
 
-            // Migrate this token to the new collection
-            await db.collection('quoteAcceptanceTokens').doc(token).set({
+            // Migrate to hashed token collection
+            await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
               userId: userDoc.id,
               quoteId: quotesSnapshot.docs[0].id,
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2254,8 +2475,8 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
       await foundQuoteRef.update({
         status: response,
         respondedAt: admin.firestore.FieldValue.serverTimestamp(),
-        respondedBy: clientName || foundQuote.customerName || 'Client',
-        clientNotes: clientNotes || null,
+        respondedBy: safeClientName || foundQuote.customerName || 'Client',
+        clientNotes: safeClientNotes || null,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
@@ -2294,7 +2515,7 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
                     <p><strong>Quote Number:</strong> ${foundQuote.quoteNumber || foundQuote.id}</p>
                     <p><strong>Total:</strong> $${foundQuote.total?.toFixed(2) || '0.00'}</p>
                     <p><strong>Response:</strong> <span style="color: ${response === 'accepted' ? '#22c55e' : '#ef4444'}; font-weight: bold;">${statusText}</span></p>
-                    ${clientNotes ? `<p><strong>Client Notes:</strong> ${clientNotes}</p>` : ''}
+                    ${safeClientNotes ? `<p><strong>Client Notes:</strong> ${escapeHtml(safeClientNotes)}</p>` : ''}
                   </div>
                   <p style="color: #6b7280; font-size: 14px;">
                     Open QuoteMate to view the full details.
@@ -2361,10 +2582,12 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
  * A self-contained HTML page that fetches quote data and handles responses
  */
 export const quoteAcceptancePage = functions.https.onRequest(async (req, res) => {
+  if (!(await checkRateLimit(`ip:${getClientIp(req)}`, RATE_LIMITS.public, res))) return;
+
   const token = req.query.token as string;
 
-  if (!token) {
-    res.status(400).send(generateErrorPage('Missing Token', 'No quote token was provided in the URL.'));
+  if (!token || typeof token !== 'string' || token.length > 200) {
+    res.status(400).send(generateErrorPage('Invalid Token', 'The quote token provided is missing or invalid.'));
     return;
   }
 
