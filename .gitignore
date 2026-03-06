@@ -26,6 +26,10 @@ web-build/
 *.swo
 *~
 
+# Native directories (managed by expo prebuild)
+/ios/
+/android/
+
 # Build
 build/
 /tmp
