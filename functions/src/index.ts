@@ -3,6 +3,18 @@ import * as admin from 'firebase-admin';
 import Stripe from 'stripe';
 import cors from 'cors';
 import fetch from 'node-fetch';
+import {
+  getUserEmail,
+  sendWelcomeEmail,
+  sendQuoteAcceptedEmail,
+  sendQuoteDeclinedEmail,
+  sendPaymentFailedEmail,
+  sendSubscriptionCancelledEmail,
+  sendQuotaWarningEmail,
+  sendReEngagementEmail,
+  sendOnboardingTipEmail,
+  handleUnsubscribe,
+} from './email';
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -125,7 +137,7 @@ function sanitizeString(val: string, maxLength: number = 1000): string {
   return val.trim().slice(0, maxLength);
 }
 
-function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
@@ -728,6 +740,18 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
     }, { merge: true });
 
     console.log(`✅ Firestore updated for user ${userId}: isPro=false (subscription deleted)`);
+
+    // Send cancellation email
+    try {
+      const email = await getUserEmail(userId);
+      if (email) {
+        const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
+        const businessName = settingsDoc.data()?.businessName || '';
+        await sendSubscriptionCancelledEmail(email, businessName, userId);
+      }
+    } catch (emailError) {
+      console.error('Error sending cancellation email:', emailError);
+    }
   } catch (error) {
     console.error('Error updating Firestore from webhook:', error);
   }
@@ -747,7 +771,21 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
 async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
   const customerId = invoice.customer as string;
   console.log(`Payment failed for customer ${customerId}`);
-  // You could send an email notification here
+
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    if (!customer.deleted) {
+      const userId = customer.metadata?.firebaseUserId;
+      if (userId) {
+        const email = await getUserEmail(userId);
+        if (email) {
+          await sendPaymentFailedEmail(email, userId);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error sending payment failed email:', error);
+  }
 }
 
 /**
@@ -836,6 +874,16 @@ export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
           isPro: result.isPro,
         });
         return;
+      }
+
+      // Send quota warning email for free users nearing their limit
+      if (!result.isPro && result.quotesThisMonth >= result.freeQuotesLimit - 1) {
+        getUserEmail(userId).then(email => {
+          if (email) {
+            sendQuotaWarningEmail(email, result.quotesThisMonth, result.freeQuotesLimit, userId)
+              .catch(err => console.error('Error sending quota warning email:', err));
+          }
+        }).catch(() => {});
       }
 
       res.status(200).json({
@@ -2482,51 +2530,33 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
 
       console.log(`✅ Quote ${foundQuote.id} marked as ${response}`);
 
-      // Send email notification to business owner via Brevo
-      const brevoApiKey = functions.config().brevo?.api_key || process.env.BREVO_API_KEY;
-      if (brevoApiKey && businessSettings?.email) {
+      // Send email notification to business owner
+      if (businessSettings?.email) {
         try {
-          const statusEmoji = response === 'accepted' ? '✅' : '❌';
-          const statusText = response === 'accepted' ? 'ACCEPTED' : 'DECLINED';
+          const quoteNumber = foundQuote.quoteNumber || foundQuote.id;
+          const total = foundQuote.total || 0;
 
-          await fetch('https://api.brevo.com/v3/smtp/email', {
-            method: 'POST',
-            headers: {
-              'api-key': brevoApiKey,
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: JSON.stringify({
-              sender: {
-                email: 'noreply@hansendev.com.au',
-                name: 'QuoteMate',
-              },
-              to: [{ email: businessSettings.email }],
-              subject: `${statusEmoji} Quote ${statusText} - ${foundQuote.customerName}`,
-              htmlContent: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                  <h2 style="color: ${response === 'accepted' ? '#22c55e' : '#ef4444'};">
-                    Quote ${statusText}
-                  </h2>
-                  <p>Great news! Your quote has been responded to.</p>
-                  <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <p><strong>Customer:</strong> ${foundQuote.customerName}</p>
-                    <p><strong>Job:</strong> ${foundQuote.job?.name || 'N/A'}</p>
-                    <p><strong>Quote Number:</strong> ${foundQuote.quoteNumber || foundQuote.id}</p>
-                    <p><strong>Total:</strong> $${foundQuote.total?.toFixed(2) || '0.00'}</p>
-                    <p><strong>Response:</strong> <span style="color: ${response === 'accepted' ? '#22c55e' : '#ef4444'}; font-weight: bold;">${statusText}</span></p>
-                    ${safeClientNotes ? `<p><strong>Client Notes:</strong> ${escapeHtml(safeClientNotes)}</p>` : ''}
-                  </div>
-                  <p style="color: #6b7280; font-size: 14px;">
-                    Open QuoteMate to view the full details.
-                  </p>
-                </div>
-              `,
-            }),
-          });
-          console.log('📧 Email notification sent to business owner via Brevo');
+          if (response === 'accepted') {
+            await sendQuoteAcceptedEmail(
+              businessSettings.email,
+              foundQuote.customerName,
+              quoteNumber,
+              total,
+              safeClientNotes || null,
+              foundUserId
+            );
+          } else {
+            await sendQuoteDeclinedEmail(
+              businessSettings.email,
+              foundQuote.customerName,
+              quoteNumber,
+              total,
+              safeClientNotes || null,
+              foundUserId
+            );
+          }
         } catch (emailError: any) {
-          console.error('❌ Error sending email notification:', emailError);
+          console.error('Error sending email notification:', emailError);
           // Don't fail the request if email fails
         }
       }
@@ -2976,6 +3006,286 @@ function generateAcceptancePage(token: string): string {
 /**
  * Generate an error page HTML
  */
+// ============================================================
+// EMAIL FUNCTIONS
+// ============================================================
+
+/**
+ * Welcome email - triggered when a new user document is created
+ */
+export const onUserCreated = functions.auth.user().onCreate(async (user) => {
+  const email = user.email;
+  if (!email) return;
+
+  // Small delay to allow business settings to be saved after signup
+  await new Promise(resolve => setTimeout(resolve, 5000));
+
+  let businessName = '';
+  try {
+    const settingsDoc = await admin.firestore()
+      .doc(`users/${user.uid}/settings/business`)
+      .get();
+    businessName = settingsDoc.data()?.businessName || '';
+  } catch (error) {
+    // Settings may not exist yet
+  }
+
+  // Initialize email preferences (opted in by default)
+  await admin.firestore()
+    .doc(`users/${user.uid}/settings/emailPreferences`)
+    .set({
+      marketing: true,
+      transactional: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+  // Record signup timestamp for drip campaign scheduling
+  await admin.firestore()
+    .doc(`users/${user.uid}/settings/emailState`)
+    .set({
+      signupAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastOnboardingTip: 0,
+      lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+  await sendWelcomeEmail(email, businessName, user.uid);
+});
+
+/**
+ * Unsubscribe endpoint - handles email unsubscribe links
+ */
+export const unsubscribeEmail = functions.https.onRequest(async (req, res) => {
+  const userId = req.query.userId as string;
+  const category = req.query.category as string;
+
+  if (!userId || !category) {
+    res.status(400).send(generateErrorPage('Invalid Link', 'This unsubscribe link is invalid.'));
+    return;
+  }
+
+  if (category !== 'marketing' && category !== 'transactional') {
+    res.status(400).send(generateErrorPage('Invalid Link', 'This unsubscribe link is invalid.'));
+    return;
+  }
+
+  const success = await handleUnsubscribe(userId, category);
+
+  if (success) {
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Unsubscribed - QuoteMate</title>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #f8fafc;
+          }
+          .card {
+            background: #1e293b;
+            border-radius: 16px;
+            padding: 40px;
+            text-align: center;
+            max-width: 400px;
+            border: 1px solid #334155;
+          }
+          .icon { font-size: 48px; margin-bottom: 16px; }
+          h1 { color: #f97316; margin-bottom: 12px; }
+          p { color: #94a3b8; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="icon">✅</div>
+          <h1>Unsubscribed</h1>
+          <p>You've been unsubscribed from ${category} emails. You can re-enable them anytime in QuoteMate settings.</p>
+        </div>
+      </body>
+      </html>
+    `);
+  } else {
+    res.status(500).send(generateErrorPage('Error', 'Something went wrong. Please try again later.'));
+  }
+});
+
+/**
+ * Scheduled: Onboarding drip emails
+ * Runs daily, sends tips on day 1, 3, and 7 after signup
+ */
+export const sendOnboardingDrip = functions.pubsub
+  .schedule('every day 09:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const now = new Date();
+
+    // Get all users with email state
+    const emailStatesSnapshot = await db.collectionGroup('settings')
+      .where('signupAt', '!=', null)
+      .get();
+
+    for (const doc of emailStatesSnapshot.docs) {
+      // Only process emailState documents
+      if (doc.id !== 'emailState') continue;
+
+      const data = doc.data();
+      const signupAt = data.signupAt?.toDate?.() || new Date(data.signupAt);
+      const lastTip = data.lastOnboardingTip || 0;
+      const userId = doc.ref.parent.parent?.id;
+
+      if (!userId || lastTip >= 3) continue; // All tips sent
+
+      const daysSinceSignup = Math.floor((now.getTime() - signupAt.getTime()) / (1000 * 60 * 60 * 24));
+
+      let tipToSend = 0;
+      if (daysSinceSignup >= 7 && lastTip < 3) tipToSend = 3;
+      else if (daysSinceSignup >= 3 && lastTip < 2) tipToSend = 2;
+      else if (daysSinceSignup >= 1 && lastTip < 1) tipToSend = 1;
+
+      if (tipToSend === 0) continue;
+
+      const email = await getUserEmail(userId);
+      if (!email) continue;
+
+      let businessName = '';
+      try {
+        const settingsDoc = await db.doc(`users/${userId}/settings/business`).get();
+        businessName = settingsDoc.data()?.businessName || '';
+      } catch {}
+
+      const sent = await sendOnboardingTipEmail(email, businessName, tipToSend, userId);
+      if (sent) {
+        await doc.ref.update({ lastOnboardingTip: tipToSend });
+      }
+    }
+
+    console.log('Onboarding drip campaign completed');
+  });
+
+/**
+ * Scheduled: Re-engagement emails
+ * Runs daily, targets users inactive for 14+ days
+ */
+export const sendReEngagement = functions.pubsub
+  .schedule('every day 10:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const now = new Date();
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    // Get users who haven't been active in 14+ days
+    const emailStatesSnapshot = await db.collectionGroup('settings')
+      .where('lastActivityAt', '<', fourteenDaysAgo)
+      .get();
+
+    for (const doc of emailStatesSnapshot.docs) {
+      if (doc.id !== 'emailState') continue;
+
+      const data = doc.data();
+      const lastActivityAt = data.lastActivityAt?.toDate?.() || new Date(data.lastActivityAt);
+      const lastReEngagementAt = data.lastReEngagementAt?.toDate?.();
+      const userId = doc.ref.parent.parent?.id;
+
+      if (!userId) continue;
+
+      // Don't send if we already sent a re-engagement email in the last 30 days
+      if (lastReEngagementAt && lastReEngagementAt > thirtyDaysAgo) continue;
+
+      const daysSinceActive = Math.floor((now.getTime() - lastActivityAt.getTime()) / (1000 * 60 * 60 * 24));
+
+      const email = await getUserEmail(userId);
+      if (!email) continue;
+
+      let businessName = '';
+      try {
+        const settingsDoc = await db.doc(`users/${userId}/settings/business`).get();
+        businessName = settingsDoc.data()?.businessName || '';
+      } catch {}
+
+      const sent = await sendReEngagementEmail(email, businessName, daysSinceActive, userId);
+      if (sent) {
+        await doc.ref.update({
+          lastReEngagementAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    }
+
+    console.log('Re-engagement campaign completed');
+  });
+
+/**
+ * Update user activity timestamp (called from the app)
+ * Used to track last activity for re-engagement emails
+ */
+export const updateActivityTimestamp = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+
+    try {
+      await admin.firestore()
+        .doc(`users/${decodedToken.uid}/settings/emailState`)
+        .set({
+          lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+      res.status(200).json({ success: true });
+    } catch (error: any) {
+      console.error('Error updating activity timestamp:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Update email preferences (called from the app settings)
+ */
+export const updateEmailPreferences = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { marketing } = req.body;
+    if (typeof marketing !== 'boolean') {
+      res.status(400).json({ error: 'marketing must be a boolean' });
+      return;
+    }
+
+    try {
+      await admin.firestore()
+        .doc(`users/${decodedToken.uid}/settings/emailPreferences`)
+        .set({
+          marketing,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+      res.status(200).json({ success: true, marketing });
+    } catch (error: any) {
+      console.error('Error updating email preferences:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
 function generateErrorPage(title: string, message: string): string {
   return `
 <!DOCTYPE html>

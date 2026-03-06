@@ -3,7 +3,7 @@
  * Home screen with quick stats and new quote button
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, Pressable } from 'react-native';
 import {
   Text,
@@ -30,8 +30,17 @@ import { generateQuotePDF } from '../utils/pdfGenerator';
 import { WebContainer } from '../components/WebContainer';
 import { QuoteCard } from '../components/QuoteCard';
 import { AlertModal } from '../components/AlertModal';
+import { updateActivityTimestamp } from '../services/emailService';
 
 export function DashboardScreen() {
+  // Track user activity for re-engagement emails (once per app session)
+  const activityTracked = useRef(false);
+  useEffect(() => {
+    if (!activityTracked.current) {
+      activityTracked.current = true;
+      updateActivityTimestamp();
+    }
+  }, []);
   const navigation = useNavigation<any>();
   const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice } = useStore();
 

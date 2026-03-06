@@ -100,8 +100,8 @@
   - File: `functions/src/index.ts` (line ~78)
 - [ ] **Move Reece OAuth token to Firestore** with TTL — currently cached in memory, lost on cold start
 - [ ] **Add API versioning** to Firebase Functions — breaking changes will affect existing clients
-- [ ] **Make notifications async** — email/FCM currently blocks response
-  - Consider Cloud Tasks for async delivery
+- [x] **Make notifications async** — quota warning email fires async (non-blocking)
+  - Consider Cloud Tasks for remaining async delivery
 - [ ] **Fix `webSearchPricing` naming** — called "searchMaterialPrice" but uses training data, not web search
 - [ ] **Add audit logging** — track who accessed what quotes (compliance)
 - [ ] **Log cancellation feedback to Firestore** — currently only logged to console

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Opening QuoteMate...</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #f8fafc;
+    }
+    .card {
+      text-align: center;
+      padding: 40px;
+      max-width: 400px;
+    }
+    .logo { width: 120px; height: auto; border-radius: 16px; margin-bottom: 24px; }
+    h1 { font-size: 22px; margin: 0 0 12px; }
+    p { color: #94a3b8; font-size: 15px; line-height: 1.6; margin: 0 0 28px; }
+    .store-links { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .store-btn {
+      display: inline-block;
+      background: #009868;
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .store-btn.secondary { background: #334155; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="/email-assets/logo.png" alt="QuoteMate" class="logo" />
+    <h1>Opening QuoteMate...</h1>
+    <p>If the app didn't open automatically, download it from your app store:</p>
+    <div class="store-links">
+      <a href="https://play.google.com/store/apps/details?id=com.quotemate.app" class="store-btn">Google Play</a>
+      <a href="https://apps.apple.com/app/quotemate/id6740091464" class="store-btn secondary">App Store</a>
+    </div>
+  </div>
+  <script>
+    // Try to open the app via custom scheme
+    var appScheme = 'quotemate://';
+    var start = Date.now();
+
+    // Try the custom scheme
+    window.location.href = appScheme;
+
+    // If still on this page after 1.5s, the app didn't open
+    // The fallback page is already visible so the user can tap store links
+    setTimeout(function() {
+      // On Android, try the intent URI as a second attempt
+      if (/android/i.test(navigator.userAgent)) {
+        window.location.href = 'intent://#Intent;scheme=quotemate;package=com.quotemate.app;end';
+      }
+    }, 1500);
+  </script>
+</body>
+</html>

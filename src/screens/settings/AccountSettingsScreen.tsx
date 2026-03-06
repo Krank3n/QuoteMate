@@ -3,13 +3,14 @@
  * User info, sign out, delete account
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
   Platform,
   Alert,
+  Switch,
 } from 'react-native';
 import {
   Text,
@@ -19,17 +20,49 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { signOut, deleteUser } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 
 import { useStore } from '../../store/useStore';
-import { auth } from '../../config/firebase';
+import { auth, db } from '../../config/firebase';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
+import { updateEmailPreferences } from '../../services/emailService';
 
 export function AccountSettingsScreen() {
   const { clearAllData } = useStore();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [marketingEmails, setMarketingEmails] = useState(true);
+  const [emailPrefsLoading, setEmailPrefsLoading] = useState(true);
+
+  // Load email preferences from Firestore
+  useEffect(() => {
+    async function loadPrefs() {
+      const userId = auth.currentUser?.uid;
+      if (!userId) return;
+      try {
+        const prefsDoc = await getDoc(doc(db, 'users', userId, 'settings', 'emailPreferences'));
+        if (prefsDoc.exists()) {
+          setMarketingEmails(prefsDoc.data()?.marketing !== false);
+        }
+      } catch (error) {
+        console.error('Failed to load email preferences:', error);
+      } finally {
+        setEmailPrefsLoading(false);
+      }
+    }
+    loadPrefs();
+  }, []);
+
+  const handleToggleMarketing = async (value: boolean) => {
+    setMarketingEmails(value);
+    const success = await updateEmailPreferences(value);
+    if (!success) {
+      setMarketingEmails(!value); // Revert on failure
+      Alert.alert('Error', 'Failed to update email preferences. Please try again.');
+    }
+  };
 
   const handleLogout = () => {
     setShowLogoutModal(true);
@@ -136,6 +169,32 @@ export function AccountSettingsScreen() {
               </View>
             </Surface>
           )}
+
+          <Surface style={styles.card}>
+            <Title style={styles.sectionTitle}>Email Notifications</Title>
+
+            <View style={styles.prefRow}>
+              <View style={styles.prefTextContainer}>
+                <Text style={styles.prefTitle}>Transactional emails</Text>
+                <Text style={styles.prefDescription}>Quote responses, payment alerts, subscription updates</Text>
+              </View>
+              <Switch value={true} disabled={true} trackColor={{ true: colors.primary + '80' }} />
+            </View>
+
+            <View style={[styles.prefRow, { borderTopWidth: 1, borderTopColor: colors.outline + '20', paddingTop: 12 }]}>
+              <View style={styles.prefTextContainer}>
+                <Text style={styles.prefTitle}>Marketing emails</Text>
+                <Text style={styles.prefDescription}>Tips, feature updates, and re-engagement</Text>
+              </View>
+              <Switch
+                value={marketingEmails}
+                onValueChange={handleToggleMarketing}
+                disabled={emailPrefsLoading}
+                trackColor={{ false: colors.outline, true: colors.primary + '80' }}
+                thumbColor={marketingEmails ? colors.primary : '#f4f3f4'}
+              />
+            </View>
+          </Surface>
 
           <Surface style={styles.card}>
             <Title style={styles.sectionTitle}>Account Actions</Title>
@@ -265,5 +324,26 @@ const styles = StyleSheet.create({
   },
   deleteAccountButton: {
     alignSelf: 'flex-start',
+  },
+  prefRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  prefTextContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
+  prefTitle: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  prefDescription: {
+    fontSize: 13,
+    color: colors.onSurface,
+    lineHeight: 18,
   },
 });

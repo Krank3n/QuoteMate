@@ -77,7 +77,7 @@ export function SettingsScreen() {
     {
       id: 'account',
       title: 'Account',
-      subtitle: 'Sign out, delete account',
+      subtitle: 'Email preferences, sign out, delete',
       icon: 'account',
       screen: 'AccountSettings',
     },
