@@ -21,7 +21,8 @@
       },
       "android": {
         "buildType": "app-bundle",
-        "image": "latest"
+        "image": "latest",
+        "autoIncrement": true
       }
     }
   },
