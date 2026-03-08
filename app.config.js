@@ -55,7 +55,8 @@ export default {
           cameraPermission: "QuoteMate needs access to your camera so you can take a photo to use as your company logo on PDF quotes and invoices."
         }
       ],
-      "expo-iap"
+      "expo-iap",
+      ["./plugins/withKotlinVersion", "2.2.0"]
     ],
     splash: {
       image: "./assets/splash.png",
