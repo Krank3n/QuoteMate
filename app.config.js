@@ -19,7 +19,7 @@ export default {
             ndkVersion: "28.0.12433566",
             useLegacyPackaging: false,
             enablePageAlignedLibraries: true,
-            kotlinVersion: "2.2.10"
+            kotlinVersion: "2.2.0"
           },
           ios: {
             deploymentTarget: "15.2"
