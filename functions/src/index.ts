@@ -3327,3 +3327,649 @@ function generateErrorPage(title: string, message: string): string {
 </html>
 `;
 }
+
+// ============================================================
+// ADMIN ANALYTICS DASHBOARD
+// ============================================================
+
+function verifyAdminKey(req: functions.https.Request, res: functions.Response): boolean {
+  const key = req.query.key as string;
+  const expectedKey = functions.config().admin?.dashboard_key || process.env.ADMIN_DASHBOARD_KEY;
+
+  if (!expectedKey) {
+    console.error('Admin dashboard key not configured');
+    res.status(500).send(generateErrorPage('Not Configured', 'Admin dashboard key not set. Run: firebase functions:config:set admin.dashboard_key="YOUR_SECRET"'));
+    return false;
+  }
+
+  if (!key || key !== expectedKey) {
+    res.status(403).send(generateErrorPage('Access Denied', 'Invalid or missing access key.'));
+    return false;
+  }
+  return true;
+}
+
+interface AnalyticsData {
+  generatedAt: string;
+  funnel: {
+    totalSignups: number;
+    onboarded: number;
+    createdQuote: number;
+    created5PlusQuotes: number;
+    createdInvoice: number;
+    proSubscribers: number;
+  };
+  quotes: {
+    total: number;
+    statuses: Record<string, number>;
+    aiGenerated: number;
+    aiSkipped: number;
+    totalMaterials: number;
+    avgMaterialsPerQuote: number;
+    totalValue: number;
+    avgValue: number;
+    medianValue: number;
+    minValue: number;
+    maxValue: number;
+    avgMarkup: number;
+    laborRateMedian: number;
+    favoritesSaved: number;
+  };
+  invoices: {
+    total: number;
+    statuses: Record<string, number>;
+    quoteToInvoiceRate: number;
+  };
+  tradeTypes: Record<string, number>;
+  jobTypes: Array<{ name: string; count: number }>;
+  quotesByMonth: Array<{ month: string; count: number }>;
+  signupsByMonth: Array<{ month: string; count: number }>;
+  users: Array<{
+    email: string;
+    businessName: string;
+    tradeType: string;
+    quotes: number;
+    invoices: number;
+    isPro: boolean;
+    quotesThisMonth: number;
+    platform: string;
+    favorites: number;
+    signupDate: string;
+    lastLogin: string;
+  }>;
+  recentQuotes: Array<{
+    date: string;
+    email: string;
+    total: number;
+    status: string;
+    job: string;
+    customer: string;
+    materialsCount: number;
+  }>;
+  cancellations: Array<{ reason: string; date: string }>;
+  acceptanceLinksGenerated: number;
+  emailsSent: number;
+  emailCategories: Record<string, number>;
+  retention: {
+    activeLastWeek: number;
+    activeLastMonth: number;
+    neverReturned: number;
+  };
+}
+
+async function getAdminAnalyticsData(): Promise<AnalyticsData> {
+  const db = admin.firestore();
+
+  // Get auth users for signup/login data
+  const authResult = await admin.auth().listUsers(1000);
+  const authUsers = authResult.users;
+
+  let totalQuotes = 0;
+  let totalInvoices = 0;
+  const quoteStatuses: Record<string, number> = {};
+  const invoiceStatuses: Record<string, number> = {};
+  const tradeTypes: Record<string, number> = {};
+  const jobTypesMap: Record<string, number> = {};
+  const quotesByMonthMap: Record<string, number> = {};
+  const signupsByMonthMap: Record<string, number> = {};
+  let totalMaterials = 0;
+  let quotesWithAI = 0;
+  let quotesSkippedAI = 0;
+  const allQuoteTotals: number[] = [];
+  let onboardedCount = 0;
+  let proCount = 0;
+  let favoritesCount = 0;
+  const markupValues: number[] = [];
+  const laborRates: number[] = [];
+  const recentQuotes: AnalyticsData['recentQuotes'] = [];
+  const usersList: AnalyticsData['users'] = [];
+
+  // Build auth user lookup
+  const authMap = new Map<string, { email: string; createdAt: string; lastLogin: string }>();
+  let activeLastWeek = 0;
+  let activeLastMonth = 0;
+  let neverReturned = 0;
+  const now = Date.now();
+
+  for (const au of authUsers) {
+    const createdMs = new Date(au.metadata.creationTime).getTime();
+    const lastMs = au.metadata.lastSignInTime ? new Date(au.metadata.lastSignInTime).getTime() : createdMs;
+
+    authMap.set(au.uid, {
+      email: au.email || au.displayName || 'anonymous',
+      createdAt: au.metadata.creationTime,
+      lastLogin: au.metadata.lastSignInTime || au.metadata.creationTime,
+    });
+
+    // Signup month
+    const signupMonth = new Date(au.metadata.creationTime).toISOString().substring(0, 7);
+    signupsByMonthMap[signupMonth] = (signupsByMonthMap[signupMonth] || 0) + 1;
+
+    // Activity
+    if (now - lastMs < 7 * 24 * 60 * 60 * 1000) activeLastWeek++;
+    if (now - lastMs < 30 * 24 * 60 * 60 * 1000) activeLastMonth++;
+    if (!au.metadata.lastSignInTime || au.metadata.lastSignInTime === au.metadata.creationTime) neverReturned++;
+  }
+
+  // Query each user's subcollections in parallel batches
+  const batchSize = 10;
+  for (let i = 0; i < authUsers.length; i += batchSize) {
+    const batch = authUsers.slice(i, i + batchSize);
+    await Promise.all(batch.map(async (au) => {
+      const userId = au.uid;
+      const authInfo = authMap.get(userId)!;
+
+      try {
+        const [quotesSnap, invoicesSnap, settingsSnap, onbSnap, subSnap, favsSnap] = await Promise.all([
+          db.collection(`users/${userId}/quotes`).get(),
+          db.collection(`users/${userId}/invoices`).get(),
+          db.doc(`users/${userId}/settings/business`).get(),
+          db.doc(`users/${userId}/profile/onboarding`).get(),
+          db.doc(`users/${userId}/profile/subscription`).get(),
+          db.collection(`users/${userId}/materialFavorites`).get(),
+        ]);
+
+        const userQuotes = quotesSnap.size;
+        const userInvoices = invoicesSnap.size;
+        totalQuotes += userQuotes;
+        totalInvoices += userInvoices;
+        favoritesCount += favsSnap.size;
+
+        // Process quotes
+        for (const qDoc of quotesSnap.docs) {
+          const q = qDoc.data();
+          quoteStatuses[q.status || 'unknown'] = (quoteStatuses[q.status || 'unknown'] || 0) + 1;
+          if (q.total) allQuoteTotals.push(q.total);
+          if (q.materials) totalMaterials += q.materials.length;
+          if (q.aiSkipped) quotesSkippedAI++; else quotesWithAI++;
+          if (q.markup) markupValues.push(q.markup);
+          if (q.laborRate) laborRates.push(q.laborRate);
+          if (q.job?.name) {
+            jobTypesMap[q.job.name] = (jobTypesMap[q.job.name] || 0) + 1;
+          }
+          if (q.createdAt) {
+            let date: Date;
+            try { date = q.createdAt.toDate(); } catch { date = new Date(q.createdAt); }
+            if (date && !isNaN(date.getTime())) {
+              const m = date.toISOString().substring(0, 7);
+              quotesByMonthMap[m] = (quotesByMonthMap[m] || 0) + 1;
+              recentQuotes.push({
+                date: date.toISOString(),
+                email: authInfo.email.substring(0, 25),
+                total: q.total || 0,
+                status: q.status || 'unknown',
+                job: q.job?.name || '',
+                customer: q.customerName || '',
+                materialsCount: q.materials?.length || 0,
+              });
+            }
+          }
+        }
+
+        // Process invoices
+        for (const iDoc of invoicesSnap.docs) {
+          const inv = iDoc.data();
+          invoiceStatuses[inv.status || 'unknown'] = (invoiceStatuses[inv.status || 'unknown'] || 0) + 1;
+        }
+
+        // Settings
+        let bizName = '(not set)';
+        let trade = '(not set)';
+        if (settingsSnap.exists) {
+          const s = settingsSnap.data()!;
+          bizName = s.businessName || '(not set)';
+          trade = s.tradeType || '(not set)';
+          if (s.tradeType) tradeTypes[s.tradeType] = (tradeTypes[s.tradeType] || 0) + 1;
+        }
+
+        // Onboarding
+        if (onbSnap.exists && onbSnap.data()?.isOnboarded) onboardedCount++;
+
+        // Subscription
+        let isPro = false;
+        let quotesThisMonth = 0;
+        let platform = '';
+        if (subSnap.exists) {
+          const sub = subSnap.data()!;
+          isPro = sub.isPro || false;
+          quotesThisMonth = sub.quotesThisMonth || 0;
+          platform = sub.platform || '';
+          if (isPro) proCount++;
+        }
+
+        usersList.push({
+          email: authInfo.email,
+          businessName: bizName,
+          tradeType: trade,
+          quotes: userQuotes,
+          invoices: userInvoices,
+          isPro,
+          quotesThisMonth,
+          platform,
+          favorites: favsSnap.size,
+          signupDate: new Date(authInfo.createdAt).toISOString().split('T')[0],
+          lastLogin: new Date(authInfo.lastLogin).toISOString().split('T')[0],
+        });
+      } catch (e) {
+        // Skip users with issues
+      }
+    }));
+  }
+
+  // Top-level collections
+  const [cancellationsSnap, tokensSnap] = await Promise.all([
+    db.collection('cancellations').get(),
+    db.collection('quoteAcceptanceTokens').get(),
+  ]);
+
+  let emailsSent = 0;
+  const emailCategories: Record<string, number> = {};
+  try {
+    const emailSnap = await db.collection('emailLog').get();
+    emailsSent = emailSnap.size;
+    emailSnap.forEach(d => {
+      const cat = d.data().category || 'unknown';
+      emailCategories[cat] = (emailCategories[cat] || 0) + 1;
+    });
+  } catch { /* no email log */ }
+
+  const cancellations: AnalyticsData['cancellations'] = [];
+  cancellationsSnap.forEach(d => {
+    const c = d.data();
+    let dateStr = '';
+    try { dateStr = c.canceledAt?.toDate?.().toISOString().split('T')[0] || ''; } catch { /* */ }
+    cancellations.push({ reason: c.reason || '(none)', date: dateStr });
+  });
+
+  // Compute quote stats
+  allQuoteTotals.sort((a, b) => a - b);
+  const totalValue = allQuoteTotals.reduce((a, b) => a + b, 0);
+  laborRates.sort((a, b) => a - b);
+
+  // Sort users and quotes
+  usersList.sort((a, b) => b.quotes - a.quotes);
+  recentQuotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  return {
+    generatedAt: new Date().toISOString(),
+    funnel: {
+      totalSignups: authUsers.length,
+      onboarded: onboardedCount,
+      createdQuote: usersList.filter(u => u.quotes > 0).length,
+      created5PlusQuotes: usersList.filter(u => u.quotes >= 5).length,
+      createdInvoice: usersList.filter(u => u.invoices > 0).length,
+      proSubscribers: proCount,
+    },
+    quotes: {
+      total: totalQuotes,
+      statuses: quoteStatuses,
+      aiGenerated: quotesWithAI,
+      aiSkipped: quotesSkippedAI,
+      totalMaterials,
+      avgMaterialsPerQuote: totalQuotes > 0 ? Math.round((totalMaterials / totalQuotes) * 10) / 10 : 0,
+      totalValue,
+      avgValue: allQuoteTotals.length > 0 ? Math.round(totalValue / allQuoteTotals.length * 100) / 100 : 0,
+      medianValue: allQuoteTotals.length > 0 ? allQuoteTotals[Math.floor(allQuoteTotals.length / 2)] : 0,
+      minValue: allQuoteTotals.length > 0 ? allQuoteTotals[0] : 0,
+      maxValue: allQuoteTotals.length > 0 ? allQuoteTotals[allQuoteTotals.length - 1] : 0,
+      avgMarkup: markupValues.length > 0 ? Math.round(markupValues.reduce((a, b) => a + b, 0) / markupValues.length * 10) / 10 : 0,
+      laborRateMedian: laborRates.length > 0 ? laborRates[Math.floor(laborRates.length / 2)] : 0,
+      favoritesSaved: favoritesCount,
+    },
+    invoices: {
+      total: totalInvoices,
+      statuses: invoiceStatuses,
+      quoteToInvoiceRate: totalQuotes > 0 ? Math.round(totalInvoices / totalQuotes * 1000) / 10 : 0,
+    },
+    tradeTypes,
+    jobTypes: Object.entries(jobTypesMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([name, count]) => ({ name, count })),
+    quotesByMonth: Object.entries(quotesByMonthMap).sort().map(([month, count]) => ({ month, count })),
+    signupsByMonth: Object.entries(signupsByMonthMap).sort().map(([month, count]) => ({ month, count })),
+    users: usersList,
+    recentQuotes: recentQuotes.slice(0, 30),
+    cancellations,
+    acceptanceLinksGenerated: tokensSnap.size,
+    emailsSent,
+    emailCategories,
+    retention: {
+      activeLastWeek,
+      activeLastMonth,
+      neverReturned,
+    },
+  };
+}
+
+function generateDashboardPage(data: AnalyticsData, key: string): string {
+  const d = data;
+  const funnelMax = d.funnel.totalSignups || 1;
+  const funnelSteps = [
+    { label: 'Signups', value: d.funnel.totalSignups },
+    { label: 'Onboarded', value: d.funnel.onboarded },
+    { label: '1+ Quotes', value: d.funnel.createdQuote },
+    { label: '5+ Quotes', value: d.funnel.created5PlusQuotes },
+    { label: 'Invoiced', value: d.funnel.createdInvoice },
+    { label: 'Pro', value: d.funnel.proSubscribers },
+  ];
+
+  const funnelHtml = funnelSteps.map(s => {
+    const pct = Math.max((s.value / funnelMax) * 100, 2);
+    const convPct = ((s.value / funnelMax) * 100).toFixed(0);
+    return `<div class="funnel-row">
+      <span class="funnel-label">${s.label}</span>
+      <div class="funnel-bar-wrap"><div class="funnel-bar" style="width:${pct}%">${s.value}</div></div>
+      <span class="funnel-pct">${convPct}%</span>
+    </div>`;
+  }).join('');
+
+  // Quote status badges
+  const statusColors: Record<string, string> = { draft: '#64748b', sent: '#3b82f6', accepted: '#22c55e', rejected: '#ef4444', unknown: '#94a3b8' };
+  const statusHtml = Object.entries(d.quotes.statuses).map(([s, c]) =>
+    `<span class="badge" style="background:${statusColors[s] || '#64748b'}">${escapeHtml(s)}: ${c}</span>`
+  ).join(' ');
+
+  // Monthly trend bars
+  const allMonths = [...new Set([...d.signupsByMonth.map(m => m.month), ...d.quotesByMonth.map(m => m.month)])].sort();
+  const signupMap = Object.fromEntries(d.signupsByMonth.map(m => [m.month, m.count]));
+  const quoteMap = Object.fromEntries(d.quotesByMonth.map(m => [m.month, m.count]));
+  const maxMonthly = Math.max(...allMonths.map(m => Math.max(signupMap[m] || 0, quoteMap[m] || 0)), 1);
+
+  const trendsHtml = allMonths.map(m => {
+    const su = signupMap[m] || 0;
+    const qu = quoteMap[m] || 0;
+    return `<div class="trend-col">
+      <div class="trend-bars">
+        <div class="trend-bar signup" style="height:${Math.max((su / maxMonthly) * 100, 3)}%" title="Signups: ${su}">${su || ''}</div>
+        <div class="trend-bar quotes" style="height:${Math.max((qu / maxMonthly) * 100, 3)}%" title="Quotes: ${qu}">${qu || ''}</div>
+      </div>
+      <span class="trend-label">${m.substring(2)}</span>
+    </div>`;
+  }).join('');
+
+  // Users table
+  const usersRowsHtml = d.users.map(u => {
+    const proTag = u.isPro ? '<span class="badge pro">PRO</span>' : '<span class="badge free">Free</span>';
+    return `<tr>
+      <td>${escapeHtml(u.email)}</td>
+      <td>${escapeHtml(u.businessName)}</td>
+      <td>${escapeHtml(u.tradeType)}</td>
+      <td class="num">${u.quotes}</td>
+      <td class="num">${u.invoices}</td>
+      <td>${proTag}</td>
+      <td>${u.signupDate}</td>
+      <td>${u.lastLogin}</td>
+    </tr>`;
+  }).join('');
+
+  // Recent quotes table
+  const recentRowsHtml = d.recentQuotes.slice(0, 20).map(q => {
+    const statusColor = statusColors[q.status] || '#64748b';
+    return `<tr>
+      <td>${q.date.split('T')[0]}</td>
+      <td>${escapeHtml(q.email)}</td>
+      <td class="num">$${q.total.toFixed(2)}</td>
+      <td><span class="badge" style="background:${statusColor}">${escapeHtml(q.status)}</span></td>
+      <td>${escapeHtml(q.job.substring(0, 30))}</td>
+      <td>${escapeHtml(q.customer)} (${q.materialsCount} items)</td>
+    </tr>`;
+  }).join('');
+
+  // Job types list
+  const jobTypesHtml = d.jobTypes.slice(0, 10).map(j =>
+    `<div class="job-row"><span class="job-name">${escapeHtml(j.name)}</span><span class="job-count">${j.count}x</span></div>`
+  ).join('');
+
+  // Cancellation reasons
+  const cancelHtml = d.cancellations.length > 0
+    ? d.cancellations.map(c => `<div class="cancel-row">${escapeHtml(c.reason)}${c.date ? ' <span class="muted">(' + c.date + ')</span>' : ''}</div>`).join('')
+    : '<div class="muted">No cancellations</div>';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuoteMate Admin Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 20px;
+      line-height: 1.5;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .header h1 { font-size: 24px; color: #f97316; }
+    .header .meta { color: #64748b; font-size: 13px; }
+    .refresh-btn {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .refresh-btn:hover { border-color: #f97316; }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .kpi {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    .kpi .value { font-size: 28px; font-weight: 700; color: #f97316; }
+    .kpi .label { font-size: 12px; color: #94a3b8; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 { font-size: 16px; color: #f97316; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } }
+
+    /* Funnel */
+    .funnel-row { display: flex; align-items: center; margin-bottom: 8px; gap: 8px; }
+    .funnel-label { width: 90px; font-size: 13px; color: #94a3b8; text-align: right; }
+    .funnel-bar-wrap { flex: 1; background: #0f172a; border-radius: 6px; height: 28px; overflow: hidden; }
+    .funnel-bar { background: linear-gradient(90deg, #f97316, #fb923c); height: 100%; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; min-width: 28px; color: #fff; }
+    .funnel-pct { width: 40px; font-size: 13px; color: #64748b; }
+
+    /* Badges */
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; color: #fff; }
+    .badge.pro { background: #f97316; }
+    .badge.free { background: #334155; color: #94a3b8; }
+
+    /* Trends */
+    .trends-container { display: flex; gap: 4px; align-items: flex-end; height: 140px; padding-top: 10px; }
+    .trend-col { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 0; }
+    .trend-bars { display: flex; gap: 2px; align-items: flex-end; height: 110px; width: 100%; }
+    .trend-bar { flex: 1; border-radius: 4px 4px 0 0; display: flex; align-items: flex-end; justify-content: center; font-size: 10px; color: #fff; min-height: 3px; padding-bottom: 2px; }
+    .trend-bar.signup { background: #3b82f6; }
+    .trend-bar.quotes { background: #f97316; }
+    .trend-label { font-size: 10px; color: #64748b; margin-top: 4px; white-space: nowrap; }
+    .legend { display: flex; gap: 16px; margin-bottom: 8px; font-size: 12px; color: #94a3b8; }
+    .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; color: #64748b; font-weight: 500; padding: 8px 12px; border-bottom: 1px solid #334155; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+    td { padding: 8px 12px; border-bottom: 1px solid #1e293b; color: #cbd5e1; white-space: nowrap; }
+    tr:hover td { background: #0f172a; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* Job types */
+    .job-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #0f172a; font-size: 13px; }
+    .job-name { color: #cbd5e1; }
+    .job-count { color: #f97316; font-weight: 600; }
+    .cancel-row { padding: 6px 0; border-bottom: 1px solid #0f172a; font-size: 13px; color: #cbd5e1; }
+
+    .muted { color: #64748b; }
+    .stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #0f172a; font-size: 13px; }
+    .stat-label { color: #94a3b8; }
+    .stat-value { color: #f8fafc; font-weight: 500; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>QuoteMate Dashboard</h1>
+      <div class="meta">Generated: ${new Date(d.generatedAt).toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' })} AEST</div>
+    </div>
+    <button class="refresh-btn" onclick="location.reload()">Refresh</button>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpi-grid">
+    <div class="kpi"><div class="value">${d.funnel.totalSignups}</div><div class="label">Total Users</div></div>
+    <div class="kpi"><div class="value">${d.retention.activeLastWeek}</div><div class="label">Active (7d)</div></div>
+    <div class="kpi"><div class="value">${d.retention.activeLastMonth}</div><div class="label">Active (30d)</div></div>
+    <div class="kpi"><div class="value">${d.quotes.total}</div><div class="label">Total Quotes</div></div>
+    <div class="kpi"><div class="value">$${Math.round(d.quotes.totalValue).toLocaleString()}</div><div class="label">Total Quoted</div></div>
+    <div class="kpi"><div class="value">${d.funnel.proSubscribers}</div><div class="label">Pro Subs</div></div>
+    <div class="kpi"><div class="value">${d.invoices.total}</div><div class="label">Invoices</div></div>
+    <div class="kpi"><div class="value">${d.retention.neverReturned}</div><div class="label">Never Returned</div></div>
+  </div>
+
+  <!-- Funnel + Quote Stats -->
+  <div class="two-col">
+    <div class="card">
+      <h2>Conversion Funnel</h2>
+      ${funnelHtml}
+    </div>
+    <div class="card">
+      <h2>Quote Statistics</h2>
+      <div class="stat-row"><span class="stat-label">Statuses</span><span class="stat-value">${statusHtml}</span></div>
+      <div class="stat-row"><span class="stat-label">AI Generated</span><span class="stat-value">${d.quotes.aiGenerated} / ${d.quotes.total} (${d.quotes.total > 0 ? Math.round(d.quotes.aiGenerated / d.quotes.total * 100) : 0}%)</span></div>
+      <div class="stat-row"><span class="stat-label">Avg Value</span><span class="stat-value">$${d.quotes.avgValue.toFixed(2)}</span></div>
+      <div class="stat-row"><span class="stat-label">Median Value</span><span class="stat-value">$${d.quotes.medianValue.toFixed(2)}</span></div>
+      <div class="stat-row"><span class="stat-label">Range</span><span class="stat-value">$${d.quotes.minValue.toFixed(0)} - $${d.quotes.maxValue.toFixed(0)}</span></div>
+      <div class="stat-row"><span class="stat-label">Avg Markup</span><span class="stat-value">${d.quotes.avgMarkup}%</span></div>
+      <div class="stat-row"><span class="stat-label">Median Labor Rate</span><span class="stat-value">$${d.quotes.laborRateMedian}/hr</span></div>
+      <div class="stat-row"><span class="stat-label">Avg Materials/Quote</span><span class="stat-value">${d.quotes.avgMaterialsPerQuote}</span></div>
+      <div class="stat-row"><span class="stat-label">Quote-to-Invoice</span><span class="stat-value">${d.invoices.quoteToInvoiceRate}%</span></div>
+    </div>
+  </div>
+
+  <!-- Trends -->
+  <div class="card">
+    <h2>Monthly Trends</h2>
+    <div class="legend">
+      <span><span class="legend-dot" style="background:#3b82f6"></span> Signups</span>
+      <span><span class="legend-dot" style="background:#f97316"></span> Quotes</span>
+    </div>
+    <div class="trends-container">${trendsHtml}</div>
+  </div>
+
+  <!-- Users Table -->
+  <div class="card">
+    <h2>Users (${d.users.length})</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Email</th><th>Business</th><th>Trade</th><th>Quotes</th><th>Invoices</th><th>Plan</th><th>Signed Up</th><th>Last Login</th>
+        </tr></thead>
+        <tbody>${usersRowsHtml}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Recent Quotes -->
+  <div class="card">
+    <h2>Recent Quotes</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Date</th><th>User</th><th>Total</th><th>Status</th><th>Job</th><th>Customer</th>
+        </tr></thead>
+        <tbody>${recentRowsHtml}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <div class="card">
+      <h2>Top Job Types</h2>
+      ${jobTypesHtml}
+    </div>
+    <div class="card">
+      <h2>Cancellations (${d.cancellations.length})</h2>
+      ${cancelHtml}
+      <div style="margin-top: 16px">
+        <h2>Other Metrics</h2>
+        <div class="stat-row"><span class="stat-label">Acceptance Links</span><span class="stat-value">${d.acceptanceLinksGenerated}</span></div>
+        <div class="stat-row"><span class="stat-label">Emails Sent</span><span class="stat-value">${d.emailsSent}</span></div>
+        <div class="stat-row"><span class="stat-label">Material Favorites</span><span class="stat-value">${d.quotes.favoritesSaved}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Auto-refresh every 5 minutes
+    setInterval(function() { location.reload(); }, 5 * 60 * 1000);
+  </script>
+</body>
+</html>`;
+}
+
+export const adminDashboard = functions
+  .runWith({ timeoutSeconds: 60, memory: '512MB' })
+  .https.onRequest(async (req, res) => {
+    if (!verifyAdminKey(req, res)) return;
+
+    try {
+      const data = await getAdminAnalyticsData();
+
+      // JSON format for API consumers
+      if (req.query.format === 'json' || req.headers.accept?.includes('application/json')) {
+        res.status(200).json(data);
+        return;
+      }
+
+      // HTML dashboard
+      res.status(200).send(generateDashboardPage(data, req.query.key as string));
+    } catch (error: any) {
+      console.error('Admin dashboard error:', error);
+      res.status(500).send(generateErrorPage('Dashboard Error', error.message));
+    }
+  });
