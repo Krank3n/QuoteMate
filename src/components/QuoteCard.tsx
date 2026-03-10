@@ -322,6 +322,8 @@ function getStatusChipStyle(status: string) {
   switch (status) {
     case 'accepted':
       return { backgroundColor: colors.successBg };
+    case 'completed':
+      return { backgroundColor: colors.primaryBg };
     case 'sent':
       return { backgroundColor: colors.warningBg };
     case 'rejected':

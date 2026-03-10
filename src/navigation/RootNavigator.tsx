@@ -3,9 +3,10 @@
  * Main navigation structure with bottom tabs
  */
 
-import React from 'react';
-import { Platform } from 'react-native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Animated, StyleSheet, View, TouchableOpacity, LayoutChangeEvent, Platform } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,15 +19,16 @@ import { PaywallScreen } from '../screens/PaywallScreen';
 import { ViewQuoteScreen } from '../screens/ViewQuoteScreen';
 import { ViewInvoiceScreen } from '../screens/ViewInvoiceScreen';
 import { RecordPaymentScreen } from '../screens/RecordPaymentScreen';
+import { InsightsScreen } from '../screens/InsightsScreen';
 
 // Settings sub-screens
 import { BusinessProfileScreen } from '../screens/settings/BusinessProfileScreen';
-import { QuoteSettingsScreen } from '../screens/settings/QuoteSettingsScreen';
 import { PaymentMethodsScreen } from '../screens/settings/PaymentMethodsScreen';
 import { TradePricingScreen } from '../screens/settings/TradePricingScreen';
 import { SubscriptionSettingsScreen } from '../screens/settings/SubscriptionSettingsScreen';
 import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen';
 import { AboutScreen } from '../screens/settings/AboutScreen';
+import { FeedbackScreen } from '../screens/settings/FeedbackScreen';
 import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
@@ -174,6 +176,180 @@ function NewInvoiceNavigator() {
   );
 }
 
+const TAB_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
+  Dashboard: 'home',
+  Quotes: 'file-document-multiple',
+  Invoices: 'receipt',
+  Settings: 'cog',
+};
+
+const PILL_WIDTH = 56;
+const PILL_HEIGHT = 32;
+
+/** Custom tab bar with liquid-morphing pill indicator */
+function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+  const insets = useSafeAreaInsets();
+  const tabCount = state.routes.length;
+
+  // Track tab center X positions
+  const [tabCenters, setTabCenters] = useState<number[]>([]);
+  const tabWidths = useRef<{ x: number; width: number }[]>(new Array(tabCount).fill({ x: 0, width: 0 }));
+  const layoutCount = useRef(0);
+
+  // Animated values for the pill
+  const pillX = useRef(new Animated.Value(0)).current;
+  const pillScaleX = useRef(new Animated.Value(1)).current;
+  const pillScaleY = useRef(new Animated.Value(1)).current;
+
+  // Animated values for icon bounce per tab
+  const iconScales = useRef(state.routes.map(() => new Animated.Value(1))).current;
+
+  const onTabLayout = useCallback((index: number) => (e: LayoutChangeEvent) => {
+    const { x, width } = e.nativeEvent.layout;
+    tabWidths.current[index] = { x, width };
+    layoutCount.current++;
+    if (layoutCount.current >= tabCount) {
+      const centers = tabWidths.current.map(t => t.x + t.width / 2);
+      setTabCenters(centers);
+      // Set initial position without animation
+      pillX.setValue(centers[state.index] - PILL_WIDTH / 2);
+    }
+  }, [tabCount, state.index]);
+
+  // Animate pill to active tab
+  useEffect(() => {
+    if (tabCenters.length === 0) return;
+    const targetX = tabCenters[state.index] - PILL_WIDTH / 2;
+
+    // Liquid morph: stretch wide, slide, then squish back
+    Animated.parallel([
+      // Horizontal stretch out
+      Animated.sequence([
+        Animated.timing(pillScaleX, {
+          toValue: 1.4,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.spring(pillScaleX, {
+          toValue: 1,
+          friction: 6,
+          tension: 120,
+          useNativeDriver: true,
+        }),
+      ]),
+      // Vertical squish during stretch
+      Animated.sequence([
+        Animated.timing(pillScaleY, {
+          toValue: 0.75,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.spring(pillScaleY, {
+          toValue: 1,
+          friction: 6,
+          tension: 120,
+          useNativeDriver: true,
+        }),
+      ]),
+      // Slide to target
+      Animated.spring(pillX, {
+        toValue: targetX,
+        friction: 7,
+        tension: 80,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Bounce the active icon
+    iconScales.forEach((scale, i) => {
+      if (i === state.index) {
+        Animated.sequence([
+          Animated.timing(scale, { toValue: 1.25, duration: 120, useNativeDriver: true }),
+          Animated.spring(scale, { toValue: 1, friction: 4, tension: 100, useNativeDriver: true }),
+        ]).start();
+      } else {
+        Animated.timing(scale, { toValue: 1, duration: 100, useNativeDriver: true }).start();
+      }
+    });
+  }, [state.index, tabCenters]);
+
+  return (
+    <View style={[styles.tabBarOuter, { paddingBottom: insets.bottom + 8 }]}>
+      <LinearGradient
+        colors={[colors.surface, '#1a2d42']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={[StyleSheet.absoluteFill, { borderTopWidth: 1, borderTopColor: colors.border }]}
+      />
+
+      {/* Liquid pill indicator */}
+      {tabCenters.length > 0 && (
+        <Animated.View
+          style={[
+            styles.liquidPill,
+            {
+              transform: [
+                { translateX: pillX },
+                { scaleX: pillScaleX },
+                { scaleY: pillScaleY },
+              ],
+            },
+          ]}
+        />
+      )}
+
+      {/* Tab buttons */}
+      <View style={styles.tabRow}>
+        {state.routes.map((route, index) => {
+          const { options } = descriptors[route.key];
+          const isFocused = state.index === index;
+          const label = options.title ?? route.name;
+          const iconName = TAB_ICONS[route.name] || 'help-circle';
+          const tintColor = isFocused ? colors.primary : colors.inactive;
+
+          const onPress = () => {
+            const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+            if (!isFocused && !event.defaultPrevented) {
+              navigation.navigate(route.name);
+            }
+          };
+
+          const onLongPress = () => {
+            navigation.emit({ type: 'tabLongPress', target: route.key });
+          };
+
+          return (
+            <TouchableOpacity
+              key={route.key}
+              accessibilityRole="button"
+              accessibilityState={isFocused ? { selected: true } : {}}
+              accessibilityLabel={options.tabBarAccessibilityLabel}
+              onPress={onPress}
+              onLongPress={onLongPress}
+              onLayout={onTabLayout(index)}
+              style={styles.tabButton}
+              activeOpacity={0.7}
+            >
+              <Animated.View style={{ transform: [{ scale: iconScales[index] }] }}>
+                <MaterialCommunityIcons name={iconName} size={26} color={tintColor} />
+              </Animated.View>
+              <Animated.Text
+                style={[
+                  styles.tabLabel,
+                  { color: tintColor, fontWeight: isFocused ? '600' : '400' },
+                ]}
+                numberOfLines={1}
+              >
+                {label}
+              </Animated.Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 /**
  * Main Tabs Navigator
  */
@@ -182,39 +358,21 @@ function MainTabs() {
 
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => {
-          let iconName: keyof typeof MaterialCommunityIcons.glyphMap = 'home';
-
-          if (route.name === 'Dashboard') {
-            iconName = 'home';
-          } else if (route.name === 'Quotes') {
-            iconName = 'file-document-multiple';
-          } else if (route.name === 'Invoices') {
-            iconName = 'receipt';
-          } else if (route.name === 'Settings') {
-            iconName = 'cog';
-          }
-
-          return <MaterialCommunityIcons name={iconName} size={size} color={color} />;
-        },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.inactive,
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.border,
-          paddingTop: 10,
-          paddingBottom: insets.bottom + 10,
-          height: Platform.OS === 'android' ? 70 + insets.bottom : 'auto',
-        },
-        headerStyle: {
-          backgroundColor: colors.primary,
-        },
+      tabBar={(props) => <LiquidTabBar {...props} />}
+      screenOptions={{
+        headerBackground: () => (
+          <LinearGradient
+            colors={['#00785a', colors.primary, '#00b07a']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={StyleSheet.absoluteFill}
+          />
+        ),
         headerTintColor: colors.white,
         headerTitleStyle: {
           fontWeight: 'bold',
         },
-      })}
+      }}
     >
       <Tab.Screen
         name="Dashboard"
@@ -289,6 +447,17 @@ export function RootNavigator() {
         }}
       />
       <RootStack.Screen
+        name="Insights"
+        component={InsightsScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Insights',
+        }}
+      />
+      <RootStack.Screen
         name="NewQuote"
         component={NewQuoteNavigator}
         options={{
@@ -328,21 +497,10 @@ export function RootNavigator() {
           headerShown: true,
           headerStyle: { backgroundColor: colors.primary },
           headerTintColor: colors.white,
-          title: 'Business Profile',
+          title: 'Business Details',
         }}
       />
-      <RootStack.Screen
-        name="QuoteSettings"
-        component={QuoteSettingsScreen}
-        options={{
-          presentation: 'card',
-          headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
-          title: 'Quote Settings',
-        }}
-      />
-      <RootStack.Screen
+<RootStack.Screen
         name="PaymentMethods"
         component={PaymentMethodsScreen}
         options={{
@@ -398,6 +556,17 @@ export function RootNavigator() {
         }}
       />
       <RootStack.Screen
+        name="Feedback"
+        component={FeedbackScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Feedback',
+        }}
+      />
+      <RootStack.Screen
         name="About"
         component={AboutScreen}
         options={{
@@ -411,3 +580,38 @@ export function RootNavigator() {
     </RootStack.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  tabBarOuter: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingTop: 8,
+    overflow: 'hidden',
+  },
+  tabRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  tabLabel: {
+    fontSize: 11,
+    marginTop: 3,
+  },
+  liquidPill: {
+    position: 'absolute',
+    top: 10,
+    left: 0,
+    width: PILL_WIDTH,
+    height: PILL_HEIGHT,
+    borderRadius: PILL_HEIGHT / 2,
+    backgroundColor: 'rgba(0, 152, 104, 0.18)',
+  },
+});

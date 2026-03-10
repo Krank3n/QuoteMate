@@ -47,6 +47,8 @@ export function BusinessProfileScreen() {
   const [logoUri, setLogoUri] = useState<string | undefined>(undefined);
   const [brandColor, setBrandColor] = useState<string | undefined>(undefined);
   const [hexInput, setHexInput] = useState('');
+  const [laborRate, setLaborRate] = useState('85');
+  const [markup, setMarkup] = useState('20');
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -60,6 +62,8 @@ export function BusinessProfileScreen() {
       setAddress(businessSettings.address || '');
       setLogoUri(businessSettings.logoUri);
       setBrandColor(businessSettings.brandColor);
+      setLaborRate(businessSettings.defaultLaborRate?.toString() || '85');
+      setMarkup(businessSettings.defaultMarkup?.toString() || '20');
     }
   }, [businessSettings]);
 
@@ -127,6 +131,8 @@ export function BusinessProfileScreen() {
         address: address.trim() || undefined,
         logoUri: logoUri,
         brandColor: brandColor,
+        defaultLaborRate: parseFloat(laborRate) || 85,
+        defaultMarkup: parseFloat(markup) || 20,
       });
       setShowSuccessModal(true);
     } catch (error) {
@@ -237,6 +243,34 @@ export function BusinessProfileScreen() {
           </Surface>
 
           <Surface style={styles.card}>
+            <Title style={styles.sectionTitle}>Default Rates</Title>
+            <Text style={styles.helperText}>
+              These will be used as defaults for new quotes
+            </Text>
+
+            <TextInput
+              label="Hourly Labor Rate"
+              value={laborRate}
+              onChangeText={setLaborRate}
+              mode="outlined"
+              style={styles.input}
+              keyboardType="decimal-pad"
+              left={<TextInput.Affix text="$" />}
+              right={<TextInput.Affix text="/hr" />}
+            />
+
+            <TextInput
+              label="Markup Percentage"
+              value={markup}
+              onChangeText={setMarkup}
+              mode="outlined"
+              style={[styles.input, { marginBottom: 0 }]}
+              keyboardType="decimal-pad"
+              right={<TextInput.Affix text="%" />}
+            />
+          </Surface>
+
+          <Surface style={styles.card}>
             <Title style={styles.sectionTitle}>Brand Colour</Title>
             <Text style={styles.helperText}>
               Override the default accent colour on your PDF templates
@@ -332,7 +366,7 @@ export function BusinessProfileScreen() {
         onDismiss={() => setShowSuccessModal(false)}
         type="success"
         title="Saved!"
-        message="Your business profile has been updated."
+        message="Your business details have been updated."
       />
 
       <AlertModal

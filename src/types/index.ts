@@ -74,7 +74,7 @@ export interface Quote {
   subtotal: number;
   gst: number;
   total: number;
-  status: 'draft' | 'sent' | 'accepted' | 'rejected';
+  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'completed';
   notes?: string;
   aiSkipped?: boolean; // Flag to indicate AI analysis was intentionally skipped
   // Quote acceptance via email link fields

@@ -32,72 +32,92 @@ interface SettingsMenuItem {
   badgeColor?: string;
 }
 
+interface SettingsSection {
+  title: string;
+  items: SettingsMenuItem[];
+}
+
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
   const { subscriptionStatus } = useStore();
 
-  const allMenuItems: SettingsMenuItem[] = [
+  const sections: SettingsSection[] = [
     {
-      id: 'business',
-      title: 'Business Profile',
-      subtitle: 'Name, logo, contact details',
-      icon: 'domain',
-      screen: 'BusinessProfile',
+      title: 'Business',
+      items: [
+        {
+          id: 'business',
+          title: 'Business Details',
+          subtitle: 'Name, logo, contact details',
+          icon: 'domain',
+          screen: 'BusinessProfile',
+        },
+{
+          id: 'payment',
+          title: 'Payment Methods',
+          subtitle: 'Bank, PayID, BPAY, PayPal',
+          icon: 'credit-card',
+          screen: 'PaymentMethods',
+        },
+        {
+          id: 'trade',
+          title: 'Trade & Pricing',
+          subtitle: 'Categories, niches, hardware store',
+          icon: 'store',
+          screen: 'TradePricing',
+        },
+      ],
     },
     {
-      id: 'quotes',
-      title: 'Quote Settings',
-      subtitle: 'Default rates and display options',
-      icon: 'file-document-edit',
-      screen: 'QuoteSettings',
+      title: 'Documents',
+      items: [
+        {
+          id: 'pdfTemplate',
+          title: 'PDF Templates',
+          subtitle: 'Choose your document style',
+          icon: 'file-document-outline',
+          screen: 'PDFTemplate',
+        },
+      ],
     },
     {
-      id: 'pdfTemplate',
-      title: 'PDF Templates',
-      subtitle: 'Choose your document style',
-      icon: 'file-document-outline',
-      screen: 'PDFTemplate',
-    },
-    {
-      id: 'payment',
-      title: 'Payment Methods',
-      subtitle: 'Bank, PayID, BPAY, PayPal',
-      icon: 'credit-card',
-      screen: 'PaymentMethods',
-    },
-    {
-      id: 'trade',
-      title: 'Trade & Pricing',
-      subtitle: 'Categories, niches, hardware store',
-      icon: 'store',
-      screen: 'TradePricing',
-    },
-    {
-      id: 'subscription',
-      title: 'Subscription',
-      subtitle: subscriptionStatus?.isPro ? 'Pro Member' : 'Free Plan',
-      icon: 'crown',
-      screen: 'SubscriptionSettings',
-      badge: subscriptionStatus?.isPro ? 'PRO' : undefined,
-      badgeColor: colors.secondary,
-    },
-    {
-      id: 'account',
-      title: 'Account',
-      subtitle: 'Email preferences, sign out, delete',
-      icon: 'account',
-      screen: 'AccountSettings',
-    },
-    {
-      id: 'about',
-      title: 'About',
-      subtitle: 'Version info, support',
-      icon: 'information',
-      screen: 'About',
+      title: 'App',
+      items: [
+        {
+          id: 'subscription',
+          title: 'Subscription',
+          subtitle: subscriptionStatus?.isPro ? 'Pro Member' : 'Free Plan',
+          icon: 'crown',
+          screen: 'SubscriptionSettings',
+          badge: subscriptionStatus?.isPro ? 'PRO' : undefined,
+          badgeColor: colors.secondary,
+        },
+        {
+          id: 'account',
+          title: 'Account',
+          subtitle: 'Email preferences, sign out, delete',
+          icon: 'account',
+          screen: 'AccountSettings',
+        },
+        {
+          id: 'feedback',
+          title: 'Feedback',
+          subtitle: 'Tell us what to fix or change',
+          icon: 'bullhorn',
+          screen: 'Feedback',
+          badge: 'NEW',
+          badgeColor: colors.error,
+        },
+        {
+          id: 'about',
+          title: 'About',
+          subtitle: 'Version info, support',
+          icon: 'information',
+          screen: 'About',
+        },
+      ],
     },
   ];
-
-  const menuItems = allMenuItems;
 
   const handleMenuPress = (screen: string) => {
     navigation.navigate(screen);
@@ -107,44 +127,49 @@ export function SettingsScreen() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <WebContainer>
-          <Surface style={styles.card}>
-            {menuItems.map((item, index) => (
-              <TouchableOpacity
-                key={item.id}
-                style={[
-                  styles.menuItem,
-                  index < menuItems.length - 1 && styles.menuItemBorder,
-                ]}
-                onPress={() => handleMenuPress(item.screen)}
-              >
-                <View style={styles.menuItemLeft}>
-                  <View style={styles.iconContainer}>
-                    <MaterialCommunityIcons
-                      name={item.icon as any}
-                      size={24}
-                      color={colors.primary}
-                    />
-                  </View>
-                  <View style={styles.menuItemText}>
-                    <View style={styles.titleRow}>
-                      <Text style={styles.menuItemTitle}>{item.title}</Text>
-                      {item.badge && (
-                        <View style={[styles.badge, { backgroundColor: item.badgeColor }]}>
-                          <Text style={styles.badgeText}>{item.badge}</Text>
+          {sections.map((section) => (
+            <View key={section.title} style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              <Surface style={styles.card}>
+                {section.items.map((item, index) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[
+                      styles.menuItem,
+                      index < section.items.length - 1 && styles.menuItemBorder,
+                    ]}
+                    onPress={() => handleMenuPress(item.screen)}
+                  >
+                    <View style={styles.menuItemLeft}>
+                      <View style={styles.iconContainer}>
+                        <MaterialCommunityIcons
+                          name={item.icon as any}
+                          size={24}
+                          color={colors.primary}
+                        />
+                      </View>
+                      <View style={styles.menuItemText}>
+                        <View style={styles.titleRow}>
+                          <Text style={styles.menuItemTitle}>{item.title}</Text>
+                          {item.badge && (
+                            <View style={[styles.badge, { backgroundColor: item.badgeColor }]}>
+                              <Text style={styles.badgeText}>{item.badge}</Text>
+                            </View>
+                          )}
                         </View>
-                      )}
+                        <Text style={styles.menuItemSubtitle}>{item.subtitle}</Text>
+                      </View>
                     </View>
-                    <Text style={styles.menuItemSubtitle}>{item.subtitle}</Text>
-                  </View>
-                </View>
-                <MaterialCommunityIcons
-                  name="chevron-right"
-                  size={24}
-                  color={colors.onSurface}
-                />
-              </TouchableOpacity>
-            ))}
-          </Surface>
+                    <MaterialCommunityIcons
+                      name="chevron-right"
+                      size={24}
+                      color={colors.onSurface}
+                    />
+                  </TouchableOpacity>
+                ))}
+              </Surface>
+            </View>
+          ))}
         </WebContainer>
       </ScrollView>
     </View>
@@ -158,12 +183,24 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 32,
+    paddingBottom: 100,
     ...(Platform.OS === 'web' && {
       maxWidth: 600,
       margin: 'auto' as any,
       width: '100%',
     }),
+  },
+  sectionContainer: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.onSurface,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+    marginLeft: 4,
   },
   card: {
     borderRadius: 12,

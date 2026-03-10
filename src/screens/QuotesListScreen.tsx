@@ -3,7 +3,7 @@
  * Display all quotes with search and filter
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, FlatList, Alert, RefreshControl } from 'react-native';
 import {
   Text,
@@ -16,7 +16,7 @@ import {
 } from 'react-native-paper';
 import { format } from 'date-fns';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, useScrollToTop } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import * as MailComposer from 'expo-mail-composer';
 
@@ -32,16 +32,27 @@ import { AnimatedListItem } from '../components/AnimatedListItem';
 import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
 import { lightTap } from '../utils/haptics';
 
-type FilterStatus = 'all' | 'draft' | 'sent' | 'accepted' | 'rejected';
+type FilterStatus = 'all' | 'draft' | 'sent' | 'accepted' | 'rejected' | 'completed';
 
 export function QuotesListScreen() {
+  const listRef = useRef<FlatList>(null);
+  useScrollToTop(listRef);
+
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const { quotes, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings, canCreateQuote, createInvoiceFromQuote, saveInvoice, loadQuotes, subscriptionStatus } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>(route.params?.filter || 'all');
+
+  // Update filter when navigating with a filter param
+  useEffect(() => {
+    if (route.params?.filter) {
+      setFilterStatus(route.params.filter);
+    }
+  }, [route.params?.filter]);
   const [statusSheetVisible, setStatusSheetVisible] = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [emailDialogVisible, setEmailDialogVisible] = useState(false);
@@ -328,40 +339,35 @@ export function QuotesListScreen() {
 
       {/* Filter Chips */}
       <View style={styles.filterRow}>
-        <Chip
-          selected={filterStatus === 'all'}
-          onPress={() => setFilterStatus('all')}
-          style={styles.filterChip}
-        >
-          All
-        </Chip>
-        <Chip
-          selected={filterStatus === 'draft'}
-          onPress={() => setFilterStatus('draft')}
-          style={styles.filterChip}
-        >
-          Draft
-        </Chip>
-        <Chip
-          selected={filterStatus === 'sent'}
-          onPress={() => setFilterStatus('sent')}
-          style={styles.filterChip}
-        >
-          Sent
-        </Chip>
-        <Chip
-          selected={filterStatus === 'accepted'}
-          onPress={() => setFilterStatus('accepted')}
-          style={styles.filterChip}
-        >
-          Accepted
-        </Chip>
+        {([
+          { key: 'all', label: 'All' },
+          { key: 'draft', label: 'Draft' },
+          { key: 'sent', label: 'Sent' },
+          { key: 'accepted', label: 'Accepted' },
+          { key: 'completed', label: 'Completed' },
+        ] as const).map(({ key, label }) => {
+          const count = key === 'all' ? quotes.length : quotes.filter(q => q.status === key).length;
+          return (
+            <Chip
+              key={key}
+              selected={filterStatus === key}
+              onPress={() => {
+                lightTap();
+                setFilterStatus(key);
+              }}
+              style={styles.filterChip}
+            >
+              {label}{count > 0 ? ` (${count})` : ''}
+            </Chip>
+          );
+        })}
       </View>
       </WebContainer>
 
       {/* Quotes List */}
       <WebContainer style={styles.listContainer}>
         <FlatList
+          ref={listRef}
           data={filteredQuotes}
           renderItem={renderQuoteCard}
           keyExtractor={(item) => item.id}
@@ -484,6 +490,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
+    paddingBottom: 100,
   },
   emptyState: {
     alignItems: 'center',
@@ -497,7 +504,7 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 16,
-    bottom: 16,
+    bottom: 96,
     backgroundColor: colors.primary,
   },
 });

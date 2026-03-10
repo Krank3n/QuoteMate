@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, RefreshControl } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, RefreshControl, Pressable } from 'react-native';
 import {
   Text,
   Surface,
@@ -15,7 +15,7 @@ import {
   Portal,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useScrollToTop } from '@react-navigation/native';
 import { format } from 'date-fns';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -37,6 +37,9 @@ import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
 import { lightTap, successTap } from '../utils/haptics';
 
 export function DashboardScreen() {
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTop(scrollRef);
+
   // Track user activity for re-engagement emails (once per app session)
   const activityTracked = useRef(false);
   useEffect(() => {
@@ -61,11 +64,22 @@ export function DashboardScreen() {
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   // Calculate quick stats
-  const totalQuotes = quotes.length;
   const sentQuotes = quotes.filter((q) => q.status === 'sent').length;
-  const acceptedQuotes = quotes.filter((q) => q.status === 'accepted').length;
-  const totalRevenue = quotes
-    .filter((q) => q.status === 'accepted')
+  const acceptedQuotes = quotes.filter((q) => q.status === 'accepted' || q.status === 'completed').length;
+
+  // This month's revenue
+  const now = new Date();
+  const thisMonthRevenue = quotes
+    .filter((q) => {
+      if (q.status !== 'accepted' && q.status !== 'completed') return false;
+      const d = new Date(q.updatedAt);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    })
+    .reduce((sum, q) => sum + q.total, 0);
+
+  // Pipeline value (sent but not yet accepted)
+  const pipelineValue = quotes
+    .filter((q) => q.status === 'sent')
     .reduce((sum, q) => sum + q.total, 0);
 
   // Recent quotes (last 3)
@@ -388,7 +402,9 @@ export function DashboardScreen() {
       />
 
     <ScrollView
+      ref={scrollRef}
       style={styles.container}
+      contentContainerStyle={{ paddingBottom: 100 }}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -476,29 +492,53 @@ export function DashboardScreen() {
 
       {/* Quick Stats */}
       <View style={styles.statsContainer}>
-        <Surface style={styles.statCard}>
-          <MaterialCommunityIcons name="file-document" size={32} color={colors.primary} />
-          <AnimatedNumber value={totalQuotes} style={styles.statNumber} delay={0} />
-          <Text style={styles.statLabel}>Total Quotes</Text>
-        </Surface>
+        <AnimatedListItem index={0} style={styles.statCardWrapper}>
+          <Pressable onPress={() => { lightTap(); navigation.navigate('Insights' as never); }}>
+            <Surface style={styles.statCard}>
+              <View style={[styles.statIconCircle, { backgroundColor: colors.primaryBg }]}>
+                <MaterialCommunityIcons name="chart-areaspline" size={22} color={colors.primary} />
+              </View>
+              <AnimatedNumber value={thisMonthRevenue} format={formatCurrency} style={styles.statNumber} delay={0} />
+              <Text style={styles.statLabel}>Earned this month</Text>
+            </Surface>
+          </Pressable>
+        </AnimatedListItem>
 
-        <Surface style={styles.statCard}>
-          <MaterialCommunityIcons name="send" size={32} color={colors.secondary} />
-          <AnimatedNumber value={sentQuotes} style={styles.statNumber} delay={100} />
-          <Text style={styles.statLabel}>Sent</Text>
-        </Surface>
+        <AnimatedListItem index={1} style={styles.statCardWrapper}>
+          <Pressable onPress={() => { lightTap(); navigation.navigate('Insights' as never); }}>
+            <Surface style={styles.statCard}>
+              <View style={[styles.statIconCircle, { backgroundColor: colors.infoBg }]}>
+                <MaterialCommunityIcons name="timer-sand" size={22} color={colors.info} />
+              </View>
+              <AnimatedNumber value={pipelineValue} format={formatCurrency} style={styles.statNumber} delay={100} />
+              <Text style={styles.statLabel}>Awaiting response</Text>
+            </Surface>
+          </Pressable>
+        </AnimatedListItem>
 
-        <Surface style={styles.statCard}>
-          <MaterialCommunityIcons name="check-circle" size={32} color={colors.success} />
-          <AnimatedNumber value={acceptedQuotes} style={styles.statNumber} delay={200} />
-          <Text style={styles.statLabel}>Accepted</Text>
-        </Surface>
+        <AnimatedListItem index={2} style={styles.statCardWrapper}>
+          <Pressable onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'sent' }); }}>
+            <Surface style={styles.statCard}>
+              <View style={[styles.statIconCircle, { backgroundColor: colors.warningBg }]}>
+                <MaterialCommunityIcons name="send-check" size={22} color={colors.secondary} />
+              </View>
+              <AnimatedNumber value={sentQuotes} style={styles.statNumber} delay={200} />
+              <Text style={styles.statLabel}>Quotes sent</Text>
+            </Surface>
+          </Pressable>
+        </AnimatedListItem>
 
-        <Surface style={styles.statCard}>
-          <MaterialCommunityIcons name="currency-usd" size={32} color={colors.warning} />
-          <AnimatedNumber value={totalRevenue} format={formatCurrency} style={styles.statNumber} delay={300} />
-          <Text style={styles.statLabel}>Revenue</Text>
-        </Surface>
+        <AnimatedListItem index={3} style={styles.statCardWrapper}>
+          <Pressable onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'accepted' }); }}>
+            <Surface style={styles.statCard}>
+              <View style={[styles.statIconCircle, { backgroundColor: colors.successBg }]}>
+                <MaterialCommunityIcons name="handshake" size={22} color={colors.success} />
+              </View>
+              <AnimatedNumber value={acceptedQuotes} style={styles.statNumber} delay={300} />
+              <Text style={styles.statLabel}>Jobs won</Text>
+            </Surface>
+          </Pressable>
+        </AnimatedListItem>
       </View>
 
       {/* Recent Quotes */}
@@ -678,23 +718,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginBottom: 24,
   },
-  statCard: {
+  statCardWrapper: {
     width: '46%',
     margin: '2%',
+  },
+  statCard: {
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 14,
     alignItems: 'center',
     elevation: 2,
     backgroundColor: colors.surface,
   },
+  statIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
   statNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 8,
-    marginBottom: 4,
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 3,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: colors.onSurface,
   },
   section: {

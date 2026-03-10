@@ -96,20 +96,20 @@ export function JobDetailsScreen() {
   const [isTemplateCarouselExpanded, setIsTemplateCarouselExpanded] = useState(false);
   const carouselHeightAnim = useRef(new Animated.Value(0)).current; // 0 = collapsed, 1 = expanded
 
+  // Animate carousel expand/collapse
+  useEffect(() => {
+    Animated.timing(carouselHeightAnim, {
+      toValue: isTemplateCarouselExpanded ? 1 : 0,
+      duration: 120,
+      useNativeDriver: false,
+    }).start();
+  }, [isTemplateCarouselExpanded]);
+
   // Keep ref in sync with state
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
 
-  // Animate carousel expansion/collapse
-  useEffect(() => {
-    Animated.spring(carouselHeightAnim, {
-      toValue: isTemplateCarouselExpanded ? 1 : 0,
-      useNativeDriver: false,
-      tension: 50,
-      friction: 7,
-    }).start();
-  }, [isTemplateCarouselExpanded]);
 
   // Check if editing an existing document (by checking if it exists in saved quotes/invoices)
   const isEditingExisting = !!(currentQuote && (
@@ -935,46 +935,55 @@ export function JobDetailsScreen() {
 
         if (uniqueTemplates.length === 0) return null;
 
+        const hasSelection = useCustomMode || selectedTemplate;
+        const selectedName = useCustomMode ? 'Custom Job' : selectedTemplate?.name || '';
+        const selectedIcon = useCustomMode ? 'pencil-outline' : (selectedTemplate?.icon as any) || 'briefcase-outline';
+
         return (
           <Surface style={[styles.paramsSection, styles.firstSection, styles.templateSection]}>
+            {/* Header row — always visible, tappable to toggle */}
             <TouchableOpacity
-              style={styles.sectionTitleContainer}
+              style={styles.selectedTemplateSummary}
               onPress={() => setIsTemplateCarouselExpanded(!isTemplateCarouselExpanded)}
               activeOpacity={0.7}
             >
-              <View style={styles.sectionTitleRow}>
-                <MaterialCommunityIcons name="briefcase-outline" size={24} color={colors.primary} style={styles.sectionIcon} />
-                <Title style={styles.sectionTitle}>
-                  {isTemplateCarouselExpanded
-                    ? 'Select Job Type'
-                    : `${uniqueTemplates.length + 1} Job Types Available`
-                  }
-                </Title>
-                <MaterialCommunityIcons
-                  name={isTemplateCarouselExpanded ? "chevron-up" : "chevron-down"}
-                  size={24}
-                  color={colors.primary}
-                  style={styles.expandIcon}
-                />
-              </View>
+              {hasSelection && !isTemplateCarouselExpanded ? (
+                <>
+                  <MaterialCommunityIcons name={selectedIcon} size={22} color={colors.primary} />
+                  <Text style={styles.selectedTemplateName} numberOfLines={1}>{selectedName}</Text>
+                  <View style={styles.changeIconButton}>
+                    <MaterialCommunityIcons name="swap-horizontal" size={20} color={colors.primary} />
+                  </View>
+                </>
+              ) : (
+                <View style={styles.sectionTitleRow}>
+                  <MaterialCommunityIcons name="briefcase-outline" size={24} color={colors.primary} style={styles.sectionIcon} />
+                  <Title style={styles.sectionTitle}>
+                    {isTemplateCarouselExpanded ? 'Select Job Type' : `${uniqueTemplates.length + 1} Job Types Available`}
+                  </Title>
+                  <MaterialCommunityIcons
+                    name={isTemplateCarouselExpanded ? "chevron-up" : "chevron-down"}
+                    size={24}
+                    color={colors.primary}
+                    style={styles.expandIcon}
+                  />
+                </View>
+              )}
             </TouchableOpacity>
 
+            {/* Carousel — animated height */}
             <Animated.View style={{
               height: carouselHeightAnim.interpolate({
                 inputRange: [0, 1],
-                outputRange: [Platform.OS === 'web' ? 160 : 80, 160], // Collapsed shows just one row, expanded shows more
+                outputRange: [0, 160],
               }),
+              opacity: carouselHeightAnim,
               overflow: 'hidden',
             }}>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 style={styles.templateScroll}
-                onScrollBeginDrag={() => {
-                  if (!isTemplateCarouselExpanded) {
-                    setIsTemplateCarouselExpanded(true);
-                  }
-                }}
               >
               {/* Custom Job Card (first option) */}
               <TouchableOpacity
@@ -986,10 +995,8 @@ export function JobDetailsScreen() {
                   setUseCustomMode(true);
                   setSelectedTemplate(null);
                   setCustomParams({});
-                  // Clear jobName and jobDescription when switching back to custom
                   setJobName('');
                   setJobDescription('');
-                  // Auto-collapse after selection
                   setTimeout(() => setIsTemplateCarouselExpanded(false), 300);
                 }}
               >
@@ -1020,13 +1027,11 @@ export function JobDetailsScreen() {
                   selectedTemplate?.id === template.id && styles.quickTemplateCardSelected,
                 ]}
                 onPress={() => {
-                  // Switch to template mode
                   setUseCustomMode(false);
                   setSelectedTemplate(template);
                   setJobName(template.name);
                   setJobDescription(template.description);
 
-                  // Initialize params with default values
                   if (template.requiredParams && template.requiredParams.length > 0) {
                     const params: Record<string, number> = {};
                     template.requiredParams.forEach(param => {
@@ -1035,7 +1040,6 @@ export function JobDetailsScreen() {
                     setCustomParams(params);
                   }
 
-                  // Auto-collapse after selection
                   setTimeout(() => setIsTemplateCarouselExpanded(false), 300);
                 }}
               >
@@ -1587,6 +1591,25 @@ const styles = StyleSheet.create({
   },
   templateSection: {
     marginBottom: 0,
+  },
+  selectedTemplateSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+    marginBottom: 4,
+  },
+  selectedTemplateName: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.onSurface,
+    marginLeft: 10,
+  },
+  changeIconButton: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: colors.primary + '15',
   },
   helperText: {
     fontSize: 13,

@@ -114,7 +114,7 @@ export function ViewQuoteScreen() {
   };
 
   // Show convert button for accepted or sent quotes
-  const canConvertToInvoice = quote.status === 'accepted' || quote.status === 'sent';
+  const canConvertToInvoice = quote.status === 'accepted' || quote.status === 'sent' || quote.status === 'completed';
 
   return (
     <View style={styles.container}>

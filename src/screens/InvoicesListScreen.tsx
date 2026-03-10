@@ -3,7 +3,7 @@
  * Display all invoices with search and filter
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, FlatList, Alert, RefreshControl } from 'react-native';
 import {
   Text,
@@ -16,7 +16,7 @@ import {
   Menu,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useScrollToTop } from '@react-navigation/native';
 
 import { useStore } from '../store/useStore';
 import { Invoice, Quote } from '../types';
@@ -30,6 +30,9 @@ import { AnimatedListItem } from '../components/AnimatedListItem';
 type FilterStatus = 'all' | 'draft' | 'sent' | 'paid' | 'overdue';
 
 export function InvoicesListScreen() {
+  const listRef = useRef<FlatList>(null);
+  useScrollToTop(listRef);
+
   const navigation = useNavigation<any>();
   const {
     invoices,
@@ -69,7 +72,7 @@ export function InvoicesListScreen() {
 
   // Get convertible quotes (accepted or sent)
   const convertibleQuotes = quotes.filter(
-    (q) => q.status === 'accepted' || q.status === 'sent'
+    (q) => q.status === 'accepted' || q.status === 'sent' || q.status === 'completed'
   );
 
   // Filter and search invoices
@@ -196,47 +199,40 @@ export function InvoicesListScreen() {
 
         {/* Filter Chips */}
         <View style={styles.filterRow}>
-          <Chip
-            selected={filterStatus === 'all'}
-            onPress={() => setFilterStatus('all')}
-            style={styles.filterChip}
-          >
-            All
-          </Chip>
-          <Chip
-            selected={filterStatus === 'draft'}
-            onPress={() => setFilterStatus('draft')}
-            style={styles.filterChip}
-          >
-            Draft
-          </Chip>
-          <Chip
-            selected={filterStatus === 'sent'}
-            onPress={() => setFilterStatus('sent')}
-            style={styles.filterChip}
-          >
-            Sent
-          </Chip>
-          <Chip
-            selected={filterStatus === 'paid'}
-            onPress={() => setFilterStatus('paid')}
-            style={styles.filterChip}
-          >
-            Paid
-          </Chip>
-          <Chip
-            selected={filterStatus === 'overdue'}
-            onPress={() => setFilterStatus('overdue')}
-            style={styles.filterChip}
-          >
-            Overdue
-          </Chip>
+          {([
+            { key: 'all', label: 'All' },
+            { key: 'draft', label: 'Draft' },
+            { key: 'sent', label: 'Sent' },
+            { key: 'paid', label: 'Paid' },
+            { key: 'overdue', label: 'Overdue' },
+          ] as const).map(({ key, label }) => {
+            // Count against all invoices (with overdue status applied)
+            const allWithStatus = invoices.map(inv =>
+              isInvoiceOverdue(inv) && inv.status !== 'paid' && inv.status !== 'cancelled'
+                ? { ...inv, status: 'overdue' as const }
+                : inv
+            );
+            const count = key === 'all'
+              ? invoices.length
+              : allWithStatus.filter(i => i.status === key).length;
+            return (
+              <Chip
+                key={key}
+                selected={filterStatus === key}
+                onPress={() => setFilterStatus(key)}
+                style={styles.filterChip}
+              >
+                {label}{count > 0 ? ` (${count})` : ''}
+              </Chip>
+            );
+          })}
         </View>
       </WebContainer>
 
       {/* Invoices List */}
       <WebContainer style={styles.listContainer}>
         <FlatList
+          ref={listRef}
           data={filteredInvoices}
           renderItem={renderInvoiceCard}
           keyExtractor={(item) => item.id}
@@ -352,6 +348,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
+    paddingBottom: 100,
   },
   emptyState: {
     alignItems: 'center',
@@ -369,6 +366,7 @@ const styles = StyleSheet.create({
   },
   fab: {
     backgroundColor: colors.primary,
+    marginBottom: 80,
   },
   dialog: {
     maxHeight: '70%',
