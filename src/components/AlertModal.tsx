@@ -161,29 +161,31 @@ export function AlertModal({
         });
       }
 
-      // Start modal animations
+      // Start all animations together for snappy feel
       Animated.parallel([
         Animated.spring(scaleAnim, {
           toValue: 1,
-          tension: 50,
-          friction: 7,
+          tension: 65,
+          friction: 8,
           useNativeDriver: true,
         }),
         Animated.timing(fadeAnim, {
           toValue: 1,
-          duration: 300,
+          duration: 200,
           useNativeDriver: true,
         }),
+        // Icon bounces in with a slight delay for visual pop
+        Animated.sequence([
+          Animated.delay(100),
+          Animated.spring(checkScaleAnim, {
+            toValue: 1,
+            tension: 120,
+            friction: 5,
+            useNativeDriver: true,
+          }),
+        ]),
       ]).start(() => {
-        // Icon bounce
-        Animated.spring(checkScaleAnim, {
-          toValue: 1,
-          tension: 100,
-          friction: 5,
-          useNativeDriver: true,
-        }).start();
-
-        // Pulse animation
+        // Pulse animation after everything settles
         Animated.loop(
           Animated.sequence([
             Animated.timing(pulseAnim, {
@@ -198,42 +200,42 @@ export function AlertModal({
             }),
           ])
         ).start();
-
-        // Start confetti
-        if (enableConfetti) {
-          confetti.forEach((piece, index) => {
-            const anim = confettiAnims[index];
-            Animated.sequence([
-              Animated.delay(piece.delay),
-              Animated.parallel([
-                Animated.timing(anim.translateY, {
-                  toValue: 500,
-                  duration: piece.duration,
-                  useNativeDriver: true,
-                }),
-                Animated.timing(anim.rotate, {
-                  toValue: (Math.random() - 0.5) * 720,
-                  duration: piece.duration,
-                  useNativeDriver: true,
-                }),
-                Animated.sequence([
-                  Animated.timing(anim.opacity, {
-                    toValue: 0.9,
-                    duration: 200,
-                    useNativeDriver: true,
-                  }),
-                  Animated.delay(piece.duration * 0.5),
-                  Animated.timing(anim.opacity, {
-                    toValue: 0,
-                    duration: piece.duration * 0.3,
-                    useNativeDriver: true,
-                  }),
-                ]),
-              ]),
-            ]).start();
-          });
-        }
       });
+
+      // Start confetti immediately
+      if (enableConfetti) {
+        confetti.forEach((piece, index) => {
+          const anim = confettiAnims[index];
+          Animated.sequence([
+            Animated.delay(piece.delay),
+            Animated.parallel([
+              Animated.timing(anim.translateY, {
+                toValue: 500,
+                duration: piece.duration,
+                useNativeDriver: true,
+              }),
+              Animated.timing(anim.rotate, {
+                toValue: (Math.random() - 0.5) * 720,
+                duration: piece.duration,
+                useNativeDriver: true,
+              }),
+              Animated.sequence([
+                Animated.timing(anim.opacity, {
+                  toValue: 0.9,
+                  duration: 200,
+                  useNativeDriver: true,
+                }),
+                Animated.delay(piece.duration * 0.5),
+                Animated.timing(anim.opacity, {
+                  toValue: 0,
+                  duration: piece.duration * 0.3,
+                  useNativeDriver: true,
+                }),
+              ]),
+            ]),
+          ]).start();
+        });
+      }
     }
   }, [visible]);
 
