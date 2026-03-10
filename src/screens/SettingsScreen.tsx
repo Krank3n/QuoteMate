@@ -52,6 +52,13 @@ export function SettingsScreen() {
       screen: 'QuoteSettings',
     },
     {
+      id: 'pdfTemplate',
+      title: 'PDF Templates',
+      subtitle: 'Choose your document style',
+      icon: 'file-document-outline',
+      screen: 'PDFTemplate',
+    },
+    {
       id: 'payment',
       title: 'Payment Methods',
       subtitle: 'Bank, PayID, BPAY, PayPal',

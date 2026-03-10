@@ -8,11 +8,111 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as MailComposer from 'expo-mail-composer';
 import { format } from 'date-fns';
-import { Quote, BusinessSettings, Invoice } from '../types';
+import { Quote, BusinessSettings, Invoice, Material } from '../types';
 import { formatPaymentTerms, getAmountDue } from './invoiceCalculator';
 import { formatCurrency } from './quoteCalculator';
-import { colors } from '../theme';
+import { printMediaCSS, getTemplateCSS } from './pdfTemplates';
+import { PdfTemplateId } from '../types';
 import { Platform, Alert } from 'react-native';
+
+/**
+ * Generate materials table HTML, optionally grouped by work section
+ */
+function generateMaterialsHTML(materials: Material[], groupBySection: boolean, materialsSubtotal: number): string {
+  if (materials.length === 0) {
+    return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>`;
+  }
+
+  const tableHeader = `
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Quantity</th>
+        <th>Unit Price</th>
+        <th>Total</th>
+      </tr>
+    </thead>`;
+
+  const materialRow = (m: Material) => `
+    <tr>
+      <td>${m.name}</td>
+      <td>${m.quantity} ${m.unit}</td>
+      <td>${formatCurrency(m.price)}</td>
+      <td>${formatCurrency(m.totalPrice)}</td>
+    </tr>`;
+
+  const hasSections = groupBySection && materials.some(m => m.section);
+
+  if (!hasSections) {
+    return `
+      <table>
+        ${tableHeader}
+        <tbody>
+          ${materials.map(materialRow).join('')}
+          <tr class="total-row">
+            <td colspan="3">Materials Subtotal</td>
+            <td>${formatCurrency(materialsSubtotal)}</td>
+          </tr>
+        </tbody>
+      </table>`;
+  }
+
+  // Group materials by section
+  const grouped = new Map<string, Material[]>();
+  materials.forEach(m => {
+    const key = m.section || '';
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(m);
+  });
+
+  // Sort: named sections first (alphabetically), then ungrouped
+  const sortedKeys = Array.from(grouped.keys()).sort((a, b) => {
+    if (a === '' && b !== '') return 1;
+    if (a !== '' && b === '') return -1;
+    return a.localeCompare(b);
+  });
+
+  let html = '';
+  sortedKeys.forEach(key => {
+    const sectionMaterials = grouped.get(key)!;
+    const sectionTotal = sectionMaterials.reduce((sum, m) => sum + m.totalPrice, 0);
+    const sectionName = key || 'Other';
+
+    html += `
+      <table>
+        <thead>
+          <tr>
+            <th colspan="4" class="section-label">${sectionName}</th>
+          </tr>
+          <tr>
+            <th>Item</th>
+            <th>Quantity</th>
+            <th>Unit Price</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sectionMaterials.map(materialRow).join('')}
+          <tr class="total-row">
+            <td colspan="3">${sectionName} Subtotal</td>
+            <td>${formatCurrency(sectionTotal)}</td>
+          </tr>
+        </tbody>
+      </table>`;
+  });
+
+  html += `
+    <table>
+      <tbody>
+        <tr class="total-row">
+          <td colspan="3"><strong>All Materials Subtotal</strong></td>
+          <td><strong>${formatCurrency(materialsSubtotal)}</strong></td>
+        </tr>
+      </tbody>
+    </table>`;
+
+  return html;
+}
 
 /**
  * Sanitize a string for use in a filename
@@ -127,6 +227,8 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
     abn: '',
   };
 
+  const templateId: PdfTemplateId = businessSettings?.pdfTemplate || 'professional';
+
   // Convert logo to base64 if it exists
   let logoBase64 = '';
   const showLogo = options?.isPro !== false; // Show logo unless explicitly not Pro
@@ -150,188 +252,8 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
     <head>
       <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
       <style>
-        @media print {
-          /* Set page margins for all pages */
-          @page {
-            margin-top: 40px;
-            margin-bottom: 40px;
-            margin-left: 40px;
-            margin-right: 40px;
-          }
-
-          /* Prevent page breaks inside these elements */
-          .header, .info-section, .summary, .section-wrapper {
-            page-break-inside: avoid;
-            break-inside: avoid;
-          }
-
-          /* Prevent page breaks after headings */
-          h2, h3 {
-            page-break-after: avoid;
-            break-after: avoid;
-            orphans: 3;
-            widows: 3;
-          }
-
-          /* Add space before sections to allow natural page breaks */
-          .info-section, .summary, .section-wrapper {
-            page-break-before: auto;
-            break-before: auto;
-            margin-top: 20px;
-          }
-
-          /* Prevent table rows from splitting */
-          tr {
-            page-break-inside: avoid;
-            break-inside: avoid;
-          }
-
-          /* Add margin before tables */
-          table {
-            page-break-before: auto;
-            break-before: auto;
-            margin-top: 15px;
-          }
-
-          /* For very long tables that must break across pages */
-          table thead {
-            display: table-header-group;
-          }
-
-          /* Ensure minimum spacing when sections do break */
-          .section-wrapper {
-            padding-top: 10px;
-            padding-bottom: 10px;
-          }
-
-          /* If a section must break, add margin on continuation */
-          .section-wrapper::after {
-            content: "";
-            display: block;
-            margin-bottom: 20px;
-          }
-        }
-
-        body {
-          font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-          padding: 40px;
-          color: #1a1a1a;
-        }
-        .header {
-          border-bottom: 3px solid ${colors.primaryDark};
-          padding-bottom: 20px;
-          margin-bottom: 30px;
-        }
-        .header-content {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-        }
-        .logo {
-          width: 80px;
-          height: 80px;
-          object-fit: contain;
-          flex-shrink: 0;
-        }
-        .header-text {
-          flex: 1;
-        }
-        .header h1 {
-          color: ${colors.primaryDark};
-          margin: 0 0 10px 0;
-        }
-        .header p {
-          color: #333333;
-          margin: 5px 0;
-        }
-        .info-section {
-          margin-bottom: 30px;
-        }
-        .info-section h2 {
-          color: #1a1a1a;
-          margin-bottom: 15px;
-        }
-        .info-section h3 {
-          color: ${colors.primaryDark};
-          margin-bottom: 10px;
-        }
-        .info-section p {
-          color: #333333;
-          margin: 5px 0;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 20px;
-        }
-        th {
-          background-color: ${colors.primaryDark};
-          color: white;
-          padding: 10px;
-          text-align: left;
-        }
-        td {
-          padding: 8px;
-          border-bottom: 1px solid #e0e0e0;
-          color: #333333;
-        }
-        .total-row {
-          font-weight: bold;
-          background-color: #f5f5f5;
-        }
-        .grand-total {
-          font-size: 18px;
-          color: ${colors.primaryDark};
-          font-weight: bold;
-        }
-        .summary {
-          margin-top: 30px;
-          padding: 20px;
-          background-color: #f9f9f9;
-          border-radius: 8px;
-          border: 1px solid #e0e0e0;
-        }
-        .summary-row {
-          display: flex;
-          justify-content: space-between;
-          padding: 8px 0;
-          color: #333333;
-        }
-        h3 {
-          color: ${colors.primaryDark};
-          margin-bottom: 10px;
-        }
-        .section-wrapper {
-          margin-bottom: 20px;
-        }
-        .payment-methods-section {
-          margin-top: 30px;
-          padding: 20px;
-          background-color: #f0f9ff;
-          border: 2px solid ${colors.primaryDark};
-          border-radius: 8px;
-        }
-        .payment-methods-section h3 {
-          margin-top: 0;
-          margin-bottom: 15px;
-        }
-        .payment-methods-grid {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 20px;
-        }
-        .payment-method {
-          flex: 1;
-          min-width: 200px;
-          padding: 10px;
-          background-color: white;
-          border-radius: 4px;
-          font-size: 13px;
-          line-height: 1.5;
-        }
-        .payment-method strong {
-          color: ${colors.primaryDark};
-        }
+        ${printMediaCSS}
+        ${getTemplateCSS(templateId, businessSettings?.brandColor)}
       </style>
     </head>
     <body>
@@ -367,38 +289,7 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
 
       <div class="section-wrapper">
         <h3>Materials</h3>
-        ${quote.materials.length === 0 ? `
-        <p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>
-        ` : `
-        <table>
-          <thead>
-            <tr>
-              <th>Item</th>
-              <th>Quantity</th>
-              <th>Unit Price</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${quote.materials
-              .map(
-                (m) => `
-              <tr>
-                <td>${m.name}</td>
-                <td>${m.quantity} ${m.unit}</td>
-                <td>${formatCurrency(m.price)}</td>
-                <td>${formatCurrency(m.totalPrice)}</td>
-              </tr>
-            `
-              )
-              .join('')}
-            <tr class="total-row">
-              <td colspan="3">Materials Subtotal</td>
-              <td>${formatCurrency(quote.materialsSubtotal)}</td>
-            </tr>
-          </tbody>
-        </table>
-        `}
+        ${generateMaterialsHTML(quote.materials, businessSettings?.groupMaterialsBySection === true, quote.materialsSubtotal)}
       </div>
 
       <div class="section-wrapper">
@@ -576,6 +467,8 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
     abn: '',
   };
 
+  const templateId: PdfTemplateId = businessSettings?.pdfTemplate || 'professional';
+
   // Convert logo to base64 if it exists
   let logoBase64 = '';
   const showLogo = options?.isPro !== false; // Show logo unless explicitly not Pro
@@ -601,192 +494,8 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
     <head>
       <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
       <style>
-        @media print {
-          @page {
-            margin-top: 40px;
-            margin-bottom: 40px;
-            margin-left: 40px;
-            margin-right: 40px;
-          }
-          .header, .info-section, .summary, .section-wrapper {
-            page-break-inside: avoid;
-            break-inside: avoid;
-          }
-          h2, h3 {
-            page-break-after: avoid;
-            break-after: avoid;
-            orphans: 3;
-            widows: 3;
-          }
-          .info-section, .summary, .section-wrapper {
-            page-break-before: auto;
-            break-before: auto;
-            margin-top: 20px;
-          }
-          tr {
-            page-break-inside: avoid;
-            break-inside: avoid;
-          }
-          table {
-            page-break-before: auto;
-            break-before: auto;
-            margin-top: 15px;
-          }
-          table thead {
-            display: table-header-group;
-          }
-          .section-wrapper {
-            padding-top: 10px;
-            padding-bottom: 10px;
-          }
-          .section-wrapper::after {
-            content: "";
-            display: block;
-            margin-bottom: 20px;
-          }
-        }
-
-        body {
-          font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-          padding: 40px;
-          color: #1a1a1a;
-        }
-        .header {
-          border-bottom: 3px solid ${colors.primaryDark};
-          padding-bottom: 20px;
-          margin-bottom: 30px;
-        }
-        .header-content {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-        }
-        .logo {
-          width: 80px;
-          height: 80px;
-          object-fit: contain;
-          flex-shrink: 0;
-        }
-        .header-text {
-          flex: 1;
-        }
-        .header h1 {
-          color: ${colors.primaryDark};
-          margin: 0 0 10px 0;
-        }
-        .header p {
-          color: #333333;
-          margin: 5px 0;
-        }
-        .info-section {
-          margin-bottom: 30px;
-        }
-        .info-section h2 {
-          color: #1a1a1a;
-          margin-bottom: 15px;
-        }
-        .info-section h3 {
-          color: ${colors.primaryDark};
-          margin-bottom: 10px;
-        }
-        .info-section p {
-          color: #333333;
-          margin: 5px 0;
-        }
-        .invoice-details {
-          margin-bottom: 20px;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 20px;
-        }
-        th {
-          background-color: ${colors.primaryDark};
-          color: white;
-          padding: 10px;
-          text-align: left;
-        }
-        td {
-          padding: 8px;
-          border-bottom: 1px solid #e0e0e0;
-          color: #333333;
-        }
-        .total-row {
-          font-weight: bold;
-          background-color: #f5f5f5;
-        }
-        .grand-total {
-          font-size: 18px;
-          color: ${colors.primaryDark};
-          font-weight: bold;
-        }
-        .balance-due {
-          font-size: 16px;
-          color: #dc3545;
-          font-weight: bold;
-          border-top: 2px solid #dc3545;
-          padding-top: 8px;
-          margin-top: 8px;
-        }
-        .summary {
-          margin-top: 30px;
-          padding: 20px;
-          background-color: #f9f9f9;
-          border-radius: 8px;
-          border: 1px solid #e0e0e0;
-        }
-        .summary-row {
-          display: flex;
-          justify-content: space-between;
-          padding: 8px 0;
-          color: #333333;
-        }
-        h3 {
-          color: ${colors.primaryDark};
-          margin-bottom: 10px;
-        }
-        .section-wrapper {
-          margin-bottom: 20px;
-        }
-        .payment-box {
-          margin-top: 30px;
-          padding: 20px;
-          background-color: #f0f9ff;
-          border: 2px solid ${colors.primaryDark};
-          border-radius: 8px;
-        }
-        .payment-box h3 {
-          margin-top: 0;
-        }
-        .payment-methods-section {
-          margin-top: 30px;
-          padding: 20px;
-          background-color: #f0f9ff;
-          border: 2px solid ${colors.primaryDark};
-          border-radius: 8px;
-        }
-        .payment-methods-section h3 {
-          margin-top: 0;
-          margin-bottom: 15px;
-        }
-        .payment-methods-grid {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 20px;
-        }
-        .payment-method {
-          flex: 1;
-          min-width: 200px;
-          padding: 10px;
-          background-color: white;
-          border-radius: 4px;
-          font-size: 13px;
-          line-height: 1.5;
-        }
-        .payment-method strong {
-          color: ${colors.primaryDark};
-        }
+        ${printMediaCSS}
+        ${getTemplateCSS(templateId, businessSettings?.brandColor)}
       </style>
     </head>
     <body>
@@ -828,38 +537,7 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
 
       <div class="section-wrapper">
         <h3>Materials</h3>
-        ${invoice.materials.length === 0 ? `
-        <p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>
-        ` : `
-        <table>
-          <thead>
-            <tr>
-              <th>Item</th>
-              <th>Quantity</th>
-              <th>Unit Price</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${invoice.materials
-              .map(
-                (m) => `
-              <tr>
-                <td>${m.name}</td>
-                <td>${m.quantity} ${m.unit}</td>
-                <td>${formatCurrency(m.price)}</td>
-                <td>${formatCurrency(m.totalPrice)}</td>
-              </tr>
-            `
-              )
-              .join('')}
-            <tr class="total-row">
-              <td colspan="3">Materials Subtotal</td>
-              <td>${formatCurrency(invoice.materialsSubtotal)}</td>
-            </tr>
-          </tbody>
-        </table>
-        `}
+        ${generateMaterialsHTML(invoice.materials, businessSettings?.groupMaterialsBySection === true, invoice.materialsSubtotal)}
       </div>
 
       <div class="section-wrapper">

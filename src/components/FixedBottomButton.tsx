@@ -9,6 +9,7 @@ import { View, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
+import { lightTap } from '../utils/haptics';
 
 interface FixedBottomButtonProps {
   /** Button label text */
@@ -213,7 +214,7 @@ export function FixedBottomButton({
         )}
         <Button
           mode={mode}
-          onPress={onPress}
+          onPress={() => { lightTap(); onPress(); }}
           style={[styles.button, buttonStyle, secondaryLabel && styles.buttonWithSecondary]}
           labelStyle={styles.buttonLabel}
           contentStyle={styles.buttonContent}

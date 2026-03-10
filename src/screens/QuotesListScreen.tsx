@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, FlatList, Alert, Pressable } from 'react-native';
+import { View, StyleSheet, FlatList, Alert, RefreshControl } from 'react-native';
 import {
   Text,
   Searchbar,
@@ -28,23 +28,28 @@ import { generateQuotePDF, exportQuotePDF } from '../utils/pdfGenerator';
 import { WebContainer } from '../components/WebContainer';
 import { QuoteCard } from '../components/QuoteCard';
 import { AlertModal } from '../components/AlertModal';
+import { AnimatedListItem } from '../components/AnimatedListItem';
+import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
+import { lightTap } from '../utils/haptics';
 
 type FilterStatus = 'all' | 'draft' | 'sent' | 'accepted' | 'rejected';
 
 export function QuotesListScreen() {
   const navigation = useNavigation<any>();
-  const { quotes, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings, canCreateQuote, createInvoiceFromQuote, saveInvoice } = useStore();
+  const { quotes, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings, canCreateQuote, createInvoiceFromQuote, saveInvoice, loadQuotes, subscriptionStatus } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
-  const [statusDialogVisible, setStatusDialogVisible] = useState(false);
+  const [statusSheetVisible, setStatusSheetVisible] = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
-  const [selectedStatus, setSelectedStatus] = useState<'draft' | 'sent' | 'accepted' | 'rejected'>('draft');
   const [emailDialogVisible, setEmailDialogVisible] = useState(false);
   const [emailQuote, setEmailQuote] = useState<Quote | null>(null);
   const [convertModalVisible, setConvertModalVisible] = useState(false);
   const [quoteToConvert, setQuoteToConvert] = useState<Quote | null>(null);
   const [isConverting, setIsConverting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Filter and search quotes
   const filteredQuotes = quotes.filter((quote) => {
@@ -65,6 +70,15 @@ export function QuotesListScreen() {
 
     return true;
   });
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadQuotes();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const handleNewQuote = () => {
     // Check if user can create a new quote
@@ -103,27 +117,25 @@ export function QuotesListScreen() {
     await deleteQuote(quoteId);
   };
 
-  const handleOpenStatusDialog = (quote: Quote) => {
+  const handleOpenStatusSheet = (quote: Quote) => {
     setSelectedQuote(quote);
-    setSelectedStatus(quote.status);
-    setStatusDialogVisible(true);
+    setStatusSheetVisible(true);
   };
 
-  const handleUpdateStatus = async () => {
+  const handleStatusSelect = async (newStatus: string) => {
     if (!selectedQuote) return;
-
     try {
       const updatedQuote = {
         ...selectedQuote,
-        status: selectedStatus,
+        status: newStatus as Quote['status'],
         updatedAt: new Date(),
       };
       await saveQuote(updatedQuote);
-      setStatusDialogVisible(false);
-      setSelectedQuote(null);
     } catch (error) {
       Alert.alert('Error', 'Failed to update quote status. Please try again.');
     }
+    setStatusSheetVisible(false);
+    setSelectedQuote(null);
   };
 
   const handleDuplicateQuote = async (quote: Quote) => {
@@ -142,6 +154,10 @@ export function QuotesListScreen() {
   };
 
   const handleConvertToInvoice = (quote: Quote) => {
+    if (!isPro) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
     setQuoteToConvert(quote);
     setConvertModalVisible(true);
   };
@@ -260,19 +276,21 @@ export function QuotesListScreen() {
     }
   };
 
-  const renderQuoteCard = ({ item: quote }: { item: Quote }) => (
-    <QuoteCard
-      quote={quote}
-      businessSettings={businessSettings}
-      onView={handleViewQuote}
-      onEdit={handleEditQuote}
-      onDelete={handleDeleteQuote}
-      onDuplicate={handleDuplicateQuote}
-      onSave={saveQuote}
-      onStatusChange={handleOpenStatusDialog}
-      onEmailDialogOpen={handleOpenEmailDialog}
-      onConvertToInvoice={handleConvertToInvoice}
-    />
+  const renderQuoteCard = ({ item: quote, index }: { item: Quote; index: number }) => (
+    <AnimatedListItem index={index}>
+      <QuoteCard
+        quote={quote}
+        businessSettings={businessSettings}
+        onView={handleViewQuote}
+        onEdit={handleEditQuote}
+        onDelete={handleDeleteQuote}
+        onDuplicate={handleDuplicateQuote}
+        onSave={saveQuote}
+        onStatusChange={handleOpenStatusSheet}
+        onEmailDialogOpen={handleOpenEmailDialog}
+        onConvertToInvoice={handleConvertToInvoice}
+      />
+    </AnimatedListItem>
   );
 
   return (
@@ -349,6 +367,14 @@ export function QuotesListScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           style={styles.flatList}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <MaterialCommunityIcons
@@ -370,104 +396,20 @@ export function QuotesListScreen() {
         color={colors.white}
       />
 
-      {/* Status Change Dialog */}
+      {/* Status Sheet */}
+      <StatusSheet
+        visible={statusSheetVisible}
+        onDismiss={() => {
+          setStatusSheetVisible(false);
+          setSelectedQuote(null);
+        }}
+        currentStatus={selectedQuote?.status || 'draft'}
+        onSelect={handleStatusSelect}
+        options={QUOTE_STATUS_OPTIONS}
+      />
+
+      {/* Email Client Selector Dialog */}
       <Portal>
-        <Dialog visible={statusDialogVisible} onDismiss={() => setStatusDialogVisible(false)}>
-          <Dialog.Title>Change Quote Status</Dialog.Title>
-          <Dialog.Content>
-            <View style={styles.statusOptions}>
-              <Pressable
-                style={[
-                  styles.statusOption,
-                  selectedStatus === 'draft' && styles.statusOptionSelected,
-                ]}
-                onPress={() => setSelectedStatus('draft')}
-              >
-                <View style={styles.statusOptionContent}>
-                  <View style={[styles.statusDot, { backgroundColor: colors.info }]} />
-                  <Text style={[
-                    styles.statusOptionText,
-                    selectedStatus === 'draft' && styles.statusOptionTextSelected,
-                  ]}>
-                    Draft
-                  </Text>
-                </View>
-                {selectedStatus === 'draft' && (
-                  <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
-                )}
-              </Pressable>
-
-              <Pressable
-                style={[
-                  styles.statusOption,
-                  selectedStatus === 'sent' && styles.statusOptionSelected,
-                ]}
-                onPress={() => setSelectedStatus('sent')}
-              >
-                <View style={styles.statusOptionContent}>
-                  <View style={[styles.statusDot, { backgroundColor: colors.warning }]} />
-                  <Text style={[
-                    styles.statusOptionText,
-                    selectedStatus === 'sent' && styles.statusOptionTextSelected,
-                  ]}>
-                    Sent
-                  </Text>
-                </View>
-                {selectedStatus === 'sent' && (
-                  <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
-                )}
-              </Pressable>
-
-              <Pressable
-                style={[
-                  styles.statusOption,
-                  selectedStatus === 'accepted' && styles.statusOptionSelected,
-                ]}
-                onPress={() => setSelectedStatus('accepted')}
-              >
-                <View style={styles.statusOptionContent}>
-                  <View style={[styles.statusDot, { backgroundColor: colors.success }]} />
-                  <Text style={[
-                    styles.statusOptionText,
-                    selectedStatus === 'accepted' && styles.statusOptionTextSelected,
-                  ]}>
-                    Accepted
-                  </Text>
-                </View>
-                {selectedStatus === 'accepted' && (
-                  <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
-                )}
-              </Pressable>
-
-              <Pressable
-                style={[
-                  styles.statusOption,
-                  selectedStatus === 'rejected' && styles.statusOptionSelected,
-                ]}
-                onPress={() => setSelectedStatus('rejected')}
-              >
-                <View style={styles.statusOptionContent}>
-                  <View style={[styles.statusDot, { backgroundColor: colors.rejected }]} />
-                  <Text style={[
-                    styles.statusOptionText,
-                    selectedStatus === 'rejected' && styles.statusOptionTextSelected,
-                  ]}>
-                    Rejected
-                  </Text>
-                </View>
-                {selectedStatus === 'rejected' && (
-                  <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
-                )}
-              </Pressable>
-            </View>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setStatusDialogVisible(false)}>Cancel</Button>
-            <Button onPress={handleUpdateStatus}>Update</Button>
-          </Dialog.Actions>
-        </Dialog>
-
-        {/* Email Client Selector Dialog */}
         <Dialog visible={emailDialogVisible} onDismiss={() => setEmailDialogVisible(false)}>
           <Dialog.Title>Send Quote</Dialog.Title>
           <Dialog.Content>
@@ -557,42 +499,5 @@ const styles = StyleSheet.create({
     right: 16,
     bottom: 16,
     backgroundColor: colors.primary,
-  },
-  statusOptions: {
-    gap: 12,
-  },
-  statusOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceLight,
-  },
-  statusOptionSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.successBg,
-  },
-  statusOptionContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 12,
-  },
-  statusOptionText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.textDark,
-    textTransform: 'capitalize',
-  },
-  statusOptionTextSelected: {
-    color: colors.primary,
-    fontWeight: '600',
   },
 });

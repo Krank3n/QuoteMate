@@ -3,7 +3,7 @@
  * Business name, logo, ABN, contact details
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -23,15 +23,21 @@ import {
 } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import ColorPicker, { Panel1, HueSlider, returnedResults } from 'reanimated-color-picker';
 
+import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
+import { ProBadge } from '../../components/ProBadge';
 
 export function BusinessProfileScreen() {
-  const { businessSettings, setBusinessSettings } = useStore();
+  const navigation = useNavigation<any>();
+  const { businessSettings, setBusinessSettings, subscriptionStatus } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const [businessName, setBusinessName] = useState('');
   const [abn, setAbn] = useState('');
@@ -39,6 +45,8 @@ export function BusinessProfileScreen() {
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [logoUri, setLogoUri] = useState<string | undefined>(undefined);
+  const [brandColor, setBrandColor] = useState<string | undefined>(undefined);
+  const [hexInput, setHexInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -51,8 +59,16 @@ export function BusinessProfileScreen() {
       setPhone(businessSettings.phone || '');
       setAddress(businessSettings.address || '');
       setLogoUri(businessSettings.logoUri);
+      setBrandColor(businessSettings.brandColor);
     }
   }, [businessSettings]);
+
+  const onColorChange = useCallback((result: returnedResults) => {
+    // Extract the 6-digit hex (strip alpha if present)
+    const hex = result.hex.length === 9 ? result.hex.slice(0, 7) : result.hex;
+    setBrandColor(hex);
+    setHexInput(hex);
+  }, []);
 
   const handlePickLogo = async () => {
     try {
@@ -110,6 +126,7 @@ export function BusinessProfileScreen() {
         phone: phone.trim() || undefined,
         address: address.trim() || undefined,
         logoUri: logoUri,
+        brandColor: brandColor,
       });
       setShowSuccessModal(true);
     } catch (error) {
@@ -177,9 +194,12 @@ export function BusinessProfileScreen() {
           </Surface>
 
           <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Company Logo</Title>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Title style={styles.sectionTitle}>Company Logo</Title>
+              {!isPro && <ProBadge size="small" />}
+            </View>
             <Text style={styles.helperText}>
-              This will appear on your PDF quotes and invoices
+              {isPro ? 'This will appear on your PDF quotes and invoices' : 'Upgrade to Pro to add your logo to PDFs'}
             </Text>
 
             {logoUri ? (
@@ -198,16 +218,103 @@ export function BusinessProfileScreen() {
                 </View>
               </View>
             ) : (
-              <TouchableOpacity style={styles.logoUploadBox} onPress={handlePickLogo}>
+              <TouchableOpacity style={styles.logoUploadBox} onPress={() => {
+                if (!isPro) {
+                  navigation.navigate('Paywall' as never);
+                  return;
+                }
+                handlePickLogo();
+              }}>
                 <MaterialCommunityIcons
-                  name="image-plus"
+                  name={isPro ? 'image-plus' : 'lock-outline'}
                   size={48}
-                  color={colors.primary}
+                  color={isPro ? colors.primary : colors.textMuted}
                 />
-                <Text style={styles.logoUploadText}>Tap to Upload Logo</Text>
+                <Text style={styles.logoUploadText}>{isPro ? 'Tap to Upload Logo' : 'Pro Feature'}</Text>
                 <Text style={styles.logoUploadHint}>Recommended: 500x500px (Square)</Text>
               </TouchableOpacity>
             )}
+          </Surface>
+
+          <Surface style={styles.card}>
+            <Title style={styles.sectionTitle}>Brand Colour</Title>
+            <Text style={styles.helperText}>
+              Override the default accent colour on your PDF templates
+            </Text>
+
+            {/* Active colour preview banner */}
+            {brandColor ? (
+              <View style={[styles.colorBanner, { backgroundColor: brandColor }]}>
+                <View style={styles.colorBannerInner}>
+                  <MaterialCommunityIcons name="palette" size={20} color="#FFFFFF" />
+                  <Text style={styles.colorBannerText}>{brandColor.toUpperCase()}</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    setBrandColor(undefined);
+                    setHexInput('');
+                  }}
+                  style={styles.colorBannerClear}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <MaterialCommunityIcons name="close-circle" size={22} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.colorBannerEmpty}>
+                <MaterialCommunityIcons name="palette-outline" size={20} color={colors.onSurface} />
+                <Text style={styles.colorBannerEmptyText}>No custom colour — using template default</Text>
+              </View>
+            )}
+
+            {/* Colour picker */}
+            <View style={styles.pickerContainer}>
+              <ColorPicker
+                value={brandColor || '#059669'}
+                onComplete={onColorChange}
+                style={styles.picker}
+              >
+                <Panel1 style={styles.pickerPanel} />
+                <HueSlider style={styles.pickerHueSlider} />
+              </ColorPicker>
+            </View>
+
+            {/* Hex input for exact values */}
+            <View style={styles.hexRow}>
+              <View style={[
+                styles.hexPreview,
+                { backgroundColor: hexInput && /^#[0-9A-Fa-f]{6}$/.test(hexInput) ? hexInput : (brandColor || colors.outline) },
+              ]} />
+              <TextInput
+                mode="outlined"
+                label="Hex"
+                value={hexInput}
+                onChangeText={(text) => {
+                  const cleaned = text.startsWith('#') ? text : `#${text}`;
+                  setHexInput(cleaned.slice(0, 7));
+                }}
+                placeholder="#059669"
+                style={styles.hexInput}
+                autoCapitalize="characters"
+                maxLength={7}
+                dense
+              />
+              <Button
+                mode="contained"
+                onPress={() => {
+                  if (/^#[0-9A-Fa-f]{6}$/.test(hexInput)) {
+                    setBrandColor(hexInput);
+                  } else {
+                    Alert.alert('Invalid Colour', 'Enter a valid hex colour (e.g. #3B82F6)');
+                  }
+                }}
+                disabled={!/^#[0-9A-Fa-f]{6}$/.test(hexInput)}
+                compact
+                style={styles.hexApply}
+              >
+                Apply
+              </Button>
+            </View>
           </Surface>
         </WebContainer>
       </ScrollView>
@@ -309,5 +416,78 @@ const styles = StyleSheet.create({
   logoButton: {
     flex: 1,
     marginRight: 8,
+  },
+  colorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  colorBannerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  colorBannerText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  colorBannerClear: {
+    padding: 2,
+  },
+  colorBannerEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.outline,
+    borderStyle: 'dashed',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  colorBannerEmptyText: {
+    fontSize: 13,
+    color: colors.onSurface,
+    fontStyle: 'italic',
+  },
+  pickerContainer: {
+    marginBottom: 16,
+  },
+  picker: {
+    gap: 12,
+  },
+  pickerPanel: {
+    height: 180,
+    borderRadius: 10,
+  },
+  pickerHueSlider: {
+    height: 36,
+    borderRadius: 18,
+  },
+  hexRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  hexPreview: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.outline,
+  },
+  hexInput: {
+    flex: 1,
+    fontSize: 14,
+  },
+  hexApply: {
+    alignSelf: 'center',
   },
 });

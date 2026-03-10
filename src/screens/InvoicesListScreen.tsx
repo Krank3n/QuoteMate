@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, FlatList, Alert } from 'react-native';
+import { View, StyleSheet, FlatList, Alert, RefreshControl } from 'react-native';
 import {
   Text,
   Searchbar,
@@ -23,7 +23,9 @@ import { Invoice, Quote } from '../types';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { InvoiceCard } from '../components/InvoiceCard';
+import { ProBadge } from '../components/ProBadge';
 import { isInvoiceOverdue } from '../utils/invoiceCalculator';
+import { AnimatedListItem } from '../components/AnimatedListItem';
 
 type FilterStatus = 'all' | 'draft' | 'sent' | 'paid' | 'overdue';
 
@@ -41,12 +43,16 @@ export function InvoicesListScreen() {
     businessSettings,
     loadInvoices,
     loadNextInvoiceNumber,
+    subscriptionStatus,
   } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [fabOpen, setFabOpen] = useState(false);
   const [quoteDialogVisible, setQuoteDialogVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Load invoices on mount
   useEffect(() => {
@@ -94,15 +100,31 @@ export function InvoicesListScreen() {
       return true;
     });
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadInvoices();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const handleNewInvoice = () => {
     setFabOpen(false);
+    if (!isPro) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
     createNewInvoice();
-    // Navigate to the new invoice creation flow (reuses quote screens)
     navigation.navigate('NewInvoice' as never, { screen: 'JobDetails' } as never);
   };
 
   const handleConvertFromQuote = () => {
     setFabOpen(false);
+    if (!isPro) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
     if (convertibleQuotes.length === 0) {
       Alert.alert(
         'No Quotes Available',
@@ -146,17 +168,19 @@ export function InvoicesListScreen() {
     }
   };
 
-  const renderInvoiceCard = ({ item: invoice }: { item: Invoice }) => (
-    <InvoiceCard
-      invoice={invoice}
-      businessSettings={businessSettings}
-      onView={handleViewInvoice}
-      onEdit={handleEditInvoice}
-      onDelete={handleDeleteInvoice}
-      onRecordPayment={handleRecordPayment}
-      onSave={saveInvoice}
-      onDuplicate={handleDuplicateInvoice}
-    />
+  const renderInvoiceCard = ({ item: invoice, index }: { item: Invoice; index: number }) => (
+    <AnimatedListItem index={index}>
+      <InvoiceCard
+        invoice={invoice}
+        businessSettings={businessSettings}
+        onView={handleViewInvoice}
+        onEdit={handleEditInvoice}
+        onDelete={handleDeleteInvoice}
+        onRecordPayment={handleRecordPayment}
+        onSave={saveInvoice}
+        onDuplicate={handleDuplicateInvoice}
+      />
+    </AnimatedListItem>
   );
 
   return (
@@ -218,6 +242,14 @@ export function InvoicesListScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           style={styles.flatList}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <MaterialCommunityIcons
@@ -227,8 +259,9 @@ export function InvoicesListScreen() {
               />
               <Text style={styles.emptyText}>No invoices found</Text>
               <Text style={styles.emptySubtext}>
-                Create an invoice or convert a quote
+                {isPro ? 'Create an invoice or convert a quote' : 'Upgrade to Pro to create invoices'}
               </Text>
+              {!isPro && <View style={{ marginTop: 12 }}><ProBadge /></View>}
             </View>
           }
         />

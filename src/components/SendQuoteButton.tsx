@@ -76,16 +76,17 @@ export function SendQuoteButton({
 
   const handleSendQuote = async () => {
     try {
-      // Generate acceptance link for the quote
+      // Generate acceptance link for the quote (Pro only)
       let acceptanceUrl = '';
-      const userId = auth.currentUser?.uid;
-      if (userId) {
-        try {
-          acceptanceUrl = await generateAcceptanceLink(quote.id, userId);
-          console.log('Generated acceptance link:', acceptanceUrl);
-        } catch (linkError) {
-          console.error('Failed to generate acceptance link:', linkError);
-          // Continue without acceptance link - not a fatal error
+      if (isPro) {
+        const userId = auth.currentUser?.uid;
+        if (userId) {
+          try {
+            acceptanceUrl = await generateAcceptanceLink(quote.id, userId);
+            console.log('Generated acceptance link:', acceptanceUrl);
+          } catch (linkError) {
+            console.error('Failed to generate acceptance link:', linkError);
+          }
         }
       }
 

@@ -12,16 +12,16 @@
 - **Name**: QuoteMate Pro Monthly
 - **Description**: Unlimited quotes with AI-powered material suggestions and live Bunnings pricing
 - **Billing period**: 1 month
-- **Price**: $19.99 AUD (or your preferred price)
+- **Price**: $29.00 USD
 - **Free trial**: Optional (recommend 7 days)
 - **Grace period**: 3 days (recommended)
 
 ### Yearly Subscription
 - **Product ID**: `quotemate_premium_yearly`
 - **Name**: QuoteMate Pro Yearly
-- **Description**: Unlimited quotes with AI-powered material suggestions and live Bunnings pricing - Save 20%!
+- **Description**: Unlimited quotes with AI-powered material suggestions and live Bunnings pricing - Save 43%!
 - **Billing period**: 1 year
-- **Price**: $199.99 AUD (20% discount vs monthly)
+- **Price**: $199.00 USD (save 43% vs monthly)
 - **Free trial**: Optional (recommend 7 days)
 - **Grace period**: 3 days (recommended)
 

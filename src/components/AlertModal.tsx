@@ -17,6 +17,7 @@ import { colors } from '../theme';
 import { Quote, Invoice, BusinessSettings } from '../types';
 import { SendQuoteButton } from './SendQuoteButton';
 import { SendInvoiceButton } from './SendInvoiceButton';
+import { successTap, errorTap } from '../utils/haptics';
 
 export type AlertType = 'success' | 'warning' | 'error' | 'info';
 
@@ -142,6 +143,10 @@ export function AlertModal({
 
   useEffect(() => {
     if (visible) {
+      // Haptic feedback based on type
+      if (type === 'success') successTap();
+      else if (type === 'error') errorTap();
+
       // Reset all animations
       scaleAnim.setValue(0);
       fadeAnim.setValue(0);

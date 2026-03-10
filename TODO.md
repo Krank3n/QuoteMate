@@ -32,8 +32,8 @@
 - [x] **Add usage counter to Dashboard** — progress bar with "X of Y quotes remaining" and upgrade CTA when limit reached
 - [ ] **Reduce free quota from 5 to 3** quotes/month to drive faster conversion
 - [ ] **Show early usage warnings** — display "2 of 3 remaining" starting at quote #2
-- [ ] **Raise pricing to $29-39/month** — current $19/month is below industry benchmark ($29-99)
-- [ ] **Adjust annual pricing** — current $190/year (17% off) is too steep; move to $279/year (20% off)
+- [x] **Raise pricing to $29/month** — updated from $19/month to $29/month across all platforms
+- [x] **Adjust annual pricing** — set to $199/year (43% savings vs monthly)
 - [ ] **Implement 7-day free trial** as alternative to monthly quota (A/B test)
 - [ ] **Add cancellation retention offers** — auto-offer 40% discount when reason is "too expensive"
 - [ ] **Expand feature gating** beyond just quote count:

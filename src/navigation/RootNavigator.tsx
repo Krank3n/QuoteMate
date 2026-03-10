@@ -27,6 +27,7 @@ import { TradePricingScreen } from '../screens/settings/TradePricingScreen';
 import { SubscriptionSettingsScreen } from '../screens/settings/SubscriptionSettingsScreen';
 import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen';
 import { AboutScreen } from '../screens/settings/AboutScreen';
+import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
 import { CustomerDetailsScreen } from '../screens/NewQuote/CustomerDetailsScreen';
@@ -383,6 +384,17 @@ export function RootNavigator() {
           headerStyle: { backgroundColor: colors.primary },
           headerTintColor: colors.white,
           title: 'Account',
+        }}
+      />
+      <RootStack.Screen
+        name="PDFTemplate"
+        component={PDFTemplateScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'PDF Templates',
         }}
       />
       <RootStack.Screen

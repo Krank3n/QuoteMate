@@ -15,9 +15,11 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import * as Print from 'expo-print';
 import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
+import { generateQuotePDF } from '../utils/pdfGenerator';
 import { SendQuoteButton } from '../components/SendQuoteButton';
 import { AlertModal } from '../components/AlertModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,6 +35,7 @@ export function ViewQuoteScreen() {
   const [displayQuote, setDisplayQuote] = useState(null);
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
 
   // Refresh quote data when screen comes into focus
   // Auto-save if there are pending changes in currentQuote
@@ -98,6 +101,18 @@ export function ViewQuoteScreen() {
     }
   };
 
+  const handleViewPDF = async () => {
+    setIsPdfLoading(true);
+    try {
+      const html = await generateQuotePDF(quote, businessSettings);
+      await Print.printAsync({ html });
+    } catch (error) {
+      console.error('PDF preview error:', error);
+    } finally {
+      setIsPdfLoading(false);
+    }
+  };
+
   // Show convert button for accepted or sent quotes
   const canConvertToInvoice = quote.status === 'accepted' || quote.status === 'sent';
 
@@ -131,7 +146,12 @@ export function ViewQuoteScreen() {
             <Text style={styles.headerQuoteNumber}>{displayQuote.quoteNumber}</Text>
           )}
         </View>
-        <View style={{ width: 40 }} />
+        <IconButton
+          icon="file-pdf-box"
+          size={24}
+          onPress={handleViewPDF}
+          disabled={isPdfLoading}
+        />
       </View>
 
       <ScrollView

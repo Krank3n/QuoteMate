@@ -3,25 +3,28 @@
  * Consolidated quote card used in both DashboardScreen and QuotesListScreen
  */
 
-import React, { useState } from 'react';
-import { View, StyleSheet, Alert, Platform, Pressable } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { View, StyleSheet, Alert, Platform, Pressable, Animated } from 'react-native';
 import {
   Text,
   Card,
   Divider,
   Menu,
   IconButton,
-  Chip,
 } from 'react-native-paper';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow, differenceInDays } from 'date-fns';
 import * as Print from 'expo-print';
 import * as MailComposer from 'expo-mail-composer';
 
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Quote, BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { generateQuotePDF, exportQuotePDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
+import { selectionTap, successTap } from '../utils/haptics';
+import { SwipeableCard } from './SwipeableCard';
+import { AnimatedChip } from './AnimatedChip';
 
 interface QuoteCardProps {
   quote: Quote;
@@ -49,6 +52,7 @@ export function QuoteCard({
   onConvertToInvoice,
 }: QuoteCardProps) {
   const [menuVisible, setMenuVisible] = useState(false);
+  const scaleAnim = useRef(new Animated.Value(1)).current;
   const { subscriptionStatus } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
@@ -155,9 +159,36 @@ export function QuoteCard({
 
 
   return (
-    <>
+    <SwipeableCard
+      rightActions={[
+        { icon: 'send', label: 'Send', color: colors.primary, bgColor: colors.primaryBg, onPress: handleSendQuote },
+        { icon: 'content-copy', label: 'Duplicate', color: colors.info, bgColor: colors.infoBg, onPress: () => onDuplicate(quote) },
+      ]}
+      leftActions={[
+        { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteQuote },
+      ]}
+    >
+      <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
       <Card style={styles.quoteCard}>
-        <Pressable onPress={() => onView(quote.id)}>
+        <Pressable
+          onPress={() => onView(quote.id)}
+          onPressIn={() => {
+            Animated.spring(scaleAnim, {
+              toValue: 0.97,
+              useNativeDriver: true,
+              speed: 50,
+              bounciness: 4,
+            }).start();
+          }}
+          onPressOut={() => {
+            Animated.spring(scaleAnim, {
+              toValue: 1,
+              useNativeDriver: true,
+              speed: 50,
+              bounciness: 4,
+            }).start();
+          }}
+        >
           <Card.Content style={styles.cardContent}>
             <View style={styles.quoteHeader}>
               <View style={styles.quoteInfo}>
@@ -170,16 +201,18 @@ export function QuoteCard({
               <View style={styles.quoteRight}>
                 <View style={styles.quotePrice}>
                   <Text style={styles.quoteTotal}>{formatCurrency(quote.total)}</Text>
-                  <Chip
+                  <AnimatedChip
+                    status={quote.status}
                     style={[styles.statusChip, getStatusChipStyle(quote.status)]}
                     textStyle={styles.statusText}
                     onPress={(e) => {
                       e.stopPropagation();
+                      selectionTap();
                       onStatusChange?.(quote);
                     }}
                   >
                     {quote.status}
-                  </Chip>
+                  </AnimatedChip>
                 </View>
                 <Menu
                   visible={menuVisible}
@@ -258,13 +291,30 @@ export function QuoteCard({
               </View>
             </View>
             <Divider style={styles.divider} />
-            <Text style={styles.quoteDate}>
-              {format(new Date(quote.updatedAt), 'dd MMM yyyy')}
-            </Text>
+            <View style={styles.footer}>
+              <View style={styles.footerStats}>
+                <View style={styles.statBadge}>
+                  <MaterialCommunityIcons name="package-variant" size={13} color={colors.textMuted} />
+                  <Text style={styles.statBadgeText}>{quote.materials.length} item{quote.materials.length !== 1 ? 's' : ''}</Text>
+                </View>
+                {quote.laborHours > 0 && (
+                  <View style={styles.statBadge}>
+                    <MaterialCommunityIcons name="clock-outline" size={13} color={colors.textMuted} />
+                    <Text style={styles.statBadgeText}>{quote.laborHours}h</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.quoteDate}>
+                {differenceInDays(new Date(), new Date(quote.updatedAt)) < 7
+                  ? formatDistanceToNow(new Date(quote.updatedAt), { addSuffix: true })
+                  : format(new Date(quote.updatedAt), 'dd MMM yyyy')}
+              </Text>
+            </View>
           </Card.Content>
         </Pressable>
       </Card>
-    </>
+      </Animated.View>
+    </SwipeableCard>
   );
 }
 
@@ -341,8 +391,26 @@ const styles = StyleSheet.create({
   divider: {
     marginVertical: 12,
   },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  footerStats: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statBadgeText: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
   quoteDate: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: colors.textMuted,
   },
 });

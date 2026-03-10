@@ -53,12 +53,15 @@ import { generateId } from '../../utils/generateId';
 import { bunningsApi } from '../../services/bunningsApi';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
+import { ProBadge } from '../../components/ProBadge';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { quotes, invoices, businessSettings } = useStore();
+  const { quotes, invoices, businessSettings, subscriptionStatus } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   // For compatibility, alias to currentQuote (used throughout this file)
   const currentQuote = currentDocument;
@@ -1194,7 +1197,7 @@ export function JobDetailsScreen() {
                   >
                     <MaterialCommunityIcons
                       name={isRecording ? 'stop' : 'microphone'}
-                      size={48}
+                      size={36}
                       color="#FFFFFF"
                     />
                   </Animated.View>
@@ -1206,14 +1209,14 @@ export function JobDetailsScreen() {
                 <TouchableOpacity
                   onPress={handleClearDescription}
                   disabled={isProcessingVoice}
-                  style={[styles.actionButton, { backgroundColor: colors.surface, marginLeft: 20 }]}
+                  style={styles.clearButton}
                 >
                   <MaterialCommunityIcons
-                    name="delete-outline"
-                    size={24}
-                    color={colors.error}
+                    name="close-circle"
+                    size={20}
+                    color={colors.onSurface}
                   />
-                  <Text style={[styles.actionButtonText, { color: colors.error }]}>Clear</Text>
+                  <Text style={styles.clearButtonText}>Clear</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -1256,29 +1259,35 @@ export function JobDetailsScreen() {
         {/* Clean-up Button below Job Description */}
         {jobDescription.trim() && !isRecording && (
           <TouchableOpacity
-            onPress={handleCleanupDescription}
+            onPress={() => {
+              if (!isPro) {
+                navigation.navigate('Paywall' as never);
+                return;
+              }
+              handleCleanupDescription();
+            }}
             disabled={isProcessingVoice}
             style={[
               styles.cleanupButtonBelow,
               {
-                backgroundColor: isProcessingVoice ? colors.surfaceGray : colors.primary,
-                opacity: isProcessingVoice ? 0.7 : 1
+                opacity: isProcessingVoice ? 0.5 : 1
               }
             ]}
           >
             {isProcessingVoice ? (
               <>
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={colors.primary} />
                 <Text style={styles.cleanupButtonBelowText}>Cleaning...</Text>
               </>
             ) : (
               <>
                 <MaterialCommunityIcons
                   name="auto-fix"
-                  size={20}
-                  color="#FFFFFF"
+                  size={18}
+                  color={colors.primary}
                 />
                 <Text style={styles.cleanupButtonBelowText}>Clean-up & Generate Title</Text>
+                {!isPro && <ProBadge size="small" />}
               </>
             )}
           </TouchableOpacity>
@@ -1392,7 +1401,7 @@ const styles = StyleSheet.create({
   },
   recordButtonContainer: {
     alignItems: 'center',
-    marginVertical: 24,
+    marginVertical: 16,
   },
   recordButtonRow: {
     flexDirection: 'row',
@@ -1406,18 +1415,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   recordButton: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    backgroundColor: colors.primary, // Beautiful eucalyptus green
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 12,
+    elevation: 8,
     shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    // Subtle gradient effect (simulated with overlays in the component)
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
     borderWidth: 3,
     borderColor: 'rgba(255, 255, 255, 0.2)',
   },
@@ -1429,18 +1437,18 @@ const styles = StyleSheet.create({
   },
   rippleRing: {
     position: 'absolute',
-    width: 110,
-    height: 110,
-    borderRadius: 55,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     borderWidth: 3,
     borderColor: colors.primary,
     backgroundColor: 'transparent',
   },
   glowEffect: {
     position: 'absolute',
-    width: 130,
-    height: 130,
-    borderRadius: 65,
+    width: 108,
+    height: 108,
+    borderRadius: 54,
     backgroundColor: colors.primary,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 0 },
@@ -1477,25 +1485,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderRadius: 8,
-    marginTop: -12,
+    marginTop: -8,
     marginBottom: 16,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: 'transparent',
   },
   cleanupButtonBelowText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#FFFFFF',
-    marginLeft: 8,
+    color: colors.primary,
+    marginLeft: 6,
+  },
+  clearButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 16,
+    padding: 8,
+  },
+  clearButtonText: {
+    fontSize: 13,
+    color: colors.onSurface,
+    marginLeft: 4,
   },
   recordButtonLabel: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
     marginTop: 8,
@@ -1557,6 +1574,7 @@ const styles = StyleSheet.create({
   },
   paramsSection: {
     marginHorizontal: 20,
+    marginTop: 20,
     marginBottom: 20,
     padding: 16,
     paddingTop: 16,
@@ -1568,7 +1586,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   templateSection: {
-    marginBottom: 16, // Consistent spacing with next section
+    marginBottom: 0,
   },
   helperText: {
     fontSize: 13,

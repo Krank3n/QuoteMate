@@ -1,5 +1,15 @@
 // Core data models for QuoteMate
 
+// PDF Template types
+export type PdfTemplateId = 'professional' | 'clean' | 'bold' | 'tradesman';
+
+export interface PdfTemplateInfo {
+  id: PdfTemplateId;
+  name: string;
+  description: string;
+  accentColor: string;
+}
+
 export interface Material {
   id: string;
   name: string;
@@ -175,6 +185,12 @@ export interface BusinessSettings {
   showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)
   // Payment method settings
   paymentMethods?: PaymentMethodSettings;
+  // Branding
+  brandColor?: string; // Custom accent color for PDF documents (overrides template default)
+  // Quote/invoice display settings
+  groupMaterialsBySection?: boolean; // Group materials by work section on PDFs (default: false)
+  // PDF template
+  pdfTemplate?: PdfTemplateId;
   // Legacy fields (kept for backwards compatibility)
   hardwareStores?: string[]; // DEPRECATED - use selectedStore instead
   customStores?: string[]; // DEPRECATED - Custom store URLs added by user

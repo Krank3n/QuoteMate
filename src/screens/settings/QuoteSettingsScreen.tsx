@@ -1,6 +1,6 @@
 /**
  * Quote Settings Screen
- * Default rates and quote display options
+ * Default rates for new quotes
  */
 
 import React, { useState, useEffect } from 'react';
@@ -8,16 +8,13 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Platform,
 } from 'react-native';
 import {
   Text,
   TextInput,
   Surface,
   Title,
-  Switch,
 } from 'react-native-paper';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
@@ -30,7 +27,6 @@ export function QuoteSettingsScreen() {
 
   const [laborRate, setLaborRate] = useState('85');
   const [markup, setMarkup] = useState('20');
-  const [showLaborHours, setShowLaborHours] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -39,7 +35,6 @@ export function QuoteSettingsScreen() {
     if (businessSettings) {
       setLaborRate(businessSettings.defaultLaborRate.toString());
       setMarkup(businessSettings.defaultMarkup.toString());
-      setShowLaborHours(businessSettings.showLaborHours === true);
     }
   }, [businessSettings]);
 
@@ -50,7 +45,6 @@ export function QuoteSettingsScreen() {
         ...businessSettings!,
         defaultLaborRate: parseFloat(laborRate) || 85,
         defaultMarkup: parseFloat(markup) || 20,
-        showLaborHours: showLaborHours,
       });
       setShowSuccessModal(true);
     } catch (error) {
@@ -93,30 +87,6 @@ export function QuoteSettingsScreen() {
               keyboardType="decimal-pad"
               right={<TextInput.Affix text="%" />}
             />
-          </Surface>
-
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Quote Display</Title>
-            <Text style={styles.helperText}>
-              Control what information is shown on quotes
-            </Text>
-
-            <View style={styles.switchRow}>
-              <View style={styles.switchLabel}>
-                <MaterialCommunityIcons name="clock-outline" size={24} color={colors.primary} />
-                <View style={styles.switchTextContainer}>
-                  <Text style={styles.switchTitle}>Show Labor Hours</Text>
-                  <Text style={styles.switchDescription}>
-                    Display hours breakdown (e.g., "8 hours @ $85/hr") instead of just the labor total
-                  </Text>
-                </View>
-              </View>
-              <Switch
-                value={showLaborHours}
-                onValueChange={setShowLaborHours}
-                color={colors.primary}
-              />
-            </View>
           </Surface>
         </WebContainer>
       </ScrollView>
@@ -176,31 +146,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.onSurface,
     marginBottom: 16,
-  },
-  switchRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  switchLabel: {
-    flex: 1,
-    marginRight: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  switchTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  switchTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  switchDescription: {
-    fontSize: 13,
-    color: colors.onSurface,
-    lineHeight: 18,
   },
 });

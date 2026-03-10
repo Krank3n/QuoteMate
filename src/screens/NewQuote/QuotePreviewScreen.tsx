@@ -19,9 +19,11 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
+import * as Print from 'expo-print';
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
+import { generateQuotePDF } from '../../utils/pdfGenerator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SuccessModal } from '../../components/SuccessModal';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -34,6 +36,7 @@ export function QuotePreviewScreen() {
   const [notes, setNotes] = useState(currentQuote?.notes || '');
   const [status, setStatus] = useState(currentQuote?.status || 'draft');
   const [isSaving, setIsSaving] = useState(false);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   if (!currentQuote) {
@@ -128,6 +131,18 @@ export function QuotePreviewScreen() {
   const handleExport = async () => {
     setSendDialogVisible(false);
     await handleExportPDF();
+  };
+
+  const handleViewPDF = async () => {
+    setIsPdfLoading(true);
+    try {
+      const html = await generateQuotePDF(currentQuote, businessSettings);
+      await Print.printAsync({ html });
+    } catch (error) {
+      console.error('PDF preview error:', error);
+    } finally {
+      setIsPdfLoading(false);
+    }
   };
 
   const handleEditCustomer = () => {
@@ -280,6 +295,17 @@ export function QuotePreviewScreen() {
           style={styles.notesInput}
         />
       </Surface>
+
+      <Button
+        mode="outlined"
+        onPress={handleViewPDF}
+        loading={isPdfLoading}
+        disabled={isPdfLoading}
+        icon="file-pdf-box"
+        style={styles.viewPdfButton}
+      >
+        View PDF Preview
+      </Button>
       </ScrollView>
 
       <FixedBottomButton
@@ -404,6 +430,9 @@ const styles = StyleSheet.create({
   notesInput: {
     textAlignVertical: 'top',
     paddingTop: 8,
+  },
+  viewPdfButton: {
+    marginBottom: 16,
   },
   dialogText: {
     fontSize: 14,

@@ -89,7 +89,7 @@ This is the same model used by Netflix, Spotify, and other multiplatform service
 - Type: Auto-Renewable Subscription
 - Subscription Group: QuoteMate Pro
 - Duration: 1 Month
-- Price: $19 USD/month (or equivalent)
+- Price: $29 USD/month (or equivalent)
 
 **Product 2: Yearly Subscription**
 - Product ID: `quotemate_premium_yearly`
@@ -197,7 +197,7 @@ Users who purchased on web or Android can ACCESS their subscription on iOS (mult
 **User Flow on iOS** (Step by step):
 1. Open QuoteMate app on iPhone
 2. Tap "Upgrade to Pro" button on Dashboard
-3. See "QuoteMate Pro" plan with features and $19/month price
+3. See "QuoteMate Pro" plan with features and $29/month price
 4. Tap "Start Pro Subscription" button
 5. Apple IAP payment sheet appears (native iOS)
 6. User completes purchase with Face ID / Touch ID

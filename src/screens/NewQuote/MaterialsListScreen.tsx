@@ -111,6 +111,7 @@ import {
 } from '../../services/bunningsScraperClient';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
+import { ProBadge } from '../../components/ProBadge';
 import { BUNNINGS_SCRAPER_URL } from '@env';
 
 // AI Analysis Loading State with Lottie Animation and scrolling progress steps
@@ -268,7 +269,9 @@ export function MaterialsListScreen() {
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { businessSettings } = useStore();
+  const { businessSettings, subscriptionStatus } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   // For compatibility, alias to currentQuote (used throughout this file)
   const currentQuote = currentDocument;
@@ -1065,12 +1068,21 @@ export function MaterialsListScreen() {
             </Text>
 
             {/* AI Generate Card */}
-            <TouchableOpacity style={styles.emptyActionCard} onPress={handleGenerateMaterialsList} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.emptyActionCard} onPress={() => {
+              if (!isPro) {
+                navigation.navigate('Paywall' as never);
+                return;
+              }
+              handleGenerateMaterialsList();
+            }} activeOpacity={0.7}>
               <View style={styles.emptyActionIconWrap}>
                 <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
               </View>
               <View style={styles.emptyActionContent}>
-                <Text style={styles.emptyActionTitle}>Generate with AI</Text>
+                <View style={styles.emptyActionTitleRow}>
+                  <Text style={styles.emptyActionTitle}>Generate with AI</Text>
+                  {!isPro && <ProBadge size="small" />}
+                </View>
                 <Text style={styles.emptyActionDesc}>
                   Automatically create a full materials list from your job description
                 </Text>
@@ -1487,6 +1499,11 @@ const styles = StyleSheet.create({
   },
   emptyActionContent: {
     flex: 1,
+  },
+  emptyActionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   emptyActionTitle: {
     fontSize: 16,

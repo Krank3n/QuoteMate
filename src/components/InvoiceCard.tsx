@@ -3,26 +3,29 @@
  * Card component for displaying invoice information in lists
  */
 
-import React, { useState } from 'react';
-import { View, StyleSheet, Alert, Platform, Pressable } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { View, StyleSheet, Alert, Platform, Pressable, Animated } from 'react-native';
 import {
   Text,
   Card,
   Divider,
   Menu,
   IconButton,
-  Chip,
 } from 'react-native-paper';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow, differenceInDays } from 'date-fns';
 import * as Print from 'expo-print';
 import * as MailComposer from 'expo-mail-composer';
 
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Invoice, BusinessSettings, InvoiceStatus } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { isInvoiceOverdue, getOverdueText, getAmountDue } from '../utils/invoiceCalculator';
 import { generateInvoicePDF, exportInvoicePDF, generatePdfFilename } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
+import { selectionTap } from '../utils/haptics';
+import { SwipeableCard } from './SwipeableCard';
+import { AnimatedChip } from './AnimatedChip';
 
 interface InvoiceCardProps {
   invoice: Invoice;
@@ -49,6 +52,7 @@ export function InvoiceCard({
 }: InvoiceCardProps) {
   const [menuVisible, setMenuVisible] = useState(false);
   const [statusMenuVisible, setStatusMenuVisible] = useState(false);
+  const scaleAnim = useRef(new Animated.Value(1)).current;
   const { subscriptionStatus } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
@@ -134,6 +138,7 @@ export function InvoiceCard({
   };
 
   const handleStatusChange = async (newStatus: InvoiceStatus) => {
+    selectionTap();
     setStatusMenuVisible(false);
     const updatedInvoice = { ...invoice, status: newStatus, updatedAt: new Date() };
     await onSave(updatedInvoice);
@@ -149,8 +154,36 @@ export function InvoiceCard({
   const showRecordPayment = invoice.status !== 'paid' && invoice.status !== 'cancelled';
 
   return (
+    <SwipeableCard
+      rightActions={[
+        { icon: 'send', label: 'Send', color: colors.primary, bgColor: colors.primaryBg, onPress: handleSendInvoice },
+        { icon: 'content-copy', label: 'Duplicate', color: colors.info, bgColor: colors.infoBg, onPress: () => { onDuplicate(invoice); } },
+      ]}
+      leftActions={[
+        { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteInvoice },
+      ]}
+    >
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
     <Card style={styles.invoiceCard}>
-      <Pressable onPress={() => onView(invoice.id)}>
+      <Pressable
+        onPress={() => onView(invoice.id)}
+        onPressIn={() => {
+          Animated.spring(scaleAnim, {
+            toValue: 0.97,
+            useNativeDriver: true,
+            speed: 50,
+            bounciness: 4,
+          }).start();
+        }}
+        onPressOut={() => {
+          Animated.spring(scaleAnim, {
+            toValue: 1,
+            useNativeDriver: true,
+            speed: 50,
+            bounciness: 4,
+          }).start();
+        }}
+      >
         <Card.Content style={styles.cardContent}>
           <View style={styles.invoiceHeader}>
             <View style={styles.invoiceInfo}>
@@ -173,7 +206,8 @@ export function InvoiceCard({
                   visible={statusMenuVisible}
                   onDismiss={() => setStatusMenuVisible(false)}
                   anchor={
-                    <Chip
+                    <AnimatedChip
+                      status={invoice.status}
                       style={[styles.statusChip, getStatusChipStyle(invoice.status)]}
                       textStyle={styles.statusText}
                       onPress={(e) => {
@@ -182,7 +216,7 @@ export function InvoiceCard({
                       }}
                     >
                       {invoice.status}
-                    </Chip>
+                    </AnimatedChip>
                   }
                 >
                   {/* Draft status options */}
@@ -287,13 +321,31 @@ export function InvoiceCard({
           </View>
           <Divider style={styles.divider} />
           <View style={styles.footer}>
+            <View style={styles.footerStats}>
+              <View style={styles.statBadge}>
+                <MaterialCommunityIcons name="package-variant" size={13} color={colors.textMuted} />
+                <Text style={styles.statBadgeText}>{invoice.materials.length} item{invoice.materials.length !== 1 ? 's' : ''}</Text>
+              </View>
+              {invoice.laborHours > 0 && (
+                <View style={styles.statBadge}>
+                  <MaterialCommunityIcons name="clock-outline" size={13} color={colors.textMuted} />
+                  <Text style={styles.statBadgeText}>{invoice.laborHours}h</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.invoiceDate}>
-              Due: {format(new Date(invoice.dueDate), 'dd MMM yyyy')}
+              Due {differenceInDays(new Date(invoice.dueDate), new Date()) < 0
+                ? formatDistanceToNow(new Date(invoice.dueDate), { addSuffix: true })
+                : differenceInDays(new Date(invoice.dueDate), new Date()) < 7
+                ? formatDistanceToNow(new Date(invoice.dueDate), { addSuffix: true })
+                : format(new Date(invoice.dueDate), 'dd MMM yyyy')}
             </Text>
           </View>
         </Card.Content>
       </Pressable>
     </Card>
+    </Animated.View>
+    </SwipeableCard>
   );
 }
 
@@ -390,8 +442,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  footerStats: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statBadgeText: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
   invoiceDate: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: colors.textMuted,
   },
 });
