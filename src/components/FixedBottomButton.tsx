@@ -188,7 +188,7 @@ export function FixedBottomButton({
       <View
         style={[
           styles.bottomActions,
-             Platform.OS !== 'ios' && { marginBottom: Math.max(insets.bottom, 16) }
+             Platform.OS === 'web' && { marginBottom: Math.max(insets.bottom, 16) }
         ]}
         needsOffscreenAlphaCompositing={false}
         renderToHardwareTextureAndroid={true}

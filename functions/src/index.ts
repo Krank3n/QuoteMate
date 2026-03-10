@@ -12,6 +12,7 @@ import {
   sendSubscriptionCancelledEmail,
   sendReEngagementEmail,
   sendOnboardingTipEmail,
+  sendUpdateAnnouncementEmail,
   handleUnsubscribe,
 } from './email';
 
@@ -4008,4 +4009,68 @@ export const adminDashboard = functions
       console.error('Admin dashboard error:', error);
       res.status(500).send(generateErrorPage('Dashboard Error', error.message));
     }
+  });
+
+// ============================================================
+// SEND UPDATE ANNOUNCEMENT EMAIL
+// ============================================================
+export const sendUpdateAnnouncement = functions
+  .runWith({ timeoutSeconds: 300, memory: '256MB' })
+  .https.onRequest(async (req, res) => {
+    const corsHandler = cors({ origin: true });
+    corsHandler(req, res, async () => {
+      // Gate with admin key
+      const adminKey = functions.config().admin?.dashboard_key;
+      if (!adminKey || req.query.key !== adminKey) {
+        res.status(403).send('Unauthorized');
+        return;
+      }
+
+      try {
+        // Optional: send to a single email for testing
+        const testEmail = req.query.email as string;
+
+        if (testEmail) {
+          // Send to single address (for testing)
+          const success = await sendUpdateAnnouncementEmail(testEmail, '', 'test');
+          res.status(200).json({ sent: success ? 1 : 0, failed: success ? 0 : 1 });
+          return;
+        }
+
+        // Send to all users
+        const authUsers = await admin.auth().listUsers(1000);
+        let sent = 0;
+        let failed = 0;
+        let skipped = 0;
+
+        for (const user of authUsers.users) {
+          const email = user.email;
+          if (!email) { skipped++; continue; }
+
+          // Get business name
+          let businessName = '';
+          try {
+            const settingsDoc = await admin.firestore()
+              .doc(`users/${user.uid}/settings/business`)
+              .get();
+            if (settingsDoc.exists) {
+              businessName = settingsDoc.data()?.businessName || '';
+            }
+          } catch (e) { /* ignore */ }
+
+          try {
+            const success = await sendUpdateAnnouncementEmail(email, businessName, user.uid);
+            if (success) sent++; else failed++;
+          } catch (e) {
+            console.error(`Failed to send to ${email}:`, e);
+            failed++;
+          }
+        }
+
+        res.status(200).json({ sent, failed, skipped, total: authUsers.users.length });
+      } catch (error: any) {
+        console.error('Send announcement error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
   });

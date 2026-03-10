@@ -723,6 +723,85 @@ export function sendOnboardingTipEmail(
   });
 }
 
+export function sendUpdateAnnouncementEmail(
+  to: string,
+  businessName: string,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = businessName || 'there';
+
+  const content = wrapEmailTemplate(`
+    <div style="text-align:center;margin:0 0 24px;">
+      ${badge('NEW UPDATE', '#064e3b', '#00c897')}
+    </div>
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;text-align:center;line-height:1.3;">
+      Big updates to QuoteMate
+    </h1>
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 20px;">Hey ${greeting},</p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 28px;">
+      We've been hard at work making QuoteMate better for tradies like you. Here's what's new:
+    </p>
+
+    <!-- Free Trial -->
+    ${infoCard(`
+      <tr>
+        <td style="padding:12px 0;">
+          <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#127881; 7-Day Free Trial</p>
+          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
+            New to QuoteMate? You now get <strong style="color:#f8fafc;">full access to every feature for 7 days</strong> &mdash; no credit card required. Create unlimited quotes, send invoices, and use your business logo on everything.
+          </p>
+        </td>
+      </tr>
+    `, '#00c897')}
+
+    <!-- Invoicing -->
+    ${infoCard(`
+      <tr>
+        <td style="padding:12px 0;">
+          <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#128196; Full Invoicing</p>
+          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
+            Convert accepted quotes to invoices with one tap. Track payment status, record partial payments, send invoices via email or SMS, and export professional PDFs &mdash; all from the one app.
+          </p>
+        </td>
+      </tr>
+    `, '#5ab9ea')}
+
+    <!-- Smarter Pricing -->
+    ${infoCard(`
+      <tr>
+        <td style="padding:12px 0;">
+          <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#128200; More Accurate Pricing</p>
+          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
+            We've improved our AI-powered material pricing engine. Prices are now pulled in real-time from major hardware stores so your quotes are tighter and more competitive.
+          </p>
+        </td>
+      </tr>
+    `, '#cfa153')}
+
+    <!-- Additional features -->
+    <p style="color:#f8fafc;font-size:15px;font-weight:600;margin:28px 0 16px;">Also new:</p>
+    ${featureBullet('&#10003;', '<strong style="color:#f8fafc;">Online quote acceptance</strong> &mdash; clients can accept or decline quotes with one click')}
+    ${featureBullet('&#127908;', '<strong style="color:#f8fafc;">Voice-to-quote</strong> &mdash; describe the job out loud on-site, skip the typing')}
+    ${featureBullet('&#127912;', '<strong style="color:#f8fafc;">Your logo on every PDF</strong> &mdash; professional branding on quotes and invoices')}
+
+    ${ctaButton('Open QuoteMate')}
+
+    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 0;text-align:center;">
+      Questions or feedback? Just reply to this email &mdash; we read every message.
+    </p>
+  `, { unsubscribeUrl, preheader: 'Free 7-day trial, full invoicing, and smarter pricing — QuoteMate just got a whole lot better.' });
+
+  return sendEmail({
+    to,
+    subject: `What's new in QuoteMate — Free Trial, Invoicing & Smarter Pricing`,
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['product-update', 'v1.0.57'],
+  });
+}
+
 // ============================================================
 // UNSUBSCRIBE HANDLER
 // ============================================================
