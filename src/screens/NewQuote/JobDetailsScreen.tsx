@@ -745,6 +745,7 @@ export function JobDetailsScreen() {
           price: 0,
           totalPrice: 0,
           manualPriceOverride: false,
+          ...(m.section && { section: m.section }),
         }));
 
         // Update the job with analyzed data

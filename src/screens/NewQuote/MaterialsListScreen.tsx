@@ -26,7 +26,6 @@ import {
   TextInput,
   SegmentedButtons,
   ActivityIndicator,
-  FAB,
 } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -44,45 +43,57 @@ import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 
-// Helper to get category display info
-function getCategoryInfo(categoryId: string | undefined): { name: string; icon: string; color: string } {
+// Helper to get section display info
+function getSectionInfo(sectionName: string | undefined): { name: string; color: string } {
+  if (!sectionName) {
+    return { name: 'General', color: colors.onSurface };
+  }
+  return { name: sectionName, color: colors.primary };
+}
+
+// Legacy helper for trade category grouping
+function getCategoryInfo(categoryId: string | undefined): { name: string; color: string } {
   if (!categoryId) {
-    return { name: 'Uncategorized', icon: 'folder-outline', color: colors.onSurface };
+    return { name: 'General', color: colors.onSurface };
   }
   const category = TRADE_CATEGORIES.find(c => c.id === categoryId);
   if (category) {
-    return { name: category.name, icon: category.icon, color: category.color };
+    return { name: category.name, color: category.color };
   }
-  return { name: 'Uncategorized', icon: 'folder-outline', color: colors.onSurface };
+  return { name: 'General', color: colors.onSurface };
 }
 
-// Helper to group materials by category
-function groupMaterialsByCategory(materials: Material[]): Map<string, Material[]> {
+// Helper to group materials by section (preferred) or category (fallback)
+function groupMaterialsByCategory(materials: Material[]): Map<string, { info: { name: string; color: string }; materials: Material[] }> {
+  // Determine if we should group by section or category
+  const hasAnySections = materials.some(m => m.section);
+
   const grouped = new Map<string, Material[]>();
 
   materials.forEach(material => {
-    const categoryKey = material.category || '';
-    if (!grouped.has(categoryKey)) {
-      grouped.set(categoryKey, []);
+    const groupKey = hasAnySections
+      ? (material.section || '')
+      : (material.category || '');
+    if (!grouped.has(groupKey)) {
+      grouped.set(groupKey, []);
     }
-    grouped.get(categoryKey)!.push(material);
+    grouped.get(groupKey)!.push(material);
   });
 
-  // Sort: categorized items first (alphabetically by category), then uncategorized
-  const sortedMap = new Map<string, Material[]>();
+  // Sort: grouped items first (alphabetically), then ungrouped
   const sortedKeys = Array.from(grouped.keys()).sort((a, b) => {
-    if (a === '' && b !== '') return 1; // Uncategorized last
+    if (a === '' && b !== '') return 1;
     if (a !== '' && b === '') return -1;
-    const catA = getCategoryInfo(a).name;
-    const catB = getCategoryInfo(b).name;
-    return catA.localeCompare(catB);
+    return a.localeCompare(b);
   });
 
+  const result = new Map<string, { info: { name: string; color: string }; materials: Material[] }>();
   sortedKeys.forEach(key => {
-    sortedMap.set(key, grouped.get(key)!);
+    const info = hasAnySections ? getSectionInfo(key) : getCategoryInfo(key);
+    result.set(key, { info, materials: grouped.get(key)! });
   });
 
-  return sortedMap;
+  return result;
 }
 import {
   searchMaterialWithWebScraping,
@@ -102,15 +113,70 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { BUNNINGS_SCRAPER_URL } from '@env';
 
-// AI Analysis Loading State with Lottie Animation
+// AI Analysis Loading State with Lottie Animation and scrolling progress steps
+const AI_STEPS = [
+  { icon: 'file-document-outline', text: 'Reading job description...' },
+  { icon: 'head-cog-outline', text: 'Understanding scope of work...' },
+  { icon: 'clipboard-list-outline', text: 'Generating materials list...' },
+  { icon: 'tape-measure', text: 'Calculating quantities...' },
+  { icon: 'group', text: 'Grouping by work sections...' },
+  { icon: 'check-circle-outline', text: 'Finalizing materials...' },
+];
+
+const STEP_HEIGHT = 32;
+const VISIBLE_STEPS = 3;
+const STEP_INTERVAL = 2500;
+
 function AiAnalyzingState({ onCancel }: { onCancel: () => void }) {
   const animationRef = React.useRef<LottieView>(null);
+  const [currentStep, setCurrentStep] = React.useState(0);
+  const scrollAnim = React.useRef(new Animated.Value(0)).current;
+  const stepOpacities = React.useRef(AI_STEPS.map((_, i) => new Animated.Value(i === 0 ? 1 : 0))).current;
 
   React.useEffect(() => {
-    // Ensure animation plays on iOS
     if (animationRef.current) {
       animationRef.current.play();
     }
+  }, []);
+
+  React.useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    AI_STEPS.forEach((_, index) => {
+      if (index === 0) return;
+      const timer = setTimeout(() => {
+        setCurrentStep(index);
+
+        // Fade in the new step
+        Animated.timing(stepOpacities[index], {
+          toValue: 1,
+          duration: 350,
+          useNativeDriver: true,
+        }).start();
+
+        // Scroll up once we have more than VISIBLE_STEPS
+        if (index >= VISIBLE_STEPS) {
+          Animated.timing(scrollAnim, {
+            toValue: (index - VISIBLE_STEPS + 1) * STEP_HEIGHT,
+            duration: 400,
+            useNativeDriver: true,
+          }).start();
+
+          // Fade out the step that's scrolling off the top
+          const fadeOutIndex = index - VISIBLE_STEPS;
+          if (fadeOutIndex >= 0) {
+            Animated.timing(stepOpacities[fadeOutIndex], {
+              toValue: 0,
+              duration: 300,
+              useNativeDriver: true,
+            }).start();
+          }
+        }
+      }, index * STEP_INTERVAL);
+      timers.push(timer);
+    });
+
+    return () => timers.forEach(clearTimeout);
   }, []);
 
   return (
@@ -126,10 +192,44 @@ function AiAnalyzingState({ onCancel }: { onCancel: () => void }) {
           resizeMode="contain"
         />
       </View>
-      <Text style={styles.aiAnalyzingTitle}>Analyzing your job...</Text>
-      <Text style={styles.aiAnalyzingSubtitle}>
-        AI is generating materials list based on your job description
-      </Text>
+
+      <Text style={styles.aiAnalyzingTitle}>Analysing your job...</Text>
+
+      <View style={styles.stepsWindow}>
+        <Animated.View
+          style={[
+            styles.stepsTrack,
+            { transform: [{ translateY: Animated.multiply(scrollAnim, -1) }] },
+          ]}
+        >
+          {AI_STEPS.map((step, index) => (
+            <Animated.View
+              key={index}
+              style={[
+                styles.stepRow,
+                { opacity: stepOpacities[index] },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={index < currentStep ? 'check-circle' as any : step.icon as any}
+                size={16}
+                color={index < currentStep ? colors.success : index === currentStep ? colors.primary : colors.textMuted}
+              />
+              <Text
+                style={[
+                  styles.stepText,
+                  index < currentStep && styles.stepTextDone,
+                  index === currentStep && styles.stepTextActive,
+                ]}
+                numberOfLines={1}
+              >
+                {step.text}
+              </Text>
+            </Animated.View>
+          ))}
+        </Animated.View>
+      </View>
+
       <Button
         mode="outlined"
         onPress={onCancel}
@@ -343,6 +443,7 @@ export function MaterialsListScreen() {
         price: 0,
         totalPrice: 0,
         manualPriceOverride: false,
+        ...(m.section && { section: m.section }),
       }));
 
       // Update the quote with analyzed data
@@ -957,50 +1058,65 @@ export function MaterialsListScreen() {
             <AiAnalyzingState onCancel={handleCancelGeneration} />
         ) : materials.length === 0 ? (
           <View style={styles.emptyState}>
-            <MaterialCommunityIcons name="package-variant-closed" size={80} color={colors.textMuted} />
+            <MaterialCommunityIcons name="package-variant-closed" size={64} color={colors.textMuted} />
             <Text style={styles.emptyText}>No materials yet</Text>
             <Text style={styles.emptySubtext}>
-              Generate a materials list from your job description or add materials manually
+              How would you like to add materials?
             </Text>
-            <Button
-              mode="contained"
-              onPress={handleGenerateMaterialsList}
-              style={styles.generateButton}
-              icon="auto-fix"
-            >
-              Generate Suggested Items
-            </Button>
+
+            {/* AI Generate Card */}
+            <TouchableOpacity style={styles.emptyActionCard} onPress={handleGenerateMaterialsList} activeOpacity={0.7}>
+              <View style={styles.emptyActionIconWrap}>
+                <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
+              </View>
+              <View style={styles.emptyActionContent}>
+                <Text style={styles.emptyActionTitle}>Generate with AI</Text>
+                <Text style={styles.emptyActionDesc}>
+                  Automatically create a full materials list from your job description
+                </Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            {/* Add Manually Card */}
+            <TouchableOpacity style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
+              <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
+                <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
+              </View>
+              <View style={styles.emptyActionContent}>
+                <Text style={styles.emptyActionTitle}>Add manually</Text>
+                <Text style={styles.emptyActionDesc}>
+                  Search for products or enter materials by hand
+                </Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+            </TouchableOpacity>
           </View>
         ) : (
           <List.Section style={styles.listView}>
             {(() => {
               const groupedMaterials = groupMaterialsByCategory(materials);
-              const hasMultipleCategories = groupedMaterials.size > 1 || (groupedMaterials.size === 1 && !groupedMaterials.has(''));
+              const hasMultipleGroups = groupedMaterials.size > 1 || (groupedMaterials.size === 1 && !groupedMaterials.has(''));
 
-              return Array.from(groupedMaterials.entries()).map(([categoryId, categoryMaterials]) => {
-                const categoryInfo = getCategoryInfo(categoryId);
-
+              return Array.from(groupedMaterials.entries()).map(([groupKey, group]) => {
                 return (
-                  <View key={categoryId || 'uncategorized'}>
-                    {/* Category Header - only show if there are multiple categories or items have categories */}
-                    {hasMultipleCategories && (
+                  <View key={groupKey || 'uncategorized'}>
+                    {/* Section Header - only show if there are multiple groups */}
+                    {hasMultipleGroups && (
                       <View style={styles.categoryHeader}>
-                        <MaterialCommunityIcons
-                          name={categoryInfo.icon as any}
-                          size={20}
-                          color={categoryInfo.color}
-                        />
-                        <Text style={[styles.categoryTitle, { color: categoryInfo.color }]}>
-                          {categoryInfo.name}
+                        <View style={styles.sectionLine} />
+                        <Text style={styles.categoryTitle}>
+                          {group.info.name}
                         </Text>
                         <Text style={styles.categoryCount}>
-                          ({categoryMaterials.length})
+                          ({group.materials.length})
                         </Text>
+                        <View style={styles.sectionLine} />
                       </View>
                     )}
 
-                    {/* Materials in this category */}
-                    {categoryMaterials.map((material) => {
+                    {/* Materials in this section */}
+                    {group.materials.map((material) => {
                       const isExpanded = expandedMaterials.has(material.id);
 
                       // Check if brand is meaningful (not just "Bunnings" or the store name)
@@ -1123,15 +1239,18 @@ export function MaterialsListScreen() {
             </Text>
           </View>
         )}
-       </ScrollView>
 
-      {/* Floating Action Button for Add Material */}
-      <FAB
-        icon="plus"
-        style={styles.fab}
-        onPress={handleAddMaterial}
-        label="Add Material"
-      />
+        {/* Add Material button - inline so it doesn't overlay content */}
+        {materials.length > 0 && (
+          <TouchableOpacity style={styles.addMaterialButton} onPress={handleAddMaterial}>
+            <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
+            <Text style={styles.addMaterialButtonText}>Add Material</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Spacer for fixed bottom button */}
+        <View style={{ height: 120 }} />
+       </ScrollView>
 
       <FixedBottomButton
         label="Next: Labor & Markup"
@@ -1275,20 +1394,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    marginTop: 8,
-    gap: 8,
+    paddingVertical: 14,
+    marginTop: 4,
+    gap: 10,
+  },
+  sectionLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
   },
   categoryTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   categoryCount: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: colors.textMuted,
   },
   accordionHeader: {
     flexDirection: 'row',
@@ -1325,21 +1449,55 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 40,
+    paddingVertical: 48,
+    paddingHorizontal: 24,
   },
   emptyText: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '700',
     color: colors.text,
-    marginBottom: 8,
+    marginBottom: 6,
     marginTop: 16,
   },
   emptySubtext: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: colors.textMuted,
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 28,
+  },
+  emptyActionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  emptyActionIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: colors.primaryBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  emptyActionContent: {
+    flex: 1,
+  },
+  emptyActionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 3,
+  },
+  emptyActionDesc: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 18,
   },
   generateButton: {
     marginTop: 8,
@@ -1348,23 +1506,23 @@ const styles = StyleSheet.create({
     marginTop: 16,
     borderColor: colors.error,
   },
-  fab: {
-    position: 'absolute',
-    right: 16,
-    bottom: Platform.OS === 'ios' ? 200 : 180,
-    backgroundColor: colors.primary,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    ...(Platform.OS === 'web' && {
-      bottom: 200,
-      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-    }),
+  addMaterialButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    borderStyle: 'dashed',
+  },
+  addMaterialButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.primary,
   },
   summary: {
     flexDirection: 'row',
@@ -1470,6 +1628,33 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     textAlign: 'center',
     marginBottom: 24,
+  },
+  stepsWindow: {
+    width: '100%',
+    height: STEP_HEIGHT * VISIBLE_STEPS,
+    overflow: 'hidden',
+    marginBottom: 24,
+    paddingHorizontal: 12,
+  },
+  stepsTrack: {
+    width: '100%',
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: STEP_HEIGHT,
+    gap: 10,
+  },
+  stepText: {
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  stepTextActive: {
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  stepTextDone: {
+    color: colors.success,
   },
   // Unpriced Materials Modal
   unpricedModalContainer: {

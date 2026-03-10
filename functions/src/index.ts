@@ -1237,12 +1237,14 @@ Provide a JSON response with the following structure:
       "searchTerm": "Generic product search term (material type, size, specs - NOT brand-specific)",
       "quantity": <number>,
       "unit": "each|m|L|kg|box|pack",
+      "section": "Work area this material belongs to (e.g. Concreting, Timber Framing, Roofing, Plumbing, Electrical, Painting, Demolition, Site Prep, etc.)",
       "reasoning": "Why this material is needed"
     }
   ]
 }
 
 Guidelines:
+- Group materials into logical work sections using the "section" field. Use short, clear labels like "Concreting", "Timber Framing", "Roofing", "Finishing", etc. Materials that belong to the same area of work should share the same section name.
 - Use GENERIC product terms that work across ${storesText}
 - Specify material type, size, and specs but avoid brand-specific names
 - GOOD examples: "brass stop valve 15mm quarter turn", "treated pine H3 90x45 2.4m", "PTFE thread tape 12mm"
@@ -1267,7 +1269,7 @@ Return ONLY valid JSON, no other text.`;
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 2000,
+          max_tokens: 4000,
           messages: [
             {
               role: 'user',

@@ -21,6 +21,7 @@ export interface Material {
   stockCheckedAt?: string; // ISO timestamp of when stock was last checked
   // Material categorization
   category?: string; // Trade category ID (e.g., 'carpentry', 'electrical', 'plumbing')
+  section?: string; // Work section within a job (e.g., 'Concreting', 'Timber Framing')
 }
 
 export interface FavoriteProductMapping {

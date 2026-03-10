@@ -204,6 +204,7 @@ export function FixedBottomButton({
               onPress={secondaryOnPress}
               style={styles.secondaryButton}
               labelStyle={styles.secondaryButtonLabel}
+              contentStyle={styles.secondaryButtonContent}
               disabled={secondaryDisabled}
             >
               {secondaryLabel}
@@ -270,11 +271,12 @@ const styles = StyleSheet.create({
   },
   buttonLabel: {
     color: colors.white,
-    marginVertical: 16,
+    marginVertical: 0,
     marginHorizontal: 10,
   },
   buttonContent: {
-    gap: 8, // Space between icon and label
+    gap: 8,
+    paddingVertical: 16,
   },
   secondaryButton: {
     borderWidth: 2,
@@ -285,8 +287,11 @@ const styles = StyleSheet.create({
   },
   secondaryButtonLabel: {
     color: colors.primary,
-    marginVertical: 16,
+    marginVertical: 0,
     marginHorizontal: 0,
+  },
+  secondaryButtonContent: {
+    paddingVertical: 16,
   },
   pulsingBorderWrapper: {
     position: 'relative',
