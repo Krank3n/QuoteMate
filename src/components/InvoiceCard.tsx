@@ -22,6 +22,7 @@ import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { isInvoiceOverdue, getOverdueText, getAmountDue } from '../utils/invoiceCalculator';
 import { generateInvoicePDF, exportInvoicePDF, generatePdfFilename } from '../utils/pdfGenerator';
+import { useStore } from '../store/useStore';
 
 interface InvoiceCardProps {
   invoice: Invoice;
@@ -48,12 +49,15 @@ export function InvoiceCard({
 }: InvoiceCardProps) {
   const [menuVisible, setMenuVisible] = useState(false);
   const [statusMenuVisible, setStatusMenuVisible] = useState(false);
+  const { subscriptionStatus } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const handleSendInvoice = async () => {
     try {
       if (Platform.OS === 'web') {
         // Generate PDF HTML
-        const html = await generateInvoicePDF(invoice, businessSettings);
+        const html = await generateInvoicePDF(invoice, businessSettings, { isPro });
         const filename = generatePdfFilename('Invoice', invoice.customerName, invoice.job.name, new Date(invoice.updatedAt));
 
         // Create a hidden iframe to print the PDF
@@ -83,7 +87,7 @@ export function InvoiceCard({
           return;
         }
 
-        const html = await generateInvoicePDF(invoice, businessSettings);
+        const html = await generateInvoicePDF(invoice, businessSettings, { isPro });
         const { uri } = await Print.printToFileAsync({ html, base64: false });
 
         const result = await MailComposer.composeAsync({
@@ -107,7 +111,7 @@ export function InvoiceCard({
 
   const handleExportInvoice = async () => {
     try {
-      await exportInvoicePDF(invoice, businessSettings, 'export');
+      await exportInvoicePDF(invoice, businessSettings, 'export', { isPro });
     } catch (error) {
       console.error('Export error:', error);
       Alert.alert('Error', 'Failed to export invoice. Please try again.');

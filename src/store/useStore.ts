@@ -219,26 +219,28 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           const quotaResult = await firestoreService.checkAndIncrementQuota();
           if (!quotaResult.allowed) {
-            throw new Error('QUOTA_EXCEEDED');
+            throw new Error('TRIAL_EXPIRED');
           }
           // Update local subscription state with server-authoritative count
           if (subscriptionStatus) {
             const updatedSubscription: SubscriptionStatus = {
               ...subscriptionStatus,
               quotesThisMonth: quotaResult.quotesThisMonth,
+              trialStartedAt: quotaResult.trialStartedAt ? new Date(quotaResult.trialStartedAt) : subscriptionStatus.trialStartedAt,
+              trialExpired: quotaResult.trialExpired || false,
             };
             await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updatedSubscription));
             set({ subscriptionStatus: updatedSubscription });
           }
         } catch (quotaError: any) {
-          if (quotaError.message === 'QUOTA_EXCEEDED') {
+          if (quotaError.message === 'QUOTA_EXCEEDED' || quotaError.message === 'TRIAL_EXPIRED') {
             throw quotaError;
           }
           // If quota check fails (network error), fall back to client-side check
           console.warn('Server quota check failed, using client-side check:', quotaError);
           const { canCreateQuote } = get();
           if (!canCreateQuote()) {
-            throw new Error('QUOTA_EXCEEDED');
+            throw new Error('TRIAL_EXPIRED');
           }
         }
       }
@@ -317,24 +319,26 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           const quotaResult = await firestoreService.checkAndIncrementQuota();
           if (!quotaResult.allowed) {
-            throw new Error('QUOTA_EXCEEDED');
+            throw new Error('TRIAL_EXPIRED');
           }
           if (subscriptionStatus) {
             const updatedSubscription: SubscriptionStatus = {
               ...subscriptionStatus,
               quotesThisMonth: quotaResult.quotesThisMonth,
+              trialStartedAt: quotaResult.trialStartedAt ? new Date(quotaResult.trialStartedAt) : subscriptionStatus.trialStartedAt,
+              trialExpired: quotaResult.trialExpired || false,
             };
             await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updatedSubscription));
             set({ subscriptionStatus: updatedSubscription });
           }
         } catch (quotaError: any) {
-          if (quotaError.message === 'QUOTA_EXCEEDED') {
+          if (quotaError.message === 'QUOTA_EXCEEDED' || quotaError.message === 'TRIAL_EXPIRED') {
             throw quotaError;
           }
           console.warn('Server quota check failed, using client-side check:', quotaError);
           const { canCreateQuote } = get();
           if (!canCreateQuote()) {
-            throw new Error('QUOTA_EXCEEDED');
+            throw new Error('TRIAL_EXPIRED');
           }
         }
       } else {
@@ -456,8 +460,8 @@ export const useStore = create<AppState>((set, get) => ({
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.SUBSCRIPTION);
       if (stored) {
         const subscription: SubscriptionStatus = JSON.parse(stored, (key, value) => {
-          if (key === 'currentPeriodStart' || key === 'currentPeriodEnd') {
-            return new Date(value);
+          if (key === 'currentPeriodStart' || key === 'currentPeriodEnd' || key === 'trialStartedAt') {
+            return value ? new Date(value) : value;
           }
           return value;
         });
@@ -494,6 +498,8 @@ export const useStore = create<AppState>((set, get) => ({
           currentPeriodStart: getMonthStart(),
           currentPeriodEnd: getMonthEnd(),
           freeQuotesLimit: 5,
+          trialStartedAt: undefined,
+          trialExpired: false,
         };
         await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(newSubscription));
         // Sync to Firestore if authenticated
@@ -531,13 +537,18 @@ export const useStore = create<AppState>((set, get) => ({
 
   canCreateQuote: () => {
     const { subscriptionStatus } = get();
-    if (!subscriptionStatus) return false;
-
-    // Pro users can always create quotes
+    if (!subscriptionStatus) return true; // Allow if no status yet (trial not started)
     if (subscriptionStatus.isPro) return true;
 
-    // Free users are limited to 5 per month
-    return subscriptionStatus.quotesThisMonth < subscriptionStatus.freeQuotesLimit;
+    // If no trial started yet, allow (first quote will start the trial)
+    if (!subscriptionStatus.trialStartedAt) return true;
+
+    // Check if trial is still active (7 days)
+    const trialStart = new Date(subscriptionStatus.trialStartedAt);
+    const now = new Date();
+    const trialDays = 7;
+    const trialEnd = new Date(trialStart.getTime() + trialDays * 24 * 60 * 60 * 1000);
+    return now < trialEnd;
   },
 
   upgradeToProMock: async () => {

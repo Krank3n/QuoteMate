@@ -77,14 +77,24 @@ export function SubscriptionSettingsScreen() {
 
                   <View style={styles.quotaInfo}>
                     <Text style={styles.quotaText}>
-                      {subscriptionStatus?.quotesThisMonth || 0} of {subscriptionStatus?.freeQuotesLimit || 5} quote analyses used this month
+                      {subscriptionStatus?.trialStartedAt
+                        ? (() => {
+                            const start = new Date(subscriptionStatus.trialStartedAt);
+                            const elapsed = Date.now() - start.getTime();
+                            const trialMs = 7 * 24 * 60 * 60 * 1000;
+                            const daysLeft = Math.max(0, Math.ceil((trialMs - elapsed) / (24 * 60 * 60 * 1000)));
+                            return elapsed >= trialMs ? 'Free trial ended' : `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left in free trial`;
+                          })()
+                        : '7-day free trial — starts when you create your first quote'}
                     </Text>
                     <View style={styles.progressBar}>
                       <View
                         style={[
                           styles.progressFill,
                           {
-                            width: `${Math.min(((subscriptionStatus?.quotesThisMonth || 0) / (subscriptionStatus?.freeQuotesLimit || 5)) * 100, 100)}%`
+                            width: subscriptionStatus?.trialStartedAt
+                              ? `${Math.min(((Date.now() - new Date(subscriptionStatus.trialStartedAt).getTime()) / (7 * 24 * 60 * 60 * 1000)) * 100, 100)}%`
+                              : '0%'
                           }
                         ]}
                       />

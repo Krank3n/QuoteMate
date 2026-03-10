@@ -159,7 +159,7 @@ export function DashboardScreen() {
     try {
       if (Platform.OS === 'web') {
         // Generate PDF HTML
-        const html = await generateQuotePDF(quote, businessSettings);
+        const html = await generateQuotePDF(quote, businessSettings, { isPro: subscriptionStatus?.isPro || !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired) });
         const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
 
         // Create a hidden iframe to print the PDF
@@ -198,7 +198,7 @@ export function DashboardScreen() {
         }
 
         // Generate PDF with custom filename
-        const html = await generateQuotePDF(quote, businessSettings);
+        const html = await generateQuotePDF(quote, businessSettings, { isPro: subscriptionStatus?.isPro || !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired) });
         const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
         const { uri } = await Print.printToFileAsync({ html, base64: false });
 
@@ -377,53 +377,62 @@ export function DashboardScreen() {
           <Paragraph>Ready to create some quotes?</Paragraph>
         </View>
 
-      {/* Quote Usage Counter */}
-      {subscriptionStatus && !subscriptionStatus.isPro && (
-        <Surface style={styles.quotaCard}>
-          <View style={styles.quotaContent}>
-            <View style={styles.quotaTextContainer}>
-              <Text style={styles.quotaTitle}>
-                {subscriptionStatus.freeQuotesLimit - subscriptionStatus.quotesThisMonth > 0
-                  ? `${subscriptionStatus.freeQuotesLimit - subscriptionStatus.quotesThisMonth} of ${subscriptionStatus.freeQuotesLimit} quotes remaining`
-                  : 'No quotes remaining this month'}
-              </Text>
-              <Text style={styles.quotaSubtext}>
-                {subscriptionStatus.freeQuotesLimit - subscriptionStatus.quotesThisMonth > 0
-                  ? 'Free plan resets monthly'
-                  : 'Upgrade to Pro for unlimited quotes'}
-              </Text>
-            </View>
-            <View style={styles.quotaBarContainer}>
-              <View style={styles.quotaBarBackground}>
-                <View
-                  style={[
-                    styles.quotaBarFill,
-                    {
-                      width: `${Math.min((subscriptionStatus.quotesThisMonth / subscriptionStatus.freeQuotesLimit) * 100, 100)}%`,
-                      backgroundColor:
-                        subscriptionStatus.quotesThisMonth >= subscriptionStatus.freeQuotesLimit
+      {/* Trial Status */}
+      {subscriptionStatus && !subscriptionStatus.isPro && subscriptionStatus.trialStartedAt && (() => {
+        const trialStart = new Date(subscriptionStatus.trialStartedAt);
+        const now = new Date();
+        const elapsed = now.getTime() - trialStart.getTime();
+        const trialMs = 7 * 24 * 60 * 60 * 1000;
+        const daysRemaining = Math.max(0, Math.ceil((trialMs - elapsed) / (24 * 60 * 60 * 1000)));
+        const trialExpired = elapsed >= trialMs;
+        const progress = Math.min(elapsed / trialMs, 1);
+
+        return (
+          <Surface style={styles.quotaCard}>
+            <View style={styles.quotaContent}>
+              <View style={styles.quotaTextContainer}>
+                <Text style={styles.quotaTitle}>
+                  {trialExpired
+                    ? 'Free trial ended'
+                    : `${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} left in trial`}
+                </Text>
+                <Text style={styles.quotaSubtext}>
+                  {trialExpired
+                    ? 'Subscribe for unlimited quotes with your logo'
+                    : 'Unlimited quotes during your trial'}
+                </Text>
+              </View>
+              <View style={styles.quotaBarContainer}>
+                <View style={styles.quotaBarBackground}>
+                  <View
+                    style={[
+                      styles.quotaBarFill,
+                      {
+                        width: `${progress * 100}%`,
+                        backgroundColor: trialExpired
                           ? colors.error
-                          : subscriptionStatus.quotesThisMonth >= subscriptionStatus.freeQuotesLimit - 1
+                          : daysRemaining <= 1
                           ? colors.warning
                           : colors.primary,
-                    },
-                  ]}
-                />
+                      },
+                    ]}
+                  />
+                </View>
               </View>
             </View>
-          </View>
-          {subscriptionStatus.quotesThisMonth >= subscriptionStatus.freeQuotesLimit && (
-            <Button
-              mode="contained"
-              compact
-              onPress={() => navigation.navigate('Paywall' as never)}
-              style={styles.quotaUpgradeButton}
-            >
-              Upgrade to Pro
-            </Button>
-          )}
-        </Surface>
-      )}
+            {trialExpired && (
+              <Button
+                mode="contained"
+                compact
+                onPress={() => navigation.navigate('Paywall' as never)}
+                style={styles.quotaUpgradeButton}
+              >
+                Upgrade to Pro
+              </Button>
+            )}
+          </Surface>
+        );
+      })()}
 
       {/* New Quote Button */}
       <Button

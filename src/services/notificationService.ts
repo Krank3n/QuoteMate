@@ -17,9 +17,8 @@ let isNativeModuleAvailable = false;
 try {
   Notifications = require('expo-notifications');
   Device = require('expo-device');
-  isNativeModuleAvailable = true;
 
-  // Configure notification handler only if module is available
+  // Test if the native module actually works (removed from Expo Go in SDK 53)
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowAlert: true,
@@ -27,8 +26,12 @@ try {
       shouldSetBadge: true,
     }),
   });
+
+  isNativeModuleAvailable = true;
 } catch (error) {
-  console.log('expo-notifications native module not available (running in Expo Go?)');
+  console.log('expo-notifications not available (Expo Go does not support push notifications in SDK 53+). Use a development build for push notification support.');
+  Notifications = null;
+  Device = null;
   isNativeModuleAvailable = false;
 }
 

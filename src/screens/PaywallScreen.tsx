@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, ActivityIndicator, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, ActivityIndicator, Platform, Linking } from 'react-native';
 import {
   Text,
   Button,
@@ -40,10 +40,20 @@ export function PaywallScreen() {
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showCancellationModal, setShowCancellationModal] = useState(false);
   const [productsLoadError, setProductsLoadError] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
 
-  // Use subscriptionStatus from useStore which has the accurate count
-  const quotesUsed = subscriptionStatus?.quotesThisMonth || quoteCount;
-  const quotesLimit = subscriptionStatus?.freeQuotesLimit || 5;
+  // Trial status
+  const trialExpired = subscriptionStatus?.trialExpired || false;
+  const trialStartedAt = subscriptionStatus?.trialStartedAt;
+  const getTrialDaysRemaining = () => {
+    if (!trialStartedAt) return 7;
+    const start = new Date(trialStartedAt);
+    const now = new Date();
+    const elapsed = now.getTime() - start.getTime();
+    const remaining = Math.ceil((7 * 24 * 60 * 60 * 1000 - elapsed) / (24 * 60 * 60 * 1000));
+    return Math.max(0, remaining);
+  };
+  const trialDaysRemaining = getTrialDaysRemaining();
 
   useEffect(() => {
     // Safety timeout: if loading takes more than 30s, stop the spinner
@@ -287,6 +297,60 @@ export function PaywallScreen() {
     return (product as any)?.localizedPrice || '$29';
   };
 
+  const handleRestorePurchases = async () => {
+    if (Platform.OS === 'web') return;
+
+    setIsRestoring(true);
+    try {
+      await billingService.initialize();
+      const activeSubscriptions = await billingService.getActiveSubscriptions();
+
+      if (activeSubscriptions.length > 0) {
+        const purchase = activeSubscriptions[0];
+        // Validate with server
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+          const API_BASE_URL = process.env.API_BASE_URL || 'https://us-central1-hansendev.cloudfunctions.net';
+          const endpoint = Platform.OS === 'ios' ? 'validateAppleReceipt' : 'validateGoogleReceipt';
+          try {
+            const idToken = await currentUser.getIdToken();
+            const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+              body: JSON.stringify({
+                transactionId: purchase.transactionId || purchase.id,
+                productId: purchase.productId,
+                purchaseToken: purchase.purchaseToken || null,
+              }),
+            });
+            const data = await response.json();
+            if (data.success) {
+              await loadSubscription();
+            }
+          } catch (serverError) {
+            console.warn('Server validation failed during restore:', serverError);
+          }
+        }
+
+        await setPremium(
+          true,
+          purchase.productId,
+          new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+        );
+        Alert.alert('Restored', 'Your Pro subscription has been restored successfully!', [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
+      } else {
+        Alert.alert('No Purchases Found', 'No previous subscriptions were found for this account.');
+      }
+    } catch (error) {
+      console.error('Error restoring purchases:', error);
+      Alert.alert('Error', 'Failed to restore purchases. Please try again.');
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
   const handleCancelSubscription = () => {
     if (Platform.OS === 'web') {
       // Show cancellation reason modal
@@ -448,10 +512,11 @@ export function PaywallScreen() {
         // Update subscription status in Firestore and local storage
         const subscriptionStatus = {
           isPro: true,
-          quotesThisMonth: 0, // Reset quota for new Pro user
-          freeQuotesLimit: 5,
+          quotesThisMonth: 0,
           currentPeriodStart: new Date(),
           currentPeriodEnd: status.expiryDate ? new Date(status.expiryDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          freeQuotesLimit: 5,
+          trialExpired: false,
         };
 
         // Save to Firestore
@@ -534,7 +599,9 @@ export function PaywallScreen() {
         <Text style={styles.subtitle}>
           {isPro
             ? 'You have unlimited quote analyses'
-            : `You've created ${quotesUsed} of ${quotesLimit} free quotes`
+            : trialExpired
+              ? 'Your free trial has ended'
+              : `${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} left in your free trial`
           }
         </Text>
       </View>
@@ -615,7 +682,12 @@ export function PaywallScreen() {
         <View style={styles.features}>
           <View style={styles.feature}>
             <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
-            <Text style={styles.featureText}>Unlimited quote analyses per month</Text>
+            <Text style={styles.featureText}>Unlimited quotes and invoices</Text>
+          </View>
+
+          <View style={styles.feature}>
+            <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
+            <Text style={styles.featureText}>Your business logo on quotes and invoices</Text>
           </View>
 
           <View style={styles.feature}>
@@ -625,17 +697,7 @@ export function PaywallScreen() {
 
           <View style={styles.feature}>
             <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
-            <Text style={styles.featureText}>Custom branding with logo</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
-            <Text style={styles.featureText}>Advanced reporting</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
-            <Text style={styles.featureText}>Future features included</Text>
+            <Text style={styles.featureText}>All future features included</Text>
           </View>
         </View>
 
@@ -661,18 +723,47 @@ export function PaywallScreen() {
         </Button>
 
         <Text style={styles.disclaimer}>
-          Cancel anytime. Subscriptions automatically renew unless cancelled 24 hours before the end of the period.
+          Auto-renewable monthly subscription at {getProductPrice(SUBSCRIPTION_SKUS.MONTHLY)}/month. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. Cancel anytime.
         </Text>
+
+        <View style={styles.legalLinks}>
+          <Text
+            style={styles.legalLink}
+            onPress={() => Linking.openURL('https://hansendev.com.au/projects/quotemate-privacy')}
+          >
+            Privacy Policy
+          </Text>
+          <Text style={styles.legalSeparator}>|</Text>
+          <Text
+            style={styles.legalLink}
+            onPress={() => Linking.openURL('https://hansendev.com.au/projects/quotemate-terms')}
+          >
+            Terms of Use
+          </Text>
+        </View>
+
+        {Platform.OS !== 'web' && (
+          <Button
+            mode="text"
+            onPress={handleRestorePurchases}
+            loading={isRestoring}
+            disabled={isRestoring}
+            style={styles.restoreButton}
+          >
+            Restore Purchases
+          </Button>
+        )}
       </Surface>
       )}
 
       {!isPro && (
       <Surface style={styles.freeCard}>
-        <Text style={styles.freeTitle}>Free Plan</Text>
+        <Text style={styles.freeTitle}>Free Trial</Text>
         <Text style={styles.freeText}>
-          • {quotesLimit} quotes total{'\n'}
-          • All core features included{'\n'}
-          • Upgrade anytime for unlimited quotes
+          {trialExpired
+            ? '• Your 7-day trial has ended\n• Subscribe to continue creating quotes\n• Your business logo requires Pro'
+            : `• ${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} remaining in trial\n• All features included during trial\n• Subscribe for unlimited access`
+          }
         </Text>
       </Surface>
       )}
@@ -878,5 +969,24 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 20,
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  legalLink: {
+    fontSize: 13,
+    color: colors.primary,
+    textDecorationLine: 'underline',
+  },
+  legalSeparator: {
+    fontSize: 13,
+    color: colors.onSurface,
+    marginHorizontal: 8,
+  },
+  restoreButton: {
+    marginTop: 8,
   },
 });

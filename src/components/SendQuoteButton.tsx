@@ -23,6 +23,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { generateQuotePDF, exportQuotePDF, generatePdfFilename } from '../utils/pdfGenerator';
 import { generateAcceptanceLink } from '../services/quoteAcceptanceService';
 import { auth } from '../config/firebase';
+import { useStore } from '../store/useStore';
 
 interface SendQuoteButtonProps {
   quote: Quote;
@@ -43,6 +44,9 @@ export function SendQuoteButton({
   buttonStyle,
   onEmailDialogOpen,
 }: SendQuoteButtonProps) {
+  const { subscriptionStatus } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
   const [sendDialogVisible, setSendDialogVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -100,7 +104,7 @@ export function SendQuoteButton({
 
       if (Platform.OS === 'web') {
         // Generate PDF HTML
-        const html = await generateQuotePDF(quote, businessSettings);
+        const html = await generateQuotePDF(quote, businessSettings, { isPro });
         const filename = generatePdfFilename('Quote', quote.customerName, quote.job.name, new Date(quote.updatedAt));
 
         // Create a hidden iframe to print the PDF
@@ -138,7 +142,7 @@ export function SendQuoteButton({
         }
 
         // Generate PDF with custom filename
-        const html = await generateQuotePDF(quote, businessSettings);
+        const html = await generateQuotePDF(quote, businessSettings, { isPro });
         const filename = generatePdfFilename('Quote', quote.customerName, quote.job.name, new Date(quote.updatedAt));
         const { uri } = await Print.printToFileAsync({ html, base64: false });
 
@@ -196,7 +200,7 @@ export function SendQuoteButton({
   const handleExportFromDialog = async () => {
     setSendDialogVisible(false);
     try {
-      await exportQuotePDF(quote, businessSettings, 'export');
+      await exportQuotePDF(quote, businessSettings, 'export', { isPro });
     } catch (error) {
       console.error('Export error:', error);
       Alert.alert('Error', 'Failed to export PDF. Please try again.');

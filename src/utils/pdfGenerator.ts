@@ -119,7 +119,7 @@ function generatePaymentMethodsHTML(businessSettings: BusinessSettings | null): 
   `;
 }
 
-export async function generateQuotePDF(quote: Quote, businessSettings: BusinessSettings | null): Promise<string> {
+export async function generateQuotePDF(quote: Quote, businessSettings: BusinessSettings | null, options?: { isPro?: boolean }): Promise<string> {
   const business = businessSettings || {
     businessName: 'Your Business',
     email: '',
@@ -129,7 +129,8 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
 
   // Convert logo to base64 if it exists
   let logoBase64 = '';
-  if (businessSettings?.logoUri && Platform.OS !== 'web') {
+  const showLogo = options?.isPro !== false; // Show logo unless explicitly not Pro
+  if (showLogo && businessSettings?.logoUri && Platform.OS !== 'web') {
     try {
       const base64 = await FileSystem.readAsStringAsync(businessSettings.logoUri, {
         encoding: FileSystem.EncodingType.Base64,
@@ -138,7 +139,7 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
     } catch (error) {
       console.error('Failed to load logo:', error);
     }
-  } else if (businessSettings?.logoUri && Platform.OS === 'web') {
+  } else if (showLogo && businessSettings?.logoUri && Platform.OS === 'web') {
     // On web, the logoUri is already a URL that can be used directly
     logoBase64 = businessSettings.logoUri;
   }
@@ -462,11 +463,12 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
 export async function exportQuotePDF(
   quote: Quote,
   businessSettings: BusinessSettings | null,
-  action: 'export' | 'share' = 'export'
+  action: 'export' | 'share' = 'export',
+  options?: { isPro?: boolean }
 ): Promise<void> {
   try {
     // Generate PDF HTML
-    const html = await generateQuotePDF(quote, businessSettings);
+    const html = await generateQuotePDF(quote, businessSettings, options);
 
     // Generate clean filename
     const filename = generatePdfFilename('Quote', quote.customerName, quote.job.name, new Date(quote.updatedAt));
@@ -566,7 +568,7 @@ export async function exportQuotePDF(
 /**
  * Generate Invoice PDF HTML
  */
-export async function generateInvoicePDF(invoice: Invoice, businessSettings: BusinessSettings | null): Promise<string> {
+export async function generateInvoicePDF(invoice: Invoice, businessSettings: BusinessSettings | null, options?: { isPro?: boolean }): Promise<string> {
   const business = businessSettings || {
     businessName: 'Your Business',
     email: '',
@@ -576,7 +578,8 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
 
   // Convert logo to base64 if it exists
   let logoBase64 = '';
-  if (businessSettings?.logoUri && Platform.OS !== 'web') {
+  const showLogo = options?.isPro !== false; // Show logo unless explicitly not Pro
+  if (showLogo && businessSettings?.logoUri && Platform.OS !== 'web') {
     try {
       const base64 = await FileSystem.readAsStringAsync(businessSettings.logoUri, {
         encoding: FileSystem.EncodingType.Base64,
@@ -585,7 +588,7 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
     } catch (error) {
       console.error('Failed to load logo:', error);
     }
-  } else if (businessSettings?.logoUri && Platform.OS === 'web') {
+  } else if (showLogo && businessSettings?.logoUri && Platform.OS === 'web') {
     logoBase64 = businessSettings.logoUri;
   }
 
@@ -939,10 +942,11 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
 export async function exportInvoicePDF(
   invoice: Invoice,
   businessSettings: BusinessSettings | null,
-  action: 'export' | 'share' = 'export'
+  action: 'export' | 'share' = 'export',
+  options?: { isPro?: boolean }
 ): Promise<void> {
   try {
-    const html = await generateInvoicePDF(invoice, businessSettings);
+    const html = await generateInvoicePDF(invoice, businessSettings, options);
 
     // Generate clean filename
     const filename = generatePdfFilename('Invoice', invoice.customerName, invoice.job.name, new Date(invoice.updatedAt));

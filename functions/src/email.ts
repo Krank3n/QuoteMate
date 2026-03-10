@@ -388,7 +388,7 @@ export function sendQuoteAcceptedEmail(
       infoRow('Customer', customerName) +
       infoRow('Quote Number', `#${quoteNumber}`) +
       infoRow('Total', `$${total.toFixed(2)}`, !clientNotes) +
-      (clientNotes ? infoRow('Client Notes', clientNotes, true) : ''),
+      (clientNotes ? infoRow('Client Notes', clientNotes, true) : ''),  
       '#00c897'
     )}
 

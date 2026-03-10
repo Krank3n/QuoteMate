@@ -248,6 +248,8 @@ class FirestoreService {
         currentPeriodStart: subscriptionStatus.currentPeriodStart.toISOString(),
         currentPeriodEnd: subscriptionStatus.currentPeriodEnd.toISOString(),
         freeQuotesLimit: subscriptionStatus.freeQuotesLimit,
+        trialStartedAt: subscriptionStatus.trialStartedAt ? new Date(subscriptionStatus.trialStartedAt).toISOString() : null,
+        trialExpired: subscriptionStatus.trialExpired || false,
         syncedAt: new Date().toISOString(),
       });
       console.log('✅ Subscription status saved to Firestore');
@@ -280,6 +282,8 @@ class FirestoreService {
           currentPeriodStart: new Date(data.currentPeriodStart),
           currentPeriodEnd: new Date(data.currentPeriodEnd),
           freeQuotesLimit: data.freeQuotesLimit,
+          trialStartedAt: data.trialStartedAt ? new Date(data.trialStartedAt.toDate ? data.trialStartedAt.toDate() : data.trialStartedAt) : undefined,
+          trialExpired: data.trialExpired || false,
         };
       }
 
@@ -417,6 +421,8 @@ class FirestoreService {
             currentPeriodStart: new Date(data.currentPeriodStart),
             currentPeriodEnd: new Date(data.currentPeriodEnd),
             freeQuotesLimit: data.freeQuotesLimit,
+            trialStartedAt: data.trialStartedAt ? new Date(data.trialStartedAt.toDate ? data.trialStartedAt.toDate() : data.trialStartedAt) : undefined,
+            trialExpired: data.trialExpired || false,
           });
         } else {
           callback(null);
@@ -619,7 +625,7 @@ class FirestoreService {
    * Atomically check and increment the quote quota (server-side enforcement).
    * Returns the updated quota info, or throws if quota exceeded.
    */
-  async checkAndIncrementQuota(): Promise<{ allowed: boolean; quotesThisMonth: number; freeQuotesLimit: number; isPro: boolean }> {
+  async checkAndIncrementQuota(): Promise<{ allowed: boolean; quotesThisMonth: number; isPro: boolean; trialStartedAt?: string; trialExpired?: boolean; trialDaysRemaining?: number }> {
     const userId = this.getUserId();
     if (!userId) {
       throw new Error('No user signed in');
@@ -630,6 +636,8 @@ class FirestoreService {
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
       const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+      const TRIAL_DAYS = 7;
+      const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
 
       const result = await runTransaction(db, async (transaction) => {
         const subscriptionDoc = await transaction.get(subscriptionRef);
@@ -638,7 +646,6 @@ class FirestoreService {
           quotesThisMonth: 0,
           currentPeriodStart: monthStart.toISOString(),
           currentPeriodEnd: monthEnd.toISOString(),
-          freeQuotesLimit: 5,
         };
 
         // Check if we need to reset monthly count (new month)
@@ -660,26 +667,42 @@ class FirestoreService {
             quotesThisMonth: newCount,
             syncedAt: new Date().toISOString(),
           });
-          return { allowed: true, quotesThisMonth: newCount, freeQuotesLimit: data.freeQuotesLimit || 5, isPro: true };
+          return { allowed: true, quotesThisMonth: newCount, isPro: true, trialStartedAt: data.trialStartedAt, trialExpired: false, trialDaysRemaining: undefined };
         }
 
-        // Free users: check quota
-        const currentCount = data.quotesThisMonth || 0;
-        const limit = data.freeQuotesLimit || 5;
+        // Free users: check trial
+        const trialStartedAt = data.trialStartedAt
+          ? new Date(data.trialStartedAt.toDate ? data.trialStartedAt.toDate() : data.trialStartedAt)
+          : null;
 
-        if (currentCount >= limit) {
-          return { allowed: false, quotesThisMonth: currentCount, freeQuotesLimit: limit, isPro: false };
+        if (!trialStartedAt) {
+          // First quote - start the trial
+          const newCount = (data.quotesThisMonth || 0) + 1;
+          transaction.set(subscriptionRef, {
+            ...data,
+            quotesThisMonth: newCount,
+            trialStartedAt: now.toISOString(),
+            syncedAt: new Date().toISOString(),
+          });
+          return { allowed: true, quotesThisMonth: newCount, isPro: false, trialStartedAt: now.toISOString(), trialExpired: false, trialDaysRemaining: TRIAL_DAYS };
         }
 
-        // Increment and save
-        const newCount = currentCount + 1;
+        // Check if trial has expired
+        const elapsed = now.getTime() - trialStartedAt.getTime();
+        if (elapsed >= TRIAL_MS) {
+          return { allowed: false, quotesThisMonth: data.quotesThisMonth || 0, isPro: false, trialStartedAt: trialStartedAt.toISOString(), trialExpired: true, trialDaysRemaining: 0 };
+        }
+
+        // Trial still active - allow
+        const newCount = (data.quotesThisMonth || 0) + 1;
+        const daysRemaining = Math.ceil((TRIAL_MS - elapsed) / (24 * 60 * 60 * 1000));
         transaction.set(subscriptionRef, {
           ...data,
           quotesThisMonth: newCount,
           syncedAt: new Date().toISOString(),
         });
 
-        return { allowed: true, quotesThisMonth: newCount, freeQuotesLimit: limit, isPro: false };
+        return { allowed: true, quotesThisMonth: newCount, isPro: false, trialStartedAt: trialStartedAt.toISOString(), trialExpired: false, trialDaysRemaining: daysRemaining };
       });
 
       return result;

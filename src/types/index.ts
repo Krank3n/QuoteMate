@@ -225,6 +225,8 @@ export interface SubscriptionStatus {
   currentPeriodStart: Date;
   currentPeriodEnd: Date;
   freeQuotesLimit: number;
+  trialStartedAt?: Date;
+  trialExpired?: boolean;
 }
 
 export type SubscriptionPlan = 'free' | 'pro';

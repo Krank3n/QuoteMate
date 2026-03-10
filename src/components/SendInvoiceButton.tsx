@@ -21,6 +21,7 @@ import { Invoice, BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { generateInvoicePDF, exportInvoicePDF, generatePdfFilename } from '../utils/pdfGenerator';
+import { useStore } from '../store/useStore';
 
 interface SendInvoiceButtonProps {
   invoice: Invoice;
@@ -39,6 +40,9 @@ export function SendInvoiceButton({
   buttonIcon = 'send',
   buttonStyle,
 }: SendInvoiceButtonProps) {
+  const { subscriptionStatus } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
   const [sendDialogVisible, setSendDialogVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -67,7 +71,7 @@ export function SendInvoiceButton({
   const handleSendInvoice = async () => {
     try {
       if (Platform.OS === 'web') {
-        const html = await generateInvoicePDF(invoice, businessSettings);
+        const html = await generateInvoicePDF(invoice, businessSettings, { isPro });
         const filename = generatePdfFilename('Invoice', invoice.customerName, invoice.job.name, new Date(invoice.updatedAt));
 
         const iframe = document.createElement('iframe');
@@ -96,7 +100,7 @@ export function SendInvoiceButton({
           return;
         }
 
-        const html = await generateInvoicePDF(invoice, businessSettings);
+        const html = await generateInvoicePDF(invoice, businessSettings, { isPro });
         const { uri } = await Print.printToFileAsync({ html, base64: false });
 
         await MailComposer.composeAsync({
@@ -152,7 +156,7 @@ export function SendInvoiceButton({
   const handleExportFromDialog = async () => {
     setSendDialogVisible(false);
     try {
-      await exportInvoicePDF(invoice, businessSettings, 'export');
+      await exportInvoicePDF(invoice, businessSettings, 'export', { isPro });
     } catch (error) {
       console.error('Export error:', error);
       Alert.alert('Error', 'Failed to export PDF. Please try again.');

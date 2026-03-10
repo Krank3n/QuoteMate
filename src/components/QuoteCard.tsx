@@ -21,6 +21,7 @@ import { Quote, BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { generateQuotePDF, exportQuotePDF } from '../utils/pdfGenerator';
+import { useStore } from '../store/useStore';
 
 interface QuoteCardProps {
   quote: Quote;
@@ -48,12 +49,15 @@ export function QuoteCard({
   onConvertToInvoice,
 }: QuoteCardProps) {
   const [menuVisible, setMenuVisible] = useState(false);
+  const { subscriptionStatus } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const handleSendQuote = async () => {
     try {
       if (Platform.OS === 'web') {
         // Generate PDF HTML
-        const html = await generateQuotePDF(quote, businessSettings);
+        const html = await generateQuotePDF(quote, businessSettings, { isPro });
         const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
 
         // Create a hidden iframe to print the PDF
@@ -91,7 +95,7 @@ export function QuoteCard({
         }
 
         // Generate PDF with custom filename
-        const html = await generateQuotePDF(quote, businessSettings);
+        const html = await generateQuotePDF(quote, businessSettings, { isPro });
         const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
         const { uri } = await Print.printToFileAsync({ html, base64: false });
 
@@ -118,7 +122,7 @@ export function QuoteCard({
 
   const handleShareQuote = async () => {
     try {
-      await exportQuotePDF(quote, businessSettings, 'share');
+      await exportQuotePDF(quote, businessSettings, 'share', { isPro });
     } catch (error) {
       console.error('Share error:', error);
       Alert.alert('Error', 'Failed to share quote. Please try again.');
@@ -127,7 +131,7 @@ export function QuoteCard({
 
   const handleExportQuote = async () => {
     try {
-      await exportQuotePDF(quote, businessSettings, 'export');
+      await exportQuotePDF(quote, businessSettings, 'export', { isPro });
     } catch (error) {
       console.error('Export error:', error);
       Alert.alert('Error', 'Failed to export quote. Please try again.');

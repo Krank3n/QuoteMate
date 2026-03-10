@@ -10,7 +10,6 @@ import {
   sendQuoteDeclinedEmail,
   sendPaymentFailedEmail,
   sendSubscriptionCancelledEmail,
-  sendQuotaWarningEmail,
   sendReEngagementEmail,
   sendOnboardingTipEmail,
   handleUnsubscribe,
@@ -695,7 +694,6 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
       currentPeriodEnd: new Date(subscription.current_period_end * 1000),
       cancelAtPeriodEnd: subscription.cancel_at_period_end,
       quotesThisMonth: 0,
-      freeQuotesLimit: 5,
     }, { merge: true });
 
     console.log(`✅ Firestore updated for user ${userId}: isPro=${isActive}`);
@@ -736,7 +734,6 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       customerId,
       canceledAt: admin.firestore.FieldValue.serverTimestamp(),
       quotesThisMonth: 0,
-      freeQuotesLimit: 5,
     }, { merge: true });
 
     console.log(`✅ Firestore updated for user ${userId}: isPro=false (subscription deleted)`);
@@ -807,6 +804,7 @@ export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
     try {
       const db = admin.firestore();
       const subscriptionRef = db.doc(`users/${userId}/profile/subscription`);
+      const TRIAL_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
 
       const result = await db.runTransaction(async (transaction) => {
         const subscriptionDoc = await transaction.get(subscriptionRef);
@@ -819,7 +817,6 @@ export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
           quotesThisMonth: 0,
           currentPeriodStart: monthStart,
           currentPeriodEnd: monthEnd,
-          freeQuotesLimit: 5,
         };
 
         // Check if we need to reset monthly count (new month)
@@ -834,63 +831,104 @@ export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
           };
         }
 
+        // Increment monthly count for analytics
+        const newCount = (subscriptionData.quotesThisMonth || 0) + 1;
+
         // Pro users can always create quotes
         if (subscriptionData.isPro) {
-          const newCount = (subscriptionData.quotesThisMonth || 0) + 1;
           transaction.set(subscriptionRef, {
             ...subscriptionData,
             quotesThisMonth: newCount,
             currentPeriodStart: subscriptionData.currentPeriodStart || monthStart,
             currentPeriodEnd: subscriptionData.currentPeriodEnd || monthEnd,
           }, { merge: true });
-          return { allowed: true, quotesThisMonth: newCount, freeQuotesLimit: subscriptionData.freeQuotesLimit || 5, isPro: true };
+          return {
+            allowed: true,
+            quotesThisMonth: newCount,
+            isPro: true,
+            trialStartedAt: subscriptionData.trialStartedAt?.toDate?.() || null,
+            trialExpired: false,
+            trialDaysRemaining: null as number | null,
+          };
         }
 
-        // Free users: check quota
-        const currentCount = subscriptionData.quotesThisMonth || 0;
-        const limit = subscriptionData.freeQuotesLimit || 5;
+        // Free users: check trial status
+        const isFirstQuote = !subscriptionData.trialStartedAt;
+        let trialStartedAt: Date;
 
-        if (currentCount >= limit) {
-          return { allowed: false, quotesThisMonth: currentCount, freeQuotesLimit: limit, isPro: false };
+        if (isFirstQuote) {
+          // First quote ever — start the trial now
+          trialStartedAt = now;
+          transaction.set(subscriptionRef, {
+            ...subscriptionData,
+            quotesThisMonth: newCount,
+            trialStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+            currentPeriodStart: subscriptionData.currentPeriodStart || monthStart,
+            currentPeriodEnd: subscriptionData.currentPeriodEnd || monthEnd,
+          }, { merge: true });
+        } else {
+          trialStartedAt = subscriptionData.trialStartedAt.toDate?.()
+            ? subscriptionData.trialStartedAt.toDate()
+            : new Date(subscriptionData.trialStartedAt);
         }
 
-        // Increment and save
-        const newCount = currentCount + 1;
-        transaction.set(subscriptionRef, {
-          ...subscriptionData,
+        const elapsed = now.getTime() - trialStartedAt.getTime();
+        const trialExpired = elapsed >= TRIAL_DURATION_MS;
+        const trialDaysRemaining = trialExpired
+          ? 0
+          : Math.ceil((TRIAL_DURATION_MS - elapsed) / (24 * 60 * 60 * 1000));
+
+        if (trialExpired) {
+          // Trial expired — don't increment count, deny access
+          return {
+            allowed: false,
+            quotesThisMonth: subscriptionData.quotesThisMonth || 0,
+            isPro: false,
+            trialStartedAt,
+            trialExpired: true,
+            trialDaysRemaining: 0,
+          };
+        }
+
+        // Trial still active — allow and increment count
+        if (!isFirstQuote) {
+          transaction.set(subscriptionRef, {
+            ...subscriptionData,
+            quotesThisMonth: newCount,
+            currentPeriodStart: subscriptionData.currentPeriodStart || monthStart,
+            currentPeriodEnd: subscriptionData.currentPeriodEnd || monthEnd,
+          }, { merge: true });
+        }
+
+        return {
+          allowed: true,
           quotesThisMonth: newCount,
-          currentPeriodStart: subscriptionData.currentPeriodStart || monthStart,
-          currentPeriodEnd: subscriptionData.currentPeriodEnd || monthEnd,
-        }, { merge: true });
-
-        return { allowed: true, quotesThisMonth: newCount, freeQuotesLimit: limit, isPro: false };
+          isPro: false,
+          trialStartedAt,
+          trialExpired: false,
+          trialDaysRemaining,
+        };
       });
 
       if (!result.allowed) {
         res.status(403).json({
-          error: 'Quote limit reached',
+          error: 'TRIAL_EXPIRED',
           quotesThisMonth: result.quotesThisMonth,
-          freeQuotesLimit: result.freeQuotesLimit,
           isPro: result.isPro,
+          trialStartedAt: result.trialStartedAt,
+          trialExpired: result.trialExpired,
+          trialDaysRemaining: result.trialDaysRemaining,
         });
         return;
-      }
-
-      // Send quota warning email for free users nearing their limit
-      if (!result.isPro && result.quotesThisMonth >= result.freeQuotesLimit - 1) {
-        getUserEmail(userId).then(email => {
-          if (email) {
-            sendQuotaWarningEmail(email, result.quotesThisMonth, result.freeQuotesLimit, userId)
-              .catch(err => console.error('Error sending quota warning email:', err));
-          }
-        }).catch(() => {});
       }
 
       res.status(200).json({
         success: true,
         quotesThisMonth: result.quotesThisMonth,
-        freeQuotesLimit: result.freeQuotesLimit,
         isPro: result.isPro,
+        trialStartedAt: result.trialStartedAt,
+        trialExpired: result.trialExpired,
+        trialDaysRemaining: result.trialDaysRemaining,
       });
     } catch (error: any) {
       console.error('Error checking quota:', error);
@@ -994,7 +1032,6 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
         currentPeriodStart: now,
         currentPeriodEnd: expiryDate,
         quotesThisMonth: 0,
-        freeQuotesLimit: 5,
       }, { merge: true });
 
       console.log(`✅ Apple receipt ${appleValidated ? 'validated' : 'saved (unvalidated)'} for user ${userId}`);
@@ -1102,7 +1139,6 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
         currentPeriodStart: now,
         currentPeriodEnd: expiryDate,
         quotesThisMonth: 0,
-        freeQuotesLimit: 5,
       }, { merge: true });
 
       console.log(`✅ Google receipt ${googleValidated ? 'validated' : 'saved (unvalidated)'} for user ${userId}`);
