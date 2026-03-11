@@ -685,12 +685,14 @@ export function AddMaterialScreen() {
   // Manual entry section component
   const renderManualEntrySection = () => (
     <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
-        <Text style={styles.sectionTitle}>
-          {isEditMode ? 'Edit Material' : isPro ? "Can't find it? Add manually" : 'Add Material'}
-        </Text>
-      </View>
+      {!isEditMode && (
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
+          <Text style={styles.sectionTitle}>
+            {isPro ? "Can't find it? Add manually" : 'Add Material'}
+          </Text>
+        </View>
+      )}
 
       <TextInput
         ref={materialNameRef}
