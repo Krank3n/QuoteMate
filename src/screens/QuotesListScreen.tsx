@@ -410,9 +410,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 16,
     marginBottom: 8,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   filterChip: {
-    marginRight: 8,
     backgroundColor: colors.surface,
   },
   listContainer: {
