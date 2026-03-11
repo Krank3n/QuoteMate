@@ -9,11 +9,7 @@ body {
   margin: auto;
 }
 
-/* React Native Web generates this class for View components */
-.css-view-175oi2r {
-  max-width: 800px;
-  margin: auto;
-}
+/* Max-width is handled by #root above - no per-View override needed */
 
 /* Portal container for dialogs and modals - needs to be above the max-width constraint */
 [role="dialog"] {

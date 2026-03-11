@@ -269,9 +269,6 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 140,
     ...(Platform.OS === 'web' && {
-      maxWidth: 800,
-      marginHorizontal: 'auto' as any,
-      width: '100%',
       paddingBottom: 16,
     }),
   },
@@ -328,9 +325,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     ...(Platform.OS === 'web' && {
-      maxWidth: 800,
-      marginHorizontal: 'auto' as any,
-      width: '100%',
       position: 'sticky' as any,
       bottom: 0,
       paddingBottom: 16,

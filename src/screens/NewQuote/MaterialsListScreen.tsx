@@ -1522,18 +1522,10 @@ const styles = StyleSheet.create({
     paddingBottom: 140,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
-      maxWidth: 800,
-      margin: 'auto' as any,
-      width: '100%',
       height: '0px' as any,
     }),
   },
   listView: {
-    ...(Platform.OS === 'web' && {
-      maxWidth: 800,
-      margin: '0 auto' as any,
-      width: '100%',
-    }),
   },
   listItem: {
     backgroundColor: colors.surface,

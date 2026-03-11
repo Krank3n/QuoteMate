@@ -279,7 +279,7 @@ export function AuthScreen() {
         <Animated.View style={[styles.logoContainer, { transform: [{ scale: logoScale }] }]}>
           <Image
             source={require('../../assets/logo-scaled.png')}
-            style={styles.logoLarge}
+            style={styles.logoLoading}
             resizeMode="contain"
           />
         </Animated.View>
@@ -483,11 +483,12 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   logoContainer: {
-    marginBottom: 40,
+    marginBottom: 32,
   },
-  logoLarge: {
-    width: 200,
-    height: 200,
+  logoLoading: {
+    width: 88,
+    height: 88,
+    borderRadius: 20,
   },
   loadingSpinner: {
     marginVertical: 20,
@@ -503,15 +504,11 @@ const styles = StyleSheet.create({
   },
   logoWrapper: {
     marginBottom: 28,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
   },
   logo: {
     width: 88,
     height: 88,
+    borderRadius: 20,
   },
   header: {
     alignItems: 'center',

@@ -9,10 +9,9 @@ try {
 }
 
 // Subscription product IDs (must match App Store Connect & Google Play Console)
-export const SUBSCRIPTION_SKUS = {
-  MONTHLY: 'quotemate_pro_monthly',
-  YEARLY: 'quotemate_pro_yearly',
-};
+export const SUBSCRIPTION_SKUS = Platform.OS === 'android'
+  ? { MONTHLY: 'quotemate_premium_monthly', YEARLY: 'quotemate_premium_yearly' }
+  : { MONTHLY: 'quotemate_pro_monthly', YEARLY: 'quotemate_pro_yearly' };
 
 export const SUBSCRIPTION_PRODUCTS = Platform.select({
   android: [SUBSCRIPTION_SKUS.MONTHLY, SUBSCRIPTION_SKUS.YEARLY],

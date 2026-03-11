@@ -327,9 +327,6 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
     flexGrow: 1,
     ...(Platform.OS === 'web' && {
-      maxWidth: 800,
-      margin: 'auto' as any,
-      width: '100%',
       height: '0px' as any,
     }),
   },

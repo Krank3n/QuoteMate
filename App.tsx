@@ -314,13 +314,14 @@ export default function App() {
 const appStyles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#1E293B', // Match logo background color
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingLogo: {
-    width: 180,
-    height: 180,
+    width: 88,
+    height: 88,
+    borderRadius: 20,
     marginBottom: 32,
   },
   loadingSpinner: {
