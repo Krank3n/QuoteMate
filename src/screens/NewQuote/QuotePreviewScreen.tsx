@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity, Share, Linking } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity } from 'react-native';
 import {
   Text,
   Button,
@@ -13,9 +13,6 @@ import {
   Divider,
   TextInput,
   SegmentedButtons,
-  Dialog,
-  Portal,
-  IconButton,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
@@ -26,7 +23,7 @@ import { formatCurrency } from '../../utils/quoteCalculator';
 import { generateQuotePDF } from '../../utils/pdfGenerator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SuccessModal } from '../../components/SuccessModal';
-import { FixedBottomButton } from '../../components/FixedBottomButton';
+import { SendQuoteButton } from '../../components/SendQuoteButton';
 
 export function QuotePreviewScreen() {
   const navigation = useNavigation<any>();
@@ -35,6 +32,8 @@ export function QuotePreviewScreen() {
 
   const [notes, setNotes] = useState(currentQuote?.notes || '');
   const [status, setStatus] = useState(currentQuote?.status || 'draft');
+  const [quoteNumber, setQuoteNumber] = useState(currentQuote?.quoteNumber || '');
+  const [isEditingNumber, setIsEditingNumber] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -42,6 +41,8 @@ export function QuotePreviewScreen() {
   if (!currentQuote) {
     return null;
   }
+
+  const isNewQuote = !currentQuote.quoteNumber;
 
   const handleSave = async () => {
     try {
@@ -51,6 +52,7 @@ export function QuotePreviewScreen() {
         ...currentQuote,
         notes,
         status,
+        ...(quoteNumber ? { quoteNumber } : {}),
         updatedAt: new Date(),
       };
 
@@ -76,68 +78,36 @@ export function QuotePreviewScreen() {
     navigation.getParent()?.goBack();
   };
 
-  const handleSendQuote = () => {
-    setSendDialogVisible(true);
-  };
-
-  const handleSendEmail = async () => {
-    setSendDialogVisible(false);
-
-    const subject = `Quote from ${businessSettings?.businessName || 'Your Business'}`;
-    const body = `Hi ${currentQuote.customerName},\n\nPlease find attached your quote for ${currentQuote.job.name}.\n\nTotal: ${formatCurrency(currentQuote.total)}\n\nThank you!`;
-    const email = currentQuote.customerEmail || '';
-
-    const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-
-    try {
-      await Linking.openURL(url);
-    } catch (error) {
-      Alert.alert('Error', 'Could not open email client');
-    }
-  };
-
-  const handleSendSMS = async () => {
-    setSendDialogVisible(false);
-
-    const message = `Hi ${currentQuote.customerName}, your quote for ${currentQuote.job.name} is ready. Total: ${formatCurrency(currentQuote.total)}`;
-    const phone = currentQuote.customerPhone || '';
-
-    const url = Platform.OS === 'ios'
-      ? `sms:${phone}&body=${encodeURIComponent(message)}`
-      : `sms:${phone}?body=${encodeURIComponent(message)}`;
-
-    try {
-      await Linking.openURL(url);
-    } catch (error) {
-      Alert.alert('Error', 'Could not open SMS');
-    }
-  };
-
-  const handleShare = async () => {
-    setSendDialogVisible(false);
-
-    try {
-      const message = `Quote for ${currentQuote.customerName}\n${currentQuote.job.name}\nTotal: ${formatCurrency(currentQuote.total)}`;
-
-      await Share.share({
-        message,
-        title: 'Share Quote',
-      });
-    } catch (error) {
-      Alert.alert('Error', 'Could not share quote');
-    }
-  };
-
-  const handleExport = async () => {
-    setSendDialogVisible(false);
-    await handleExportPDF();
-  };
-
   const handleViewPDF = async () => {
     setIsPdfLoading(true);
     try {
       const html = await generateQuotePDF(currentQuote, businessSettings);
-      await Print.printAsync({ html });
+
+      if (Platform.OS === 'web') {
+        // On web, Print.printAsync prints the current page, not the HTML content.
+        // Use a hidden iframe to print the generated PDF HTML instead.
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(html);
+          iframeDoc.close();
+
+          iframe.onload = () => {
+            setTimeout(() => {
+              iframe.contentWindow?.print();
+              setTimeout(() => {
+                document.body.removeChild(iframe);
+              }, 1000);
+            }, 250);
+          };
+        }
+      } else {
+        await Print.printAsync({ html });
+      }
     } catch (error) {
       console.error('PDF preview error:', error);
     } finally {
@@ -178,6 +148,51 @@ export function QuotePreviewScreen() {
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
       >
+      {/* Quote Header */}
+      <Surface style={styles.headerSection}>
+        <View style={styles.headerRow}>
+          <View style={styles.headerInfo}>
+            {isEditingNumber ? (
+              <TextInput
+                value={quoteNumber}
+                onChangeText={setQuoteNumber}
+                onBlur={() => setIsEditingNumber(false)}
+                onSubmitEditing={() => setIsEditingNumber(false)}
+                placeholder="e.g. Q-001"
+                placeholderTextColor="rgba(255,255,255,0.5)"
+                autoFocus
+                style={styles.quoteNumberInput}
+                mode="flat"
+                underlineColor="rgba(255,255,255,0.5)"
+                activeUnderlineColor="#fff"
+                textColor="#fff"
+              />
+            ) : (
+              <TouchableOpacity
+                onPress={() => setIsEditingNumber(true)}
+                style={styles.quoteNumberTouchable}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.quoteNumber}>
+                  {quoteNumber || (isNewQuote ? 'Auto-assigned' : 'Quote')}
+                </Text>
+                <MaterialCommunityIcons name="pencil" size={14} color="rgba(255,255,255,0.7)" />
+              </TouchableOpacity>
+            )}
+            <Text style={styles.quoteDate}>
+              {new Date(currentQuote.createdAt).toLocaleDateString('en-AU', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              })}
+            </Text>
+          </View>
+          <View style={styles.statusBadge}>
+            <Text style={styles.statusBadgeText}>{status.toUpperCase()}</Text>
+          </View>
+        </View>
+      </Surface>
+
       {/* Quote Details Preview */}
       <TouchableOpacity onPress={handleEditCustomer} activeOpacity={0.7}>
         <Surface style={styles.section}>
@@ -254,10 +269,12 @@ export function QuotePreviewScreen() {
           <Text style={styles.summaryLabel}>Subtotal</Text>
           <Text style={styles.summaryValue}>{formatCurrency(currentQuote.subtotal)}</Text>
         </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Markup ({currentQuote.markup}%)</Text>
-          <Text style={styles.summaryValue}>{formatCurrency(currentQuote.markupAmount)}</Text>
-        </View>
+        {currentQuote.markup > 0 && (
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Markup ({currentQuote.markup}%)</Text>
+            <Text style={styles.summaryValue}>{formatCurrency(currentQuote.markupAmount)}</Text>
+          </View>
+        )}
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>GST (10%)</Text>
           <Text style={styles.summaryValue}>{formatCurrency(currentQuote.gst)}</Text>
@@ -274,12 +291,18 @@ export function QuotePreviewScreen() {
         <SegmentedButtons
           value={status}
           onValueChange={setStatus}
-          buttons={[
-            { value: 'draft', label: 'Draft' },
-            { value: 'sent', label: 'Sent' },
-            { value: 'accepted', label: 'Accepted' },
-            { value: 'rejected', label: 'Rejected' },
-          ]}
+          buttons={isNewQuote
+            ? [
+                { value: 'draft', label: 'Draft' },
+                { value: 'sent', label: 'Sent' },
+              ]
+            : [
+                { value: 'draft', label: 'Draft' },
+                { value: 'sent', label: 'Sent' },
+                { value: 'accepted', label: 'Accepted' },
+                { value: 'rejected', label: 'Rejected' },
+              ]
+          }
         />
       </Surface>
 
@@ -308,12 +331,27 @@ export function QuotePreviewScreen() {
       </Button>
       </ScrollView>
 
-      <FixedBottomButton
-        label="Save Quote"
-        onPress={handleSave}
-        loading={isSaving}
-        disabled={isSaving}
-      />
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+        <SendQuoteButton
+          quote={currentQuote}
+          businessSettings={businessSettings}
+          buttonMode="outlined"
+          buttonLabel="Send"
+          buttonIcon="send"
+          buttonStyle={styles.bottomButtonHalf}
+        />
+        <Button
+          mode="contained"
+          onPress={handleSave}
+          loading={isSaving}
+          disabled={isSaving}
+          icon="content-save"
+          style={styles.bottomButtonHalf}
+          contentStyle={styles.bottomButtonContent}
+        >
+          Save Quote
+        </Button>
+      </View>
     </View>
   );
 }
@@ -341,6 +379,56 @@ const styles = StyleSheet.create({
       width: '100%',
       paddingBottom: 16,
     }),
+  },
+  headerSection: {
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 8,
+    elevation: 2,
+    backgroundColor: colors.primary,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  quoteNumber: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  quoteNumberTouchable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  quoteNumberInput: {
+    backgroundColor: 'transparent',
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    paddingHorizontal: 0,
+    marginBottom: -4,
+    height: 36,
+  },
+  quoteDate: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
+  },
+  statusBadge: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
   },
   section: {
     marginBottom: 16,
@@ -434,32 +522,27 @@ const styles = StyleSheet.create({
   viewPdfButton: {
     marginBottom: 16,
   },
-  dialogText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    marginBottom: 16,
-  },
-  sendOption: {
+  bottomBar: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    marginBottom: 8,
-    backgroundColor: colors.surfaceLight,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+      marginHorizontal: 'auto' as any,
+      width: '100%',
+      position: 'sticky' as any,
+      bottom: 0,
+      paddingBottom: 16,
+    }),
   },
-  sendOptionText: {
+  bottomButtonHalf: {
     flex: 1,
-    marginLeft: 16,
   },
-  sendOptionTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.text,
-    marginBottom: 2,
-  },
-  sendOptionSubtitle: {
-    fontSize: 13,
-    color: colors.onSurface,
+  bottomButtonContent: {
+    paddingVertical: 8,
   },
 });

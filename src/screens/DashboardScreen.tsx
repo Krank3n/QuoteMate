@@ -3,7 +3,7 @@
  * Home screen with quick stats and new quote button
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, RefreshControl, Pressable } from 'react-native';
 import {
   Text,
@@ -63,24 +63,30 @@ export function DashboardScreen() {
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
-  // Calculate quick stats
-  const sentQuotes = quotes.filter((q) => q.status === 'sent').length;
-  const acceptedQuotes = quotes.filter((q) => q.status === 'accepted' || q.status === 'completed').length;
+  // Calculate quick stats (memoized to avoid recalculation on every render)
+  const { sentQuotes, acceptedQuotes, thisMonthRevenue, pipelineValue } = useMemo(() => {
+    const now = new Date();
+    let sent = 0;
+    let accepted = 0;
+    let monthRevenue = 0;
+    let pipeline = 0;
 
-  // This month's revenue
-  const now = new Date();
-  const thisMonthRevenue = quotes
-    .filter((q) => {
-      if (q.status !== 'accepted' && q.status !== 'completed') return false;
-      const d = new Date(q.updatedAt);
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    })
-    .reduce((sum, q) => sum + q.total, 0);
+    for (const q of quotes) {
+      if (q.status === 'sent') {
+        sent++;
+        pipeline += q.total;
+      }
+      if (q.status === 'accepted' || q.status === 'completed') {
+        accepted++;
+        const d = new Date(q.updatedAt);
+        if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
+          monthRevenue += q.total;
+        }
+      }
+    }
 
-  // Pipeline value (sent but not yet accepted)
-  const pipelineValue = quotes
-    .filter((q) => q.status === 'sent')
-    .reduce((sum, q) => sum + q.total, 0);
+    return { sentQuotes: sent, acceptedQuotes: accepted, thisMonthRevenue: monthRevenue, pipelineValue: pipeline };
+  }, [quotes]);
 
   // Recent quotes (last 3)
   const recentQuotes = [...quotes]
@@ -258,7 +264,7 @@ export function DashboardScreen() {
     }
   };
 
-  const handleEmailViaGmail = (quote: Quote) => {
+  const handleEmailViaGmail = async (quote: Quote) => {
     const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
     const emailBody =
       `Hi ${quote.customerName},\n\n` +
@@ -276,11 +282,11 @@ export function DashboardScreen() {
 
     // Update quote status
     const updatedQuote = { ...quote, status: 'sent' as const };
-    saveQuote(updatedQuote);
+    await saveQuote(updatedQuote);
     setEmailDialogVisible(false);
   };
 
-  const handleEmailViaOutlook = (quote: Quote) => {
+  const handleEmailViaOutlook = async (quote: Quote) => {
     const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
     const emailBody =
       `Hi ${quote.customerName},\n\n` +
@@ -298,11 +304,11 @@ export function DashboardScreen() {
 
     // Update quote status
     const updatedQuote = { ...quote, status: 'sent' as const };
-    saveQuote(updatedQuote);
+    await saveQuote(updatedQuote);
     setEmailDialogVisible(false);
   };
 
-  const handleEmailViaYahoo = (quote: Quote) => {
+  const handleEmailViaYahoo = async (quote: Quote) => {
     const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
     const emailBody =
       `Hi ${quote.customerName},\n\n` +
@@ -320,7 +326,7 @@ export function DashboardScreen() {
 
     // Update quote status
     const updatedQuote = { ...quote, status: 'sent' as const };
-    saveQuote(updatedQuote);
+    await saveQuote(updatedQuote);
     setEmailDialogVisible(false);
   };
 

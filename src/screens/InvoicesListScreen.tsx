@@ -3,7 +3,7 @@
  * Display all invoices with search and filter
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { View, StyleSheet, FlatList, Alert, RefreshControl } from 'react-native';
 import {
   Text,
@@ -71,19 +71,20 @@ export function InvoicesListScreen() {
   );
 
   // Get convertible quotes (accepted or sent)
-  const convertibleQuotes = quotes.filter(
+  const convertibleQuotes = useMemo(() => quotes.filter(
     (q) => q.status === 'accepted' || q.status === 'sent' || q.status === 'completed'
-  );
+  ), [quotes]);
+
+  // Apply overdue status to all invoices (used for both filtering and chip counts)
+  const invoicesWithStatus = useMemo(() => invoices.map((invoice) => {
+    if (isInvoiceOverdue(invoice) && invoice.status !== 'paid' && invoice.status !== 'cancelled') {
+      return { ...invoice, status: 'overdue' as const };
+    }
+    return invoice;
+  }), [invoices]);
 
   // Filter and search invoices
-  const filteredInvoices = invoices
-    .map((invoice) => {
-      // Add real-time overdue status
-      if (isInvoiceOverdue(invoice) && invoice.status !== 'paid' && invoice.status !== 'cancelled') {
-        return { ...invoice, status: 'overdue' as const };
-      }
-      return invoice;
-    })
+  const filteredInvoices = useMemo(() => invoicesWithStatus
     .filter((invoice) => {
       // Status filter
       if (filterStatus !== 'all' && invoice.status !== filterStatus) {
@@ -101,7 +102,7 @@ export function InvoicesListScreen() {
       }
 
       return true;
-    });
+    }), [invoicesWithStatus, filterStatus, searchQuery]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -171,7 +172,7 @@ export function InvoicesListScreen() {
     }
   };
 
-  const renderInvoiceCard = ({ item: invoice, index }: { item: Invoice; index: number }) => (
+  const renderInvoiceCard = useCallback(({ item: invoice, index }: { item: Invoice; index: number }) => (
     <AnimatedListItem index={index}>
       <InvoiceCard
         invoice={invoice}
@@ -184,7 +185,7 @@ export function InvoicesListScreen() {
         onDuplicate={handleDuplicateInvoice}
       />
     </AnimatedListItem>
-  );
+  ), [businessSettings, handleViewInvoice, handleEditInvoice, handleDeleteInvoice, handleRecordPayment, saveInvoice, handleDuplicateInvoice]);
 
   return (
     <View style={styles.container}>
@@ -206,15 +207,9 @@ export function InvoicesListScreen() {
             { key: 'paid', label: 'Paid' },
             { key: 'overdue', label: 'Overdue' },
           ] as const).map(({ key, label }) => {
-            // Count against all invoices (with overdue status applied)
-            const allWithStatus = invoices.map(inv =>
-              isInvoiceOverdue(inv) && inv.status !== 'paid' && inv.status !== 'cancelled'
-                ? { ...inv, status: 'overdue' as const }
-                : inv
-            );
             const count = key === 'all'
               ? invoices.length
-              : allWithStatus.filter(i => i.status === key).length;
+              : invoicesWithStatus.filter(i => i.status === key).length;
             return (
               <Chip
                 key={key}

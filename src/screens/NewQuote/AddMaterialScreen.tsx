@@ -3,7 +3,7 @@
  * Modern full-screen UX for adding materials with tabs for Search/Manual and Saved Items
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -34,6 +34,7 @@ import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
 import { Material } from '../../types';
 import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
+import { ProBadge } from '../../components/ProBadge';
 import { bunningsApi } from '../../services/bunningsApi';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import {
@@ -48,6 +49,7 @@ import {
   saveFavoriteProduct,
   removeFavoriteProduct,
 } from '../../services/materialFavorites';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { BUNNINGS_SCRAPER_URL } from '@env';
 import { TRADE_CATEGORIES } from '../../constants/tradeCategories';
@@ -69,7 +71,9 @@ export function AddMaterialScreen() {
   const route = useRoute<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { businessSettings } = useStore();
+  const { businessSettings, subscriptionStatus } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   // For compatibility, alias to currentQuote (used throughout this file)
   const currentQuote = currentDocument;
@@ -107,6 +111,19 @@ export function AddMaterialScreen() {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
 
+  // Ref for auto-focusing manual name input for non-pro users
+  const materialNameRef = useRef<any>(null);
+
+  // Auto-focus material name for non-pro users
+  useEffect(() => {
+    if (!isPro && !isEditMode && activeTab === 'search') {
+      const timer = setTimeout(() => {
+        materialNameRef.current?.focus();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isPro, isEditMode, activeTab]);
+
   // Update form when editing material changes
   React.useEffect(() => {
     if (editingMaterial) {
@@ -122,6 +139,51 @@ export function AddMaterialScreen() {
   // Saved items state
   const [savedItems, setSavedItems] = useState<any[]>([]);
   const [isLoadingSaved, setIsLoadingSaved] = useState(false);
+
+  // Recently used materials state
+  const [recentMaterials, setRecentMaterials] = useState<Material[]>([]);
+
+  const RECENT_MATERIALS_KEY = '@quotemate_recent_materials';
+  const MAX_RECENT_MATERIALS = 8;
+
+  // Load recently used materials on mount
+  useEffect(() => {
+    loadRecentMaterials();
+  }, []);
+
+  const loadRecentMaterials = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(RECENT_MATERIALS_KEY);
+      if (stored) {
+        setRecentMaterials(JSON.parse(stored));
+      }
+    } catch (error) {
+      console.error('Error loading recent materials:', error);
+    }
+  };
+
+  const saveToRecentMaterials = async (material: Material) => {
+    try {
+      const stored = await AsyncStorage.getItem(RECENT_MATERIALS_KEY);
+      let recents: Material[] = stored ? JSON.parse(stored) : [];
+
+      // Remove duplicate by name (case-insensitive)
+      recents = recents.filter(
+        (m) => m.name.toLowerCase() !== material.name.toLowerCase()
+      );
+
+      // Add to front
+      recents.unshift(material);
+
+      // Keep only the most recent
+      recents = recents.slice(0, MAX_RECENT_MATERIALS);
+
+      await AsyncStorage.setItem(RECENT_MATERIALS_KEY, JSON.stringify(recents));
+      setRecentMaterials(recents);
+    } catch (error) {
+      console.error('Error saving recent material:', error);
+    }
+  };
 
   // Load saved items when switching to saved tab
   useEffect(() => {
@@ -147,6 +209,11 @@ export function AddMaterialScreen() {
   };
 
   const handleSearch = useCallback(async () => {
+    if (!isPro) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
+
     if (!searchQuery.trim()) {
       Alert.alert('Enter Search Term', 'Please enter a product name or description to search');
       return;
@@ -287,7 +354,7 @@ export function AddMaterialScreen() {
     } finally {
       setIsSearching(false);
     }
-  }, [searchQuery, businessSettings]);
+  }, [searchQuery, businessSettings, isPro, navigation]);
 
   const handleSelectProduct = async (item: any) => {
     let newMaterial: Material;
@@ -455,6 +522,16 @@ export function AddMaterialScreen() {
     addMaterialToQuote(newMaterial);
   };
 
+  const handleSelectRecentMaterial = (material: Material) => {
+    const newMaterial: Material = {
+      ...material,
+      id: generateId(),
+      quantity: 1,
+      totalPrice: material.price * 1,
+    };
+    addMaterialToQuote(newMaterial);
+  };
+
   const handleDeleteSavedItem = async (item: any) => {
     Alert.alert(
       'Delete Template',
@@ -481,6 +558,9 @@ export function AddMaterialScreen() {
       materials: [...(currentQuote.materials || []), material],
     });
 
+    // Save to recently used
+    saveToRecentMaterials(material);
+
     // Navigate back
     navigation.goBack();
   };
@@ -501,226 +581,295 @@ export function AddMaterialScreen() {
     navigation.goBack();
   };
 
-  // Render Search & Add Tab
+  // Search section component
+  const renderSearchSection = () => (
+    <View style={styles.section}>
+      <View style={styles.searchTitleRow}>
+        <Text style={styles.sectionTitle}>Search Products</Text>
+        {!isPro && <ProBadge size="small" />}
+      </View>
+      {!isPro ? (
+        <TouchableOpacity
+          style={styles.proSearchPrompt}
+          onPress={() => navigation.navigate('Paywall' as never)}
+        >
+          <MaterialCommunityIcons name="lock-outline" size={20} color={colors.onSurface} />
+          <Text style={styles.proSearchPromptText}>
+            Search real product prices from hardware stores
+          </Text>
+          <Text style={styles.proSearchPromptCta}>Upgrade to Pro</Text>
+        </TouchableOpacity>
+      ) : (
+      <TextInput
+        label="Search for materials"
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        mode="outlined"
+        placeholder="e.g., treated pine 90x45"
+        style={styles.searchInput}
+        right={
+          <TextInput.Icon
+            icon="magnify"
+            onPress={handleSearch}
+            disabled={isSearching}
+          />
+        }
+        onSubmitEditing={handleSearch}
+      />
+      )}
+
+      {isPro && isSearching && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={styles.loadingText}>Searching...</Text>
+        </View>
+      )}
+
+      {isPro && searchResults.length > 0 && (
+        <View style={styles.resultsContainer}>
+          <Text style={styles.resultsHeader}>
+            Found {searchResults.length} products:
+          </Text>
+          <FlatList
+            data={searchResults}
+            keyExtractor={(item, index) => item.itemNumber || `result-${index}`}
+            scrollEnabled={false}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.resultItem}
+                onPress={() => handleSelectProduct(item)}
+              >
+                {item.imageUrl && (
+                  <Image
+                    source={{ uri: item.imageUrl }}
+                    style={styles.resultImage}
+                    resizeMode="contain"
+                  />
+                )}
+                <View style={styles.resultInfo}>
+                  <Text style={styles.resultName}>
+                    {item.productName || item.description}
+                  </Text>
+                  <Text style={styles.resultDetails}>
+                    {item.itemNumber && `Item #: ${item.itemNumber}`}
+                    {item.brand && item.brand.toLowerCase() !== 'bunnings' && ` • ${item.brand}`}
+                  </Text>
+                  {item.price > 0 && (
+                    <Text style={styles.resultPrice}>
+                      {formatCurrency(item.price)}
+                    </Text>
+                  )}
+                  {item.isAiEstimate && (
+                    <Chip
+                      icon="robot"
+                      mode="outlined"
+                      compact
+                      style={styles.aiChip}
+                      textStyle={styles.aiChipText}
+                    >
+                      AI Estimate
+                    </Chip>
+                  )}
+                </View>
+                <IconButton icon="chevron-right" size={20} />
+              </TouchableOpacity>
+            )}
+            ItemSeparatorComponent={() => <Divider />}
+          />
+        </View>
+      )}
+    </View>
+  );
+
+  // Manual entry section component
+  const renderManualEntrySection = () => (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
+        <Text style={styles.sectionTitle}>
+          {isPro ? "Can't find it? Add manually" : 'Add Material'}
+        </Text>
+      </View>
+
+      <TextInput
+        ref={materialNameRef}
+        label="Material Name *"
+        value={manualName}
+        onChangeText={setManualName}
+        mode="outlined"
+        style={styles.input}
+        placeholder="e.g., Custom timber piece"
+      />
+
+      <View style={styles.row}>
+        <TextInput
+          label="Quantity *"
+          value={manualQuantity}
+          onChangeText={setManualQuantity}
+          mode="outlined"
+          keyboardType="decimal-pad"
+          style={[styles.input, styles.halfWidth]}
+        />
+
+        <TextInput
+          label="Price per Unit"
+          value={manualPrice}
+          onChangeText={setManualPrice}
+          mode="outlined"
+          keyboardType="decimal-pad"
+          left={<TextInput.Affix text="$" />}
+          style={[styles.input, styles.halfWidth]}
+        />
+      </View>
+
+      <View style={styles.unitSelector}>
+        <Text style={styles.unitLabel}>Unit</Text>
+        <View style={styles.unitButtons}>
+          <SegmentedButtons
+            value={manualUnit}
+            onValueChange={(value) => setManualUnit(value as Material['unit'])}
+            buttons={[
+              { value: 'each', label: 'Each' },
+              { value: 'm', label: 'M' },
+              { value: 'L', label: 'L' },
+            ]}
+            style={styles.unitRow}
+          />
+          <SegmentedButtons
+            value={manualUnit}
+            onValueChange={(value) => setManualUnit(value as Material['unit'])}
+            buttons={[
+              { value: 'kg', label: 'Kg' },
+              { value: 'box', label: 'Box' },
+              { value: 'pack', label: 'Pack' },
+            ]}
+            style={styles.unitRow}
+          />
+        </View>
+      </View>
+
+      {/* Category Picker */}
+      <View style={styles.categorySelector}>
+        <Text style={styles.unitLabel}>Category (for grouping)</Text>
+        <TouchableOpacity
+          style={styles.categoryButton}
+          onPress={() => setShowCategoryPicker(!showCategoryPicker)}
+        >
+          <MaterialCommunityIcons
+            name={(MATERIAL_CATEGORIES.find(c => c.id === selectedCategory)?.icon || 'folder-outline') as any}
+            size={20}
+            color={colors.primary}
+          />
+          <Text style={styles.categoryButtonText}>
+            {MATERIAL_CATEGORIES.find(c => c.id === selectedCategory)?.name || 'No Category'}
+          </Text>
+          <MaterialCommunityIcons
+            name={showCategoryPicker ? 'chevron-up' : 'chevron-down'}
+            size={20}
+            color={colors.onSurface}
+          />
+        </TouchableOpacity>
+        {showCategoryPicker && (
+          <View style={styles.categoryList}>
+            {MATERIAL_CATEGORIES.map((cat) => (
+              <TouchableOpacity
+                key={cat.id}
+                style={[
+                  styles.categoryItem,
+                  selectedCategory === cat.id && styles.categoryItemSelected,
+                ]}
+                onPress={() => {
+                  setSelectedCategory(cat.id);
+                  setShowCategoryPicker(false);
+                }}
+              >
+                <MaterialCommunityIcons
+                  name={cat.icon as any}
+                  size={18}
+                  color={selectedCategory === cat.id ? colors.primary : colors.onSurface}
+                />
+                <Text
+                  style={[
+                    styles.categoryItemText,
+                    selectedCategory === cat.id && styles.categoryItemTextSelected,
+                  ]}
+                >
+                  {cat.name}
+                </Text>
+                {selectedCategory === cat.id && (
+                  <MaterialCommunityIcons name="check" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </View>
+
+      <View style={styles.toggleRow}>
+        <Text style={styles.toggleLabel}>Save as template for future quotes</Text>
+        <Switch
+          value={saveAsTemplate}
+          onValueChange={setSaveAsTemplate}
+          color={colors.primary}
+        />
+      </View>
+    </View>
+  );
+
+  // Recently Used section
+  const renderRecentlyUsedSection = () => {
+    if (recentMaterials.length === 0 || isEditMode) return null;
+
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="history" size={20} color={colors.primary} />
+          <Text style={styles.sectionTitle}>Recently Used</Text>
+        </View>
+        <View style={styles.recentChipsContainer}>
+          {recentMaterials.map((material, index) => (
+            <TouchableOpacity
+              key={`${material.name}-${index}`}
+              style={styles.recentChip}
+              onPress={() => handleSelectRecentMaterial(material)}
+            >
+              <Text style={styles.recentChipName} numberOfLines={1}>
+                {material.name}
+              </Text>
+              {material.price > 0 && (
+                <Text style={styles.recentChipPrice}>
+                  {formatCurrency(material.price)}
+                </Text>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  // Render Search & Add Tab - manual entry first for non-pro users
   const renderSearchTab = () => (
     <ScrollView
       style={styles.tabContent}
       contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Search Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Search Products</Text>
-        <TextInput
-          label="Search for materials"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          mode="outlined"
-          placeholder="e.g., treated pine 90x45"
-          style={styles.searchInput}
-          right={
-            <TextInput.Icon
-              icon="magnify"
-              onPress={handleSearch}
-              disabled={isSearching}
-            />
-          }
-          onSubmitEditing={handleSearch}
-        />
-
-        {isSearching && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" color={colors.primary} />
-            <Text style={styles.loadingText}>Searching...</Text>
-          </View>
-        )}
-
-        {searchResults.length > 0 && (
-          <View style={styles.resultsContainer}>
-            <Text style={styles.resultsHeader}>
-              Found {searchResults.length} products:
-            </Text>
-            <FlatList
-              data={searchResults}
-              keyExtractor={(item, index) => item.itemNumber || `result-${index}`}
-              scrollEnabled={false}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.resultItem}
-                  onPress={() => handleSelectProduct(item)}
-                >
-                  {item.imageUrl && (
-                    <Image
-                      source={{ uri: item.imageUrl }}
-                      style={styles.resultImage}
-                      resizeMode="contain"
-                    />
-                  )}
-                  <View style={styles.resultInfo}>
-                    <Text style={styles.resultName}>
-                      {item.productName || item.description}
-                    </Text>
-                    <Text style={styles.resultDetails}>
-                      {item.itemNumber && `Item #: ${item.itemNumber}`}
-                      {item.brand && item.brand.toLowerCase() !== 'bunnings' && ` • ${item.brand}`}
-                    </Text>
-                    {item.price > 0 && (
-                      <Text style={styles.resultPrice}>
-                        {formatCurrency(item.price)}
-                      </Text>
-                    )}
-                    {item.isAiEstimate && (
-                      <Chip
-                        icon="robot"
-                        mode="outlined"
-                        compact
-                        style={styles.aiChip}
-                        textStyle={styles.aiChipText}
-                      >
-                        AI Estimate
-                      </Chip>
-                    )}
-                  </View>
-                  <IconButton icon="chevron-right" size={20} />
-                </TouchableOpacity>
-              )}
-              ItemSeparatorComponent={() => <Divider />}
-            />
-          </View>
-        )}
-      </View>
-
-      <Divider style={styles.divider} />
-
-      {/* Manual Entry Section */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
-          <Text style={styles.sectionTitle}>Can't find it? Add manually</Text>
-        </View>
-
-        <TextInput
-          label="Material Name *"
-          value={manualName}
-          onChangeText={setManualName}
-          mode="outlined"
-          style={styles.input}
-          placeholder="e.g., Custom timber piece"
-        />
-
-        <View style={styles.row}>
-          <TextInput
-            label="Quantity *"
-            value={manualQuantity}
-            onChangeText={setManualQuantity}
-            mode="outlined"
-            keyboardType="decimal-pad"
-            style={[styles.input, styles.halfWidth]}
-          />
-
-          <TextInput
-            label="Price per Unit"
-            value={manualPrice}
-            onChangeText={setManualPrice}
-            mode="outlined"
-            keyboardType="decimal-pad"
-            left={<TextInput.Affix text="$" />}
-            style={[styles.input, styles.halfWidth]}
-          />
-        </View>
-
-        <View style={styles.unitSelector}>
-          <Text style={styles.unitLabel}>Unit</Text>
-          <View style={styles.unitButtons}>
-            <SegmentedButtons
-              value={manualUnit}
-              onValueChange={(value) => setManualUnit(value as Material['unit'])}
-              buttons={[
-                { value: 'each', label: 'Each' },
-                { value: 'm', label: 'M' },
-                { value: 'L', label: 'L' },
-              ]}
-              style={styles.unitRow}
-            />
-            <SegmentedButtons
-              value={manualUnit}
-              onValueChange={(value) => setManualUnit(value as Material['unit'])}
-              buttons={[
-                { value: 'kg', label: 'Kg' },
-                { value: 'box', label: 'Box' },
-                { value: 'pack', label: 'Pack' },
-              ]}
-              style={styles.unitRow}
-            />
-          </View>
-        </View>
-
-        {/* Category Picker */}
-        <View style={styles.categorySelector}>
-          <Text style={styles.unitLabel}>Category (for grouping)</Text>
-          <TouchableOpacity
-            style={styles.categoryButton}
-            onPress={() => setShowCategoryPicker(!showCategoryPicker)}
-          >
-            <MaterialCommunityIcons
-              name={(MATERIAL_CATEGORIES.find(c => c.id === selectedCategory)?.icon || 'folder-outline') as any}
-              size={20}
-              color={colors.primary}
-            />
-            <Text style={styles.categoryButtonText}>
-              {MATERIAL_CATEGORIES.find(c => c.id === selectedCategory)?.name || 'No Category'}
-            </Text>
-            <MaterialCommunityIcons
-              name={showCategoryPicker ? 'chevron-up' : 'chevron-down'}
-              size={20}
-              color={colors.onSurface}
-            />
-          </TouchableOpacity>
-          {showCategoryPicker && (
-            <View style={styles.categoryList}>
-              {MATERIAL_CATEGORIES.map((cat) => (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={[
-                    styles.categoryItem,
-                    selectedCategory === cat.id && styles.categoryItemSelected,
-                  ]}
-                  onPress={() => {
-                    setSelectedCategory(cat.id);
-                    setShowCategoryPicker(false);
-                  }}
-                >
-                  <MaterialCommunityIcons
-                    name={cat.icon as any}
-                    size={18}
-                    color={selectedCategory === cat.id ? colors.primary : colors.onSurface}
-                  />
-                  <Text
-                    style={[
-                      styles.categoryItemText,
-                      selectedCategory === cat.id && styles.categoryItemTextSelected,
-                    ]}
-                  >
-                    {cat.name}
-                  </Text>
-                  {selectedCategory === cat.id && (
-                    <MaterialCommunityIcons name="check" size={18} color={colors.primary} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
-
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Save as template for future quotes</Text>
-          <Switch
-            value={saveAsTemplate}
-            onValueChange={setSaveAsTemplate}
-            color={colors.primary}
-          />
-        </View>
-      </View>
+      {renderRecentlyUsedSection()}
+      {recentMaterials.length > 0 && !isEditMode && <Divider style={styles.divider} />}
+      {isPro ? (
+        <>
+          {renderSearchSection()}
+          <Divider style={styles.divider} />
+          {renderManualEntrySection()}
+        </>
+      ) : (
+        <>
+          {renderManualEntrySection()}
+          <Divider style={styles.divider} />
+          {renderSearchSection()}
+        </>
+      )}
     </ScrollView>
   );
 
@@ -869,6 +1018,30 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 12,
   },
+  searchTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  proSearchPrompt: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+    gap: 8,
+  },
+  proSearchPromptText: {
+    fontSize: 14,
+    color: colors.onSurface,
+    textAlign: 'center',
+  },
+  proSearchPromptCta: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+  },
   searchInput: {
     marginBottom: 16,
   },
@@ -932,6 +1105,32 @@ const styles = StyleSheet.create({
   },
   aiChipText: {
     fontSize: 10,
+  },
+  recentChipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  recentChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    gap: 6,
+  },
+  recentChipName: {
+    fontSize: 13,
+    color: colors.text,
+    maxWidth: 150,
+  },
+  recentChipPrice: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
   },
   divider: {
     marginVertical: 8,

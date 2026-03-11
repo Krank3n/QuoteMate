@@ -3,7 +3,7 @@
  * Card component for displaying invoice information in lists
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { View, StyleSheet, Alert, Platform, Pressable, Animated } from 'react-native';
 import {
   Text,
@@ -39,7 +39,7 @@ interface InvoiceCardProps {
   onStatusChange?: (invoice: Invoice) => void;
 }
 
-export function InvoiceCard({
+export const InvoiceCard = React.memo(function InvoiceCard({
   invoice,
   businessSettings,
   onView,
@@ -347,7 +347,7 @@ export function InvoiceCard({
     </Animated.View>
     </SwipeableCard>
   );
-}
+});
 
 function getStatusChipStyle(status: Invoice['status']) {
   switch (status) {

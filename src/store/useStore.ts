@@ -270,9 +270,13 @@ export const useStore = create<AppState>((set, get) => ({
       // Update quotes in state but keep currentQuote (will be cleared on navigation)
       set({ quotes: updatedQuotes });
 
-      // Sync to Firestore if user is signed in
+      // Sync to Firestore if user is signed in (non-blocking — local save already succeeded)
       if (auth.currentUser) {
-        await firestoreService.saveQuote(calculatedQuote);
+        try {
+          await firestoreService.saveQuote(calculatedQuote);
+        } catch (syncError) {
+          console.warn('Firestore sync failed for quote, will retry on next load:', syncError);
+        }
       }
 
       // For new quotes when not authenticated, do client-side increment
@@ -299,9 +303,13 @@ export const useStore = create<AppState>((set, get) => ({
 
       set({ quotes: updatedQuotes });
 
-      // Delete from Firestore if user is signed in
+      // Delete from Firestore if user is signed in (non-blocking)
       if (auth.currentUser) {
-        await firestoreService.deleteQuote(quoteId);
+        try {
+          await firestoreService.deleteQuote(quoteId);
+        } catch (syncError) {
+          console.warn('Firestore sync failed for quote deletion:', syncError);
+        }
       }
     } catch (error) {
       console.error('Failed to delete quote:', error);
@@ -373,9 +381,13 @@ export const useStore = create<AppState>((set, get) => ({
 
       set({ quotes: updatedQuotes });
 
-      // Sync to Firestore if authenticated
+      // Sync to Firestore if authenticated (non-blocking)
       if (auth.currentUser) {
-        await firestoreService.saveQuote(duplicatedQuote);
+        try {
+          await firestoreService.saveQuote(duplicatedQuote);
+        } catch (syncError) {
+          console.warn('Firestore sync failed for duplicated quote:', syncError);
+        }
       }
     } catch (error) {
       console.error('Failed to duplicate quote:', error);
@@ -766,9 +778,13 @@ export const useStore = create<AppState>((set, get) => ({
 
       set({ invoices: updatedInvoices });
 
-      // Sync to Firestore if user is signed in
+      // Sync to Firestore if user is signed in (non-blocking)
       if (auth.currentUser) {
-        await firestoreService.saveInvoice(updatedInvoice);
+        try {
+          await firestoreService.saveInvoice(updatedInvoice);
+        } catch (syncError) {
+          console.warn('Firestore sync failed for invoice:', syncError);
+        }
       }
     } catch (error) {
       console.error('Failed to save invoice:', error);
@@ -788,9 +804,13 @@ export const useStore = create<AppState>((set, get) => ({
 
       set({ invoices: updatedInvoices });
 
-      // Delete from Firestore if user is signed in
+      // Delete from Firestore if user is signed in (non-blocking)
       if (auth.currentUser) {
-        await firestoreService.deleteInvoice(invoiceId);
+        try {
+          await firestoreService.deleteInvoice(invoiceId);
+        } catch (syncError) {
+          console.warn('Firestore sync failed for invoice deletion:', syncError);
+        }
       }
     } catch (error) {
       console.error('Failed to delete invoice:', error);
@@ -919,9 +939,13 @@ export const useStore = create<AppState>((set, get) => ({
 
       set({ invoices: updatedInvoices });
 
-      // Sync to Firestore if user is signed in
+      // Sync to Firestore if user is signed in (non-blocking)
       if (auth.currentUser) {
-        await firestoreService.saveInvoice(updatedInvoice);
+        try {
+          await firestoreService.saveInvoice(updatedInvoice);
+        } catch (syncError) {
+          console.warn('Firestore sync failed for payment recording:', syncError);
+        }
       }
     } catch (error) {
       console.error('Failed to record payment:', error);
@@ -970,9 +994,13 @@ export const useStore = create<AppState>((set, get) => ({
 
       set({ invoices: updatedInvoices, currentInvoice: duplicatedInvoice });
 
-      // Sync to Firestore if user is signed in
+      // Sync to Firestore if user is signed in (non-blocking)
       if (auth.currentUser) {
-        await firestoreService.saveInvoice(duplicatedInvoice);
+        try {
+          await firestoreService.saveInvoice(duplicatedInvoice);
+        } catch (syncError) {
+          console.warn('Firestore sync failed for duplicated invoice:', syncError);
+        }
       }
 
       return duplicatedInvoice;
@@ -996,6 +1024,7 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.ONBOARDED,
         STORAGE_KEYS.SUBSCRIPTION,
         STORAGE_KEYS.INVOICES,
+        STORAGE_KEYS.NEXT_QUOTE_NUMBER,
         STORAGE_KEYS.NEXT_INVOICE_NUMBER,
       ]);
       console.log('✅ clearAllData: AsyncStorage cleared');
@@ -1010,6 +1039,7 @@ export const useStore = create<AppState>((set, get) => ({
         subscriptionStatus: null,
         invoices: [],
         currentInvoice: null,
+        nextQuoteNumber: 1,
         nextInvoiceNumber: 1,
       });
       console.log('✅ clearAllData: Store state reset');

@@ -3,7 +3,7 @@
  * Display all quotes with search and filter
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { View, StyleSheet, FlatList, Alert, RefreshControl } from 'react-native';
 import {
   Text,
@@ -63,7 +63,7 @@ export function QuotesListScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   // Filter and search quotes
-  const filteredQuotes = quotes.filter((quote) => {
+  const filteredQuotes = useMemo(() => quotes.filter((quote) => {
     // Status filter
     if (filterStatus !== 'all' && quote.status !== filterStatus) {
       return false;
@@ -80,7 +80,7 @@ export function QuotesListScreen() {
     }
 
     return true;
-  });
+  }), [quotes, filterStatus, searchQuery]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -194,7 +194,7 @@ export function QuotesListScreen() {
     setEmailDialogVisible(true);
   };
 
-  const handleEmailViaGmail = (quote: Quote) => {
+  const handleEmailViaGmail = async (quote: Quote) => {
     const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
     const emailBody =
       `Hi ${quote.customerName},\n\n` +
@@ -216,7 +216,7 @@ export function QuotesListScreen() {
     setEmailDialogVisible(false);
   };
 
-  const handleEmailViaOutlook = (quote: Quote) => {
+  const handleEmailViaOutlook = async (quote: Quote) => {
     const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
     const emailBody =
       `Hi ${quote.customerName},\n\n` +
@@ -234,11 +234,11 @@ export function QuotesListScreen() {
 
     // Update quote status
     const updatedQuote = { ...quote, status: 'sent' as const };
-    saveQuote(updatedQuote);
+    await saveQuote(updatedQuote);
     setEmailDialogVisible(false);
   };
 
-  const handleEmailViaYahoo = (quote: Quote) => {
+  const handleEmailViaYahoo = async (quote: Quote) => {
     const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
     const emailBody =
       `Hi ${quote.customerName},\n\n` +
@@ -256,7 +256,7 @@ export function QuotesListScreen() {
 
     // Update quote status
     const updatedQuote = { ...quote, status: 'sent' as const };
-    saveQuote(updatedQuote);
+    await saveQuote(updatedQuote);
     setEmailDialogVisible(false);
   };
 
@@ -287,7 +287,7 @@ export function QuotesListScreen() {
     }
   };
 
-  const renderQuoteCard = ({ item: quote, index }: { item: Quote; index: number }) => (
+  const renderQuoteCard = useCallback(({ item: quote, index }: { item: Quote; index: number }) => (
     <AnimatedListItem index={index}>
       <QuoteCard
         quote={quote}
@@ -302,7 +302,7 @@ export function QuotesListScreen() {
         onConvertToInvoice={handleConvertToInvoice}
       />
     </AnimatedListItem>
-  );
+  ), [businessSettings, handleViewQuote, handleEditQuote, handleDeleteQuote, handleDuplicateQuote, saveQuote, handleOpenStatusSheet, handleOpenEmailDialog, handleConvertToInvoice]);
 
   return (
     <View style={styles.container}>

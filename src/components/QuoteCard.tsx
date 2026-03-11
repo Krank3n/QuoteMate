@@ -3,7 +3,7 @@
  * Consolidated quote card used in both DashboardScreen and QuotesListScreen
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { View, StyleSheet, Alert, Platform, Pressable, Animated } from 'react-native';
 import {
   Text,
@@ -39,7 +39,7 @@ interface QuoteCardProps {
   onConvertToInvoice?: (quote: Quote) => void;
 }
 
-export function QuoteCard({
+export const QuoteCard = React.memo(function QuoteCard({
   quote,
   businessSettings,
   onView,
@@ -316,7 +316,7 @@ export function QuoteCard({
       </Animated.View>
     </SwipeableCard>
   );
-}
+});
 
 function getStatusChipStyle(status: string) {
   switch (status) {

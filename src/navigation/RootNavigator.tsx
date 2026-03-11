@@ -5,6 +5,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Animated, StyleSheet, View, TouchableOpacity, LayoutChangeEvent, Platform } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -310,6 +311,9 @@ function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           const onPress = () => {
             const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
             if (!isFocused && !event.defaultPrevented) {
+              if (Platform.OS !== 'web') {
+                Haptics.selectionAsync();
+              }
               navigation.navigate(route.name);
             }
           };
