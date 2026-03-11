@@ -80,7 +80,7 @@ export default {
         backgroundColor: "#1E293B"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 65,
+      versionCode: 71,
       permissions: ["android.permission.RECORD_AUDIO"],
       blockedPermissions: ["android.permission.CAMERA"]
     },
