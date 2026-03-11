@@ -12,6 +12,9 @@ const SENDER = {
   name: 'QuoteMate',
 };
 
+// Admin notification email
+const ADMIN_EMAIL = 'thomas.andrew.hansen@gmail.com';
+
 // Email preference types that users can opt out of
 type EmailCategory = 'transactional' | 'marketing';
 
@@ -820,4 +823,80 @@ export async function handleUnsubscribe(userId: string, category: string): Promi
     console.error('Error updating email preferences:', error);
     return false;
   }
+}
+
+// ============================================================
+// ADMIN NOTIFICATION EMAILS
+// ============================================================
+
+/**
+ * Notify admin when a new user registers
+ */
+export function sendNewUserNotificationEmail(
+  userEmail: string,
+  platform: string,
+  authMethod: string,
+  businessName: string,
+): Promise<boolean> {
+  const platformLabels: Record<string, string> = {
+    ios: 'iOS (iPhone/iPad)',
+    android: 'Android',
+    web: 'Web',
+  };
+  const platformDisplay = platformLabels[platform] || platform || 'Unknown';
+
+  const methodLabels: Record<string, string> = {
+    email: 'Email & Password',
+    google: 'Google Sign-In',
+    apple: 'Apple Sign-In',
+  };
+  const methodDisplay = methodLabels[authMethod] || authMethod || 'Unknown';
+
+  const content = wrapEmailTemplate(`
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">New User Registration</p>
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      A new user just signed up!
+    </h1>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+      <tr>
+        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Email</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${userEmail}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Platform</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${platformDisplay}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Sign-up Method</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${methodDisplay}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;">
+                <span style="color:#94a3b8;font-size:13px;">Business Name</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${businessName || 'Not set yet'}</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  `);
+
+  return sendEmail({
+    to: ADMIN_EMAIL,
+    subject: `New QuoteMate user: ${userEmail} (${platformDisplay})`,
+    htmlContent: content,
+    category: 'transactional',
+    tags: ['admin-notification', 'new-user'],
+  });
 }

@@ -14,6 +14,7 @@ import {
   sendOnboardingTipEmail,
   sendUpdateAnnouncementEmail,
   handleUnsubscribe,
+  sendNewUserNotificationEmail,
 } from './email';
 
 // Initialize Firebase Admin
@@ -3087,7 +3088,33 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
       lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-  await sendWelcomeEmail(email, businessName, user.uid);
+  // Read registration platform info (saved by client on signup)
+  let platform = '';
+  let authMethod = '';
+  try {
+    const regDoc = await admin.firestore()
+      .doc(`users/${user.uid}/settings/registrationInfo`)
+      .get();
+    if (regDoc.exists) {
+      platform = regDoc.data()?.platform || '';
+      authMethod = regDoc.data()?.method || '';
+    }
+  } catch (error) {
+    // Registration info may not exist yet
+  }
+
+  // If no method from client, infer from provider data
+  if (!authMethod && user.providerData?.length) {
+    const providerId = user.providerData[0].providerId;
+    if (providerId === 'google.com') authMethod = 'google';
+    else if (providerId === 'apple.com') authMethod = 'apple';
+    else authMethod = 'email';
+  }
+
+  await Promise.all([
+    sendWelcomeEmail(email, businessName, user.uid),
+    sendNewUserNotificationEmail(email, platform, authMethod, businessName),
+  ]);
 });
 
 /**
