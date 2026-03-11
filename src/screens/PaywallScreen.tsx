@@ -4,13 +4,12 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, ActivityIndicator, Platform, Linking } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, ActivityIndicator, Platform, Linking, Pressable } from 'react-native';
 import {
   Text,
   Button,
   Surface,
   Title,
-  List,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
@@ -41,6 +40,7 @@ export function PaywallScreen() {
   const [showCancellationModal, setShowCancellationModal] = useState(false);
   const [productsLoadError, setProductsLoadError] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('yearly');
 
   // Trial status
   const trialExpired = subscriptionStatus?.trialExpired || false;
@@ -255,13 +255,12 @@ export function PaywallScreen() {
     try {
       if (Platform.OS === 'ios') {
         // iOS MUST use Apple IAP only (App Store guidelines 3.1.1)
-        // requestPurchase works directly with the SKU — no need for pre-fetched products
         console.log('🍎 Using Apple IAP for iOS');
-        await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
+        await billingService.purchaseSubscription(selectedSku);
       } else if (Platform.OS === 'android') {
         // Android uses Google Play IAP
         console.log('🤖 Using Google Play IAP for Android');
-        await billingService.purchaseSubscription(SUBSCRIPTION_SKUS.MONTHLY);
+        await billingService.purchaseSubscription(selectedSku);
       } else if (Platform.OS === 'web') {
         // Web uses Stripe (multi-platform service - Guideline 3.1.3b)
         const currentUser = auth.currentUser;
@@ -294,8 +293,11 @@ export function PaywallScreen() {
 
   const getProductPrice = (productId: string): string => {
     const product = products.find(p => p.productId === productId);
-    return (product as any)?.localizedPrice || '$29';
+    if (product) return (product as any)?.localizedPrice || (productId === SUBSCRIPTION_SKUS.YEARLY ? '$199' : '$29');
+    return productId === SUBSCRIPTION_SKUS.YEARLY ? '$199' : '$29';
   };
+
+  const selectedSku = selectedPlan === 'yearly' ? SUBSCRIPTION_SKUS.YEARLY : SUBSCRIPTION_SKUS.MONTHLY;
 
   const handleRestorePurchases = async () => {
     if (Platform.OS === 'web') return;
@@ -590,11 +592,14 @@ export function PaywallScreen() {
     >
       <WebContainer>
         <View style={styles.header}>
-        <MaterialCommunityIcons
-          name="crown"
-          size={80}
-          color={colors.secondary}
-        />
+        <View style={styles.crownContainer}>
+          <View style={styles.crownGlow} />
+          <MaterialCommunityIcons
+            name="crown"
+            size={48}
+            color={colors.secondary}
+          />
+        </View>
         <Title style={styles.title}>{isPro ? 'Manage Subscription' : 'Upgrade to Pro'}</Title>
         <Text style={styles.subtitle}>
           {isPro
@@ -668,35 +673,55 @@ export function PaywallScreen() {
         </Surface>
       )}
 
+      {/* Plan Toggle */}
+      {!isPro && (
+        <View style={styles.planToggleContainer}>
+          <Pressable
+            style={[styles.planOption, selectedPlan === 'monthly' && styles.planOptionSelected]}
+            onPress={() => setSelectedPlan('monthly')}
+          >
+            <Text style={[styles.planOptionLabel, selectedPlan === 'monthly' && styles.planOptionLabelSelected]}>Monthly</Text>
+            <Text style={[styles.planOptionPrice, selectedPlan === 'monthly' && styles.planOptionPriceSelected]}>{getProductPrice(SUBSCRIPTION_SKUS.MONTHLY)}</Text>
+            <Text style={[styles.planOptionPeriod, selectedPlan === 'monthly' && styles.planOptionPeriodSelected]}>/month</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.planOption, selectedPlan === 'yearly' && styles.planOptionSelected]}
+            onPress={() => setSelectedPlan('yearly')}
+          >
+            <View style={styles.saveBadge}>
+              <Text style={styles.saveBadgeText}>Save 43%</Text>
+            </View>
+            <Text style={[styles.planOptionLabel, selectedPlan === 'yearly' && styles.planOptionLabelSelected]}>Yearly</Text>
+            <Text style={[styles.planOptionPrice, selectedPlan === 'yearly' && styles.planOptionPriceSelected]}>{getProductPrice(SUBSCRIPTION_SKUS.YEARLY)}</Text>
+            <Text style={[styles.planOptionPeriod, selectedPlan === 'yearly' && styles.planOptionPeriodSelected]}>/year</Text>
+          </Pressable>
+        </View>
+      )}
+
       {/* Upgrade Section for Free Users */}
       {!isPro && (
-      <Surface style={styles.planCard}>
-        <View style={styles.planHeader}>
-          <Text style={styles.planName}>QuoteMate Pro</Text>
-          <View style={styles.priceContainer}>
-            <Text style={styles.price}>{getProductPrice(SUBSCRIPTION_SKUS.MONTHLY)}</Text>
-            <Text style={styles.period}>/month</Text>
-          </View>
-        </View>
+      <View style={styles.planCard}>
+        <Text style={styles.includesLabel}>Everything you need:</Text>
 
         <View style={styles.features}>
           <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
+            <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
             <Text style={styles.featureText}>Unlimited quotes and invoices</Text>
           </View>
 
           <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
+            <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
             <Text style={styles.featureText}>Your business logo on quotes and invoices</Text>
           </View>
 
           <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
+            <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
             <Text style={styles.featureText}>Priority customer support</Text>
           </View>
 
           <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
+            <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
             <Text style={styles.featureText}>All future features included</Text>
           </View>
         </View>
@@ -704,7 +729,7 @@ export function PaywallScreen() {
         {/* Show non-blocking warning if products failed to load on iOS/Android */}
         {productsLoadError && Platform.OS !== 'web' && (
           <View style={styles.errorStateContainer}>
-            <MaterialCommunityIcons name="alert-circle-outline" size={32} color={colors.warning} />
+            <MaterialCommunityIcons name="information-outline" size={20} color={colors.warning} />
             <Text style={styles.errorStateText}>
               Could not verify pricing from the {Platform.OS === 'ios' ? 'App Store' : 'Play Store'}. You can still subscribe below.
             </Text>
@@ -716,31 +741,12 @@ export function PaywallScreen() {
           onPress={handleUpgrade}
           style={styles.upgradeButton}
           contentStyle={styles.upgradeButtonContent}
+          labelStyle={styles.upgradeButtonLabel}
           loading={isUpgrading}
           disabled={isUpgrading}
         >
           Start Pro Subscription
         </Button>
-
-        <Text style={styles.disclaimer}>
-          Auto-renewable monthly subscription at {getProductPrice(SUBSCRIPTION_SKUS.MONTHLY)}/month. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. Cancel anytime.
-        </Text>
-
-        <View style={styles.legalLinks}>
-          <Text
-            style={styles.legalLink}
-            onPress={() => Linking.openURL('https://hansendev.com.au/projects/quotemate-privacy')}
-          >
-            Privacy Policy
-          </Text>
-          <Text style={styles.legalSeparator}>|</Text>
-          <Text
-            style={styles.legalLink}
-            onPress={() => Linking.openURL('https://hansendev.com.au/projects/quotemate-terms')}
-          >
-            Terms of Use
-          </Text>
-        </View>
 
         {Platform.OS !== 'web' && (
           <Button
@@ -753,28 +759,51 @@ export function PaywallScreen() {
             Restore Purchases
           </Button>
         )}
-      </Surface>
+      </View>
       )}
 
       {!isPro && (
-      <Surface style={styles.freeCard}>
-        <Text style={styles.freeTitle}>Free Trial</Text>
-        <Text style={styles.freeText}>
-          {trialExpired
-            ? '• Your 7-day trial has ended\n• Subscribe to continue creating quotes\n• Your business logo requires Pro'
-            : `• ${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} remaining in trial\n• All features included during trial\n• Subscribe for unlimited access`
-          }
-        </Text>
-      </Surface>
+        <View style={styles.bottomSection}>
+          <Button
+            mode="text"
+            onPress={() => navigation.goBack()}
+            style={styles.backButton}
+            textColor={colors.textMuted}
+          >
+            Maybe Later
+          </Button>
+
+          <Text style={styles.disclaimer}>
+            Auto-renewable {selectedPlan} subscription at {getProductPrice(selectedSku)}/{selectedPlan === 'yearly' ? 'year' : 'month'}.{'\n'}Cancel anytime. Renews unless cancelled 24 hours before period end.
+          </Text>
+
+          <View style={styles.legalLinks}>
+            <Text
+              style={styles.legalLink}
+              onPress={() => Linking.openURL('https://hansendev.com.au/projects/quotemate-privacy')}
+            >
+              Privacy Policy
+            </Text>
+            <Text style={styles.legalSeparator}>|</Text>
+            <Text
+              style={styles.legalLink}
+              onPress={() => Linking.openURL('https://hansendev.com.au/projects/quotemate-terms')}
+            >
+              Terms of Use
+            </Text>
+          </View>
+        </View>
       )}
 
-      <Button
-        mode="text"
-        onPress={() => navigation.goBack()}
-        style={styles.backButton}
-      >
-        {isPro ? 'Back to Settings' : 'Maybe Later'}
-      </Button>
+      {isPro && (
+        <Button
+          mode="text"
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
+          Back to Settings
+        </Button>
+      )}
       </WebContainer>
 
     </ScrollView>
@@ -800,99 +829,152 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    padding: 32,
-    paddingTop: 48,
+    padding: 24,
+    paddingTop: 32,
+    paddingBottom: 20,
+  },
+  crownContainer: {
+    width: 88,
+    height: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  crownGlow: {
+    position: 'absolute',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: 'rgba(207, 161, 83, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(207, 161, 83, 0.25)',
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: 'bold',
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: 12,
+    marginBottom: 6,
+    color: colors.text,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: colors.onSurface,
     textAlign: 'center',
   },
-  planCard: {
-    margin: 20,
-    padding: 24,
-    borderRadius: 12,
-    elevation: 4,
-  },
-  planHeader: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  planName: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  priceContainer: {
+  planToggleContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    marginHorizontal: 20,
+    gap: 12,
+    marginTop: 4,
+    marginBottom: 16,
   },
-  currency: {
-    fontSize: 24,
-    fontWeight: 'bold',
+  planOption: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 18,
+    paddingTop: 20,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.border,
+  },
+  planOptionSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryBg,
+  },
+  planOptionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  planOptionLabelSelected: {
     color: colors.primary,
   },
-  price: {
-    fontSize: 48,
+  planOptionPrice: {
+    fontSize: 30,
     fontWeight: 'bold',
-    color: colors.primary,
+    color: colors.textMuted,
   },
-  period: {
-    fontSize: 16,
+  planOptionPriceSelected: {
+    color: colors.text,
+  },
+  planOptionPeriod: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  planOptionPeriodSelected: {
     color: colors.onSurface,
-    marginTop: 24,
+  },
+  saveBadge: {
+    position: 'absolute',
+    top: -11,
+    backgroundColor: colors.secondary,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  saveBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  planCard: {
+    marginHorizontal: 20,
+    marginBottom: 0,
+    padding: 20,
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  includesLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.onSurface,
+    marginBottom: 16,
   },
   features: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   feature: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   featureText: {
-    fontSize: 16,
+    fontSize: 15,
     marginLeft: 12,
     flex: 1,
+    color: colors.text,
   },
   upgradeButton: {
-    marginBottom: 16,
+    marginBottom: 8,
+    borderRadius: 12,
   },
   upgradeButtonContent: {
-    paddingVertical: 8,
+    paddingVertical: 10,
+  },
+  upgradeButtonLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  bottomSection: {
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    marginTop: 4,
   },
   disclaimer: {
-    fontSize: 12,
-    color: colors.onSurface,
+    fontSize: 11,
+    color: colors.textMuted,
     textAlign: 'center',
-    fontStyle: 'italic',
-  },
-  freeCard: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-    padding: 16,
-    borderRadius: 8,
-    elevation: 2,
-  },
-  freeTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  freeText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    lineHeight: 22,
+    lineHeight: 16,
   },
   backButton: {
-    marginTop: 8,
-    // marginBottom handled by scrollContent paddingBottom with insets
+    marginBottom: 16,
   },
   proStatusSection: {
     alignItems: 'center',
@@ -957,36 +1039,37 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   errorStateContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.warningBg,
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: colors.surfaceLight,
+    padding: 12,
+    borderRadius: 10,
     marginBottom: 16,
+    gap: 10,
   },
   errorStateText: {
-    fontSize: 14,
-    color: colors.warning,
-    textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
+    fontSize: 13,
+    color: colors.onSurface,
+    flex: 1,
+    lineHeight: 18,
   },
   legalLinks: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: 10,
   },
   legalLink: {
     fontSize: 13,
-    color: colors.primary,
+    color: colors.textMuted,
     textDecorationLine: 'underline',
   },
   legalSeparator: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: colors.textMuted,
     marginHorizontal: 8,
   },
   restoreButton: {
-    marginTop: 8,
+    marginTop: 4,
   },
 });

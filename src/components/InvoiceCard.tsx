@@ -167,6 +167,8 @@ export const InvoiceCard = React.memo(function InvoiceCard({
     <Card style={styles.invoiceCard}>
       <Pressable
         onPress={() => onView(invoice.id)}
+        accessibilityRole="button"
+        accessibilityLabel={`View invoice for ${invoice.customerName}, ${invoice.job.name}, ${formatCurrency(invoice.total)}, status ${invoice.status}`}
         onPressIn={() => {
           Animated.spring(scaleAnim, {
             toValue: 0.97,
@@ -261,6 +263,7 @@ export const InvoiceCard = React.memo(function InvoiceCard({
                   <IconButton
                     icon="dots-vertical"
                     size={20}
+                    accessibilityLabel="Invoice actions menu"
                     onPress={(e) => {
                       e.stopPropagation();
                       setMenuVisible(true);

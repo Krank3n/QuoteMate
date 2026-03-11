@@ -4,19 +4,16 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, Alert } from 'react-native';
 import {
   Text,
   Button,
   Surface,
   Title,
-  Divider,
-  IconButton,
   Chip,
   TextInput,
   Menu,
 } from 'react-native-paper';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { format } from 'date-fns';
 
@@ -31,7 +28,16 @@ import {
   getAmountDue,
   isInvoiceOverdue,
 } from '../utils/invoiceCalculator';
-import { Invoice, PaymentTerms, PaymentMethod } from '../types';
+import { Invoice, PaymentMethod } from '../types';
+import {
+  DocumentHeader,
+  CustomerSection,
+  JobSection,
+  MaterialsSection,
+  LaborSection,
+  TotalsSection,
+  documentStyles,
+} from '../components/document';
 
 function formatPaymentMethod(method: PaymentMethod): string {
   const methods: Record<PaymentMethod, string> = {
@@ -123,10 +129,7 @@ export function ViewInvoiceScreen() {
   };
 
   const handleEditSection = (section: 'materials' | 'labor') => {
-    // Set the invoice as current invoice for editing
     setCurrentInvoice(displayInvoice);
-
-    // Navigate to the specific screen in the NewInvoice flow
     const screenMap = {
       materials: 'MaterialsList',
       labor: 'LaborMarkup',
@@ -148,39 +151,28 @@ export function ViewInvoiceScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <IconButton
-          icon="arrow-left"
-          size={24}
-          onPress={() => {
-            setCurrentInvoice(null);
-            navigation.goBack();
-          }}
-        />
-        <View style={styles.headerTitleContainer}>
-          <Title>Invoice {isEditing ? '(Editing)' : 'Preview'}</Title>
-          {invoice.invoiceNumber && (
-            <Text style={styles.headerInvoiceNumber}>{invoice.invoiceNumber}</Text>
-          )}
-        </View>
-        <IconButton
-          icon={isEditing ? 'check' : 'pencil'}
-          size={24}
-          onPress={() => {
-            if (isEditing) {
-              handleSave();
-            } else {
-              setIsEditing(true);
-            }
-          }}
-        />
-      </View>
+      <DocumentHeader
+        title={`Invoice ${isEditing ? '(Editing)' : 'Preview'}`}
+        subtitle={invoice.invoiceNumber}
+        onBackPress={() => {
+          setCurrentInvoice(null);
+          navigation.goBack();
+        }}
+        rightIcon={isEditing ? 'check' : 'pencil'}
+        onRightPress={() => {
+          if (isEditing) {
+            handleSave();
+          } else {
+            setIsEditing(true);
+          }
+        }}
+      />
 
       <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
         {/* Status Section */}
-        <Surface style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Title style={styles.sectionTitle}>Status</Title>
+        <Surface style={documentStyles.section}>
+          <View style={documentStyles.sectionHeader}>
+            <Title style={documentStyles.sectionTitle}>Status</Title>
           </View>
           <View style={styles.statusRow}>
             <Chip
@@ -206,59 +198,19 @@ export function ViewInvoiceScreen() {
           )}
         </Surface>
 
-        {/* Customer Section */}
-        <Surface style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Title style={styles.sectionTitle}>Customer</Title>
-          </View>
-          {isEditing ? (
-            <>
-              <TextInput
-                label="Customer Name"
-                value={invoice.customerName}
-                onChangeText={(text) => handleFieldChange('customerName', text)}
-                style={styles.input}
-                mode="outlined"
-              />
-              <TextInput
-                label="Email"
-                value={invoice.customerEmail || ''}
-                onChangeText={(text) => handleFieldChange('customerEmail', text)}
-                style={styles.input}
-                mode="outlined"
-                keyboardType="email-address"
-              />
-              <TextInput
-                label="Phone"
-                value={invoice.customerPhone || ''}
-                onChangeText={(text) => handleFieldChange('customerPhone', text)}
-                style={styles.input}
-                mode="outlined"
-                keyboardType="phone-pad"
-              />
-              <TextInput
-                label="Job Address"
-                value={invoice.jobAddress || ''}
-                onChangeText={(text) => handleFieldChange('jobAddress', text)}
-                style={styles.input}
-                mode="outlined"
-                multiline
-              />
-            </>
-          ) : (
-            <>
-              <Text style={styles.text}>{invoice.customerName}</Text>
-              {invoice.customerEmail && <Text style={styles.subtext}>{invoice.customerEmail}</Text>}
-              {invoice.customerPhone && <Text style={styles.subtext}>{invoice.customerPhone}</Text>}
-              {invoice.jobAddress && <Text style={styles.subtext}>{invoice.jobAddress}</Text>}
-            </>
-          )}
-        </Surface>
+        <CustomerSection
+          customerName={invoice.customerName}
+          customerEmail={invoice.customerEmail}
+          customerPhone={invoice.customerPhone}
+          jobAddress={invoice.jobAddress}
+          isEditing={isEditing}
+          onFieldChange={(field, value) => handleFieldChange(field as keyof Invoice, value)}
+        />
 
         {/* Dates Section */}
-        <Surface style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Title style={styles.sectionTitle}>Invoice Details</Title>
+        <Surface style={documentStyles.section}>
+          <View style={documentStyles.sectionHeader}>
+            <Title style={documentStyles.sectionTitle}>Invoice Details</Title>
           </View>
           <View style={styles.dateRow}>
             <View style={styles.dateItem}>
@@ -362,128 +314,41 @@ export function ViewInvoiceScreen() {
           </View>
         </Surface>
 
-        {/* Job Section */}
-        <Surface style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Title style={styles.sectionTitle}>Job</Title>
-          </View>
-          {isEditing ? (
-            <>
-              <TextInput
-                label="Job Name"
-                value={invoice.job.name}
-                onChangeText={(text) =>
-                  handleFieldChange('job', { ...invoice.job, name: text })
-                }
-                style={styles.input}
-                mode="outlined"
-              />
-              <TextInput
-                label="Description"
-                value={invoice.job.description}
-                onChangeText={(text) =>
-                  handleFieldChange('job', { ...invoice.job, description: text })
-                }
-                style={styles.input}
-                mode="outlined"
-                multiline
-              />
-            </>
-          ) : (
-            <>
-              <Text style={styles.text}>{invoice.job.name}</Text>
-              <Text style={styles.subtext}>{invoice.job.description}</Text>
-            </>
-          )}
-        </Surface>
+        <JobSection
+          job={invoice.job}
+          isEditing={isEditing}
+          onJobChange={(job) => handleFieldChange('job', job)}
+        />
 
-        {/* Materials Section */}
-        <TouchableOpacity onPress={() => handleEditSection('materials')} activeOpacity={0.7}>
-          <Surface style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Title style={styles.sectionTitle}>Materials ({invoice.materials.length})</Title>
-              <IconButton icon="pencil" size={18} iconColor={colors.primary} style={styles.editIcon} />
-            </View>
-            {invoice.materials.length === 0 ? (
-              <Text style={styles.subtext}>No materials - Labor only</Text>
-            ) : (
-              invoice.materials.map((material) => (
-                <View key={material.id} style={styles.itemRow}>
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemName}>{material.name}</Text>
-                    <Text style={styles.itemDetails}>
-                      {material.quantity} {material.unit} × {formatCurrency(material.price)}
-                    </Text>
-                  </View>
-                  <Text style={styles.itemTotal}>{formatCurrency(material.totalPrice)}</Text>
-                </View>
-              ))
-            )}
-            <Divider style={styles.divider} />
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Materials Subtotal</Text>
-              <Text style={styles.summaryValue}>{formatCurrency(invoice.materialsSubtotal)}</Text>
-            </View>
-          </Surface>
-        </TouchableOpacity>
+        <MaterialsSection
+          materials={invoice.materials}
+          materialsSubtotal={invoice.materialsSubtotal}
+          onEdit={() => handleEditSection('materials')}
+          emptyMessage="No materials - Labor only"
+        />
 
-        {/* Labor Section */}
-        <TouchableOpacity onPress={() => handleEditSection('labor')} activeOpacity={0.7}>
-          <Surface style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Title style={styles.sectionTitle}>Labor</Title>
-              <IconButton icon="pencil" size={18} iconColor={colors.primary} style={styles.editIcon} />
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.text}>
-                {businessSettings?.showLaborHours
-                  ? `${invoice.laborHours} hours @ ${formatCurrency(invoice.laborRate)}/hr`
-                  : 'Labor'}
-              </Text>
-              <Text style={styles.summaryValue}>{formatCurrency(invoice.laborTotal)}</Text>
-            </View>
-          </Surface>
-        </TouchableOpacity>
+        <LaborSection
+          laborHours={invoice.laborHours}
+          laborRate={invoice.laborRate}
+          laborTotal={invoice.laborTotal}
+          showLaborHours={businessSettings?.showLaborHours}
+          onEdit={() => handleEditSection('labor')}
+        />
 
-        {/* Totals Section */}
-        <Surface style={styles.totalSection}>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Subtotal</Text>
-            <Text style={styles.summaryValue}>{formatCurrency(invoice.subtotal)}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Markup ({invoice.markup}%)</Text>
-            <Text style={styles.summaryValue}>{formatCurrency(invoice.markupAmount)}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>GST (10%)</Text>
-            <Text style={styles.summaryValue}>{formatCurrency(invoice.gst)}</Text>
-          </View>
-          <Divider style={styles.divider} />
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>TOTAL</Text>
-            <Text style={styles.totalValue}>{formatCurrency(invoice.total)}</Text>
-          </View>
-          {invoice.paidAmount !== undefined && invoice.paidAmount > 0 && (
-            <>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Amount Paid</Text>
-                <Text style={[styles.summaryValue, { color: colors.success }]}>
-                  -{formatCurrency(invoice.paidAmount)}
-                </Text>
-              </View>
-              <View style={styles.balanceRow}>
-                <Text style={styles.balanceLabel}>BALANCE DUE</Text>
-                <Text style={styles.balanceValue}>{formatCurrency(amountDue)}</Text>
-              </View>
-            </>
-          )}
-        </Surface>
+        <TotalsSection
+          subtotal={invoice.subtotal}
+          markup={invoice.markup}
+          markupAmount={invoice.markupAmount}
+          gst={invoice.gst}
+          total={invoice.total}
+          paidAmount={invoice.paidAmount}
+          balanceDue={amountDue}
+        />
 
         {/* Notes Section */}
         {(invoice.notes || isEditing) && (
-          <Surface style={styles.section}>
-            <Title style={styles.sectionTitle}>Notes</Title>
+          <Surface style={documentStyles.section}>
+            <Title style={documentStyles.sectionTitle}>Notes</Title>
             {isEditing ? (
               <TextInput
                 value={invoice.notes || ''}
@@ -494,15 +359,15 @@ export function ViewInvoiceScreen() {
                 numberOfLines={3}
               />
             ) : (
-              <Text style={styles.text}>{invoice.notes}</Text>
+              <Text style={documentStyles.text}>{invoice.notes}</Text>
             )}
           </Surface>
         )}
 
         {/* Payment History Section */}
         {invoice.paidAmount !== undefined && invoice.paidAmount > 0 && (
-          <Surface style={styles.section}>
-            <Title style={styles.sectionTitle}>Payment History</Title>
+          <Surface style={documentStyles.section}>
+            <Title style={documentStyles.sectionTitle}>Payment History</Title>
             <View style={styles.paymentHistoryRow}>
               <View style={styles.paymentHistoryInfo}>
                 <Text style={styles.paymentHistoryMethod}>
@@ -579,61 +444,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingTop: Platform.OS === 'ios' ? 60 : 20,
-    paddingBottom: 12,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  headerTitleContainer: {
-    alignItems: 'center',
-  },
-  headerInvoiceNumber: {
-    fontSize: 12,
-    color: colors.primary,
-    fontWeight: '600',
-  },
   content: {
     flex: 1,
     padding: 16,
   },
   scrollContent: {
     paddingBottom: 140,
-  },
-  section: {
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 8,
-    elevation: 2,
-    backgroundColor: colors.surface,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  editIcon: {
-    margin: 0,
-  },
-  text: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  subtext: {
-    fontSize: 13,
-    color: colors.onSurface,
-    marginBottom: 2,
   },
   input: {
     marginBottom: 12,
@@ -692,86 +508,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   customDaysInput: {
-    marginTop: 8,
+    marginTop: 4,
     marginBottom: 8,
     backgroundColor: colors.surface,
     maxWidth: 150,
-    marginTop: 4,
-  },
-  itemRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  itemInfo: {
-    flex: 1,
-  },
-  itemName: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  itemDetails: {
-    fontSize: 12,
-    color: colors.onSurface,
-  },
-  itemTotal: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  divider: {
-    marginVertical: 12,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  summaryLabel: {
-    fontSize: 14,
-  },
-  summaryValue: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  totalSection: {
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 8,
-    elevation: 3,
-    backgroundColor: colors.surfaceGray,
-  },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 8,
-  },
-  totalLabel: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  totalValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.primary,
-  },
-  balanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    marginTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  balanceLabel: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: colors.warning,
-  },
-  balanceValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.warning,
   },
   solidBackground: {
     position: 'absolute',

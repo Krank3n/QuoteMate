@@ -51,6 +51,7 @@ import {
 } from '../../services/materialFavorites';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
+import { SwipeableCard } from '../../components/SwipeableCard';
 import { BUNNINGS_SCRAPER_URL } from '@env';
 import { TRADE_CATEGORIES } from '../../constants/tradeCategories';
 
@@ -702,14 +703,38 @@ export function AddMaterialScreen() {
       />
 
       <View style={styles.row}>
-        <TextInput
-          label="Quantity *"
-          value={manualQuantity}
-          onChangeText={setManualQuantity}
-          mode="outlined"
-          keyboardType="decimal-pad"
-          style={[styles.input, styles.halfWidth]}
-        />
+        <View style={[styles.halfWidth, styles.quantityStepperContainer]}>
+          <Text style={styles.quantityLabel}>Quantity *</Text>
+          <View style={styles.quantityStepper}>
+            <TouchableOpacity
+              style={styles.stepperButton}
+              onPress={() => {
+                const current = parseFloat(manualQuantity) || 1;
+                if (current > 1) setManualQuantity((current - 1).toString());
+              }}
+            >
+              <MaterialCommunityIcons name="minus" size={20} color={colors.primary} />
+            </TouchableOpacity>
+            <TextInput
+              value={manualQuantity}
+              onChangeText={setManualQuantity}
+              mode="flat"
+              keyboardType="decimal-pad"
+              style={styles.quantityInput}
+              contentStyle={styles.quantityInputContent}
+              underlineStyle={{ display: 'none' }}
+            />
+            <TouchableOpacity
+              style={styles.stepperButton}
+              onPress={() => {
+                const current = parseFloat(manualQuantity) || 0;
+                setManualQuantity((current + 1).toString());
+              }}
+            >
+              <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
+        </View>
 
         <TextInput
           label="Price per Unit"
@@ -717,6 +742,7 @@ export function AddMaterialScreen() {
           onChangeText={setManualPrice}
           mode="outlined"
           keyboardType="decimal-pad"
+          placeholder="Optional"
           left={<TextInput.Affix text="$" />}
           style={[styles.input, styles.halfWidth]}
         />
@@ -895,10 +921,21 @@ export function AddMaterialScreen() {
           keyExtractor={(item) => item.key}
           contentContainerStyle={styles.savedList}
           renderItem={({ item }) => (
-            <View style={styles.savedItem}>
+            <SwipeableCard
+              rightActions={[
+                {
+                  icon: 'delete-outline',
+                  label: 'Delete',
+                  color: colors.error,
+                  bgColor: colors.error + '18',
+                  onPress: () => handleDeleteSavedItem(item),
+                },
+              ]}
+            >
               <TouchableOpacity
-                style={styles.savedItemContent}
+                style={styles.savedItem}
                 onPress={() => handleSelectSavedItem(item)}
+                activeOpacity={0.7}
               >
                 {item.imageUrl ? (
                   <Image
@@ -928,13 +965,7 @@ export function AddMaterialScreen() {
                 </View>
                 <IconButton icon="chevron-right" size={20} />
               </TouchableOpacity>
-              <IconButton
-                icon="delete"
-                size={20}
-                iconColor={colors.error}
-                onPress={() => handleDeleteSavedItem(item)}
-              />
-            </View>
+            </SwipeableCard>
           )}
           ItemSeparatorComponent={() => <Divider />}
         />
@@ -1145,6 +1176,41 @@ const styles = StyleSheet.create({
   halfWidth: {
     flex: 1,
   },
+  quantityStepperContainer: {
+    marginBottom: 12,
+  },
+  quantityLabel: {
+    fontSize: 12,
+    color: colors.onSurface,
+    marginBottom: 6,
+    marginLeft: 4,
+  },
+  quantityStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    height: 48,
+  },
+  stepperButton: {
+    width: 44,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quantityInput: {
+    flex: 1,
+    textAlign: 'center',
+    backgroundColor: 'transparent',
+    height: 48,
+  },
+  quantityInputContent: {
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   unitSelector: {
     marginBottom: 16,
   },
@@ -1231,11 +1297,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderRadius: 8,
     overflow: 'hidden',
-  },
-  savedItemContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 12,
   },

@@ -35,6 +35,7 @@ import { AnimatedNumber } from '../components/AnimatedNumber';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
 import { lightTap, successTap } from '../utils/haptics';
+import { openWebEmailClient, copyQuoteEmailText } from '../utils/emailUtils';
 
 export function DashboardScreen() {
   const scrollRef = useRef<ScrollView>(null);
@@ -265,92 +266,23 @@ export function DashboardScreen() {
   };
 
   const handleEmailViaGmail = async (quote: Quote) => {
-    const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
-    const emailBody =
-      `Hi ${quote.customerName},\n\n` +
-      `Please find your quotation for ${quote.job.name}.\n\n` +
-      `Total: ${formatCurrency(quote.total)}\n\n` +
-      `This quote is valid for 30 days from the date of issue.\n\n` +
-      `If you have any questions, please don't hesitate to contact us.\n\n` +
-      `Best regards,\n${businessSettings?.businessName || 'Your Business'}\n\n` +
-      `---\n` +
-      `Note: A print dialog has opened with the quote PDF. Please save it as PDF and attach it to this email.`;
-
-    const recipient = quote.customerEmail || '';
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(recipient)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
-    window.open(gmailUrl, '_blank');
-
-    // Update quote status
-    const updatedQuote = { ...quote, status: 'sent' as const };
-    await saveQuote(updatedQuote);
+    await openWebEmailClient('gmail', quote, businessSettings, saveQuote);
     setEmailDialogVisible(false);
   };
 
   const handleEmailViaOutlook = async (quote: Quote) => {
-    const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
-    const emailBody =
-      `Hi ${quote.customerName},\n\n` +
-      `Please find your quotation for ${quote.job.name}.\n\n` +
-      `Total: ${formatCurrency(quote.total)}\n\n` +
-      `This quote is valid for 30 days from the date of issue.\n\n` +
-      `If you have any questions, please don't hesitate to contact us.\n\n` +
-      `Best regards,\n${businessSettings?.businessName || 'Your Business'}\n\n` +
-      `---\n` +
-      `Note: A print dialog has opened with the quote PDF. Please save it as PDF and attach it to this email.`;
-
-    const recipient = quote.customerEmail || '';
-    const outlookUrl = `https://outlook.live.com/mail/0/deeplink/compose?to=${encodeURIComponent(recipient)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
-    window.open(outlookUrl, '_blank');
-
-    // Update quote status
-    const updatedQuote = { ...quote, status: 'sent' as const };
-    await saveQuote(updatedQuote);
+    await openWebEmailClient('outlook', quote, businessSettings, saveQuote);
     setEmailDialogVisible(false);
   };
 
   const handleEmailViaYahoo = async (quote: Quote) => {
-    const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
-    const emailBody =
-      `Hi ${quote.customerName},\n\n` +
-      `Please find your quotation for ${quote.job.name}.\n\n` +
-      `Total: ${formatCurrency(quote.total)}\n\n` +
-      `This quote is valid for 30 days from the date of issue.\n\n` +
-      `If you have any questions, please don't hesitate to contact us.\n\n` +
-      `Best regards,\n${businessSettings?.businessName || 'Your Business'}\n\n` +
-      `---\n` +
-      `Note: A print dialog has opened with the quote PDF. Please save it as PDF and attach it to this email.`;
-
-    const recipient = quote.customerEmail || '';
-    const yahooUrl = `https://compose.mail.yahoo.com/?to=${encodeURIComponent(recipient)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
-    window.open(yahooUrl, '_blank');
-
-    // Update quote status
-    const updatedQuote = { ...quote, status: 'sent' as const };
-    await saveQuote(updatedQuote);
+    await openWebEmailClient('yahoo', quote, businessSettings, saveQuote);
     setEmailDialogVisible(false);
   };
 
   const handleCopyEmailText = async (quote: Quote) => {
     try {
-      const subject = `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`;
-      const emailBody =
-        `Hi ${quote.customerName},\n\n` +
-        `Please find your quotation for ${quote.job.name}.\n\n` +
-        `Total: ${formatCurrency(quote.total)}\n\n` +
-        `This quote is valid for 30 days from the date of issue.\n\n` +
-        `If you have any questions, please don't hesitate to contact us.\n\n` +
-        `Best regards,\n${businessSettings?.businessName || 'Your Business'}\n\n` +
-        `---\n` +
-        `Note: A print dialog has opened with the quote PDF. Please save it as PDF and attach it to this email.`;
-
-      const recipient = quote.customerEmail || '';
-      const emailText = `To: ${recipient}\nSubject: ${subject}\n\n${emailBody}`;
-      await navigator.clipboard.writeText(emailText);
-      Alert.alert('Copied!', 'Email text copied to clipboard. You can paste it into your email client.');
-
-      // Update quote status
-      const updatedQuote = { ...quote, status: 'sent' as const };
-      await saveQuote(updatedQuote);
+      await copyQuoteEmailText(quote, businessSettings, saveQuote);
       setEmailDialogVisible(false);
     } catch (error) {
       Alert.alert('Error', 'Failed to copy to clipboard');
@@ -492,6 +424,7 @@ export function DashboardScreen() {
         onPress={handleNewQuote}
         style={styles.newQuoteButton}
         contentStyle={styles.newQuoteButtonContent}
+        accessibilityLabel="Create a new quote"
       >
         New Quote
       </Button>
@@ -499,7 +432,7 @@ export function DashboardScreen() {
       {/* Quick Stats */}
       <View style={styles.statsContainer}>
         <AnimatedListItem index={0} style={styles.statCardWrapper}>
-          <Pressable onPress={() => { lightTap(); navigation.navigate('Insights' as never); }}>
+          <Pressable onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Earned this month: ${formatCurrency(thisMonthRevenue)}`}>
             <Surface style={styles.statCard}>
               <View style={[styles.statIconCircle, { backgroundColor: colors.primaryBg }]}>
                 <MaterialCommunityIcons name="chart-areaspline" size={22} color={colors.primary} />
@@ -511,7 +444,7 @@ export function DashboardScreen() {
         </AnimatedListItem>
 
         <AnimatedListItem index={1} style={styles.statCardWrapper}>
-          <Pressable onPress={() => { lightTap(); navigation.navigate('Insights' as never); }}>
+          <Pressable onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Awaiting response: ${formatCurrency(pipelineValue)}`}>
             <Surface style={styles.statCard}>
               <View style={[styles.statIconCircle, { backgroundColor: colors.infoBg }]}>
                 <MaterialCommunityIcons name="timer-sand" size={22} color={colors.info} />
@@ -523,7 +456,7 @@ export function DashboardScreen() {
         </AnimatedListItem>
 
         <AnimatedListItem index={2} style={styles.statCardWrapper}>
-          <Pressable onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'sent' }); }}>
+          <Pressable onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'sent' }); }} accessibilityRole="button" accessibilityLabel={`${sentQuotes} quotes sent`}>
             <Surface style={styles.statCard}>
               <View style={[styles.statIconCircle, { backgroundColor: colors.warningBg }]}>
                 <MaterialCommunityIcons name="send-check" size={22} color={colors.secondary} />
@@ -535,7 +468,7 @@ export function DashboardScreen() {
         </AnimatedListItem>
 
         <AnimatedListItem index={3} style={styles.statCardWrapper}>
-          <Pressable onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'accepted' }); }}>
+          <Pressable onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'accepted' }); }} accessibilityRole="button" accessibilityLabel={`${acceptedQuotes} jobs won`}>
             <Surface style={styles.statCard}>
               <View style={[styles.statIconCircle, { backgroundColor: colors.successBg }]}>
                 <MaterialCommunityIcons name="handshake" size={22} color={colors.success} />

@@ -4,25 +4,30 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Platform, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import {
   Text,
   Button,
   Surface,
   Title,
-  Divider,
-  IconButton,
 } from 'react-native-paper';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import { useStore } from '../store/useStore';
 import { colors } from '../theme';
-import { formatCurrency } from '../utils/quoteCalculator';
 import { generateQuotePDF } from '../utils/pdfGenerator';
 import { SendQuoteButton } from '../components/SendQuoteButton';
 import { AlertModal } from '../components/AlertModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  DocumentHeader,
+  CustomerSection,
+  JobSection,
+  MaterialsSection,
+  LaborSection,
+  TotalsSection,
+  documentStyles,
+} from '../components/document';
 
 export function ViewQuoteScreen() {
   const navigation = useNavigation<any>();
@@ -70,10 +75,7 @@ export function ViewQuoteScreen() {
   const quote = displayQuote;
 
   const handleEditSection = (section: 'customer' | 'job' | 'materials' | 'labor') => {
-    // Set the quote as current quote for editing
     setCurrentQuote(quote);
-
-    // Navigate to the specific screen
     const screenMap = {
       customer: 'CustomerDetails',
       job: 'JobDetails',
@@ -118,7 +120,6 @@ export function ViewQuoteScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Convert to Invoice Modal */}
       <AlertModal
         visible={showConvertModal}
         onDismiss={() => setShowConvertModal(false)}
@@ -134,124 +135,58 @@ export function ViewQuoteScreen() {
         secondaryButtonLoading={isConverting}
       />
 
-      <View style={styles.header}>
-        <IconButton
-          icon="arrow-left"
-          size={24}
-          onPress={() => navigation.goBack()}
-        />
-        <View style={styles.headerTitleContainer}>
-          <Title>Quote Preview</Title>
-          {displayQuote?.quoteNumber && (
-            <Text style={styles.headerQuoteNumber}>{displayQuote.quoteNumber}</Text>
-          )}
-        </View>
-        <IconButton
-          icon="file-pdf-box"
-          size={24}
-          onPress={handleViewPDF}
-          disabled={isPdfLoading}
-        />
-      </View>
+      <DocumentHeader
+        title="Quote Preview"
+        subtitle={displayQuote?.quoteNumber}
+        onBackPress={() => navigation.goBack()}
+        rightIcon="file-pdf-box"
+        onRightPress={handleViewPDF}
+        rightDisabled={isPdfLoading}
+      />
 
       <ScrollView
         style={styles.content}
         contentContainerStyle={styles.scrollContent}
       >
-        <TouchableOpacity onPress={() => handleEditSection('customer')} activeOpacity={0.7}>
-          <Surface style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Title style={styles.sectionTitle}>Customer</Title>
-              <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
-            </View>
-            <Text style={styles.text}>{quote.customerName}</Text>
-            {quote.customerEmail && <Text style={styles.subtext}>{quote.customerEmail}</Text>}
-            {quote.customerPhone && <Text style={styles.subtext}>{quote.customerPhone}</Text>}
-            {quote.jobAddress && <Text style={styles.subtext}>{quote.jobAddress}</Text>}
-          </Surface>
-        </TouchableOpacity>
+        <CustomerSection
+          customerName={quote.customerName}
+          customerEmail={quote.customerEmail}
+          customerPhone={quote.customerPhone}
+          jobAddress={quote.jobAddress}
+          onEdit={() => handleEditSection('customer')}
+        />
 
-        <TouchableOpacity onPress={() => handleEditSection('job')} activeOpacity={0.7}>
-          <Surface style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Title style={styles.sectionTitle}>Job</Title>
-              <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
-            </View>
-            <Text style={styles.text}>{quote.job.name}</Text>
-            <Text style={styles.subtext}>{quote.job.description}</Text>
-          </Surface>
-        </TouchableOpacity>
+        <JobSection
+          job={quote.job}
+          onEdit={() => handleEditSection('job')}
+        />
 
-        <TouchableOpacity onPress={() => handleEditSection('materials')} activeOpacity={0.7}>
-          <Surface style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Title style={styles.sectionTitle}>Materials ({quote.materials.length})</Title>
-              <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
-            </View>
-          {quote.materials.length === 0 ? (
-            <Text style={styles.subtext}>No materials required - Labor only</Text>
-          ) : (
-            quote.materials.map((material) => (
-              <View key={material.id} style={styles.itemRow}>
-                <View style={styles.itemInfo}>
-                  <Text style={styles.itemName}>{material.name}</Text>
-                  <Text style={styles.itemDetails}>
-                    {material.quantity} {material.unit} × {formatCurrency(material.price)}
-                  </Text>
-                </View>
-                <Text style={styles.itemTotal}>{formatCurrency(material.totalPrice)}</Text>
-              </View>
-            ))
-          )}
-          <Divider style={styles.divider} />
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Materials Subtotal</Text>
-            <Text style={styles.summaryValue}>{formatCurrency(quote.materialsSubtotal)}</Text>
-          </View>
-          </Surface>
-        </TouchableOpacity>
+        <MaterialsSection
+          materials={quote.materials}
+          materialsSubtotal={quote.materialsSubtotal}
+          onEdit={() => handleEditSection('materials')}
+        />
 
-        <TouchableOpacity onPress={() => handleEditSection('labor')} activeOpacity={0.7}>
-          <Surface style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Title style={styles.sectionTitle}>Labor</Title>
-              <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
-            </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.text}>
-              {businessSettings?.showLaborHours
-                ? `${quote.laborHours} hours @ ${formatCurrency(quote.laborRate)}/hr`
-                : 'Labor'}
-            </Text>
-            <Text style={styles.summaryValue}>{formatCurrency(quote.laborTotal)}</Text>
-          </View>
-          </Surface>
-        </TouchableOpacity>
+        <LaborSection
+          laborHours={quote.laborHours}
+          laborRate={quote.laborRate}
+          laborTotal={quote.laborTotal}
+          showLaborHours={businessSettings?.showLaborHours}
+          onEdit={() => handleEditSection('labor')}
+        />
 
-        <Surface style={styles.totalSection}>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Subtotal</Text>
-            <Text style={styles.summaryValue}>{formatCurrency(quote.subtotal)}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Markup ({quote.markup}%)</Text>
-            <Text style={styles.summaryValue}>{formatCurrency(quote.markupAmount)}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>GST (10%)</Text>
-            <Text style={styles.summaryValue}>{formatCurrency(quote.gst)}</Text>
-          </View>
-          <Divider style={styles.divider} />
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>TOTAL</Text>
-            <Text style={styles.totalValue}>{formatCurrency(quote.total)}</Text>
-          </View>
-        </Surface>
+        <TotalsSection
+          subtotal={quote.subtotal}
+          markup={quote.markup}
+          markupAmount={quote.markupAmount}
+          gst={quote.gst}
+          total={quote.total}
+        />
 
         {quote.notes && (
-          <Surface style={styles.section}>
-            <Title style={styles.sectionTitle}>Notes</Title>
-            <Text style={styles.text}>{quote.notes}</Text>
+          <Surface style={documentStyles.section}>
+            <Title style={documentStyles.sectionTitle}>Notes</Title>
+            <Text style={documentStyles.text}>{quote.notes}</Text>
           </Surface>
         )}
       </ScrollView>
@@ -270,7 +205,9 @@ export function ViewQuoteScreen() {
             <Button
               mode="outlined"
               onPress={handleConvertToInvoice}
-              style={styles.button}
+              style={styles.outlinedButton}
+              contentStyle={styles.buttonContent}
+              labelStyle={styles.outlinedButtonLabel}
               icon="file-replace"
             >
               Convert to Invoice
@@ -278,7 +215,7 @@ export function ViewQuoteScreen() {
             <SendQuoteButton
               quote={quote}
               businessSettings={businessSettings}
-              buttonStyle={styles.button}
+              buttonStyle={styles.sendButton}
             />
           </>
         ) : (
@@ -286,15 +223,16 @@ export function ViewQuoteScreen() {
             <Button
               mode="outlined"
               onPress={() => navigation.goBack()}
-              style={styles.button}
-              labelStyle={styles.buttonLabel}
+              style={styles.outlinedButton}
+              contentStyle={styles.buttonContent}
+              labelStyle={styles.outlinedButtonLabel}
             >
               Close
             </Button>
             <SendQuoteButton
               quote={quote}
               businessSettings={businessSettings}
-              buttonStyle={styles.button}
+              buttonStyle={styles.sendButton}
             />
           </>
         )}
@@ -308,115 +246,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingTop: Platform.OS === 'ios' ? 60 : 20,
-    paddingBottom: 12,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  headerTitleContainer: {
-    alignItems: 'center',
-  },
-  headerQuoteNumber: {
-    fontSize: 12,
-    color: colors.primary,
-    fontWeight: '600',
-  },
   content: {
     flex: 1,
     padding: 16,
   },
   scrollContent: {
     paddingBottom: 140,
-  },
-  section: {
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 8,
-    elevation: 2,
-    backgroundColor: colors.surface,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  text: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  subtext: {
-    fontSize: 13,
-    color: colors.onSurface,
-    marginBottom: 2,
-  },
-  itemRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  itemInfo: {
-    flex: 1,
-  },
-  itemName: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  itemDetails: {
-    fontSize: 12,
-    color: colors.onSurface,
-  },
-  itemTotal: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  divider: {
-    marginVertical: 12,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  summaryLabel: {
-    fontSize: 14,
-  },
-  summaryValue: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  totalSection: {
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 8,
-    elevation: 3,
-    backgroundColor: colors.surfaceGray,
-  },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 8,
-  },
-  totalLabel: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  totalValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.primary,
   },
   solidBackground: {
     position: 'absolute',
@@ -450,41 +285,24 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  button: {
+  sendButton: {
     flex: 1,
     margin: 0,
+    borderRadius: 24,
   },
-  buttonLabel: {
-    color: colors.white,
-    marginVertical: 16,
-    marginHorizontal: 10,
-  },
-  dialogText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    marginBottom: 16,
-  },
-  sendOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    marginBottom: 8,
-    backgroundColor: colors.surfaceLight,
-  },
-  sendOptionText: {
+  outlinedButton: {
     flex: 1,
-    marginLeft: 16,
+    margin: 0,
+    borderColor: colors.primary,
+    borderWidth: 1.5,
+    borderRadius: 24,
   },
-  sendOptionTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.text,
-    marginBottom: 2,
+  buttonContent: {
+    height: 48,
   },
-  sendOptionSubtitle: {
-    fontSize: 13,
-    color: colors.onSurface,
+  outlinedButtonLabel: {
+    fontSize: 15,
+    color: colors.primary,
+    fontWeight: '600',
   },
 });

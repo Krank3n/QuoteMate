@@ -73,7 +73,12 @@ function NewQuoteNavigator() {
       screenOptions={{
         headerStyle: {
           backgroundColor: colors.primary,
+          elevation: 0,
+          shadowOpacity: 0,
         },
+        headerBackground: () => (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.primary }]} />
+        ),
         headerTintColor: colors.white,
         headerTitleStyle: {
           fontWeight: 'bold',
@@ -127,7 +132,12 @@ function NewInvoiceNavigator() {
       screenOptions={{
         headerStyle: {
           backgroundColor: colors.primary,
+          elevation: 0,
+          shadowOpacity: 0,
         },
+        headerBackground: () => (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.primary }]} />
+        ),
         headerTintColor: colors.white,
         headerTitleStyle: {
           fontWeight: 'bold',

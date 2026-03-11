@@ -1,0 +1,64 @@
+import React from 'react';
+import { View, TouchableOpacity } from 'react-native';
+import { Text, Title, Surface, TextInput } from 'react-native-paper';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { colors } from '../../theme';
+import { Job } from '../../types';
+import { documentStyles as styles } from './documentStyles';
+
+interface JobSectionProps {
+  job: Job;
+  onEdit?: () => void;
+  isEditing?: boolean;
+  onJobChange?: (job: Job) => void;
+}
+
+export function JobSection({
+  job,
+  onEdit,
+  isEditing,
+  onJobChange,
+}: JobSectionProps) {
+  const content = (
+    <Surface style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Title style={styles.sectionTitle}>Job</Title>
+        {onEdit && <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />}
+      </View>
+      {isEditing && onJobChange ? (
+        <>
+          <TextInput
+            label="Job Name"
+            value={job.name}
+            onChangeText={(text) => onJobChange({ ...job, name: text })}
+            style={styles.input}
+            mode="outlined"
+          />
+          <TextInput
+            label="Description"
+            value={job.description}
+            onChangeText={(text) => onJobChange({ ...job, description: text })}
+            style={styles.input}
+            mode="outlined"
+            multiline
+          />
+        </>
+      ) : (
+        <>
+          <Text style={styles.text}>{job.name}</Text>
+          <Text style={styles.subtext}>{job.description}</Text>
+        </>
+      )}
+    </Surface>
+  );
+
+  if (onEdit) {
+    return (
+      <TouchableOpacity onPress={onEdit} activeOpacity={0.7}>
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return content;
+}

@@ -172,6 +172,8 @@ export const QuoteCard = React.memo(function QuoteCard({
       <Card style={styles.quoteCard}>
         <Pressable
           onPress={() => onView(quote.id)}
+          accessibilityRole="button"
+          accessibilityLabel={`View quote for ${quote.customerName}, ${quote.job.name}, ${formatCurrency(quote.total)}, status ${quote.status}`}
           onPressIn={() => {
             Animated.spring(scaleAnim, {
               toValue: 0.97,
@@ -221,6 +223,7 @@ export const QuoteCard = React.memo(function QuoteCard({
                     <IconButton
                       icon="dots-vertical"
                       size={20}
+                      accessibilityLabel="Quote actions menu"
                       onPress={(e) => {
                         e.stopPropagation();
                         setMenuVisible(true);
