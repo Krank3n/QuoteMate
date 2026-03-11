@@ -299,131 +299,158 @@ export function AuthScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.contentWrapper}>
-          <WebContainer maxWidth={500}>
+          <WebContainer maxWidth={440}>
             <Animated.View style={[styles.animatedContent, { opacity: fadeAnim }]}>
-              <View style={styles.header}>
+              {/* Logo */}
+              <Animated.View style={[styles.logoWrapper, { transform: [{ scale: logoScale }] }]}>
                 <Image
                   source={require('../../assets/logo-scaled.png')}
                   style={styles.logo}
                   resizeMode="contain"
                 />
+              </Animated.View>
+
+              {/* Heading */}
+              <View style={styles.header}>
                 <Title style={styles.title}>
-                  {isSignUp ? 'Join QuoteMate' : 'Welcome to QuoteMate'}
+                  {isSignUp ? 'Create your account' : 'Welcome back'}
                 </Title>
                 <Text style={styles.subtitle}>
                   {isSignUp
-                    ? 'Create an account to save your quotes, sync across devices, and access premium features'
-                    : 'Sign in to access your quotes and continue where you left off'
+                    ? 'Start creating professional quotes in minutes'
+                    : 'Sign in to continue managing your quotes'
                   }
                 </Text>
               </View>
 
-            <Surface style={styles.formCard}>
-            {error ? (
-              <Text style={styles.errorText}>{error}</Text>
-            ) : null}
+              {/* Error message */}
+              {error ? (
+                <View style={styles.errorContainer}>
+                  <MaterialCommunityIcons name="alert-circle-outline" size={18} color={colors.error} />
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              ) : null}
 
-            {/* Apple Sign-In Button (iOS only) */}
-            {appleAuthAvailable && (
-              <Button
-                mode="contained"
-                onPress={handleAppleSignIn}
-                style={styles.appleButtonCustom}
-                contentStyle={styles.appleButtonContent}
-                disabled={loading}
-                icon={() => <MaterialCommunityIcons name="apple" size={24} color="#fff" />}
-                buttonColor="#000"
-                textColor="#fff"
-              >
-                Sign in with Apple
-              </Button>
-            )}
+              {/* Social sign-in buttons */}
+              <View style={styles.socialSection}>
+                {appleAuthAvailable && (
+                  <Button
+                    mode="contained"
+                    onPress={handleAppleSignIn}
+                    style={styles.appleButton}
+                    contentStyle={styles.socialButtonContent}
+                    labelStyle={styles.socialButtonLabel}
+                    disabled={loading}
+                    icon={() => <MaterialCommunityIcons name="apple" size={22} color="#fff" />}
+                    buttonColor="#000"
+                    textColor="#fff"
+                  >
+                    Continue with Apple
+                  </Button>
+                )}
 
-            {/* Google Sign-In Button (All platforms) */}
-            <Button
-              mode="contained"
-              onPress={handleGoogleSignIn}
-              style={styles.googleButton}
-              contentStyle={styles.googleButtonContent}
-              disabled={loading || (Platform.OS !== 'web' && !request)}
-              icon={() => <MaterialCommunityIcons name="google" size={24} color="#fff" />}
-            >
-              Continue with Google
-            </Button>
+                <Button
+                  mode="contained"
+                  onPress={handleGoogleSignIn}
+                  style={styles.googleButton}
+                  contentStyle={styles.socialButtonContent}
+                  labelStyle={styles.socialButtonLabel}
+                  disabled={loading || (Platform.OS !== 'web' && !request)}
+                  icon={() => <MaterialCommunityIcons name="google" size={22} color="#fff" />}
+                  buttonColor="#4285F4"
+                  textColor="#fff"
+                >
+                  Continue with Google
+                </Button>
+              </View>
 
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>OR</Text>
-              <View style={styles.dividerLine} />
-            </View>
+              {/* Divider */}
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or continue with email</Text>
+                <View style={styles.dividerLine} />
+              </View>
 
-            <TextInput
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
-              mode="outlined"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete={isSignUp ? 'username' : 'email'}
-              textContentType={isSignUp ? 'username' : 'emailAddress'}
-              style={styles.input}
-              disabled={loading}
-            />
+              {/* Email / Password form */}
+              <View style={styles.formSection}>
+                <TextInput
+                  label="Email address"
+                  value={email}
+                  onChangeText={setEmail}
+                  mode="outlined"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoComplete={isSignUp ? 'username' : 'email'}
+                  textContentType={isSignUp ? 'username' : 'emailAddress'}
+                  style={styles.input}
+                  outlineStyle={styles.inputOutline}
+                  disabled={loading}
+                  left={<TextInput.Icon icon="email-outline" color={colors.placeholder} size={20} />}
+                />
 
-            <TextInput
-              label="Password"
-              value={password}
-              onChangeText={setPassword}
-              mode="outlined"
-              secureTextEntry
-              autoCapitalize="none"
-              autoComplete={isSignUp ? 'new-password' : 'current-password'}
-              textContentType={isSignUp ? 'newPassword' : 'password'}
-              style={styles.input}
-              disabled={loading}
-            />
+                <TextInput
+                  label="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  mode="outlined"
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                  textContentType={isSignUp ? 'newPassword' : 'password'}
+                  style={styles.input}
+                  outlineStyle={styles.inputOutline}
+                  disabled={loading}
+                  left={<TextInput.Icon icon="lock-outline" color={colors.placeholder} size={20} />}
+                />
 
-            {isSignUp && (
-              <TextInput
-                label="Confirm Password"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                mode="outlined"
-                secureTextEntry
-                autoCapitalize="none"
-                autoComplete="new-password"
-                textContentType="newPassword"
-                style={styles.input}
-                disabled={loading}
-              />
-            )}
+                {isSignUp && (
+                  <TextInput
+                    label="Confirm password"
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    mode="outlined"
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoComplete="new-password"
+                    textContentType="newPassword"
+                    style={styles.input}
+                    outlineStyle={styles.inputOutline}
+                    disabled={loading}
+                    left={<TextInput.Icon icon="lock-check-outline" color={colors.placeholder} size={20} />}
+                  />
+                )}
 
-            <Button
-              mode="contained"
-              onPress={isSignUp ? handleSignUp : handleSignIn}
-              style={styles.primaryButton}
-              contentStyle={styles.buttonContent}
-              loading={loading}
-              disabled={loading}
-            >
-              {isSignUp ? 'Sign Up' : 'Sign In'}
-            </Button>
+                <Button
+                  mode="contained"
+                  onPress={isSignUp ? handleSignUp : handleSignIn}
+                  style={styles.primaryButton}
+                  contentStyle={styles.primaryButtonContent}
+                  labelStyle={styles.primaryButtonLabel}
+                  loading={loading}
+                  disabled={loading}
+                >
+                  {isSignUp ? 'Create Account' : 'Sign In'}
+                </Button>
+              </View>
 
-            <Button
-              mode="text"
-              onPress={() => {
-                setIsSignUp(!isSignUp);
-                setError('');
-              }}
-              disabled={loading}
-              style={styles.switchButton}
-            >
-              {isSignUp
-                ? 'Already have an account? Sign In'
-                : "Don't have an account? Sign Up"
-              }
-            </Button>
-            </Surface>
+              {/* Switch mode link */}
+              <View style={styles.switchRow}>
+                <Text style={styles.switchText}>
+                  {isSignUp ? 'Already have an account?' : "Don't have an account?"}
+                </Text>
+                <Button
+                  mode="text"
+                  onPress={() => {
+                    setIsSignUp(!isSignUp);
+                    setError('');
+                  }}
+                  disabled={loading}
+                  labelStyle={styles.switchButtonLabel}
+                  compact
+                >
+                  {isSignUp ? 'Sign In' : 'Sign Up'}
+                </Button>
+              </View>
             </Animated.View>
           </WebContainer>
         </View>
@@ -435,21 +462,22 @@ export function AuthScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1E293B', // Match logo background color
+    backgroundColor: colors.background,
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
+    padding: 24,
+    paddingVertical: 48,
   },
   contentWrapper: {
     width: '100%',
-    maxWidth: 500,
+    maxWidth: 440,
     alignSelf: 'center',
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -461,11 +489,6 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
   },
-  logo: {
-    width: 120,
-    height: 120,
-    marginBottom: 24,
-  },
   loadingSpinner: {
     marginVertical: 20,
   },
@@ -476,6 +499,19 @@ const styles = StyleSheet.create({
   },
   animatedContent: {
     width: '100%',
+    alignItems: 'center',
+  },
+  logoWrapper: {
+    marginBottom: 28,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  logo: {
+    width: 88,
+    height: 88,
   },
   header: {
     alignItems: 'center',
@@ -483,75 +519,113 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
+    fontSize: 26,
+    fontWeight: '700',
     marginBottom: 8,
-    color: colors.onBackground,
+    color: '#FFFFFF',
     textAlign: 'center',
+    letterSpacing: -0.3,
   },
   subtitle: {
-    fontSize: 16,
-    color: colors.onSurface,
+    fontSize: 15,
+    color: colors.textMuted,
     textAlign: 'center',
-    paddingHorizontal: 20,
-    lineHeight: 24,
-    maxWidth: 500,
+    lineHeight: 22,
   },
-  formCard: {
-    padding: 24,
-    borderRadius: 12,
-    elevation: 4,
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.errorBg,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 20,
     width: '100%',
-    alignSelf: 'center',
-    backgroundColor: colors.surfaceGray3,
-  },
-  input: {
-    marginBottom: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   errorText: {
-    color: colors.error,
-    marginBottom: 16,
-    textAlign: 'center',
+    color: '#FCA5A5',
+    fontSize: 13,
+    flex: 1,
   },
-  primaryButton: {
-    marginTop: 8,
-    marginBottom: 8,
+  socialSection: {
+    width: '100%',
+    gap: 12,
+    marginBottom: 4,
   },
-  buttonContent: {
-    paddingVertical: 6,
+  appleButton: {
+    borderRadius: 12,
+    elevation: 0,
   },
-  switchButton: {
-    marginTop: 8,
-    marginBottom: 16,
+  googleButton: {
+    borderRadius: 12,
+    elevation: 0,
+  },
+  socialButtonContent: {
+    paddingVertical: 10,
+  },
+  socialButtonLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.1,
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
     marginVertical: 24,
+    width: '100%',
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.onSurface,
-    opacity: 0.3,
+    backgroundColor: colors.border,
   },
   dividerText: {
-    marginHorizontal: 16,
-    color: colors.onSurface,
-    opacity: 0.6,
+    marginHorizontal: 14,
+    color: colors.textMuted,
+    fontSize: 13,
+    textTransform: 'lowercase',
   },
-  appleButtonCustom: {
-    marginBottom: 16,
-    backgroundColor: '#000',
+  formSection: {
+    width: '100%',
+    gap: 4,
   },
-  appleButtonContent: {
-    paddingVertical: 16,
+  input: {
+    marginBottom: 12,
+    backgroundColor: colors.surface,
   },
-  googleButton: {
-    marginBottom: 24,
-    backgroundColor: '#4285F4', // Google blue
+  inputOutline: {
+    borderRadius: 10,
+    borderColor: colors.border,
   },
-  googleButtonContent: {
-    paddingVertical: 16,
+  primaryButton: {
+    marginTop: 8,
+    borderRadius: 12,
+    elevation: 0,
+  },
+  primaryButtonContent: {
+    paddingVertical: 10,
+  },
+  primaryButtonLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+  },
+  switchText: {
+    color: colors.textMuted,
+    fontSize: 14,
+  },
+  switchButtonLabel: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
