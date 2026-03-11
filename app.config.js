@@ -1,3 +1,5 @@
+const isWebExport = process.env.EXPO_WEB_BASE_URL;
+
 export default {
   expo: {
     name: "QuoteMate",
@@ -81,6 +83,9 @@ export default {
       versionCode: 65,
       permissions: ["android.permission.RECORD_AUDIO"],
       blockedPermissions: ["android.permission.CAMERA"]
+    },
+    experiments: {
+      ...(isWebExport ? { baseUrl: isWebExport } : {}),
     },
     web: {
       favicon: "./assets/favicon.png"
