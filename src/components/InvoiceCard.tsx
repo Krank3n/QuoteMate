@@ -26,6 +26,7 @@ import { useStore } from '../store/useStore';
 import { selectionTap } from '../utils/haptics';
 import { SwipeableCard } from './SwipeableCard';
 import { AnimatedChip } from './AnimatedChip';
+import { AlertModal } from './AlertModal';
 
 interface InvoiceCardProps {
   invoice: Invoice;
@@ -52,6 +53,7 @@ export const InvoiceCard = React.memo(function InvoiceCard({
 }: InvoiceCardProps) {
   const [menuVisible, setMenuVisible] = useState(false);
   const [statusMenuVisible, setStatusMenuVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const { subscriptionStatus } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
@@ -123,18 +125,12 @@ export const InvoiceCard = React.memo(function InvoiceCard({
   };
 
   const handleDeleteInvoice = () => {
-    Alert.alert(
-      'Delete Invoice',
-      'Are you sure you want to delete this invoice?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => onDelete(invoice.id),
-        },
-      ]
-    );
+    setDeleteModalVisible(true);
+  };
+
+  const confirmDeleteInvoice = () => {
+    setDeleteModalVisible(false);
+    onDelete(invoice.id);
   };
 
   const handleStatusChange = async (newStatus: InvoiceStatus) => {
@@ -154,6 +150,7 @@ export const InvoiceCard = React.memo(function InvoiceCard({
   const showRecordPayment = invoice.status !== 'paid' && invoice.status !== 'cancelled';
 
   return (
+    <>
     <SwipeableCard
       rightActions={[
         { icon: 'send', label: 'Send', color: colors.primary, bgColor: colors.primaryBg, onPress: handleSendInvoice },
@@ -349,6 +346,21 @@ export const InvoiceCard = React.memo(function InvoiceCard({
     </Card>
     </Animated.View>
     </SwipeableCard>
+
+    <AlertModal
+      visible={deleteModalVisible}
+      onDismiss={() => setDeleteModalVisible(false)}
+      type="error"
+      icon="delete"
+      title="Delete Invoice"
+      message="Are you sure you want to delete this invoice?"
+      primaryButtonText="Delete"
+      primaryButtonAction={confirmDeleteInvoice}
+      secondaryButtonText="Cancel"
+      secondaryButtonAction={() => setDeleteModalVisible(false)}
+      showConfetti={false}
+    />
+    </>
   );
 });
 

@@ -580,14 +580,14 @@ async function cleanupViaGemini(
  * Create the prompt for text cleanup and title generation
  */
 function createCleanupPrompt(transcribedText: string): string {
-  return `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title.
+  return `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title. The cleaned description will appear on an invoice sent to the customer, so it must be written professionally. Do NOT add any details, claims, or information that are not present in the original text.
 
 Transcribed Text: "${transcribedText}"
 
 Tasks:
 1. Fix any transcription errors or unclear phrases
-2. Improve grammar and formatting while keeping the tradie's natural language
-3. Keep all important details (measurements, materials, locations, etc.)
+2. Rewrite the description in a professional, customer-facing tone suitable for an invoice
+3. Keep all important details (measurements, materials, locations, etc.) but do not invent or add any new details
 4. Generate a short, professional job title (3-7 words)
 
 Provide a JSON response with this structure:

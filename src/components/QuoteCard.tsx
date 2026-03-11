@@ -25,6 +25,7 @@ import { useStore } from '../store/useStore';
 import { selectionTap, successTap } from '../utils/haptics';
 import { SwipeableCard } from './SwipeableCard';
 import { AnimatedChip } from './AnimatedChip';
+import { AlertModal } from './AlertModal';
 
 interface QuoteCardProps {
   quote: Quote;
@@ -52,6 +53,7 @@ export const QuoteCard = React.memo(function QuoteCard({
   onConvertToInvoice,
 }: QuoteCardProps) {
   const [menuVisible, setMenuVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const { subscriptionStatus } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
@@ -143,22 +145,17 @@ export const QuoteCard = React.memo(function QuoteCard({
   };
 
   const handleDeleteQuote = () => {
-    Alert.alert(
-      'Delete Quote',
-      'Are you sure you want to delete this quote?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => onDelete(quote.id),
-        },
-      ]
-    );
+    setDeleteModalVisible(true);
+  };
+
+  const confirmDeleteQuote = () => {
+    setDeleteModalVisible(false);
+    onDelete(quote.id);
   };
 
 
   return (
+    <>
     <SwipeableCard
       rightActions={[
         { icon: 'send', label: 'Send', color: colors.primary, bgColor: colors.primaryBg, onPress: handleSendQuote },
@@ -318,6 +315,21 @@ export const QuoteCard = React.memo(function QuoteCard({
       </Card>
       </Animated.View>
     </SwipeableCard>
+
+    <AlertModal
+      visible={deleteModalVisible}
+      onDismiss={() => setDeleteModalVisible(false)}
+      type="error"
+      icon="delete"
+      title="Delete Quote"
+      message="Are you sure you want to delete this quote?"
+      primaryButtonText="Delete"
+      primaryButtonAction={confirmDeleteQuote}
+      secondaryButtonText="Cancel"
+      secondaryButtonAction={() => setDeleteModalVisible(false)}
+      showConfetti={false}
+    />
+    </>
   );
 });
 

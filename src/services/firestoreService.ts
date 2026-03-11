@@ -21,6 +21,19 @@ import {
 import { auth, db } from '../config/firebase';
 import { Quote, BusinessSettings, SubscriptionStatus, Invoice } from '../types';
 
+/** Recursively strip undefined values from an object (Firestore rejects them) */
+function stripUndefined(obj: any): any {
+  if (obj === null || obj === undefined || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(stripUndefined);
+  const cleaned: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      cleaned[key] = typeof value === 'object' && value !== null ? stripUndefined(value) : value;
+    }
+  }
+  return cleaned;
+}
+
 class FirestoreService {
   private quotesUnsubscribe: Unsubscribe | null = null;
   private settingsUnsubscribe: Unsubscribe | null = null;
@@ -47,7 +60,7 @@ class FirestoreService {
 
     try {
       const quoteRef = doc(db, 'users', userId, 'quotes', quote.id);
-      await setDoc(quoteRef, {
+      await setDoc(quoteRef, stripUndefined({
         ...quote,
         createdAt: quote.createdAt.toISOString(),
         updatedAt: quote.updatedAt.toISOString(),
@@ -58,7 +71,7 @@ class FirestoreService {
         respondedBy: quote.respondedBy || null,
         clientNotes: quote.clientNotes || null,
         syncedAt: new Date().toISOString(),
-      });
+      }));
       console.log('✅ Quote saved to Firestore:', quote.id);
     } catch (error) {
       console.error('❌ Error saving quote to Firestore:', error);
@@ -451,7 +464,7 @@ class FirestoreService {
     try {
       const invoiceRef = doc(db, 'users', userId, 'invoices', invoice.id);
       // Convert undefined values to null for Firestore compatibility
-      await setDoc(invoiceRef, {
+      await setDoc(invoiceRef, stripUndefined({
         ...invoice,
         // Optional string fields - convert undefined to null
         invoiceNumber: invoice.invoiceNumber || null,
@@ -472,7 +485,7 @@ class FirestoreService {
         dueDate: invoice.dueDate.toISOString(),
         paidDate: invoice.paidDate?.toISOString() || null,
         syncedAt: new Date().toISOString(),
-      });
+      }));
       console.log('✅ Invoice saved to Firestore:', invoice.id);
     } catch (error) {
       console.error('❌ Error saving invoice to Firestore:', error);

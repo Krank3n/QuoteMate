@@ -24,8 +24,6 @@ import {
   Card,
   Chip,
   ActivityIndicator,
-  Dialog,
-  Portal,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
@@ -54,12 +52,13 @@ import { bunningsApi } from '../../services/bunningsApi';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { ProBadge } from '../../components/ProBadge';
+import { AlertModal } from '../../components/AlertModal';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { quotes, invoices, businessSettings, subscriptionStatus } = useStore();
+  const { quotes, invoices, businessSettings, subscriptionStatus, saveDraft } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -638,9 +637,11 @@ export function JobDetailsScreen() {
       materials: [], // Empty - user will add manually
       laborHours: 8,
       aiSkipped: true, // Flag that AI was intentionally skipped
+      draftStep: 'CustomerDetails',
     };
 
     updateQuote(updatedQuote);
+    saveDraft(updatedQuote);
     navigation.navigate('CustomerDetails');
   };
 
@@ -667,9 +668,11 @@ export function JobDetailsScreen() {
       materials: [], // Empty for now, will be populated in background
       laborHours: 8,
       aiSkipped: false, // Explicitly mark that AI is being used
+      draftStep: 'CustomerDetails',
     };
 
     updateQuote(updatedQuote);
+    saveDraft(updatedQuote);
 
     // Navigate immediately - AI will analyze in background on CustomerDetails or MaterialsList screen
     navigation.navigate('CustomerDetails');
@@ -805,8 +808,10 @@ export function JobDetailsScreen() {
             name: jobName || currentQuote.job.name,
             description: jobDescription,
           },
+          draftStep: 'CustomerDetails',
         };
         updateQuote(updatedQuote);
+        saveDraft(updatedQuote);
         navigation.navigate('CustomerDetails');
         return;
       }
@@ -826,9 +831,11 @@ export function JobDetailsScreen() {
         materials: [], // Empty - user will generate or add manually from MaterialsList screen
         laborHours: 8,
         aiSkipped: false, // Not skipped, just deferred to MaterialsList screen
+        draftStep: 'CustomerDetails',
       };
 
       updateQuote(updatedQuote);
+      saveDraft(updatedQuote);
       navigation.navigate('CustomerDetails');
       return;
     }
@@ -867,27 +874,28 @@ export function JobDetailsScreen() {
       job,
       materials,
       laborHours: estimatedHours,
+      draftStep: 'CustomerDetails',
     };
 
     updateQuote(updatedQuote);
+    saveDraft(updatedQuote);
     navigation.navigate('CustomerDetails');
   };
 
   return (
     <>
-      <Portal>
-        <Dialog visible={analysisErrorDialogVisible} onDismiss={() => setAnalysisErrorDialogVisible(false)}>
-          <Dialog.Title>AI Analysis Failed</Dialog.Title>
-          <Dialog.Content>
-            <Text>{analysisErrorMessage}</Text>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setAnalysisErrorDialogVisible(false)}>Cancel</Button>
-            <Button onPress={() => { setAnalysisErrorDialogVisible(false); handleSkipToManualEntry(); }}>Enter Manually</Button>
-            <Button onPress={() => { setAnalysisErrorDialogVisible(false); handleAnalyzeCustomJob(); }}>Try Again</Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
+      <AlertModal
+        visible={analysisErrorDialogVisible}
+        onDismiss={() => setAnalysisErrorDialogVisible(false)}
+        type="error"
+        title="AI Analysis Failed"
+        message={analysisErrorMessage}
+        primaryButtonText="Try Again"
+        primaryButtonAction={() => { setAnalysisErrorDialogVisible(false); handleAnalyzeCustomJob(); }}
+        secondaryButtonText="Enter Manually"
+        secondaryButtonAction={() => { setAnalysisErrorDialogVisible(false); handleSkipToManualEntry(); }}
+        showConfetti={false}
+      />
       <KeyboardAvoidingView
         style={[styles.container]}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

@@ -26,6 +26,7 @@ interface AppState {
   createNewQuote: () => void;
   setCurrentQuote: (quote: Quote | null) => void;
   saveQuote: (quote: Quote) => Promise<void>;
+  saveDraft: (quote: Quote) => Promise<void>;
   deleteQuote: (quoteId: string) => Promise<void>;
   duplicateQuote: (quote: Quote) => Promise<void>;
   updateQuote: (quote: Quote) => void;
@@ -36,6 +37,7 @@ interface AppState {
   loadSubscription: () => Promise<void>;
   incrementQuoteCount: () => Promise<void>;
   canCreateQuote: () => boolean;
+  startTrialIfNeeded: () => Promise<void>;
   upgradeToProMock: () => Promise<void>;
 
   // Onboarding
@@ -165,7 +167,9 @@ export const useStore = create<AppState>((set, get) => ({
 
   // Create new quote
   createNewQuote: () => {
-    const { businessSettings } = get();
+    const { businessSettings, startTrialIfNeeded } = get();
+    // Start trial on first quote creation, not on save
+    startTrialIfNeeded();
     const newQuote: Quote = {
       id: generateId(),
       createdAt: new Date(),
@@ -202,6 +206,44 @@ export const useStore = create<AppState>((set, get) => ({
   updateQuote: (quote: Quote) => {
     const updatedQuote = updateQuoteCalculations(quote);
     set({ currentQuote: updatedQuote });
+  },
+
+  // Save draft to storage (lightweight, no quota check or number assignment)
+  saveDraft: async (quote: Quote) => {
+    try {
+      const { quotes } = get();
+      const calculatedQuote = updateQuoteCalculations({
+        ...quote,
+        updatedAt: new Date(),
+      });
+
+      const existingIndex = quotes.findIndex((q) => q.id === quote.id);
+      let updatedQuotes: Quote[];
+      if (existingIndex >= 0) {
+        updatedQuotes = [...quotes];
+        updatedQuotes[existingIndex] = calculatedQuote;
+      } else {
+        updatedQuotes = [...quotes, calculatedQuote];
+      }
+
+      // Save to AsyncStorage
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.QUOTES,
+        JSON.stringify(updatedQuotes)
+      );
+
+      // Update state
+      set({ quotes: updatedQuotes, currentQuote: calculatedQuote });
+
+      // Sync to Firestore in background
+      if (auth.currentUser) {
+        firestoreService.saveQuote(calculatedQuote).catch((err) => {
+          console.warn('Firestore draft sync failed:', err);
+        });
+      }
+    } catch (error) {
+      console.error('Failed to save draft:', error);
+    }
   },
 
   // Save quote to storage
@@ -561,6 +603,34 @@ export const useStore = create<AppState>((set, get) => ({
     const trialDays = 7;
     const trialEnd = new Date(trialStart.getTime() + trialDays * 24 * 60 * 60 * 1000);
     return now < trialEnd;
+  },
+
+  // Start the trial period if not already started
+  startTrialIfNeeded: async () => {
+    try {
+      const { subscriptionStatus } = get();
+      if (!subscriptionStatus) return;
+      if (subscriptionStatus.isPro) return;
+      if (subscriptionStatus.trialStartedAt) return; // Already started
+
+      const now = new Date();
+      const updatedSubscription: SubscriptionStatus = {
+        ...subscriptionStatus,
+        trialStartedAt: now,
+      };
+
+      await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updatedSubscription));
+      set({ subscriptionStatus: updatedSubscription });
+
+      // Sync to Firestore if authenticated
+      if (auth.currentUser) {
+        firestoreService.saveSubscriptionStatus(updatedSubscription).catch((err) => {
+          console.warn('Firestore trial sync failed:', err);
+        });
+      }
+    } catch (error) {
+      console.error('Failed to start trial:', error);
+    }
   },
 
   upgradeToProMock: async () => {

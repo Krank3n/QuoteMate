@@ -75,6 +75,7 @@ export interface Quote {
   gst: number;
   total: number;
   status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'completed';
+  draftStep?: string; // Screen name where user left off during quote flow (e.g., 'CustomerDetails')
   notes?: string;
   aiSkipped?: boolean; // Flag to indicate AI analysis was intentionally skipped
   // Quote acceptance via email link fields

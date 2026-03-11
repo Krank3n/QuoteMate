@@ -56,6 +56,7 @@ export function QuotePreviewScreen() {
         ...currentQuote,
         notes,
         status,
+        draftStep: null,
         ...(quoteNumber ? { quoteNumber } : {}),
         updatedAt: new Date(),
       };

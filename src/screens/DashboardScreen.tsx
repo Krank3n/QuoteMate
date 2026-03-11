@@ -34,6 +34,7 @@ import { updateActivityTimestamp } from '../services/emailService';
 import { AnimatedNumber } from '../components/AnimatedNumber';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
+import { SwipeableCard } from '../components/SwipeableCard';
 import { lightTap, successTap } from '../utils/haptics';
 import { openWebEmailClient, copyQuoteEmailText } from '../utils/emailUtils';
 
@@ -50,7 +51,7 @@ export function DashboardScreen() {
     }
   }, []);
   const navigation = useNavigation<any>();
-  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes } = useStore();
+  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft } = useStore();
 
   const [emailDialogVisible, setEmailDialogVisible] = useState(false);
   const [emailQuote, setEmailQuote] = useState<Quote | null>(null);
@@ -60,6 +61,10 @@ export function DashboardScreen() {
   const [quoteToConvert, setQuoteToConvert] = useState<Quote | null>(null);
   const [isConverting, setIsConverting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [quoteToDelete, setQuoteToDelete] = useState<string | null>(null);
+  const [duplicateSuccessVisible, setDuplicateSuccessVisible] = useState(false);
+  const [deleteDraftModalVisible, setDeleteDraftModalVisible] = useState(false);
 
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
@@ -89,6 +94,13 @@ export function DashboardScreen() {
     return { sentQuotes: sent, acceptedQuotes: accepted, thisMonthRevenue: monthRevenue, pipelineValue: pipeline };
   }, [quotes]);
 
+  // Find in-progress draft (has draftStep set)
+  const inProgressDraft = useMemo(() => {
+    return quotes
+      .filter((q) => q.status === 'draft' && q.draftStep)
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] || null;
+  }, [quotes]);
+
   // Recent quotes (last 3)
   const recentQuotes = [...quotes]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
@@ -101,6 +113,27 @@ export function DashboardScreen() {
     } finally {
       setRefreshing(false);
     }
+  };
+
+  const handleContinueDraft = (draft: Quote) => {
+    lightTap();
+    setCurrentQuote(draft);
+    navigation.navigate('NewQuote' as never, { screen: draft.draftStep || 'JobDetails' } as never);
+  };
+
+  const handleDeleteDraft = () => {
+    setDeleteDraftModalVisible(true);
+  };
+
+  const confirmDeleteDraft = async () => {
+    if (inProgressDraft) {
+      try {
+        await deleteQuote(inProgressDraft.id);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to delete draft. Please try again.');
+      }
+    }
+    setDeleteDraftModalVisible(false);
   };
 
   const handleNewQuote = () => {
@@ -145,7 +178,7 @@ export function DashboardScreen() {
 
     try {
       await duplicateQuote(quote);
-      Alert.alert('Success', 'Quote duplicated successfully!');
+      setDuplicateSuccessVisible(true);
     } catch (error) {
       Alert.alert('Error', 'Failed to duplicate quote. Please try again.');
     }
@@ -177,24 +210,20 @@ export function DashboardScreen() {
   };
 
   const handleDeleteQuote = async (quoteId: string) => {
-    Alert.alert(
-      'Delete Quote',
-      'Are you sure you want to delete this quote?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteQuote(quoteId);
-            } catch (error) {
-              Alert.alert('Error', 'Failed to delete quote. Please try again.');
-            }
-          },
-        },
-      ]
-    );
+    setQuoteToDelete(quoteId);
+    setDeleteModalVisible(true);
+  };
+
+  const confirmDeleteQuote = async () => {
+    if (quoteToDelete) {
+      try {
+        await deleteQuote(quoteToDelete);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to delete quote. Please try again.');
+      }
+    }
+    setDeleteModalVisible(false);
+    setQuoteToDelete(null);
   };
 
   const handleSendQuote = async (quote: Quote) => {
@@ -339,6 +368,45 @@ export function DashboardScreen() {
         secondaryButtonLoading={isConverting}
       />
 
+      {/* Duplicate Success */}
+      <AlertModal
+        visible={duplicateSuccessVisible}
+        onDismiss={() => setDuplicateSuccessVisible(false)}
+        type="success"
+        title="Quote Duplicated"
+        message="Quote duplicated successfully!"
+      />
+
+      {/* Delete Draft Confirmation */}
+      <AlertModal
+        visible={deleteDraftModalVisible}
+        onDismiss={() => setDeleteDraftModalVisible(false)}
+        type="error"
+        icon="delete"
+        title="Delete Draft"
+        message="Are you sure you want to delete this draft?"
+        primaryButtonText="Delete"
+        primaryButtonAction={confirmDeleteDraft}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => setDeleteDraftModalVisible(false)}
+        showConfetti={false}
+      />
+
+      {/* Delete Quote Confirmation */}
+      <AlertModal
+        visible={deleteModalVisible}
+        onDismiss={() => { setDeleteModalVisible(false); setQuoteToDelete(null); }}
+        type="error"
+        icon="delete"
+        title="Delete Quote"
+        message="Are you sure you want to delete this quote?"
+        primaryButtonText="Delete"
+        primaryButtonAction={confirmDeleteQuote}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => { setDeleteModalVisible(false); setQuoteToDelete(null); }}
+        showConfetti={false}
+      />
+
     <ScrollView
       ref={scrollRef}
       style={styles.container}
@@ -368,7 +436,7 @@ export function DashboardScreen() {
         const trialMs = 7 * 24 * 60 * 60 * 1000;
         const daysRemaining = Math.max(0, Math.ceil((trialMs - elapsed) / (24 * 60 * 60 * 1000)));
         const trialExpired = elapsed >= trialMs;
-        const progress = Math.min(elapsed / trialMs, 1);
+        const progress = Math.max(0, 1 - (elapsed / trialMs));
 
         return (
           <Surface style={styles.quotaCard}>
@@ -416,6 +484,36 @@ export function DashboardScreen() {
           </Surface>
         );
       })()}
+
+      {/* Continue Draft Banner */}
+      {inProgressDraft && (
+        <SwipeableCard
+          leftActions={[
+            { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteDraft },
+          ]}
+        >
+          <TouchableOpacity
+            onPress={() => handleContinueDraft(inProgressDraft)}
+            activeOpacity={0.7}
+            accessibilityLabel={`Continue draft for ${inProgressDraft.job.name || 'Untitled'}`}
+          >
+            <Surface style={styles.draftBanner}>
+              <View style={styles.draftBannerContent}>
+                <View style={[styles.draftIconCircle, { backgroundColor: colors.warningBg }]}>
+                  <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.secondary} />
+                </View>
+                <View style={styles.draftBannerText}>
+                  <Text style={styles.draftBannerTitle}>Continue Draft</Text>
+                  <Text style={styles.draftBannerSubtitle} numberOfLines={1}>
+                    {inProgressDraft.job.name || 'Untitled'}{inProgressDraft.customerName ? ` — ${inProgressDraft.customerName}` : ''}
+                  </Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.primary} />
+              </View>
+            </Surface>
+          </TouchableOpacity>
+        </SwipeableCard>
+      )}
 
       {/* New Quote Button */}
       <Button
@@ -643,6 +741,42 @@ const styles = StyleSheet.create({
   },
   quotaUpgradeButton: {
     marginTop: 12,
+  },
+  draftBanner: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 18,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+    elevation: 2,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.secondary,
+  },
+  draftBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  draftIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  draftBannerText: {
+    flex: 1,
+  },
+  draftBannerTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  draftBannerSubtitle: {
+    fontSize: 12,
+    color: colors.onSurface,
+    marginTop: 2,
   },
   newQuoteButton: {
     marginHorizontal: 20,

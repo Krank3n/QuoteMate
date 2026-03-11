@@ -43,6 +43,7 @@ export function CustomerDetailsScreen() {
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
+  const { saveDraft } = useStore();
   const documentList = useDocumentList();
 
   // For compatibility, alias to currentQuote (used throughout this file)
@@ -149,9 +150,11 @@ export function CustomerDetailsScreen() {
       customerEmail: customerEmail.trim(),
       customerPhone: customerPhone.trim(),
       jobAddress: jobAddress.trim(),
+      draftStep: 'MaterialsList',
     };
 
     updateQuote(updatedQuote);
+    saveDraft(updatedQuote);
     navigation.navigate('MaterialsList');
   };
 

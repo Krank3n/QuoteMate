@@ -62,6 +62,7 @@ export function QuotesListScreen() {
   const [quoteToConvert, setQuoteToConvert] = useState<Quote | null>(null);
   const [isConverting, setIsConverting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [duplicateSuccessVisible, setDuplicateSuccessVisible] = useState(false);
 
   // Filter and search quotes
   const filteredQuotes = useMemo(() => quotes.filter((quote) => {
@@ -159,7 +160,7 @@ export function QuotesListScreen() {
 
     try {
       await duplicateQuote(quote);
-      Alert.alert('Success', 'Quote duplicated successfully!');
+      setDuplicateSuccessVisible(true);
     } catch (error) {
       Alert.alert('Error', 'Failed to duplicate quote. Please try again.');
     }
@@ -258,6 +259,15 @@ export function QuotesListScreen() {
           setQuoteToConvert(null);
         }}
         secondaryButtonLoading={isConverting}
+      />
+
+      {/* Duplicate Success */}
+      <AlertModal
+        visible={duplicateSuccessVisible}
+        onDismiss={() => setDuplicateSuccessVisible(false)}
+        type="success"
+        title="Quote Duplicated"
+        message="Quote duplicated successfully!"
       />
 
       <WebContainer>

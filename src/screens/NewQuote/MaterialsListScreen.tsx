@@ -19,9 +19,7 @@ import {
   Button,
   List,
   IconButton,
-  Dialog,
   Portal,
-  Modal,
   TextInput,
   SegmentedButtons,
   ActivityIndicator,
@@ -268,7 +266,7 @@ export function MaterialsListScreen() {
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { businessSettings, subscriptionStatus } = useStore();
+  const { businessSettings, subscriptionStatus, saveDraft } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -294,36 +292,12 @@ export function MaterialsListScreen() {
 
   // Unpriced materials warning dialog state
   const [unpricedDialogVisible, setUnpricedDialogVisible] = useState(false);
-  const unpricedScaleAnim = useRef(new Animated.Value(0)).current;
-  const unpricedFadeAnim = useRef(new Animated.Value(0)).current;
 
   // Success modal state
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [successTitle, setSuccessTitle] = useState('Success!');
   const [successType, setSuccessType] = useState<'success' | 'warning' | 'error' | 'info'>('success');
-
-  // Animate unpriced dialog
-  useEffect(() => {
-    if (unpricedDialogVisible) {
-      unpricedScaleAnim.setValue(0);
-      unpricedFadeAnim.setValue(0);
-
-      Animated.parallel([
-        Animated.spring(unpricedScaleAnim, {
-          toValue: 1,
-          tension: 50,
-          friction: 7,
-          useNativeDriver: true,
-        }),
-        Animated.timing(unpricedFadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [unpricedDialogVisible]);
 
   // Match selector state for web scraping pricing
   const [matchSelectorVisible, setMatchSelectorVisible] = useState(false);
@@ -1128,12 +1102,22 @@ export function MaterialsListScreen() {
     if (hasUnpricedMaterials) {
       setUnpricedDialogVisible(true);
     } else {
+      if (currentQuote) {
+        const draftQuote = { ...currentQuote, draftStep: 'LaborMarkup' };
+        updateQuote(draftQuote);
+        saveDraft(draftQuote);
+      }
       navigation.navigate('LaborMarkup');
     }
-  }, [hasUnpricedMaterials, navigation]);
+  }, [hasUnpricedMaterials, navigation, currentQuote, updateQuote, saveDraft]);
 
   const proceedWithUnpricedMaterials = () => {
     setUnpricedDialogVisible(false);
+    if (currentQuote) {
+      const draftQuote = { ...currentQuote, draftStep: 'LaborMarkup' };
+      updateQuote(draftQuote);
+      saveDraft(draftQuote);
+    }
     navigation.navigate('LaborMarkup');
   };
 
@@ -1410,73 +1394,34 @@ export function MaterialsListScreen() {
         secondaryLoadingOnPress={isFetchingPrices ? handleCancelFetchPrices : undefined}
       />
 
-      {/* Delete Material Confirmation Dialog */}
-      <Portal>
-        <Dialog visible={deleteDialogVisible} onDismiss={() => setDeleteDialogVisible(false)}>
-          <Dialog.Title>Delete Material</Dialog.Title>
-          <Dialog.Content>
-            <Text>Are you sure you want to remove this material?</Text>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setDeleteDialogVisible(false)}>Cancel</Button>
-            <Button onPress={confirmDeleteMaterial} textColor={colors.error}>Delete</Button>
-          </Dialog.Actions>
-        </Dialog>
+      {/* Delete Material Confirmation */}
+      <AlertModal
+        visible={deleteDialogVisible}
+        onDismiss={() => setDeleteDialogVisible(false)}
+        type="error"
+        icon="delete"
+        title="Delete Material"
+        message="Are you sure you want to remove this material?"
+        primaryButtonText="Delete"
+        primaryButtonAction={confirmDeleteMaterial}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => setDeleteDialogVisible(false)}
+        showConfetti={false}
+      />
 
-        {/* Unpriced Materials Warning Modal */}
-        <Modal
-          visible={unpricedDialogVisible}
-          onDismiss={() => setUnpricedDialogVisible(false)}
-          dismissable={true}
-          contentContainerStyle={styles.unpricedModalContainer}
-        >
-          <Animated.View
-            style={[
-              styles.unpricedCard,
-              {
-                opacity: unpricedFadeAnim,
-                transform: [{ scale: unpricedScaleAnim }],
-              },
-            ]}
-          >
-            {/* Header */}
-            <View style={styles.unpricedHeader}>
-              <View style={styles.unpricedIconContainer}>
-                <IconButton
-                  icon="alert-circle"
-                  iconColor={colors.warning}
-                  size={40}
-                />
-              </View>
-              <Text style={styles.unpricedTitle}>Unpriced Materials</Text>
-              <Text style={styles.unpricedSubtitle}>
-                Some materials don't have prices yet. You can continue anyway and add prices later, or go back to add them now.
-              </Text>
-            </View>
-
-            {/* Action Buttons */}
-            <View style={styles.unpricedButtonContainer}>
-              <Button
-                mode="outlined"
-                onPress={() => setUnpricedDialogVisible(false)}
-                style={styles.unpricedButton}
-                textColor={colors.onSurface}
-              >
-                Go Back
-              </Button>
-              <Button
-                mode="contained"
-                onPress={proceedWithUnpricedMaterials}
-                style={styles.unpricedButton}
-                buttonColor={colors.warning}
-                textColor={colors.white}
-              >
-                Continue Anyway
-              </Button>
-            </View>
-          </Animated.View>
-        </Modal>
-      </Portal>
+      {/* Unpriced Materials Warning */}
+      <AlertModal
+        visible={unpricedDialogVisible}
+        onDismiss={() => setUnpricedDialogVisible(false)}
+        type="warning"
+        title="Unpriced Materials"
+        message="Some materials don't have prices yet. You can continue anyway and add prices later, or go back to add them now."
+        primaryButtonText="Continue Anyway"
+        primaryButtonAction={proceedWithUnpricedMaterials}
+        secondaryButtonText="Go Back"
+        secondaryButtonAction={() => setUnpricedDialogVisible(false)}
+        showConfetti={false}
+      />
 
       {/* Material Match Selector Modal */}
       <MaterialMatchSelector
@@ -1820,67 +1765,5 @@ const styles = StyleSheet.create({
   },
   stepTextDone: {
     color: colors.success,
-  },
-  // Unpriced Materials Modal
-  unpricedModalContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  unpricedCard: {
-    width: '100%',
-    maxWidth: 480,
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 32,
-    ...Platform.select({
-      android: {
-        elevation: 8,
-      },
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-      },
-      web: {
-        boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-      },
-    }),
-  },
-  unpricedHeader: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  unpricedIconContainer: {
-    backgroundColor: colors.warningBg,
-    borderRadius: 50,
-    width: 80,
-    height: 80,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  unpricedTitle: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  unpricedSubtitle: {
-    fontSize: 15,
-    color: colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  unpricedButtonContainer: {
-    width: '100%',
-    gap: 12,
-  },
-  unpricedButton: {
-    width: '100%',
-    paddingVertical: 6,
   },
 });

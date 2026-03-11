@@ -12,21 +12,22 @@ import {
   Surface,
   Title,
   Divider,
-  Dialog,
-  Portal,
 } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode, getPreviewScreenName } from '../../utils/documentMode';
+
 import { colors } from '../../theme';
 import { formatCurrency, calculateQuote } from '../../utils/quoteCalculator';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
+import { AlertModal } from '../../components/AlertModal';
 
 export function LaborMarkupScreen() {
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
+  const { saveDraft } = useStore();
 
   // For compatibility, alias to currentQuote (used throughout this file)
   const currentQuote = currentDocument;
@@ -127,27 +128,29 @@ export function LaborMarkupScreen() {
       markupAmount: calculation.markupAmount,
       gst: calculation.gst,
       total: calculation.total,
+      draftStep: previewScreenName,
     };
 
     updateQuote(updatedQuote);
+    saveDraft(updatedQuote);
     setWarningDialogVisible(false);
     navigation.navigate(previewScreenName);
   };
 
   const scrollContent = (
     <>
-      <Portal>
-        <Dialog visible={warningDialogVisible} onDismiss={() => setWarningDialogVisible(false)}>
-          <Dialog.Title>Zero Labor Cost</Dialog.Title>
-          <Dialog.Content>
-            <Text>{warningMessage}</Text>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setWarningDialogVisible(false)}>Cancel</Button>
-            <Button onPress={proceedToPreview}>Continue</Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
+      <AlertModal
+        visible={warningDialogVisible}
+        onDismiss={() => setWarningDialogVisible(false)}
+        type="warning"
+        title="Zero Labor Cost"
+        message={warningMessage}
+        primaryButtonText="Continue"
+        primaryButtonAction={proceedToPreview}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => setWarningDialogVisible(false)}
+        showConfetti={false}
+      />
       <View style={styles.outerContainer}>
         <ScrollView
           style={styles.scrollView}
