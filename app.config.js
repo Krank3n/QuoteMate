@@ -2,7 +2,7 @@ export default {
   expo: {
     name: "QuoteMate",
     slug: "quotemate",
-    version: "1.0.60",
+    version: "1.0.61",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
