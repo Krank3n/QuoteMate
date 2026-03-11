@@ -320,14 +320,11 @@ export function SendQuoteButton({
 
 const styles = StyleSheet.create({
   buttonContent: {
-    height: 48,
-    alignItems: 'center',
+    paddingVertical: 8,
   },
   buttonLabel: {
     fontSize: 15,
     fontWeight: '600',
-    marginVertical: 0,
-    lineHeight: 20,
   },
   modalContainer: {
     flex: 1,

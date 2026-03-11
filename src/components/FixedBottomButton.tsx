@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Platform, Animated, Easing } from 'react-native';
+import { View, StyleSheet, Platform, Animated, Easing, TouchableOpacity } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
@@ -34,6 +34,10 @@ interface FixedBottomButtonProps {
   secondaryLoading?: boolean;
   /** Optional secondary button disabled state */
   secondaryDisabled?: boolean;
+  /** Optional loading progress text (e.g. "Fetching 3 of 7...") */
+  secondaryLoadingText?: string;
+  /** Optional handler when tapping the loading button (e.g. to cancel) */
+  secondaryLoadingOnPress?: () => void;
   /** Disable the solid background block - useful when transparency is desired */
   disableSolidBackground?: boolean;
 }
@@ -41,7 +45,7 @@ interface FixedBottomButtonProps {
 /**
  * Animated pulsing border wrapper for the loading button
  */
-function PulsingBorderButton({ children }: { children: React.ReactNode }) {
+function PulsingBorderButton({ children, loadingText, onPress }: { children: React.ReactNode; loadingText?: string; onPress?: () => void }) {
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
   const textAnim = useRef(new Animated.Value(0)).current;
@@ -132,8 +136,11 @@ function PulsingBorderButton({ children }: { children: React.ReactNode }) {
     outputRange: [0.55, 1],
   });
 
+  const Wrapper = onPress ? TouchableOpacity : View;
+  const wrapperProps = onPress ? { onPress, activeOpacity: 0.7 } : {};
+
   return (
-    <View style={styles.pulsingBorderWrapper}>
+    <Wrapper {...wrapperProps} style={styles.pulsingBorderWrapper}>
       {/* Animated pulsing border */}
       <Animated.View
         style={[
@@ -158,10 +165,13 @@ function PulsingBorderButton({ children }: { children: React.ReactNode }) {
           numberOfLines={1}
           ellipsizeMode="tail"
         >
-          Fetching prices...
+          {loadingText || 'Fetching prices...'}
         </Animated.Text>
+        {onPress && (
+          <Text style={styles.cancelHint}>Tap to cancel</Text>
+        )}
       </View>
-    </View>
+    </Wrapper>
   );
 }
 
@@ -177,6 +187,8 @@ export function FixedBottomButton({
   secondaryOnPress,
   secondaryLoading = false,
   secondaryDisabled = false,
+  secondaryLoadingText,
+  secondaryLoadingOnPress,
   disableSolidBackground = false,
 }: FixedBottomButtonProps) {
   const insets = useSafeAreaInsets();
@@ -196,7 +208,7 @@ export function FixedBottomButton({
       >
         {secondaryLabel && secondaryOnPress && (
           secondaryLoading ? (
-            <PulsingBorderButton>
+            <PulsingBorderButton loadingText={secondaryLoadingText} onPress={secondaryLoadingOnPress}>
               {secondaryLabel}
             </PulsingBorderButton>
           ) : (
@@ -327,5 +339,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.primary,
     textAlign: 'center',
+  },
+  cancelHint: {
+    fontSize: 11,
+    color: colors.onSurfaceVariant,
+    textAlign: 'center',
+    marginTop: 2,
   },
 });

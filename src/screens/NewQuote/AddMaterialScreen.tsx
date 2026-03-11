@@ -688,7 +688,7 @@ export function AddMaterialScreen() {
       <View style={styles.sectionHeader}>
         <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
         <Text style={styles.sectionTitle}>
-          {isPro ? "Can't find it? Add manually" : 'Add Material'}
+          {isEditMode ? 'Edit Material' : isPro ? "Can't find it? Add manually" : 'Add Material'}
         </Text>
       </View>
 
@@ -883,7 +883,9 @@ export function AddMaterialScreen() {
     >
       {renderRecentlyUsedSection()}
       {recentMaterials.length > 0 && !isEditMode && <Divider style={styles.divider} />}
-      {isPro ? (
+      {isEditMode ? (
+        renderManualEntrySection()
+      ) : isPro ? (
         <>
           {renderSearchSection()}
           <Divider style={styles.divider} />

@@ -72,10 +72,8 @@ export const documentStyles = StyleSheet.create({
     marginBottom: 16,
     padding: 16,
     borderRadius: 8,
-    elevation: 3,
-    backgroundColor: colors.primaryBg,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 152, 104, 0.3)',
+    elevation: 2,
+    backgroundColor: colors.surface,
   },
   totalRow: {
     flexDirection: 'row',
