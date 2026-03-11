@@ -10,9 +10,6 @@ import {
   Searchbar,
   Chip,
   FAB,
-  Dialog,
-  Portal,
-  Button,
   Menu,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -26,6 +23,7 @@ import { InvoiceCard } from '../components/InvoiceCard';
 import { ProBadge } from '../components/ProBadge';
 import { isInvoiceOverdue } from '../utils/invoiceCalculator';
 import { AnimatedListItem } from '../components/AnimatedListItem';
+import { QuoteSelectSheet } from '../components/QuoteSelectSheet';
 
 type FilterStatus = 'all' | 'draft' | 'sent' | 'paid' | 'overdue';
 
@@ -280,37 +278,13 @@ export function InvoicesListScreen() {
         color={colors.white}
       />
 
-      {/* Quote Selection Dialog */}
-      <Portal>
-        <Dialog
-          visible={quoteDialogVisible}
-          onDismiss={() => setQuoteDialogVisible(false)}
-          style={styles.dialog}
-        >
-          <Dialog.Title>Select Quote to Convert</Dialog.Title>
-          <Dialog.ScrollArea style={styles.dialogScrollArea}>
-            {convertibleQuotes.map((quote) => (
-              <Button
-                key={quote.id}
-                mode="outlined"
-                onPress={() => handleSelectQuote(quote)}
-                style={styles.quoteButton}
-                contentStyle={styles.quoteButtonContent}
-              >
-                <View style={styles.quoteButtonInner}>
-                  <Text style={styles.quoteButtonTitle}>
-                    {quote.quoteNumber || 'Quote'} - {quote.customerName}
-                  </Text>
-                  <Text style={styles.quoteButtonSubtitle}>{quote.job.name}</Text>
-                </View>
-              </Button>
-            ))}
-          </Dialog.ScrollArea>
-          <Dialog.Actions>
-            <Button onPress={() => setQuoteDialogVisible(false)}>Cancel</Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
+      {/* Quote Selection Sheet */}
+      <QuoteSelectSheet
+        visible={quoteDialogVisible}
+        onDismiss={() => setQuoteDialogVisible(false)}
+        onSelect={handleSelectQuote}
+        quotes={convertibleQuotes}
+      />
     </View>
   );
 }
@@ -362,33 +336,5 @@ const styles = StyleSheet.create({
   fab: {
     backgroundColor: colors.primary,
     marginBottom: 80,
-  },
-  dialog: {
-    maxHeight: '70%',
-  },
-  dialogScrollArea: {
-    paddingHorizontal: 16,
-    maxHeight: 300,
-  },
-  quoteButton: {
-    marginBottom: 8,
-    borderColor: colors.border,
-  },
-  quoteButtonContent: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    paddingVertical: 8,
-  },
-  quoteButtonInner: {
-    width: '100%',
-  },
-  quoteButtonTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  quoteButtonSubtitle: {
-    fontSize: 12,
-    color: colors.textMuted,
   },
 });

@@ -197,7 +197,7 @@ export function ViewQuoteScreen() {
       <View
         style={[
           styles.actions,
-          Platform.OS !== 'ios' && { marginBottom: Math.max(insets.bottom, 16) }
+          { paddingBottom: Math.max(insets.bottom, 16) }
         ]}
       >
         {canConvertToInvoice ? (
