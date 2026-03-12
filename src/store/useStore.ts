@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
-import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod } from '../types';
+import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo } from '../types';
 import { updateQuoteCalculations } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { firestoreService } from '../services/firestoreService';
@@ -74,6 +74,10 @@ interface AppState {
   ) => Promise<void>;
   duplicateInvoice: (invoice: Invoice) => Promise<Invoice>;
 
+  // Referral
+  referralInfo: ReferralInfo | null;
+  loadReferralInfo: () => Promise<void>;
+
   // Cleanup
   clearAllData: () => Promise<void>;
 }
@@ -112,6 +116,7 @@ export const useStore = create<AppState>((set, get) => ({
   invoices: [],
   currentInvoice: null,
   nextInvoiceNumber: 1,
+  referralInfo: null,
 
   // Business settings
   setBusinessSettings: async (settings: BusinessSettings) => {
@@ -483,6 +488,11 @@ export const useStore = create<AppState>((set, get) => ({
   // Subscription
   loadSubscription: async () => {
     try {
+      // Also load referral info for Pro access check
+      if (auth.currentUser) {
+        get().loadReferralInfo();
+      }
+
       // If user is authenticated, prioritize Firestore data
       if (auth.currentUser) {
         const firestoreSubscription = await firestoreService.loadSubscriptionStatus();
@@ -590,9 +600,15 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   canCreateQuote: () => {
-    const { subscriptionStatus } = get();
+    const { subscriptionStatus, referralInfo } = get();
     if (!subscriptionStatus) return true; // Allow if no status yet (trial not started)
     if (subscriptionStatus.isPro) return true;
+
+    // Check for active referral reward
+    if (referralInfo?.rewardExpiresAt) {
+      const rewardExpiry = new Date(referralInfo.rewardExpiresAt);
+      if (rewardExpiry > new Date()) return true;
+    }
 
     // If no trial started yet, allow (first quote will start the trial)
     if (!subscriptionStatus.trialStartedAt) return true;
@@ -1080,6 +1096,18 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  // Referral
+  loadReferralInfo: async () => {
+    try {
+      if (auth.currentUser) {
+        const info = await firestoreService.loadReferralInfo();
+        set({ referralInfo: info });
+      }
+    } catch (error) {
+      console.error('Failed to load referral info:', error);
+    }
+  },
+
   // Clear all data (for logout)
   clearAllData: async () => {
     try {
@@ -1111,6 +1139,7 @@ export const useStore = create<AppState>((set, get) => ({
         currentInvoice: null,
         nextQuoteNumber: 1,
         nextInvoiceNumber: 1,
+        referralInfo: null,
       });
       console.log('✅ clearAllData: Store state reset');
 

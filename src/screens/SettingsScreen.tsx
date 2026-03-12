@@ -84,6 +84,15 @@ export function SettingsScreen() {
       title: 'App',
       items: [
         {
+          id: 'referral',
+          title: 'Refer a Friend',
+          subtitle: 'Get 3 months free Pro',
+          icon: 'gift',
+          screen: 'Referral',
+          badge: 'FREE',
+          badgeColor: colors.secondary,
+        },
+        {
           id: 'subscription',
           title: 'Subscription',
           subtitle: subscriptionStatus?.isPro ? 'Pro Member' : 'Free Plan',

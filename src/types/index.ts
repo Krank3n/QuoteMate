@@ -247,6 +247,15 @@ export interface SubscriptionStatus {
   trialExpired?: boolean;
 }
 
+export interface ReferralInfo {
+  referralCode: string;
+  referredBy: string | null;
+  totalReferrals: number;
+  convertedReferrals: number;
+  rewardMonthsEarned: number;
+  rewardExpiresAt: Date | null;
+}
+
 export type SubscriptionPlan = 'free' | 'pro';
 
 // Invoice types

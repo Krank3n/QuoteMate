@@ -19,7 +19,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
-import { Quote, BusinessSettings, SubscriptionStatus, Invoice } from '../types';
+import { Quote, BusinessSettings, SubscriptionStatus, Invoice, ReferralInfo } from '../types';
 
 /** Recursively strip undefined values from an object (Firestore rejects them) */
 function stripUndefined(obj: any): any {
@@ -584,6 +584,40 @@ class FirestoreService {
       return this.invoicesUnsubscribe;
     } catch (error) {
       console.error('❌ Error setting up invoices listener:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Load referral info from Firestore
+   */
+  async loadReferralInfo(): Promise<ReferralInfo | null> {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, returning null referral info');
+      return null;
+    }
+
+    try {
+      const referralRef = doc(db, 'users', userId, 'profile', 'referral');
+      const snapshot = await getDoc(referralRef);
+
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        console.log('✅ Referral info loaded from Firestore');
+        return {
+          referralCode: data.referralCode,
+          referredBy: data.referredBy || null,
+          totalReferrals: data.totalReferrals || 0,
+          convertedReferrals: data.convertedReferrals || 0,
+          rewardMonthsEarned: data.rewardMonthsEarned || 0,
+          rewardExpiresAt: data.rewardExpiresAt ? new Date(data.rewardExpiresAt.toDate ? data.rewardExpiresAt.toDate() : data.rewardExpiresAt) : null,
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('❌ Error loading referral info from Firestore:', error);
       return null;
     }
   }

@@ -15,6 +15,7 @@ import {
   sendUpdateAnnouncementEmail,
   handleUnsubscribe,
   sendNewUserNotificationEmail,
+  sendFeedbackEmail,
 } from './email';
 
 // Initialize Firebase Admin
@@ -699,6 +700,15 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
     }, { merge: true });
 
     console.log(`✅ Firestore updated for user ${userId}: isPro=${isActive}`);
+
+    // Process referral reward if this user was referred and just became Pro
+    if (isActive) {
+      try {
+        await processReferralReward(userId);
+      } catch (refError) {
+        console.error('Referral reward processing failed (non-blocking):', refError);
+      }
+    }
   } catch (error) {
     console.error('Error updating Firestore from webhook:', error);
   }
@@ -1038,6 +1048,13 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
 
       console.log(`✅ Apple receipt ${appleValidated ? 'validated' : 'saved (unvalidated)'} for user ${userId}`);
 
+      // Process referral reward
+      try {
+        await processReferralReward(userId);
+      } catch (refError) {
+        console.error('Referral reward processing failed (non-blocking):', refError);
+      }
+
       res.status(200).json({
         success: true,
         isPremium: true,
@@ -1144,6 +1161,13 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       }, { merge: true });
 
       console.log(`✅ Google receipt ${googleValidated ? 'validated' : 'saved (unvalidated)'} for user ${userId}`);
+
+      // Process referral reward
+      try {
+        await processReferralReward(userId);
+      } catch (refError) {
+        console.error('Referral reward processing failed (non-blocking):', refError);
+      }
 
       res.status(200).json({
         success: true,
@@ -4102,4 +4126,314 @@ export const sendUpdateAnnouncement = functions
         res.status(500).json({ error: error.message });
       }
     });
+  });
+
+// ==========================================
+// Feedback Function
+// ==========================================
+
+/**
+ * Submit feedback directly from the app.
+ * Sends an email to the admin with the user's feedback.
+ */
+export const submitFeedback = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+
+  const userId = context.auth.uid;
+  const category = (data?.category || 'General').trim().slice(0, 100);
+  const feedback = (data?.feedback || '').trim().slice(0, 5000);
+
+  if (!feedback) {
+    throw new functions.https.HttpsError('invalid-argument', 'Feedback text is required');
+  }
+
+  // Get user email
+  const userEmail = await getUserEmail(userId) || 'Unknown';
+
+  const success = await sendFeedbackEmail(userEmail, userId, category, feedback);
+
+  if (!success) {
+    throw new functions.https.HttpsError('internal', 'Failed to send feedback');
+  }
+
+  // Also store in Firestore for reference
+  await admin.firestore().collection('feedback').add({
+    userId,
+    userEmail,
+    category,
+    feedback,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { success: true };
+});
+
+// ==========================================
+// Referral Program Functions
+// ==========================================
+
+/**
+ * Generate a unique referral code for a user.
+ * Callable function — requires authentication.
+ */
+export const generateReferralCode = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+
+  const userId = context.auth.uid;
+  const firestore = admin.firestore();
+  const referralRef = firestore.doc(`users/${userId}/profile/referral`);
+
+  // Check if user already has a code
+  const existing = await referralRef.get();
+  if (existing.exists && existing.data()?.referralCode) {
+    return { referralCode: existing.data()!.referralCode };
+  }
+
+  // Generate unique 6-char code with QM- prefix
+  let code = '';
+  let attempts = 0;
+  while (attempts < 10) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No I/O/0/1 to avoid confusion
+    let raw = '';
+    for (let i = 0; i < 6; i++) {
+      raw += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    code = `QM-${raw}`;
+
+    // Check uniqueness
+    const codeDoc = await firestore.doc(`referrals/${code}`).get();
+    if (!codeDoc.exists) break;
+    attempts++;
+  }
+
+  if (!code) {
+    throw new functions.https.HttpsError('internal', 'Failed to generate unique code');
+  }
+
+  const now = admin.firestore.FieldValue.serverTimestamp();
+
+  // Write both docs atomically
+  const batch = firestore.batch();
+  batch.set(referralRef, {
+    referralCode: code,
+    referredBy: null,
+    totalReferrals: 0,
+    convertedReferrals: 0,
+    rewardMonthsEarned: 0,
+    rewardExpiresAt: null,
+    createdAt: now,
+  }, { merge: true });
+
+  batch.set(firestore.doc(`referrals/${code}`), {
+    referrerUserId: userId,
+    createdAt: now,
+  });
+
+  await batch.commit();
+  console.log(`✅ Generated referral code ${code} for user ${userId}`);
+
+  return { referralCode: code };
+});
+
+/**
+ * Apply a referral code to the current user.
+ * Callable function — requires authentication.
+ */
+export const applyReferralCode = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+
+  const userId = context.auth.uid;
+  const referralCode = (data?.referralCode || '').trim().toUpperCase();
+
+  if (!referralCode) {
+    throw new functions.https.HttpsError('invalid-argument', 'Referral code is required');
+  }
+
+  const firestore = admin.firestore();
+
+  // Check if this user already has a referrer
+  const userReferralRef = firestore.doc(`users/${userId}/profile/referral`);
+  const userReferral = await userReferralRef.get();
+  if (userReferral.exists && userReferral.data()?.referredBy) {
+    throw new functions.https.HttpsError('already-exists', 'You have already applied a referral code');
+  }
+
+  // Validate the referral code
+  const codeDoc = await firestore.doc(`referrals/${referralCode}`).get();
+  if (!codeDoc.exists) {
+    throw new functions.https.HttpsError('not-found', 'Invalid referral code — not found');
+  }
+
+  const referrerUserId = codeDoc.data()!.referrerUserId;
+
+  // Can't refer yourself
+  if (referrerUserId === userId) {
+    throw new functions.https.HttpsError('invalid-argument', "You can't use your own referral code");
+  }
+
+  // Save referredBy on the new user + increment referrer's totalReferrals
+  const batch = firestore.batch();
+
+  batch.set(userReferralRef, {
+    referredBy: referrerUserId,
+  }, { merge: true });
+
+  const referrerReferralRef = firestore.doc(`users/${referrerUserId}/profile/referral`);
+  batch.set(referrerReferralRef, {
+    totalReferrals: admin.firestore.FieldValue.increment(1),
+  }, { merge: true });
+
+  await batch.commit();
+  console.log(`✅ User ${userId} applied referral code ${referralCode} (referrer: ${referrerUserId})`);
+
+  return { success: true };
+});
+
+/**
+ * Process referral reward when a referred user upgrades to Pro.
+ * Called internally from subscription update handlers.
+ *
+ * Instead of granting the reward immediately, we record the Pro start date.
+ * A daily scheduled function (processReferralRewards) checks for referred users
+ * who have been subscribed for 30+ days and grants the reward then.
+ * This prevents abuse where someone subscribes and immediately cancels/refunds.
+ */
+async function processReferralReward(userId: string): Promise<void> {
+  const firestore = admin.firestore();
+  const userReferralRef = firestore.doc(`users/${userId}/profile/referral`);
+  const userReferral = await userReferralRef.get();
+
+  if (!userReferral.exists) return;
+  const data = userReferral.data()!;
+  const referrerUserId = data.referredBy;
+
+  if (!referrerUserId) return;
+
+  // Already converted or already pending — nothing to do
+  if (data.referralConverted || data.referralPendingSince) return;
+
+  // Mark with a pending timestamp — the daily job will grant the reward after 30 days
+  await userReferralRef.set({
+    referralPendingSince: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  console.log(`⏳ Referral reward pending for referrer ${referrerUserId} (referred user ${userId} must stay Pro for 30 days)`);
+}
+
+/**
+ * Grant the actual referral reward to a referrer.
+ * Called by the scheduled job after the 30-day waiting period.
+ */
+async function grantReferralReward(referredUserId: string, referrerUserId: string): Promise<void> {
+  const firestore = admin.firestore();
+
+  // Mark as converted on the referred user
+  await firestore.doc(`users/${referredUserId}/profile/referral`).set({
+    referralConverted: true,
+  }, { merge: true });
+
+  // Grant 3 months free Pro to the referrer
+  const referrerReferralRef = firestore.doc(`users/${referrerUserId}/profile/referral`);
+  const referrerReferral = await referrerReferralRef.get();
+  const referrerData = referrerReferral.exists ? referrerReferral.data()! : {};
+
+  // Calculate new expiry: extend from current reward expiry or from now
+  const now = new Date();
+  const currentExpiry = referrerData.rewardExpiresAt
+    ? new Date(referrerData.rewardExpiresAt.toDate ? referrerData.rewardExpiresAt.toDate() : referrerData.rewardExpiresAt)
+    : null;
+  const baseDate = (currentExpiry && currentExpiry > now) ? currentExpiry : now;
+  const newExpiry = new Date(baseDate.getTime() + 90 * 24 * 60 * 60 * 1000); // 3 months (90 days)
+
+  await referrerReferralRef.set({
+    convertedReferrals: admin.firestore.FieldValue.increment(1),
+    rewardMonthsEarned: admin.firestore.FieldValue.increment(3),
+    rewardExpiresAt: newExpiry,
+  }, { merge: true });
+
+  console.log(`🎁 Referral reward granted to ${referrerUserId}: free Pro until ${newExpiry.toISOString()}`);
+}
+
+/**
+ * Daily scheduled job: process pending referral rewards.
+ * Finds referred users who have been Pro for 30+ days and grants the reward.
+ * If the referred user is no longer Pro, clears the pending state (no reward).
+ * Runs every day at 3:00 AM UTC.
+ */
+export const processReferralRewards = functions.pubsub
+  .schedule('every day 03:00')
+  .timeZone('UTC')
+  .onRun(async () => {
+    const firestore = admin.firestore();
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+    // Query all users who have a pending referral (not yet converted, has pendingSince)
+    // We scan /users/*/profile/referral docs via a collectionGroup query
+    const referralDocs = await firestore.collectionGroup('profile')
+      .where('referralPendingSince', '!=', null)
+      .where('referralConverted', '==', false)
+      .get();
+
+    // Fallback: also catch docs where referralConverted doesn't exist yet
+    const referralDocsNoField = await firestore.collectionGroup('profile')
+      .where('referralPendingSince', '!=', null)
+      .get();
+
+    // Merge and deduplicate
+    const allDocs = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+    for (const doc of referralDocs.docs) {
+      allDocs.set(doc.ref.path, doc);
+    }
+    for (const doc of referralDocsNoField.docs) {
+      if (!doc.data().referralConverted) {
+        allDocs.set(doc.ref.path, doc);
+      }
+    }
+
+    let granted = 0;
+    let cleared = 0;
+    let waiting = 0;
+
+    for (const [, referralDoc] of allDocs) {
+      const data = referralDoc.data();
+      if (!data.referredBy || !data.referralPendingSince) continue;
+      if (data.referralConverted) continue;
+
+      const pendingSince = data.referralPendingSince.toDate
+        ? data.referralPendingSince.toDate()
+        : new Date(data.referralPendingSince);
+      const elapsed = Date.now() - pendingSince.getTime();
+
+      if (elapsed < THIRTY_DAYS_MS) {
+        waiting++;
+        continue;
+      }
+
+      // 30 days have passed — check if the referred user is still Pro
+      // Extract userId from path: users/{userId}/profile/referral
+      const pathParts = referralDoc.ref.path.split('/');
+      const referredUserId = pathParts[1];
+
+      const subDoc = await firestore.doc(`users/${referredUserId}/profile/subscription`).get();
+      const isPro = subDoc.exists && subDoc.data()?.isPro === true;
+
+      if (isPro) {
+        await grantReferralReward(referredUserId, data.referredBy);
+        granted++;
+      } else {
+        // User cancelled before 30 days — clear the pending state, no reward
+        await referralDoc.ref.set({
+          referralPendingSince: null,
+        }, { merge: true });
+        cleared++;
+      }
+    }
+
+    console.log(`📊 Referral rewards processed: ${granted} granted, ${cleared} cleared, ${waiting} still waiting`);
   });

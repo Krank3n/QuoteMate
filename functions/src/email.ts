@@ -197,8 +197,8 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
     return false;
   }
 
-  // Check user email preferences
-  if (userId) {
+  // Check user email preferences (skip for test sends)
+  if (userId && userId !== 'test') {
     const allowed = await canSendEmail(userId, category);
     if (!allowed) {
       console.log(`User ${userId} has opted out of ${category} emails, skipping`);
@@ -770,6 +770,18 @@ export function sendUpdateAnnouncementEmail(
       </tr>
     `, '#5ab9ea')}
 
+    <!-- Payment Tracking -->
+    ${infoCard(`
+      <tr>
+        <td style="padding:12px 0;">
+          <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#128176; Payment Tracking</p>
+          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
+            Record partial or full payments against invoices &mdash; bank transfer, card, cash, or cheque. Set flexible payment terms like <strong style="color:#f8fafc;">Net 7, Net 14, Net 30</strong>, or custom due dates. Overdue invoices are flagged automatically.
+          </p>
+        </td>
+      </tr>
+    `, '#a78bfa')}
+
     <!-- Smarter Pricing -->
     ${infoCard(`
       <tr>
@@ -782,26 +794,20 @@ export function sendUpdateAnnouncementEmail(
       </tr>
     `, '#cfa153')}
 
-    <!-- Additional features -->
-    <p style="color:#f8fafc;font-size:15px;font-weight:600;margin:28px 0 16px;">Also new:</p>
-    ${featureBullet('&#10003;', '<strong style="color:#f8fafc;">Online quote acceptance</strong> &mdash; clients can accept or decline quotes with one click')}
-    ${featureBullet('&#127908;', '<strong style="color:#f8fafc;">Voice-to-quote</strong> &mdash; describe the job out loud on-site, skip the typing')}
-    ${featureBullet('&#127912;', '<strong style="color:#f8fafc;">Your logo on every PDF</strong> &mdash; professional branding on quotes and invoices')}
-
     ${ctaButton('Open QuoteMate')}
 
     <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 0;text-align:center;">
       Questions or feedback? Just reply to this email &mdash; we read every message.
     </p>
-  `, { unsubscribeUrl, preheader: 'Free 7-day trial, full invoicing, and smarter pricing — QuoteMate just got a whole lot better.' });
+  `, { unsubscribeUrl, preheader: 'Free trial, invoicing, payment tracking, and smarter pricing — QuoteMate just got a whole lot better.' });
 
   return sendEmail({
     to,
-    subject: `What's new in QuoteMate — Free Trial, Invoicing & Smarter Pricing`,
+    subject: `What's new in QuoteMate — Invoicing, Payment Tracking & More`,
     htmlContent: content,
     category: 'marketing',
     userId,
-    tags: ['product-update', 'v1.0.57'],
+    tags: ['product-update', 'v1.0.61'],
   });
 }
 
@@ -898,5 +904,61 @@ export function sendNewUserNotificationEmail(
     htmlContent: content,
     category: 'transactional',
     tags: ['admin-notification', 'new-user'],
+  });
+}
+
+function escapeHtmlEmail(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+export function sendFeedbackEmail(
+  userEmail: string,
+  userId: string,
+  category: string,
+  feedback: string,
+): Promise<boolean> {
+  const escapedFeedback = escapeHtmlEmail(feedback).replace(/\n/g, '<br/>');
+  const escapedCategory = escapeHtmlEmail(category);
+
+  const content = wrapEmailTemplate(`
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">User Feedback</p>
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      New feedback from a user
+    </h1>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+      <tr>
+        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">From</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${escapeHtmlEmail(userEmail)}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Category</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${escapedCategory}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;">
+                <span style="color:#94a3b8;font-size:13px;">Feedback</span><br/>
+                <span style="color:#f8fafc;font-size:15px;line-height:1.6;">${escapedFeedback}</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  `);
+
+  return sendEmail({
+    to: ADMIN_EMAIL,
+    subject: `QuoteMate Feedback: ${escapedCategory}`,
+    htmlContent: content,
+    category: 'transactional',
+    tags: ['feedback', category.toLowerCase().replace(/\s+/g, '-')],
   });
 }

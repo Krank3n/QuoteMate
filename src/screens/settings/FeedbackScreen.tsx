@@ -11,9 +11,8 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Linking,
-  Alert,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import {
   Text,
@@ -21,11 +20,11 @@ import {
   Title,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
-
-const FEEDBACK_EMAIL = 'thomas.andrew.hansen@gmail.com';
+import { AlertModal, AlertType } from '../../components/AlertModal';
 
 type FeedbackCategory = 'hate' | 'buggy' | 'missing' | 'confusing' | 'other';
 
@@ -40,27 +39,38 @@ const CATEGORIES: { id: FeedbackCategory; label: string; icon: string }[] = [
 export function FeedbackScreen() {
   const [selectedCategory, setSelectedCategory] = useState<FeedbackCategory | null>(null);
   const [feedbackText, setFeedbackText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [modal, setModal] = useState<{ visible: boolean; type: AlertType; title: string; message: string }>({
+    visible: false, type: 'info', title: '', message: '',
+  });
 
-  const handleSendFeedback = () => {
+  const showModal = (type: AlertType, title: string, message: string) => {
+    setModal({ visible: true, type, title, message });
+  };
+
+  const handleSendFeedback = async () => {
     if (!feedbackText.trim()) {
-      Alert.alert('Hold on', 'Please write some feedback before sending.');
+      showModal('warning', 'Hold on', 'Please write some feedback before sending.');
       return;
     }
 
     const categoryLabel = CATEGORIES.find(c => c.id === selectedCategory)?.label || 'General';
-    const subject = encodeURIComponent(`QuoteMate Feedback: ${categoryLabel}`);
-    const body = encodeURIComponent(
-      `Category: ${categoryLabel}\n\n${feedbackText.trim()}\n\n---\nSent from QuoteMate app`
-    );
 
-    const mailtoUrl = `mailto:${FEEDBACK_EMAIL}?subject=${subject}&body=${body}`;
+    setSending(true);
+    try {
+      const functions = getFunctions();
+      const submitFeedback = httpsCallable(functions, 'submitFeedback');
+      await submitFeedback({ category: categoryLabel, feedback: feedbackText.trim() });
 
-    Linking.openURL(mailtoUrl).catch(() => {
-      Alert.alert(
-        'Could not open email',
-        `Please send your feedback directly to ${FEEDBACK_EMAIL}`,
-      );
-    });
+      showModal('success', 'Feedback Sent!', 'Thanks for taking the time. We read every single message.');
+      setFeedbackText('');
+      setSelectedCategory(null);
+    } catch (error: any) {
+      console.error('Failed to send feedback:', error);
+      showModal('error', 'Failed to Send', 'Something went wrong. Please try again.');
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -136,13 +146,18 @@ export function FeedbackScreen() {
           <TouchableOpacity
             style={[
               styles.sendButton,
-              !feedbackText.trim() && styles.sendButtonDisabled,
+              (!feedbackText.trim() || sending) && styles.sendButtonDisabled,
             ]}
             onPress={handleSendFeedback}
             activeOpacity={0.8}
+            disabled={sending}
           >
-            <MaterialCommunityIcons name="send" size={20} color={colors.white} />
-            <Text style={styles.sendButtonText}>Send Feedback</Text>
+            {sending ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <MaterialCommunityIcons name="send" size={20} color={colors.white} />
+            )}
+            <Text style={styles.sendButtonText}>{sending ? 'Sending...' : 'Send Feedback'}</Text>
           </TouchableOpacity>
 
           <Text style={styles.footnote}>
@@ -151,6 +166,15 @@ export function FeedbackScreen() {
           </Text>
         </WebContainer>
       </ScrollView>
+
+      <AlertModal
+        visible={modal.visible}
+        onDismiss={() => setModal(m => ({ ...m, visible: false }))}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        showConfetti={modal.type === 'success'}
+      />
     </View>
   );
 }

@@ -31,6 +31,7 @@ import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen
 import { AboutScreen } from '../screens/settings/AboutScreen';
 import { FeedbackScreen } from '../screens/settings/FeedbackScreen';
 import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
+import { ReferralScreen } from '../screens/settings/ReferralScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
 import { CustomerDetailsScreen } from '../screens/NewQuote/CustomerDetailsScreen';
@@ -567,6 +568,17 @@ export function RootNavigator() {
           headerStyle: { backgroundColor: colors.primary },
           headerTintColor: colors.white,
           title: 'PDF Templates',
+        }}
+      />
+      <RootStack.Screen
+        name="Referral"
+        component={ReferralScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Refer a Friend',
         }}
       />
       <RootStack.Screen
