@@ -3,13 +3,12 @@
  * Card component for displaying invoice information in lists
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { View, StyleSheet, Alert, Platform, Pressable, Animated } from 'react-native';
 import {
   Text,
   Card,
   Divider,
-  Menu,
   IconButton,
 } from 'react-native-paper';
 import { format, formatDistanceToNow, differenceInDays } from 'date-fns';
@@ -27,6 +26,10 @@ import { selectionTap } from '../utils/haptics';
 import { SwipeableCard } from './SwipeableCard';
 import { AnimatedChip } from './AnimatedChip';
 import { AlertModal } from './AlertModal';
+import { ShimmerOverlay } from './ShimmerOverlay';
+import { TapRipple } from './TapRipple';
+import { GrainOverlay } from './GrainOverlay';
+import { ActionSheet } from './ActionSheet';
 
 interface InvoiceCardProps {
   invoice: Invoice;
@@ -55,7 +58,44 @@ export const InvoiceCard = React.memo(function InvoiceCard({
   const [statusMenuVisible, setStatusMenuVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const idleAnim = useRef(new Animated.Value(0)).current;
+  const idleTilt = useRef(new Animated.Value(0)).current;
   const { subscriptionStatus } = useStore();
+
+  // Subtle idle bob + tilt — randomized so cards are never in sync
+  const bobDurationRef = useRef(2400 + Math.random() * 1200);
+  const tiltDurationRef = useRef(3200 + Math.random() * 1600);
+  const tiltDirRef = useRef(Math.random() > 0.5 ? 1 : -1);
+  const delayRef = useRef(Math.random() * 1500);
+
+  useEffect(() => {
+    const bobD = bobDurationRef.current;
+    const tiltD = tiltDurationRef.current;
+    const tiltDir = tiltDirRef.current;
+
+    const bobAnim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(idleAnim, { toValue: -2, duration: bobD / 2, useNativeDriver: true }),
+        Animated.timing(idleAnim, { toValue: 0, duration: bobD / 2, useNativeDriver: true }),
+      ])
+    );
+    const tiltAnim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(idleTilt, { toValue: 0.4 * tiltDir, duration: tiltD / 2, useNativeDriver: true }),
+        Animated.timing(idleTilt, { toValue: -0.4 * tiltDir, duration: tiltD, useNativeDriver: true }),
+        Animated.timing(idleTilt, { toValue: 0, duration: tiltD / 2, useNativeDriver: true }),
+      ])
+    );
+    const timer = setTimeout(() => {
+      bobAnim.start();
+      tiltAnim.start();
+    }, delayRef.current);
+    return () => {
+      clearTimeout(timer);
+      bobAnim.stop();
+      tiltAnim.stop();
+    };
+  }, []);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -160,12 +200,13 @@ export const InvoiceCard = React.memo(function InvoiceCard({
         { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteInvoice },
       ]}
     >
-    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+    <Animated.View style={{ transform: [{ scale: scaleAnim }, { translateY: idleAnim }, { rotate: idleTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
     <Card style={styles.invoiceCard}>
-      <Pressable
+      <TapRipple
         onPress={() => onView(invoice.id)}
         accessibilityRole="button"
         accessibilityLabel={`View invoice for ${invoice.customerName}, ${invoice.job.name}, ${formatCurrency(invoice.total)}, status ${invoice.status}`}
+        rippleColor="rgba(0,152,104,0.2)"
         onPressIn={() => {
           Animated.spring(scaleAnim, {
             toValue: 0.97,
@@ -201,122 +242,27 @@ export const InvoiceCard = React.memo(function InvoiceCard({
                 {invoice.status === 'partial' && (
                   <Text style={styles.amountDue}>Due: {formatCurrency(amountDue)}</Text>
                 )}
-                <Menu
-                  visible={statusMenuVisible}
-                  onDismiss={() => setStatusMenuVisible(false)}
-                  anchor={
-                    <AnimatedChip
-                      status={invoice.status}
-                      style={[styles.statusChip, getStatusChipStyle(invoice.status)]}
-                      textStyle={styles.statusText}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        setStatusMenuVisible(true);
-                      }}
-                    >
-                      {invoice.status}
-                    </AnimatedChip>
-                  }
+                <AnimatedChip
+                  status={invoice.status}
+                  style={[styles.statusChip, getStatusChipStyle(invoice.status)]}
+                  textStyle={styles.statusText}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setStatusMenuVisible(true);
+                  }}
                 >
-                  {/* Draft status options */}
-                  {invoice.status !== 'draft' && (
-                    <Menu.Item
-                      leadingIcon="file-document-edit"
-                      onPress={() => handleStatusChange('draft')}
-                      title="Mark as Draft"
-                    />
-                  )}
-                  {/* Sent status options */}
-                  {invoice.status !== 'sent' && invoice.status !== 'paid' && (
-                    <Menu.Item
-                      leadingIcon="send"
-                      onPress={() => handleStatusChange('sent')}
-                      title="Mark as Sent"
-                    />
-                  )}
-                  {/* Paid status options */}
-                  {invoice.status !== 'paid' && (
-                    <Menu.Item
-                      leadingIcon="check-circle"
-                      onPress={() => handleStatusChange('paid')}
-                      title="Mark as Paid"
-                    />
-                  )}
-                  {/* Cancel option */}
-                  {invoice.status !== 'cancelled' && (
-                    <Menu.Item
-                      leadingIcon="close-circle"
-                      onPress={() => handleStatusChange('cancelled')}
-                      title="Cancel Invoice"
-                      titleStyle={{ color: colors.error }}
-                    />
-                  )}
-                </Menu>
+                  {invoice.status}
+                </AnimatedChip>
               </View>
-              <Menu
-                visible={menuVisible}
-                onDismiss={() => setMenuVisible(false)}
-                anchor={
-                  <IconButton
-                    icon="dots-vertical"
-                    size={20}
-                    accessibilityLabel="Invoice actions menu"
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      setMenuVisible(true);
-                    }}
-                  />
-                }
-              >
-                <Menu.Item
-                  leadingIcon="pencil"
-                  onPress={() => {
-                    setMenuVisible(false);
-                    onEdit(invoice);
-                  }}
-                  title="Edit"
-                />
-                <Menu.Item
-                  leadingIcon="email"
-                  onPress={() => {
-                    setMenuVisible(false);
-                    handleSendInvoice();
-                  }}
-                  title="Send via Email"
-                />
-                <Menu.Item
-                  leadingIcon="content-copy"
-                  onPress={handleDuplicate}
-                  title="Duplicate"
-                />
-                {showRecordPayment && (
-                  <Menu.Item
-                    leadingIcon="cash"
-                    onPress={() => {
-                      setMenuVisible(false);
-                      onRecordPayment(invoice);
-                    }}
-                    title="Record Payment"
-                  />
-                )}
-                <Menu.Item
-                  leadingIcon="file-pdf-box"
-                  onPress={() => {
-                    setMenuVisible(false);
-                    handleExportInvoice();
-                  }}
-                  title="Export PDF"
-                />
-                <Menu.Item
-                  leadingIcon="delete"
-                  onPress={() => {
-                    setMenuVisible(false);
-                    handleDeleteInvoice();
-                  }}
-                  title="Delete"
-                  titleStyle={{ color: colors.error }}
-                />
-              </Menu>
+              <IconButton
+                icon="dots-vertical"
+                size={24}
+                accessibilityLabel="Invoice actions menu"
+                onPress={(e) => {
+                  e.stopPropagation();
+                  setMenuVisible(true);
+                }}
+              />
             </View>
           </View>
           <Divider style={styles.divider} />
@@ -342,10 +288,48 @@ export const InvoiceCard = React.memo(function InvoiceCard({
             </Text>
           </View>
         </Card.Content>
-      </Pressable>
+      </TapRipple>
+      <GrainOverlay />
+      <ShimmerOverlay />
     </Card>
     </Animated.View>
     </SwipeableCard>
+
+    <ActionSheet
+      visible={menuVisible}
+      onDismiss={() => setMenuVisible(false)}
+      title="Invoice Actions"
+      options={[
+        { icon: 'pencil', label: 'Edit', onPress: () => onEdit(invoice) },
+        { icon: 'email-outline', label: 'Send via Email', onPress: handleSendInvoice },
+        { icon: 'content-copy', label: 'Duplicate', onPress: () => onDuplicate(invoice) },
+        ...(showRecordPayment
+          ? [{ icon: 'cash', label: 'Record Payment', onPress: () => onRecordPayment(invoice) }]
+          : []),
+        { icon: 'file-pdf-box', label: 'Export PDF', onPress: handleExportInvoice },
+        { icon: 'delete-outline', label: 'Delete', onPress: handleDeleteInvoice, color: colors.error, divider: true },
+      ]}
+    />
+
+    <ActionSheet
+      visible={statusMenuVisible}
+      onDismiss={() => setStatusMenuVisible(false)}
+      title="Update Status"
+      options={[
+        ...(invoice.status !== 'draft'
+          ? [{ icon: 'file-document-edit-outline', label: 'Mark as Draft', onPress: () => handleStatusChange('draft') }]
+          : []),
+        ...(invoice.status !== 'sent' && invoice.status !== 'paid'
+          ? [{ icon: 'send-outline', label: 'Mark as Sent', onPress: () => handleStatusChange('sent') }]
+          : []),
+        ...(invoice.status !== 'paid'
+          ? [{ icon: 'check-circle-outline', label: 'Mark as Paid', onPress: () => handleStatusChange('paid') }]
+          : []),
+        ...(invoice.status !== 'cancelled'
+          ? [{ icon: 'close-circle-outline', label: 'Cancel Invoice', onPress: () => handleStatusChange('cancelled'), color: colors.error, divider: true }]
+          : []),
+      ]}
+    />
 
     <AlertModal
       visible={deleteModalVisible}
@@ -385,6 +369,7 @@ const styles = StyleSheet.create({
   invoiceCard: {
     marginBottom: 12,
     backgroundColor: colors.surface,
+    overflow: 'hidden',
   },
   cardContent: {
     paddingTop: 16,

@@ -3,7 +3,7 @@
  * Shows subscription options when free quote limit is reached
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, StyleSheet, ScrollView, Alert, ActivityIndicator, Platform, Linking, Pressable } from 'react-native';
 import {
   Text,
@@ -25,9 +25,30 @@ import { WebContainer } from '../components/WebContainer';
 import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
 import { CancellationReasonModal } from '../components/CancellationReasonModal';
 
+const PRO_NUDGES = [
+  "Your quotes deserve the VIP treatment",
+  "Free is nice, but Pro is where the money's at",
+  "Even your ute has a paid rego",
+  "Time to give your business the upgrade it deserves",
+  "Pro tip: go Pro",
+  "Your competitors aren't using the free version",
+  "Less than a smashed avo a week",
+];
+
+const MAYBE_LATER_QUIPS = [
+  "Your quotes will miss you",
+  "The crown will be here when you're ready",
+  "No pressure... but your competitors just upgraded",
+  "We'll keep the light on for you",
+  "That's what they all say... then they come back",
+  "Sure, but don't say we didn't warn you",
+];
+
 export function PaywallScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
+  const proNudge = useMemo(() => PRO_NUDGES[Math.floor(Math.random() * PRO_NUDGES.length)], []);
+  const maybeLaterQuip = useMemo(() => MAYBE_LATER_QUIPS[Math.floor(Math.random() * MAYBE_LATER_QUIPS.length)], []);
   const { subscriptionStatus, loadSubscription } = useStore();
   const { quoteCount, setPremium } = useSubscriptionStore();
   const [isUpgrading, setIsUpgrading] = useState(false);
@@ -609,6 +630,9 @@ export function PaywallScreen() {
               : `${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} left in your free trial`
           }
         </Text>
+        {!isPro && (
+          <Text style={styles.proNudge}>{proNudge}</Text>
+        )}
       </View>
 
       {/* Pro Member Management Section */}
@@ -764,6 +788,7 @@ export function PaywallScreen() {
 
       {!isPro && (
         <View style={styles.bottomSection}>
+          <Text style={styles.maybeLaterQuip}>{maybeLaterQuip}</Text>
           <Button
             mode="text"
             onPress={() => navigation.goBack()}
@@ -859,6 +884,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.onSurface,
     textAlign: 'center',
+  },
+  proNudge: {
+    fontSize: 13,
+    fontStyle: 'italic',
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: 8,
+    opacity: 0.85,
   },
   planToggleContainer: {
     flexDirection: 'row',
@@ -972,6 +1005,14 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 16,
+  },
+  maybeLaterQuip: {
+    fontSize: 13,
+    fontStyle: 'italic',
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: 4,
+    opacity: 0.7,
   },
   backButton: {
     marginBottom: 16,

@@ -29,6 +29,7 @@ import { WebContainer } from '../components/WebContainer';
 import { QuoteCard } from '../components/QuoteCard';
 import { AlertModal } from '../components/AlertModal';
 import { AnimatedListItem } from '../components/AnimatedListItem';
+import { SkeletonCardList } from '../components/SkeletonCard';
 import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
 import { lightTap } from '../utils/haptics';
 import { openWebEmailClient, copyQuoteEmailText } from '../utils/emailUtils';
@@ -62,7 +63,19 @@ export function QuotesListScreen() {
   const [quoteToConvert, setQuoteToConvert] = useState<Quote | null>(null);
   const [isConverting, setIsConverting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialLoaded, setInitialLoaded] = useState(quotes.length > 0);
   const [duplicateSuccessVisible, setDuplicateSuccessVisible] = useState(false);
+
+  useEffect(() => {
+    if (!initialLoaded && quotes.length > 0) setInitialLoaded(true);
+  }, [quotes.length, initialLoaded]);
+
+  // Mark loaded after first refresh completes even if empty
+  useEffect(() => {
+    if (!initialLoaded) {
+      loadQuotes().then(() => setInitialLoaded(true));
+    }
+  }, []);
 
   // Filter and search quotes
   const filteredQuotes = useMemo(() => quotes.filter((quote) => {
@@ -324,14 +337,24 @@ export function QuotesListScreen() {
             />
           }
           ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <MaterialCommunityIcons
-                name="file-document-outline"
-                size={64}
-                color={colors.disabled}
-              />
-              <Text style={styles.emptyText}>No quotes found</Text>
-            </View>
+            !initialLoaded ? (
+              <View style={{ padding: 16 }}>
+                <SkeletonCardList count={4} />
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <View style={styles.emptyIconCircle}>
+                  <MaterialCommunityIcons name="file-document-plus-outline" size={36} color={colors.primary} />
+                </View>
+                <Text style={styles.emptyTitle}>Nothing here yet, chief</Text>
+                <Text style={styles.emptyText}>
+                  Time to drum up some work
+                </Text>
+                <Text style={styles.emptySubtext}>
+                  Tap + to bang out your first quote
+                </Text>
+              </View>
+            )
           }
         />
       </WebContainer>
@@ -438,12 +461,36 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingVertical: 48,
+    paddingHorizontal: 32,
+  },
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.primary + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: 8,
   },
   emptyText: {
     fontSize: 16,
     color: colors.onSurface,
-    marginTop: 16,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
   fab: {
     position: 'absolute',

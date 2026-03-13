@@ -612,6 +612,13 @@ class FirestoreService {
           convertedReferrals: data.convertedReferrals || 0,
           rewardMonthsEarned: data.rewardMonthsEarned || 0,
           rewardExpiresAt: data.rewardExpiresAt ? new Date(data.rewardExpiresAt.toDate ? data.rewardExpiresAt.toDate() : data.rewardExpiresAt) : null,
+          // Affiliate fields
+          isAffiliate: data.isAffiliate || false,
+          commissionRate: data.commissionRate || 0.50,
+          totalEarnings: data.totalEarnings || 0,
+          pendingEarnings: data.pendingEarnings || 0,
+          paidEarnings: data.paidEarnings || 0,
+          lastPayoutAt: data.lastPayoutAt ? new Date(data.lastPayoutAt.toDate ? data.lastPayoutAt.toDate() : data.lastPayoutAt) : null,
         };
       }
 

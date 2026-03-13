@@ -36,6 +36,133 @@ const stripe = new Stripe(stripeSecretKey, {
   apiVersion: '2023-10-16',
 });
 
+// ============================================
+// Affiliate Commission Configuration
+// ============================================
+const PLATFORM_FEES: Record<string, { percentage: number; fixedCents: number }> = {
+  ios: { percentage: 0.30, fixedCents: 0 },       // Apple takes 30%
+  android: { percentage: 0.15, fixedCents: 0 },    // Google takes 15% (small business program)
+  web: { percentage: 0.029, fixedCents: 30 },      // Stripe takes 2.9% + $0.30
+};
+
+const DEFAULT_COMMISSION_RATE = 0.50; // 50% of net revenue
+
+// Pricing in cents (AUD)
+const PRODUCT_PRICES: Record<string, number> = {
+  // iOS product IDs
+  quotemate_pro_monthly: 2900,
+  quotemate_pro_yearly: 19900,
+  // Android product IDs
+  quotemate_premium_monthly: 2900,
+  quotemate_premium_yearly: 19900,
+};
+
+/**
+ * Calculate affiliate commission for a subscription payment.
+ * Returns amounts in cents.
+ */
+function calculateCommission(
+  platform: string,
+  grossAmountCents: number,
+  commissionRate: number
+): { platformFee: number; netRevenue: number; commissionAmount: number } {
+  const fees = PLATFORM_FEES[platform] || PLATFORM_FEES.web;
+  const platformFee = Math.round(grossAmountCents * fees.percentage + fees.fixedCents);
+  const netRevenue = grossAmountCents - platformFee;
+  const commissionAmount = Math.round(netRevenue * commissionRate);
+  return { platformFee, netRevenue, commissionAmount };
+}
+
+/**
+ * Get the current billing period string (e.g., "2026-03")
+ */
+function getBillingPeriod(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Record an affiliate earning for a referrer when a referred user pays.
+ */
+async function recordAffiliateEarning(
+  referredUserId: string,
+  referrerUserId: string,
+  platform: string,
+  productId: string,
+  grossAmountCents: number,
+  billingPeriod: string
+): Promise<void> {
+  const firestore = admin.firestore();
+  const referrerReferralRef = firestore.doc(`users/${referrerUserId}/profile/referral`);
+  const referrerReferral = await referrerReferralRef.get();
+  const referrerData = referrerReferral.exists ? referrerReferral.data()! : {};
+
+  // Only record earnings if the referrer is an approved affiliate
+  if (!referrerData.isAffiliate) {
+    console.log(`Skipping affiliate earning — referrer ${referrerUserId} is not an affiliate`);
+    return;
+  }
+
+  const commissionRate = referrerData.commissionRate || DEFAULT_COMMISSION_RATE;
+
+  // Check if earning already exists for this billing period + referred user
+  const existingEarnings = await firestore
+    .collection(`users/${referrerUserId}/affiliateEarnings`)
+    .where('referredUserId', '==', referredUserId)
+    .where('billingPeriod', '==', billingPeriod)
+    .limit(1)
+    .get();
+
+  if (!existingEarnings.empty) {
+    console.log(`Affiliate earning already exists for ${referrerUserId} <- ${referredUserId} period ${billingPeriod}`);
+    return;
+  }
+
+  const { platformFee, netRevenue, commissionAmount } = calculateCommission(platform, grossAmountCents, commissionRate);
+
+  // Get referred user email (masked)
+  let referredUserEmail = '';
+  try {
+    const email = await getUserEmail(referredUserId);
+    if (email) {
+      const [local, domain] = email.split('@');
+      referredUserEmail = `${local.charAt(0)}***@${domain}`;
+    }
+  } catch {
+    referredUserEmail = 'unknown';
+  }
+
+  const earningDoc = firestore.collection(`users/${referrerUserId}/affiliateEarnings`).doc();
+  const batch = firestore.batch();
+
+  batch.set(earningDoc, {
+    referredUserId,
+    referredUserEmail,
+    platform,
+    grossAmount: grossAmountCents,
+    platformFee,
+    netRevenue,
+    commissionRate,
+    commissionAmount,
+    billingPeriod,
+    productId,
+    status: 'pending',
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    confirmedAt: null,
+    paidAt: null,
+  });
+
+  // Update referrer's running totals
+  batch.set(referrerReferralRef, {
+    isAffiliate: true,
+    totalEarnings: admin.firestore.FieldValue.increment(commissionAmount),
+    pendingEarnings: admin.firestore.FieldValue.increment(commissionAmount),
+  }, { merge: true });
+
+  await batch.commit();
+  console.log(`💰 Affiliate earning recorded: ${referrerUserId} earns $${(commissionAmount / 100).toFixed(2)} from ${referredUserId} (${platform}, period ${billingPeriod})`);
+}
+
 // CORS configuration - whitelist allowed origins
 const allowedOrigins = [
   'https://us-central1-hansendev.cloudfunctions.net',
@@ -704,7 +831,9 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
     // Process referral reward if this user was referred and just became Pro
     if (isActive) {
       try {
-        await processReferralReward(userId);
+        const priceId = subscription.items.data[0]?.price?.id || '';
+        const amountCents = subscription.items.data[0]?.price?.unit_amount || 0;
+        await processReferralReward(userId, 'web', priceId, amountCents);
       } catch (refError) {
         console.error('Referral reward processing failed (non-blocking):', refError);
       }
@@ -772,6 +901,28 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
 async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
   const customerId = invoice.customer as string;
   console.log(`Payment succeeded for customer ${customerId}`);
+
+  // Record recurring affiliate commission for renewal payments
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer.deleted) return;
+
+    const userId = customer.metadata?.firebaseUserId;
+    if (!userId) return;
+
+    // Get the subscription line item details
+    const lineItem = invoice.lines?.data?.[0];
+    if (!lineItem) return;
+
+    const amountCents = lineItem.amount || 0;
+    const priceId = lineItem.price?.id || '';
+
+    if (amountCents > 0 && priceId) {
+      await processReferralReward(userId, 'web', priceId, amountCents);
+    }
+  } catch (error) {
+    console.error('Error processing affiliate commission on invoice payment:', error);
+  }
 }
 
 /**
@@ -1050,7 +1201,8 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
 
       // Process referral reward
       try {
-        await processReferralReward(userId);
+        const grossCents = PRODUCT_PRICES[productId] || 2900;
+        await processReferralReward(userId, 'ios', productId, grossCents);
       } catch (refError) {
         console.error('Referral reward processing failed (non-blocking):', refError);
       }
@@ -1164,7 +1316,8 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
 
       // Process referral reward
       try {
-        await processReferralReward(userId);
+        const grossCents = PRODUCT_PRICES[productId] || 2900;
+        await processReferralReward(userId, 'android', productId, grossCents);
       } catch (refError) {
         console.error('Referral reward processing failed (non-blocking):', refError);
       }
@@ -4225,6 +4378,13 @@ export const generateReferralCode = functions.https.onCall(async (data, context)
     convertedReferrals: 0,
     rewardMonthsEarned: 0,
     rewardExpiresAt: null,
+    // Affiliate is NOT enabled by default — must be enabled by admin
+    isAffiliate: false,
+    commissionRate: 0,
+    totalEarnings: 0,
+    pendingEarnings: 0,
+    paidEarnings: 0,
+    lastPayoutAt: null,
     createdAt: now,
   }, { merge: true });
 
@@ -4304,7 +4464,12 @@ export const applyReferralCode = functions.https.onCall(async (data, context) =>
  * who have been subscribed for 30+ days and grants the reward then.
  * This prevents abuse where someone subscribes and immediately cancels/refunds.
  */
-async function processReferralReward(userId: string): Promise<void> {
+async function processReferralReward(
+  userId: string,
+  platform?: string,
+  productId?: string,
+  grossAmountCents?: number
+): Promise<void> {
   const firestore = admin.firestore();
   const userReferralRef = firestore.doc(`users/${userId}/profile/referral`);
   const userReferral = await userReferralRef.get();
@@ -4315,13 +4480,30 @@ async function processReferralReward(userId: string): Promise<void> {
 
   if (!referrerUserId) return;
 
-  // Already converted or already pending — nothing to do
+  // Record affiliate earning for this billing period (recurring commission)
+  if (platform && productId && grossAmountCents) {
+    try {
+      await recordAffiliateEarning(
+        userId, referrerUserId, platform, productId,
+        grossAmountCents, getBillingPeriod()
+      );
+    } catch (err) {
+      console.error('Failed to record affiliate earning (non-blocking):', err);
+    }
+  }
+
+  // Already converted or already pending — nothing to do for the free months reward
   if (data.referralConverted || data.referralPendingSince) return;
 
-  // Mark with a pending timestamp — the daily job will grant the reward after 30 days
-  await userReferralRef.set({
+  // Store billing details for commission calculation during grant
+  const updateData: Record<string, any> = {
     referralPendingSince: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
+  };
+  if (platform) updateData.subscriptionPlatform = platform;
+  if (productId) updateData.subscriptionProductId = productId;
+  if (grossAmountCents) updateData.subscriptionAmount = grossAmountCents;
+
+  await userReferralRef.set(updateData, { merge: true });
 
   console.log(`⏳ Referral reward pending for referrer ${referrerUserId} (referred user ${userId} must stay Pro for 30 days)`);
 }
@@ -4437,3 +4619,166 @@ export const processReferralRewards = functions.pubsub
 
     console.log(`📊 Referral rewards processed: ${granted} granted, ${cleared} cleared, ${waiting} still waiting`);
   });
+
+// ============================================
+// Affiliate Earnings API
+// ============================================
+
+/**
+ * Get affiliate earnings for the authenticated user.
+ * Returns summary stats and list of earnings.
+ */
+export const getAffiliateEarnings = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+
+  const userId = context.auth.uid;
+  const firestore = admin.firestore();
+
+  // Get referral profile for summary
+  const referralRef = firestore.doc(`users/${userId}/profile/referral`);
+  const referralDoc = await referralRef.get();
+  const referralData = referralDoc.exists ? referralDoc.data()! : {};
+
+  // Get earnings list
+  const earningsSnap = await firestore
+    .collection(`users/${userId}/affiliateEarnings`)
+    .orderBy('createdAt', 'desc')
+    .limit(100)
+    .get();
+
+  const earnings = earningsSnap.docs.map(doc => {
+    const d = doc.data();
+    return {
+      id: doc.id,
+      referredUserId: d.referredUserId,
+      referredUserEmail: d.referredUserEmail,
+      platform: d.platform,
+      grossAmount: d.grossAmount,
+      platformFee: d.platformFee,
+      netRevenue: d.netRevenue,
+      commissionRate: d.commissionRate,
+      commissionAmount: d.commissionAmount,
+      billingPeriod: d.billingPeriod,
+      productId: d.productId,
+      status: d.status,
+      createdAt: d.createdAt?.toDate?.()?.toISOString() || null,
+    };
+  });
+
+  return {
+    summary: {
+      isAffiliate: referralData.isAffiliate || false,
+      commissionRate: referralData.commissionRate || DEFAULT_COMMISSION_RATE,
+      totalEarnings: referralData.totalEarnings || 0,
+      pendingEarnings: referralData.pendingEarnings || 0,
+      paidEarnings: referralData.paidEarnings || 0,
+      lastPayoutAt: referralData.lastPayoutAt?.toDate?.()?.toISOString() || null,
+      totalReferrals: referralData.totalReferrals || 0,
+      convertedReferrals: referralData.convertedReferrals || 0,
+    },
+    earnings,
+  };
+});
+
+/**
+ * Enable or disable a user as an affiliate (admin use).
+ * Sets their commission rate and affiliate status.
+ * Call from Firebase console or admin tool.
+ */
+export const setAffiliateStatus = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+
+  const adminEmails = (functions.config().admin?.emails || process.env.ADMIN_EMAILS || '').split(',');
+  const callerEmail = context.auth.token?.email || '';
+  if (!adminEmails.includes(callerEmail)) {
+    throw new functions.https.HttpsError('permission-denied', 'Only admins can manage affiliates');
+  }
+
+  const { userId, isAffiliate, commissionRate } = data || {};
+
+  if (!userId) {
+    throw new functions.https.HttpsError('invalid-argument', 'userId is required');
+  }
+
+  const firestore = admin.firestore();
+  const referralRef = firestore.doc(`users/${userId}/profile/referral`);
+
+  await referralRef.set({
+    isAffiliate: isAffiliate !== false,
+    commissionRate: commissionRate || DEFAULT_COMMISSION_RATE,
+  }, { merge: true });
+
+  console.log(`${isAffiliate !== false ? '✅' : '❌'} Affiliate status updated for ${userId}: isAffiliate=${isAffiliate !== false}, rate=${commissionRate || DEFAULT_COMMISSION_RATE}`);
+
+  return { success: true };
+});
+
+/**
+ * Record a manual affiliate payout (admin use).
+ * Call this after you have paid an affiliate via bank transfer/PayPal.
+ */
+export const recordAffiliatePayout = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+
+  // Simple admin check — only the app owner can record payouts
+  const adminEmails = (functions.config().admin?.emails || process.env.ADMIN_EMAILS || '').split(',');
+  const callerEmail = context.auth.token?.email || '';
+  if (!adminEmails.includes(callerEmail)) {
+    throw new functions.https.HttpsError('permission-denied', 'Only admins can record payouts');
+  }
+
+  const { affiliateUserId, amount, paymentMethod, reference } = data || {};
+
+  if (!affiliateUserId || !amount) {
+    throw new functions.https.HttpsError('invalid-argument', 'affiliateUserId and amount are required');
+  }
+
+  const firestore = admin.firestore();
+
+  // Mark pending earnings as paid
+  const pendingEarnings = await firestore
+    .collection(`users/${affiliateUserId}/affiliateEarnings`)
+    .where('status', '==', 'pending')
+    .get();
+
+  const batch = firestore.batch();
+  const earningIds: string[] = [];
+
+  for (const doc of pendingEarnings.docs) {
+    batch.update(doc.ref, {
+      status: 'paid',
+      paidAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    earningIds.push(doc.id);
+  }
+
+  // Create payout record
+  const payoutRef = firestore.collection('affiliatePayouts').doc();
+  batch.set(payoutRef, {
+    affiliateUserId,
+    amount,
+    paymentMethod: paymentMethod || 'bank_transfer',
+    reference: reference || '',
+    earningIds,
+    paidAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  // Update referrer's totals
+  const referralRef = firestore.doc(`users/${affiliateUserId}/profile/referral`);
+  batch.set(referralRef, {
+    pendingEarnings: 0,
+    paidEarnings: admin.firestore.FieldValue.increment(amount),
+    lastPayoutAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  await batch.commit();
+  console.log(`💸 Payout recorded: $${(amount / 100).toFixed(2)} to affiliate ${affiliateUserId}`);
+
+  return { success: true, earningsMarkedPaid: earningIds.length };
+});

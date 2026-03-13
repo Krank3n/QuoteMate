@@ -42,6 +42,8 @@ export function AuthScreen() {
   const [error, setError] = useState('');
   const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
   const [isProcessingOAuth, setIsProcessingOAuth] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Animation values
   const fadeAnim = useState(new Animated.Value(0))[0];
@@ -411,7 +413,7 @@ export function AuthScreen() {
                   value={password}
                   onChangeText={setPassword}
                   mode="outlined"
-                  secureTextEntry
+                  secureTextEntry={!showPassword}
                   autoCapitalize="none"
                   autoComplete={isSignUp ? 'new-password' : 'current-password'}
                   textContentType={isSignUp ? 'newPassword' : 'password'}
@@ -419,6 +421,7 @@ export function AuthScreen() {
                   outlineStyle={styles.inputOutline}
                   disabled={loading}
                   left={<TextInput.Icon icon="lock-outline" color={colors.placeholder} size={20} />}
+                  right={<TextInput.Icon icon={showPassword ? 'eye-off' : 'eye'} color={colors.placeholder} size={20} onPress={() => setShowPassword(!showPassword)} />}
                 />
 
                 {isSignUp && (
@@ -427,7 +430,7 @@ export function AuthScreen() {
                     value={confirmPassword}
                     onChangeText={setConfirmPassword}
                     mode="outlined"
-                    secureTextEntry
+                    secureTextEntry={!showConfirmPassword}
                     autoCapitalize="none"
                     autoComplete="new-password"
                     textContentType="newPassword"
@@ -435,6 +438,7 @@ export function AuthScreen() {
                     outlineStyle={styles.inputOutline}
                     disabled={loading}
                     left={<TextInput.Icon icon="lock-check-outline" color={colors.placeholder} size={20} />}
+                    right={<TextInput.Icon icon={showConfirmPassword ? 'eye-off' : 'eye'} color={colors.placeholder} size={20} onPress={() => setShowConfirmPassword(!showConfirmPassword)} />}
                   />
                 )}
 

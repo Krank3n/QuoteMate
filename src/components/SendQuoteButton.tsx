@@ -3,27 +3,21 @@
  * Reusable button with modal dialog for sending quotes via Email, SMS, Share, or Export PDF
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Alert, Platform, TouchableOpacity, Share, Linking, Animated } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, Alert, Share, Linking, Platform } from 'react-native';
 import {
-  Text,
   Button,
-  Modal,
-  Portal,
-  IconButton,
 } from 'react-native-paper';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Print from 'expo-print';
 import * as MailComposer from 'expo-mail-composer';
-import { format } from 'date-fns';
 
 import { Quote, BusinessSettings } from '../types';
-import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { generateQuotePDF, exportQuotePDF, generatePdfFilename } from '../utils/pdfGenerator';
 import { generateAcceptanceLink } from '../services/quoteAcceptanceService';
 import { auth } from '../config/firebase';
 import { useStore } from '../store/useStore';
+import { ActionSheet, ActionSheetOption } from './ActionSheet';
 
 interface SendQuoteButtonProps {
   quote: Quote;
@@ -48,31 +42,6 @@ export function SendQuoteButton({
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
   const [sendDialogVisible, setSendDialogVisible] = useState(false);
-  const scaleAnim = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (sendDialogVisible) {
-      // Reset animations
-      scaleAnim.setValue(0);
-      fadeAnim.setValue(0);
-
-      // Start animations
-      Animated.parallel([
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          tension: 50,
-          friction: 7,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [sendDialogVisible]);
 
   const handleSendQuote = async () => {
     try {
@@ -161,14 +130,7 @@ export function SendQuoteButton({
     }
   };
 
-  const handleSendEmailFromDialog = async () => {
-    setSendDialogVisible(false);
-    await handleSendQuote();
-  };
-
   const handleSendSMS = async () => {
-    setSendDialogVisible(false);
-
     const message = `Hi ${quote.customerName}, your quote from ${businessSettings?.businessName || 'us'} for ${quote.job.name} is ready. Total: ${formatCurrency(quote.total)}. Thank you for your business!`;
     const phone = quote.customerPhone || '';
 
@@ -184,8 +146,6 @@ export function SendQuoteButton({
   };
 
   const handleShareFromDialog = async () => {
-    setSendDialogVisible(false);
-
     try {
       const message = `Quote for ${quote.customerName}\n${quote.job.name}\nTotal: ${formatCurrency(quote.total)}`;
 
@@ -199,7 +159,6 @@ export function SendQuoteButton({
   };
 
   const handleExportFromDialog = async () => {
-    setSendDialogVisible(false);
     try {
       await exportQuotePDF(quote, businessSettings, 'export', { isPro });
     } catch (error) {
@@ -207,6 +166,29 @@ export function SendQuoteButton({
       Alert.alert('Error', 'Failed to export PDF. Please try again.');
     }
   };
+
+  const sendOptions: ActionSheetOption[] = [
+    {
+      icon: 'email-outline',
+      label: 'Email',
+      onPress: handleSendQuote,
+    },
+    {
+      icon: 'message-text',
+      label: 'SMS',
+      onPress: handleSendSMS,
+    },
+    {
+      icon: 'share-variant',
+      label: 'Share',
+      onPress: handleShareFromDialog,
+    },
+    {
+      icon: 'file-pdf-box',
+      label: 'Export PDF',
+      onPress: handleExportFromDialog,
+    },
+  ];
 
   return (
     <>
@@ -221,99 +203,12 @@ export function SendQuoteButton({
         {buttonLabel}
       </Button>
 
-      {/* Send Options Modal */}
-      <Portal>
-        <Modal
-          visible={sendDialogVisible}
-          onDismiss={() => setSendDialogVisible(false)}
-          dismissable={true}
-          contentContainerStyle={styles.modalContainer}
-        >
-          <Animated.View
-            style={[
-              styles.card,
-              {
-                opacity: fadeAnim,
-                transform: [{ scale: scaleAnim }],
-              },
-            ]}
-          >
-            {/* Header */}
-            <View style={styles.header}>
-              <View style={styles.iconContainer}>
-                <IconButton
-                  icon="send"
-                  iconColor={colors.primary}
-                  size={40}
-                />
-              </View>
-              <Text style={styles.title}>Send Quote</Text>
-              <Text style={styles.subtitle}>Choose how to send this quote to your customer</Text>
-            </View>
-
-            {/* Send Options */}
-            <View style={styles.optionsContainer}>
-              <TouchableOpacity style={styles.sendOption} onPress={handleSendEmailFromDialog}>
-                <View style={styles.optionIconContainer}>
-                  <MaterialCommunityIcons name="email" size={28} color={colors.primary} />
-                </View>
-                <View style={styles.sendOptionText}>
-                  <Text style={styles.sendOptionTitle}>Email</Text>
-                  <Text style={styles.sendOptionSubtitle}>
-                    {quote.customerEmail || 'No email provided'}
-                  </Text>
-                </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.onSurface} />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.sendOption} onPress={handleSendSMS}>
-                <View style={styles.optionIconContainer}>
-                  <MaterialCommunityIcons name="message-text" size={28} color={colors.primary} />
-                </View>
-                <View style={styles.sendOptionText}>
-                  <Text style={styles.sendOptionTitle}>SMS</Text>
-                  <Text style={styles.sendOptionSubtitle}>
-                    {quote.customerPhone || 'No phone provided'}
-                  </Text>
-                </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.onSurface} />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.sendOption} onPress={handleShareFromDialog}>
-                <View style={styles.optionIconContainer}>
-                  <MaterialCommunityIcons name="share-variant" size={28} color={colors.primary} />
-                </View>
-                <View style={styles.sendOptionText}>
-                  <Text style={styles.sendOptionTitle}>Share</Text>
-                  <Text style={styles.sendOptionSubtitle}>Share via other apps</Text>
-                </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.onSurface} />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.sendOption} onPress={handleExportFromDialog}>
-                <View style={styles.optionIconContainer}>
-                  <MaterialCommunityIcons name="file-pdf-box" size={28} color={colors.primary} />
-                </View>
-                <View style={styles.sendOptionText}>
-                  <Text style={styles.sendOptionTitle}>Export PDF</Text>
-                  <Text style={styles.sendOptionSubtitle}>Save or share PDF file</Text>
-                </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.onSurface} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Cancel Button */}
-            <Button
-              mode="outlined"
-              onPress={() => setSendDialogVisible(false)}
-              style={styles.cancelButton}
-              textColor={colors.onSurface}
-            >
-              Cancel
-            </Button>
-          </Animated.View>
-        </Modal>
-      </Portal>
+      <ActionSheet
+        visible={sendDialogVisible}
+        onDismiss={() => setSendDialogVisible(false)}
+        title="Send Quote"
+        options={sendOptions}
+      />
     </>
   );
 }
@@ -325,109 +220,5 @@ const styles = StyleSheet.create({
   buttonLabel: {
     fontSize: 15,
     fontWeight: '600',
-  },
-  modalContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 480,
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 32,
-    ...Platform.select({
-      android: {
-        elevation: 8,
-      },
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-      },
-      web: {
-        boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-      },
-    }),
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  iconContainer: {
-    backgroundColor: colors.primaryBg,
-    borderRadius: 50,
-    width: 80,
-    height: 80,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 15,
-    color: colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  optionsContainer: {
-    width: '100%',
-    marginBottom: 20,
-  },
-  sendOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 18,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    backgroundColor: colors.surfaceLight,
-    ...Platform.select({
-      android: {
-        elevation: 1,
-      },
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-      },
-    }),
-  },
-  optionIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.primaryBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  sendOptionText: {
-    flex: 1,
-  },
-  sendOptionTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 3,
-  },
-  sendOptionSubtitle: {
-    fontSize: 14,
-    color: colors.onSurface,
-  },
-  cancelButton: {
-    width: '100%',
-    paddingVertical: 6,
-    borderColor: colors.border,
   },
 });

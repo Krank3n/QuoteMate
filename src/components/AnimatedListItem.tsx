@@ -10,18 +10,19 @@ interface AnimatedListItemProps {
   index: number;
   children: React.ReactNode;
   style?: ViewStyle;
+  staggerDelay?: number;
 }
 
-const STAGGER_DELAY = 60;
+const DEFAULT_STAGGER_DELAY = 60;
 const DURATION = 350;
 const SLIDE_DISTANCE = 20;
 
-export function AnimatedListItem({ index, children, style }: AnimatedListItemProps) {
+export function AnimatedListItem({ index, children, style, staggerDelay = DEFAULT_STAGGER_DELAY }: AnimatedListItemProps) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(SLIDE_DISTANCE)).current;
 
   useEffect(() => {
-    const delay = index * STAGGER_DELAY;
+    const delay = index * staggerDelay;
 
     Animated.parallel([
       Animated.timing(fadeAnim, {

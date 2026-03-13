@@ -3,7 +3,7 @@
  * View, edit, add, and delete materials with Bunnings pricing
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -13,13 +13,21 @@ import {
   Linking,
   Image,
   Animated,
+  LayoutAnimation,
+  UIManager,
+  TextInput as RNTextInput,
 } from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import {
   Text,
   Button,
   List,
   IconButton,
   Portal,
+  Modal,
   TextInput,
   SegmentedButtons,
   ActivityIndicator,
@@ -39,6 +47,7 @@ import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
+import { AnimatedListItem } from '../../components/AnimatedListItem';
 
 // Helper to get section display info
 function getSectionInfo(sectionName: string | undefined): { name: string; color: string } {
@@ -262,7 +271,58 @@ function formatTimeAgo(isoTimestamp: string): string {
 }
 
 
+const CHASING_TITLES = [
+  'Chasing Prices',
+  'Hunting Bargains',
+  'Shaking Down Suppliers',
+  'Price Snooping',
+  'Deal Detective',
+  'Bargain Patrol',
+];
+
+const CHASING_SUBTITLES = [
+  'Haggling item',
+  'Interrogating',
+  'Sweet-talking',
+  'Arm-wrestling over',
+  'Running down',
+  'Squeezing a deal on',
+];
+
+const TIME_FUN_FACTS = [
+  { minSeconds: 10, text: 'Enough time to crack your knuckles' },
+  { minSeconds: 20, text: 'You could do 20 star jumps right now' },
+  { minSeconds: 30, text: 'Perfect time to stretch your legs' },
+  { minSeconds: 45, text: 'You could make a cup of tea' },
+  { minSeconds: 60, text: 'Long enough to practise your invoice voice' },
+  { minSeconds: 90, text: 'You could microwave a pie' },
+  { minSeconds: 120, text: 'Enough time to scroll TikTok... but don\'t' },
+  { minSeconds: 180, text: 'You could soft-boil an egg' },
+  { minSeconds: 240, text: 'Time to reorganise your ute' },
+  { minSeconds: 300, text: 'You could mow half the front lawn' },
+];
+
+function getTimeFunFact(seconds: number): string | null {
+  // Find the highest threshold that the time exceeds
+  let best: string | null = null;
+  for (const fact of TIME_FUN_FACTS) {
+    if (seconds >= fact.minSeconds) best = fact.text;
+  }
+  return best;
+}
+
+const EMPTY_MATERIALS_MESSAGES = [
+  { title: 'Nothing to build with', subtitle: 'Pick how you want to load up' },
+  { title: "Bare bones over here", subtitle: "Let's get some materials on the list" },
+  { title: 'Empty toolbox', subtitle: 'Time to stock up' },
+  { title: "Where's the gear?", subtitle: 'Add some materials to get rolling' },
+  { title: 'Starting from scratch', subtitle: 'Every great build starts here' },
+];
+
 export function MaterialsListScreen() {
+  const emptyMessage = useMemo(() => EMPTY_MATERIALS_MESSAGES[Math.floor(Math.random() * EMPTY_MATERIALS_MESSAGES.length)], []);
+  const chasingTitle = useMemo(() => CHASING_TITLES[Math.floor(Math.random() * CHASING_TITLES.length)], []);
+  const chasingSubtitle = useMemo(() => CHASING_SUBTITLES[Math.floor(Math.random() * CHASING_SUBTITLES.length)], []);
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
@@ -277,7 +337,10 @@ export function MaterialsListScreen() {
   const [isFetchingPrices, setIsFetchingPrices] = useState(false);
   const [fetchingMaterialId, setFetchingMaterialId] = useState<string | null>(null);
   const [fetchProgress, setFetchProgress] = useState({ current: 0, total: 0 });
+  const [fetchedItemNames, setFetchedItemNames] = useState<{ name: string; success: boolean }[]>([]);
+  const [currentFetchingName, setCurrentFetchingName] = useState<string>('');
   const cancelFetchRef = useRef(false);
+  const cancelFetchResolverRef = useRef<(() => void) | null>(null);
   const [recentlyPricedIds, setRecentlyPricedIds] = useState<Set<string>>(new Set());
   const priceFlashAnims = useRef<Map<string, Animated.Value>>(new Map());
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
@@ -299,6 +362,12 @@ export function MaterialsListScreen() {
   const [successTitle, setSuccessTitle] = useState('Success!');
   const [successType, setSuccessType] = useState<'success' | 'warning' | 'error' | 'info'>('success');
 
+  // Fetch time estimate modal state
+  const [showFetchEstimateModal, setShowFetchEstimateModal] = useState(false);
+  const [fetchEstimateSeconds, setFetchEstimateSeconds] = useState(0);
+  const fetchCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fetchItemsScrollRef = useRef<ScrollView>(null);
+
   // Match selector state for web scraping pricing
   const [matchSelectorVisible, setMatchSelectorVisible] = useState(false);
   const [pendingMatches, setPendingMatches] = useState<ProductMatch[]>([]);
@@ -309,6 +378,13 @@ export function MaterialsListScreen() {
   const [expandedMaterials, setExpandedMaterials] = useState<Set<string>>(new Set());
 
 
+
+  // Cleanup fetch countdown on unmount
+  useEffect(() => {
+    return () => {
+      if (fetchCountdownRef.current) clearInterval(fetchCountdownRef.current);
+    };
+  }, []);
 
   // Get materials safely - before any hooks that depend on it
   const materials = currentQuote?.materials || [];
@@ -354,6 +430,11 @@ export function MaterialsListScreen() {
   }, []);
 
   const toggleMaterialExpanded = useCallback((materialId: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.create(
+      250,
+      LayoutAnimation.Types.easeInEaseOut,
+      LayoutAnimation.Properties.opacity,
+    ));
     setExpandedMaterials(prev => {
       const newSet = new Set(prev);
       if (newSet.has(materialId)) {
@@ -500,14 +581,62 @@ export function MaterialsListScreen() {
     setShowSuccessModal(true);
   };
 
+  // Start the countdown timer for the fetch estimate modal
+  const fetchEstimateSecondsRef = useRef(0);
+  const startFetchCountdown = (totalSeconds: number) => {
+    fetchEstimateSecondsRef.current = totalSeconds;
+    setFetchEstimateSeconds(totalSeconds);
+    setShowFetchEstimateModal(true);
+    if (fetchCountdownRef.current) clearInterval(fetchCountdownRef.current);
+    fetchCountdownRef.current = setInterval(() => {
+      fetchEstimateSecondsRef.current -= 1;
+      const next = fetchEstimateSecondsRef.current;
+      if (next <= 0) {
+        if (fetchCountdownRef.current) clearInterval(fetchCountdownRef.current);
+        fetchCountdownRef.current = null;
+        setFetchEstimateSeconds(0);
+        setShowFetchEstimateModal(false);
+      } else {
+        setFetchEstimateSeconds(next);
+      }
+    }, 1000);
+  };
+
+  // Stop the countdown timer
+  const stopFetchCountdown = () => {
+    if (fetchCountdownRef.current) {
+      clearInterval(fetchCountdownRef.current);
+      fetchCountdownRef.current = null;
+    }
+    setShowFetchEstimateModal(false);
+  };
+
   const handleFetchPrices = async () => {
     if (materials.length === 0) {
       setSuccessType('info');
-      setSuccessTitle('No Materials');
-      setSuccessMessage('Please add materials first.');
+      setSuccessTitle('Nothing to Price');
+      setSuccessMessage('Chuck some materials in first, legend.');
       setShowSuccessModal(true);
       return;
     }
+
+    // Calculate estimated time and show modal
+    const materialsNeedingPrices = materials.filter(m => !(m.price > 0 && !m.manualPriceOverride));
+    const estimatedSeconds = Math.max(materialsNeedingPrices.length * 35, 35);
+    setFetchedItemNames([]);
+    setCurrentFetchingName('');
+    startFetchCountdown(estimatedSeconds);
+
+    // Set up cancel promise so in-flight requests can be interrupted instantly
+    let cancelPromiseReject: (() => void) | null = null;
+    const cancelPromise = new Promise<never>((_, reject) => {
+      cancelPromiseReject = () => reject(new Error('__FETCH_CANCELLED__'));
+    });
+    cancelFetchResolverRef.current = cancelPromiseReject;
+
+    // Helper to race any async call against the cancel promise
+    const withCancel = <T,>(promise: Promise<T>): Promise<T> =>
+      Promise.race([promise, cancelPromise]);
 
     setIsFetchingPrices(true);
     cancelFetchRef.current = false;
@@ -550,8 +679,9 @@ export function MaterialsListScreen() {
 
     console.log(`📊 Using pricing method: ${methodName}`);
 
+    const updatedMaterials = [...materials];
+
     try {
-      const updatedMaterials = [...materials];
 
       let fetchIndex = 0;
       for (let i = 0; i < updatedMaterials.length; i++) {
@@ -571,6 +701,7 @@ export function MaterialsListScreen() {
         fetchIndex++;
         setFetchProgress({ current: fetchIndex, total: materialsToFetch.length });
         setFetchingMaterialId(material.id);
+        setCurrentFetchingName(material.name);
 
         const searchTerm = material.searchTerm || material.name;
 
@@ -578,7 +709,7 @@ export function MaterialsListScreen() {
           // Use Bunnings Scraper API (Priority #1 - Real Prices)
           try {
             console.log(`🔍 Scraper: Searching for "${searchTerm}"...`);
-            const product = await findBestMatchForMaterial(searchTerm);
+            const product = await withCancel(findBestMatchForMaterial(searchTerm));
 
             if (product && product.price > 0) {
               material.price = product.price;
@@ -620,13 +751,15 @@ export function MaterialsListScreen() {
               console.log('⚠️ Scraper: No product found with price, trying next method...');
               throw new Error('No product found with price');
             }
-          } catch (error) {
+          } catch (error: any) {
+            // Re-throw cancellation so the outer catch handles it instantly
+            if (error?.message === '__FETCH_CANCELLED__') throw error;
             console.log('❌ Scraper failed, falling back to next pricing method:', error);
 
             // Fallback to next method: try Bunnings API first, then AI estimation
             if (useBunningsApi) {
               console.log('🔄 Trying Bunnings API fallback...');
-              const result = await bunningsApi.findAndPriceMaterial(searchTerm);
+              const result = await withCancel(bunningsApi.findAndPriceMaterial(searchTerm));
               if (result) {
                 material.bunningsItemNumber = result.item.itemNumber;
                 material.price = result.price.priceIncGst;
@@ -639,7 +772,7 @@ export function MaterialsListScreen() {
               } else {
                 // Bunnings API also failed, try AI estimation as final fallback
                 console.log('🔄 Bunnings API failed, trying AI estimation fallback...');
-                const aiResult = await searchMaterialPrice(searchTerm, hardwareStores);
+                const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
                 if (aiResult.price) {
                   material.price = aiResult.price;
@@ -665,7 +798,7 @@ export function MaterialsListScreen() {
             } else {
               // No Bunnings API, fall back directly to AI estimation
               console.log('🔄 Trying AI estimation fallback...');
-              const aiResult = await searchMaterialPrice(searchTerm, hardwareStores);
+              const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
               if (aiResult.price) {
                 material.price = aiResult.price;
@@ -691,7 +824,7 @@ export function MaterialsListScreen() {
           }
         } else if (useBunningsApi) {
           // Use Bunnings API
-          const result = await bunningsApi.findAndPriceMaterial(searchTerm);
+          const result = await withCancel(bunningsApi.findAndPriceMaterial(searchTerm));
 
           if (result) {
             material.bunningsItemNumber = result.item.itemNumber;
@@ -721,7 +854,7 @@ export function MaterialsListScreen() {
           }
         } else if (useReeceApi) {
           // Use Reece API for plumbing supplies
-          const result = await searchReeceMaterialPrice(searchTerm);
+          const result = await withCancel(searchReeceMaterialPrice(searchTerm));
 
           if (result.price) {
             material.price = result.price;
@@ -746,7 +879,7 @@ export function MaterialsListScreen() {
           // Use Web Scraping with Favorites (NEW METHOD)
 
           // 1. Check for saved favorite first
-          const favorite = await getFavoriteProduct(material.name, material.searchTerm);
+          const favorite = await withCancel(getFavoriteProduct(material.name, material.searchTerm));
 
           if (favorite) {
             // Use favorite product's last known price (user can manually update if needed)
@@ -757,13 +890,13 @@ export function MaterialsListScreen() {
           }
 
           // 2. Search hardware stores with web scraping
-          const results = await searchMaterialWithWebScraping(
+          const results = await withCancel(searchMaterialWithWebScraping(
             material.name,
             searchTerm,
             material.quantity,
             material.unit,
             hardwareStores
-          );
+          ));
 
           if (results.length > 0 && results[0].matches.length > 0) {
             const allMatches = results.flatMap(r => r.matches);
@@ -797,6 +930,8 @@ export function MaterialsListScreen() {
 
               // Wait for user selection before continuing
               // (This will be handled by the modal callback)
+              stopFetchCountdown();
+              setCurrentFetchingName('');
               setIsFetchingPrices(false);
               return; // Exit early, user will resume after selection
             }
@@ -844,7 +979,7 @@ export function MaterialsListScreen() {
           } else {
             // Web scraping failed, fall back to AI estimation
             console.log(`Web scraping failed for "${searchTerm}", trying AI estimation...`);
-            const aiResult = await searchMaterialPrice(searchTerm, hardwareStores);
+            const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
             if (aiResult.price) {
               material.price = aiResult.price;
@@ -868,6 +1003,12 @@ export function MaterialsListScreen() {
           }
         }
 
+        // Track completed item for the estimate modal
+        setFetchedItemNames(prev => [...prev, {
+          name: material.name,
+          success: material.price > 0,
+        }]);
+
         // Update UI progressively (skip if dialogs are open to avoid flickering)
         if (!matchSelectorVisible && currentQuote) {
           updateQuote({
@@ -877,7 +1018,7 @@ export function MaterialsListScreen() {
         }
 
         // Small delay to avoid overwhelming the API
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await withCancel(new Promise(resolve => setTimeout(resolve, 1000)));
       }
 
       // Final update to ensure all changes are saved
@@ -891,40 +1032,58 @@ export function MaterialsListScreen() {
       // Show appropriate message based on results
       if (cancelFetchRef.current) {
         if (fetchedCount > 0) {
-          setSuccessTitle('Cancelled');
-          setSuccessMessage(`Updated ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} before cancelling.`);
+          setSuccessTitle('No Dramas');
+          setSuccessMessage(`Grabbed ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} before pulling the pin.`);
           setShowSuccessModal(true);
         }
       } else if (fetchedCount === 0 && failedCount === 0 && skippedCount > 0) {
         setSuccessType('info');
-        setSuccessTitle('Already Priced');
-        setSuccessMessage('All materials already have prices.');
+        setSuccessTitle('Already Sorted');
+        setSuccessMessage('All your materials already have prices. No worries!');
         setShowSuccessModal(true);
       } else if (fetchedCount === 0 && failedCount > 0) {
         setSuccessType('warning');
-        setSuccessTitle('No Prices Found');
-        setSuccessMessage(`Could not find prices for ${failedCount} material${failedCount > 1 ? 's' : ''} using ${methodName}.\n\nTry:\n• Editing material names to match hardware store products\n• Adding prices manually\n• ${useBunningsApi ? 'Checking if the Bunnings API is down' : 'Trying different hardware stores in Settings'}\n• Checking again later`);
+        setSuccessTitle('No Luck, Mate');
+        setSuccessMessage(`Couldn't track down prices for ${failedCount} item${failedCount > 1 ? 's' : ''} using ${methodName}.\n\nGive these a crack:\n• Tweak material names to match what's on the shelf\n• Punch in prices manually\n• ${useBunningsApi ? 'Bunnings API might be having a smoko' : 'Try a different hardware store in Settings'}\n• Have another go later`);
         setShowSuccessModal(true);
       } else if (fetchedCount > 0 && failedCount === 0) {
-        setSuccessTitle('Prices Updated!');
-        setSuccessMessage(`Updated ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} using ${methodName}.`);
+        setSuccessTitle('Beauty!');
+        setSuccessMessage(`Scored ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} using ${methodName}. Too easy!`);
         setShowSuccessModal(true);
       } else if (fetchedCount > 0 && failedCount > 0) {
-        setSuccessTitle('Partial Success');
-        setSuccessMessage(`Updated ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} using ${methodName}. Could not find ${failedCount} item${failedCount > 1 ? 's' : ''}. ${useBunningsApi ? 'The Bunnings API may be experiencing issues.' : 'Try editing material names or adjusting hardware stores in Settings.'}`);
+        setSuccessTitle('Nearly There');
+        setSuccessMessage(`Got ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} using ${methodName}, but ${failedCount} item${failedCount > 1 ? 's' : ''} gave us the slip. ${useBunningsApi ? 'Bunnings API might be having a rough one.' : 'Try tweaking material names or switching stores in Settings.'}`);
         setShowSuccessModal(true);
       } else {
-        setSuccessTitle('Complete');
-        setSuccessMessage('Price fetch complete.');
+        setSuccessTitle('All Done');
+        setSuccessMessage('Prices are sorted. Time for a cuppa!');
         setShowSuccessModal(true);
       }
-    } catch (error) {
-      console.error('Error fetching prices:', error);
-      setSuccessType('error');
-      setSuccessTitle('Error');
-      setSuccessMessage(`Failed to fetch prices using ${methodName}. ${useBunningsApi ? 'The Bunnings API may be down or' : 'The AI price estimation service may be unavailable or'} there may be a connection issue. Please try again later.`);
-      setShowSuccessModal(true);
+    } catch (error: any) {
+      if (error?.message === '__FETCH_CANCELLED__') {
+        // Cancelled via the cancel promise — save any progress made so far
+        if (currentQuote) {
+          updateQuote({
+            ...currentQuote,
+            materials: [...updatedMaterials],
+          } as any);
+        }
+        if (fetchedCount > 0) {
+          setSuccessTitle('No Dramas');
+          setSuccessMessage(`Grabbed ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} before pulling the pin.`);
+          setShowSuccessModal(true);
+        }
+      } else {
+        console.error('Error fetching prices:', error);
+        setSuccessType('error');
+        setSuccessTitle('Crikey!');
+        setSuccessMessage(`Something went wrong fetching prices with ${methodName}. ${useBunningsApi ? 'Bunnings API might be on smoko,' : 'The price service might be taking a sickie,'} or your internet\'s gone walkabout. Give it another crack later.`);
+        setShowSuccessModal(true);
+      }
     } finally {
+      cancelFetchResolverRef.current = null;
+      stopFetchCountdown();
+      setCurrentFetchingName('');
       setIsFetchingPrices(false);
       setFetchingMaterialId(null);
       setFetchProgress({ current: 0, total: 0 });
@@ -933,6 +1092,11 @@ export function MaterialsListScreen() {
 
   const handleCancelFetchPrices = () => {
     cancelFetchRef.current = true;
+    // Immediately reject any in-flight request so cancellation feels instant
+    if (cancelFetchResolverRef.current) {
+      cancelFetchResolverRef.current();
+      cancelFetchResolverRef.current = null;
+    }
   };
 
   const handleMatchSelected = async (match: ProductMatch, saveAsFavorite: boolean) => {
@@ -1079,6 +1243,31 @@ export function MaterialsListScreen() {
   };
 
 
+  const handleQuickQuantityUpdate = useCallback((materialId: string, delta: number) => {
+    if (!currentQuote) return;
+    const updatedMaterials = materials.map(m => {
+      if (m.id === materialId) {
+        const newQty = Math.max(1, m.quantity + delta);
+        return updateMaterialTotalPrice({ ...m, quantity: newQty });
+      }
+      return m;
+    });
+    updateQuote({ ...currentQuote, materials: updatedMaterials } as any);
+  }, [currentQuote, materials, updateQuote]);
+
+  const handleQuantitySet = useCallback((materialId: string, value: string) => {
+    if (!currentQuote) return;
+    const parsed = parseInt(value, 10);
+    const newQty = isNaN(parsed) || parsed < 1 ? 1 : parsed;
+    const updatedMaterials = materials.map(m => {
+      if (m.id === materialId) {
+        return updateMaterialTotalPrice({ ...m, quantity: newQty });
+      }
+      return m;
+    });
+    updateQuote({ ...currentQuote, materials: updatedMaterials } as any);
+  }, [currentQuote, materials, updateQuote]);
+
   const handleDeleteMaterial = (materialId: string) => {
     setMaterialToDelete(materialId);
     setDeleteDialogVisible(true);
@@ -1138,9 +1327,9 @@ export function MaterialsListScreen() {
         ) : materials.length === 0 ? (
           <View style={styles.emptyState}>
             <MaterialCommunityIcons name="package-variant-closed" size={64} color={colors.textMuted} />
-            <Text style={styles.emptyText}>No materials yet</Text>
+            <Text style={styles.emptyText}>{emptyMessage.title}</Text>
             <Text style={styles.emptySubtext}>
-              How would you like to add materials?
+              {emptyMessage.subtitle}
             </Text>
 
             {/* AI Generate Card */}
@@ -1186,6 +1375,7 @@ export function MaterialsListScreen() {
               const groupedMaterials = groupMaterialsByCategory(materials);
               const hasMultipleGroups = groupedMaterials.size > 1 || (groupedMaterials.size === 1 && !groupedMaterials.has(''));
 
+              let runningIndex = 0;
               return Array.from(groupedMaterials.entries()).map(([groupKey, group]) => {
                 return (
                   <View key={groupKey || 'uncategorized'}>
@@ -1205,6 +1395,7 @@ export function MaterialsListScreen() {
 
                     {/* Materials in this section */}
                     {group.materials.map((material) => {
+                      const animIndex = runningIndex++;
                       const isExpanded = expandedMaterials.has(material.id);
 
                       // Check if brand is meaningful (not just "Bunnings" or the store name)
@@ -1222,8 +1413,8 @@ export function MaterialsListScreen() {
                       const flashAnim = priceFlashAnims.current.get(material.id);
 
                       return (
+                        <AnimatedListItem key={material.id} index={animIndex} staggerDelay={100}>
                         <Animated.View
-                          key={material.id}
                           style={[
                             styles.listItem,
                             isCurrentlyFetching && styles.listItemFetching,
@@ -1245,44 +1436,40 @@ export function MaterialsListScreen() {
                             disabled={!hasDetails}
                             activeOpacity={0.7}
                           >
-                            <View style={styles.accordionHeader}>
-                              {isCurrentlyFetching ? (
-                                <ActivityIndicator
-                                  size={24}
-                                  color={colors.primary}
-                                  style={styles.accordionIcon}
-                                />
-                              ) : isRecentlyPriced ? (
-                                <MaterialCommunityIcons
-                                  name="check-circle"
-                                  size={24}
-                                  color={colors.success}
-                                  style={styles.accordionIcon}
-                                />
-                              ) : (
-                                <MaterialCommunityIcons
-                                  name="package-variant"
-                                  size={24}
-                                  color={colors.onSurface}
-                                  style={styles.accordionIcon}
-                                />
-                              )}
-                              <View style={styles.accordionContent}>
-                                <Text style={styles.accordionTitle}>{material.name}</Text>
-                                <View>
-                                  {isCurrentlyFetching ? (
-                                    <Text style={styles.searchingLabel}>Searching...</Text>
-                                  ) : (
-                                    <Text style={styles.materialDescription}>
-                                      {material.quantity} {material.unit} × {formatCurrency(material.price)}
-                                    </Text>
-                                  )}
-                                  {isAiEstimate && !isCurrentlyFetching && (
-                                    <Text style={styles.aiEstimateLabel}>AI Estimate</Text>
-                                  )}
-                                </View>
+                            {/* Top row: icon + name + total price */}
+                            <View style={styles.itemTopRow}>
+                              <View style={styles.itemStatusIcon}>
+                                {isCurrentlyFetching ? (
+                                  <ActivityIndicator
+                                    size={20}
+                                    color={colors.primary}
+                                  />
+                                ) : isRecentlyPriced ? (
+                                  <MaterialCommunityIcons
+                                    name="check-circle"
+                                    size={20}
+                                    color={colors.success}
+                                  />
+                                ) : (
+                                  <MaterialCommunityIcons
+                                    name="package-variant"
+                                    size={20}
+                                    color={colors.textMuted}
+                                  />
+                                )}
                               </View>
-                              <View style={styles.itemRight}>
+                              <View style={styles.itemNameWrap}>
+                                <Text style={styles.itemName} numberOfLines={2}>{material.name}</Text>
+                                {isCurrentlyFetching ? (
+                                  <Text style={styles.searchingLabel}>Searching...</Text>
+                                ) : (
+                                  <Text style={styles.itemUnitPrice}>
+                                    {formatCurrency(material.price)} ea.
+                                    {isAiEstimate ? '  ·  AI est.' : ''}
+                                  </Text>
+                                )}
+                              </View>
+                              <View style={styles.itemPriceWrap}>
                                 {isCurrentlyFetching ? (
                                   <Text style={styles.searchingPrice}>...</Text>
                                 ) : (
@@ -1290,26 +1477,58 @@ export function MaterialsListScreen() {
                                     {formatCurrency(material.totalPrice)}
                                   </Text>
                                 )}
-                                <View style={styles.itemActions}>
-                                  {showLink && (
-                                    <IconButton
-                                      icon="open-in-new"
-                                      size={20}
-                                      onPress={() => handleOpenInStore(material)}
-                                      iconColor={colors.primary}
-                                    />
-                                  )}
-                                  <IconButton
-                                    icon="pencil"
-                                    size={20}
-                                    onPress={() => handleEditMaterial(material)}
+                              </View>
+                            </View>
+
+                            {/* Bottom row: qty stepper + actions */}
+                            <View style={styles.itemBottomRow}>
+                              <View style={styles.qtyRow}>
+                                <View style={styles.qtyStepper}>
+                                  <TouchableOpacity
+                                    style={styles.qtyBtn}
+                                    onPress={() => handleQuickQuantityUpdate(material.id, -1)}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                  >
+                                    <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
+                                  </TouchableOpacity>
+                                  <RNTextInput
+                                    style={styles.qtyInput}
+                                    value={String(material.quantity)}
+                                    onChangeText={(text) => handleQuantitySet(material.id, text)}
+                                    keyboardType="number-pad"
+                                    selectTextOnFocus
                                   />
-                                  <IconButton
-                                    icon="delete"
-                                    size={20}
-                                    onPress={() => handleDeleteMaterial(material.id)}
-                                  />
+                                  <TouchableOpacity
+                                    style={styles.qtyBtn}
+                                    onPress={() => handleQuickQuantityUpdate(material.id, 1)}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                  >
+                                    <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
+                                  </TouchableOpacity>
                                 </View>
+                                <Text style={styles.qtyUnit}>{material.unit}</Text>
+                              </View>
+                              <View style={styles.itemActions}>
+                                {showLink && (
+                                  <TouchableOpacity
+                                    style={styles.actionBtn}
+                                    onPress={() => handleOpenInStore(material)}
+                                  >
+                                    <MaterialCommunityIcons name="open-in-new" size={18} color={colors.primary} />
+                                  </TouchableOpacity>
+                                )}
+                                <TouchableOpacity
+                                  style={styles.actionBtn}
+                                  onPress={() => handleEditMaterial(material)}
+                                >
+                                  <MaterialCommunityIcons name="pencil" size={18} color={colors.textMuted} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={styles.actionBtn}
+                                  onPress={() => handleDeleteMaterial(material.id)}
+                                >
+                                  <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
+                                </TouchableOpacity>
                               </View>
                             </View>
                           </TouchableOpacity>
@@ -1353,6 +1572,7 @@ export function MaterialsListScreen() {
                             </View>
                           )}
                         </Animated.View>
+                        </AnimatedListItem>
                       );
                     })}
                   </View>
@@ -1390,7 +1610,7 @@ export function MaterialsListScreen() {
         secondaryOnPress={materials.length > 0 ? handleFetchPrices : undefined}
         secondaryLoading={isFetchingPrices}
         secondaryDisabled={isFetchingPrices}
-        secondaryLoadingText={isFetchingPrices && fetchProgress.total > 0 ? `Fetching ${fetchProgress.current} of ${fetchProgress.total}...` : undefined}
+        secondaryLoadingText={isFetchingPrices && fetchProgress.total > 0 ? `${chasingTitle.split(' ')[0]} ${fetchProgress.current} of ${fetchProgress.total}...` : undefined}
         secondaryLoadingOnPress={isFetchingPrices ? handleCancelFetchPrices : undefined}
       />
 
@@ -1433,6 +1653,101 @@ export function MaterialsListScreen() {
         onCancel={handleMatchCanceled}
       />
 
+      {/* Fetch Time Estimate Modal */}
+      <Portal>
+        <Modal
+          visible={showFetchEstimateModal}
+          onDismiss={() => setShowFetchEstimateModal(false)}
+          dismissable={true}
+          contentContainerStyle={styles.fetchEstimateModalContainer}
+        >
+          <View style={styles.fetchEstimateCard}>
+            <IconButton
+              icon="truck-fast-outline"
+              iconColor={colors.primary}
+              size={48}
+              style={styles.fetchEstimateIcon}
+            />
+            <Text style={styles.fetchEstimateTitle}>{chasingTitle}</Text>
+            <Text style={styles.fetchEstimateTime}>
+              {Math.floor(fetchEstimateSeconds / 60)}:{String(fetchEstimateSeconds % 60).padStart(2, '0')}
+            </Text>
+            {fetchEstimateSeconds >= 10 && getTimeFunFact(fetchEstimateSeconds) ? (
+              <Text style={styles.fetchFunFact}>
+                {getTimeFunFact(fetchEstimateSeconds)}
+              </Text>
+            ) : null}
+
+            {/* Progress bar */}
+            {fetchProgress.total > 0 && (
+              <View style={styles.progressBarContainer}>
+                <View style={[styles.progressBarFill, { width: `${(fetchProgress.current / fetchProgress.total) * 100}%` }]} />
+              </View>
+            )}
+
+            <Text style={styles.fetchEstimateSubtext}>
+              {fetchProgress.total > 0 && currentFetchingName
+                ? `${chasingSubtitle} ${fetchProgress.current} of ${fetchProgress.total}`
+                : 'Warming up the ute...'}
+            </Text>
+            {currentFetchingName ? (
+              <Text style={styles.fetchCurrentItem} numberOfLines={1}>
+                {currentFetchingName}
+              </Text>
+            ) : null}
+
+            {/* Scrolling item list */}
+            <View style={styles.fetchItemsWindow}>
+              <ScrollView
+                ref={fetchItemsScrollRef}
+                style={styles.fetchItemsScroll}
+                contentContainerStyle={styles.fetchItemsContent}
+                showsVerticalScrollIndicator={false}
+                onContentSizeChange={() => {
+                  fetchItemsScrollRef.current?.scrollToEnd({ animated: true });
+                }}
+              >
+                {fetchedItemNames.map((item, index) => (
+                  <View key={index} style={styles.fetchItemRow}>
+                    <MaterialCommunityIcons
+                      name={item.success ? 'check-circle' as any : 'close-circle' as any}
+                      size={16}
+                      color={item.success ? colors.success : colors.error}
+                    />
+                    <Text
+                      style={[
+                        styles.fetchItemText,
+                        item.success ? styles.fetchItemDone : styles.fetchItemFailed,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.name}
+                    </Text>
+                  </View>
+                ))}
+                {currentFetchingName ? (
+                  <View style={styles.fetchItemRow}>
+                    <ActivityIndicator size={14} color={colors.primary} />
+                    <Text style={[styles.fetchItemText, styles.fetchItemActive]} numberOfLines={1}>
+                      {currentFetchingName}
+                    </Text>
+                  </View>
+                ) : null}
+              </ScrollView>
+            </View>
+
+            <Button
+              mode="outlined"
+              onPress={() => setShowFetchEstimateModal(false)}
+              style={styles.fetchEstimateCloseButton}
+              textColor={colors.textMuted}
+            >
+              Hide
+            </Button>
+          </View>
+        </Modal>
+      </Portal>
+
       {/* Success Modal */}
       <AlertModal
         visible={showSuccessModal}
@@ -1474,7 +1789,10 @@ const styles = StyleSheet.create({
   },
   listItem: {
     backgroundColor: colors.surface,
-    marginBottom: 1,
+    marginHorizontal: 12,
+    marginBottom: 10,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
   listItemFetching: {
     backgroundColor: colors.surface,
@@ -1505,38 +1823,89 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
   },
-  accordionHeader: {
+  itemTopRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    paddingRight: 8,
+    alignItems: 'flex-start',
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 4,
   },
-  accordionIcon: {
-    marginRight: 16,
+  itemStatusIcon: {
+    width: 28,
+    marginTop: 2,
   },
-  accordionContent: {
+  itemNameWrap: {
     flex: 1,
-    justifyContent: 'center',
+    marginRight: 12,
   },
-  accordionTitle: {
-    fontSize: 16,
-    fontWeight: '500',
+  itemName: {
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.text,
-    marginBottom: 4,
+    lineHeight: 20,
   },
-  itemRight: {
-    flexDirection: 'column',
+  itemUnitPrice: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  itemPriceWrap: {
     alignItems: 'flex-end',
-    marginLeft: 8,
+    marginTop: 2,
   },
   itemTotal: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.primary,
-    marginTop: 8,
+  },
+  itemBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    paddingTop: 6,
+  },
+  qtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  qtyStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  qtyBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  qtyInput: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+    minWidth: 36,
+    textAlign: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: colors.border,
+  },
+  qtyUnit: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginLeft: 8,
   },
   itemActions: {
     flexDirection: 'row',
+    gap: 4,
+  },
+  actionBtn: {
+    padding: 8,
+    borderRadius: 8,
   },
   emptyState: {
     alignItems: 'center',
@@ -1639,13 +2008,14 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   materialDescription: {
-    fontSize: 14,
-    color: colors.onSurface,
+    fontSize: 13,
+    color: colors.textMuted,
   },
   aiEstimateLabel: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.onSurface,
     fontStyle: 'italic',
+    opacity: 0.4,
     marginTop: 2,
   },
   searchingLabel: {
@@ -1657,7 +2027,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.textMuted,
-    marginTop: 8,
   },
   itemTotalSuccess: {
     color: colors.success,
@@ -1765,5 +2134,120 @@ const styles = StyleSheet.create({
   },
   stepTextDone: {
     color: colors.success,
+  },
+  // Fetch Time Estimate Modal
+  fetchEstimateModalContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  fetchEstimateCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    ...Platform.select({
+      android: { elevation: 8 },
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      web: { boxShadow: '0 4px 20px rgba(0,0,0,0.15)' },
+    }),
+  },
+  fetchEstimateIcon: {
+    marginBottom: 8,
+  },
+  fetchEstimateTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: 16,
+  },
+  fetchEstimateTime: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: colors.primary,
+    fontVariant: ['tabular-nums'],
+    marginBottom: 4,
+  },
+  fetchEstimateSubtext: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginBottom: 4,
+  },
+  fetchCurrentItem: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  fetchFunFact: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    color: colors.textMuted,
+    marginBottom: 12,
+    textAlign: 'center',
+    opacity: 0.8,
+  },
+  progressBarContainer: {
+    width: '100%',
+    height: 6,
+    backgroundColor: colors.border,
+    borderRadius: 3,
+    marginBottom: 10,
+    overflow: 'hidden' as const,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+    borderRadius: 3,
+  },
+  fetchItemsWindow: {
+    width: '100%',
+    maxHeight: 160,
+    marginBottom: 20,
+    borderRadius: 10,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  fetchItemsScroll: {
+    flex: 1,
+  },
+  fetchItemsContent: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  fetchItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 28,
+  },
+  fetchItemText: {
+    fontSize: 13,
+    flex: 1,
+  },
+  fetchItemDone: {
+    color: colors.success,
+  },
+  fetchItemFailed: {
+    color: colors.error,
+  },
+  fetchItemActive: {
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  fetchEstimateCloseButton: {
+    width: '100%',
+    borderColor: colors.border,
   },
 });

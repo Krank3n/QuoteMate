@@ -86,11 +86,11 @@ export function SettingsScreen() {
         {
           id: 'referral',
           title: 'Refer a Friend',
-          subtitle: 'Get 3 months free Pro',
+          subtitle: 'Earn rewards for referrals',
           icon: 'gift',
           screen: 'Referral',
-          badge: 'FREE',
-          badgeColor: colors.secondary,
+          badge: 'EARN',
+          badgeColor: colors.success,
         },
         {
           id: 'subscription',

@@ -3,8 +3,8 @@
  * Home screen with quick stats and new quote button
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, RefreshControl, Pressable } from 'react-native';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, RefreshControl, Pressable, Animated as RNAnimated } from 'react-native';
 import {
   Text,
   Surface,
@@ -33,14 +33,203 @@ import { AlertModal } from '../components/AlertModal';
 import { updateActivityTimestamp } from '../services/emailService';
 import { AnimatedNumber } from '../components/AnimatedNumber';
 import { AnimatedListItem } from '../components/AnimatedListItem';
+import { SkeletonCardList } from '../components/SkeletonCard';
 import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
 import { SwipeableCard } from '../components/SwipeableCard';
 import { lightTap, successTap } from '../utils/haptics';
 import { openWebEmailClient, copyQuoteEmailText } from '../utils/emailUtils';
+import { TrialBanner } from '../components/TrialBanner';
+import { ShimmerOverlay } from '../components/ShimmerOverlay';
+import { TapRipple } from '../components/TapRipple';
+import { GrainOverlay } from '../components/GrainOverlay';
+
+const GREETINGS = [
+  "G'day",
+  "Howdy",
+  "Oi oi",
+  "Well well well",
+  "Crikey",
+];
+
+const SUBTITLES = [
+  "Quoting at the pub? Classic.",
+  "Gonna be a good day, ya legend.",
+  "Time to send a quote and crack a cold one.",
+  "Let's smash out some quotes, ay.",
+  "Another day, another dollar... once they accept the quote.",
+  "She'll be right, just send the quote.",
+  "No wuckas, let's get quoting.",
+  "Strap in legend, it's quoting time.",
+  "Quotes don't write themselves... well, almost.",
+  "Chuck a quote together, it'll only take a sec.",
+  "If in doubt, quote it out.",
+  "Too easy, let's get into it.",
+  "The sooner you quote, the sooner you get paid. Probably.",
+  "Bit quiet? Perfect time to fire off a quote.",
+  "Your ute's loaded, your quotes should be too.",
+];
 
 export function DashboardScreen() {
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTop(scrollRef);
+
+  // Greeting changes only on mount/refresh, subtitle cycles with fade
+  const [greetingIndex] = useState(() => Math.floor(Math.random() * GREETINGS.length));
+  const subtitleFade = useRef(new RNAnimated.Value(1)).current;
+  const [subtitleIndex, setSubtitleIndex] = useState(() => Math.floor(Math.random() * SUBTITLES.length));
+
+  // Ambient animations — icons (bob + scale pulse)
+  const iconFloat1 = useRef(new RNAnimated.Value(0)).current;
+  const iconFloat2 = useRef(new RNAnimated.Value(0)).current;
+  const iconFloat3 = useRef(new RNAnimated.Value(0)).current;
+  const iconFloat4 = useRef(new RNAnimated.Value(0)).current;
+  const iconScale1 = useRef(new RNAnimated.Value(1)).current;
+  const iconScale2 = useRef(new RNAnimated.Value(1)).current;
+  const iconScale3 = useRef(new RNAnimated.Value(1)).current;
+  const iconScale4 = useRef(new RNAnimated.Value(1)).current;
+  // Stat card breathing + tilt
+  const cardBreath1 = useRef(new RNAnimated.Value(1)).current;
+  const cardBreath2 = useRef(new RNAnimated.Value(1)).current;
+  const cardBreath3 = useRef(new RNAnimated.Value(1)).current;
+  const cardBreath4 = useRef(new RNAnimated.Value(1)).current;
+  const cardTilt1 = useRef(new RNAnimated.Value(0)).current;
+  const cardTilt2 = useRef(new RNAnimated.Value(0)).current;
+  const cardTilt3 = useRef(new RNAnimated.Value(0)).current;
+  const cardTilt4 = useRef(new RNAnimated.Value(0)).current;
+  // New Quote button pulse
+  const btnPulse = useRef(new RNAnimated.Value(1)).current;
+  const btnTilt = useRef(new RNAnimated.Value(0)).current;
+  const btnGlow = useRef(new RNAnimated.Value(0)).current;
+  const emptyFloat = useRef(new RNAnimated.Value(0)).current;
+  const draftWiggle = useRef(new RNAnimated.Value(0)).current;
+
+  useEffect(() => {
+    const allAnims: RNAnimated.CompositeAnimation[] = [];
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    // Stat icon floating — gentle bob + subtle scale pulse, staggered
+    const floatIcons = [
+      { anim: iconFloat1, scale: iconScale1, duration: 2800, delay: 0 },
+      { anim: iconFloat2, scale: iconScale2, duration: 3200, delay: 400 },
+      { anim: iconFloat3, scale: iconScale3, duration: 2600, delay: 800 },
+      { anim: iconFloat4, scale: iconScale4, duration: 3000, delay: 1200 },
+    ];
+    floatIcons.forEach(({ anim, scale, duration, delay }) => {
+      const a = RNAnimated.loop(
+        RNAnimated.parallel([
+          RNAnimated.sequence([
+            RNAnimated.timing(anim, { toValue: -2, duration: duration / 2, useNativeDriver: true }),
+            RNAnimated.timing(anim, { toValue: 0, duration: duration / 2, useNativeDriver: true }),
+          ]),
+          RNAnimated.sequence([
+            RNAnimated.timing(scale, { toValue: 1.05, duration: duration / 2, useNativeDriver: true }),
+            RNAnimated.timing(scale, { toValue: 1, duration: duration / 2, useNativeDriver: true }),
+          ]),
+        ])
+      );
+      allAnims.push(a);
+      timers.push(setTimeout(() => a.start(), delay));
+    });
+
+    // Stat card breathing + tilt — each on its own rhythm
+    const cardBreaths = [
+      { anim: cardBreath1, tilt: cardTilt1, duration: 3400, tiltDuration: 4200, tiltDir: 1, delay: 200 },
+      { anim: cardBreath2, tilt: cardTilt2, duration: 3800, tiltDuration: 4800, tiltDir: -1, delay: 700 },
+      { anim: cardBreath3, tilt: cardTilt3, duration: 3100, tiltDuration: 3900, tiltDir: 1, delay: 1100 },
+      { anim: cardBreath4, tilt: cardTilt4, duration: 3600, tiltDuration: 4500, tiltDir: -1, delay: 300 },
+    ];
+    cardBreaths.forEach(({ anim, tilt, duration, tiltDuration, tiltDir, delay }) => {
+      const breathA = RNAnimated.loop(
+        RNAnimated.sequence([
+          RNAnimated.timing(anim, { toValue: 1.008, duration: duration / 2, useNativeDriver: true }),
+          RNAnimated.timing(anim, { toValue: 1, duration: duration / 2, useNativeDriver: true }),
+        ])
+      );
+      const tiltA = RNAnimated.loop(
+        RNAnimated.sequence([
+          RNAnimated.timing(tilt, { toValue: 0.8 * tiltDir, duration: tiltDuration / 2, useNativeDriver: true }),
+          RNAnimated.timing(tilt, { toValue: -0.8 * tiltDir, duration: tiltDuration, useNativeDriver: true }),
+          RNAnimated.timing(tilt, { toValue: 0, duration: tiltDuration / 2, useNativeDriver: true }),
+        ])
+      );
+      allAnims.push(breathA, tiltA);
+      timers.push(setTimeout(() => { breathA.start(); tiltA.start(); }, delay));
+    });
+
+    // New Quote button — gentle breathing pulse + slight tilt
+    const btnPulseA = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(btnPulse, { toValue: 1.02, duration: 1800, useNativeDriver: true }),
+        RNAnimated.timing(btnPulse, { toValue: 1, duration: 1800, useNativeDriver: true }),
+      ])
+    );
+    const btnTiltA = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(btnTilt, { toValue: 0.3, duration: 2500, useNativeDriver: true }),
+        RNAnimated.timing(btnTilt, { toValue: -0.3, duration: 5000, useNativeDriver: true }),
+        RNAnimated.timing(btnTilt, { toValue: 0, duration: 2500, useNativeDriver: true }),
+      ])
+    );
+    const btnGlowA = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(btnGlow, { toValue: 1, duration: 1800, useNativeDriver: false }),
+        RNAnimated.timing(btnGlow, { toValue: 0, duration: 1800, useNativeDriver: false }),
+      ])
+    );
+    allAnims.push(btnPulseA, btnTiltA, btnGlowA);
+    btnPulseA.start();
+    btnTiltA.start();
+    btnGlowA.start();
+
+    // Empty state icon float
+    const emptyA = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(emptyFloat, { toValue: -6, duration: 2000, useNativeDriver: true }),
+        RNAnimated.timing(emptyFloat, { toValue: 0, duration: 2000, useNativeDriver: true }),
+      ])
+    );
+    allAnims.push(emptyA);
+    emptyA.start();
+
+    // Draft pencil wiggle
+    const wiggleA = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(draftWiggle, { toValue: 1, duration: 300, useNativeDriver: true }),
+        RNAnimated.timing(draftWiggle, { toValue: 0, duration: 300, useNativeDriver: true }),
+        RNAnimated.delay(4000),
+      ])
+    );
+    allAnims.push(wiggleA);
+    wiggleA.start();
+
+    return () => {
+      timers.forEach(clearTimeout);
+      allAnims.forEach((a) => a.stop());
+    };
+  }, []);
+
+  useEffect(() => {
+    const CYCLE_MS = 12000;
+    const interval = setInterval(() => {
+      RNAnimated.timing(subtitleFade, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }).start(() => {
+        setSubtitleIndex((prev) => {
+          let next = Math.floor(Math.random() * SUBTITLES.length);
+          while (next === prev && SUBTITLES.length > 1) next = Math.floor(Math.random() * SUBTITLES.length);
+          return next;
+        });
+        RNAnimated.timing(subtitleFade, {
+          toValue: 1,
+          duration: 400,
+          useNativeDriver: true,
+        }).start();
+      });
+    }, CYCLE_MS);
+    return () => clearInterval(interval);
+  }, [subtitleFade]);
 
   // Track user activity for re-engagement emails (once per app session)
   const activityTracked = useRef(false);
@@ -61,6 +250,15 @@ export function DashboardScreen() {
   const [quoteToConvert, setQuoteToConvert] = useState<Quote | null>(null);
   const [isConverting, setIsConverting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialLoaded, setInitialLoaded] = useState(quotes.length > 0);
+  useEffect(() => {
+    if (!initialLoaded && quotes.length > 0) setInitialLoaded(true);
+  }, [quotes.length, initialLoaded]);
+  useEffect(() => {
+    if (!initialLoaded) {
+      loadQuotes().then(() => setInitialLoaded(true));
+    }
+  }, []);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [quoteToDelete, setQuoteToDelete] = useState<string | null>(null);
   const [duplicateSuccessVisible, setDuplicateSuccessVisible] = useState(false);
@@ -422,68 +620,33 @@ export function DashboardScreen() {
     >
       <WebContainer>
         <View style={styles.header}>
-          <Title style={styles.greeting}>
-            G'day, {businessSettings?.businessName || 'Mate'}!
-          </Title>
-          <Paragraph>Ready to create some quotes?</Paragraph>
+          <View style={styles.headerRow}>
+            <View style={styles.headerText}>
+              <Title style={styles.greeting}>
+                {GREETINGS[greetingIndex]}, {businessSettings?.businessName || 'Mate'}!
+              </Title>
+              <RNAnimated.View style={{ opacity: subtitleFade }}>
+                <Paragraph>{SUBTITLES[subtitleIndex]}</Paragraph>
+              </RNAnimated.View>
+            </View>
+            <TouchableOpacity
+              style={styles.referralButton}
+              onPress={() => { lightTap(); navigation.navigate('Referral' as never); }}
+              activeOpacity={0.7}
+              accessibilityLabel="Refer a friend"
+            >
+              <MaterialCommunityIcons name="gift-outline" size={20} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
       {/* Trial Status */}
-      {subscriptionStatus && !subscriptionStatus.isPro && subscriptionStatus.trialStartedAt && (() => {
-        const trialStart = new Date(subscriptionStatus.trialStartedAt);
-        const now = new Date();
-        const elapsed = now.getTime() - trialStart.getTime();
-        const trialMs = 7 * 24 * 60 * 60 * 1000;
-        const daysRemaining = Math.max(0, Math.ceil((trialMs - elapsed) / (24 * 60 * 60 * 1000)));
-        const trialExpired = elapsed >= trialMs;
-        const progress = Math.max(0, 1 - (elapsed / trialMs));
-
-        return (
-          <Surface style={styles.quotaCard}>
-            <View style={styles.quotaContent}>
-              <View style={styles.quotaTextContainer}>
-                <Text style={styles.quotaTitle}>
-                  {trialExpired
-                    ? 'Free trial ended'
-                    : `${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} left in trial`}
-                </Text>
-                <Text style={styles.quotaSubtext}>
-                  {trialExpired
-                    ? 'Subscribe for unlimited quotes with your logo'
-                    : 'Unlimited quotes during your trial'}
-                </Text>
-              </View>
-              <View style={styles.quotaBarContainer}>
-                <View style={styles.quotaBarBackground}>
-                  <View
-                    style={[
-                      styles.quotaBarFill,
-                      {
-                        width: `${progress * 100}%`,
-                        backgroundColor: trialExpired
-                          ? colors.error
-                          : daysRemaining <= 1
-                          ? colors.warning
-                          : colors.primary,
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-            </View>
-            {trialExpired && (
-              <Button
-                mode="contained"
-                compact
-                onPress={() => navigation.navigate('Paywall' as never)}
-                style={styles.quotaUpgradeButton}
-              >
-                Upgrade to Pro
-              </Button>
-            )}
-          </Surface>
-        );
-      })()}
+      {subscriptionStatus && !subscriptionStatus.isPro && subscriptionStatus.trialStartedAt && (
+        <TrialBanner
+          trialStartedAt={subscriptionStatus.trialStartedAt}
+          quoteCount={quotes.length}
+        />
+      )}
 
       {/* Continue Draft Banner */}
       {inProgressDraft && (
@@ -499,9 +662,9 @@ export function DashboardScreen() {
           >
             <Surface style={styles.draftBanner}>
               <View style={styles.draftBannerContent}>
-                <View style={[styles.draftIconCircle, { backgroundColor: colors.warningBg }]}>
+                <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: colors.warningBg, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
                   <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.secondary} />
-                </View>
+                </RNAnimated.View>
                 <View style={styles.draftBannerText}>
                   <Text style={styles.draftBannerTitle}>Continue Draft</Text>
                   <Text style={styles.draftBannerSubtitle} numberOfLines={1}>
@@ -516,65 +679,94 @@ export function DashboardScreen() {
       )}
 
       {/* New Quote Button */}
-      <Button
-        mode="contained"
-        icon="plus-circle"
-        onPress={handleNewQuote}
-        style={styles.newQuoteButton}
-        contentStyle={styles.newQuoteButtonContent}
-        accessibilityLabel="Create a new quote"
-      >
-        New Quote
-      </Button>
+      <RNAnimated.View style={{ transform: [{ scale: btnPulse }, { rotate: btnTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
+        <RNAnimated.View style={{
+          marginHorizontal: 20,
+          marginBottom: 24,
+          borderRadius: 28,
+          shadowColor: colors.primary,
+          shadowOffset: { width: 0, height: 0 },
+          shadowRadius: btnGlow.interpolate({ inputRange: [0, 1], outputRange: [4, 14] }),
+          shadowOpacity: btnGlow.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] }),
+          elevation: btnGlow.interpolate({ inputRange: [0, 1], outputRange: [4, 12] }),
+        }}>
+          <Button
+            mode="contained"
+            icon="plus-circle"
+            onPress={handleNewQuote}
+            style={styles.newQuoteButton}
+            contentStyle={styles.newQuoteButtonContent}
+            accessibilityLabel="Create a new quote"
+          >
+            New Quote
+          </Button>
+        </RNAnimated.View>
+      </RNAnimated.View>
 
       {/* Quick Stats */}
       <View style={styles.statsContainer}>
         <AnimatedListItem index={0} style={styles.statCardWrapper}>
-          <Pressable onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Earned this month: ${formatCurrency(thisMonthRevenue)}`}>
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Earned this month: ${formatCurrency(thisMonthRevenue)}`} rippleColor="rgba(0,152,104,0.25)">
+            <RNAnimated.View style={{ transform: [{ scale: cardBreath1 }, { rotate: cardTilt1.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
-              <View style={[styles.statIconCircle, { backgroundColor: colors.primaryBg }]}>
+              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.primaryBg, transform: [{ translateY: iconFloat1 }, { scale: iconScale1 }] }]}>
                 <MaterialCommunityIcons name="chart-areaspline" size={22} color={colors.primary} />
-              </View>
+              </RNAnimated.View>
               <AnimatedNumber value={thisMonthRevenue} format={formatCurrency} style={styles.statNumber} delay={0} />
               <Text style={styles.statLabel}>Earned this month</Text>
+              <GrainOverlay density={60} />
+              <ShimmerOverlay tint={colors.primary} intensity={0.06} />
             </Surface>
-          </Pressable>
+            </RNAnimated.View>
+          </TapRipple>
         </AnimatedListItem>
 
         <AnimatedListItem index={1} style={styles.statCardWrapper}>
-          <Pressable onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Awaiting response: ${formatCurrency(pipelineValue)}`}>
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Awaiting response: ${formatCurrency(pipelineValue)}`} rippleColor="rgba(90,185,234,0.25)">
+            <RNAnimated.View style={{ transform: [{ scale: cardBreath2 }, { rotate: cardTilt2.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
-              <View style={[styles.statIconCircle, { backgroundColor: colors.infoBg }]}>
+              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.infoBg, transform: [{ translateY: iconFloat2 }, { scale: iconScale2 }] }]}>
                 <MaterialCommunityIcons name="timer-sand" size={22} color={colors.info} />
-              </View>
+              </RNAnimated.View>
               <AnimatedNumber value={pipelineValue} format={formatCurrency} style={styles.statNumber} delay={100} />
               <Text style={styles.statLabel}>Awaiting response</Text>
+              <GrainOverlay density={60} />
+              <ShimmerOverlay tint={colors.info} intensity={0.06} />
             </Surface>
-          </Pressable>
+            </RNAnimated.View>
+          </TapRipple>
         </AnimatedListItem>
 
         <AnimatedListItem index={2} style={styles.statCardWrapper}>
-          <Pressable onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'sent' }); }} accessibilityRole="button" accessibilityLabel={`${sentQuotes} quotes sent`}>
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'sent' }); }} accessibilityRole="button" accessibilityLabel={`${sentQuotes} quotes sent`} rippleColor="rgba(207,161,83,0.25)">
+            <RNAnimated.View style={{ transform: [{ scale: cardBreath3 }, { rotate: cardTilt3.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
-              <View style={[styles.statIconCircle, { backgroundColor: colors.warningBg }]}>
+              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.warningBg, transform: [{ translateY: iconFloat3 }, { scale: iconScale3 }] }]}>
                 <MaterialCommunityIcons name="send-check" size={22} color={colors.secondary} />
-              </View>
+              </RNAnimated.View>
               <AnimatedNumber value={sentQuotes} style={styles.statNumber} delay={200} />
               <Text style={styles.statLabel}>Quotes sent</Text>
+              <GrainOverlay density={60} />
+              <ShimmerOverlay tint={colors.secondary} intensity={0.06} />
             </Surface>
-          </Pressable>
+            </RNAnimated.View>
+          </TapRipple>
         </AnimatedListItem>
 
         <AnimatedListItem index={3} style={styles.statCardWrapper}>
-          <Pressable onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'accepted' }); }} accessibilityRole="button" accessibilityLabel={`${acceptedQuotes} jobs won`}>
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'accepted' }); }} accessibilityRole="button" accessibilityLabel={`${acceptedQuotes} jobs won`} rippleColor="rgba(0,200,151,0.25)">
+            <RNAnimated.View style={{ transform: [{ scale: cardBreath4 }, { rotate: cardTilt4.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
-              <View style={[styles.statIconCircle, { backgroundColor: colors.successBg }]}>
+              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.successBg, transform: [{ translateY: iconFloat4 }, { scale: iconScale4 }] }]}>
                 <MaterialCommunityIcons name="handshake" size={22} color={colors.success} />
-              </View>
+              </RNAnimated.View>
               <AnimatedNumber value={acceptedQuotes} style={styles.statNumber} delay={300} />
               <Text style={styles.statLabel}>Jobs won</Text>
+              <GrainOverlay density={60} />
+              <ShimmerOverlay tint={colors.success} intensity={0.06} />
             </Surface>
-          </Pressable>
+            </RNAnimated.View>
+          </TapRipple>
         </AnimatedListItem>
       </View>
 
@@ -610,16 +802,24 @@ export function DashboardScreen() {
         </View>
       )}
 
-      {recentQuotes.length === 0 && (
+      {recentQuotes.length === 0 && !initialLoaded && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Recent Quotes</Text>
+          <SkeletonCardList count={3} />
+        </View>
+      )}
+
+      {recentQuotes.length === 0 && initialLoaded && (
         <View style={styles.emptyState}>
-          <MaterialCommunityIcons
-            name="file-document-outline"
-            size={64}
-            color={colors.disabled}
-          />
-          <Text style={styles.emptyText}>No quotes yet</Text>
+          <RNAnimated.View style={[styles.emptyIconCircle, { transform: [{ translateY: emptyFloat }] }]}>
+            <MaterialCommunityIcons name="hard-hat" size={36} color={colors.primary} />
+          </RNAnimated.View>
+          <Text style={styles.emptyTitle}>Bit quiet around here</Text>
+          <Text style={styles.emptyText}>
+            Knock off early or get cracking
+          </Text>
           <Text style={styles.emptySubtext}>
-            Tap "New Quote" to create your first quote
+            Hit "New Quote" and she'll be right
           </Text>
         </View>
       )}
@@ -696,51 +896,28 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 24,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  headerText: {
+    flex: 1,
+    marginRight: 12,
+  },
+  referralButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: colors.primary + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
   greeting: {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 4,
-  },
-  quotaCard: {
-    marginHorizontal: 20,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: colors.surface,
-    elevation: 2,
-  },
-  quotaContent: {
-    gap: 8,
-  },
-  quotaTextContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  quotaTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  quotaSubtext: {
-    fontSize: 12,
-    color: colors.onSurface,
-  },
-  quotaBarContainer: {
-    marginTop: 4,
-  },
-  quotaBarBackground: {
-    height: 6,
-    backgroundColor: colors.surfaceLight,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  quotaBarFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  quotaUpgradeButton: {
-    marginTop: 12,
   },
   draftBanner: {
     marginHorizontal: 20,
@@ -779,8 +956,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   newQuoteButton: {
-    marginHorizontal: 20,
-    marginBottom: 24,
+    borderRadius: 28,
   },
   newQuoteButtonContent: {
     paddingVertical: 8,
@@ -801,6 +977,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     elevation: 2,
     backgroundColor: colors.surface,
+    overflow: 'hidden',
   },
   statIconCircle: {
     width: 44,
@@ -834,19 +1011,36 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 40,
+    paddingVertical: 48,
+    paddingHorizontal: 32,
+  },
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.primary + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.text,
+    marginTop: 12,
+    marginBottom: 8,
   },
   emptyText: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 16,
-    color: colors.text,
+    fontSize: 16,
+    color: colors.onSurface,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   emptySubtext: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: colors.textMuted,
     marginTop: 8,
     textAlign: 'center',
+    lineHeight: 20,
   },
 });

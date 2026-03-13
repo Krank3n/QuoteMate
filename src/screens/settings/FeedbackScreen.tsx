@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   Platform,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import {
   Text,
@@ -77,6 +78,24 @@ export function FeedbackScreen() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <WebContainer>
+          {/* WhatsApp quick feedback */}
+          <TouchableOpacity
+            style={styles.whatsappCard}
+            onPress={() => Linking.openURL('https://api.whatsapp.com/send/?phone=61480232922&text=Hey%20Tom%21%20Got%20some%20feedback%20about%20QuoteMate%3A%20&type=phone_number&app_absent=0')}
+            activeOpacity={0.8}
+          >
+            <View style={styles.whatsappCardLeft}>
+              <View style={styles.whatsappIconCircle}>
+                <MaterialCommunityIcons name="whatsapp" size={28} color="#ffffff" />
+              </View>
+              <View style={styles.whatsappCardText}>
+                <Text style={styles.whatsappCardTitle}>Message me directly</Text>
+                <Text style={styles.whatsappCardSubtitle}>Fastest way to get your feedback heard — I reply to every message</Text>
+              </View>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={24} color="#25D366" />
+          </TouchableOpacity>
+
           {/* Hero / Call to action */}
           <Surface style={styles.heroCard}>
             <MaterialCommunityIcons name="bullhorn" size={48} color={colors.primary} />
@@ -187,6 +206,45 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     paddingBottom: 32,
+  },
+  whatsappCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#25D366' + '15',
+    borderWidth: 2,
+    borderColor: '#25D366' + '40',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  whatsappCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 14,
+  },
+  whatsappIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#25D366',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  whatsappCardText: {
+    flex: 1,
+  },
+  whatsappCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#25D366',
+    marginBottom: 2,
+  },
+  whatsappCardSubtitle: {
+    fontSize: 13,
+    color: '#25D366' + 'BB',
+    lineHeight: 18,
   },
   heroCard: {
     padding: 24,

@@ -23,9 +23,18 @@ import { InvoiceCard } from '../components/InvoiceCard';
 import { ProBadge } from '../components/ProBadge';
 import { isInvoiceOverdue } from '../utils/invoiceCalculator';
 import { AnimatedListItem } from '../components/AnimatedListItem';
+import { SkeletonCardList } from '../components/SkeletonCard';
 import { QuoteSelectSheet } from '../components/QuoteSelectSheet';
 
 type FilterStatus = 'all' | 'draft' | 'sent' | 'paid' | 'overdue';
+
+const EMPTY_MESSAGES = [
+  { title: 'No invoices yet', subtitle: "Your invoice list is wide open" },
+  { title: 'Nothing to collect', subtitle: "Time to send someone a bill" },
+  { title: 'All quiet here', subtitle: "Your invoice list is feeling lonely" },
+  { title: 'Zero invoices', subtitle: "Let's change that, shall we?" },
+  { title: 'Tumbleweeds...', subtitle: "Not a single invoice in sight" },
+];
 
 export function InvoicesListScreen() {
   const listRef = useRef<FlatList>(null);
@@ -49,15 +58,22 @@ export function InvoicesListScreen() {
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
+  const emptyMessage = useMemo(() => EMPTY_MESSAGES[Math.floor(Math.random() * EMPTY_MESSAGES.length)], []);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [fabOpen, setFabOpen] = useState(false);
   const [quoteDialogVisible, setQuoteDialogVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialLoaded, setInitialLoaded] = useState(invoices.length > 0);
+
+  useEffect(() => {
+    if (!initialLoaded && invoices.length > 0) setInitialLoaded(true);
+  }, [invoices.length, initialLoaded]);
 
   // Load invoices on mount
   useEffect(() => {
-    loadInvoices();
+    loadInvoices().then(() => setInitialLoaded(true));
     loadNextInvoiceNumber();
   }, []);
 
@@ -240,18 +256,27 @@ export function InvoicesListScreen() {
             />
           }
           ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <MaterialCommunityIcons
-                name="receipt"
-                size={64}
-                color={colors.disabled}
-              />
-              <Text style={styles.emptyText}>No invoices found</Text>
-              <Text style={styles.emptySubtext}>
-                {isPro ? 'Create an invoice or convert a quote' : 'Upgrade to Pro to create invoices'}
-              </Text>
-              {!isPro && <View style={{ marginTop: 12 }}><ProBadge /></View>}
-            </View>
+            !initialLoaded ? (
+              <View style={{ padding: 16 }}>
+                <SkeletonCardList count={4} />
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <View style={styles.emptyIconCircle}>
+                  <MaterialCommunityIcons name="receipt-text-outline" size={36} color={colors.primary} />
+                </View>
+                <Text style={styles.emptyTitle}>{emptyMessage.title}</Text>
+                <Text style={styles.emptyText}>
+                  {emptyMessage.subtitle}
+                </Text>
+                <Text style={styles.emptySubtext}>
+                  {isPro
+                    ? "Hit + and send someone a bill"
+                    : "Upgrade to Pro to start invoicing"}
+                </Text>
+                {!isPro && <View style={{ marginTop: 12 }}><ProBadge /></View>}
+              </View>
+            )
           }
         />
       </WebContainer>
@@ -321,17 +346,36 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingVertical: 48,
+    paddingHorizontal: 32,
+  },
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.primary + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: 8,
   },
   emptyText: {
     fontSize: 16,
     color: colors.onSurface,
-    marginTop: 16,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   emptySubtext: {
     fontSize: 14,
     color: colors.textMuted,
-    marginTop: 4,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
   fab: {
     backgroundColor: colors.primary,

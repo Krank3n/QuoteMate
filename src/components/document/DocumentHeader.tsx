@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { Title, Text, IconButton } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme';
 
 interface DocumentHeaderProps {
@@ -20,8 +21,10 @@ export function DocumentHeader({
   onRightPress,
   rightDisabled,
 }: DocumentHeaderProps) {
+  const insets = useSafeAreaInsets();
+
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
       <IconButton
         icon="arrow-left"
         size={24}
@@ -51,7 +54,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 8,
-    paddingTop: Platform.OS === 'ios' ? 60 : 20,
     paddingBottom: 12,
     backgroundColor: colors.primary,
   },

@@ -254,6 +254,29 @@ export interface ReferralInfo {
   convertedReferrals: number;
   rewardMonthsEarned: number;
   rewardExpiresAt: Date | null;
+  // Affiliate fields
+  isAffiliate: boolean;
+  commissionRate: number; // e.g. 0.50 for 50%
+  totalEarnings: number; // lifetime earnings in cents
+  pendingEarnings: number; // awaiting payout in cents
+  paidEarnings: number; // already paid out in cents
+  lastPayoutAt: Date | null;
+}
+
+export interface AffiliateEarning {
+  id: string;
+  referredUserId: string;
+  referredUserEmail: string; // masked, e.g. "j***@gmail.com"
+  platform: 'web' | 'ios' | 'android';
+  grossAmount: number; // cents
+  platformFee: number; // cents
+  netRevenue: number; // cents
+  commissionRate: number;
+  commissionAmount: number; // cents
+  billingPeriod: string; // e.g. "2026-03"
+  productId: string;
+  status: 'pending' | 'confirmed' | 'paid' | 'cancelled';
+  createdAt: Date;
 }
 
 export type SubscriptionPlan = 'free' | 'pro';

@@ -300,12 +300,13 @@ const styles = StyleSheet.create({
   buttonContent: {
     height: 48,
     alignItems: 'center',
+    paddingHorizontal: 0,
   },
   outlinedButtonLabel: {
-    fontSize: 15,
+    fontSize: 12,
     color: colors.primary,
     fontWeight: '600',
     marginVertical: 0,
-    lineHeight: 20,
+    marginHorizontal: 4,
   },
 });

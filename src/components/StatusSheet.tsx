@@ -78,20 +78,22 @@ export function StatusSheet({
           duration: 250,
           useNativeDriver: true,
         }),
-      ]).start(() => {
-        // Stagger option entrances after sheet is up
-        Animated.stagger(
-          60,
-          optionAnims.current.map(anim =>
-            Animated.spring(anim, {
-              toValue: 1,
-              tension: 80,
-              friction: 8,
-              useNativeDriver: true,
-            })
-          )
-        ).start();
-      });
+        // Stagger option entrances alongside the sheet slide, with a small delay
+        Animated.sequence([
+          Animated.delay(100),
+          Animated.stagger(
+            40,
+            optionAnims.current.map(anim =>
+              Animated.spring(anim, {
+                toValue: 1,
+                tension: 80,
+                friction: 8,
+                useNativeDriver: true,
+              })
+            )
+          ),
+        ]),
+      ]).start();
     } else {
       Animated.parallel([
         Animated.timing(slideAnim, {
@@ -132,6 +134,7 @@ export function StatusSheet({
       </Animated.View>
 
       {/* Sheet */}
+      <View style={styles.sheetWrapper} pointerEvents="box-none">
       <Animated.View
         style={[
           styles.sheet,
@@ -208,6 +211,7 @@ export function StatusSheet({
         {/* Safe area padding for bottom */}
         <View style={styles.bottomPadding} />
       </Animated.View>
+      </View>
     </Portal>
   );
 }
@@ -218,15 +222,20 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     zIndex: 1000,
   },
-  sheet: {
+  sheetWrapper: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
+    alignItems: 'center',
+    zIndex: 1001,
+  },
+  sheet: {
+    width: '100%',
+    maxWidth: 480,
     backgroundColor: colors.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    zIndex: 1001,
     ...Platform.select({
       ios: {
         shadowColor: '#000',

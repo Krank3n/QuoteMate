@@ -3,13 +3,12 @@
  * Consolidated quote card used in both DashboardScreen and QuotesListScreen
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { View, StyleSheet, Alert, Platform, Pressable, Animated } from 'react-native';
 import {
   Text,
   Card,
   Divider,
-  Menu,
   IconButton,
 } from 'react-native-paper';
 import { format, formatDistanceToNow, differenceInDays } from 'date-fns';
@@ -26,6 +25,10 @@ import { selectionTap, successTap } from '../utils/haptics';
 import { SwipeableCard } from './SwipeableCard';
 import { AnimatedChip } from './AnimatedChip';
 import { AlertModal } from './AlertModal';
+import { ShimmerOverlay } from './ShimmerOverlay';
+import { TapRipple } from './TapRipple';
+import { GrainOverlay } from './GrainOverlay';
+import { ActionSheet, ActionSheetOption } from './ActionSheet';
 
 interface QuoteCardProps {
   quote: Quote;
@@ -55,7 +58,45 @@ export const QuoteCard = React.memo(function QuoteCard({
   const [menuVisible, setMenuVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const idleAnim = useRef(new Animated.Value(0)).current;
+  const idleTilt = useRef(new Animated.Value(0)).current;
   const { subscriptionStatus } = useStore();
+
+  // Subtle idle bob + tilt — randomized so cards are never in sync
+  // Uses Animated.loop + delay for proper cleanup
+  const bobDurationRef = useRef(2400 + Math.random() * 1200);
+  const tiltDurationRef = useRef(3200 + Math.random() * 1600);
+  const tiltDirRef = useRef(Math.random() > 0.5 ? 1 : -1);
+  const delayRef = useRef(Math.random() * 1500);
+
+  useEffect(() => {
+    const bobD = bobDurationRef.current;
+    const tiltD = tiltDurationRef.current;
+    const tiltDir = tiltDirRef.current;
+
+    const bobAnim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(idleAnim, { toValue: -2, duration: bobD / 2, useNativeDriver: true }),
+        Animated.timing(idleAnim, { toValue: 0, duration: bobD / 2, useNativeDriver: true }),
+      ])
+    );
+    const tiltAnim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(idleTilt, { toValue: 0.4 * tiltDir, duration: tiltD / 2, useNativeDriver: true }),
+        Animated.timing(idleTilt, { toValue: -0.4 * tiltDir, duration: tiltD, useNativeDriver: true }),
+        Animated.timing(idleTilt, { toValue: 0, duration: tiltD / 2, useNativeDriver: true }),
+      ])
+    );
+    const timer = setTimeout(() => {
+      bobAnim.start();
+      tiltAnim.start();
+    }, delayRef.current);
+    return () => {
+      clearTimeout(timer);
+      bobAnim.stop();
+      tiltAnim.stop();
+    };
+  }, []);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -165,12 +206,13 @@ export const QuoteCard = React.memo(function QuoteCard({
         { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteQuote },
       ]}
     >
-      <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <Animated.View style={{ transform: [{ scale: scaleAnim }, { translateY: idleAnim }, { rotate: idleTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
       <Card style={styles.quoteCard}>
-        <Pressable
+        <TapRipple
           onPress={() => onView(quote.id)}
           accessibilityRole="button"
           accessibilityLabel={`View quote for ${quote.customerName}, ${quote.job.name}, ${formatCurrency(quote.total)}, status ${quote.status}`}
+          rippleColor="rgba(0,152,104,0.2)"
           onPressIn={() => {
             Animated.spring(scaleAnim, {
               toValue: 0.97,
@@ -213,81 +255,15 @@ export const QuoteCard = React.memo(function QuoteCard({
                     {quote.status}
                   </AnimatedChip>
                 </View>
-                <Menu
-                  visible={menuVisible}
-                  onDismiss={() => setMenuVisible(false)}
-                  anchor={
-                    <IconButton
-                      icon="dots-vertical"
-                      size={20}
-                      accessibilityLabel="Quote actions menu"
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        setMenuVisible(true);
-                      }}
-                    />
-                  }
-                >
-                  <Menu.Item
-                    leadingIcon="pencil"
-                    onPress={() => {
-                      setMenuVisible(false);
-                      onEdit(quote);
-                    }}
-                    title="Edit"
-                  />
-                  <Menu.Item
-                    leadingIcon="email"
-                    onPress={() => {
-                      setMenuVisible(false);
-                      handleSendQuote();
-                    }}
-                    title="Send via Email"
-                  />
-                  <Menu.Item
-                    leadingIcon="content-copy"
-                    onPress={() => {
-                      setMenuVisible(false);
-                      onDuplicate(quote);
-                    }}
-                    title="Duplicate"
-                  />
-                  <Menu.Item
-                    leadingIcon="share"
-                    onPress={() => {
-                      setMenuVisible(false);
-                      handleShareQuote();
-                    }}
-                    title="Share"
-                  />
-                  <Menu.Item
-                    leadingIcon="file-pdf-box"
-                    onPress={() => {
-                      setMenuVisible(false);
-                      handleExportQuote();
-                    }}
-                    title="Export PDF"
-                  />
-                  {onConvertToInvoice && (
-                    <Menu.Item
-                      leadingIcon="file-replace"
-                      onPress={() => {
-                        setMenuVisible(false);
-                        onConvertToInvoice(quote);
-                      }}
-                      title="Convert to Invoice"
-                    />
-                  )}
-                  <Menu.Item
-                    leadingIcon="delete"
-                    onPress={() => {
-                      setMenuVisible(false);
-                      handleDeleteQuote();
-                    }}
-                    title="Delete"
-                    titleStyle={{ color: colors.error }}
-                  />
-                </Menu>
+                <IconButton
+                  icon="dots-vertical"
+                  size={32}
+                  accessibilityLabel="Quote actions menu"
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setMenuVisible(true);
+                  }}
+                />
               </View>
             </View>
             <Divider style={styles.divider} />
@@ -311,10 +287,29 @@ export const QuoteCard = React.memo(function QuoteCard({
               </Text>
             </View>
           </Card.Content>
-        </Pressable>
+        </TapRipple>
+        <GrainOverlay />
+        <ShimmerOverlay />
       </Card>
       </Animated.View>
     </SwipeableCard>
+
+    <ActionSheet
+      visible={menuVisible}
+      onDismiss={() => setMenuVisible(false)}
+      title="Quote Actions"
+      options={[
+        { icon: 'pencil', label: 'Edit', onPress: () => onEdit(quote) },
+        { icon: 'email-outline', label: 'Send via Email', onPress: handleSendQuote },
+        { icon: 'content-copy', label: 'Duplicate', onPress: () => onDuplicate(quote) },
+        { icon: 'share-variant', label: 'Share', onPress: handleShareQuote },
+        { icon: 'file-pdf-box', label: 'Export PDF', onPress: handleExportQuote },
+        ...(onConvertToInvoice
+          ? [{ icon: 'file-replace', label: 'Convert to Invoice', onPress: () => onConvertToInvoice(quote) }]
+          : []),
+        { icon: 'delete-outline', label: 'Delete', onPress: handleDeleteQuote, color: colors.error, divider: true },
+      ]}
+    />
 
     <AlertModal
       visible={deleteModalVisible}
@@ -352,6 +347,7 @@ const styles = StyleSheet.create({
   quoteCard: {
     marginBottom: 12,
     backgroundColor: colors.surface,
+    overflow: 'hidden',
   },
   cardContent: {
     paddingTop: 16,
