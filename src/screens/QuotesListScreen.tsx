@@ -10,21 +10,13 @@ import {
   Searchbar,
   Chip,
   FAB,
-  Dialog,
-  Portal,
-  Button,
 } from 'react-native-paper';
-import { format } from 'date-fns';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, useScrollToTop } from '@react-navigation/native';
-import * as Print from 'expo-print';
-import * as MailComposer from 'expo-mail-composer';
 
 import { useStore } from '../store/useStore';
 import { Quote } from '../types';
 import { colors } from '../theme';
-import { formatCurrency } from '../utils/quoteCalculator';
-import { generateQuotePDF, exportQuotePDF } from '../utils/pdfGenerator';
 import { WebContainer } from '../components/WebContainer';
 import { QuoteCard } from '../components/QuoteCard';
 import { AlertModal } from '../components/AlertModal';
@@ -32,7 +24,6 @@ import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
 import { lightTap } from '../utils/haptics';
-import { openWebEmailClient, copyQuoteEmailText } from '../utils/emailUtils';
 
 type FilterStatus = 'all' | 'draft' | 'sent' | 'accepted' | 'rejected' | 'completed';
 
@@ -57,8 +48,6 @@ export function QuotesListScreen() {
   }, [route.params?.filter]);
   const [statusSheetVisible, setStatusSheetVisible] = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
-  const [emailDialogVisible, setEmailDialogVisible] = useState(false);
-  const [emailQuote, setEmailQuote] = useState<Quote | null>(null);
   const [convertModalVisible, setConvertModalVisible] = useState(false);
   const [quoteToConvert, setQuoteToConvert] = useState<Quote | null>(null);
   const [isConverting, setIsConverting] = useState(false);
@@ -204,35 +193,6 @@ export function QuotesListScreen() {
     }
   };
 
-  const handleOpenEmailDialog = (quote: Quote) => {
-    setEmailQuote(quote);
-    setEmailDialogVisible(true);
-  };
-
-  const handleEmailViaGmail = async (quote: Quote) => {
-    await openWebEmailClient('gmail', quote, businessSettings, saveQuote);
-    setEmailDialogVisible(false);
-  };
-
-  const handleEmailViaOutlook = async (quote: Quote) => {
-    await openWebEmailClient('outlook', quote, businessSettings, saveQuote);
-    setEmailDialogVisible(false);
-  };
-
-  const handleEmailViaYahoo = async (quote: Quote) => {
-    await openWebEmailClient('yahoo', quote, businessSettings, saveQuote);
-    setEmailDialogVisible(false);
-  };
-
-  const handleCopyEmailText = async (quote: Quote) => {
-    try {
-      await copyQuoteEmailText(quote, businessSettings, saveQuote);
-      setEmailDialogVisible(false);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to copy to clipboard');
-    }
-  };
-
   const renderQuoteCard = useCallback(({ item: quote, index }: { item: Quote; index: number }) => (
     <AnimatedListItem index={index}>
       <QuoteCard
@@ -244,11 +204,10 @@ export function QuotesListScreen() {
         onDuplicate={handleDuplicateQuote}
         onSave={saveQuote}
         onStatusChange={handleOpenStatusSheet}
-        onEmailDialogOpen={handleOpenEmailDialog}
         onConvertToInvoice={handleConvertToInvoice}
       />
     </AnimatedListItem>
-  ), [businessSettings, handleViewQuote, handleEditQuote, handleDeleteQuote, handleDuplicateQuote, saveQuote, handleOpenStatusSheet, handleOpenEmailDialog, handleConvertToInvoice]);
+  ), [businessSettings, handleViewQuote, handleEditQuote, handleDeleteQuote, handleDuplicateQuote, saveQuote, handleOpenStatusSheet, handleConvertToInvoice]);
 
   return (
     <View style={styles.container}>
@@ -394,51 +353,6 @@ export function QuotesListScreen() {
         options={QUOTE_STATUS_OPTIONS}
       />
 
-      {/* Email Client Selector Dialog */}
-      <Portal>
-        <Dialog visible={emailDialogVisible} onDismiss={() => setEmailDialogVisible(false)}>
-          <Dialog.Title>Send Quote</Dialog.Title>
-          <Dialog.Content>
-            <Text style={{ marginBottom: 16 }}>Choose how to send your quote:</Text>
-            <View style={{ gap: 8 }}>
-              <Button
-                mode="contained"
-                icon="google"
-                onPress={() => emailQuote && handleEmailViaGmail(emailQuote)}
-                style={{ marginBottom: 8 }}
-              >
-                Gmail
-              </Button>
-              <Button
-                mode="contained"
-                icon="microsoft-outlook"
-                onPress={() => emailQuote && handleEmailViaOutlook(emailQuote)}
-                style={{ marginBottom: 8 }}
-              >
-                Outlook
-              </Button>
-              <Button
-                mode="contained"
-                icon="yahoo"
-                onPress={() => emailQuote && handleEmailViaYahoo(emailQuote)}
-                style={{ marginBottom: 8 }}
-              >
-                Yahoo Mail
-              </Button>
-              <Button
-                mode="outlined"
-                icon="content-copy"
-                onPress={() => emailQuote && handleCopyEmailText(emailQuote)}
-              >
-                Copy Email Text
-              </Button>
-            </View>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setEmailDialogVisible(false)}>Cancel</Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
     </View>
   );
 }

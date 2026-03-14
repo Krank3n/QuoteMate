@@ -4,15 +4,13 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, RefreshControl, Pressable, Animated as RNAnimated } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl, Pressable, Animated as RNAnimated } from 'react-native';
 import {
   Text,
   Surface,
   Title,
   Button,
   Paragraph,
-  Dialog,
-  Portal,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useScrollToTop } from '@react-navigation/native';
@@ -22,7 +20,6 @@ import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
-import { generateQuotePDF } from '../utils/pdfGenerator';
 import { WebContainer } from '../components/WebContainer';
 import { QuoteCard } from '../components/QuoteCard';
 import { AlertModal } from '../components/AlertModal';

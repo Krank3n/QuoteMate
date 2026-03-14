@@ -7,6 +7,11 @@ import { ANTHROPIC_API_KEY, GEMINI_API_KEY } from '@env';
 import { Material } from '../types';
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase';
+// Lazy-import FileSystem (only available on native)
+let FileSystem: typeof import('expo-file-system') | null = null;
+if (Platform.OS !== 'web') {
+  FileSystem = require('expo-file-system');
+}
 
 // For web, use Firebase Functions URL
 // For mobile, call Anthropic API directly
@@ -83,14 +88,22 @@ export async function analyzeJobDescription(
 
       // Add photo images for vision analysis if provided
       if (photoUrls?.length) {
-        for (const url of photoUrls) {
-          messageContent.push({
-            type: 'image',
-            source: {
-              type: 'url',
-              url,
-            },
-          });
+        for (const uri of photoUrls) {
+          try {
+            const base64Data = await FileSystem!.readAsStringAsync(uri, {
+              encoding: FileSystem!.EncodingType.Base64,
+            });
+            messageContent.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/jpeg',
+                data: base64Data,
+              },
+            });
+          } catch (err) {
+            console.warn('Failed to read photo for AI analysis:', uri, err);
+          }
         }
       }
 
