@@ -1,10 +1,11 @@
 /**
  * Quote Preview Screen
  * Final review and export/share quote
+ * Auto-saves on mount with inline confetti celebration
  */
 
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity, Animated } from 'react-native';
 import {
   Text,
   Button,
@@ -19,8 +20,8 @@ import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { generateQuotePDF } from '../../utils/pdfGenerator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SuccessModal } from '../../components/SuccessModal';
 import { SendQuoteButton } from '../../components/SendQuoteButton';
+import { successTap } from '../../utils/haptics';
 import {
   CustomerSection,
   JobSection,
@@ -30,56 +31,179 @@ import {
   documentStyles,
 } from '../../components/document';
 
+// Confetti piece definition (reused from AlertModal pattern)
+interface ConfettiPiece {
+  id: number;
+  x: number;
+  color: string;
+  size: number;
+  delay: number;
+  duration: number;
+}
+
+const CONFETTI_COLORS = [colors.success, colors.secondary, colors.info, colors.primary];
+
+function createConfettiPieces(): ConfettiPiece[] {
+  return Array.from({ length: 25 }, (_, i) => ({
+    id: i,
+    x: Math.random() * 100,
+    color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+    size: Math.random() * 6 + 4,
+    delay: i * 50,
+    duration: 2000 + Math.random() * 1000,
+  }));
+}
+
 export function QuotePreviewScreen() {
   const navigation = useNavigation<any>();
   const { currentQuote, saveQuote, businessSettings, setCurrentQuote, nextQuoteNumber } = useStore();
   const insets = useSafeAreaInsets();
 
   const [notes, setNotes] = useState(currentQuote?.notes || '');
+  const savedNotesRef = useRef(currentQuote?.notes || '');
   const status = currentQuote?.status || 'draft';
   const [quoteNumber, setQuoteNumber] = useState(currentQuote?.quoteNumber || '');
   const [isEditingNumber, setIsEditingNumber] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
-  if (!currentQuote) {
-    return null;
-  }
+  // Confetti state & animations
+  const [confetti] = useState<ConfettiPiece[]>(() => createConfettiPieces());
+  const confettiAnims = useRef(
+    confetti.map(() => ({
+      translateY: new Animated.Value(-100),
+      rotate: new Animated.Value(0),
+      opacity: new Animated.Value(0),
+    }))
+  ).current;
 
+  // Banner animations
+  const bannerScale = useRef(new Animated.Value(0)).current;
+  const bannerOpacity = useRef(new Animated.Value(0)).current;
 
-  const handleSave = async () => {
-    try {
-      setIsSaving(true);
+  // Auto-save on mount
+  useEffect(() => {
+    if (!currentQuote) return;
 
-      const updatedQuote = {
-        ...currentQuote,
-        notes,
-        status,
-        draftStep: null,
-        ...(quoteNumber ? { quoteNumber } : {}),
-        updatedAt: new Date(),
-      };
+    const autoSave = async () => {
+      try {
+        setIsSaving(true);
 
-      await saveQuote(updatedQuote);
-      setShowSuccessModal(true);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to save quote. Please try again.');
-      setIsSaving(false);
+        const updatedQuote = {
+          ...currentQuote,
+          notes,
+          status,
+          draftStep: null,
+          ...(quoteNumber ? { quoteNumber } : {}),
+          updatedAt: new Date(),
+        };
+
+        await saveQuote(updatedQuote);
+        savedNotesRef.current = notes;
+        setIsSaving(false);
+        setShowSuccess(true);
+        successTap();
+
+        // Animate banner in
+        Animated.parallel([
+          Animated.spring(bannerScale, {
+            toValue: 1,
+            tension: 120,
+            friction: 8,
+            useNativeDriver: true,
+          }),
+          Animated.timing(bannerOpacity, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+        ]).start();
+
+        // Animate confetti
+        confetti.forEach((piece, index) => {
+          const anim = confettiAnims[index];
+          Animated.sequence([
+            Animated.delay(piece.delay),
+            Animated.parallel([
+              Animated.timing(anim.translateY, {
+                toValue: 500,
+                duration: piece.duration,
+                useNativeDriver: true,
+              }),
+              Animated.timing(anim.rotate, {
+                toValue: (Math.random() - 0.5) * 720,
+                duration: piece.duration,
+                useNativeDriver: true,
+              }),
+              Animated.sequence([
+                Animated.timing(anim.opacity, {
+                  toValue: 0.9,
+                  duration: 200,
+                  useNativeDriver: true,
+                }),
+                Animated.delay(piece.duration * 0.5),
+                Animated.timing(anim.opacity, {
+                  toValue: 0,
+                  duration: piece.duration * 0.3,
+                  useNativeDriver: true,
+                }),
+              ]),
+            ]),
+          ]).start();
+        });
+
+        // Auto-dismiss banner after 3 seconds
+        setTimeout(() => {
+          Animated.parallel([
+            Animated.timing(bannerOpacity, {
+              toValue: 0,
+              duration: 400,
+              useNativeDriver: true,
+            }),
+            Animated.timing(bannerScale, {
+              toValue: 0.8,
+              duration: 400,
+              useNativeDriver: true,
+            }),
+          ]).start(() => setShowSuccess(false));
+        }, 3000);
+      } catch (error) {
+        setIsSaving(false);
+        Alert.alert('Error', 'Failed to save quote. Please try again.');
+      }
+    };
+
+    autoSave();
+  }, []); // Run once on mount
+
+  const handleBackToDashboard = useCallback(async () => {
+    // Re-save if notes changed since auto-save
+    if (notes !== savedNotesRef.current && currentQuote) {
+      try {
+        const updatedQuote = {
+          ...currentQuote,
+          notes,
+          status,
+          draftStep: null,
+          ...(quoteNumber ? { quoteNumber } : {}),
+          updatedAt: new Date(),
+        };
+        await saveQuote(updatedQuote);
+      } catch (error) {
+        // Non-blocking — navigate anyway
+        console.error('Failed to save notes on exit:', error);
+      }
     }
-  };
 
-  const handleSuccessModalDismiss = () => {
-    setShowSuccessModal(false);
-    setIsSaving(false);
     setCurrentQuote(null);
     navigation.getParent()?.goBack();
-  };
+  }, [notes, currentQuote, quoteNumber, status, saveQuote, setCurrentQuote, navigation]);
 
   const handleViewPDF = async () => {
     setIsPdfLoading(true);
     try {
-      const html = await generateQuotePDF(currentQuote, businessSettings);
+      const html = await generateQuotePDF(currentQuote!, businessSettings);
 
       if (Platform.OS === 'web') {
         const iframe = document.createElement('iframe');
@@ -111,23 +235,63 @@ export function QuotePreviewScreen() {
     }
   };
 
+  if (!currentQuote) {
+    return null;
+  }
+
   return (
     <View style={styles.outerContainer}>
-      <SuccessModal
-        visible={showSuccessModal}
-        onDismiss={handleSuccessModalDismiss}
-        title="Quote Saved!"
-        message="Your quote has been saved successfully and is ready to share with your customer."
-        buttonText="Back to Dashboard"
-        icon="check-circle"
-        quote={currentQuote}
-        businessSettings={businessSettings}
-      />
+      {/* Confetti overlay */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        {confetti.map((piece, index) => {
+          const anim = confettiAnims[index];
+          return (
+            <Animated.View
+              key={piece.id}
+              style={[
+                styles.confetti,
+                {
+                  left: `${piece.x}%` as any,
+                  width: piece.size,
+                  height: piece.size,
+                  backgroundColor: piece.color,
+                  opacity: anim.opacity,
+                  transform: [
+                    { translateY: anim.translateY },
+                    {
+                      rotate: anim.rotate.interpolate({
+                        inputRange: [-360, 360],
+                        outputRange: ['-360deg', '360deg'],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            />
+          );
+        })}
+      </View>
 
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
       >
+        {/* Success banner */}
+        {showSuccess && (
+          <Animated.View
+            style={[
+              styles.successBanner,
+              {
+                opacity: bannerOpacity,
+                transform: [{ scale: bannerScale }],
+              },
+            ]}
+          >
+            <MaterialCommunityIcons name="check-circle" size={24} color={colors.success} />
+            <Text style={styles.successBannerText}>Quote Complete!</Text>
+          </Animated.View>
+        )}
+
         {/* Quote Number & Date */}
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
@@ -238,14 +402,14 @@ export function QuotePreviewScreen() {
         />
         <Button
           mode="contained"
-          onPress={handleSave}
+          onPress={handleBackToDashboard}
           loading={isSaving}
           disabled={isSaving}
-          icon="content-save"
+          icon="view-dashboard"
           style={styles.bottomButtonHalf}
           contentStyle={styles.bottomButtonContent}
         >
-          Save Quote
+          Back to Dashboard
         </Button>
       </View>
     </View>
@@ -272,6 +436,28 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && {
       paddingBottom: 16,
     }),
+  },
+  confetti: {
+    position: 'absolute',
+    top: -100,
+    borderRadius: 2,
+    zIndex: 999,
+  },
+  successBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.successBg,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginBottom: 16,
+    gap: 8,
+  },
+  successBannerText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.success,
   },
   headerRow: {
     flexDirection: 'row',

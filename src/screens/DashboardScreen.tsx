@@ -625,8 +625,8 @@ export function DashboardScreen() {
               <Title style={styles.greeting}>
                 {GREETINGS[greetingIndex]}, {businessSettings?.businessName || 'Mate'}!
               </Title>
-              <RNAnimated.View style={{ opacity: subtitleFade }}>
-                <Paragraph>{SUBTITLES[subtitleIndex]}</Paragraph>
+              <RNAnimated.View style={{ opacity: subtitleFade, minHeight: 40 }}>
+                <Paragraph numberOfLines={2}>{SUBTITLES[subtitleIndex]}</Paragraph>
               </RNAnimated.View>
             </View>
             <TouchableOpacity

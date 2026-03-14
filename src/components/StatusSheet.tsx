@@ -4,12 +4,13 @@
  * Tapping an option updates immediately — no confirm button needed
  */
 
-import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Pressable, Animated, Dimensions, Platform } from 'react-native';
-import { Portal, Text } from 'react-native-paper';
+import React from 'react';
+import { View, StyleSheet, Pressable, Animated } from 'react-native';
+import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../theme';
 import { selectionTap } from '../utils/haptics';
+import { BottomSheet, useStaggeredEntrance } from './BottomSheet';
 
 interface StatusOption {
   value: string;
@@ -27,8 +28,6 @@ interface StatusSheetProps {
   options: StatusOption[];
   title?: string;
 }
-
-const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 export const QUOTE_STATUS_OPTIONS: StatusOption[] = [
   { value: 'draft', label: 'Draft', icon: 'file-document-edit-outline', color: colors.info, bgColor: colors.infoBg },
@@ -53,62 +52,7 @@ export function StatusSheet({
   options,
   title = 'Update Status',
 }: StatusSheetProps) {
-  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-  const backdropAnim = useRef(new Animated.Value(0)).current;
-  const optionAnims = useRef<Animated.Value[]>([]);
-  // Keep animated values in sync with options length
-  if (optionAnims.current.length !== options.length) {
-    optionAnims.current = options.map(() => new Animated.Value(0));
-  }
-
-  useEffect(() => {
-    if (visible) {
-      // Reset option anims
-      optionAnims.current.forEach(a => a.setValue(0));
-
-      Animated.parallel([
-        Animated.spring(slideAnim, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 65,
-          friction: 11,
-        }),
-        Animated.timing(backdropAnim, {
-          toValue: 1,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        // Stagger option entrances alongside the sheet slide, with a small delay
-        Animated.sequence([
-          Animated.delay(100),
-          Animated.stagger(
-            40,
-            optionAnims.current.map(anim =>
-              Animated.spring(anim, {
-                toValue: 1,
-                tension: 80,
-                friction: 8,
-                useNativeDriver: true,
-              })
-            )
-          ),
-        ]),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: SCREEN_HEIGHT,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(backdropAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [visible]);
+  const optionAnims = useStaggeredEntrance(options.length, visible, 100, 40);
 
   const handleSelect = (value: string) => {
     if (value === currentStatus) {
@@ -119,157 +63,73 @@ export function StatusSheet({
     onSelect(value);
   };
 
-  if (!visible) return null;
-
   return (
-    <Portal>
-      {/* Backdrop */}
-      <Animated.View
-        style={[
-          styles.backdrop,
-          { opacity: backdropAnim },
-        ]}
-      >
-        <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} />
-      </Animated.View>
+    <BottomSheet visible={visible} onDismiss={onDismiss} title={title}>
+      <View style={styles.optionsContainer}>
+        {options.map((option, index) => {
+          const isSelected = option.value === currentStatus;
+          const anim = optionAnims[index];
 
-      {/* Sheet */}
-      <View style={styles.sheetWrapper} pointerEvents="box-none">
-      <Animated.View
-        style={[
-          styles.sheet,
-          { transform: [{ translateY: slideAnim }] },
-        ]}
-      >
-        {/* Handle */}
-        <View style={styles.handleContainer}>
-          <View style={styles.handle} />
-        </View>
-
-        <Text style={styles.title}>{title}</Text>
-
-        <View style={styles.optionsContainer}>
-          {options.map((option, index) => {
-            const isSelected = option.value === currentStatus;
-            const anim = optionAnims.current[index];
-
-            return (
-              <Animated.View
-                key={option.value}
-                style={{
-                  opacity: anim,
-                  transform: [
-                    { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) },
-                    { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) },
-                  ],
-                }}
+          return (
+            <Animated.View
+              key={option.value}
+              style={{
+                opacity: anim,
+                transform: [
+                  { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) },
+                  { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) },
+                ],
+              }}
+            >
+              <Pressable
+                style={({ pressed }) => [
+                  styles.option,
+                  isSelected && styles.optionSelected,
+                  isSelected && { borderColor: option.color },
+                  pressed && !isSelected && styles.optionPressed,
+                ]}
+                onPress={() => handleSelect(option.value)}
               >
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.option,
-                    isSelected && styles.optionSelected,
-                    isSelected && { borderColor: option.color },
-                    pressed && !isSelected && styles.optionPressed,
-                  ]}
-                  onPress={() => handleSelect(option.value)}
-                >
-                  <View style={[styles.iconCircle, { backgroundColor: option.bgColor }]}>
-                    <MaterialCommunityIcons
-                      name={isSelected ? 'check' : option.icon as any}
-                      size={22}
-                      color={option.color}
-                    />
-                  </View>
+                <View style={[styles.iconCircle, { backgroundColor: option.bgColor }]}>
+                  <MaterialCommunityIcons
+                    name={isSelected ? 'check' : option.icon as any}
+                    size={22}
+                    color={option.color}
+                  />
+                </View>
 
-                  <View style={styles.labelContainer}>
-                    <Text style={[
-                      styles.optionLabel,
-                      isSelected && { color: option.color, fontWeight: '700' },
-                    ]}>
-                      {option.label}
-                    </Text>
-                    {isSelected && (
-                      <Text style={styles.currentSubtext}>Currently selected</Text>
-                    )}
-                  </View>
-
-                  {isSelected ? (
-                    <View style={[styles.selectedDot, { backgroundColor: option.color }]} />
-                  ) : (
-                    <MaterialCommunityIcons
-                      name="chevron-right"
-                      size={20}
-                      color={colors.inactive}
-                    />
+                <View style={styles.labelContainer}>
+                  <Text style={[
+                    styles.optionLabel,
+                    isSelected && { color: option.color, fontWeight: '700' },
+                  ]}>
+                    {option.label}
+                  </Text>
+                  {isSelected && (
+                    <Text style={styles.currentSubtext}>Currently selected</Text>
                   )}
-                </Pressable>
-              </Animated.View>
-            );
-          })}
-        </View>
+                </View>
 
-        {/* Safe area padding for bottom */}
-        <View style={styles.bottomPadding} />
-      </Animated.View>
+                {isSelected ? (
+                  <View style={[styles.selectedDot, { backgroundColor: option.color }]} />
+                ) : (
+                  <MaterialCommunityIcons
+                    name="chevron-right"
+                    size={20}
+                    color={colors.inactive}
+                  />
+                )}
+              </Pressable>
+            </Animated.View>
+          );
+        })}
       </View>
-    </Portal>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    zIndex: 1000,
-  },
-  sheetWrapper: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 1001,
-  },
-  sheet: {
-    width: '100%',
-    maxWidth: 480,
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -6 },
-        shadowOpacity: 0.3,
-        shadowRadius: 16,
-      },
-      android: {
-        elevation: 20,
-      },
-    }),
-  },
-  handleContainer: {
-    alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 2,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.surfaceGray,
-    opacity: 0.6,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-    textAlign: 'center',
-    paddingTop: 8,
-    paddingBottom: 16,
-  },
   optionsContainer: {
-    paddingHorizontal: 16,
     gap: 10,
   },
   option: {
@@ -315,8 +175,5 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-  },
-  bottomPadding: {
-    height: 34,
   },
 });

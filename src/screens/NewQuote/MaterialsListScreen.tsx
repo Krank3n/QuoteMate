@@ -9,6 +9,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Platform,
   Linking,
   Image,
@@ -1255,7 +1256,7 @@ export function MaterialsListScreen() {
     updateQuote({ ...currentQuote, materials: updatedMaterials } as any);
   }, [currentQuote, materials, updateQuote]);
 
-  const handleQuantitySet = useCallback((materialId: string, value: string) => {
+  const handleQuantityBlur = useCallback((materialId: string, value: string) => {
     if (!currentQuote) return;
     const parsed = parseInt(value, 10);
     const newQty = isNaN(parsed) || parsed < 1 ? 1 : parsed;
@@ -1484,27 +1485,29 @@ export function MaterialsListScreen() {
                             <View style={styles.itemBottomRow}>
                               <View style={styles.qtyRow}>
                                 <View style={styles.qtyStepper}>
-                                  <TouchableOpacity
-                                    style={styles.qtyBtn}
+                                  <Pressable
+                                    style={({ pressed }) => [styles.qtyBtn, pressed && styles.qtyBtnPressed]}
                                     onPress={() => handleQuickQuantityUpdate(material.id, -1)}
                                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                   >
                                     <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
-                                  </TouchableOpacity>
+                                  </Pressable>
                                   <RNTextInput
                                     style={styles.qtyInput}
-                                    value={String(material.quantity)}
-                                    onChangeText={(text) => handleQuantitySet(material.id, text)}
+                                    key={`${material.id}-${material.quantity}`}
+                                    defaultValue={String(material.quantity)}
+                                    onEndEditing={(e) => handleQuantityBlur(material.id, e.nativeEvent.text)}
                                     keyboardType="number-pad"
                                     selectTextOnFocus
+                                    returnKeyType="done"
                                   />
-                                  <TouchableOpacity
-                                    style={styles.qtyBtn}
+                                  <Pressable
+                                    style={({ pressed }) => [styles.qtyBtn, pressed && styles.qtyBtnPressed]}
                                     onPress={() => handleQuickQuantityUpdate(material.id, 1)}
                                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                   >
                                     <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
-                                  </TouchableOpacity>
+                                  </Pressable>
                                 </View>
                                 <Text style={styles.qtyUnit}>{material.unit}</Text>
                               </View>
@@ -1881,6 +1884,11 @@ const styles = StyleSheet.create({
   qtyBtn: {
     paddingHorizontal: 10,
     paddingVertical: 6,
+    borderRadius: 6,
+  },
+  qtyBtnPressed: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    transform: [{ scale: 0.9 }],
   },
   qtyInput: {
     fontSize: 15,

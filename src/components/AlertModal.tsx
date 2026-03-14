@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Animated, Platform } from 'react-native';
+import { View, StyleSheet, Animated, Platform, BackHandler } from 'react-native';
 import {
   Portal,
   Modal,
@@ -140,6 +140,16 @@ export function AlertModal({
       opacity: new Animated.Value(0),
     }))
   ).current;
+
+  // Android back button closes the modal
+  useEffect(() => {
+    if (!visible || Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onDismiss();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onDismiss]);
 
   useEffect(() => {
     if (visible) {

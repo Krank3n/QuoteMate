@@ -256,7 +256,7 @@ export const InvoiceCard = React.memo(function InvoiceCard({
               </View>
               <IconButton
                 icon="dots-vertical"
-                size={24}
+                size={32}
                 accessibilityLabel="Invoice actions menu"
                 onPress={(e) => {
                   e.stopPropagation();

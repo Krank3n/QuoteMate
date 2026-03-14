@@ -425,10 +425,11 @@ export function RootNavigator() {
         ...(Platform.OS === 'web' && {
           contentStyle: { overflow: 'auto' }
         }),
+        // Keep previous screen mounted during transitions to prevent remount glitches
+        detachPreviousScreen: false,
         // Disable safe area for iOS to allow full height cards
         ...(Platform.OS === 'ios' && {
           safeAreaInsets: { top: 0, bottom: 0 },
-          detachPreviousScreen: false,
           contentStyle: { flex: 1 },
         })
       }}
