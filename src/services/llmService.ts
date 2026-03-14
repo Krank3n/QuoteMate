@@ -57,7 +57,8 @@ export async function analyzeJobDescription(
     pricingMethod?: string;
     selectedStore?: string; // Which store will be used for pricing
   },
-  retryCount: number = 3
+  retryCount: number = 3,
+  photoUrls?: string[]
 ): Promise<LLMResponse> {
   // On web, use Firebase Functions to avoid CORS issues
   if (Platform.OS === 'web') {
@@ -77,6 +78,29 @@ export async function analyzeJobDescription(
     try {
       const prompt = createPrompt(jobDescription, tradeContext);
 
+      // Build message content - text only or text + images (Pro vision)
+      const messageContent: any[] = [];
+
+      // Add photo images for vision analysis if provided
+      if (photoUrls?.length) {
+        for (const url of photoUrls) {
+          messageContent.push({
+            type: 'image',
+            source: {
+              type: 'url',
+              url,
+            },
+          });
+        }
+      }
+
+      messageContent.push({
+        type: 'text',
+        text: photoUrls?.length
+          ? `${prompt}\n\nI've also attached ${photoUrls.length} site photo(s). Please examine them carefully to better understand the scope of work, identify specific materials visible, and refine your material estimates based on what you see.`
+          : prompt,
+      });
+
       const response = await fetch(ANTHROPIC_API_URL, {
         method: 'POST',
         headers: {
@@ -90,7 +114,7 @@ export async function analyzeJobDescription(
           messages: [
             {
               role: 'user',
-              content: prompt,
+              content: messageContent,
             },
           ],
         }),
@@ -359,6 +383,177 @@ function parseResponse(content: string): LLMResponse {
     console.error('Failed to parse LLM response:', error);
     throw new Error('Invalid response from LLM');
   }
+}
+
+/**
+ * Generate a professional email body for sending a quote to a client
+ * Pro only - free users get a clean default template
+ */
+export async function generateQuoteEmail(params: {
+  jobName: string;
+  jobDescription: string;
+  materials: { name: string; quantity: number; unit: string }[];
+  laborHours: number;
+  total: number;
+  businessName: string;
+  customerName: string;
+  photoDescriptions?: string[];
+}): Promise<string> {
+  const { jobName, jobDescription, materials, laborHours, total, businessName, customerName, photoDescriptions } = params;
+
+  const prompt = createEmailPrompt(params);
+
+  // On web, use Firebase Functions
+  if (Platform.OS === 'web') {
+    return generateEmailViaFirebaseFunction(prompt);
+  }
+
+  // On mobile, call Anthropic API directly
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('API key not configured');
+  }
+
+  try {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    const content = data.content[0].text;
+    return parseEmailResponse(content);
+  } catch (error) {
+    console.error('Email generation with Claude failed:', error);
+
+    // Try Gemini fallback
+    try {
+      return await generateEmailViaGemini(prompt);
+    } catch (geminiError) {
+      console.error('Gemini fallback also failed:', geminiError);
+    }
+
+    // Final fallback - return a basic template
+    return getDefaultEmailBody(customerName, jobName, total, businessName);
+  }
+}
+
+function createEmailPrompt(params: {
+  jobName: string;
+  jobDescription: string;
+  materials: { name: string; quantity: number; unit: string }[];
+  laborHours: number;
+  total: number;
+  businessName: string;
+  customerName: string;
+  photoDescriptions?: string[];
+}): string {
+  const { jobName, jobDescription, materials, laborHours, total, businessName, customerName, photoDescriptions } = params;
+
+  let photosSection = '';
+  if (photoDescriptions?.length) {
+    photosSection = `\n\nSite photos have been attached showing: ${photoDescriptions.join('; ')}`;
+  }
+
+  const materialsSummary = materials.slice(0, 10).map(m => `${m.name} (${m.quantity} ${m.unit})`).join(', ');
+
+  return `You are writing a professional email body for an Australian tradie sending a quote to their client. Write ONLY the email body text (no subject line, no greeting, no sign-off - those are added separately).
+
+Job: ${jobName}
+Description: ${jobDescription}
+Key materials: ${materialsSummary}
+Estimated labour: ${laborHours} hours
+Total: $${total.toFixed(2)} (inc GST)
+Business: ${businessName}
+Client: ${customerName}${photosSection}
+
+Guidelines:
+- Write 2-3 short paragraphs summarising the scope of work
+- Be professional but friendly, in plain Australian English
+- Mention key materials/work areas without listing every item
+- Be strictly factual - do NOT add any details, claims, or promises not in the description
+- Do NOT include pricing (it's shown separately in the email template)
+- Do NOT include greetings or sign-offs (they're added by the template)
+- Keep it concise - under 150 words
+
+Return ONLY the email body text, no JSON wrapping or quotes.`;
+}
+
+async function generateEmailViaFirebaseFunction(prompt: string): Promise<string> {
+  const idToken = await auth.currentUser?.getIdToken();
+  const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/generateQuoteEmail`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ prompt }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Firebase function returned ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.emailBody || '';
+}
+
+async function generateEmailViaGemini(prompt: string): Promise<string> {
+  if (!GEMINI_API_KEY) throw new Error('Gemini API key not configured');
+
+  const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 500 },
+    }),
+  });
+
+  if (!response.ok) throw new Error(`Gemini API returned ${response.status}`);
+
+  const data = await response.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) throw new Error('No content in Gemini response');
+
+  return parseEmailResponse(content);
+}
+
+function parseEmailResponse(content: string): string {
+  // Strip any markdown code blocks or JSON wrapping
+  let text = content.trim();
+  if (text.startsWith('```')) {
+    text = text.replace(/```[a-z]*\n?/g, '').replace(/\n?```$/g, '');
+  }
+  // Remove wrapping quotes if present
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1);
+  }
+  return text.trim();
+}
+
+/**
+ * Default email body for free users (no AI)
+ */
+export function getDefaultEmailBody(
+  customerName: string,
+  jobName: string,
+  total: number,
+  businessName: string
+): string {
+  return `Please find attached your quotation for ${jobName}.\n\nThis quote includes all materials and labour required to complete the work as discussed. The total amount is $${total.toFixed(2)} (inc GST).\n\nThis quote is valid for 30 days from the date of issue. If you have any questions, please don't hesitate to get in touch.`;
 }
 
 /**

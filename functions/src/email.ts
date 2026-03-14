@@ -812,6 +812,163 @@ export function sendUpdateAnnouncementEmail(
 }
 
 // ============================================================
+// CLIENT-FACING QUOTE EMAIL
+// ============================================================
+
+interface QuoteEmailData {
+  customerName: string;
+  emailBody: string; // AI-generated or default body text
+  jobName: string;
+  materials: { name: string; quantity: number; unit: string; totalPrice: number; section?: string }[];
+  laborTotal: number;
+  materialsSubtotal: number;
+  subtotal: number;
+  gst: number;
+  total: number;
+  acceptanceUrl?: string;
+  photoUrls?: string[];
+  business: {
+    name: string;
+    abn?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    logoUrl?: string;
+    brandColor?: string;
+  };
+}
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+export function buildQuoteEmailHtml(data: QuoteEmailData): string {
+  const accent = data.business.brandColor || '#009868';
+  const esc = escapeHtml;
+
+  // Business logo
+  const logoSection = data.business.logoUrl
+    ? `<tr><td align="center" style="padding:0 0 20px;">
+        <img src="${esc(data.business.logoUrl)}" alt="${esc(data.business.name)}" width="120" style="display:block;width:120px;height:auto;border-radius:12px;" />
+      </td></tr>`
+    : '';
+
+  // Email body paragraphs
+  const bodyHtml = esc(data.emailBody).replace(/\n\n/g, '</p><p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">').replace(/\n/g, '<br/>');
+
+  // Photos section
+  let photosSection = '';
+  if (data.photoUrls?.length) {
+    const photoImgs = data.photoUrls.map(url =>
+      `<td style="padding:4px;"><img src="${esc(url)}" width="160" style="display:block;width:160px;height:120px;object-fit:cover;border-radius:8px;" /></td>`
+    ).join('');
+    photosSection = `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;">
+        <tr><td style="padding:0 0 8px;"><p style="color:#94a3b8;font-size:13px;font-weight:600;margin:0;">Site Photos</p></td></tr>
+        <tr><td>
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>${photoImgs}</tr></table>
+        </td></tr>
+      </table>`;
+  }
+
+  // Pricing table
+  const pricingRows = `
+    <tr>
+      <td style="padding:8px 0;color:#94a3b8;font-size:14px;border-bottom:1px solid #334155;">Materials</td>
+      <td style="padding:8px 0;color:#f1f5f9;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #334155;">$${data.materialsSubtotal.toFixed(2)}</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 0;color:#94a3b8;font-size:14px;border-bottom:1px solid #334155;">Labour</td>
+      <td style="padding:8px 0;color:#f1f5f9;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #334155;">$${data.laborTotal.toFixed(2)}</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 0;color:#94a3b8;font-size:14px;border-bottom:1px solid #334155;">Subtotal</td>
+      <td style="padding:8px 0;color:#f1f5f9;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #334155;">$${data.subtotal.toFixed(2)}</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 0;color:#94a3b8;font-size:14px;border-bottom:1px solid #334155;">GST</td>
+      <td style="padding:8px 0;color:#f1f5f9;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #334155;">$${data.gst.toFixed(2)}</td>
+    </tr>
+    <tr>
+      <td style="padding:10px 0;color:#f8fafc;font-size:16px;font-weight:700;">Total (inc GST)</td>
+      <td style="padding:10px 0;color:${accent};font-size:18px;font-weight:700;text-align:right;">$${data.total.toFixed(2)}</td>
+    </tr>`;
+
+  // Accept/Decline buttons
+  let ctaSection = '';
+  if (data.acceptanceUrl) {
+    ctaSection = `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
+        <tr>
+          <td align="center">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:${accent};border-radius:10px;text-align:center;margin-right:12px;">
+                  <a href="${esc(data.acceptanceUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Accept Quote</a>
+                </td>
+                <td width="12"></td>
+                <td style="background:#475569;border-radius:10px;text-align:center;">
+                  <a href="${esc(data.acceptanceUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Decline</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>`;
+  }
+
+  // Business footer
+  const footerParts: string[] = [];
+  if (data.business.name) footerParts.push(`<strong style="color:#f1f5f9;">${esc(data.business.name)}</strong>`);
+  if (data.business.abn) footerParts.push(`ABN: ${esc(data.business.abn)}`);
+  if (data.business.phone) footerParts.push(esc(data.business.phone));
+  if (data.business.email) footerParts.push(`<a href="mailto:${esc(data.business.email)}" style="color:${accent};text-decoration:none;">${esc(data.business.email)}</a>`);
+  if (data.business.address) footerParts.push(esc(data.business.address));
+
+  const businessFooter = footerParts.length ? `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;border-top:1px solid #334155;padding-top:20px;">
+      <tr><td style="text-align:center;">
+        <p style="color:#94a3b8;font-size:13px;line-height:1.8;margin:0;">${footerParts.join(' &bull; ')}</p>
+      </td></tr>
+    </table>` : '';
+
+  const content = `
+    ${logoSection}
+    <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 8px;line-height:1.3;">
+      Quotation for ${esc(data.jobName)}
+    </h1>
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 24px;">
+      Hi ${esc(data.customerName)},
+    </p>
+
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      ${bodyHtml}
+    </p>
+
+    ${photosSection}
+
+    ${infoCard(pricingRows, accent)}
+
+    ${ctaSection}
+
+    <p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:24px 0 0;">
+      This quote is valid for 30 days. If you have any questions, please don't hesitate to get in touch.
+    </p>
+
+    <p style="color:#94a3b8;font-size:14px;margin:16px 0 0;">
+      Kind regards,<br/>
+      <strong style="color:#f1f5f9;">${esc(data.business.name)}</strong>
+    </p>
+
+    ${businessFooter}
+  `;
+
+  return wrapEmailTemplate(content, {
+    preheader: `Quote for ${data.jobName} - $${data.total.toFixed(2)} from ${data.business.name}`,
+  });
+}
+
+// ============================================================
 // UNSUBSCRIBE HANDLER
 // ============================================================
 

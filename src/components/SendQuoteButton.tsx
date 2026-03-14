@@ -1,6 +1,7 @@
 /**
  * Send Quote Button Component
  * Reusable button with modal dialog for sending quotes via Email, SMS, Share, or Export PDF
+ * Email option now uses Brevo-powered branded HTML emails instead of native mail composer
  */
 
 import React, { useState } from 'react';
@@ -8,16 +9,14 @@ import { StyleSheet, Alert, Share, Linking, Platform } from 'react-native';
 import {
   Button,
 } from 'react-native-paper';
-import * as Print from 'expo-print';
-import * as MailComposer from 'expo-mail-composer';
 
 import { Quote, BusinessSettings } from '../types';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { generateQuotePDF, exportQuotePDF, generatePdfFilename } from '../utils/pdfGenerator';
-import { generateAcceptanceLink } from '../services/quoteAcceptanceService';
-import { auth } from '../config/firebase';
+import { exportQuotePDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
+import { EmailPreviewModal } from './EmailPreviewModal';
+import { generateQuoteEmail, getDefaultEmailBody } from '../services/llmService';
 
 interface SendQuoteButtonProps {
   quote: Quote;
@@ -42,91 +41,77 @@ export function SendQuoteButton({
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
   const [sendDialogVisible, setSendDialogVisible] = useState(false);
+  const [emailPreviewVisible, setEmailPreviewVisible] = useState(false);
+  const [emailBody, setEmailBody] = useState('');
+  const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
 
-  const handleSendQuote = async () => {
+  const handleEmailOption = async () => {
+    setSendDialogVisible(false);
+    setIsGeneratingEmail(true);
+    setEmailPreviewVisible(true);
+
     try {
-      // Generate acceptance link for the quote (Pro only)
-      let acceptanceUrl = '';
       if (isPro) {
-        const userId = auth.currentUser?.uid;
-        if (userId) {
-          try {
-            acceptanceUrl = await generateAcceptanceLink(quote.id, userId);
-            console.log('Generated acceptance link:', acceptanceUrl);
-          } catch (linkError) {
-            console.error('Failed to generate acceptance link:', linkError);
-          }
-        }
-      }
-
-      // Build email body with optional acceptance link
-      const buildEmailBody = () => {
-        let body = `Hi ${quote.customerName},\n\nPlease find attached your quotation for ${quote.job.name}.\n\nTotal: ${formatCurrency(quote.total)}\n\nThis quote is valid for 30 days from the date of issue.`;
-
-        if (acceptanceUrl) {
-          body += `\n\n--- RESPOND TO THIS QUOTE ---\n\nYou can accept or decline this quote directly by clicking the link below:\n\n${acceptanceUrl}\n\n(This link expires in 30 days)`;
-        }
-
-        body += `\n\nIf you have any questions, please don't hesitate to contact us.\n\nBest regards,\n${businessSettings?.businessName || 'Your Business'}`;
-
-        return body;
-      };
-
-      if (Platform.OS === 'web') {
-        // Generate PDF HTML
-        const html = await generateQuotePDF(quote, businessSettings, { isPro });
-        const filename = generatePdfFilename('Quote', quote.customerName, quote.job.name, new Date(quote.updatedAt));
-
-        // Create a hidden iframe to print the PDF
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        document.body.appendChild(iframe);
-
-        const iframeDoc = iframe.contentWindow?.document;
-        if (iframeDoc) {
-          iframeDoc.open();
-          iframeDoc.write(html);
-          iframeDoc.close();
-
-          // Wait for content to load then trigger print dialog
-          iframe.onload = () => {
-            setTimeout(() => {
-              iframe.contentWindow?.print();
-              // Clean up after a delay
-              setTimeout(() => {
-                document.body.removeChild(iframe);
-              }, 1000);
-            }, 250);
-          };
-        }
-
-        // Show email client selector dialog immediately
-        onEmailDialogOpen?.(quote);
-      } else {
-        // Mobile platforms
-        // Check if email is available
-        const isAvailable = await MailComposer.isAvailableAsync();
-        if (!isAvailable) {
-          Alert.alert('Email Not Available', 'Email is not configured on this device. Please set up an email account first.');
-          return;
-        }
-
-        // Generate PDF with custom filename
-        const html = await generateQuotePDF(quote, businessSettings, { isPro });
-        const filename = generatePdfFilename('Quote', quote.customerName, quote.job.name, new Date(quote.updatedAt));
-        const { uri } = await Print.printToFileAsync({ html, base64: false });
-
-        // Compose email with acceptance link
-        await MailComposer.composeAsync({
-          recipients: quote.customerEmail ? [quote.customerEmail] : [],
-          subject: `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`,
-          body: buildEmailBody(),
-          attachments: [uri],
+        // Generate AI email body
+        const body = await generateQuoteEmail({
+          jobName: quote.job.name,
+          jobDescription: quote.job.description || '',
+          materials: quote.materials.map(m => ({
+            name: m.name,
+            quantity: m.quantity,
+            unit: m.unit,
+          })),
+          laborHours: quote.laborHours,
+          total: quote.total,
+          businessName: businessSettings?.businessName || '',
+          customerName: quote.customerName,
         });
+        setEmailBody(body);
+      } else {
+        // Free users get default template
+        setEmailBody(getDefaultEmailBody(
+          quote.customerName,
+          quote.job.name,
+          quote.total,
+          businessSettings?.businessName || 'Your Business'
+        ));
       }
     } catch (error) {
-      console.error('Send error:', error);
-      Alert.alert('Error', 'Failed to send quote. Please try again.');
+      console.error('Email generation failed:', error);
+      // Fallback to default template
+      setEmailBody(getDefaultEmailBody(
+        quote.customerName,
+        quote.job.name,
+        quote.total,
+        businessSettings?.businessName || 'Your Business'
+      ));
+    } finally {
+      setIsGeneratingEmail(false);
+    }
+  };
+
+  const handleRegenerateEmail = async () => {
+    setIsGeneratingEmail(true);
+    try {
+      const body = await generateQuoteEmail({
+        jobName: quote.job.name,
+        jobDescription: quote.job.description || '',
+        materials: quote.materials.map(m => ({
+          name: m.name,
+          quantity: m.quantity,
+          unit: m.unit,
+        })),
+        laborHours: quote.laborHours,
+        total: quote.total,
+        businessName: businessSettings?.businessName || '',
+        customerName: quote.customerName,
+      });
+      setEmailBody(body);
+    } catch (error) {
+      console.error('Email regeneration failed:', error);
+      Alert.alert('Error', 'Could not regenerate email. Please try again.');
+    } finally {
+      setIsGeneratingEmail(false);
     }
   };
 
@@ -171,7 +156,7 @@ export function SendQuoteButton({
     {
       icon: 'email-outline',
       label: 'Email',
-      onPress: handleSendQuote,
+      onPress: handleEmailOption,
     },
     {
       icon: 'message-text',
@@ -208,6 +193,18 @@ export function SendQuoteButton({
         onDismiss={() => setSendDialogVisible(false)}
         title="Send Quote"
         options={sendOptions}
+      />
+
+      <EmailPreviewModal
+        visible={emailPreviewVisible}
+        onDismiss={() => setEmailPreviewVisible(false)}
+        quote={quote}
+        businessSettings={businessSettings}
+        emailBody={emailBody}
+        onEmailBodyChange={setEmailBody}
+        onRegenerate={handleRegenerateEmail}
+        isPro={isPro}
+        isRegenerating={isGeneratingEmail}
       />
     </>
   );

@@ -22,6 +22,7 @@ import { generateQuotePDF } from '../../utils/pdfGenerator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SendQuoteButton } from '../../components/SendQuoteButton';
 import { successTap } from '../../utils/haptics';
+import { WebContainer } from '../../components/WebContainer';
 import {
   CustomerSection,
   JobSection,
@@ -241,57 +242,11 @@ export function QuotePreviewScreen() {
 
   return (
     <View style={styles.outerContainer}>
-      {/* Confetti overlay */}
-      <View style={StyleSheet.absoluteFill} pointerEvents="none">
-        {confetti.map((piece, index) => {
-          const anim = confettiAnims[index];
-          return (
-            <Animated.View
-              key={piece.id}
-              style={[
-                styles.confetti,
-                {
-                  left: `${piece.x}%` as any,
-                  width: piece.size,
-                  height: piece.size,
-                  backgroundColor: piece.color,
-                  opacity: anim.opacity,
-                  transform: [
-                    { translateY: anim.translateY },
-                    {
-                      rotate: anim.rotate.interpolate({
-                        inputRange: [-360, 360],
-                        outputRange: ['-360deg', '360deg'],
-                      }),
-                    },
-                  ],
-                },
-              ]}
-            />
-          );
-        })}
-      </View>
-
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Success banner */}
-        {showSuccess && (
-          <Animated.View
-            style={[
-              styles.successBanner,
-              {
-                opacity: bannerOpacity,
-                transform: [{ scale: bannerScale }],
-              },
-            ]}
-          >
-            <MaterialCommunityIcons name="check-circle" size={24} color={colors.success} />
-            <Text style={styles.successBannerText}>Quote Complete!</Text>
-          </Animated.View>
-        )}
-
+        <WebContainer>
         {/* Quote Number & Date */}
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
@@ -389,6 +344,7 @@ export function QuotePreviewScreen() {
         >
           View PDF Preview
         </Button>
+        </WebContainer>
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
@@ -411,6 +367,53 @@ export function QuotePreviewScreen() {
         >
           Back to Dashboard
         </Button>
+      </View>
+
+      {/* Confetti overlay — rendered last so it's on top */}
+      <View style={[StyleSheet.absoluteFill, styles.celebrationOverlay]} pointerEvents="none">
+        {confetti.map((piece, index) => {
+          const anim = confettiAnims[index];
+          return (
+            <Animated.View
+              key={piece.id}
+              style={[
+                styles.confetti,
+                {
+                  left: `${piece.x}%` as any,
+                  width: piece.size,
+                  height: piece.size,
+                  backgroundColor: piece.color,
+                  opacity: anim.opacity,
+                  transform: [
+                    { translateY: anim.translateY },
+                    {
+                      rotate: anim.rotate.interpolate({
+                        inputRange: [-360, 360],
+                        outputRange: ['-360deg', '360deg'],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            />
+          );
+        })}
+
+        {/* Success banner overlay */}
+        {showSuccess && (
+          <Animated.View
+            style={[
+              styles.successBanner,
+              {
+                opacity: bannerOpacity,
+                transform: [{ scale: bannerScale }],
+              },
+            ]}
+          >
+            <MaterialCommunityIcons name="check-circle" size={24} color={colors.success} />
+            <Text style={styles.successBannerText}>Quote Complete!</Text>
+          </Animated.View>
+        )}
       </View>
     </View>
   );
@@ -437,22 +440,36 @@ const styles = StyleSheet.create({
       paddingBottom: 16,
     }),
   },
+  celebrationOverlay: {
+    zIndex: 999,
+  },
   confetti: {
     position: 'absolute',
     top: -100,
     borderRadius: 2,
-    zIndex: 999,
   },
   successBanner: {
+    position: 'absolute',
+    top: 16,
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.successBg,
     borderRadius: 12,
     paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginBottom: 16,
+    paddingHorizontal: 24,
     gap: 8,
+    ...Platform.select({
+      android: { elevation: 6 },
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+      },
+      web: { boxShadow: '0 2px 12px rgba(0,0,0,0.3)' },
+    }),
   },
   successBannerText: {
     fontSize: 18,

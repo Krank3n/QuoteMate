@@ -321,6 +321,12 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
           <span>Markup (${quote.markup}%)</span>
           <span>${formatCurrency(quote.markupAmount)}</span>
         </div>
+        ${quote.travelAdjustment && quote.travelAdjustment > 0 ? `
+        <div class="summary-row">
+          <span>Travel Adjustment (${quote.travelAdjustment}%)</span>
+          <span>${formatCurrency(quote.subtotal * (quote.travelAdjustment / 100))}</span>
+        </div>
+        ` : ''}
         <div class="summary-row">
           <span>GST (10%)</span>
           <span>${formatCurrency(quote.gst)}</span>
@@ -569,6 +575,12 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
           <span>Markup (${invoice.markup}%)</span>
           <span>${formatCurrency(invoice.markupAmount)}</span>
         </div>
+        ${invoice.travelAdjustment && invoice.travelAdjustment > 0 ? `
+        <div class="summary-row">
+          <span>Travel Adjustment (${invoice.travelAdjustment}%)</span>
+          <span>${formatCurrency(invoice.subtotal * (invoice.travelAdjustment / 100))}</span>
+        </div>
+        ` : ''}
         <div class="summary-row">
           <span>GST (10%)</span>
           <span>${formatCurrency(invoice.gst)}</span>

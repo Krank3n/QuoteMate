@@ -16,7 +16,8 @@ export function calculateQuote(
   materials: Material[],
   laborRate: number,
   laborHours: number,
-  markupPercent: number
+  markupPercent: number,
+  travelAdjustment: number = 0
 ): QuoteCalculation {
   // Calculate materials subtotal
   const materialsSubtotal = materials.reduce((sum, material) => {
@@ -29,11 +30,14 @@ export function calculateQuote(
   // Subtotal before markup
   const subtotal = materialsSubtotal + laborTotal;
 
-  // Calculate markup
+  // Calculate markup (base markup only)
   const markupAmount = subtotal * (markupPercent / 100);
 
-  // Subtotal with markup (before GST)
-  const subtotalWithMarkup = subtotal + markupAmount;
+  // Calculate travel adjustment amount separately
+  const travelAdjustmentAmount = subtotal * (travelAdjustment / 100);
+
+  // Subtotal with markup and travel adjustment (before GST)
+  const subtotalWithMarkup = subtotal + markupAmount + travelAdjustmentAmount;
 
   // Calculate GST (10% in Australia)
   const gst = subtotalWithMarkup * 0.1;
@@ -46,6 +50,7 @@ export function calculateQuote(
     laborTotal: roundToTwoDecimals(laborTotal),
     subtotal: roundToTwoDecimals(subtotal),
     markupAmount: roundToTwoDecimals(markupAmount),
+    travelAdjustmentAmount: roundToTwoDecimals(travelAdjustmentAmount),
     gst: roundToTwoDecimals(gst),
     total: roundToTwoDecimals(total),
   };
@@ -60,7 +65,8 @@ export function updateQuoteCalculations(quote: Quote): Quote {
     quote.materials,
     quote.laborRate,
     quote.laborHours,
-    quote.markup
+    quote.markup,
+    quote.travelAdjustment || 0
   );
 
   return {

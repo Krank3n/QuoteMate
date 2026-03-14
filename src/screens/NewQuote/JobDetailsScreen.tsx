@@ -45,7 +45,7 @@ import { NICHE_TEMPLATES, getTemplatesForNiche, getNicheTemplateById, NicheJobTe
 import { getTradeCategoryById, getTradeNicheById, PRICING_METHODS } from '../../constants/tradeCategories';
 import { createJobFromTemplate } from '../../utils/materialsEstimator';
 import { colors } from '../../theme';
-import { JobTemplate } from '../../types';
+import { JobTemplate, QuotePhoto } from '../../types';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials, cleanupTranscriptionAndGenerateTitle } from '../../services/llmService';
 import { generateId } from '../../utils/generateId';
 import { bunningsApi } from '../../services/bunningsApi';
@@ -53,6 +53,7 @@ import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { ProBadge } from '../../components/ProBadge';
 import { AlertModal } from '../../components/AlertModal';
+import { JobPhotos } from '../../components/JobPhotos';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
@@ -75,6 +76,8 @@ export function JobDetailsScreen() {
   const [analysisErrorDialogVisible, setAnalysisErrorDialogVisible] = useState(false);
   const [analysisErrorMessage, setAnalysisErrorMessage] = useState('');
   const [useCustomMode, setUseCustomMode] = useState(true); // Default to custom (AI) mode
+  const [jobPhotos, setJobPhotos] = useState<QuotePhoto[]>([]);
+  const [includePhotosInAi, setIncludePhotosInAi] = useState(true);
 
   // Voice recording states
   const [isRecording, setIsRecording] = useState(false);
@@ -342,6 +345,7 @@ export function JobDetailsScreen() {
     if (currentQuote) {
       setJobName(currentQuote.job.name);
       setJobDescription(currentQuote.job.description || '');
+      setJobPhotos((currentQuote as any).photos || []);
 
       // Load template if exists and it's not 'custom'
       const template = JOB_TEMPLATES.find((t) => t.id === currentQuote.job.template);
@@ -371,6 +375,7 @@ export function JobDetailsScreen() {
             name: jobName.trim() || currentQuote.job.name,
             description: jobDescription.trim(),
           },
+          photos: jobPhotos,
         };
         updateQuote(updatedQuote);
       }
@@ -638,6 +643,7 @@ export function JobDetailsScreen() {
       laborHours: 8,
       aiSkipped: true, // Flag that AI was intentionally skipped
       draftStep: 'CustomerDetails',
+      photos: jobPhotos,
     };
 
     updateQuote(updatedQuote);
@@ -669,6 +675,7 @@ export function JobDetailsScreen() {
       laborHours: 8,
       aiSkipped: false, // Explicitly mark that AI is being used
       draftStep: 'CustomerDetails',
+      photos: jobPhotos,
     };
 
     updateQuote(updatedQuote);
@@ -736,7 +743,12 @@ export function JobDetailsScreen() {
       };
     })() : undefined;
 
-    analyzeJobDescription(jobDescription, tradeContext)
+    // Pass photo URIs for vision analysis if toggle is on and photos exist
+    const photoUrlsForAi = (includePhotosInAi && isPro && jobPhotos.length > 0)
+      ? jobPhotos.map(p => p.storageUrl).filter(Boolean)
+      : undefined;
+
+    analyzeJobDescription(jobDescription, tradeContext, 3, photoUrlsForAi)
       .then((analysis) => {
         // Convert LLM materials to app materials format
         const baseMaterials = convertLLMMaterialsToMaterials(analysis.materials);
@@ -808,6 +820,7 @@ export function JobDetailsScreen() {
             name: jobName || currentQuote.job.name,
             description: jobDescription,
           },
+          photos: jobPhotos,
           draftStep: 'CustomerDetails',
         };
         updateQuote(updatedQuote);
@@ -832,6 +845,7 @@ export function JobDetailsScreen() {
         laborHours: 8,
         aiSkipped: false, // Not skipped, just deferred to MaterialsList screen
         draftStep: 'CustomerDetails',
+        photos: jobPhotos,
       };
 
       updateQuote(updatedQuote);
@@ -875,6 +889,7 @@ export function JobDetailsScreen() {
       materials,
       laborHours: estimatedHours,
       draftStep: 'CustomerDetails',
+      photos: jobPhotos,
     };
 
     updateQuote(updatedQuote);
@@ -1319,6 +1334,33 @@ export function JobDetailsScreen() {
           autoComplete="off"
           textContentType="none"
         />
+
+        {/* Job Photos */}
+        {useCustomMode && (
+          <>
+            <JobPhotos
+              photos={jobPhotos}
+              onPhotosChange={setJobPhotos}
+            />
+            {jobPhotos.length > 0 && (
+              <TouchableOpacity
+                style={styles.aiPhotoToggle}
+                onPress={() => setIncludePhotosInAi(!includePhotosInAi)}
+                activeOpacity={0.7}
+              >
+                <MaterialCommunityIcons
+                  name={includePhotosInAi ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                  size={20}
+                  color={includePhotosInAi ? colors.primary : colors.textMuted}
+                />
+                <Text style={[styles.aiPhotoToggleText, includePhotosInAi && { color: colors.text }]}>
+                  Include photos in AI analysis
+                </Text>
+                {!isPro && <ProBadge size="small" />}
+              </TouchableOpacity>
+            )}
+          </>
+        )}
         </Surface>
       )}
 
@@ -1749,5 +1791,17 @@ const styles = StyleSheet.create({
   },
   switchModeButton: {
     marginTop: 16,
+  },
+  aiPhotoToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    paddingVertical: 6,
+  },
+  aiPhotoToggleText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    flex: 1,
   },
 });

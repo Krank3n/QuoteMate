@@ -51,6 +51,7 @@ import {
 } from '../../services/materialFavorites';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
+import { WebContainer } from '../../components/WebContainer';
 import { SwipeableCard } from '../../components/SwipeableCard';
 import { BUNNINGS_SCRAPER_URL } from '@env';
 import { TRADE_CATEGORIES } from '../../constants/tradeCategories';
@@ -585,9 +586,13 @@ export function AddMaterialScreen() {
   // Search section component
   const renderSearchSection = () => (
     <View style={styles.section}>
-      <View style={styles.searchTitleRow}>
-        <Text style={styles.sectionTitle}>Search Products</Text>
-        {!isPro && <ProBadge size="small" />}
+      <View style={styles.manualEntryHeader}>
+        <View style={styles.manualEntryDividerLine} />
+        <View style={styles.searchTitleRow}>
+          <Text style={styles.manualEntryHeaderText}>Search Products</Text>
+          {!isPro && <ProBadge size="small" />}
+        </View>
+        <View style={styles.manualEntryDividerLine} />
       </View>
       {!isPro ? (
         <TouchableOpacity
@@ -686,11 +691,12 @@ export function AddMaterialScreen() {
   const renderManualEntrySection = () => (
     <View style={styles.section}>
       {!isEditMode && (
-        <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
-          <Text style={styles.sectionTitle}>
-            {isPro ? "Can't find it? Add manually" : 'Add Material'}
+        <View style={styles.manualEntryHeader}>
+          <View style={styles.manualEntryDividerLine} />
+          <Text style={styles.manualEntryHeaderText}>
+            {isPro ? 'add manually' : 'Add Material'}
           </Text>
+          <View style={styles.manualEntryDividerLine} />
         </View>
       )}
 
@@ -850,9 +856,10 @@ export function AddMaterialScreen() {
 
     return (
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="history" size={20} color={colors.primary} />
-          <Text style={styles.sectionTitle}>Recently Used</Text>
+        <View style={styles.manualEntryHeader}>
+          <View style={styles.manualEntryDividerLine} />
+          <Text style={styles.manualEntryHeaderText}>Recently Used</Text>
+          <View style={styles.manualEntryDividerLine} />
         </View>
         <View style={styles.recentChipsContainer}>
           {recentMaterials.map((material, index) => (
@@ -883,6 +890,7 @@ export function AddMaterialScreen() {
       contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled"
     >
+      <WebContainer>
       {renderRecentlyUsedSection()}
       {recentMaterials.length > 0 && !isEditMode && <Divider style={styles.divider} />}
       {isEditMode ? (
@@ -890,7 +898,6 @@ export function AddMaterialScreen() {
       ) : isPro ? (
         <>
           {renderSearchSection()}
-          <Divider style={styles.divider} />
           {renderManualEntrySection()}
         </>
       ) : (
@@ -900,6 +907,7 @@ export function AddMaterialScreen() {
           {renderSearchSection()}
         </>
       )}
+      </WebContainer>
     </ScrollView>
   );
 
@@ -986,31 +994,35 @@ export function AddMaterialScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Tab Selector */}
-      <View style={styles.tabBar}>
-        <SegmentedButtons
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as TabValue)}
-          buttons={[
-            {
-              value: 'search',
-              label: 'Search & Add',
-              icon: 'magnify',
-            },
-            {
-              value: 'saved',
-              label: 'Saved Items',
-              icon: 'star',
-            },
-          ]}
-        />
-      </View>
+      {/* Tab Selector - hidden in edit mode */}
+      {!isEditMode && (
+        <WebContainer>
+        <View style={styles.tabBar}>
+          <SegmentedButtons
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as TabValue)}
+            buttons={[
+              {
+                value: 'search',
+                label: 'Search & Add',
+                icon: 'magnify',
+              },
+              {
+                value: 'saved',
+                label: 'Saved Items',
+                icon: 'star',
+              },
+            ]}
+          />
+        </View>
+        </WebContainer>
+      )}
 
       {/* Tab Content */}
-      {activeTab === 'search' ? renderSearchTab() : renderSavedTab()}
+      {isEditMode ? renderSearchTab() : activeTab === 'search' ? renderSearchTab() : renderSavedTab()}
 
-      {/* Fixed Bottom Button - Only show in search tab */}
-      {activeTab === 'search' && (
+      {/* Fixed Bottom Button */}
+      {(isEditMode || activeTab === 'search') && (
         <FixedBottomButton
           label={isEditMode ? 'Update Material' : 'Add to Quote'}
           onPress={handleAddManually}
@@ -1052,6 +1064,24 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
     marginBottom: 12,
+  },
+  manualEntryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 12,
+  },
+  manualEntryDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  manualEntryHeaderText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.onSurface,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   searchTitleRow: {
     flexDirection: 'row',

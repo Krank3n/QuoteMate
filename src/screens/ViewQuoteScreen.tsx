@@ -4,13 +4,15 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, TouchableOpacity } from 'react-native';
 import {
   Text,
   Button,
   Surface,
   Title,
+  TextInput,
 } from 'react-native-paper';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import { useStore } from '../store/useStore';
@@ -19,6 +21,7 @@ import { generateQuotePDF } from '../utils/pdfGenerator';
 import { SendQuoteButton } from '../components/SendQuoteButton';
 import { AlertModal } from '../components/AlertModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WebContainer } from '../components/WebContainer';
 import {
   DocumentHeader,
   CustomerSection,
@@ -34,13 +37,15 @@ export function ViewQuoteScreen() {
   const route = useRoute<any>();
   const quoteId = route.params?.quoteId;
 
-  const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote, createInvoiceFromQuote, saveInvoice } = useStore();
+  const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote, createInvoiceFromQuote, saveInvoice, nextQuoteNumber } = useStore();
   const insets = useSafeAreaInsets();
 
   const [displayQuote, setDisplayQuote] = useState(null);
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
+  const [isEditingNumber, setIsEditingNumber] = useState(false);
+  const [quoteNumber, setQuoteNumber] = useState('');
 
   // Refresh quote data when screen comes into focus
   // Auto-save if there are pending changes in currentQuote
@@ -63,6 +68,23 @@ export function ViewQuoteScreen() {
       }
     }, [quotes, currentQuote, quoteId, saveQuote, setCurrentQuote])
   );
+
+  // Sync quoteNumber when displayQuote loads/changes
+  React.useEffect(() => {
+    if (displayQuote?.quoteNumber !== undefined) {
+      setQuoteNumber(displayQuote.quoteNumber || '');
+    }
+  }, [displayQuote?.quoteNumber]);
+
+  const handleQuoteNumberSave = async () => {
+    setIsEditingNumber(false);
+    if (!displayQuote) return;
+    if (quoteNumber !== (displayQuote.quoteNumber || '')) {
+      const updated = { ...displayQuote, quoteNumber, updatedAt: new Date() };
+      setDisplayQuote(updated);
+      await saveQuote(updated);
+    }
+  };
 
   if (!displayQuote) {
     return (
@@ -137,7 +159,6 @@ export function ViewQuoteScreen() {
 
       <DocumentHeader
         title="Quote Preview"
-        subtitle={displayQuote?.quoteNumber}
         onBackPress={() => navigation.goBack()}
         rightIcon="file-pdf-box"
         onRightPress={handleViewPDF}
@@ -148,6 +169,36 @@ export function ViewQuoteScreen() {
         style={styles.content}
         contentContainerStyle={styles.scrollContent}
       >
+        <WebContainer>
+        {/* Editable Quote Number */}
+        <View style={styles.quoteNumberRow}>
+          {isEditingNumber ? (
+            <TextInput
+              value={quoteNumber}
+              onChangeText={setQuoteNumber}
+              onBlur={handleQuoteNumberSave}
+              onSubmitEditing={handleQuoteNumberSave}
+              placeholder="e.g. Q-001"
+              autoFocus
+              style={styles.quoteNumberInput}
+              mode="flat"
+              dense
+            />
+          ) : (
+            <TouchableOpacity
+              onPress={() => setIsEditingNumber(true)}
+              style={styles.quoteNumberTouchable}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.quoteNumberLabel}>Quote #</Text>
+              <Text style={styles.quoteNumber}>
+                {quoteNumber || quote.quoteNumber || `Q-${String(nextQuoteNumber).padStart(3, '0')}`}
+              </Text>
+              <MaterialCommunityIcons name="pencil-outline" size={14} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+
         <CustomerSection
           customerName={quote.customerName}
           customerEmail={quote.customerEmail}
@@ -189,6 +240,7 @@ export function ViewQuoteScreen() {
             <Text style={documentStyles.text}>{quote.notes}</Text>
           </Surface>
         )}
+        </WebContainer>
       </ScrollView>
 
       {/* Fixed bottom section with solid background */}
@@ -252,6 +304,34 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 140,
+  },
+  quoteNumberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  quoteNumberTouchable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  quoteNumberLabel: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginRight: 4,
+  },
+  quoteNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    marginRight: 6,
+  },
+  quoteNumberInput: {
+    backgroundColor: 'transparent',
+    fontSize: 14,
+    paddingHorizontal: 0,
+    height: 32,
+    width: 120,
   },
   solidBackground: {
     position: 'absolute',

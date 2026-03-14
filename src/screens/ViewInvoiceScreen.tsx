@@ -38,6 +38,7 @@ import {
   TotalsSection,
   documentStyles,
 } from '../components/document';
+import { WebContainer } from '../components/WebContainer';
 
 function formatPaymentMethod(method: PaymentMethod): string {
   const methods: Record<PaymentMethod, string> = {
@@ -169,6 +170,7 @@ export function ViewInvoiceScreen() {
       />
 
       <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
+        <WebContainer>
         {/* Status Section */}
         <Surface style={documentStyles.section}>
           <View style={documentStyles.sectionHeader}>
@@ -212,6 +214,21 @@ export function ViewInvoiceScreen() {
           <View style={documentStyles.sectionHeader}>
             <Title style={documentStyles.sectionTitle}>Invoice Details</Title>
           </View>
+          {isEditing ? (
+            <TextInput
+              label="Invoice Number"
+              value={invoice.invoiceNumber || ''}
+              onChangeText={(text) => handleFieldChange('invoiceNumber', text)}
+              mode="outlined"
+              style={styles.invoiceNumberInput}
+              placeholder="e.g. INV-001"
+            />
+          ) : invoice.invoiceNumber ? (
+            <View style={styles.invoiceNumberRow}>
+              <Text style={styles.dateLabel}>Invoice #</Text>
+              <Text style={styles.dateValue}>{invoice.invoiceNumber}</Text>
+            </View>
+          ) : null}
           <View style={styles.dateRow}>
             <View style={styles.dateItem}>
               <Text style={styles.dateLabel}>Issue Date</Text>
@@ -388,6 +405,7 @@ export function ViewInvoiceScreen() {
             </View>
           </Surface>
         )}
+        </WebContainer>
       </ScrollView>
 
       {/* Fixed bottom section */}
@@ -502,6 +520,13 @@ const styles = StyleSheet.create({
   },
   paymentTermsRow: {
     marginTop: 8,
+  },
+  invoiceNumberInput: {
+    marginBottom: 12,
+    backgroundColor: colors.surface,
+  },
+  invoiceNumberRow: {
+    marginBottom: 12,
   },
   termsButton: {
     alignSelf: 'flex-start',

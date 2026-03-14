@@ -14,25 +14,31 @@ let Device: typeof import('expo-device') | null = null;
 // Track if native modules are available
 let isNativeModuleAvailable = false;
 
-try {
-  Notifications = require('expo-notifications');
-  Device = require('expo-device');
+// Detect Expo Go — skip requiring expo-notifications entirely since SDK 53 removed support
+const isExpoGo = Constants.appOwnership === 'expo';
 
-  // Test if the native module actually works (removed from Expo Go in SDK 53)
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
+if (isExpoGo) {
+  console.log('Running in Expo Go — push notifications are not supported. Use a development build for push notification support.');
+} else {
+  try {
+    Notifications = require('expo-notifications');
+    Device = require('expo-device');
 
-  isNativeModuleAvailable = true;
-} catch (error) {
-  console.log('expo-notifications not available (Expo Go does not support push notifications in SDK 53+). Use a development build for push notification support.');
-  Notifications = null;
-  Device = null;
-  isNativeModuleAvailable = false;
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+
+    isNativeModuleAvailable = true;
+  } catch (error) {
+    console.log('expo-notifications native module not available. Use a development build for push notification support.');
+    Notifications = null;
+    Device = null;
+    isNativeModuleAvailable = false;
+  }
 }
 
 class NotificationService {

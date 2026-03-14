@@ -117,6 +117,7 @@ import {
   findBestMatchForMaterial,
 } from '../../services/bunningsScraperClient';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
+import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
 import { BUNNINGS_SCRAPER_URL } from '@env';
@@ -365,9 +366,10 @@ export function MaterialsListScreen() {
 
   // Fetch time estimate modal state
   const [showFetchEstimateModal, setShowFetchEstimateModal] = useState(false);
+  const [fetchMinimized, setFetchMinimized] = useState(false);
   const [fetchEstimateSeconds, setFetchEstimateSeconds] = useState(0);
   const fetchCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const fetchItemsScrollRef = useRef<ScrollView>(null);
+  const fetchStartTimeRef = useRef<number>(0);
 
   // Match selector state for web scraping pricing
   const [matchSelectorVisible, setMatchSelectorVisible] = useState(false);
@@ -377,6 +379,9 @@ export function MaterialsListScreen() {
 
   // Expanded materials state for accordion
   const [expandedMaterials, setExpandedMaterials] = useState<Set<string>>(new Set());
+
+  // Optimistic quantity overrides — shown instantly before store re-render
+  const [localQuantities, setLocalQuantities] = useState<Record<string, number>>({});
 
 
 
@@ -518,7 +523,13 @@ export function MaterialsListScreen() {
         };
       })() : undefined;
 
-      const analysis = await analyzeJobDescription(jobDescription, tradeContext);
+      // Pass photo URLs for vision analysis if available (Pro feature)
+      const quotePhotos = (currentQuote as any).photos;
+      const photoUrlsForAi = (isPro && quotePhotos?.length)
+        ? quotePhotos.map((p: any) => p.storageUrl).filter(Boolean)
+        : undefined;
+
+      const analysis = await analyzeJobDescription(jobDescription, tradeContext, 3, photoUrlsForAi);
 
       // Check if user canceled during AI analysis
       if (cancelGeneration) {
@@ -588,6 +599,8 @@ export function MaterialsListScreen() {
     fetchEstimateSecondsRef.current = totalSeconds;
     setFetchEstimateSeconds(totalSeconds);
     setShowFetchEstimateModal(true);
+    setFetchMinimized(false);
+    fetchStartTimeRef.current = Date.now();
     if (fetchCountdownRef.current) clearInterval(fetchCountdownRef.current);
     fetchCountdownRef.current = setInterval(() => {
       fetchEstimateSecondsRef.current -= 1;
@@ -597,6 +610,7 @@ export function MaterialsListScreen() {
         fetchCountdownRef.current = null;
         setFetchEstimateSeconds(0);
         setShowFetchEstimateModal(false);
+        setFetchMinimized(true);
       } else {
         setFetchEstimateSeconds(next);
       }
@@ -610,6 +624,7 @@ export function MaterialsListScreen() {
       fetchCountdownRef.current = null;
     }
     setShowFetchEstimateModal(false);
+    setFetchMinimized(false);
   };
 
   const handleFetchPrices = async () => {
@@ -673,7 +688,7 @@ export function MaterialsListScreen() {
 
     let methodName = 'AI estimation';
     if (useScraperApi && selectedStore === 'bunnings') {
-      methodName = 'Bunnings WebSearch';
+      methodName = 'Bunnings';
     } else if (useBunningsApi) {
       methodName = 'Bunnings API';
     }
@@ -1010,6 +1025,17 @@ export function MaterialsListScreen() {
           success: material.price > 0,
         }]);
 
+        // Recalculate remaining time based on actual pace
+        const itemsCompleted = fetchIndex;
+        const itemsRemaining = materialsToFetch.length - itemsCompleted;
+        if (itemsCompleted > 0 && itemsRemaining > 0 && fetchCountdownRef.current) {
+          const elapsedMs = Date.now() - fetchStartTimeRef.current;
+          const avgMsPerItem = elapsedMs / itemsCompleted;
+          const newEstimate = Math.ceil((avgMsPerItem * itemsRemaining) / 1000);
+          fetchEstimateSecondsRef.current = newEstimate;
+          setFetchEstimateSeconds(newEstimate);
+        }
+
         // Update UI progressively (skip if dialogs are open to avoid flickering)
         if (!matchSelectorVisible && currentQuote) {
           updateQuote({
@@ -1045,15 +1071,15 @@ export function MaterialsListScreen() {
       } else if (fetchedCount === 0 && failedCount > 0) {
         setSuccessType('warning');
         setSuccessTitle('No Luck, Mate');
-        setSuccessMessage(`Couldn't track down prices for ${failedCount} item${failedCount > 1 ? 's' : ''} using ${methodName}.\n\nGive these a crack:\n• Tweak material names to match what's on the shelf\n• Punch in prices manually\n• ${useBunningsApi ? 'Bunnings API might be having a smoko' : 'Try a different hardware store in Settings'}\n• Have another go later`);
+        setSuccessMessage(`Couldn't track down prices for ${failedCount} item${failedCount > 1 ? 's' : ''}.\n\nGive these a crack:\n• Tweak material names to match what's on the shelf\n• Punch in prices manually\n• ${useBunningsApi ? 'Bunnings API might be having a smoko' : 'Try a different hardware store in Settings'}\n• Have another go later`);
         setShowSuccessModal(true);
       } else if (fetchedCount > 0 && failedCount === 0) {
         setSuccessTitle('Beauty!');
-        setSuccessMessage(`Scored ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} using ${methodName}. Too easy!`);
+        setSuccessMessage(`Scored ${fetchedCount} price${fetchedCount > 1 ? 's' : ''}. Too easy!`);
         setShowSuccessModal(true);
       } else if (fetchedCount > 0 && failedCount > 0) {
         setSuccessTitle('Nearly There');
-        setSuccessMessage(`Got ${fetchedCount} price${fetchedCount > 1 ? 's' : ''} using ${methodName}, but ${failedCount} item${failedCount > 1 ? 's' : ''} gave us the slip. ${useBunningsApi ? 'Bunnings API might be having a rough one.' : 'Try tweaking material names or switching stores in Settings.'}`);
+        setSuccessMessage(`Got ${fetchedCount} price${fetchedCount > 1 ? 's' : ''}, but ${failedCount} item${failedCount > 1 ? 's' : ''} gave us the slip. ${useBunningsApi ? 'Bunnings API might be having a rough one.' : 'Try tweaking material names or switching stores in Settings.'}`);
         setShowSuccessModal(true);
       } else {
         setSuccessTitle('All Done');
@@ -1078,7 +1104,7 @@ export function MaterialsListScreen() {
         console.error('Error fetching prices:', error);
         setSuccessType('error');
         setSuccessTitle('Crikey!');
-        setSuccessMessage(`Something went wrong fetching prices with ${methodName}. ${useBunningsApi ? 'Bunnings API might be on smoko,' : 'The price service might be taking a sickie,'} or your internet\'s gone walkabout. Give it another crack later.`);
+        setSuccessMessage(`Something went wrong fetching prices. ${useBunningsApi ? 'Bunnings API might be on smoko,' : 'The price service might be taking a sickie,'} or your internet\'s gone walkabout. Give it another crack later.`);
         setShowSuccessModal(true);
       }
     } finally {
@@ -1246,20 +1272,27 @@ export function MaterialsListScreen() {
 
   const handleQuickQuantityUpdate = useCallback((materialId: string, delta: number) => {
     if (!currentQuote) return;
+    const material = materials.find(m => m.id === materialId);
+    if (!material) return;
+    const currentQty = localQuantities[materialId] ?? material.quantity;
+    const newQty = Math.max(1, currentQty + delta);
+    // Update local state instantly for immediate UI feedback
+    setLocalQuantities(prev => ({ ...prev, [materialId]: newQty }));
+    // Then update the store
     const updatedMaterials = materials.map(m => {
       if (m.id === materialId) {
-        const newQty = Math.max(1, m.quantity + delta);
         return updateMaterialTotalPrice({ ...m, quantity: newQty });
       }
       return m;
     });
     updateQuote({ ...currentQuote, materials: updatedMaterials } as any);
-  }, [currentQuote, materials, updateQuote]);
+  }, [currentQuote, materials, updateQuote, localQuantities]);
 
   const handleQuantityBlur = useCallback((materialId: string, value: string) => {
     if (!currentQuote) return;
     const parsed = parseInt(value, 10);
     const newQty = isNaN(parsed) || parsed < 1 ? 1 : parsed;
+    setLocalQuantities(prev => ({ ...prev, [materialId]: newQty }));
     const updatedMaterials = materials.map(m => {
       if (m.id === materialId) {
         return updateMaterialTotalPrice({ ...m, quantity: newQty });
@@ -1323,6 +1356,7 @@ export function MaterialsListScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
       >
+        <WebContainer>
         {isAiAnalyzing ? (
             <AiAnalyzingState onCancel={handleCancelGeneration} />
         ) : materials.length === 0 ? (
@@ -1494,8 +1528,8 @@ export function MaterialsListScreen() {
                                   </Pressable>
                                   <RNTextInput
                                     style={styles.qtyInput}
-                                    key={`${material.id}-${material.quantity}`}
-                                    defaultValue={String(material.quantity)}
+                                    key={`${material.id}-${localQuantities[material.id] ?? material.quantity}`}
+                                    defaultValue={String(localQuantities[material.id] ?? material.quantity)}
                                     onEndEditing={(e) => handleQuantityBlur(material.id, e.nativeEvent.text)}
                                     keyboardType="number-pad"
                                     selectTextOnFocus
@@ -1604,6 +1638,7 @@ export function MaterialsListScreen() {
 
         {/* Spacer for fixed bottom button */}
         <View style={{ height: 120 }} />
+        </WebContainer>
        </ScrollView>
 
       <FixedBottomButton
@@ -1660,7 +1695,7 @@ export function MaterialsListScreen() {
       <Portal>
         <Modal
           visible={showFetchEstimateModal}
-          onDismiss={() => setShowFetchEstimateModal(false)}
+          onDismiss={() => { setShowFetchEstimateModal(false); setFetchMinimized(true); }}
           dismissable={true}
           contentContainerStyle={styles.fetchEstimateModalContainer}
         >
@@ -1693,24 +1728,10 @@ export function MaterialsListScreen() {
                 ? `${chasingSubtitle} ${fetchProgress.current} of ${fetchProgress.total}`
                 : 'Warming up the ute...'}
             </Text>
-            {currentFetchingName ? (
-              <Text style={styles.fetchCurrentItem} numberOfLines={1}>
-                {currentFetchingName}
-              </Text>
-            ) : null}
-
-            {/* Scrolling item list */}
+            {/* Item list - show last 2 completed + current = max 3 */}
             <View style={styles.fetchItemsWindow}>
-              <ScrollView
-                ref={fetchItemsScrollRef}
-                style={styles.fetchItemsScroll}
-                contentContainerStyle={styles.fetchItemsContent}
-                showsVerticalScrollIndicator={false}
-                onContentSizeChange={() => {
-                  fetchItemsScrollRef.current?.scrollToEnd({ animated: true });
-                }}
-              >
-                {fetchedItemNames.map((item, index) => (
+              <View style={styles.fetchItemsContent}>
+                {fetchedItemNames.slice(-2).map((item, index) => (
                   <View key={index} style={styles.fetchItemRow}>
                     <MaterialCommunityIcons
                       name={item.success ? 'check-circle' as any : 'close-circle' as any}
@@ -1736,20 +1757,47 @@ export function MaterialsListScreen() {
                     </Text>
                   </View>
                 ) : null}
-              </ScrollView>
+              </View>
             </View>
 
             <Button
               mode="outlined"
-              onPress={() => setShowFetchEstimateModal(false)}
+              onPress={() => {
+                setShowFetchEstimateModal(false);
+                setFetchMinimized(true);
+              }}
               style={styles.fetchEstimateCloseButton}
               textColor={colors.textMuted}
+              icon="chevron-down"
             >
-              Hide
+              Minimize
             </Button>
           </View>
         </Modal>
       </Portal>
+
+      {/* Minimized fetch progress pill */}
+      {fetchMinimized && isFetchingPrices && (
+        <TouchableOpacity
+          style={styles.fetchMinimizedPill}
+          onPress={() => {
+            setFetchMinimized(false);
+            setShowFetchEstimateModal(true);
+          }}
+          activeOpacity={0.8}
+        >
+          <ActivityIndicator size={14} color={colors.primary} />
+          <Text style={styles.fetchMinimizedText} numberOfLines={1}>
+            {fetchProgress.total > 0
+              ? `${fetchProgress.current}/${fetchProgress.total}`
+              : 'Fetching...'}
+          </Text>
+          <View style={styles.fetchMinimizedProgressBg}>
+            <View style={[styles.fetchMinimizedProgressFill, { width: fetchProgress.total > 0 ? `${(fetchProgress.current / fetchProgress.total) * 100}%` : '0%' }]} />
+          </View>
+          <MaterialCommunityIcons name="chevron-up" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+      )}
 
       {/* Success Modal */}
       <AlertModal
@@ -2219,7 +2267,7 @@ const styles = StyleSheet.create({
   },
   fetchItemsWindow: {
     width: '100%',
-    maxHeight: 160,
+    maxHeight: 100,
     marginBottom: 20,
     borderRadius: 10,
     backgroundColor: colors.background,
@@ -2257,5 +2305,43 @@ const styles = StyleSheet.create({
   fetchEstimateCloseButton: {
     width: '100%',
     borderColor: colors.border,
+  },
+  fetchMinimizedPill: {
+    position: 'absolute',
+    bottom: 110,
+    left: 16,
+    right: 16,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  fetchMinimizedText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  fetchMinimizedProgressBg: {
+    flex: 1,
+    height: 4,
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  fetchMinimizedProgressFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+    borderRadius: 2,
   },
 });

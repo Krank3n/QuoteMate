@@ -346,12 +346,26 @@ export function QuotesListScreen() {
                 <View style={styles.emptyIconCircle}>
                   <MaterialCommunityIcons name="file-document-plus-outline" size={36} color={colors.primary} />
                 </View>
-                <Text style={styles.emptyTitle}>Nothing here yet, chief</Text>
+                <Text style={styles.emptyTitle}>
+                  {filterStatus === 'all' && "Nothing here yet, chief"}
+                  {filterStatus === 'draft' && "No drafts gathering dust"}
+                  {filterStatus === 'sent' && "Nothing out in the wild"}
+                  {filterStatus === 'accepted' && "No one's said yes... yet"}
+                  {filterStatus === 'rejected' && "Clean slate, no knockbacks"}
+                  {filterStatus === 'completed' && "No jobs wrapped up yet"}
+                </Text>
                 <Text style={styles.emptyText}>
-                  Time to drum up some work
+                  {filterStatus === 'all' && "Time to drum up some work"}
+                  {filterStatus === 'draft' && "You've fired off everything — good on ya"}
+                  {filterStatus === 'sent' && "Either no one's got a quote or they're all sorted"}
+                  {filterStatus === 'accepted' && "Send a few out and she'll be right"}
+                  {filterStatus === 'rejected' && "No one's given you the flick — beauty!"}
+                  {filterStatus === 'completed' && "Finish a job and it'll show up here, legend"}
                 </Text>
                 <Text style={styles.emptySubtext}>
-                  Tap + to bang out your first quote
+                  {filterStatus === 'all'
+                    ? "Tap + to bang out your first quote"
+                    : "Try another filter or tap + to whip one up"}
                 </Text>
               </View>
             )

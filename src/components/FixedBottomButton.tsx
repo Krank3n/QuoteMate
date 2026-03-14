@@ -290,6 +290,8 @@ const styles = StyleSheet.create({
   buttonContent: {
     gap: 8,
     paddingVertical: 16,
+    flex: 1,
+    justifyContent: 'center',
   },
   secondaryButton: {
     borderWidth: 2,
@@ -313,6 +315,7 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     backgroundColor: colors.surface,
     height: '100%',
+    flex: 1,
   },
   pulsingBorder: {
     position: 'absolute',

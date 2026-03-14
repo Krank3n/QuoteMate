@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, Animated } from 'react-native';
 import { Text, TextInput, Button, Surface, Title, ActivityIndicator } from 'react-native-paper';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -19,6 +19,13 @@ import { WebContainer } from '../components/WebContainer';
 
 // Needed for expo-auth-session to work properly
 WebBrowser.maybeCompleteAuthSession();
+
+// Detect in-app browsers (Facebook Messenger, Instagram, etc.) that block popups
+function isInAppBrowser(): boolean {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /FBAN|FBAV|Instagram|Line\/|Twitter|Snapchat|TikTok/i.test(ua);
+}
 
 // Save registration platform info so cloud functions know which platform the user signed up on
 async function saveRegistrationPlatform(uid: string, method: 'email' | 'google' | 'apple') {
@@ -61,6 +68,23 @@ export function AuthScreen() {
     androidClientId: androidClientId || undefined,
     webClientId: process.env.GOOGLE_OAUTH_WEB_CLIENT_ID || undefined,
   });
+
+  // Handle Google redirect result (for in-app browsers that can't use popups)
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      getRedirectResult(auth)
+        .then((result) => {
+          if (result) {
+            console.log('✅ Google Sign-In successful (redirect)');
+            saveRegistrationPlatform(result.user.uid, 'google');
+          }
+        })
+        .catch((error) => {
+          console.error('Google redirect sign-in error:', error);
+          setError('Failed to sign in with Google. Please try again.');
+        });
+    }
+  }, []);
 
   // Initialize screen with animation
   useEffect(() => {
@@ -170,9 +194,15 @@ export function AuthScreen() {
 
     try {
       if (Platform.OS === 'web') {
-        // Web: Use Firebase popup
-        setIsProcessingOAuth(true);
         const provider = new GoogleAuthProvider();
+        if (isInAppBrowser()) {
+          // In-app browsers (Messenger, Instagram, etc.) block popups — use redirect
+          await signInWithRedirect(auth, provider);
+          // Page will redirect, result handled by getRedirectResult on return
+          return;
+        }
+        // Normal browser: Use Firebase popup
+        setIsProcessingOAuth(true);
         const result = await signInWithPopup(auth, provider);
         await saveRegistrationPlatform(result.user.uid, 'google');
         // Keep loading state - App.tsx will handle navigation

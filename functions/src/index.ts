@@ -5,7 +5,9 @@ import cors from 'cors';
 import fetch from 'node-fetch';
 import {
   getUserEmail,
+  sendEmail,
   sendWelcomeEmail,
+  sendQuoteSentEmail,
   sendQuoteAcceptedEmail,
   sendQuoteDeclinedEmail,
   sendPaymentFailedEmail,
@@ -16,6 +18,7 @@ import {
   handleUnsubscribe,
   sendNewUserNotificationEmail,
   sendFeedbackEmail,
+  buildQuoteEmailHtml,
 } from './email';
 
 // Initialize Firebase Admin
@@ -2455,6 +2458,190 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
 });
 
 /**
+ * Send a quote to a client via Brevo email
+ * Generates acceptance link, sends branded HTML email, updates quote status
+ */
+export const sendQuoteEmail = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.standard);
+    if (!decodedToken) return;
+
+    const userId = decodedToken.uid;
+    const { quoteId, emailBody, recipientEmail } = req.body;
+
+    if (!quoteId || !emailBody || !recipientEmail) {
+      res.status(400).json({ error: 'Missing required fields: quoteId, emailBody, recipientEmail' });
+      return;
+    }
+
+    try {
+      const firestore = admin.firestore();
+
+      // Fetch quote
+      const quoteDoc = await firestore.doc(`users/${userId}/quotes/${quoteId}`).get();
+      if (!quoteDoc.exists) {
+        res.status(404).json({ error: 'Quote not found' });
+        return;
+      }
+      const quote = quoteDoc.data()!;
+
+      // Fetch business settings
+      const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
+      const business = settingsDoc.exists ? settingsDoc.data()! : {};
+
+      // Generate acceptance token
+      const token = crypto.randomBytes(32).toString('hex');
+      const hashedToken = hashToken(token);
+
+      // Store token on quote and in lookup collection
+      const batch = firestore.batch();
+      batch.update(quoteDoc.ref, {
+        acceptanceToken: hashedToken,
+        acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        status: 'sent',
+        aiEmailBody: emailBody,
+      });
+      batch.set(firestore.doc(`quoteAcceptanceTokens/${hashedToken}`), {
+        userId,
+        quoteId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
+
+      const acceptanceUrl = `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
+
+      // Build photo URLs from quote
+      const photoUrls = (quote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
+
+      // Resolve business logo URL (may be a local URI - use logoUrl if available from storage)
+      let logoUrl = business.logoStorageUrl || '';
+
+      // Build email HTML
+      const htmlContent = buildQuoteEmailHtml({
+        customerName: quote.customerName || 'Client',
+        emailBody,
+        jobName: quote.job?.name || 'Job',
+        materials: (quote.materials || []).map((m: any) => ({
+          name: m.name,
+          quantity: m.quantity,
+          unit: m.unit,
+          totalPrice: m.totalPrice || 0,
+          section: m.section,
+        })),
+        laborTotal: quote.laborTotal || 0,
+        materialsSubtotal: quote.materialsSubtotal || 0,
+        subtotal: quote.subtotal || 0,
+        gst: quote.gst || 0,
+        total: quote.total || 0,
+        acceptanceUrl,
+        photoUrls,
+        business: {
+          name: business.businessName || '',
+          abn: business.abn,
+          phone: business.phone,
+          email: business.email,
+          address: business.address,
+          logoUrl,
+          brandColor: business.brandColor,
+        },
+      });
+
+      // Send via Brevo
+      const sent = await sendEmail({
+        to: recipientEmail,
+        subject: `Quotation from ${business.businessName || 'Your Tradie'} - ${quote.job?.name || 'Job'}`,
+        htmlContent,
+        category: 'transactional',
+        userId,
+        tags: ['quote-to-client'],
+      });
+
+      if (!sent) {
+        res.status(500).json({ error: 'Failed to send email' });
+        return;
+      }
+
+      // Send confirmation to tradie
+      const tradieEmail = await getUserEmail(userId);
+      if (tradieEmail) {
+        await sendQuoteSentEmail(
+          tradieEmail,
+          quote.customerName || 'Client',
+          quote.quoteNumber || quoteId,
+          quote.total || 0,
+          userId
+        );
+      }
+
+      res.json({ success: true, acceptanceUrl });
+    } catch (error: any) {
+      console.error('sendQuoteEmail error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Generate AI email body for a quote (web platform)
+ */
+export const generateQuoteEmail = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
+    if (!decodedToken) return;
+
+    const { prompt } = req.body;
+    if (!prompt) {
+      res.status(400).json({ error: 'Missing prompt' });
+      return;
+    }
+
+    try {
+      const anthropicApiKey = functions.config().anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+      if (!anthropicApiKey) {
+        res.status(500).json({ error: 'API key not configured' });
+        return;
+      }
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicApiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 1000,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Anthropic API returned ${response.status}`);
+      }
+
+      const data = await response.json() as any;
+      const emailBody = data.content?.[0]?.text || '';
+
+      res.json({ emailBody });
+    } catch (error: any) {
+      console.error('generateQuoteEmail error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
  * Get quote data for the acceptance web page
  * Looks up quote by token, validates expiration, returns public quote data
  */
@@ -2574,6 +2761,10 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
       }
 
       // Return quote data for the acceptance page (excluding sensitive fields)
+      const photoUrls = (foundQuote.photos || [])
+        .map((p: any) => p.storageUrl)
+        .filter(Boolean);
+
       res.status(200).json({
         success: true,
         quote: {
@@ -2595,11 +2786,15 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           total: foundQuote.total,
           notes: foundQuote.notes,
           createdAt: foundQuote.createdAt,
+          aiEmailBody: foundQuote.aiEmailBody || null,
+          photoUrls: photoUrls,
         },
         business: {
           name: businessSettings?.businessName || 'Your Trade Business',
           email: businessSettings?.email,
           phone: businessSettings?.phone,
+          logoUrl: businessSettings?.logoStorageUrl || null,
+          brandColor: businessSettings?.brandColor || null,
         },
       });
     } catch (error: any) {
@@ -2878,9 +3073,16 @@ function generateAcceptancePage(token: string): string {
       text-align: center;
       margin-bottom: 24px;
     }
+    .logo img {
+      width: 80px;
+      height: 80px;
+      border-radius: 16px;
+      object-fit: cover;
+      margin-bottom: 12px;
+    }
     .logo h1 {
       font-size: 28px;
-      color: #f97316;
+      color: var(--accent, #f97316);
       margin-bottom: 8px;
     }
     .logo p { color: #94a3b8; font-size: 14px; }
@@ -2890,6 +3092,28 @@ function generateAcceptancePage(token: string): string {
       font-weight: 600;
       margin-bottom: 8px;
       color: #f8fafc;
+    }
+    .ai-summary {
+      background: #0f172a;
+      padding: 16px;
+      border-radius: 8px;
+      color: #cbd5e1;
+      line-height: 1.7;
+      font-size: 15px;
+      border-left: 3px solid var(--accent, #f97316);
+    }
+    .photos-grid {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+    .photos-grid img {
+      width: 140px;
+      height: 105px;
+      object-fit: cover;
+      border-radius: 8px;
+      flex-shrink: 0;
     }
     .quote-number {
       text-align: center;
@@ -2921,7 +3145,7 @@ function generateAcceptancePage(token: string): string {
     .material-row:last-child { border-bottom: none; }
     .material-name { flex: 1; }
     .material-qty { color: #94a3b8; margin-right: 16px; }
-    .material-price { font-weight: 500; color: #f97316; }
+    .material-price { font-weight: 500; color: var(--accent, #f97316); }
     .totals-row {
       display: flex;
       justify-content: space-between;
@@ -2934,7 +3158,7 @@ function generateAcceptancePage(token: string): string {
       border-top: 2px solid #334155;
       margin-top: 8px;
     }
-    .totals-row.total .amount { color: #f97316; }
+    .totals-row.total .amount { color: var(--accent, #f97316); }
     .notes {
       background: #0f172a;
       padding: 16px;
@@ -2992,7 +3216,7 @@ function generateAcceptancePage(token: string): string {
       width: 40px;
       height: 40px;
       border: 3px solid #334155;
-      border-top-color: #f97316;
+      border-top-color: var(--accent, #f97316);
       border-radius: 50%;
       animation: spin 1s linear infinite;
       margin: 0 auto 16px;
@@ -3015,7 +3239,7 @@ function generateAcceptancePage(token: string): string {
       margin-bottom: 16px;
     }
     .success h2 { color: #22c55e; margin-bottom: 12px; }
-    .already-responded h2 { color: #f97316; }
+    .already-responded h2 { color: var(--accent, #f97316); }
     .contact-info {
       background: #0f172a;
       padding: 16px;
@@ -3023,7 +3247,7 @@ function generateAcceptancePage(token: string): string {
       margin-top: 16px;
     }
     .contact-info p { margin-bottom: 8px; }
-    .contact-info a { color: #f97316; text-decoration: none; }
+    .contact-info a { color: var(--accent, #f97316); text-decoration: none; }
   </style>
 </head>
 <body>
@@ -3083,6 +3307,48 @@ function generateAcceptancePage(token: string): string {
     function renderQuote(quote, business) {
       const content = document.getElementById('content');
 
+      // Set brand color as CSS variable
+      if (business.brandColor) {
+        document.documentElement.style.setProperty('--accent', business.brandColor);
+      }
+
+      // Business logo
+      var logoHtml = '';
+      if (business.logoUrl) {
+        logoHtml = '<img src="' + escapeHtml(business.logoUrl) + '" alt="' + escapeHtml(business.name) + '" />';
+      }
+
+      // Update logo section
+      var logoSection = document.querySelector('.logo');
+      if (logoSection) {
+        logoSection.innerHTML = logoHtml +
+          '<h1>' + escapeHtml(business.name) + '</h1>' +
+          '<p>Professional Quoting Made Easy</p>';
+      }
+
+      // AI summary section
+      var aiSummaryHtml = '';
+      if (quote.aiEmailBody) {
+        aiSummaryHtml =
+          '<div class="section">' +
+            '<div class="section-title">Scope of Work</div>' +
+            '<div class="ai-summary">' + escapeHtml(quote.aiEmailBody).replace(/\\n/g, '<br/>') + '</div>' +
+          '</div>';
+      }
+
+      // Photos section
+      var photosHtml = '';
+      if (quote.photoUrls && quote.photoUrls.length > 0) {
+        var imgs = quote.photoUrls.map(function(url) {
+          return '<img src="' + escapeHtml(url) + '" alt="Job photo" />';
+        }).join('');
+        photosHtml =
+          '<div class="section">' +
+            '<div class="section-title">Site Photos</div>' +
+            '<div class="photos-grid">' + imgs + '</div>' +
+          '</div>';
+      }
+
       let materialsHtml = '';
       if (quote.materials && quote.materials.length > 0) {
         materialsHtml = quote.materials.map(m =>
@@ -3098,11 +3364,15 @@ function generateAcceptancePage(token: string): string {
         '<div class="business-name">' + escapeHtml(business.name) + '</div>' +
         '<div class="quote-number">Quote #' + escapeHtml(quote.quoteNumber || quote.id) + '</div>' +
 
+        aiSummaryHtml +
+
         '<div class="section">' +
           '<div class="section-title">Job Details</div>' +
           '<div class="job-name">' + escapeHtml(quote.jobName || 'Quote') + '</div>' +
           (quote.jobDescription ? '<div class="job-desc">' + escapeHtml(quote.jobDescription) + '</div>' : '') +
         '</div>' +
+
+        photosHtml +
 
         (materialsHtml ?
           '<div class="section">' +

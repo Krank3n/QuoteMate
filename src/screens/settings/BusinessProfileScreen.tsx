@@ -20,6 +20,7 @@ import {
   Title,
   IconButton,
   Button,
+  Switch,
 } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -49,6 +50,7 @@ export function BusinessProfileScreen() {
   const [hexInput, setHexInput] = useState('');
   const [laborRate, setLaborRate] = useState('85');
   const [markup, setMarkup] = useState('20');
+  const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -64,6 +66,7 @@ export function BusinessProfileScreen() {
       setBrandColor(businessSettings.brandColor);
       setLaborRate(businessSettings.defaultLaborRate?.toString() || '85');
       setMarkup(businessSettings.defaultMarkup?.toString() || '20');
+      setTransportMarkupEnabled(businessSettings.transportMarkupEnabled !== false);
     }
   }, [businessSettings]);
 
@@ -133,6 +136,7 @@ export function BusinessProfileScreen() {
         brandColor: brandColor,
         defaultLaborRate: parseFloat(laborRate) || 85,
         defaultMarkup: parseFloat(markup) || 20,
+        transportMarkupEnabled,
       });
       setShowSuccessModal(true);
     } catch (error) {
@@ -260,14 +264,28 @@ export function BusinessProfileScreen() {
             />
 
             <TextInput
-              label="Markup Percentage"
+              label="Baseline Markup"
               value={markup}
               onChangeText={setMarkup}
               mode="outlined"
-              style={[styles.input, { marginBottom: 0 }]}
+              style={styles.input}
               keyboardType="decimal-pad"
               right={<TextInput.Affix text="%" />}
             />
+
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Transport / Logistics Markup</Text>
+                <Text style={styles.toggleDescription}>
+                  Auto-calculate travel markup based on job distance
+                </Text>
+              </View>
+              <Switch
+                value={transportMarkupEnabled}
+                onValueChange={setTransportMarkupEnabled}
+                color={colors.primary}
+              />
+            </View>
           </Surface>
 
           <Surface style={styles.card}>
@@ -523,5 +541,25 @@ const styles = StyleSheet.create({
   },
   hexApply: {
     alignSelf: 'center',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  toggleLabel: {
+    flex: 1,
+    marginRight: 12,
+  },
+  toggleTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.onSurface,
+  },
+  toggleDescription: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 2,
   },
 });

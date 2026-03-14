@@ -27,6 +27,7 @@ import { useNavigation } from '@react-navigation/native';
 
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode, useDocumentList } from '../../utils/documentMode';
+import { calculateTravelAdjustment } from '../../utils/travelCalculator';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -43,7 +44,7 @@ export function CustomerDetailsScreen() {
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { saveDraft } = useStore();
+  const { saveDraft, businessSettings } = useStore();
   const documentList = useDocumentList();
 
   // For compatibility, alias to currentQuote (used throughout this file)
@@ -156,6 +157,27 @@ export function CustomerDetailsScreen() {
     updateQuote(updatedQuote);
     saveDraft(updatedQuote);
     navigation.navigate('MaterialsList');
+
+    // Fire-and-forget: calculate travel distance in background
+    const trimmedJobAddress = jobAddress.trim();
+    if (businessSettings?.address && trimmedJobAddress) {
+      calculateTravelAdjustment(businessSettings.address, trimmedJobAddress)
+        .then((result) => {
+          if (result) {
+            // Only set travel adjustment if user hasn't already manually adjusted it
+            const hasExistingAdjustment = updatedQuote.travelAdjustment !== undefined && updatedQuote.travelAdjustment > 0;
+            updateDocument({
+              ...updatedQuote,
+              estimatedDistance: result.distance,
+              estimatedFuelCost: result.estimatedFuelCost,
+              ...(hasExistingAdjustment ? {} : { travelAdjustment: result.suggestedMarkup }),
+            });
+          }
+        })
+        .catch(() => {
+          // Silently fail - user can adjust manually
+        });
+    }
   };
 
   if (!currentQuote) {

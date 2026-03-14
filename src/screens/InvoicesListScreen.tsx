@@ -265,14 +265,24 @@ export function InvoicesListScreen() {
                 <View style={styles.emptyIconCircle}>
                   <MaterialCommunityIcons name="receipt-text-outline" size={36} color={colors.primary} />
                 </View>
-                <Text style={styles.emptyTitle}>{emptyMessage.title}</Text>
+                <Text style={styles.emptyTitle}>
+                  {filterStatus === 'all' && emptyMessage.title}
+                  {filterStatus === 'draft' && "No drafts lying around"}
+                  {filterStatus === 'sent' && "Nothing waiting on payment"}
+                  {filterStatus === 'paid' && "No one's coughed up yet"}
+                  {filterStatus === 'overdue' && "No one owes ya — stoked!"}
+                </Text>
                 <Text style={styles.emptyText}>
-                  {emptyMessage.subtitle}
+                  {filterStatus === 'all' && emptyMessage.subtitle}
+                  {filterStatus === 'draft' && "You're either on top of it or haven't started"}
+                  {filterStatus === 'sent' && "Send a bill and play the waiting game"}
+                  {filterStatus === 'paid' && "Time to chase up some invoices, mate"}
+                  {filterStatus === 'overdue' && "Everyone's paid up — that's rarer than rocking horse poo"}
                 </Text>
                 <Text style={styles.emptySubtext}>
-                  {isPro
-                    ? "Hit + and send someone a bill"
-                    : "Upgrade to Pro to start invoicing"}
+                  {filterStatus === 'all'
+                    ? (isPro ? "Hit + and send someone a bill" : "Upgrade to Pro to start invoicing")
+                    : "Try another filter or tap + to fire one off"}
                 </Text>
                 {!isPro && <View style={{ marginTop: 12 }}><ProBadge /></View>}
               </View>

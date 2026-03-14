@@ -45,6 +45,13 @@ export interface FavoriteProductMapping {
   imageUrl?: string; // Product image
 }
 
+export interface QuotePhoto {
+  id: string;
+  storageUrl: string;    // Firebase Storage download URL
+  thumbnailUrl?: string;  // Optional smaller version
+  annotated?: boolean;    // Whether photo has been annotated
+}
+
 export interface Job {
   id: string;
   name: string;
@@ -78,12 +85,20 @@ export interface Quote {
   draftStep?: string; // Screen name where user left off during quote flow (e.g., 'CustomerDetails')
   notes?: string;
   aiSkipped?: boolean; // Flag to indicate AI analysis was intentionally skipped
+  // Travel adjustment
+  travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
+  estimatedDistance?: number;   // km (straight-line)
+  estimatedFuelCost?: number;  // AUD (round trip)
   // Quote acceptance via email link fields
   acceptanceToken?: string; // 64-char secure token for email acceptance link
   acceptanceTokenCreatedAt?: Date; // When the token was generated (for 30-day expiration)
   respondedAt?: Date; // When client accepted/rejected via email link
   respondedBy?: string; // Client identifier (email or name from form)
   clientNotes?: string; // Optional feedback from client when responding
+  // Job photos
+  photos?: QuotePhoto[];
+  // AI email content (stored at send time for acceptance page)
+  aiEmailBody?: string;
 }
 
 export interface JobTemplate {
@@ -170,6 +185,7 @@ export interface BusinessSettings {
   logoUri?: string; // Local file URI for company logo
   defaultLaborRate: number;
   defaultMarkup: number;
+  transportMarkupEnabled?: boolean; // Whether to include transport/logistics markup on quotes (default: true)
   // Trade type
   tradeType?: TradeType; // Default: 'all'
   // New: Trade category and niche for improved targeting (multi-select)
@@ -232,6 +248,7 @@ export interface QuoteCalculation {
   laborTotal: number;
   subtotal: number;
   markupAmount: number;
+  travelAdjustmentAmount: number;
   gst: number;
   total: number;
 }
@@ -330,4 +347,9 @@ export interface Invoice {
   sourceQuoteId?: string;
 
   notes?: string;
+
+  // Travel adjustment
+  travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
+  estimatedDistance?: number;   // km (straight-line)
+  estimatedFuelCost?: number;  // AUD (round trip)
 }
