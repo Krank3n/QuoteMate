@@ -536,37 +536,81 @@ export function ReferralScreen() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <WebContainer>
-          {/* Hero */}
-          <Surface style={styles.heroCard}>
-            <MaterialCommunityIcons name="gift" size={48} color={colors.secondary} />
-            <Title style={styles.heroTitle}>Refer a Friend, Get 3 Months Free</Title>
-            <Text style={styles.heroText}>
-              Share your referral code with mates. When they sign up and upgrade to Pro,
-              you get 3 months of free Pro access.
-            </Text>
-          </Surface>
+          {/* QR Hero Card */}
+          {referralInfo?.referralCode ? (
+            <Surface style={styles.adQrCard}>
+              <Image
+                source={require('../../../assets/logo-scaled.png')}
+                style={styles.adLogo}
+                resizeMode="contain"
+              />
 
-          {/* Referral Code */}
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Your Referral Code</Title>
-            {referralInfo?.referralCode ? (
-              <>
-                <TouchableOpacity style={styles.codeBox} onPress={handleCopyCode}>
-                  <Text style={styles.codeText}>{referralInfo.referralCode}</Text>
-                  <MaterialCommunityIcons
-                    name={copied ? 'check' : 'content-copy'} size={22}
-                    color={copied ? colors.success : colors.primary}
-                  />
-                </TouchableOpacity>
-                {copied && <Text style={styles.copiedText}>Copied to clipboard!</Text>}
+              <View style={styles.qrContainer}>
+                <QRCode value={referralLink} size={240} backgroundColor="#ffffff" color="#000000" />
+              </View>
 
-                <TouchableOpacity style={[styles.shareButton, { marginTop: 14 }]} onPress={handleShare}>
+              <Text style={styles.adScanText}>Scan to download on iOS & Android</Text>
+
+              <View style={styles.regularQrSubtext}>
+                <MaterialCommunityIcons name="gift" size={18} color={colors.secondary} />
+                <Text style={styles.regularQrSubtextText}>
+                  You both get 3 months free Pro when they sign up!
+                </Text>
+              </View>
+
+              <View style={styles.buttonRow}>
+                <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
                   <MaterialCommunityIcons name="share-variant" size={20} color={colors.white} />
                   <Text style={styles.shareButtonText}>Share with Mates</Text>
                 </TouchableOpacity>
-              </>
-            ) : renderGenerateCode()}
-          </Surface>
+                <TouchableOpacity
+                  style={styles.codeToggleButton}
+                  onPress={() => { handleCopyCode(); setShowCode(true); }}
+                >
+                  <MaterialCommunityIcons
+                    name={copied ? 'check' : 'content-copy'} size={20}
+                    color={copied ? colors.success : colors.primary}
+                  />
+                  <Text style={[styles.codeToggleText, copied && { color: colors.success }]}>
+                    {copied ? 'Copied!' : 'Code'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {showCode && (
+                <View style={styles.codeBox}>
+                  <Text style={styles.codeText}>{referralInfo.referralCode}</Text>
+                </View>
+              )}
+            </Surface>
+          ) : (
+            <Surface style={styles.heroCard}>
+              <MaterialCommunityIcons name="gift" size={48} color={colors.secondary} />
+              <Title style={styles.heroTitle}>Refer a Friend, Get 3 Months Free</Title>
+              <Text style={styles.heroText}>
+                Share your referral code with mates. When they sign up and upgrade to Pro,
+                you get 3 months of free Pro access.
+              </Text>
+              {renderGenerateCode()}
+            </Surface>
+          )}
+
+          {/* Feature pills */}
+          {referralInfo?.referralCode && (
+            <View style={styles.adFeaturePills}>
+              {[
+                { icon: 'robot' as const, label: 'AI-Powered' },
+                { icon: 'currency-usd' as const, label: 'Live Pricing' },
+                { icon: 'file-document-outline' as const, label: 'GST Ready' },
+                { icon: 'wifi-off' as const, label: 'Offline' },
+              ].map((feature, index) => (
+                <View key={index} style={styles.adFeaturePill}>
+                  <MaterialCommunityIcons name={feature.icon} size={14} color={colors.primary} />
+                  <Text style={styles.adFeaturePillText}>{feature.label}</Text>
+                </View>
+              ))}
+            </View>
+          )}
 
           {/* Stats */}
           {referralInfo?.referralCode && (
@@ -909,6 +953,20 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 16,
     gap: 8,
+  },
+  regularQrSubtext: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  regularQrSubtextText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.secondary,
+    textAlign: 'center',
   },
   qrContainer: {
     backgroundColor: '#ffffff',
