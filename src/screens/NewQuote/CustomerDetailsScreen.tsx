@@ -3,7 +3,7 @@
  * Second step: Enter customer information with smart auto-complete
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -31,6 +31,8 @@ import { calculateTravelAdjustment } from '../../utils/travelCalculator';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
+import { useTourRefs } from '../../components/tour/useTourRefs';
+import { ScreenTour } from '../../components/tour/ScreenTour';
 
 interface CustomerInfo {
   name: string;
@@ -52,6 +54,16 @@ export function CustomerDetailsScreen() {
   const updateQuote = updateDocument;
   // Use combined document list for customer auto-complete
   const quotes = documentList;
+
+  // Tour refs
+  const { registerRef } = useTourRefs();
+  const customerNameRef = useRef<View>(null);
+  const jobAddressRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (customerNameRef.current) registerRef('customerName', customerNameRef.current);
+    if (jobAddressRef.current) registerRef('jobAddress', jobAddressRef.current);
+  });
 
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
@@ -232,6 +244,7 @@ export function CustomerDetailsScreen() {
 
             {/* Customer Name Input */}
             <TextInput
+              ref={customerNameRef}
               label="Customer Name *"
               value={customerName}
               onChangeText={handleCustomerNameChange}
@@ -307,6 +320,7 @@ export function CustomerDetailsScreen() {
             />
 
             <TextInput
+              ref={jobAddressRef}
               label="Job Address"
               value={jobAddress}
               onChangeText={setJobAddress}
@@ -324,6 +338,8 @@ export function CustomerDetailsScreen() {
         onPress={handleNext}
         disabled={!customerName.trim()}
       />
+
+      <ScreenTour tourId="customerDetails" />
     </View>
   );
 }

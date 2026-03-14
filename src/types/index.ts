@@ -353,3 +353,12 @@ export interface Invoice {
   estimatedDistance?: number;   // km (straight-line)
   estimatedFuelCost?: number;  // AUD (round trip)
 }
+
+// Notification preferences (stored at users/{userId}/settings/notificationPreferences)
+export interface NotificationPreferences {
+  quoteUpdates: boolean;       // Quote accepted/rejected/viewed/expiring
+  invoiceUpdates: boolean;     // Invoice paid/overdue
+  dailyMotivation: boolean;    // Morning Aussie motivation
+  milestoneCelebrations: boolean; // Quote count milestones
+  inactivityNudges: boolean;   // "We miss ya" nudges
+}

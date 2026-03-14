@@ -31,6 +31,8 @@ import {
   TotalsSection,
   documentStyles,
 } from '../../components/document';
+import { useTourRefs } from '../../components/tour/useTourRefs';
+import { ScreenTour } from '../../components/tour/ScreenTour';
 
 // Confetti piece definition (reused from AlertModal pattern)
 interface ConfettiPiece {
@@ -59,6 +61,16 @@ export function QuotePreviewScreen() {
   const navigation = useNavigation<any>();
   const { currentQuote, saveQuote, businessSettings, setCurrentQuote, nextQuoteNumber } = useStore();
   const insets = useSafeAreaInsets();
+
+  // Tour refs
+  const { registerRef } = useTourRefs();
+  const editSectionsRef = useRef<View>(null);
+  const sendButtonRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (editSectionsRef.current) registerRef('editSections', editSectionsRef.current);
+    if (sendButtonRef.current) registerRef('sendButton', sendButtonRef.current);
+  });
 
   const [notes, setNotes] = useState(currentQuote?.notes || '');
   const savedNotesRef = useRef(currentQuote?.notes || '');
@@ -285,6 +297,7 @@ export function QuotePreviewScreen() {
           </Text>
         </View>
 
+        <View ref={editSectionsRef}>
         <CustomerSection
           customerName={currentQuote.customerName}
           customerEmail={currentQuote.customerEmail}
@@ -297,6 +310,7 @@ export function QuotePreviewScreen() {
           job={currentQuote.job}
           onEdit={() => navigation.navigate('JobDetails')}
         />
+        </View>
 
         <MaterialsSection
           materials={currentQuote.materials}
@@ -347,7 +361,7 @@ export function QuotePreviewScreen() {
         </WebContainer>
       </ScrollView>
 
-      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View ref={sendButtonRef} style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
         <SendQuoteButton
           quote={currentQuote}
           businessSettings={businessSettings}
@@ -415,6 +429,9 @@ export function QuotePreviewScreen() {
           </Animated.View>
         )}
       </View>
+
+      {/* Screen Tour */}
+      <ScreenTour tourId="quotePreview" delay={1500} />
     </View>
   );
 }

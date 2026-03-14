@@ -12,14 +12,12 @@ import {
   IconButton,
 } from 'react-native-paper';
 import { format, formatDistanceToNow, differenceInDays } from 'date-fns';
-import * as Print from 'expo-print';
-import * as MailComposer from 'expo-mail-composer';
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Quote, BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { generateQuotePDF, exportQuotePDF } from '../utils/pdfGenerator';
+import { exportQuotePDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
 import { selectionTap, successTap } from '../utils/haptics';
 import { SwipeableCard } from './SwipeableCard';
@@ -29,6 +27,8 @@ import { ShimmerOverlay } from './ShimmerOverlay';
 import { TapRipple } from './TapRipple';
 import { GrainOverlay } from './GrainOverlay';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
+import { EmailPreviewModal } from './EmailPreviewModal';
+import { generateQuoteEmail, getDefaultEmailBody } from '../services/llmService';
 
 interface QuoteCardProps {
   quote: Quote;
@@ -39,7 +39,6 @@ interface QuoteCardProps {
   onDuplicate: (quote: Quote) => void;
   onSave: (quote: Quote) => void;
   onStatusChange?: (quote: Quote) => void;
-  onEmailDialogOpen?: (quote: Quote) => void;
   onConvertToInvoice?: (quote: Quote) => void;
 }
 
@@ -52,11 +51,13 @@ export const QuoteCard = React.memo(function QuoteCard({
   onDuplicate,
   onSave,
   onStatusChange,
-  onEmailDialogOpen,
   onConvertToInvoice,
 }: QuoteCardProps) {
   const [menuVisible, setMenuVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [emailPreviewVisible, setEmailPreviewVisible] = useState(false);
+  const [emailBody, setEmailBody] = useState('');
+  const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const idleAnim = useRef(new Animated.Value(0)).current;
   const idleTilt = useRef(new Animated.Value(0)).current;
@@ -101,69 +102,68 @@ export const QuoteCard = React.memo(function QuoteCard({
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const handleSendQuote = async () => {
+    setIsGeneratingEmail(true);
+    setEmailPreviewVisible(true);
+
     try {
-      if (Platform.OS === 'web') {
-        // Generate PDF HTML
-        const html = await generateQuotePDF(quote, businessSettings, { isPro });
-        const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-
-        // Create a hidden iframe to print the PDF
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        document.body.appendChild(iframe);
-
-        const iframeDoc = iframe.contentWindow?.document;
-        if (iframeDoc) {
-          iframeDoc.open();
-          iframeDoc.write(html);
-          iframeDoc.close();
-
-          // Wait for content to load then trigger print dialog
-          iframe.onload = () => {
-            setTimeout(() => {
-              iframe.contentWindow?.print();
-              // Clean up after a delay
-              setTimeout(() => {
-                document.body.removeChild(iframe);
-              }, 1000);
-            }, 250);
-          };
-        }
-
-        // Show email client selector dialog immediately
-        onEmailDialogOpen?.(quote);
-      } else {
-        // Mobile platforms
-        // Check if email is available
-        const isAvailable = await MailComposer.isAvailableAsync();
-        if (!isAvailable) {
-          Alert.alert('Email Not Available', 'Email is not configured on this device. Please set up an email account first.');
-          return;
-        }
-
-        // Generate PDF with custom filename
-        const html = await generateQuotePDF(quote, businessSettings, { isPro });
-        const filename = `Quote_${quote.customerName.replace(/\s+/g, '_')}_${quote.job.name.replace(/\s+/g, '_')}_${format(quote.updatedAt, 'dd-MMM-yyyy')}.pdf`;
-        const { uri } = await Print.printToFileAsync({ html, base64: false });
-
-        // Compose email
-        const result = await MailComposer.composeAsync({
-          recipients: quote.customerEmail ? [quote.customerEmail] : [],
-          subject: `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`,
-          body: `Hi ${quote.customerName},\n\nPlease find attached your quotation for ${quote.job.name}.\n\nTotal: ${formatCurrency(quote.total)}\n\nThis quote is valid for 30 days from the date of issue.\n\nIf you have any questions, please don't hesitate to contact us.\n\nBest regards,\n${businessSettings?.businessName || 'Your Business'}`,
-          attachments: [uri],
+      if (isPro) {
+        const body = await generateQuoteEmail({
+          jobName: quote.job.name,
+          jobDescription: quote.job.description || '',
+          materials: quote.materials.map(m => ({
+            name: m.name,
+            quantity: m.quantity,
+            unit: m.unit,
+          })),
+          laborHours: quote.laborHours,
+          total: quote.total,
+          businessName: businessSettings?.businessName || '',
+          customerName: quote.customerName,
         });
-
-        // Update quote status to 'sent' if email was sent
-        if (result.status === 'sent') {
-          const updatedQuote = { ...quote, status: 'sent' as const };
-          await onSave(updatedQuote);
-          Alert.alert('Success', 'Quote sent successfully and marked as sent!');
-        }
+        setEmailBody(body);
+      } else {
+        setEmailBody(getDefaultEmailBody(
+          quote.customerName,
+          quote.job.name,
+          quote.total,
+          businessSettings?.businessName || 'Your Business'
+        ));
       }
     } catch (error) {
-      console.error('Send error:', error);
-      Alert.alert('Error', 'Failed to send quote. Please try again.');
+      console.error('Email generation failed:', error);
+      setEmailBody(getDefaultEmailBody(
+        quote.customerName,
+        quote.job.name,
+        quote.total,
+        businessSettings?.businessName || 'Your Business'
+      ));
+    } finally {
+      setIsGeneratingEmail(false);
+    }
+  };
+
+  const handleRegenerateEmail = async () => {
+    setIsGeneratingEmail(true);
+    try {
+      const body = await generateQuoteEmail({
+        jobName: quote.job.name,
+        jobDescription: quote.job.description || '',
+        materials: quote.materials.map(m => ({
+          name: m.name,
+          quantity: m.quantity,
+          unit: m.unit,
+        })),
+        laborHours: quote.laborHours,
+        total: quote.total,
+        businessName: businessSettings?.businessName || '',
+        customerName: quote.customerName,
+      });
+      setEmailBody(body);
+    } catch (error) {
+      console.error('Email regeneration failed:', error);
+      Alert.alert('Error', 'Could not regenerate email. Please try again.');
+    } finally {
+      setIsGeneratingEmail(false);
     }
   };
 
@@ -323,6 +323,18 @@ export const QuoteCard = React.memo(function QuoteCard({
       secondaryButtonText="Cancel"
       secondaryButtonAction={() => setDeleteModalVisible(false)}
       showConfetti={false}
+    />
+
+    <EmailPreviewModal
+      visible={emailPreviewVisible}
+      onDismiss={() => setEmailPreviewVisible(false)}
+      quote={quote}
+      businessSettings={businessSettings}
+      emailBody={emailBody}
+      onEmailBodyChange={setEmailBody}
+      onRegenerate={handleRegenerateEmail}
+      isPro={isPro}
+      isRegenerating={isGeneratingEmail}
     />
     </>
   );

@@ -244,6 +244,45 @@ class FirestoreService {
   }
 
   /**
+   * Save tour status to Firestore
+   */
+  async saveTourStatus(hasSeenTour: boolean): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) return;
+
+    try {
+      const tourRef = doc(db, 'users', userId, 'profile', 'tour');
+      await setDoc(tourRef, {
+        hasSeenTour,
+        syncedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Error saving tour status to Firestore:', error);
+    }
+  }
+
+  /**
+   * Load tour status from Firestore
+   */
+  async loadTourStatus(): Promise<boolean | null> {
+    const userId = this.getUserId();
+    if (!userId) return null;
+
+    try {
+      const tourRef = doc(db, 'users', userId, 'profile', 'tour');
+      const snapshot = await getDoc(tourRef);
+
+      if (snapshot.exists()) {
+        return snapshot.data().hasSeenTour || false;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error loading tour status from Firestore:', error);
+      return null;
+    }
+  }
+
+  /**
    * Save subscription status to Firestore
    */
   async saveSubscriptionStatus(subscriptionStatus: SubscriptionStatus): Promise<void> {

@@ -20,6 +20,7 @@ import {
   sendFeedbackEmail,
   buildQuoteEmailHtml,
 } from './email';
+import { getAussieMessage, AussieEvent } from './aussieNotifications';
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -49,6 +50,11 @@ const PLATFORM_FEES: Record<string, { percentage: number; fixedCents: number }> 
 };
 
 const DEFAULT_COMMISSION_RATE = 0.50; // 50% of net revenue
+
+// Emails to auto-grant affiliate status on signup
+const PENDING_AFFILIATE_EMAILS = [
+  'chargedtm11@gmail.com',
+];
 
 // Pricing in cents (AUD)
 const PRODUCT_PRICES: Record<string, number> = {
@@ -2667,6 +2673,7 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
       const db = admin.firestore();
       let foundQuote: any = null;
       let businessSettings: any = null;
+      let quoteRef: FirebaseFirestore.DocumentReference | null = null;
       const tokenHash = hashToken(token);
 
       // O(1) lookup via dedicated tokens collection (hashed)
@@ -2684,6 +2691,7 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
 
         if (quoteDoc.exists) {
           foundQuote = quoteDoc.data();
+          quoteRef = quoteDoc.ref;
 
           const settingsDoc = await db.collection('users').doc(tokenData.userId)
             .collection('settings').doc('business').get();
@@ -2718,6 +2726,7 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
 
           if (!quotesSnapshot.empty) {
             foundQuote = quotesSnapshot.docs[0].data();
+            quoteRef = quotesSnapshot.docs[0].ref;
 
             // Migrate to hashed token collection for future lookups
             await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
@@ -2758,6 +2767,11 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           respondedAt: foundQuote.respondedAt,
         });
         return;
+      }
+
+      // Record that the customer viewed the quote (triggers onQuoteViewed notification)
+      if (quoteRef) {
+        await quoteRef.update({ lastViewedAt: admin.firestore.FieldValue.serverTimestamp() });
       }
 
       // Return quote data for the acceptance page (excluding sensitive fields)
@@ -2983,12 +2997,16 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
 
         if (!fcmTokensSnapshot.empty) {
           const tokens = fcmTokensSnapshot.docs.map(doc => doc.data().token);
-          const statusEmoji = response === 'accepted' ? '✅' : '❌';
+          const aussieEvent: AussieEvent = response === 'accepted' ? 'quote_accepted' : 'quote_rejected';
+          const aussieMsg = getAussieMessage(aussieEvent, {
+            customer: foundQuote.customerName,
+            job: foundQuote.job?.name || 'the job',
+          });
 
           const message = {
             notification: {
-              title: `Quote ${response === 'accepted' ? 'Accepted' : 'Declined'} ${statusEmoji}`,
-              body: `${foundQuote.customerName} has ${response} your quote for ${foundQuote.job?.name || 'the job'}.`,
+              title: aussieMsg.title,
+              body: aussieMsg.body,
             },
             data: {
               quoteId: foundQuote.id,
@@ -3556,6 +3574,46 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
     if (providerId === 'google.com') authMethod = 'google';
     else if (providerId === 'apple.com') authMethod = 'apple';
     else authMethod = 'email';
+  }
+
+  // Auto-grant affiliate status for pre-approved emails
+  if (PENDING_AFFILIATE_EMAILS.includes(email.toLowerCase())) {
+    try {
+      const referralRef = admin.firestore().doc(`users/${user.uid}/profile/referral`);
+      const referralDoc = await referralRef.get();
+      const existingData = referralDoc.exists ? referralDoc.data() : {};
+
+      // Generate a referral code if they don't already have one
+      let referralCode = existingData?.referralCode;
+      if (!referralCode) {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = 'QM-';
+        for (let i = 0; i < 6; i++) {
+          code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        referralCode = code;
+        await admin.firestore().doc(`referrals/${referralCode}`).set({
+          referrerUserId: user.uid,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      await referralRef.set({
+        referralCode,
+        isAffiliate: true,
+        commissionRate: DEFAULT_COMMISSION_RATE,
+        totalReferrals: existingData?.totalReferrals || 0,
+        convertedReferrals: existingData?.convertedReferrals || 0,
+        rewardMonthsEarned: existingData?.rewardMonthsEarned || 0,
+        totalEarnings: existingData?.totalEarnings || 0,
+        pendingEarnings: existingData?.pendingEarnings || 0,
+        paidEarnings: existingData?.paidEarnings || 0,
+      }, { merge: true });
+
+      console.log(`✅ Auto-granted affiliate status to ${email} (${user.uid})`);
+    } catch (error) {
+      console.error(`Failed to auto-grant affiliate status to ${email}:`, error);
+    }
   }
 
   await Promise.all([
@@ -5052,3 +5110,333 @@ export const recordAffiliatePayout = functions.https.onCall(async (data, context
 
   return { success: true, earningsMarkedPaid: earningIds.length };
 });
+
+// ============================================================
+// Aussie Push Notification System — Helper & Cloud Functions
+// ============================================================
+
+const db = admin.firestore();
+
+/**
+ * Send an Aussie-themed push notification to a user.
+ * Fetches FCM tokens, checks notification preferences, and sends via FCM.
+ */
+async function sendAussiePush(
+  userId: string,
+  event: AussieEvent,
+  vars: Record<string, string> = {},
+  dataPayload: Record<string, string> = {}
+): Promise<void> {
+  // Check notification preferences
+  const prefsDoc = await db.collection('users').doc(userId).collection('settings').doc('notificationPreferences').get();
+  const prefs = prefsDoc.exists ? prefsDoc.data() : {};
+
+  const prefMap: Record<string, string> = {
+    quote_accepted: 'quoteUpdates',
+    quote_rejected: 'quoteUpdates',
+    quote_viewed: 'quoteUpdates',
+    quote_expiring: 'quoteUpdates',
+    invoice_paid: 'invoiceUpdates',
+    invoice_overdue: 'invoiceUpdates',
+    daily_motivation: 'dailyMotivation',
+    milestone: 'milestoneCelebrations',
+    inactivity: 'inactivityNudges',
+  };
+
+  const prefKey = prefMap[event];
+  if (prefs && prefKey && prefs[prefKey] === false) {
+    console.log(`🔕 User ${userId} has ${prefKey} disabled, skipping ${event} notification`);
+    return;
+  }
+
+  const fcmTokensSnapshot = await db.collection('users').doc(userId).collection('fcmTokens').get();
+  if (fcmTokensSnapshot.empty) {
+    console.log(`📱 No FCM tokens for user ${userId}, skipping notification`);
+    return;
+  }
+
+  const tokens = fcmTokensSnapshot.docs.map(doc => doc.data().token);
+  const aussieMsg = getAussieMessage(event, vars);
+
+  const message = {
+    notification: {
+      title: aussieMsg.title,
+      body: aussieMsg.body,
+    },
+    data: {
+      type: event,
+      ...dataPayload,
+    },
+    tokens,
+  };
+
+  const fcmResponse = await admin.messaging().sendEachForMulticast(message);
+  console.log(`📱 [${event}] Push sent to ${userId}: ${fcmResponse.successCount} success, ${fcmResponse.failureCount} failed`);
+
+  // Clean up invalid tokens
+  const tokensToDelete: string[] = [];
+  fcmResponse.responses.forEach((resp, idx) => {
+    if (!resp.success && resp.error?.code === 'messaging/registration-token-not-registered') {
+      tokensToDelete.push(fcmTokensSnapshot.docs[idx].id);
+    }
+  });
+  if (tokensToDelete.length > 0) {
+    const batch = db.batch();
+    for (const tokenDocId of tokensToDelete) {
+      batch.delete(db.collection('users').doc(userId).collection('fcmTokens').doc(tokenDocId));
+    }
+    await batch.commit();
+    console.log(`🧹 Cleaned up ${tokensToDelete.length} stale FCM tokens for ${userId}`);
+  }
+}
+
+// -----------------------------------------------------------
+// onQuoteViewed — Firestore trigger: when quote lastViewedAt changes
+// -----------------------------------------------------------
+export const onQuoteViewed = functions.firestore
+  .document('users/{userId}/quotes/{quoteId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+    const { userId, quoteId } = context.params;
+
+    // Only fire when lastViewedAt is set/updated and wasn't just updated by the owner
+    if (!after.lastViewedAt || before.lastViewedAt?.toMillis?.() === after.lastViewedAt?.toMillis?.()) {
+      return;
+    }
+
+    // Don't notify if quote is already accepted/rejected
+    if (['accepted', 'rejected', 'completed'].includes(after.status)) {
+      return;
+    }
+
+    await sendAussiePush(userId, 'quote_viewed', {
+      customer: after.customerName || 'A customer',
+      job: after.job?.name || 'the job',
+    }, { quoteId });
+  });
+
+// -----------------------------------------------------------
+// onInvoiceStatusChanged — Firestore trigger: when invoice status changes to paid
+// -----------------------------------------------------------
+export const onInvoiceStatusChanged = functions.firestore
+  .document('users/{userId}/invoices/{invoiceId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+    const { userId, invoiceId } = context.params;
+
+    // Only fire when status changes to 'paid'
+    if (before.status === after.status || after.status !== 'paid') {
+      return;
+    }
+
+    await sendAussiePush(userId, 'invoice_paid', {
+      customer: after.customerName || 'A customer',
+      job: after.job?.name || 'the job',
+    }, { invoiceId });
+  });
+
+// -----------------------------------------------------------
+// onInvoiceOverdue — Scheduled daily: nudge about overdue invoices
+// -----------------------------------------------------------
+export const onInvoiceOverdue = functions.pubsub
+  .schedule('every day 09:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const now = new Date();
+    const usersSnapshot = await db.collection('users').get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      const invoicesSnapshot = await userDoc.ref
+        .collection('invoices')
+        .where('status', 'in', ['sent', 'partial', 'overdue'])
+        .get();
+
+      for (const invoiceDoc of invoicesSnapshot.docs) {
+        const invoice = invoiceDoc.data();
+        const dueDate = invoice.dueDate?.toDate ? invoice.dueDate.toDate() : new Date(invoice.dueDate);
+
+        if (dueDate >= now) continue; // Not overdue yet
+
+        // Check if we already nudged today
+        const lastOverdueNudge = invoice.lastOverdueNudgeAt?.toDate ? invoice.lastOverdueNudgeAt.toDate() : null;
+        if (lastOverdueNudge) {
+          const hoursSinceNudge = (now.getTime() - lastOverdueNudge.getTime()) / (1000 * 60 * 60);
+          if (hoursSinceNudge < 23) continue; // Already nudged within the last day
+        }
+
+        await sendAussiePush(userDoc.id, 'invoice_overdue', {
+          customer: invoice.customerName || 'A customer',
+          job: invoice.job?.name || 'the job',
+        }, { invoiceId: invoiceDoc.id });
+
+        // Mark as nudged
+        await invoiceDoc.ref.update({ lastOverdueNudgeAt: admin.firestore.FieldValue.serverTimestamp() });
+      }
+    }
+
+    console.log('✅ Overdue invoice check complete');
+  });
+
+// -----------------------------------------------------------
+// onQuoteExpiring — Scheduled daily: remind about quotes expiring within 48hrs
+// -----------------------------------------------------------
+export const onQuoteExpiring = functions.pubsub
+  .schedule('every day 09:30')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const now = new Date();
+    const in48hrs = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    const usersSnapshot = await db.collection('users').get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      const quotesSnapshot = await userDoc.ref
+        .collection('quotes')
+        .where('status', '==', 'sent')
+        .get();
+
+      for (const quoteDoc of quotesSnapshot.docs) {
+        const quote = quoteDoc.data();
+
+        // Check if the acceptance token is expiring (30 days from creation)
+        if (!quote.acceptanceTokenCreatedAt) continue;
+        const tokenCreatedAt = quote.acceptanceTokenCreatedAt.toDate
+          ? quote.acceptanceTokenCreatedAt.toDate()
+          : new Date(quote.acceptanceTokenCreatedAt);
+        const expiresAt = new Date(tokenCreatedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+        if (expiresAt <= now || expiresAt > in48hrs) continue; // Already expired or not expiring soon
+
+        // Check if already notified about expiring
+        if (quote.expiryNotifiedAt) continue;
+
+        await sendAussiePush(userDoc.id, 'quote_expiring', {
+          customer: quote.customerName || 'A customer',
+          job: quote.job?.name || 'the job',
+        }, { quoteId: quoteDoc.id });
+
+        await quoteDoc.ref.update({ expiryNotifiedAt: admin.firestore.FieldValue.serverTimestamp() });
+      }
+    }
+
+    console.log('✅ Quote expiry check complete');
+  });
+
+// -----------------------------------------------------------
+// dailyMotivation — Scheduled: Aussie motivation at 7:30am AEST
+// -----------------------------------------------------------
+export const dailyMotivation = functions.pubsub
+  .schedule('every day 07:30')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const usersSnapshot = await db.collection('users').get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      // Only send to users who have FCM tokens (active users)
+      const tokensSnapshot = await userDoc.ref.collection('fcmTokens').get();
+      if (tokensSnapshot.empty) continue;
+
+      await sendAussiePush(userDoc.id, 'daily_motivation');
+    }
+
+    console.log('✅ Daily motivation messages sent');
+  });
+
+// -----------------------------------------------------------
+// milestoneChecker — Scheduled daily: check for quote count milestones
+// -----------------------------------------------------------
+const MILESTONES = [10, 25, 50, 100, 250, 500, 1000];
+
+export const milestoneChecker = functions.pubsub
+  .schedule('every day 10:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const usersSnapshot = await db.collection('users').get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      const quotesSnapshot = await userDoc.ref.collection('quotes').get();
+      const quoteCount = quotesSnapshot.size;
+
+      // Find the highest milestone achieved
+      const achievedMilestone = [...MILESTONES].reverse().find(m => quoteCount >= m);
+      if (!achievedMilestone) continue;
+
+      // Check if already celebrated
+      const profileDoc = await userDoc.ref.collection('settings').doc('milestones').get();
+      const lastCelebrated = profileDoc.exists ? profileDoc.data()?.lastCelebratedMilestone || 0 : 0;
+
+      if (achievedMilestone <= lastCelebrated) continue;
+
+      await sendAussiePush(userDoc.id, 'milestone', {
+        n: String(achievedMilestone),
+      });
+
+      await userDoc.ref.collection('settings').doc('milestones').set({
+        lastCelebratedMilestone: achievedMilestone,
+        lastCelebratedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    console.log('✅ Milestone check complete');
+  });
+
+// -----------------------------------------------------------
+// inactivityNudge — Scheduled weekly: nudge users inactive for 7+ days
+// -----------------------------------------------------------
+export const inactivityNudge = functions.pubsub
+  .schedule('every monday 10:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const usersSnapshot = await db.collection('users').get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      // Check last activity — use updatedAt on most recent quote as a proxy
+      const recentQuoteSnapshot = await userDoc.ref
+        .collection('quotes')
+        .orderBy('updatedAt', 'desc')
+        .limit(1)
+        .get();
+
+      let lastActive: Date | null = null;
+      if (!recentQuoteSnapshot.empty) {
+        const lastQuote = recentQuoteSnapshot.docs[0].data();
+        lastActive = lastQuote.updatedAt?.toDate ? lastQuote.updatedAt.toDate() : null;
+      }
+
+      // Also check invoices
+      const recentInvoiceSnapshot = await userDoc.ref
+        .collection('invoices')
+        .orderBy('updatedAt', 'desc')
+        .limit(1)
+        .get();
+
+      if (!recentInvoiceSnapshot.empty) {
+        const lastInvoice = recentInvoiceSnapshot.docs[0].data();
+        const invoiceDate = lastInvoice.updatedAt?.toDate ? lastInvoice.updatedAt.toDate() : null;
+        if (invoiceDate && (!lastActive || invoiceDate > lastActive)) {
+          lastActive = invoiceDate;
+        }
+      }
+
+      // Skip if active recently or no activity data
+      if (!lastActive || lastActive > sevenDaysAgo) continue;
+
+      // Check if we already nudged recently (within 7 days)
+      const nudgeDoc = await userDoc.ref.collection('settings').doc('nudges').get();
+      const lastNudgedAt = nudgeDoc.exists ? nudgeDoc.data()?.lastNudgedAt?.toDate?.() : null;
+      if (lastNudgedAt && (now.getTime() - lastNudgedAt.getTime()) < 7 * 24 * 60 * 60 * 1000) {
+        continue;
+      }
+
+      await sendAussiePush(userDoc.id, 'inactivity');
+
+      await userDoc.ref.collection('settings').doc('nudges').set({
+        lastNudgedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    console.log('✅ Inactivity nudge check complete');
+  });

@@ -49,6 +49,8 @@ import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { AnimatedListItem } from '../../components/AnimatedListItem';
+import { useTourRefs } from '../../components/tour/useTourRefs';
+import { ScreenTour } from '../../components/tour/ScreenTour';
 
 // Helper to get section display info
 function getSectionInfo(sectionName: string | undefined): { name: string; color: string } {
@@ -331,6 +333,16 @@ export function MaterialsListScreen() {
   const { businessSettings, subscriptionStatus, saveDraft } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
+
+  // Tour refs
+  const { registerRef } = useTourRefs();
+  const aiGenerateRef = useRef<View>(null);
+  const addManualRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (aiGenerateRef.current) registerRef('aiGenerateCard', aiGenerateRef.current);
+    if (addManualRef.current) registerRef('addManualCard', addManualRef.current);
+  });
 
   // For compatibility, alias to currentQuote (used throughout this file)
   const currentQuote = currentDocument;
@@ -1368,7 +1380,7 @@ export function MaterialsListScreen() {
             </Text>
 
             {/* AI Generate Card */}
-            <TouchableOpacity style={styles.emptyActionCard} onPress={() => {
+            <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
               if (!isPro) {
                 navigation.navigate('Paywall' as never);
                 return;
@@ -1391,7 +1403,7 @@ export function MaterialsListScreen() {
             </TouchableOpacity>
 
             {/* Add Manually Card */}
-            <TouchableOpacity style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
+            <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
               <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
                 <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
               </View>
@@ -1807,6 +1819,7 @@ export function MaterialsListScreen() {
         title={successTitle}
         message={successMessage}
       />
+      <ScreenTour tourId="materialsList" />
     </View>
   );
 }

@@ -135,7 +135,7 @@ export function ReferralScreen() {
       await Share.share({
         message: referralInfo.isAffiliate
           ? `Try QuoteMate — the fastest way to create professional trade quotes and invoices! Sign up with my code ${referralInfo.referralCode} to get started. ${referralLink}`
-          : `Try QuoteMate for creating professional trade quotes! Use my referral code ${referralInfo.referralCode} when you sign up, and we both benefit. ${referralLink}`,
+          : `Try QuoteMate for creating professional trade quotes! Use my referral code ${referralInfo.referralCode} when you sign up. ${referralLink}`,
       });
     } catch (error) {
       console.error('Share failed:', error);
@@ -554,7 +554,7 @@ export function ReferralScreen() {
               <View style={styles.regularQrSubtext}>
                 <MaterialCommunityIcons name="gift" size={18} color={colors.secondary} />
                 <Text style={styles.regularQrSubtextText}>
-                  You both get 3 months free Pro when they sign up!
+                  You get 3 months free Pro when they sign up!
                 </Text>
               </View>
 

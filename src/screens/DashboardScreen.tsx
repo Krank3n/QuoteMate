@@ -42,6 +42,8 @@ import { TrialBanner } from '../components/TrialBanner';
 import { ShimmerOverlay } from '../components/ShimmerOverlay';
 import { TapRipple } from '../components/TapRipple';
 import { GrainOverlay } from '../components/GrainOverlay';
+import { useTourRefs } from '../components/tour/useTourRefs';
+import { SpotlightTour } from '../components/tour/SpotlightTour';
 
 const GREETINGS = [
   "G'day",
@@ -67,6 +69,7 @@ const SUBTITLES = [
   "The sooner you quote, the sooner you get paid. Probably.",
   "Bit quiet? Perfect time to fire off a quote.",
   "Your ute's loaded, your quotes should be too.",
+  "Duck to the loo and smash out a quote while you're there.",
 ];
 
 export function DashboardScreen() {
@@ -240,7 +243,24 @@ export function DashboardScreen() {
     }
   }, []);
   const navigation = useNavigation<any>();
-  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft } = useStore();
+  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft, hasSeenTour } = useStore();
+  const { registerRef } = useTourRefs();
+  const [tourActive, setTourActive] = useState(false);
+
+  // Tour target refs — use useRef + useEffect to register safely (post-mount)
+  const headerRef = useRef<View>(null);
+  const newQuoteRef = useRef<View>(null);
+  const statsRef = useRef<View>(null);
+  const recentRef = useRef<View>(null);
+  const referralRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (headerRef.current) registerRef('header', headerRef.current);
+    if (newQuoteRef.current) registerRef('newQuoteButton', newQuoteRef.current);
+    if (statsRef.current) registerRef('statsGrid', statsRef.current);
+    if (recentRef.current) registerRef('recentQuotes', recentRef.current);
+    if (referralRef.current) registerRef('referralButton', referralRef.current);
+  });
 
   const [emailDialogVisible, setEmailDialogVisible] = useState(false);
   const [emailQuote, setEmailQuote] = useState<Quote | null>(null);
@@ -263,6 +283,14 @@ export function DashboardScreen() {
   const [quoteToDelete, setQuoteToDelete] = useState<string | null>(null);
   const [duplicateSuccessVisible, setDuplicateSuccessVisible] = useState(false);
   const [deleteDraftModalVisible, setDeleteDraftModalVisible] = useState(false);
+
+  // Auto-trigger tour for first-time users
+  useEffect(() => {
+    if (!hasSeenTour) {
+      const timer = setTimeout(() => setTourActive(true), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [hasSeenTour]);
 
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
@@ -619,7 +647,7 @@ export function DashboardScreen() {
       }
     >
       <WebContainer>
-        <View style={styles.header}>
+        <View ref={headerRef} style={styles.header}>
           <View style={styles.headerRow}>
             <View style={styles.headerText}>
               <Title style={styles.greeting}>
@@ -629,14 +657,16 @@ export function DashboardScreen() {
                 <Paragraph numberOfLines={2}>{SUBTITLES[subtitleIndex]}</Paragraph>
               </RNAnimated.View>
             </View>
-            <TouchableOpacity
-              style={styles.referralButton}
-              onPress={() => { lightTap(); navigation.navigate('Referral' as never); }}
-              activeOpacity={0.7}
-              accessibilityLabel="Refer a friend"
-            >
-              <MaterialCommunityIcons name="gift-outline" size={20} color={colors.primary} />
-            </TouchableOpacity>
+            <View ref={referralRef}>
+              <TouchableOpacity
+                style={styles.referralButton}
+                onPress={() => { lightTap(); navigation.navigate('Referral' as never); }}
+                activeOpacity={0.7}
+                accessibilityLabel="Refer a friend"
+              >
+                <MaterialCommunityIcons name="gift-outline" size={20} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -679,6 +709,7 @@ export function DashboardScreen() {
       )}
 
       {/* New Quote Button */}
+      <View ref={newQuoteRef}>
       <RNAnimated.View style={{ transform: [{ scale: btnPulse }, { rotate: btnTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
         <RNAnimated.View style={{
           marginHorizontal: 20,
@@ -702,9 +733,10 @@ export function DashboardScreen() {
           </Button>
         </RNAnimated.View>
       </RNAnimated.View>
+      </View>
 
       {/* Quick Stats */}
-      <View style={styles.statsContainer}>
+      <View ref={statsRef} style={styles.statsContainer}>
         <AnimatedListItem index={0} style={styles.statCardWrapper}>
           <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Earned this month: ${formatCurrency(thisMonthRevenue)}`} rippleColor="rgba(0,152,104,0.25)">
             <RNAnimated.View style={{ transform: [{ scale: cardBreath1 }, { rotate: cardTilt1.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
@@ -772,7 +804,7 @@ export function DashboardScreen() {
 
       {/* Recent Quotes */}
       {recentQuotes.length > 0 && (
-        <View style={styles.section}>
+        <View ref={recentRef} style={styles.section}>
           <Text style={styles.sectionTitle}>Recent Quotes</Text>
 
           {recentQuotes.map((quote, index) => (
@@ -836,6 +868,18 @@ export function DashboardScreen() {
       currentStatus={selectedQuote?.status || 'draft'}
       onSelect={handleStatusSelect}
       options={QUOTE_STATUS_OPTIONS}
+    />
+
+    {/* Spotlight Tour */}
+    <SpotlightTour
+      active={tourActive}
+      onFinish={() => {
+        setTourActive(false);
+        // Auto-navigate into the quoting flow after the dashboard tour
+        createNewQuote();
+        navigation.navigate('NewQuote' as never);
+      }}
+      scrollRef={scrollRef}
     />
 
     {/* Email Client Selector Dialog */}

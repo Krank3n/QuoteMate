@@ -326,7 +326,7 @@ Hardware Store for pricing: ${storeName}
 
 Provide a JSON response with the following structure:
 {
-  "jobSummary": "A brief summary of the job",
+  "jobSummary": "Short job title, 3-7 words max (e.g. 'Deck Construction', 'Bathroom Renovation', 'Timber Fence Installation')",
   "estimatedHours": <number of hours>,
   "materials": [
     {

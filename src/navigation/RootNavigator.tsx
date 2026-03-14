@@ -32,6 +32,7 @@ import { AboutScreen } from '../screens/settings/AboutScreen';
 import { FeedbackScreen } from '../screens/settings/FeedbackScreen';
 import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
 import { ReferralScreen } from '../screens/settings/ReferralScreen';
+import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
 import { CustomerDetailsScreen } from '../screens/NewQuote/CustomerDetailsScreen';
@@ -42,6 +43,7 @@ import { QuotePreviewScreen } from '../screens/NewQuote/QuotePreviewScreen';
 import { InvoicePreviewScreen } from '../screens/NewQuote/InvoicePreviewScreen';
 
 import { colors } from '../theme';
+import { TourRefsProvider } from '../components/tour/useTourRefs';
 
 // Type definitions for navigation
 export type RootTabParamList = {
@@ -418,6 +420,7 @@ function MainTabs() {
  */
 export function RootNavigator() {
   return (
+    <TourRefsProvider>
     <RootStack.Navigator
       screenOptions={{
         headerShown: false,
@@ -583,6 +586,17 @@ export function RootNavigator() {
         }}
       />
       <RootStack.Screen
+        name="NotificationPreferences"
+        component={NotificationPreferencesScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Notifications',
+        }}
+      />
+      <RootStack.Screen
         name="Feedback"
         component={FeedbackScreen}
         options={{
@@ -605,6 +619,7 @@ export function RootNavigator() {
         }}
       />
     </RootStack.Navigator>
+    </TourRefsProvider>
   );
 }
 

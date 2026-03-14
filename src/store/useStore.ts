@@ -45,6 +45,14 @@ interface AppState {
   setOnboarded: (value: boolean) => Promise<void>;
   checkOnboarding: () => Promise<void>;
 
+  // Tour
+  hasSeenTour: boolean;
+  setHasSeenTour: (value: boolean) => Promise<void>;
+  checkTourStatus: () => Promise<void>;
+  seenScreenTours: string[];
+  markScreenTourSeen: (tourId: string) => Promise<void>;
+  hasSeenScreenTour: (tourId: string) => boolean;
+
   // Quote numbering
   nextQuoteNumber: number;
   loadNextQuoteNumber: () => Promise<void>;
@@ -91,6 +99,7 @@ const STORAGE_KEYS = {
   NEXT_QUOTE_NUMBER: '@quotemate:next_quote_number',
   INVOICES: '@quotemate:invoices',
   NEXT_INVOICE_NUMBER: '@quotemate:next_invoice_number',
+  TOUR_SEEN: '@quotemate:tour_seen',
 };
 
 // Helper to check if we need to reset monthly count
@@ -111,6 +120,8 @@ export const useStore = create<AppState>((set, get) => ({
   quotes: [],
   currentQuote: null,
   isOnboarded: false,
+  hasSeenTour: false,
+  seenScreenTours: [],
   subscriptionStatus: null,
   nextQuoteNumber: 1,
   invoices: [],
@@ -716,6 +727,47 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  // Tour
+  setHasSeenTour: async (value: boolean) => {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.TOUR_SEEN, JSON.stringify(value));
+      set({ hasSeenTour: value });
+    } catch (error) {
+      console.error('Failed to save tour status:', error);
+    }
+  },
+
+  checkTourStatus: async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.TOUR_SEEN);
+      if (stored) {
+        set({ hasSeenTour: JSON.parse(stored) });
+      }
+      const screenToursStored = await AsyncStorage.getItem('@quotemate:seen_screen_tours');
+      if (screenToursStored) {
+        set({ seenScreenTours: JSON.parse(screenToursStored) });
+      }
+    } catch (error) {
+      console.error('Failed to check tour status:', error);
+    }
+  },
+
+  markScreenTourSeen: async (tourId: string) => {
+    try {
+      const { seenScreenTours } = get();
+      if (seenScreenTours.includes(tourId)) return;
+      const updated = [...seenScreenTours, tourId];
+      await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(updated));
+      set({ seenScreenTours: updated });
+    } catch (error) {
+      console.error('Failed to mark screen tour seen:', error);
+    }
+  },
+
+  hasSeenScreenTour: (tourId: string) => {
+    return get().seenScreenTours.includes(tourId);
+  },
+
   // Quote numbering
   loadNextQuoteNumber: async () => {
     try {
@@ -1124,6 +1176,8 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.INVOICES,
         STORAGE_KEYS.NEXT_QUOTE_NUMBER,
         STORAGE_KEYS.NEXT_INVOICE_NUMBER,
+        STORAGE_KEYS.TOUR_SEEN,
+        '@quotemate:seen_screen_tours',
       ]);
       console.log('✅ clearAllData: AsyncStorage cleared');
 
@@ -1134,6 +1188,8 @@ export const useStore = create<AppState>((set, get) => ({
         quotes: [],
         currentQuote: null,
         isOnboarded: false,
+        hasSeenTour: false,
+        seenScreenTours: [],
         subscriptionStatus: null,
         invoices: [],
         currentInvoice: null,

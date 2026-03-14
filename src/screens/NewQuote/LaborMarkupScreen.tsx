@@ -3,7 +3,7 @@
  * Set labor hours, rates, and markup percentage
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
 import {
   Text,
@@ -25,6 +25,8 @@ import { estimateFuelCost, DEFAULT_FUEL_PRICE } from '../../utils/travelCalculat
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
+import { useTourRefs } from '../../components/tour/useTourRefs';
+import { ScreenTour } from '../../components/tour/ScreenTour';
 
 export function LaborMarkupScreen() {
   const navigation = useNavigation<any>();
@@ -38,6 +40,18 @@ export function LaborMarkupScreen() {
 
   // Get the appropriate preview screen based on mode
   const previewScreenName = getPreviewScreenName(mode);
+
+  // Tour refs
+  const { registerRef } = useTourRefs();
+  const travelSectionRef = useRef<View>(null);
+  const laborSectionRef = useRef<View>(null);
+  const markupSectionRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (travelSectionRef.current) registerRef('travelSection', travelSectionRef.current);
+    if (laborSectionRef.current) registerRef('laborSection', laborSectionRef.current);
+    if (markupSectionRef.current) registerRef('markupSection', markupSectionRef.current);
+  });
 
   const [laborHours, setLaborHours] = useState('');
   const [laborRate, setLaborRate] = useState('');
@@ -180,7 +194,7 @@ export function LaborMarkupScreen() {
         <WebContainer>
         {/* Travel Adjustment Section */}
         {estimatedDistance !== undefined ? (
-          <View style={styles.section}>
+          <View ref={travelSectionRef} style={styles.section}>
             {!travelDismissed ? (
               <>
                 <Title style={styles.sectionTitle}>Travel Adjustment</Title>
@@ -252,7 +266,7 @@ export function LaborMarkupScreen() {
 
         <Divider />
 
-        <View style={styles.section}>
+        <View ref={laborSectionRef} style={styles.section}>
         <Title style={styles.sectionTitle}>Labor</Title>
 
         <TextInput
@@ -286,7 +300,7 @@ export function LaborMarkupScreen() {
 
       <Divider />
 
-      <View style={styles.section}>
+      <View ref={markupSectionRef} style={styles.section}>
         <Title style={styles.sectionTitle}>Markup</Title>
 
         <TextInput
@@ -383,6 +397,9 @@ export function LaborMarkupScreen() {
           onPress={handleNext}
         />
       </View>
+
+      {/* Screen Tour */}
+      <ScreenTour tourId="laborMarkup" />
     </>
   );
 

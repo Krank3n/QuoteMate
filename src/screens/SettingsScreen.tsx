@@ -39,7 +39,7 @@ interface SettingsSection {
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
-  const { subscriptionStatus } = useStore();
+  const { subscriptionStatus, setHasSeenTour, seenScreenTours } = useStore();
 
   const sections: SettingsSection[] = [
     {
@@ -81,8 +81,27 @@ export function SettingsScreen() {
       ],
     },
     {
+      title: 'Notifications',
+      items: [
+        {
+          id: 'notifications',
+          title: 'Push Notifications',
+          subtitle: 'Manage Aussie notification preferences',
+          icon: 'bell-outline',
+          screen: 'NotificationPreferences',
+        },
+      ],
+    },
+    {
       title: 'App',
       items: [
+        {
+          id: 'appTour',
+          title: 'App Tour',
+          subtitle: 'Replay the guided feature tour',
+          icon: 'map-marker-path',
+          screen: 'AppTour',
+        },
         {
           id: 'referral',
           title: 'Refer a Friend',
@@ -128,7 +147,16 @@ export function SettingsScreen() {
     },
   ];
 
-  const handleMenuPress = (screen: string) => {
+  const handleMenuPress = async (screen: string) => {
+    if (screen === 'AppTour') {
+      await setHasSeenTour(false);
+      // Also reset screen-specific tours
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await AsyncStorage.removeItem('@quotemate:seen_screen_tours');
+      useStore.setState({ seenScreenTours: [] });
+      navigation.navigate('Dashboard');
+      return;
+    }
     navigation.navigate(screen);
   };
 

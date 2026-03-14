@@ -54,6 +54,8 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { ProBadge } from '../../components/ProBadge';
 import { AlertModal } from '../../components/AlertModal';
 import { JobPhotos } from '../../components/JobPhotos';
+import { useTourRefs } from '../../components/tour/useTourRefs';
+import { ScreenTour } from '../../components/tour/ScreenTour';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
@@ -78,6 +80,20 @@ export function JobDetailsScreen() {
   const [useCustomMode, setUseCustomMode] = useState(true); // Default to custom (AI) mode
   const [jobPhotos, setJobPhotos] = useState<QuotePhoto[]>([]);
   const [includePhotosInAi, setIncludePhotosInAi] = useState(true);
+
+  // Tour refs
+  const { registerRef } = useTourRefs();
+  const descriptionRef = useRef<View>(null);
+  const micButtonRef = useRef<View>(null);
+  const jobPhotosRef = useRef<View>(null);
+  const analyzeRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (descriptionRef.current) registerRef('jobDescription', descriptionRef.current);
+    if (micButtonRef.current) registerRef('micButton', micButtonRef.current);
+    if (jobPhotosRef.current) registerRef('jobPhotos', jobPhotosRef.current);
+    if (analyzeRef.current) registerRef('analyzeButton', analyzeRef.current);
+  });
 
   // Voice recording states
   const [isRecording, setIsRecording] = useState(false);
@@ -1132,7 +1148,7 @@ export function JobDetailsScreen() {
 
         {/* Beautiful Record Button */}
         {(
-          <View style={styles.recordButtonContainer}>
+          <View ref={micButtonRef} style={styles.recordButtonContainer}>
             <View style={styles.recordButtonRow}>
               <TouchableOpacity
                 onPress={() => {
@@ -1272,6 +1288,7 @@ export function JobDetailsScreen() {
 
         {/* Job Description Text Input */}
         <TextInput
+          ref={descriptionRef}
           label="Job Description *"
           value={jobDescription}
           onChangeText={setJobDescription}
@@ -1338,10 +1355,12 @@ export function JobDetailsScreen() {
         {/* Job Photos */}
         {useCustomMode && (
           <>
+            <View ref={jobPhotosRef}>
             <JobPhotos
               photos={jobPhotos}
               onPhotosChange={setJobPhotos}
             />
+            </View>
             {jobPhotos.length > 0 && (
               <TouchableOpacity
                 style={styles.aiPhotoToggle}
@@ -1367,6 +1386,7 @@ export function JobDetailsScreen() {
           </WebContainer>
         </ScrollView>
 
+        <View ref={analyzeRef}>
         <FixedBottomButton
           label="Next: Customer Details"
           onPress={handleNext}
@@ -1375,7 +1395,11 @@ export function JobDetailsScreen() {
             (!useCustomMode && !selectedTemplate)
           }
         />
+        </View>
       </KeyboardAvoidingView>
+
+      {/* Screen Tour */}
+      <ScreenTour tourId="jobDetails" />
     </>
   );
 }
