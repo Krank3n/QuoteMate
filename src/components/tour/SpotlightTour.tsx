@@ -19,6 +19,8 @@ import { useStore } from '../../store/useStore';
 interface SpotlightTourProps {
   active: boolean;
   onFinish: () => void;
+  /** Optional override for Skip button — if provided, called instead of handleFinish */
+  onSkip?: () => void;
   scrollRef?: React.RefObject<ScrollView>;
   /** Offset added to displayed step number for sequential numbering */
   stepOffset?: number;
@@ -26,7 +28,7 @@ interface SpotlightTourProps {
   globalTotalSteps?: number;
 }
 
-export function SpotlightTour({ active, onFinish, scrollRef, stepOffset = 0, globalTotalSteps }: SpotlightTourProps) {
+export function SpotlightTour({ active, onFinish, onSkip, scrollRef, stepOffset = 0, globalTotalSteps }: SpotlightTourProps) {
   const { width: screenW, height: screenH } = useWindowDimensions();
   const { setHasSeenTour } = useStore();
   const { measureTarget } = useTourRefs();
@@ -68,10 +70,11 @@ export function SpotlightTour({ active, onFinish, scrollRef, stepOffset = 0, glo
     const step = TOUR_STEPS[stepIdx];
     if (!step) return;
 
-    const scrollTargets = ['header', 'newQuoteButton', 'statsGrid', 'recentQuotes'];
+    const scrollTargets = ['header', 'referralButton', 'newQuoteButton', 'statsGrid', 'recentQuotes'];
     if (scrollRef?.current && scrollTargets.includes(step.id)) {
       const scrollPositions: Record<string, number> = {
         header: 0,
+        referralButton: 0,
         newQuoteButton: 0,
         statsGrid: 200,
         recentQuotes: 400,
@@ -120,8 +123,12 @@ export function SpotlightTour({ active, onFinish, scrollRef, stepOffset = 0, glo
   }, [currentStep]);
 
   const handleSkip = useCallback(() => {
-    handleFinish();
-  }, [handleFinish]);
+    if (onSkip) {
+      onSkip();
+    } else {
+      handleFinish();
+    }
+  }, [handleFinish, onSkip]);
 
   if (!active || !targetRect) return null;
 

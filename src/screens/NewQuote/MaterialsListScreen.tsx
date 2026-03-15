@@ -46,6 +46,9 @@ import { AnimatedListItem } from '../../components/AnimatedListItem';
 import { CollapsibleSection } from '../../components/CollapsibleSection';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
+import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
+import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
+import { getTourMaterialsPriced } from '../../components/tour/tourDummyData';
 import { notificationService } from '../../services/notificationService';
 
 // Helper to get section display info
@@ -318,7 +321,7 @@ export function MaterialsListScreen() {
   const isFocused = useIsFocused();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { businessSettings, subscriptionStatus, saveDraft } = useStore();
+  const { businessSettings, subscriptionStatus, saveDraft, unifiedTourActive, unifiedTourPhase, updateQuote: storeUpdateQuote } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -356,6 +359,18 @@ export function MaterialsListScreen() {
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   const [initialMaterialCount, setInitialMaterialCount] = useState(0);
   const [cancelGeneration, setCancelGeneration] = useState(false);
+
+  // Unified tour: show brief fake AI loading when transitioning materialsList → materialsListItems
+  useEffect(() => {
+    if (unifiedTourActive && unifiedTourPhase === 'materialsListItems' && materials.length > 0 && !isAiAnalyzing) {
+      // Materials were just injected — show fake loading for 2s
+      setIsAiAnalyzing(true);
+      const timer = setTimeout(() => {
+        setIsAiAnalyzing(false);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [unifiedTourPhase]);
 
   // Product search state - REMOVED: Now handled by AddMaterialScreen
 
@@ -1656,7 +1671,7 @@ export function MaterialsListScreen() {
           </List.Section>
         )}
 
-        {materials.length > 0 && (
+        {materials.length > 0 && !isAiAnalyzing && (
           <View style={styles.summary}>
             <Text style={styles.summaryLabel}>Materials Subtotal:</Text>
             <Text style={styles.summaryValue}>
@@ -1666,7 +1681,7 @@ export function MaterialsListScreen() {
         )}
 
         {/* Add Material button - inline so it doesn't overlay content */}
-        {materials.length > 0 && (
+        {materials.length > 0 && !isAiAnalyzing && (
           <TouchableOpacity ref={addMaterialButtonRef as any} style={styles.addMaterialButton} onPress={handleAddMaterial}>
             <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
             <Text style={styles.addMaterialButtonText}>Add Material</Text>
@@ -1867,13 +1882,56 @@ export function MaterialsListScreen() {
       />
       {!showSuccessModal && (
         <>
-          <ScreenTour tourId="materialsList" onActiveChange={setTourActive} />
-          {materials.length > 0 && (
+          <ScreenTour
+            tourId="materialsList"
+            onActiveChange={setTourActive}
+            unifiedMode={unifiedTourActive && unifiedTourPhase === 'materialsList'}
+            onScreenComplete={() => notifyScreenComplete('materialsList')}
+            onSkipRequest={notifySkipRequest}
+            stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.materialsList : 0}
+            globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
+          />
+          {materials.length > 0 && !isAiAnalyzing && (
             <ScreenTour
               tourId="materialsListItems"
+              delay={unifiedTourActive ? 800 : 600}
               onActiveChange={setTourActive}
               scrollRef={materialsScrollRef}
               scrollPositions={{ fetchPricesButton: 99999, firstMaterialItem: 0, addMaterialButton: 99999 }}
+              unifiedMode={unifiedTourActive && unifiedTourPhase === 'materialsListItems'}
+              onScreenComplete={() => notifyScreenComplete('materialsListItems')}
+              onSkipRequest={notifySkipRequest}
+              stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.materialsListItems : 0}
+              globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
+              onStepChange={(stepId) => {
+                if (!unifiedTourActive) return;
+                const quote = currentQuote;
+                if (!quote) return;
+                if (stepId === 'fetchPricesButton') {
+                  // Simulate price fetch when advancing past the "Strewth" step
+                  const pricedMaterials = getTourMaterialsPriced();
+                  storeUpdateQuote({ ...quote, materials: pricedMaterials });
+                } else if (stepId === 'firstMaterialItem') {
+                  // Second time we hit firstMaterialItem — after prices. Expand first item.
+                  if (materials.some(m => m.price > 0) && materials.length > 0) {
+                    setExpandedMaterials(new Set([materials[0].id]));
+                  }
+                }
+              }}
+            />
+          )}
+          {materials.length > 0 && unifiedTourActive && unifiedTourPhase === 'materialsListAdded' && (
+            <ScreenTour
+              tourId="materialsListAdded"
+              delay={800}
+              onActiveChange={setTourActive}
+              scrollRef={materialsScrollRef}
+              scrollPositions={{ firstMaterialItem: 0 }}
+              unifiedMode={true}
+              onScreenComplete={() => notifyScreenComplete('materialsListAdded')}
+              onSkipRequest={notifySkipRequest}
+              stepOffset={PHASE_STEP_OFFSETS.materialsListAdded}
+              globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
             />
           )}
         </>

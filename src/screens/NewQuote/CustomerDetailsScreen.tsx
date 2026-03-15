@@ -33,6 +33,8 @@ import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
+import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
+import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 
 interface CustomerInfo {
   name: string;
@@ -46,7 +48,7 @@ export function CustomerDetailsScreen() {
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { saveDraft, businessSettings, hasSeenScreenTour } = useStore();
+  const { saveDraft, businessSettings, hasSeenScreenTour, unifiedTourActive, unifiedTourPhase } = useStore();
   const documentList = useDocumentList();
 
   // For compatibility, alias to currentQuote (used throughout this file)
@@ -381,6 +383,11 @@ export function CustomerDetailsScreen() {
       <ScreenTour
         tourId="customerDetails"
         onActiveChange={setTourActive}
+        unifiedMode={unifiedTourActive && unifiedTourPhase === 'customerDetails'}
+        onScreenComplete={() => notifyScreenComplete('customerDetails')}
+        onSkipRequest={notifySkipRequest}
+        stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.customerDetails : 0}
+        globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
         onStepChange={(stepId) => {
           // When advancing past recentCustomers, auto-select Davo to demo the auto-fill
           if (stepId === 'customerName' && showDavo) {

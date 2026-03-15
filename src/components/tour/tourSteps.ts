@@ -37,7 +37,7 @@ export const TOUR_STEPS: TourStep[] = [
  * Total steps across the intro flow (dashboard + jobDetails)
  * Used for sequential "X of Y" numbering across both tours.
  */
-export const INTRO_TOUR_TOTAL_STEPS = TOUR_STEPS.length + 4; // + jobDetails steps
+export const INTRO_TOUR_TOTAL_STEPS = TOUR_STEPS.length + 8; // + jobDetails steps (including photo annotation)
 
 /**
  * Screen-specific contextual tours
@@ -49,8 +49,10 @@ export type ScreenTourId =
   | 'materialsList'
   | 'materialsListItems'
   | 'addMaterial'
+  | 'materialsListAdded'
   | 'laborMarkup'
-  | 'quotePreview';
+  | 'quotePreview'
+  | 'dashboardComplete';
 
 export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
   // ─── Job Details ───
@@ -74,9 +76,33 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
       tooltipPosition: 'top',
     },
     {
-      id: 'jobPhotos',
+      id: 'jobPhotoThumbnail',
       title: "Show 'em what needs doing",
-      description: "Snap photos of the job site — **they'll show up on your quote** so the customer knows exactly what's getting fixed. You can also flick them to the AI if you want help sussing out materials",
+      description: "Snap photos of the job site — **they'll show up on your quote**. Tap any photo to **draw on it** — circle the dodgy bits, add arrows, write notes. Watch this...",
+      tooltipPosition: 'top',
+    },
+    {
+      id: 'annotatorCanvas',
+      title: "Here's your canvas, Picasso",
+      description: "This is where the magic happens — **draw right on the photo** to highlight what needs fixing. We've already chucked on a circle and arrow to show ya how it's done",
+      tooltipPosition: 'bottom',
+    },
+    {
+      id: 'annotatorTools',
+      title: "Pick your weapon",
+      description: "**Draw freehand, add arrows, circles, or text labels.** Tap a tool to switch it up, tap again for colour and thickness options. Go nuts",
+      tooltipPosition: 'top',
+    },
+    {
+      id: 'annotatorDone',
+      title: "Hit Done when you're happy",
+      description: "Tap **Done** to save your annotations onto the photo. They'll show up right on your quote — looking proper mint and dead professional",
+      tooltipPosition: 'bottom',
+    },
+    {
+      id: 'jobPhotoAnnotated',
+      title: "Now THAT'S professional!",
+      description: "Circled the busted hinge, arrowed the soggy frame — your customer gets it instantly. **Annotated photos show up on the quote** so everyone's on the same page",
       tooltipPosition: 'top',
     },
   ],
@@ -122,15 +148,21 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
   // ─── Materials List (with items) ───
   materialsListItems: [
     {
+      id: 'firstMaterialItem',
+      title: "Strewth, look at that!",
+      description: "The AI's sussed out everything you need for the job — **materials, quantities, the lot**. Use the **plus/minus buttons** to tweak quantities, or hit the **bin** to chuck something out",
+      tooltipPosition: 'bottom',
+    },
+    {
       id: 'fetchPricesButton',
       title: "Time to get some real prices, legend",
-      description: "Smash this button and we'll **chase up actual prices** from Bunnings, Reece, and other suppliers. No more guessing what a bag of cement costs — we'll do the legwork for ya",
+      description: "Smash this button and we'll **hunt down real prices** from Bunnings, Reece, and other suppliers. If we can't track one down, she'll cop a **best-guess estimate** so you're not left hanging",
       tooltipPosition: 'top',
     },
     {
       id: 'firstMaterialItem',
-      title: "Here's your gear list",
-      description: "Once prices are in, **tap any material** to see the full description, brand, photo, and store link. Before fetching prices they're just names on a list — after, they're the real deal with all the deets",
+      title: "Now we're cooking with gas!",
+      description: "Prices are in! **Tap any material** to see the full description, brand, photo, and store link. The AI matched each item to a real product — proper mint",
       tooltipPosition: 'bottom',
     },
     {
@@ -144,6 +176,18 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
   // ─── Add Material ───
   addMaterial: [
     {
+      id: 'searchSection',
+      title: "Hunt down the real deal",
+      description: "Type in what you need and we'll **search Bunnings, Reece, and other suppliers** for the actual product with real pricing. Beats guessing every time",
+      tooltipPosition: 'bottom',
+    },
+    {
+      id: 'manualEntrySection',
+      title: "Know exactly what you need?",
+      description: "Punch in the **name, quantity, and price** yourself if you've already sussed it out. Handy for oddball items the catalogues don't stock",
+      tooltipPosition: 'bottom',
+    },
+    {
       id: 'savedItemsTab',
       title: "Save time on repeat jobs",
       description: "Tap **Saved Items** to reuse materials from past quotes — no more searching for the same stuff every time. Absolute game changer for regulars",
@@ -151,14 +195,18 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
     },
   ],
 
-  // ─── Labor & Markup ───
-  laborMarkup: [
+  // ─── Materials List (after adding a material) ───
+  materialsListAdded: [
     {
-      id: 'travelSection',
-      title: "Petrol ain't free, mate",
-      description: "We've sussed out **how far the job is** and worked out the fuel. Bump it up for Woop Woop jobs, or ditch it if they're just down the road",
+      id: 'firstMaterialItem',
+      title: "Chucked it in, no worries!",
+      description: "Your new material's right there with the rest of the gear. **Tap any item** to see the full deets, edit, or bin it if you changed your mind",
       tooltipPosition: 'bottom',
     },
+  ],
+
+  // ─── Labor & Markup ───
+  laborMarkup: [
     {
       id: 'laborSection',
       title: "Pay yourself proper",
@@ -172,9 +220,9 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
       tooltipPosition: 'bottom',
     },
     {
-      id: 'travelAdjust',
-      title: "Dial it in, ya tight-arse",
-      description: "Use the **plus and minus** to nudge the travel markup up or down. Reckon it's not worth charging? Hit **Dismiss** and we'll leave it out completely. No judgement",
+      id: 'travelSection',
+      title: "Petrol ain't free, mate",
+      description: "We've sussed out **how far the job is** and worked out the fuel. Use the **plus and minus** to dial it in, or hit **Dismiss** if they're just down the road. No judgement, ya tight-arse",
       tooltipPosition: 'top',
     },
   ],
@@ -190,8 +238,24 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
     {
       id: 'sendButton',
       title: "Send it, ya legend!",
-      description: "Smashes out a **ripper PDF** and sends it straight to the customer's inbox. Professional as, and took you about 3 minutes. Too easy",
+      description: "Tap here to **email, text, or share** Davo's quote. Whacks out a ripper PDF and fires it off — professional as. Go on, **send a test to yourself** to see what the customer gets!",
       tooltipPosition: 'top',
+    },
+  ],
+
+  // ─── Dashboard (after tour completes) ───
+  dashboardComplete: [
+    {
+      id: 'recentQuoteCard',
+      title: "There's Davo's quote!",
+      description: "Every quote you create lands right here. Tap the **three dots** to edit, send, duplicate, or convert to an invoice. **Swipe left to delete** it when you're done having a squiz",
+      tooltipPosition: 'bottom',
+    },
+    {
+      id: 'recentQuoteCard',
+      title: "You're a QuoteMate pro now!",
+      description: "That's the lot, legend! Go on — **delete Davo's practice quote** with a swipe or the three dots, then crack on with a real one. You've got this!",
+      tooltipPosition: 'bottom',
     },
   ],
 };

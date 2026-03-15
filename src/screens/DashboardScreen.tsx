@@ -37,6 +37,10 @@ import { TapRipple } from '../components/TapRipple';
 import { GrainOverlay } from '../components/GrainOverlay';
 import { useTourRefs } from '../components/tour/useTourRefs';
 import { SpotlightTour } from '../components/tour/SpotlightTour';
+import { ScreenTour } from '../components/tour/ScreenTour';
+import { PHASE_STEP_OFFSETS } from '../components/tour/tourFlow';
+import { notifyScreenComplete, notifySkipRequest } from '../components/tour/UnifiedTourController';
+import { UNIFIED_TOUR_TOTAL_STEPS } from '../components/tour/tourFlow';
 import { INTRO_TOUR_TOTAL_STEPS } from '../components/tour/tourSteps';
 
 const GREETINGS = [
@@ -246,7 +250,7 @@ export function DashboardScreen() {
     }
   }, []);
   const navigation = useNavigation<any>();
-  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft, hasSeenTour } = useStore();
+  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft, hasSeenTour, unifiedTourActive, unifiedTourPhase, startUnifiedTour } = useStore();
   const { registerRef } = useTourRefs();
   const [tourActive, setTourActive] = useState(false);
 
@@ -256,6 +260,7 @@ export function DashboardScreen() {
   const statsRef = useRef<View>(null);
   const recentRef = useRef<View>(null);
   const referralRef = useRef<View>(null);
+  const recentQuoteCardRef = useRef<View>(null);
 
   useEffect(() => {
     if (headerRef.current) registerRef('header', headerRef.current);
@@ -263,6 +268,7 @@ export function DashboardScreen() {
     if (statsRef.current) registerRef('statsGrid', statsRef.current);
     if (recentRef.current) registerRef('recentQuotes', recentRef.current);
     if (referralRef.current) registerRef('referralButton', referralRef.current);
+    if (recentQuoteCardRef.current) registerRef('recentQuoteCard', recentQuoteCardRef.current);
   });
 
   const [statusSheetVisible, setStatusSheetVisible] = useState(false);
@@ -285,10 +291,13 @@ export function DashboardScreen() {
   const [duplicateSuccessVisible, setDuplicateSuccessVisible] = useState(false);
   const [deleteDraftModalVisible, setDeleteDraftModalVisible] = useState(false);
 
-  // Auto-trigger tour for first-time users
+  // Auto-trigger unified tour for first-time users
   useEffect(() => {
-    if (!hasSeenTour) {
-      const timer = setTimeout(() => setTourActive(true), 800);
+    if (!hasSeenTour && !unifiedTourActive) {
+      const timer = setTimeout(() => {
+        startUnifiedTour();
+        setTourActive(true);
+      }, 800);
       return () => clearTimeout(timer);
     }
   }, [hasSeenTour]);
@@ -437,8 +446,12 @@ export function DashboardScreen() {
   };
 
   const handleDeleteQuote = async (quoteId: string) => {
-    setQuoteToDelete(quoteId);
-    setDeleteModalVisible(true);
+    // QuoteCard already shows its own confirmation modal, so just delete directly
+    try {
+      await deleteQuote(quoteId);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to delete quote. Please try again.');
+    }
   };
 
   const confirmDeleteQuote = async () => {
@@ -726,6 +739,7 @@ export function DashboardScreen() {
 
             {recentQuotes.map((quote, index) => (
               <AnimatedListItem key={quote.id} index={index}>
+                <View ref={index === 0 ? recentQuoteCardRef : undefined}>
                 <QuoteCard
                   quote={quote}
                   businessSettings={businessSettings}
@@ -737,6 +751,7 @@ export function DashboardScreen() {
                   onStatusChange={handleOpenStatusSheet}
                   onConvertToInvoice={handleConvertToInvoice}
                 />
+                </View>
               </AnimatedListItem>
             ))}
 
@@ -780,19 +795,41 @@ export function DashboardScreen() {
       options={QUOTE_STATUS_OPTIONS}
     />
 
-    {/* Spotlight Tour */}
+    {/* Spotlight Tour — only active during 'dashboard' phase, not 'dashboardComplete' */}
     <SpotlightTour
-      active={tourActive}
+      active={tourActive && (!unifiedTourActive || unifiedTourPhase === 'dashboard')}
       onFinish={() => {
         setTourActive(false);
-        // Auto-navigate into the quoting flow after the dashboard tour
-        createNewQuote();
-        navigation.navigate('NewQuote' as never, { screen: 'JobDetails', params: { fromTour: true } } as never);
+        if (unifiedTourActive) {
+          // Unified tour — controller handles navigation
+          notifyScreenComplete('dashboard');
+        } else {
+          // Legacy standalone dashboard tour
+          createNewQuote();
+          navigation.navigate('NewQuote' as never, { screen: 'JobDetails', params: { fromTour: true } } as never);
+        }
       }}
+      onSkip={unifiedTourActive ? () => notifySkipRequest() : undefined}
       scrollRef={scrollRef}
       stepOffset={0}
-      globalTotalSteps={INTRO_TOUR_TOTAL_STEPS}
+      globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : INTRO_TOUR_TOTAL_STEPS}
     />
+
+    {/* Dashboard Complete Tour — shown after returning from quote flow */}
+    {unifiedTourActive && unifiedTourPhase === 'dashboardComplete' && (
+      <ScreenTour
+        tourId="dashboardComplete"
+        delay={1000}
+        onActiveChange={setTourActive}
+        unifiedMode={true}
+        onScreenComplete={() => notifyScreenComplete('dashboardComplete')}
+        onSkipRequest={notifySkipRequest}
+        stepOffset={PHASE_STEP_OFFSETS.dashboardComplete}
+        globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
+        scrollRef={scrollRef}
+        scrollPositions={{ recentQuoteCard: 600 }}
+      />
+    )}
 
   </>
   );

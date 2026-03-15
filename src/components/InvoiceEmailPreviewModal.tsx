@@ -20,6 +20,7 @@ import {
   Text,
   TextInput,
   Button,
+  Switch,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -157,6 +158,7 @@ interface InvoiceEmailPreviewModalProps {
   onRegenerate: () => void;
   isPro: boolean;
   isRegenerating: boolean;
+  photoCount?: number;
 }
 
 export function InvoiceEmailPreviewModal({
@@ -169,6 +171,7 @@ export function InvoiceEmailPreviewModal({
   onRegenerate,
   isPro,
   isRegenerating,
+  photoCount = 0,
 }: InvoiceEmailPreviewModalProps) {
   const insets = useSafeAreaInsets();
   const [recipientEmail, setRecipientEmail] = useState(invoice.customerEmail || '');
@@ -181,6 +184,8 @@ export function InvoiceEmailPreviewModal({
   const [emailTouched, setEmailTouched] = useState(false);
   const [emailError, setEmailError] = useState('');
   const ownerEmail = auth.currentUser?.email || '';
+  const hasPhotos = photoCount > 0;
+  const [includePhotos, setIncludePhotos] = useState(true);
 
   // Alert modal state
   const [alertVisible, setAlertVisible] = useState(false);
@@ -246,6 +251,7 @@ export function InvoiceEmailPreviewModal({
           invoiceId: invoice.id,
           emailBody: emailBody,
           recipientEmail: recipientEmail.trim(),
+          includePhotos: hasPhotos && includePhotos,
         }),
       });
 
@@ -283,6 +289,7 @@ export function InvoiceEmailPreviewModal({
           emailBody: emailBody,
           recipientEmail: ownerEmail,
           isTestSend: true,
+          includePhotos: hasPhotos && includePhotos,
         }),
       });
 
@@ -393,11 +400,33 @@ export function InvoiceEmailPreviewModal({
             )}
           </View>
 
+          {/* Photo attachment toggle */}
+          {hasPhotos && (
+            <View style={styles.sectionCard}>
+              <View style={styles.toggleRow}>
+                <View style={styles.toggleLeft}>
+                  <View style={[styles.sectionIconCircle, { backgroundColor: colors.successBg }]}>
+                    <MaterialCommunityIcons name="image-multiple-outline" size={18} color={colors.success} />
+                  </View>
+                  <View style={styles.toggleTextContainer}>
+                    <Text style={styles.sectionTitle}>Attach Job Photos</Text>
+                    <Text style={styles.toggleSubtext}>{photoCount} photo{photoCount > 1 ? 's' : ''} will be attached</Text>
+                  </View>
+                </View>
+                <Switch
+                  value={includePhotos}
+                  onValueChange={setIncludePhotos}
+                  color={colors.primary}
+                />
+              </View>
+            </View>
+          )}
+
           {/* Info note */}
           <View style={styles.infoNote}>
             <MaterialCommunityIcons name="information-outline" size={16} color={colors.textMuted} />
             <Text style={styles.infoText}>
-              The email will include a pricing breakdown, payment details, and a PDF invoice attachment.
+              The email will include a pricing breakdown, payment details, and a PDF invoice attachment.{hasPhotos && includePhotos ? ' Job photos will be attached.' : ''}
             </Text>
           </View>
         </ScrollView>
@@ -605,6 +634,25 @@ const styles = StyleSheet.create({
   },
   stepTextDone: {
     color: colors.success,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  toggleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  toggleTextContainer: {
+    flex: 1,
+  },
+  toggleSubtext: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   infoNote: {
     flexDirection: 'row',

@@ -36,8 +36,11 @@ export function SendInvoiceButton({
   buttonIcon = 'send',
   buttonStyle,
 }: SendInvoiceButtonProps) {
-  const { subscriptionStatus } = useStore();
+  const { subscriptionStatus, quotes } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const sourceQuotePhotos = invoice.sourceQuoteId
+    ? quotes.find(q => q.id === invoice.sourceQuoteId)?.photos || []
+    : [];
   const isPro = subscriptionStatus?.isPro || isTrialActive;
   const [sendDialogVisible, setSendDialogVisible] = useState(false);
   const [emailPreviewVisible, setEmailPreviewVisible] = useState(false);
@@ -212,6 +215,7 @@ export function SendInvoiceButton({
         onRegenerate={handleRegenerateEmail}
         isPro={isPro}
         isRegenerating={isGeneratingEmail}
+        photoCount={sourceQuotePhotos.length}
       />
     </>
   );

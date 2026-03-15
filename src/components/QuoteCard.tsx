@@ -281,9 +281,13 @@ export const QuoteCard = React.memo(function QuoteCard({
                 )}
               </View>
               <Text style={styles.quoteDate}>
-                {differenceInDays(new Date(), new Date(quote.updatedAt)) < 7
-                  ? formatDistanceToNow(new Date(quote.updatedAt), { addSuffix: true })
-                  : format(new Date(quote.updatedAt), 'dd MMM yyyy')}
+                {(() => {
+                  const date = new Date(quote.updatedAt ?? quote.createdAt);
+                  if (isNaN(date.getTime())) return '';
+                  return differenceInDays(new Date(), date) < 7
+                    ? formatDistanceToNow(date, { addSuffix: true })
+                    : format(date, 'dd MMM yyyy');
+                })()}
               </Text>
             </View>
           </Card.Content>

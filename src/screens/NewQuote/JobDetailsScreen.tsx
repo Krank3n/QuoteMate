@@ -54,9 +54,13 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { ProBadge } from '../../components/ProBadge';
 import { AlertModal } from '../../components/AlertModal';
 import { JobPhotos } from '../../components/JobPhotos';
+import { PhotoAnnotator } from '../../components/PhotoAnnotator';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
 import { TOUR_STEPS, INTRO_TOUR_TOTAL_STEPS } from '../../components/tour/tourSteps';
+import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
+import { getTourPhoto, getTourPhotoAnnotated } from '../../components/tour/tourDummyData';
+import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
@@ -64,7 +68,7 @@ export function JobDetailsScreen() {
   const fromTour = route.params?.fromTour;
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { quotes, invoices, businessSettings, subscriptionStatus, saveDraft } = useStore();
+  const { quotes, invoices, businessSettings, subscriptionStatus, saveDraft, unifiedTourActive, unifiedTourPhase } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -90,9 +94,11 @@ export function JobDetailsScreen() {
   const descriptionCleanedRef = useRef<View>(null);
   const micButtonRef = useRef<View>(null);
   const jobPhotosRef = useRef<View>(null);
+  const jobPhotoThumbnailRef = useRef<View>(null);
   const analyzeRef = useRef<View>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [tourActive, setTourActive] = useState(false);
+  const [tourAnnotatorOpen, setTourAnnotatorOpen] = useState(false);
   const typewriterRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -100,6 +106,9 @@ export function JobDetailsScreen() {
     if (descriptionCleanedRef.current) registerRef('jobDescriptionCleaned', descriptionCleanedRef.current);
     if (micButtonRef.current) registerRef('micButton', micButtonRef.current);
     if (jobPhotosRef.current) registerRef('jobPhotos', jobPhotosRef.current);
+    if (jobPhotoThumbnailRef.current) registerRef('jobPhotoThumbnail', jobPhotoThumbnailRef.current);
+    // jobPhotoAnnotated uses the same ref as jobPhotoThumbnail (same element, different content)
+    if (jobPhotoThumbnailRef.current) registerRef('jobPhotoAnnotated', jobPhotoThumbnailRef.current);
     if (analyzeRef.current) registerRef('analyzeButton', analyzeRef.current);
   });
 
@@ -953,7 +962,7 @@ export function JobDetailsScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={true}
-          scrollEnabled={!tourActive}
+          scrollEnabled={true}
         >
           <WebContainer>
       {/* Niche-Specific Quick Templates */}
@@ -1385,6 +1394,8 @@ export function JobDetailsScreen() {
             <JobPhotos
               photos={jobPhotos}
               onPhotosChange={setJobPhotos}
+              firstPhotoRef={jobPhotoThumbnailRef}
+              interactionDisabled={tourActive}
             />
             </View>
             {jobPhotos.length > 0 && (
@@ -1428,11 +1439,14 @@ export function JobDetailsScreen() {
       <ScreenTour
         tourId="jobDetails"
         delay={fromTour ? 200 : 600}
-        stepOffset={TOUR_STEPS.length}
-        globalTotalSteps={INTRO_TOUR_TOTAL_STEPS}
+        stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.jobDetails : TOUR_STEPS.length}
+        globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : INTRO_TOUR_TOTAL_STEPS}
         scrollRef={scrollRef}
-        scrollPositions={{ micButton: 0, jobDescription: 0, jobDescriptionCleaned: 0, jobPhotos: 600 }}
+        scrollPositions={{ micButton: 0, jobDescription: 0, jobDescriptionCleaned: 0, jobPhotoThumbnail: 600, annotatorCanvas: 0, annotatorTools: 0, annotatorDone: 0, jobPhotoAnnotated: 600 }}
         onActiveChange={setTourActive}
+        unifiedMode={unifiedTourActive && unifiedTourPhase === 'jobDetails'}
+        onScreenComplete={() => notifyScreenComplete('jobDetails')}
+        onSkipRequest={notifySkipRequest}
         onStepChange={(stepId) => {
           if (stepId === 'jobDescription' && !jobDescription.trim()) {
             const demoText =
@@ -1461,6 +1475,20 @@ export function JobDetailsScreen() {
               typewriterRef.current = null;
             }
             handleCleanupDescription();
+          } else if (stepId === 'jobPhotoThumbnail' && jobPhotos.length === 0) {
+            // Inject dummy photo when arriving at combined photo/annotate step
+            if (typewriterRef.current) {
+              clearInterval(typewriterRef.current);
+              typewriterRef.current = null;
+            }
+            setJobPhotos([getTourPhoto()]);
+          } else if (stepId === 'annotatorCanvas') {
+            // Open the real annotator in tour mode
+            setTourAnnotatorOpen(true);
+          } else if (stepId === 'jobPhotoAnnotated') {
+            // Close annotator and swap to pre-annotated version
+            setTourAnnotatorOpen(false);
+            setJobPhotos([getTourPhotoAnnotated()]);
           } else {
             // Clear typewriter if moving away from step
             if (typewriterRef.current) {
@@ -1470,6 +1498,17 @@ export function JobDetailsScreen() {
           }
         }}
       />
+
+      {/* Tour-mode annotator — rendered as absolute overlay (not Modal) so tour spotlight works on top */}
+      {tourAnnotatorOpen && jobPhotos.length > 0 && (
+        <PhotoAnnotator
+          visible={true}
+          tourMode={true}
+          imageUri={jobPhotos[0].storageUrl}
+          onSave={() => {}}
+          onCancel={() => {}}
+        />
+      )}
     </>
   );
 }

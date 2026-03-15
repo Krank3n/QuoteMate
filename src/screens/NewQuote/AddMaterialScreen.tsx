@@ -57,6 +57,8 @@ import { BUNNINGS_SCRAPER_URL } from '@env';
 import { TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
+import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
+import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 
 // Material categories for the picker (derived from trade categories)
 const MATERIAL_CATEGORIES = [
@@ -75,7 +77,7 @@ export function AddMaterialScreen() {
   const route = useRoute<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { businessSettings, subscriptionStatus } = useStore();
+  const { businessSettings, subscriptionStatus, unifiedTourActive, unifiedTourPhase } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -143,9 +145,13 @@ export function AddMaterialScreen() {
   // Tour refs
   const { registerRef } = useTourRefs();
   const savedItemsTabRef = useRef<View>(null);
+  const searchSectionRef = useRef<View>(null);
+  const manualEntrySectionRef = useRef<View>(null);
 
   useEffect(() => {
     if (savedItemsTabRef.current) registerRef('savedItemsTab', savedItemsTabRef.current);
+    if (searchSectionRef.current) registerRef('searchSection', searchSectionRef.current);
+    if (manualEntrySectionRef.current) registerRef('manualEntrySection', manualEntrySectionRef.current);
   });
 
   // Saved items state
@@ -595,7 +601,7 @@ export function AddMaterialScreen() {
 
   // Search section component
   const renderSearchSection = () => (
-    <View style={styles.section}>
+    <View ref={searchSectionRef} style={styles.section}>
       <View style={styles.manualEntryHeader}>
         <View style={styles.manualEntryDividerLine} />
         <View style={styles.searchTitleRow}>
@@ -699,7 +705,7 @@ export function AddMaterialScreen() {
 
   // Manual entry section component
   const renderManualEntrySection = () => (
-    <View style={styles.section}>
+    <View ref={manualEntrySectionRef} style={styles.section}>
       {!isEditMode && (
         <View style={styles.manualEntryHeader}>
           <View style={styles.manualEntryDividerLine} />
@@ -1041,7 +1047,16 @@ export function AddMaterialScreen() {
       )}
 
       {/* Screen Tour */}
-      {!isEditMode && <ScreenTour tourId="addMaterial" />}
+      {!isEditMode && (
+        <ScreenTour
+          tourId="addMaterial"
+          unifiedMode={unifiedTourActive && unifiedTourPhase === 'addMaterial'}
+          onScreenComplete={() => notifyScreenComplete('addMaterial')}
+          onSkipRequest={notifySkipRequest}
+          stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.addMaterial : 0}
+          globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
+        />
+      )}
     </View>
   );
 }

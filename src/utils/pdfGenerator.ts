@@ -257,6 +257,7 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
       </style>
     </head>
     <body>
+      <div class="content-wrapper">
       <div class="header">
         <div class="header-content">
           ${logoBase64 ? `<img src="${logoBase64}" alt="${business.businessName}" class="logo" />` : ''}
@@ -342,8 +343,12 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
 
       ${generatePaymentMethodsHTML(businessSettings)}
 
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666666;">
+      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
         <p>This quote is valid for 30 days from the date of issue.</p>
+      </div>
+      </div>
+
+      <div class="pdf-footer">
         <p>Powered by QuoteMate | quotemateapp.au</p>
       </div>
     </body>
@@ -505,6 +510,7 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
       </style>
     </head>
     <body>
+      <div class="content-wrapper">
       <div class="header">
         <div class="header-content">
           ${logoBase64 ? `<img src="${logoBase64}" alt="${business.businessName}" class="logo" />` : ''}
@@ -613,9 +619,13 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
 
       ${generatePaymentMethodsHTML(businessSettings)}
 
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666666;">
+      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
         <p>Payment is due by ${format(new Date(invoice.dueDate), 'dd MMMM yyyy')}.</p>
         <p>Thank you for your business!</p>
+      </div>
+      </div>
+
+      <div class="pdf-footer">
         <p>Powered by QuoteMate | quotemateapp.au</p>
       </div>
     </body>

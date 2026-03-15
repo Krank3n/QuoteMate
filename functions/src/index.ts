@@ -2469,6 +2469,38 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
 });
 
 /**
+ * Fetch photos from URLs and return as base64 attachments for email
+ */
+async function fetchPhotoAttachments(
+  photoUrls: string[]
+): Promise<Array<{ name: string; content: string }>> {
+  const attachments: Array<{ name: string; content: string }> = [];
+
+  const results = await Promise.allSettled(
+    photoUrls.map(async (url, index) => {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      const ext = contentType.includes('png') ? 'png' : 'jpg';
+      const buffer = await response.buffer();
+      return {
+        name: `Job_Photo_${index + 1}.${ext}`,
+        content: buffer.toString('base64'),
+      };
+    })
+  );
+
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value) {
+      attachments.push(result.value);
+    }
+  }
+
+  return attachments;
+}
+
+/**
  * Send a quote to a client via Brevo email
  * Generates acceptance link, sends branded HTML email, updates quote status
  */
@@ -2483,7 +2515,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { quoteId, emailBody, recipientEmail, isTestSend } = req.body;
+    const { quoteId, emailBody, recipientEmail, isTestSend, includePhotos } = req.body;
 
     if (!quoteId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: quoteId, emailBody, recipientEmail' });
@@ -2621,6 +2653,17 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 30);
       const pdfFilename = `Quote_${sanitize(quote.customerName || 'Client')}_${sanitize(quote.job?.name || 'Job')}.pdf`;
 
+      // Build attachments array
+      const attachments: Array<{ name: string; content: string }> = [
+        { name: pdfFilename, content: pdfBase64 },
+      ];
+
+      // Attach job photos if requested
+      if (includePhotos && photoUrls.length > 0) {
+        const photoAttachments = await fetchPhotoAttachments(photoUrls);
+        attachments.push(...photoAttachments);
+      }
+
       // Send via Brevo
       const sent = await sendEmail({
         to: recipientEmail,
@@ -2629,7 +2672,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         category: 'transactional',
         userId,
         tags: isTestSend ? ['quote-test'] : ['quote-to-client'],
-        attachment: [{ name: pdfFilename, content: pdfBase64 }],
+        attachment: attachments,
       });
 
       if (!sent) {
@@ -2673,7 +2716,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { invoiceId, emailBody, recipientEmail, isTestSend } = req.body;
+    const { invoiceId, emailBody, recipientEmail, isTestSend, includePhotos } = req.body;
 
     if (!invoiceId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: invoiceId, emailBody, recipientEmail' });
@@ -2797,6 +2840,24 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
       const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 30);
       const pdfFilename = `Invoice_${sanitize(invoice.customerName || 'Client')}_${sanitize(invoice.job?.name || 'Job')}.pdf`;
 
+      // Build attachments array
+      const attachments: Array<{ name: string; content: string }> = [
+        { name: pdfFilename, content: pdfBase64 },
+      ];
+
+      // Attach job photos if requested (from source quote)
+      if (includePhotos && invoice.sourceQuoteId) {
+        const sourceQuoteDoc = await firestore.doc(`users/${userId}/quotes/${invoice.sourceQuoteId}`).get();
+        if (sourceQuoteDoc.exists) {
+          const sourceQuote = sourceQuoteDoc.data()!;
+          const photoUrls = (sourceQuote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
+          if (photoUrls.length > 0) {
+            const photoAttachments = await fetchPhotoAttachments(photoUrls);
+            attachments.push(...photoAttachments);
+          }
+        }
+      }
+
       // Send via Brevo
       const sent = await sendEmail({
         to: recipientEmail,
@@ -2805,7 +2866,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         category: 'transactional',
         userId,
         tags: isTestSend ? ['invoice-test'] : ['invoice-to-client'],
-        attachment: [{ name: pdfFilename, content: pdfBase64 }],
+        attachment: attachments,
       });
 
       if (!sent) {

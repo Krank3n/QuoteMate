@@ -2,6 +2,11 @@
  * ScreenTour — contextual tour for individual screens
  * Shows a short spotlight tour on first visit, then never again.
  * Uses the same overlay/tooltip system as the dashboard tour.
+ *
+ * In unified mode, the tour is externally controlled by the orchestrator:
+ * - Always shows (ignores hasSeenScreenTour)
+ * - Calls onScreenComplete instead of marking as seen
+ * - Calls onSkipRequest instead of dismissing
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -29,11 +34,17 @@ interface ScreenTourProps {
   stepOffset?: number;
   /** Override displayed total for sequential numbering across tours */
   globalTotalSteps?: number;
+  /** When true, controlled by unified tour orchestrator */
+  unifiedMode?: boolean;
+  /** Called when the last step finishes in unified mode (triggers auto-navigation) */
+  onScreenComplete?: () => void;
+  /** Called when user taps Skip in unified mode (shows confirmation modal) */
+  onSkipRequest?: () => void;
 }
 
-export function ScreenTour({ tourId, delay = 600, scrollRef, scrollPositions, onActiveChange, onStepChange, stepOffset = 0, globalTotalSteps }: ScreenTourProps) {
+export function ScreenTour({ tourId, delay = 600, scrollRef, scrollPositions, onActiveChange, onStepChange, stepOffset = 0, globalTotalSteps, unifiedMode = false, onScreenComplete, onSkipRequest }: ScreenTourProps) {
   const { width: screenW, height: screenH } = useWindowDimensions();
-  const { markScreenTourSeen, hasSeenScreenTour } = useStore();
+  const { markScreenTourSeen, hasSeenScreenTour, unifiedTourActive } = useStore();
   const { measureTarget } = useTourRefs();
   const isFocused = useIsFocused();
 
@@ -43,17 +54,21 @@ export function ScreenTour({ tourId, delay = 600, scrollRef, scrollPositions, on
   const [targetRect, setTargetRect] = useState<TargetRect | null>(null);
   const [isVisible, setIsVisible] = useState(false);
 
-  // Auto-trigger on mount if not seen
+  // Auto-trigger on mount if not seen (or always in unified mode)
+  // When unified tour is active, only the ScreenTour with unifiedMode=true should trigger
   useEffect(() => {
     if (!steps || steps.length === 0) return;
-    if (hasSeenScreenTour(tourId)) return;
+    if (!unifiedMode && unifiedTourActive) return; // suppress standalone tours during unified tour
+    if (!unifiedMode && hasSeenScreenTour(tourId)) return;
 
+    // In unified mode, use a shorter delay since the previous phase already dismissed
+    const effectiveDelay = unifiedMode ? Math.min(delay, 300) : delay;
     const timer = setTimeout(() => {
       setActive(true);
       onActiveChange?.(true);
-    }, delay);
+    }, effectiveDelay);
     return () => clearTimeout(timer);
-  }, [tourId]);
+  }, [tourId, unifiedMode]);
 
   // Dismiss tour when screen loses focus (e.g. navigation)
   useEffect(() => {
@@ -70,8 +85,23 @@ export function ScreenTour({ tourId, delay = 600, scrollRef, scrollPositions, on
     setTargetRect(null);
     setActive(false);
     onActiveChange?.(false);
-    await markScreenTourSeen(tourId);
-  }, [tourId, markScreenTourSeen, onActiveChange]);
+
+    if (unifiedMode) {
+      // In unified mode, signal screen complete — orchestrator handles navigation
+      onScreenComplete?.();
+    } else {
+      await markScreenTourSeen(tourId);
+    }
+  }, [tourId, markScreenTourSeen, onActiveChange, unifiedMode, onScreenComplete]);
+
+  const handleSkip = useCallback(() => {
+    if (unifiedMode) {
+      // In unified mode, show confirmation modal instead of dismissing
+      onSkipRequest?.();
+    } else {
+      handleFinish();
+    }
+  }, [unifiedMode, onSkipRequest, handleFinish]);
 
   // Scroll target into view if needed, then measure
   const scrollAndMeasure = useCallback(async (stepIdx: number) => {
@@ -84,7 +114,8 @@ export function ScreenTour({ tourId, delay = 600, scrollRef, scrollPositions, on
       await new Promise(resolve => setTimeout(resolve, 400));
     }
 
-    // Wait for layout to settle before measuring
+    // Wait for layout to settle before measuring (navigation transitions need extra time)
+    await new Promise(resolve => setTimeout(resolve, 150));
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     let rect = await measureTarget(step.id);
 
@@ -116,11 +147,24 @@ export function ScreenTour({ tourId, delay = 600, scrollRef, scrollPositions, on
       }
     }
 
+    // Retry a few times if target isn't measurable yet (e.g. async mount like PhotoAnnotator)
+    if (!rect) {
+      for (let retry = 0; retry < 5 && !rect; retry++) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        rect = await measureTarget(step.id);
+      }
+    }
+
     if (rect) {
       setTargetRect(rect);
       setIsVisible(true);
       // Only fire for initial step — subsequent steps fire from handleNext
       if (stepIdx === 0) onStepChange?.(step.id);
+      // Quick re-measure after a beat to correct any drift from transition animations
+      setTimeout(async () => {
+        const corrected = await measureTarget(step.id);
+        if (corrected) setTargetRect(corrected);
+      }, 400);
     } else {
       // Skip missing targets
       if (stepIdx < steps.length - 1) {
@@ -205,7 +249,7 @@ export function ScreenTour({ tourId, delay = 600, scrollRef, scrollPositions, on
           screenHeight={screenH}
           onNext={handleNext}
           onBack={handleBack}
-          onSkip={handleFinish}
+          onSkip={handleSkip}
           stepOffset={stepOffset}
           globalTotalSteps={globalTotalSteps}
         />

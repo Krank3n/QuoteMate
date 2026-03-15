@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo } from '../types';
+import { TourPhase } from '../components/tour/tourFlow';
 import { updateQuoteCalculations } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { firestoreService } from '../services/firestoreService';
@@ -86,6 +87,15 @@ interface AppState {
   referralInfo: ReferralInfo | null;
   loadReferralInfo: () => Promise<void>;
 
+  // Unified guided tour
+  unifiedTourActive: boolean;
+  unifiedTourPhase: TourPhase | null;
+  unifiedTourQuoteId: string | null;
+  startUnifiedTour: () => void;
+  setUnifiedTourPhase: (phase: TourPhase) => void;
+  endUnifiedTour: () => Promise<void>;
+  skipUnifiedTour: () => Promise<void>;
+
   // Cleanup
   clearAllData: () => Promise<void>;
 }
@@ -128,6 +138,9 @@ export const useStore = create<AppState>((set, get) => ({
   currentInvoice: null,
   nextInvoiceNumber: 1,
   referralInfo: null,
+  unifiedTourActive: false,
+  unifiedTourPhase: null,
+  unifiedTourQuoteId: null,
 
   // Business settings
   setBusinessSettings: async (settings: BusinessSettings) => {
@@ -1158,6 +1171,72 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (error) {
       console.error('Failed to load referral info:', error);
     }
+  },
+
+  // Unified guided tour
+  startUnifiedTour: () => {
+    const { createNewQuote, currentQuote } = get();
+    createNewQuote();
+    const newQuote = get().currentQuote;
+    set({
+      unifiedTourActive: true,
+      unifiedTourPhase: 'dashboard',
+      unifiedTourQuoteId: newQuote?.id || null,
+    });
+  },
+
+  setUnifiedTourPhase: (phase: TourPhase) => {
+    set({ unifiedTourPhase: phase });
+  },
+
+  endUnifiedTour: async () => {
+    const { setHasSeenTour, saveDraft, currentQuote } = get();
+    // Save the tour quote as a real draft so it shows on the dashboard
+    if (currentQuote) {
+      try {
+        await saveDraft(currentQuote);
+      } catch (e) {
+        console.warn('Failed to save tour quote as draft:', e);
+      }
+    }
+    // Mark all tours as seen
+    await setHasSeenTour(true);
+    const allScreenTours = ['jobDetails', 'customerDetails', 'materialsList', 'materialsListItems', 'addMaterial', 'materialsListAdded', 'laborMarkup', 'quotePreview', 'dashboardComplete'];
+    const { seenScreenTours } = get();
+    const updated = [...new Set([...seenScreenTours, ...allScreenTours])];
+    await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(updated));
+    set({
+      unifiedTourActive: false,
+      unifiedTourPhase: null,
+      unifiedTourQuoteId: null,
+      currentQuote: null,
+      seenScreenTours: updated,
+    });
+  },
+
+  skipUnifiedTour: async () => {
+    const { unifiedTourQuoteId, deleteQuote, setHasSeenTour } = get();
+    // Delete the dummy quote on skip
+    if (unifiedTourQuoteId) {
+      try {
+        await deleteQuote(unifiedTourQuoteId);
+      } catch (e) {
+        console.warn('Failed to delete tour dummy quote:', e);
+      }
+    }
+    // Mark all tours as seen
+    await setHasSeenTour(true);
+    const allScreenTours = ['jobDetails', 'customerDetails', 'materialsList', 'materialsListItems', 'addMaterial', 'materialsListAdded', 'laborMarkup', 'quotePreview', 'dashboardComplete'];
+    const { seenScreenTours } = get();
+    const updated = [...new Set([...seenScreenTours, ...allScreenTours])];
+    await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(updated));
+    set({
+      unifiedTourActive: false,
+      unifiedTourPhase: null,
+      unifiedTourQuoteId: null,
+      currentQuote: null,
+      seenScreenTours: updated,
+    });
   },
 
   // Clear all data (for logout)

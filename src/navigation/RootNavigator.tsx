@@ -44,6 +44,7 @@ import { InvoicePreviewScreen } from '../screens/NewQuote/InvoicePreviewScreen';
 
 import { colors } from '../theme';
 import { TourRefsProvider } from '../components/tour/useTourRefs';
+import { UnifiedTourController } from '../components/tour/UnifiedTourController';
 
 // Type definitions for navigation
 export type RootTabParamList = {
@@ -622,6 +623,7 @@ export function RootNavigator() {
         }}
       />
     </RootStack.Navigator>
+    <UnifiedTourController />
     </TourRefsProvider>
   );
 }

@@ -33,6 +33,8 @@ import {
 } from '../../components/document';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
+import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
+import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 
 // Confetti piece definition (reused from AlertModal pattern)
 interface ConfettiPiece {
@@ -72,7 +74,7 @@ function createConfettiPieces(): ConfettiPiece[] {
 
 export function QuotePreviewScreen() {
   const navigation = useNavigation<any>();
-  const { currentQuote, saveQuote, businessSettings, setCurrentQuote, nextQuoteNumber } = useStore();
+  const { currentQuote, saveQuote, businessSettings, setCurrentQuote, nextQuoteNumber, unifiedTourActive, unifiedTourPhase } = useStore();
   const insets = useSafeAreaInsets();
 
   // Tour refs
@@ -118,6 +120,99 @@ export function QuotePreviewScreen() {
   useEffect(() => {
     if (!currentQuote) return;
 
+    // Start celebration immediately — don't wait for save
+    setShowSuccess(true);
+    successTap();
+
+    // Animate banner in — backdrop + card in parallel for snappier feel
+    Animated.parallel([
+      Animated.timing(backdropOpacity, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.spring(bannerScale, {
+        toValue: 1,
+        tension: 80,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+      Animated.timing(bannerOpacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.spring(checkScale, {
+        toValue: 1,
+        tension: 100,
+        friction: 6,
+        delay: 150,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      // Fade in subtitle after card appears
+      Animated.timing(subtitleOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    });
+
+    // Animate confetti
+    confetti.forEach((piece, index) => {
+      const anim = confettiAnims[index];
+      Animated.sequence([
+        Animated.delay(piece.delay),
+        Animated.parallel([
+          Animated.timing(anim.translateY, {
+            toValue: 500,
+            duration: piece.duration,
+            useNativeDriver: true,
+          }),
+          Animated.timing(anim.rotate, {
+            toValue: (Math.random() - 0.5) * 720,
+            duration: piece.duration,
+            useNativeDriver: true,
+          }),
+          Animated.sequence([
+            Animated.timing(anim.opacity, {
+              toValue: 0.9,
+              duration: 200,
+              useNativeDriver: true,
+            }),
+            Animated.delay(piece.duration * 0.5),
+            Animated.timing(anim.opacity, {
+              toValue: 0,
+              duration: piece.duration * 0.3,
+              useNativeDriver: true,
+            }),
+          ]),
+        ]),
+      ]).start();
+    });
+
+    // Auto-dismiss banner
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(bannerOpacity, {
+          toValue: 0,
+          duration: 400,
+          useNativeDriver: true,
+        }),
+        Animated.timing(bannerScale, {
+          toValue: 0.8,
+          duration: 400,
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropOpacity, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ]).start(() => setShowSuccess(false));
+    }, 2000);
+
+    // Save in the background
     const autoSave = async () => {
       try {
         setIsSaving(true);
@@ -134,99 +229,6 @@ export function QuotePreviewScreen() {
         await saveQuote(updatedQuote);
         savedNotesRef.current = notes;
         setIsSaving(false);
-        setShowSuccess(true);
-        successTap();
-
-        // Animate banner in
-        Animated.sequence([
-          // Fade in backdrop
-          Animated.timing(backdropOpacity, {
-            toValue: 1,
-            duration: 250,
-            useNativeDriver: true,
-          }),
-          // Pop in the card + checkmark together
-          Animated.parallel([
-            Animated.spring(bannerScale, {
-              toValue: 1,
-              tension: 80,
-              friction: 8,
-              useNativeDriver: true,
-            }),
-            Animated.timing(bannerOpacity, {
-              toValue: 1,
-              duration: 200,
-              useNativeDriver: true,
-            }),
-            Animated.spring(checkScale, {
-              toValue: 1,
-              tension: 100,
-              friction: 6,
-              delay: 150,
-              useNativeDriver: true,
-            }),
-          ]),
-          // Fade in subtitle
-          Animated.timing(subtitleOpacity, {
-            toValue: 1,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-        ]).start();
-
-        // Animate confetti
-        confetti.forEach((piece, index) => {
-          const anim = confettiAnims[index];
-          Animated.sequence([
-            Animated.delay(piece.delay),
-            Animated.parallel([
-              Animated.timing(anim.translateY, {
-                toValue: 500,
-                duration: piece.duration,
-                useNativeDriver: true,
-              }),
-              Animated.timing(anim.rotate, {
-                toValue: (Math.random() - 0.5) * 720,
-                duration: piece.duration,
-                useNativeDriver: true,
-              }),
-              Animated.sequence([
-                Animated.timing(anim.opacity, {
-                  toValue: 0.9,
-                  duration: 200,
-                  useNativeDriver: true,
-                }),
-                Animated.delay(piece.duration * 0.5),
-                Animated.timing(anim.opacity, {
-                  toValue: 0,
-                  duration: piece.duration * 0.3,
-                  useNativeDriver: true,
-                }),
-              ]),
-            ]),
-          ]).start();
-        });
-
-        // Auto-dismiss banner
-        setTimeout(() => {
-          Animated.parallel([
-            Animated.timing(bannerOpacity, {
-              toValue: 0,
-              duration: 400,
-              useNativeDriver: true,
-            }),
-            Animated.timing(bannerScale, {
-              toValue: 0.8,
-              duration: 400,
-              useNativeDriver: true,
-            }),
-            Animated.timing(backdropOpacity, {
-              toValue: 0,
-              duration: 500,
-              useNativeDriver: true,
-            }),
-          ]).start(() => setShowSuccess(false));
-        }, 2000);
       } catch (error) {
         setIsSaving(false);
         Alert.alert('Error', 'Failed to save quote. Please try again.');
@@ -517,6 +519,11 @@ export function QuotePreviewScreen() {
         onActiveChange={setTourActive}
         scrollRef={scrollRef}
         scrollPositions={{ editSections: 0, sendButton: 0 }}
+        unifiedMode={unifiedTourActive && unifiedTourPhase === 'quotePreview'}
+        onScreenComplete={() => notifyScreenComplete('quotePreview')}
+        onSkipRequest={notifySkipRequest}
+        stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.quotePreview : 0}
+        globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
       />
     </View>
   );

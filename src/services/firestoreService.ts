@@ -99,7 +99,7 @@ class FirestoreService {
         return {
           ...data,
           createdAt: new Date(data.createdAt),
-          updatedAt: new Date(data.updatedAt),
+          updatedAt: data.updatedAt ? new Date(data.updatedAt) : new Date(data.createdAt),
           // Handle new quote acceptance fields
           acceptanceTokenCreatedAt: data.acceptanceTokenCreatedAt ? new Date(data.acceptanceTokenCreatedAt) : undefined,
           respondedAt: data.respondedAt ? new Date(data.respondedAt) : undefined,
@@ -366,7 +366,7 @@ class FirestoreService {
           return {
             ...data,
             createdAt: new Date(data.createdAt),
-            updatedAt: new Date(data.updatedAt),
+            updatedAt: data.updatedAt ? new Date(data.updatedAt) : new Date(data.createdAt),
             // Handle new quote acceptance fields
             acceptanceTokenCreatedAt: data.acceptanceTokenCreatedAt ? new Date(data.acceptanceTokenCreatedAt) : undefined,
             respondedAt: data.respondedAt ? new Date(data.respondedAt) : undefined,

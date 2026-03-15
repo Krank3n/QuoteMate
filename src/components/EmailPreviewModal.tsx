@@ -21,6 +21,7 @@ import {
   TextInput,
   Button,
   Portal,
+  Switch,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -181,6 +182,8 @@ export function EmailPreviewModal({
   const [emailTouched, setEmailTouched] = useState(false);
   const [emailError, setEmailError] = useState('');
   const ownerEmail = auth.currentUser?.email || '';
+  const hasPhotos = (quote.photos?.length || 0) > 0;
+  const [includePhotos, setIncludePhotos] = useState(true);
 
   // Alert modal state
   const [alertVisible, setAlertVisible] = useState(false);
@@ -246,6 +249,7 @@ export function EmailPreviewModal({
           quoteId: quote.id,
           emailBody: emailBody,
           recipientEmail: recipientEmail.trim(),
+          includePhotos: hasPhotos && includePhotos,
         }),
       });
 
@@ -283,6 +287,7 @@ export function EmailPreviewModal({
           emailBody: emailBody,
           recipientEmail: ownerEmail,
           isTestSend: true,
+          includePhotos: hasPhotos && includePhotos,
         }),
       });
 
@@ -394,11 +399,33 @@ export function EmailPreviewModal({
             )}
           </View>
 
+          {/* Photo attachment toggle */}
+          {hasPhotos && (
+            <View style={styles.sectionCard}>
+              <View style={styles.toggleRow}>
+                <View style={styles.toggleLeft}>
+                  <View style={[styles.sectionIconCircle, { backgroundColor: colors.successBg }]}>
+                    <MaterialCommunityIcons name="image-multiple-outline" size={18} color={colors.success} />
+                  </View>
+                  <View style={styles.toggleTextContainer}>
+                    <Text style={styles.sectionTitle}>Attach Job Photos</Text>
+                    <Text style={styles.toggleSubtext}>{quote.photos!.length} photo{quote.photos!.length > 1 ? 's' : ''} will be attached</Text>
+                  </View>
+                </View>
+                <Switch
+                  value={includePhotos}
+                  onValueChange={setIncludePhotos}
+                  color={colors.primary}
+                />
+              </View>
+            </View>
+          )}
+
           {/* Info note */}
           <View style={styles.infoNote}>
             <MaterialCommunityIcons name="information-outline" size={16} color={colors.textMuted} />
             <Text style={styles.infoText}>
-              The email will include a pricing table, {quote.photos?.length ? 'job photos, ' : ''}accept/decline buttons, and your business details.
+              The email will include a pricing table, {hasPhotos && includePhotos ? 'job photos, ' : ''}accept/decline buttons, and your business details.
             </Text>
           </View>
         </ScrollView>
@@ -609,6 +636,25 @@ const styles = StyleSheet.create({
   },
   stepTextDone: {
     color: colors.success,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  toggleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  toggleTextContainer: {
+    flex: 1,
+  },
+  toggleSubtext: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   infoNote: {
     flexDirection: 'row',

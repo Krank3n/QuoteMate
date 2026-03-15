@@ -230,6 +230,10 @@ function generatePaymentMethodsHTML(pm: any): string {
 // ---- Template CSS system (mirrors client-side pdfTemplates.ts) ----
 
 const printMediaCSS = `
+  html, body { min-height: 100%; margin: 0; }
+  body { display: flex; flex-direction: column; }
+  .content-wrapper { flex: 1; }
+  .pdf-footer { margin-top: auto; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666666; text-align: center; }
   @media print {
     @page { margin: 40px; }
     .header, .info-section, .summary, .section-wrapper { page-break-inside: avoid; break-inside: avoid; }
@@ -426,6 +430,7 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
       </style>
     </head>
     <body>
+      <div class="content-wrapper">
       <div class="header">
         <div class="header-content">
           ${logoHtml}
@@ -511,8 +516,12 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
 
       ${generatePaymentMethodsHTML(quote.paymentMethods)}
 
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666666;">
+      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
         <p>This quote is valid for 30 days from the date of issue.</p>
+      </div>
+      </div>
+
+      <div class="pdf-footer">
         <p>Powered by QuoteMate | quotemateapp.au</p>
       </div>
     </body>
@@ -556,6 +565,7 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
       </style>
     </head>
     <body>
+      <div class="content-wrapper">
       <div class="header">
         <div class="header-content">
           ${logoHtml}
@@ -660,9 +670,13 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
 
       ${generatePaymentMethodsHTML(invoice.paymentMethods)}
 
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666666;">
+      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
         <p>Payment is due by ${dueDateStr}.</p>
         <p>Thank you for your business!</p>
+      </div>
+      </div>
+
+      <div class="pdf-footer">
         <p>Powered by QuoteMate | quotemateapp.au</p>
       </div>
     </body>

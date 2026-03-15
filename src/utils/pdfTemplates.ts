@@ -34,6 +34,25 @@ export const PDF_TEMPLATES: PdfTemplateInfo[] = [
 
 /** Print media CSS shared across all templates */
 export const printMediaCSS = `
+  html, body {
+    min-height: 100%;
+    margin: 0;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+  }
+  .content-wrapper {
+    flex: 1;
+  }
+  .pdf-footer {
+    margin-top: auto;
+    padding-top: 20px;
+    border-top: 1px solid #e0e0e0;
+    font-size: 12px;
+    color: #666666;
+    text-align: center;
+  }
   @media print {
     @page {
       margin-top: 40px;

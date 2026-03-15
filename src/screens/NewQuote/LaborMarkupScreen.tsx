@@ -25,12 +25,14 @@ import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
+import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
+import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 
 export function LaborMarkupScreen() {
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { saveDraft, businessSettings } = useStore();
+  const { saveDraft, businessSettings, unifiedTourActive, unifiedTourPhase } = useStore();
 
   // For compatibility, alias to currentQuote (used throughout this file)
   const currentQuote = currentDocument;
@@ -488,7 +490,12 @@ export function LaborMarkupScreen() {
         tourId="laborMarkup"
         onActiveChange={setTourActive}
         scrollRef={scrollRef}
-        scrollPositions={{ travelSection: 0, laborSection: 0, markupSection: 300, travelAdjust: 200 }}
+        scrollPositions={{ laborSection: 0, markupSection: 300 }}
+        unifiedMode={unifiedTourActive && unifiedTourPhase === 'laborMarkup'}
+        onScreenComplete={() => notifyScreenComplete('laborMarkup')}
+        onSkipRequest={notifySkipRequest}
+        stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.laborMarkup : 0}
+        globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
       />
     </>
   );

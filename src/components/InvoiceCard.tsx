@@ -62,7 +62,10 @@ export const InvoiceCard = React.memo(function InvoiceCard({
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const idleAnim = useRef(new Animated.Value(0)).current;
   const idleTilt = useRef(new Animated.Value(0)).current;
-  const { subscriptionStatus } = useStore();
+  const { subscriptionStatus, quotes } = useStore();
+  const sourceQuotePhotos = invoice.sourceQuoteId
+    ? quotes.find(q => q.id === invoice.sourceQuoteId)?.photos || []
+    : [];
 
   // Subtle idle bob + tilt — randomized so cards are never in sync
   const bobDurationRef = useRef(2400 + Math.random() * 1200);
@@ -373,6 +376,7 @@ export const InvoiceCard = React.memo(function InvoiceCard({
       onRegenerate={handleRegenerateEmail}
       isPro={isPro}
       isRegenerating={isGeneratingEmail}
+      photoCount={sourceQuotePhotos.length}
     />
     </>
   );

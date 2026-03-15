@@ -37,9 +37,13 @@ interface LocalPhoto extends QuotePhoto {
 interface JobPhotosProps {
   photos: QuotePhoto[];
   onPhotosChange: (photos: QuotePhoto[]) => void;
+  /** Ref attached to the first photo's wrapper — for tour spotlight targeting */
+  firstPhotoRef?: React.RefObject<View>;
+  /** When true, disable photo taps and add button (during tour) */
+  interactionDisabled?: boolean;
 }
 
-export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
+export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDisabled }: JobPhotosProps) {
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
   const [annotatingPhoto, setAnnotatingPhoto] = useState<LocalPhoto | null>(null);
 
@@ -234,12 +238,12 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
       </Text>
 
       <View style={styles.grid}>
-        {allPhotos.map((photo) => {
+        {allPhotos.map((photo, index) => {
           const displayUri = photo.localUri || photo.storageUrl;
           return (
-            <View key={photo.id} style={styles.photoWrapper}>
+            <View key={photo.id} style={styles.photoWrapper} ref={index === 0 ? firstPhotoRef : undefined}>
               <TouchableOpacity
-                onPress={() => !photo.uploading && setAnnotatingPhoto(photo)}
+                onPress={() => !photo.uploading && !interactionDisabled && setAnnotatingPhoto(photo)}
                 activeOpacity={0.8}
               >
                 <Image source={{ uri: displayUri }} style={styles.photo} />
@@ -275,7 +279,7 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
           <TouchableOpacity
             style={styles.addButton}
             onPress={showAddOptions}
-            disabled={hasAnyUploading}
+            disabled={hasAnyUploading || interactionDisabled}
           >
             <MaterialCommunityIcons name="camera-plus" size={28} color={colors.textMuted} />
             <Text style={styles.addText}>Add</Text>

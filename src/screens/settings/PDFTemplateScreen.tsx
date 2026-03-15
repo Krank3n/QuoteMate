@@ -465,6 +465,7 @@ export function PDFTemplateScreen() {
           <style>${printMediaCSS} ${css}</style>
         </head>
         <body>
+          <div class="content-wrapper">
           <div class="header">
             <div class="header-content">
               <div class="header-text">
@@ -594,8 +595,12 @@ export function PDFTemplateScreen() {
 
           <div class="info-section"><h3>Notes</h3><p>All timber will be treated and stained. Work includes cleanup and disposal of waste materials. Deck will comply with local council regulations.</p></div>
 
-          <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666666;">
+          <div style="margin-top: 40px; font-size: 12px; color: #666666;">
             <p>This quote is valid for 30 days from the date of issue.</p>
+          </div>
+          </div>
+
+          <div class="pdf-footer">
             <p>Powered by QuoteMate | quotemateapp.au</p>
           </div>
         </body>
