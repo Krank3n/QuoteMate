@@ -1166,7 +1166,7 @@ export function JobDetailsScreen() {
             <Title style={styles.sectionTitle}>Job Description</Title>
           </View>
           <Text style={styles.helperText}>
-            Tap the microphone to describe the job with your voice, or type it manually below.
+            Hit the mic and tell us what needs doing, or bash it out on the keyboard.
           </Text>
 
         {/* Beautiful Record Button */}
