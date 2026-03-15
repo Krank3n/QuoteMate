@@ -3025,6 +3025,8 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           laborTotal: foundQuote.laborTotal,
           materialsSubtotal: foundQuote.materialsSubtotal,
           subtotal: foundQuote.subtotal,
+          markupAmount: foundQuote.markupAmount || 0,
+          travelAdjustmentAmount: foundQuote.travelAdjustmentAmount || 0,
           gst: foundQuote.gst,
           total: foundQuote.total,
           notes: foundQuote.notes,
@@ -3267,25 +3269,242 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
 });
 
 /**
- * Serve the quote acceptance web page
- * A self-contained HTML page that fetches quote data and handles responses
+ * Serve the quote acceptance/response page
+ * When action=accept or action=decline is provided, processes the response server-side
+ * and shows a simple confirmation page. Otherwise shows the full review page.
  */
 export const quoteAcceptancePage = functions.https.onRequest(async (req, res) => {
   if (!(await checkRateLimit(`ip:${getClientIp(req)}`, RATE_LIMITS.public, res))) return;
 
   const token = req.query.token as string;
+  const action = req.query.action as string;
 
   if (!token || typeof token !== 'string' || token.length > 200) {
     res.status(400).send(generateErrorPage('Invalid Token', 'The quote token provided is missing or invalid.'));
     return;
   }
 
-  // Serve the HTML page that will fetch quote data via JavaScript
-  res.status(200).send(generateAcceptancePage(token));
+  // If no action specified, show the full review page (fallback)
+  if (!action || (action !== 'accept' && action !== 'decline')) {
+    res.status(200).send(generateAcceptancePage(token));
+    return;
+  }
+
+  // Process the response server-side and show confirmation
+  try {
+    const db = admin.firestore();
+    const responseType = action === 'accept' ? 'accepted' : 'rejected';
+    const tokenHash = hashToken(token);
+
+    // Look up the token
+    let tokenDoc = await db.collection('quoteAcceptanceTokens').doc(tokenHash).get();
+    if (!tokenDoc.exists) {
+      tokenDoc = await db.collection('quoteAcceptanceTokens').doc(token).get();
+    }
+
+    if (!tokenDoc.exists) {
+      res.status(200).send(generateConfirmationPage('error', 'Quote not found. The link may have expired.'));
+      return;
+    }
+
+    const tokenData = tokenDoc.data()!;
+    const quoteDoc = await db.collection('users').doc(tokenData.userId)
+      .collection('quotes').doc(tokenData.quoteId).get();
+
+    if (!quoteDoc.exists) {
+      res.status(200).send(generateConfirmationPage('error', 'Quote not found.'));
+      return;
+    }
+
+    const foundQuote = quoteDoc.data()!;
+    const foundUserId = tokenData.userId;
+
+    // Get business settings for branding
+    const settingsDoc = await db.collection('users').doc(foundUserId)
+      .collection('settings').doc('business').get();
+    const businessSettings = settingsDoc.exists ? settingsDoc.data() : null;
+    const businessName = businessSettings?.businessName || 'Your Trade Business';
+    const brandColor = businessSettings?.brandColor || null;
+    const logoUrl = businessSettings?.logoStorageUrl || null;
+
+    // Check if already responded
+    if (foundQuote.respondedAt) {
+      res.status(200).send(generateConfirmationPage(
+        'already',
+        `This quote has already been ${foundQuote.status}.`,
+        businessName, brandColor, logoUrl
+      ));
+      return;
+    }
+
+    // Check token expiration
+    const tokenCreatedAt = foundQuote.acceptanceTokenCreatedAt?.toDate?.() ||
+      new Date(foundQuote.acceptanceTokenCreatedAt);
+    if (Date.now() - tokenCreatedAt.getTime() > TOKEN_EXPIRATION_MS) {
+      res.status(200).send(generateConfirmationPage(
+        'error',
+        'This link has expired. Please contact the business directly.',
+        businessName, brandColor, logoUrl
+      ));
+      return;
+    }
+
+    // Process the response
+    await quoteDoc.ref.update({
+      status: responseType,
+      respondedAt: admin.firestore.FieldValue.serverTimestamp(),
+      respondedBy: foundQuote.customerName || 'Client',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Send email notification to business owner
+    if (businessSettings?.email) {
+      try {
+        const quoteNumber = foundQuote.quoteNumber || foundQuote.id;
+        const total = foundQuote.total || 0;
+        if (responseType === 'accepted') {
+          await sendQuoteAcceptedEmail(businessSettings.email, foundQuote.customerName, quoteNumber, total, null, foundUserId);
+        } else {
+          await sendQuoteDeclinedEmail(businessSettings.email, foundQuote.customerName, quoteNumber, total, null, foundUserId);
+        }
+      } catch (emailError) {
+        console.error('Error sending email notification:', emailError);
+      }
+    }
+
+    // Send push notification
+    try {
+      const fcmTokensSnapshot = await db.collection('users').doc(foundUserId).collection('fcmTokens').get();
+      if (!fcmTokensSnapshot.empty) {
+        const tokens = fcmTokensSnapshot.docs.map(doc => doc.data().token);
+        const aussieEvent: AussieEvent = responseType === 'accepted' ? 'quote_accepted' : 'quote_rejected';
+        const aussieMsg = getAussieMessage(aussieEvent, {
+          customer: foundQuote.customerName,
+          job: foundQuote.job?.name || 'the job',
+        });
+        await admin.messaging().sendEachForMulticast({
+          notification: { title: aussieMsg.title, body: aussieMsg.body },
+          data: { quoteId: foundQuote.id, type: 'quote_response', response: responseType },
+          tokens,
+        });
+      }
+    } catch (fcmError) {
+      console.error('Error sending push notification:', fcmError);
+    }
+
+    // Show confirmation page
+    if (responseType === 'accepted') {
+      res.status(200).send(generateConfirmationPage(
+        'accepted',
+        `Thank you! ${businessName} has been notified and will be in touch soon.`,
+        businessName, brandColor, logoUrl
+      ));
+    } else {
+      res.status(200).send(generateConfirmationPage(
+        'declined',
+        `Your response has been recorded. ${businessName} has been notified.`,
+        businessName, brandColor, logoUrl
+      ));
+    }
+  } catch (error: any) {
+    console.error('Error processing quote response:', error);
+    res.status(200).send(generateConfirmationPage('error', 'Something went wrong. Please try again later.'));
+  }
 });
 
 /**
- * Generate the quote acceptance HTML page
+ * Generate a simple confirmation page after accepting/declining
+ */
+function generateConfirmationPage(
+  type: 'accepted' | 'declined' | 'already' | 'error',
+  message: string,
+  businessName?: string,
+  brandColor?: string | null,
+  logoUrl?: string | null
+): string {
+  const accent = brandColor || '#f97316';
+  const icon = type === 'accepted' ? '&#10003;' : type === 'declined' ? '&#10005;' : type === 'already' ? '&#8505;' : '&#9888;';
+  const iconBg = type === 'accepted' ? '#22c55e' : type === 'declined' ? '#64748b' : type === 'error' ? '#ef4444' : '#f97316';
+  const heading = type === 'accepted' ? 'Quote Accepted'
+    : type === 'declined' ? 'Quote Declined'
+    : type === 'already' ? 'Already Responded'
+    : 'Something Went Wrong';
+
+  const logoHtml = logoUrl
+    ? `<img src="${logoUrl}" alt="" style="width:64px;height:64px;border-radius:14px;object-fit:cover;margin-bottom:16px;" />`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${heading}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: #1e293b;
+      border-radius: 20px;
+      padding: 48px 36px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      border: 1px solid #334155;
+    }
+    .icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: ${iconBg};
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+      font-size: 32px;
+      color: white;
+    }
+    h1 {
+      color: #f8fafc;
+      font-size: 24px;
+      margin-bottom: 12px;
+    }
+    .message {
+      color: #94a3b8;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    .business {
+      color: ${accent};
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    ${logoHtml}
+    ${businessName ? `<div class="business">${businessName}</div>` : ''}
+    <div class="icon">${icon}</div>
+    <h1>${heading}</h1>
+    <p class="message">${message}</p>
+  </div>
+</body>
+</html>`;
+}
+
+/**
+ * Generate the quote acceptance HTML page (fallback review page)
  */
 function generateAcceptancePage(token: string): string {
   return `
@@ -3333,13 +3552,6 @@ function generateAcceptancePage(token: string): string {
       margin-bottom: 8px;
     }
     .logo p { color: #94a3b8; font-size: 14px; }
-    .business-name {
-      text-align: center;
-      font-size: 24px;
-      font-weight: 600;
-      margin-bottom: 8px;
-      color: #f8fafc;
-    }
     .ai-summary {
       background: #0f172a;
       padding: 16px;
@@ -3500,15 +3712,12 @@ function generateAcceptancePage(token: string): string {
 <body>
   <div class="container">
     <div class="card">
-      <div class="logo">
-        <h1>QuoteMate</h1>
-        <p>Professional Quoting Made Easy</p>
-      </div>
+      <div class="logo"></div>
 
       <div id="content">
         <div class="loading">
           <div class="spinner"></div>
-          <p>Loading quote details...</p>
+          <p>Loading quote...</p>
         </div>
       </div>
     </div>
@@ -3569,8 +3778,7 @@ function generateAcceptancePage(token: string): string {
       var logoSection = document.querySelector('.logo');
       if (logoSection) {
         logoSection.innerHTML = logoHtml +
-          '<h1>' + escapeHtml(business.name) + '</h1>' +
-          '<p>Professional Quoting Made Easy</p>';
+          '<h1>' + escapeHtml(business.name) + '</h1>';
       }
 
       // AI summary section
@@ -3608,7 +3816,6 @@ function generateAcceptancePage(token: string): string {
       }
 
       content.innerHTML =
-        '<div class="business-name">' + escapeHtml(business.name) + '</div>' +
         '<div class="quote-number">Quote #' + escapeHtml(quote.quoteNumber || quote.id) + '</div>' +
 
         aiSummaryHtml +
@@ -3631,7 +3838,9 @@ function generateAcceptancePage(token: string): string {
           '<div class="section-title">Summary</div>' +
           '<div class="totals-row"><span>Materials</span><span>' + formatCurrency(quote.materialsSubtotal) + '</span></div>' +
           '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>' +
-          '<div class="totals-row"><span>Subtotal</span><span>' + formatCurrency(quote.subtotal) + '</span></div>' +
+          ((quote.markupAmount || quote.travelAdjustmentAmount) ?
+            '<div class="totals-row"><span>Subtotal (ex GST)</span><span>' + formatCurrency(quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0)) + '</span></div>' :
+            '<div class="totals-row"><span>Subtotal</span><span>' + formatCurrency(quote.subtotal) + '</span></div>') +
           '<div class="totals-row"><span>GST (10%)</span><span>' + formatCurrency(quote.gst) + '</span></div>' +
           '<div class="totals-row total"><span>Total</span><span class="amount">' + formatCurrency(quote.total) + '</span></div>' +
         '</div>' +

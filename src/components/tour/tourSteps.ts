@@ -128,14 +128,8 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
       tooltipPosition: 'top',
     },
     {
-      id: 'fetchPricesButton',
-      title: "Chuck the kettle on while you wait",
-      description: "Price fetching takes a tick — we're ringing up every supplier in town. **Minimise and we'll ping you a push notification** when it's done. Go have a smoko, pat the dog, whatever — we've got this",
-      tooltipPosition: 'top',
-    },
-    {
       id: 'firstMaterialItem',
-      title: "Now we're cooking with gas!",
+      title: "Here's your gear list",
       description: "Once prices are in, **tap any material** to see the full description, brand, photo, and store link. Before fetching prices they're just names on a list — after, they're the real deal with all the deets",
       tooltipPosition: 'bottom',
     },
@@ -166,12 +160,6 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
       tooltipPosition: 'bottom',
     },
     {
-      id: 'travelAdjust',
-      title: "Dial it in, ya tight-arse",
-      description: "Use the **plus and minus** to nudge the travel markup up or down. Reckon it's not worth charging? Hit **Dismiss** and we'll leave it out completely. No judgement",
-      tooltipPosition: 'bottom',
-    },
-    {
       id: 'laborSection',
       title: "Pay yourself proper",
       description: "Hours times your rate — simple as. **If in doubt, round up.** You're a tradie, not a volunteer",
@@ -182,6 +170,12 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
       title: "Your margin, your rules",
       description: "This covers the stuff no one sees — risk, know-how, and that new ute fund. **15-25% is standard**, but you do you",
       tooltipPosition: 'bottom',
+    },
+    {
+      id: 'travelAdjust',
+      title: "Dial it in, ya tight-arse",
+      description: "Use the **plus and minus** to nudge the travel markup up or down. Reckon it's not worth charging? Hit **Dismiss** and we'll leave it out completely. No judgement",
+      tooltipPosition: 'top',
     },
   ],
 

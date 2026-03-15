@@ -45,6 +45,7 @@ export function LaborMarkupScreen() {
   const travelAdjustRef = useRef<View>(null);
   const laborSectionRef = useRef<View>(null);
   const markupSectionRef = useRef<View>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const [tourActive, setTourActive] = useState(false);
 
   useEffect(() => {
@@ -189,10 +190,10 @@ export function LaborMarkupScreen() {
       />
       <View style={styles.outerContainer}>
         <ScrollView
+          ref={scrollRef}
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
-          scrollEnabled={!tourActive}
         >
         <WebContainer>
         {/* Labor Section */}
@@ -483,7 +484,12 @@ export function LaborMarkupScreen() {
       </View>
 
       {/* Screen Tour */}
-      <ScreenTour tourId="laborMarkup" onActiveChange={setTourActive} />
+      <ScreenTour
+        tourId="laborMarkup"
+        onActiveChange={setTourActive}
+        scrollRef={scrollRef}
+        scrollPositions={{ travelSection: 0, laborSection: 0, markupSection: 300, travelAdjust: 200 }}
+      />
     </>
   );
 

@@ -380,16 +380,7 @@ export function CustomerDetailsScreen() {
 
       <ScreenTour
         tourId="customerDetails"
-        onActiveChange={(active) => {
-          setTourActive(active);
-          // Tour just finished — clear fake customer data if it was selected
-          if (!active && customerName === TOUR_CUSTOMER.name) {
-            setCustomerName('');
-            setCustomerEmail('');
-            setCustomerPhone('');
-            setJobAddress('');
-          }
-        }}
+        onActiveChange={setTourActive}
         onStepChange={(stepId) => {
           // When advancing past recentCustomers, auto-select Davo to demo the auto-fill
           if (stepId === 'customerName' && showDavo) {
