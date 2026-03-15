@@ -259,6 +259,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: '100%',
     flexDirection: 'row',
+    alignItems: 'stretch',
     gap: 12,
     borderColor: colors.border,
     zIndex: 2, // Above the solid background
@@ -278,6 +279,7 @@ const styles = StyleSheet.create({
   button: {
     flex: 1,
     margin: 0,
+    justifyContent: 'center',
   },
   buttonWithSecondary: {
     flex: 1,
@@ -292,6 +294,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
   },
   secondaryButton: {
     borderWidth: 2,

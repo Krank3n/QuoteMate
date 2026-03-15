@@ -367,25 +367,20 @@ const styles = StyleSheet.create({
   sendButton: {
     flex: 1,
     margin: 0,
-    borderRadius: 24,
   },
   outlinedButton: {
     flex: 1,
     margin: 0,
+    borderWidth: 2,
     borderColor: colors.primary,
-    borderWidth: 1.5,
-    borderRadius: 24,
+    justifyContent: 'center',
   },
   buttonContent: {
-    height: 48,
-    alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   outlinedButtonLabel: {
-    fontSize: 13,
     color: colors.primary,
-    fontWeight: '600',
     marginVertical: 0,
-    marginHorizontal: 4,
+    marginHorizontal: 0,
   },
 });

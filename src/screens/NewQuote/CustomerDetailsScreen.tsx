@@ -46,7 +46,7 @@ export function CustomerDetailsScreen() {
   const navigation = useNavigation<any>();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { saveDraft, businessSettings } = useStore();
+  const { saveDraft, businessSettings, hasSeenScreenTour } = useStore();
   const documentList = useDocumentList();
 
   // For compatibility, alias to currentQuote (used throughout this file)
@@ -59,11 +59,14 @@ export function CustomerDetailsScreen() {
   const { registerRef } = useTourRefs();
   const customerNameRef = useRef<View>(null);
   const jobAddressRef = useRef<View>(null);
+  const recentCustomersRef = useRef<View>(null);
   const [tourActive, setTourActive] = useState(false);
+  const tourNotSeen = !hasSeenScreenTour('customerDetails');
 
   useEffect(() => {
     if (customerNameRef.current) registerRef('customerName', customerNameRef.current);
     if (jobAddressRef.current) registerRef('jobAddress', jobAddressRef.current);
+    if (recentCustomersRef.current) registerRef('recentCustomers', recentCustomersRef.current);
   });
 
   const [customerName, setCustomerName] = useState('');
@@ -207,7 +210,19 @@ export function CustomerDetailsScreen() {
     return null;
   }
 
-  const recentCustomers = pastCustomers.slice(0, 3);
+  // Fake customer shown during the tour so there's always a recent customer to demo
+  const TOUR_CUSTOMER: CustomerInfo = {
+    name: 'Davo Snagsworth',
+    email: 'davo@snagsworth.com.au',
+    phone: '0412 345 678',
+    address: 'Sydney Opera House, Bennelong Point, Sydney NSW 2000',
+    lastUsed: new Date(),
+  };
+
+  const realRecents = pastCustomers.slice(0, 3);
+  const recentCustomers = tourNotSeen
+    ? [TOUR_CUSTOMER, ...realRecents].slice(0, 3)
+    : realRecents;
   const showRecentCustomers = !showSuggestions && customerName.length === 0 && recentCustomers.length > 0;
 
   return (
@@ -237,7 +252,7 @@ export function CustomerDetailsScreen() {
 
             {/* Recent Customers - Show when input is empty */}
             {showRecentCustomers && (
-              <View style={styles.recentCustomersContainer}>
+              <View ref={recentCustomersRef} style={styles.recentCustomersContainer}>
                 <Text style={styles.recentLabel}>Recent Customers:</Text>
                 <View style={styles.chipsContainer}>
                   {recentCustomers.map((customer, index) => (
@@ -352,7 +367,25 @@ export function CustomerDetailsScreen() {
         disabled={!customerName.trim()}
       />
 
-      <ScreenTour tourId="customerDetails" onActiveChange={setTourActive} />
+      <ScreenTour
+        tourId="customerDetails"
+        onActiveChange={(active) => {
+          setTourActive(active);
+          // Tour just finished — clear fake customer data if it was selected
+          if (!active && customerName === TOUR_CUSTOMER.name) {
+            setCustomerName('');
+            setCustomerEmail('');
+            setCustomerPhone('');
+            setJobAddress('');
+          }
+        }}
+        onStepChange={(stepId) => {
+          // When advancing past recentCustomers, auto-select Davo to demo the auto-fill
+          if (stepId === 'customerName' && tourNotSeen) {
+            handleSelectCustomer(TOUR_CUSTOMER);
+          }
+        }}
+      />
     </View>
   );
 }

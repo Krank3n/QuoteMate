@@ -86,9 +86,10 @@ function NewQuoteNavigator() {
         headerTitleStyle: {
           fontWeight: 'bold',
         },
+        cardStyle: { backgroundColor: colors.background },
         // Enable scrolling for new quote screens on web
         ...(Platform.OS === 'web' && {
-          contentStyle: { overflow: 'auto' }
+          contentStyle: { overflow: 'auto', backgroundColor: colors.background }
         })
       }}
     >
@@ -145,9 +146,10 @@ function NewInvoiceNavigator() {
         headerTitleStyle: {
           fontWeight: 'bold',
         },
+        cardStyle: { backgroundColor: colors.background },
         // Enable scrolling for new invoice screens on web
         ...(Platform.OS === 'web' && {
-          contentStyle: { overflow: 'auto' }
+          contentStyle: { overflow: 'auto', backgroundColor: colors.background }
         })
       }}
     >

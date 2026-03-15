@@ -14,14 +14,8 @@ import {
   Linking,
   Image,
   Animated,
-  LayoutAnimation,
-  UIManager,
   TextInput as RNTextInput,
 } from 'react-native';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 import {
   Text,
   Button,
@@ -49,6 +43,7 @@ import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { AnimatedListItem } from '../../components/AnimatedListItem';
+import { CollapsibleSection } from '../../components/CollapsibleSection';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
 import { notificationService } from '../../services/notificationService';
@@ -460,11 +455,6 @@ export function MaterialsListScreen() {
   }, []);
 
   const toggleMaterialExpanded = useCallback((materialId: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.create(
-      250,
-      LayoutAnimation.Types.easeInEaseOut,
-      LayoutAnimation.Properties.opacity,
-    ));
     setExpandedMaterials(prev => {
       const newSet = new Set(prev);
       if (newSet.has(materialId)) {
@@ -628,16 +618,11 @@ export function MaterialsListScreen() {
     if (fetchCountdownRef.current) clearInterval(fetchCountdownRef.current);
     fetchCountdownRef.current = setInterval(() => {
       fetchEstimateSecondsRef.current -= 1;
-      const next = fetchEstimateSecondsRef.current;
-      if (next <= 0) {
-        if (fetchCountdownRef.current) clearInterval(fetchCountdownRef.current);
-        fetchCountdownRef.current = null;
-        setFetchEstimateSeconds(0);
-        setShowFetchEstimateModal(false);
-        setFetchMinimized(true);
-      } else {
-        setFetchEstimateSeconds(next);
-      }
+      const next = Math.max(fetchEstimateSecondsRef.current, 0);
+      fetchEstimateSecondsRef.current = next;
+      setFetchEstimateSeconds(next);
+      // Don't hide the modal when countdown hits 0 — items may still be fetching.
+      // The modal is hidden when the fetch loop finishes (stopFetchCountdown).
     }, 1000);
   };
 
@@ -1053,12 +1038,17 @@ export function MaterialsListScreen() {
         // Recalculate remaining time based on actual pace
         const itemsCompleted = fetchIndex;
         const itemsRemaining = materialsToFetch.length - itemsCompleted;
-        if (itemsCompleted > 0 && itemsRemaining > 0 && fetchCountdownRef.current) {
-          const elapsedMs = Date.now() - fetchStartTimeRef.current;
-          const avgMsPerItem = elapsedMs / itemsCompleted;
-          const newEstimate = Math.ceil((avgMsPerItem * itemsRemaining) / 1000);
-          fetchEstimateSecondsRef.current = newEstimate;
-          setFetchEstimateSeconds(newEstimate);
+        if (itemsCompleted > 0 && fetchCountdownRef.current) {
+          if (itemsRemaining <= 0) {
+            fetchEstimateSecondsRef.current = 0;
+            setFetchEstimateSeconds(0);
+          } else {
+            const elapsedMs = Date.now() - fetchStartTimeRef.current;
+            const avgMsPerItem = elapsedMs / itemsCompleted;
+            const newEstimate = Math.ceil((avgMsPerItem * itemsRemaining) / 1000);
+            fetchEstimateSecondsRef.current = newEstimate;
+            setFetchEstimateSeconds(newEstimate);
+          }
         }
 
         // Update UI progressively (skip if dialogs are open to avoid flickering)
@@ -1608,44 +1598,46 @@ export function MaterialsListScreen() {
                               </View>
                             </View>
                           </TouchableOpacity>
-                          {hasDetails && isExpanded && (
-                            <View style={styles.expandedContent}>
-                              <View style={styles.detailsContainer}>
-                                {material.imageUrl && (
-                                  <Image
-                                    source={{ uri: material.imageUrl }}
-                                    style={styles.productImage}
-                                    resizeMode="contain"
-                                  />
-                                )}
-                                <View style={styles.detailsColumn}>
-                                  {material.description && (
-                                    <View style={styles.detailRow}>
-                                      <Text style={styles.detailLabel}>Description:</Text>
-                                      <Text style={styles.detailValue}>{material.description}</Text>
-                                    </View>
+                          {hasDetails && (
+                            <CollapsibleSection expanded={isExpanded}>
+                              <View style={styles.expandedContent}>
+                                <View style={styles.detailsContainer}>
+                                  {material.imageUrl && (
+                                    <Image
+                                      source={{ uri: material.imageUrl }}
+                                      style={styles.productImage}
+                                      resizeMode="contain"
+                                    />
                                   )}
-                                  {hasMeaningfulBrand && (
-                                    <View style={styles.detailRow}>
-                                      <Text style={styles.detailLabel}>Brand:</Text>
-                                      <Text style={styles.detailValue}>{material.brand}</Text>
-                                    </View>
-                                  )}
-                                  {material.stockCheckedAt && (
-                                    <View style={styles.detailRow}>
-                                      <Text style={styles.detailLabel}>Last checked:</Text>
-                                      <Text style={styles.detailValue}>{formatTimeAgo(material.stockCheckedAt)}</Text>
-                                    </View>
-                                  )}
-                                  {material.bunningsItemNumber && (
-                                    <View style={styles.detailRow}>
-                                      <Text style={styles.detailLabel}>Item #:</Text>
-                                      <Text style={styles.detailValue}>{material.bunningsItemNumber}</Text>
-                                    </View>
-                                  )}
+                                  <View style={styles.detailsColumn}>
+                                    {material.description && (
+                                      <View style={styles.detailRow}>
+                                        <Text style={styles.detailLabel}>Description:</Text>
+                                        <Text style={styles.detailValue}>{material.description}</Text>
+                                      </View>
+                                    )}
+                                    {hasMeaningfulBrand && (
+                                      <View style={styles.detailRow}>
+                                        <Text style={styles.detailLabel}>Brand:</Text>
+                                        <Text style={styles.detailValue}>{material.brand}</Text>
+                                      </View>
+                                    )}
+                                    {material.stockCheckedAt && (
+                                      <View style={styles.detailRow}>
+                                        <Text style={styles.detailLabel}>Last checked:</Text>
+                                        <Text style={styles.detailValue}>{formatTimeAgo(material.stockCheckedAt)}</Text>
+                                      </View>
+                                    )}
+                                    {material.bunningsItemNumber && (
+                                      <View style={styles.detailRow}>
+                                        <Text style={styles.detailLabel}>Item #:</Text>
+                                        <Text style={styles.detailValue}>{material.bunningsItemNumber}</Text>
+                                      </View>
+                                    )}
+                                  </View>
                                 </View>
                               </View>
-                            </View>
+                            </CollapsibleSection>
                           )}
                         </Animated.View>
                         </AnimatedListItem>
@@ -1812,21 +1804,21 @@ export function MaterialsListScreen() {
               >
                 Minimize
               </Button>
-              <Button
-                mode="contained"
-                onPress={() => {
-                  notifyWhenDoneRef.current = true;
-                  setNotifyWhenDone(true);
-                  setShowFetchEstimateModal(false);
-                  setFetchMinimized(true);
-                }}
-                style={[styles.fetchEstimateCloseButton, { flex: 1 }]}
-                buttonColor={colors.primary}
-                icon="bell-ring-outline"
-              >
-                Notify When Done
-              </Button>
             </View>
+            <Button
+              mode="contained"
+              onPress={() => {
+                notifyWhenDoneRef.current = true;
+                setNotifyWhenDone(true);
+                setShowFetchEstimateModal(false);
+                setFetchMinimized(true);
+              }}
+              style={[styles.fetchEstimateCloseButton, { width: '100%' }]}
+              buttonColor={colors.primary}
+              icon="bell-ring-outline"
+            >
+              Notify When Done
+            </Button>
           </View>
         </Modal>
       </Portal>
@@ -2186,14 +2178,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   detailLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.onSurface,
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.textMuted,
     marginRight: 8,
     minWidth: 80,
   },
   detailValue: {
     fontSize: 13,
+    fontWeight: '500',
     color: colors.text,
     flex: 1,
   },

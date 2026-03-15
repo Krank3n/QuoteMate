@@ -10,17 +10,43 @@ import {
   ScrollView,
   Linking,
   TouchableOpacity,
+  Image,
 } from 'react-native';
 import {
   Text,
   Surface,
-  Title,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Constants from 'expo-constants';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
+
+const features = [
+  { icon: 'robot' as const, text: 'AI-powered job analysis' },
+  { icon: 'store' as const, text: 'Live price integration' },
+  { icon: 'file-pdf-box' as const, text: 'Professional PDF quotes' },
+  { icon: 'cloud-sync' as const, text: 'Cloud sync across devices' },
+];
+
+const supportLinks = [
+  {
+    icon: 'email-outline' as const,
+    text: 'Contact Support',
+    url: 'mailto:tom@hansendev.com.au',
+  },
+  {
+    icon: 'shield-lock-outline' as const,
+    text: 'Privacy Policy',
+    url: 'https://hansendev.com.au/projects/quotemate-privacy',
+  },
+  {
+    icon: 'file-document-outline' as const,
+    text: 'Terms of Service',
+    url: 'https://hansendev.com.au/projects/quotemate-terms',
+  },
+];
 
 export function AboutScreen() {
   const appVersion = Constants.expoConfig?.version || '1.0.0';
@@ -34,87 +60,92 @@ export function AboutScreen() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <WebContainer>
-          <Surface style={styles.card}>
-            <View style={styles.logoContainer}>
-              <MaterialCommunityIcons name="file-document-edit" size={64} color={colors.primary} />
-              <Text style={styles.appName}>QuoteMate</Text>
-              <Text style={styles.tagline}>Professional Quoting Made Easy</Text>
-            </View>
+          {/* Hero Section */}
+          <LinearGradient
+            colors={['#064E3B', '#0F172A']}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={styles.heroGradient}
+          >
+            <Image
+              source={require('../../../assets/logo-scaled.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <Text style={styles.appName}>QuoteMate</Text>
+            <Text style={styles.tagline}>Professional Quoting Made Easy</Text>
 
-            <View style={styles.versionInfo}>
-              <View style={styles.versionRow}>
-                <Text style={styles.versionLabel}>Version</Text>
-                <Text style={styles.versionValue}>{appVersion}</Text>
-              </View>
-              <View style={styles.versionRow}>
-                <Text style={styles.versionLabel}>Build</Text>
-                <Text style={styles.versionValue}>{buildNumber}</Text>
-              </View>
+            <View style={styles.versionBadge}>
+              <Text style={styles.versionBadgeText}>v{appVersion}</Text>
+              <View style={styles.versionDot} />
+              <Text style={styles.versionBadgeText}>Build {buildNumber}</Text>
             </View>
-          </Surface>
+          </LinearGradient>
 
+          {/* Features Section */}
           <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>About</Title>
+            <Text style={styles.sectionTitle}>What we offer</Text>
             <Text style={styles.description}>
-              QuoteMate is a quoting tool designed specifically for Australian tradies.
-              With AI-powered job analysis and Bunnings integration, creating professional
-              quotes has never been easier.
+              Built specifically for Australian tradies. AI-powered job analysis
+              and Bunnings integration make professional quoting effortless.
             </Text>
 
-            <View style={styles.featureList}>
-              <View style={styles.featureItem}>
-                <MaterialCommunityIcons name="robot" size={20} color={colors.primary} />
-                <Text style={styles.featureText}>AI-powered job analysis</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <MaterialCommunityIcons name="store" size={20} color={colors.primary} />
-                <Text style={styles.featureText}>Bunnings price integration</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <MaterialCommunityIcons name="file-pdf-box" size={20} color={colors.primary} />
-                <Text style={styles.featureText}>Professional PDF quotes</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <MaterialCommunityIcons name="cloud-sync" size={20} color={colors.primary} />
-                <Text style={styles.featureText}>Cloud sync across devices</Text>
-              </View>
+            <View style={styles.featureGrid}>
+              {features.map((feature) => (
+                <View key={feature.icon} style={styles.featureCard}>
+                  <View style={styles.featureIconContainer}>
+                    <MaterialCommunityIcons
+                      name={feature.icon}
+                      size={22}
+                      color={colors.primary}
+                    />
+                  </View>
+                  <Text style={styles.featureText}>{feature.text}</Text>
+                </View>
+              ))}
             </View>
           </Surface>
 
+          {/* Support Section */}
           <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Support</Title>
+            <Text style={styles.sectionTitle}>Support</Text>
 
-            <TouchableOpacity
-              style={styles.linkRow}
-              onPress={() => handleLinkPress('mailto:tom@hansendev.com.au')}
-            >
-              <MaterialCommunityIcons name="email-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>Contact Support</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color={colors.onSurface} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.linkRow}
-              onPress={() => handleLinkPress('https://hansendev.com.au/projects/quotemate-privacy')}
-            >
-              <MaterialCommunityIcons name="shield-lock-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>Privacy Policy</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color={colors.onSurface} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.linkRow}
-              onPress={() => handleLinkPress('https://hansendev.com.au/projects/quotemate-terms')}
-            >
-              <MaterialCommunityIcons name="file-document-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>Terms of Service</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color={colors.onSurface} />
-            </TouchableOpacity>
+            {supportLinks.map((link, index) => (
+              <TouchableOpacity
+                key={link.url}
+                style={[
+                  styles.linkRow,
+                  index === supportLinks.length - 1 && styles.linkRowLast,
+                ]}
+                onPress={() => handleLinkPress(link.url)}
+                activeOpacity={0.6}
+              >
+                <View style={styles.linkIconContainer}>
+                  <MaterialCommunityIcons
+                    name={link.icon}
+                    size={18}
+                    color={colors.primary}
+                  />
+                </View>
+                <Text style={styles.linkText}>{link.text}</Text>
+                <MaterialCommunityIcons
+                  name="chevron-right"
+                  size={20}
+                  color={colors.placeholder}
+                />
+              </TouchableOpacity>
+            ))}
           </Surface>
 
-          <Text style={styles.copyright}>
-            © 2024-2026 Hansen Dev. All rights reserved.
-          </Text>
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.madeWith}>
+              Made with {'❤️'} in Australia
+            </Text>
+            <Text style={styles.copyright}>
+              © 2024–2026 Hansen Dev
+            </Text>
+          </View>
         </WebContainer>
       </ScrollView>
     </View>
@@ -127,91 +158,148 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   scrollContent: {
-    padding: 16,
     paddingBottom: 32,
   },
-  card: {
-    padding: 20,
-    marginBottom: 16,
-    borderRadius: 12,
-    elevation: 2,
-    backgroundColor: colors.surface,
-  },
-  logoContainer: {
+
+  // Hero
+  heroGradient: {
     alignItems: 'center',
-    paddingVertical: 20,
+    paddingTop: 36,
+    paddingBottom: 28,
+    marginBottom: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  logo: {
+    width: 100,
+    height: 100,
+    marginBottom: 16,
   },
   appName: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.primary,
-    marginTop: 12,
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
   tagline: {
     fontSize: 15,
     color: colors.onSurface,
     marginTop: 4,
+    letterSpacing: 0.3,
   },
-  versionInfo: {
-    borderTopWidth: 1,
-    borderTopColor: colors.outline + '30',
-    paddingTop: 16,
-    marginTop: 8,
-  },
-  versionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  versionLabel: {
-    fontSize: 15,
-    color: colors.onSurface,
-  },
-  versionValue: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  description: {
-    fontSize: 15,
-    color: colors.onSurface,
-    lineHeight: 22,
-    marginBottom: 20,
-  },
-  featureList: {
-    gap: 12,
-  },
-  featureItem: {
+  versionBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  versionBadgeText: {
+    fontSize: 13,
+    color: colors.onSurface,
+    fontWeight: '500',
+  },
+  versionDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    marginHorizontal: 8,
+  },
+
+  // Cards
+  card: {
+    padding: 20,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 16,
+    elevation: 2,
+    backgroundColor: colors.surface,
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 10,
+  },
+  description: {
+    fontSize: 14,
+    color: colors.onSurface,
+    lineHeight: 21,
+    marginBottom: 20,
+  },
+
+  // Features
+  featureGrid: {
+    gap: 10,
+  },
+  featureCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceGray3,
+    borderRadius: 12,
+    padding: 14,
+  },
+  featureIconContainer: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: colors.primaryBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
   featureText: {
-    fontSize: 15,
+    fontSize: 14,
+    fontWeight: '500',
     color: colors.text,
-    marginLeft: 12,
+    flex: 1,
   },
+
+  // Links
   linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: colors.outline + '20',
+    borderBottomColor: colors.outline + '15',
+  },
+  linkRowLast: {
+    borderBottomWidth: 0,
+  },
+  linkIconContainer: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: colors.primaryBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
   linkText: {
     flex: 1,
     fontSize: 15,
     color: colors.text,
-    marginLeft: 12,
   },
-  copyright: {
-    textAlign: 'center',
+
+  // Footer
+  footer: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    gap: 4,
+  },
+  madeWith: {
     fontSize: 13,
     color: colors.onSurface,
-    marginTop: 8,
+  },
+  copyright: {
+    fontSize: 12,
+    color: colors.placeholder,
   },
 });

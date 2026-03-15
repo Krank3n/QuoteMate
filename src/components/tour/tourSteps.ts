@@ -84,6 +84,12 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
   // ─── Customer Details ───
   customerDetails: [
     {
+      id: 'recentCustomers',
+      title: "Your regulars, one tap away",
+      description: "Quoted someone before? They'll pop up here as a **recent customer**. Tap one and we'll auto-fill the lot — name, email, phone, address. Give Davo a tap!",
+      tooltipPosition: 'bottom',
+    },
+    {
       id: 'customerName',
       title: "Who's getting the quote?",
       description: "Start typing and **we'll pull up past customers** — pick one and their email, phone, and address auto-fill. No more asking Karen twice",
