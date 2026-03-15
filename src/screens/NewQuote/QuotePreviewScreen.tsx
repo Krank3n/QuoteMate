@@ -46,6 +46,19 @@ interface ConfettiPiece {
 
 const CONFETTI_COLORS = [colors.success, colors.secondary, colors.info, colors.primary];
 
+const SUCCESS_MESSAGES: { title: string; subtitle: string }[] = [
+  { title: "Bloody Ripper!", subtitle: "Quote's locked and loaded" },
+  { title: "Too Easy!", subtitle: "She's all saved, mate" },
+  { title: "Beauty!", subtitle: "Quote's good to go" },
+  { title: "No Worries!", subtitle: "Saved and ready to send" },
+  { title: "Strewth!", subtitle: "That quote's a done deal" },
+  { title: "Good as Gold!", subtitle: "Ready for the customer" },
+  { title: "Nailed It!", subtitle: "Quote saved, legend" },
+  { title: "Sweet as!", subtitle: "All wrapped up, mate" },
+  { title: "Bonzer!", subtitle: "Quote's in the bag" },
+  { title: "You Beauty!", subtitle: "Send it when you're ready" },
+];
+
 function createConfettiPieces(): ConfettiPiece[] {
   return Array.from({ length: 25 }, (_, i) => ({
     id: i,
@@ -81,6 +94,7 @@ export function QuotePreviewScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [successMsg] = useState(() => SUCCESS_MESSAGES[Math.floor(Math.random() * SUCCESS_MESSAGES.length)]);
 
   // Confetti state & animations
   const [confetti] = useState<ConfettiPiece[]>(() => createConfettiPieces());
@@ -93,8 +107,11 @@ export function QuotePreviewScreen() {
   ).current;
 
   // Banner animations
-  const bannerScale = useRef(new Animated.Value(0)).current;
+  const bannerScale = useRef(new Animated.Value(0.3)).current;
   const bannerOpacity = useRef(new Animated.Value(0)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const checkScale = useRef(new Animated.Value(0)).current;
+  const subtitleOpacity = useRef(new Animated.Value(0)).current;
 
   // Auto-save on mount
   useEffect(() => {
@@ -120,16 +137,38 @@ export function QuotePreviewScreen() {
         successTap();
 
         // Animate banner in
-        Animated.parallel([
-          Animated.spring(bannerScale, {
+        Animated.sequence([
+          // Fade in backdrop
+          Animated.timing(backdropOpacity, {
             toValue: 1,
-            tension: 120,
-            friction: 8,
+            duration: 250,
             useNativeDriver: true,
           }),
-          Animated.timing(bannerOpacity, {
+          // Pop in the card + checkmark together
+          Animated.parallel([
+            Animated.spring(bannerScale, {
+              toValue: 1,
+              tension: 80,
+              friction: 8,
+              useNativeDriver: true,
+            }),
+            Animated.timing(bannerOpacity, {
+              toValue: 1,
+              duration: 200,
+              useNativeDriver: true,
+            }),
+            Animated.spring(checkScale, {
+              toValue: 1,
+              tension: 100,
+              friction: 6,
+              delay: 150,
+              useNativeDriver: true,
+            }),
+          ]),
+          // Fade in subtitle
+          Animated.timing(subtitleOpacity, {
             toValue: 1,
-            duration: 200,
+            duration: 300,
             useNativeDriver: true,
           }),
         ]).start();
@@ -167,7 +206,7 @@ export function QuotePreviewScreen() {
           ]).start();
         });
 
-        // Auto-dismiss banner after 3 seconds
+        // Auto-dismiss banner
         setTimeout(() => {
           Animated.parallel([
             Animated.timing(bannerOpacity, {
@@ -180,8 +219,13 @@ export function QuotePreviewScreen() {
               duration: 400,
               useNativeDriver: true,
             }),
+            Animated.timing(backdropOpacity, {
+              toValue: 0,
+              duration: 500,
+              useNativeDriver: true,
+            }),
           ]).start(() => setShowSuccess(false));
-        }, 3000);
+        }, 2000);
       } catch (error) {
         setIsSaving(false);
         Alert.alert('Error', 'Failed to save quote. Please try again.');
@@ -377,15 +421,16 @@ export function QuotePreviewScreen() {
         </WebContainer>
       </ScrollView>
 
-      <View ref={sendButtonRef} style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <SendQuoteButton
-          quote={currentQuote}
-          businessSettings={businessSettings}
-          buttonMode="outlined"
-          buttonLabel="Send"
-          buttonIcon="send"
-          buttonStyle={styles.bottomButtonHalf}
-        />
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+        <View ref={sendButtonRef} style={styles.bottomButtonHalf}>
+          <SendQuoteButton
+            quote={currentQuote}
+            businessSettings={businessSettings}
+            buttonMode="outlined"
+            buttonLabel="Send"
+            buttonIcon="send"
+          />
+        </View>
         <Button
           mode="contained"
           onPress={handleBackToDashboard}
@@ -431,18 +476,36 @@ export function QuotePreviewScreen() {
 
         {/* Success banner overlay */}
         {showSuccess && (
-          <Animated.View
-            style={[
-              styles.successBanner,
-              {
-                opacity: bannerOpacity,
-                transform: [{ scale: bannerScale }],
-              },
-            ]}
-          >
-            <MaterialCommunityIcons name="check-circle" size={24} color={colors.success} />
-            <Text style={styles.successBannerText}>Quote Complete!</Text>
-          </Animated.View>
+          <>
+            <Animated.View
+              style={[
+                styles.successBackdrop,
+                { opacity: backdropOpacity },
+              ]}
+            />
+            <Animated.View
+              style={[
+                styles.successBanner,
+                {
+                  opacity: bannerOpacity,
+                  transform: [{ scale: bannerScale }],
+                },
+              ]}
+            >
+              <Animated.View
+                style={[
+                  styles.successCheckCircle,
+                  { transform: [{ scale: checkScale }] },
+                ]}
+              >
+                <MaterialCommunityIcons name="check" size={36} color={colors.white} />
+              </Animated.View>
+              <Text style={styles.successBannerText}>{successMsg.title}</Text>
+              <Animated.Text style={[styles.successSubtext, { opacity: subtitleOpacity }]}>
+                {successMsg.subtitle}
+              </Animated.Text>
+            </Animated.View>
+          </>
         )}
       </View>
 
@@ -481,33 +544,50 @@ const styles = StyleSheet.create({
     top: -100,
     borderRadius: 2,
   },
+  successBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
   successBanner: {
     position: 'absolute',
-    top: 16,
-    alignSelf: 'center',
-    flexDirection: 'row',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.successBg,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    gap: 8,
+  },
+  successCheckCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
     ...Platform.select({
-      android: { elevation: 6 },
+      android: { elevation: 8 },
       ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
+        shadowColor: colors.success,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 12,
       },
-      web: { boxShadow: '0 2px 12px rgba(0,0,0,0.3)' },
+      web: { boxShadow: `0 4px 20px ${colors.success}66` },
     }),
   },
   successBannerText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.success,
+    fontSize: 26,
+    fontWeight: '800',
+    color: colors.white,
+    textAlign: 'center',
+    letterSpacing: 0.5,
+  },
+  successSubtext: {
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+    marginTop: 6,
   },
   headerCard: {
     marginBottom: 12,

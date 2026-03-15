@@ -342,6 +342,7 @@ export function MaterialsListScreen() {
   const addManualRef = useRef<View>(null);
   const firstMaterialItemRef = useRef<View>(null);
   const addMaterialButtonRef = useRef<View>(null);
+  const materialsScrollRef = useRef<ScrollView>(null);
   const [tourActive, setTourActive] = useState(false);
 
   useEffect(() => {
@@ -1387,6 +1388,7 @@ export function MaterialsListScreen() {
   return (
     <View style={styles.container}>
       <ScrollView
+          ref={materialsScrollRef}
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -1865,7 +1867,12 @@ export function MaterialsListScreen() {
         <>
           <ScreenTour tourId="materialsList" onActiveChange={setTourActive} />
           {materials.length > 0 && (
-            <ScreenTour tourId="materialsListItems" onActiveChange={setTourActive} />
+            <ScreenTour
+              tourId="materialsListItems"
+              onActiveChange={setTourActive}
+              scrollRef={materialsScrollRef}
+              scrollPositions={{ firstMaterialItem: 0, addMaterialButton: 99999 }}
+            />
           )}
         </>
       )}
