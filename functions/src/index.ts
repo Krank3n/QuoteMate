@@ -180,6 +180,8 @@ const allowedOrigins = [
   'https://us-central1-hansendev.cloudfunctions.net',
   'https://hansendev.web.app',
   'https://hansendev.firebaseapp.com',
+  'https://quotemateapp.au',
+  'https://www.quotemateapp.au',
 ];
 
 const corsHandler = cors({
