@@ -1,11 +1,11 @@
 {
   "name": "@quotemate/app",
-  "version": "1.0.69",
+  "version": "1.0.70",
   "main": "index.js",
   "scripts": {
     "start": "expo start --dev-client",
     "start:expo-go": "expo start",
-    "android": "npm run android:clean && expo run:android --variant playDebug",
+    "android": "npm run android:clean && expo run:android",
     "android:clean": "$HOME/Library/Android/sdk/platform-tools/adb uninstall com.quotemate.app 2>/dev/null || true",
     "ios": "npm run ios:clean && expo run:ios",
     "ios:clean": "xcrun simctl uninstall booted com.hansendev.quotemate 2>/dev/null || true",

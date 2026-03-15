@@ -24,6 +24,7 @@ export interface Material {
   favoriteProduct?: FavoriteProductMapping; // User's preferred product for this material
   // Pricing and product metadata
   pricingSource?: 'scraper' | 'api' | 'ai' | 'manual'; // Where the price came from
+  priceConfidence?: 'high' | 'medium' | 'low'; // AI price confidence level
   imageUrl?: string; // Product image URL
   description?: string; // Product description
   brand?: string; // Product brand

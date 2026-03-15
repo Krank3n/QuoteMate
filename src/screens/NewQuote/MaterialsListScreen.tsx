@@ -134,7 +134,7 @@ const STEP_HEIGHT = 32;
 const VISIBLE_STEPS = 3;
 const STEP_INTERVAL = 2500;
 
-function AiAnalyzingState({ onCancel }: { onCancel: () => void }) {
+function AiAnalyzingState() {
   const animationRef = React.useRef<LottieView>(null);
   const [currentStep, setCurrentStep] = React.useState(0);
   const scrollAnim = React.useRef(new Animated.Value(0)).current;
@@ -237,15 +237,6 @@ function AiAnalyzingState({ onCancel }: { onCancel: () => void }) {
         </Animated.View>
       </View>
 
-      <Button
-        mode="outlined"
-        onPress={onCancel}
-        style={styles.cancelButton}
-        textColor={colors.error}
-        compact
-      >
-        Cancel
-      </Button>
     </View>
   );
 }
@@ -337,6 +328,7 @@ export function MaterialsListScreen() {
   const addManualRef = useRef<View>(null);
   const firstMaterialItemRef = useRef<View>(null);
   const addMaterialButtonRef = useRef<View>(null);
+  const fetchPricesButtonRef = useRef<View>(null);
   const materialsScrollRef = useRef<ScrollView>(null);
   const [tourActive, setTourActive] = useState(false);
 
@@ -345,6 +337,7 @@ export function MaterialsListScreen() {
     if (addManualRef.current) registerRef('addManualCard', addManualRef.current);
     if (firstMaterialItemRef.current) registerRef('firstMaterialItem', firstMaterialItemRef.current);
     if (addMaterialButtonRef.current) registerRef('addMaterialButton', addMaterialButtonRef.current);
+    if (fetchPricesButtonRef.current) registerRef('fetchPricesButton', fetchPricesButtonRef.current);
   });
 
   // For compatibility, alias to currentQuote (used throughout this file)
@@ -805,12 +798,13 @@ export function MaterialsListScreen() {
                   material.totalPrice = material.price * material.quantity;
                   material.manualPriceOverride = false;
                   material.pricingSource = 'ai';
+                  material.priceConfidence = aiResult.confidence || 'medium';
 
                   if (aiResult.productName) {
                     material.name = aiResult.productName;
                   }
                   if (aiResult.store) {
-                    material.description = `Estimated from ${aiResult.store}`;
+                    material.description = `AI reckons about this much`;
                   }
 
                   fetchedCount++;
@@ -831,12 +825,13 @@ export function MaterialsListScreen() {
                 material.totalPrice = material.price * material.quantity;
                 material.manualPriceOverride = false;
                 material.pricingSource = 'ai';
+                material.priceConfidence = aiResult.confidence || 'medium';
 
                 if (aiResult.productName) {
                   material.name = aiResult.productName;
                 }
                 if (aiResult.store) {
-                  material.description = `Estimated from ${aiResult.store}`;
+                  material.description = `AI reckons about this much`;
                 }
 
                 fetchedCount++;
@@ -1012,12 +1007,13 @@ export function MaterialsListScreen() {
               material.totalPrice = material.price * material.quantity;
               material.manualPriceOverride = false;
               material.pricingSource = 'ai';
+              material.priceConfidence = aiResult.confidence || 'medium';
 
               if (aiResult.productName) {
                 material.name = aiResult.productName;
               }
               if (aiResult.store) {
-                material.description = `Estimated from ${aiResult.store}`;
+                material.description = `AI reckons about this much`;
               }
 
               fetchedCount++;
@@ -1386,7 +1382,7 @@ export function MaterialsListScreen() {
       >
         <WebContainer>
         {isAiAnalyzing ? (
-            <AiAnalyzingState onCancel={handleCancelGeneration} />
+            <AiAnalyzingState />
         ) : materials.length === 0 ? (
           <View style={styles.emptyState}>
             <MaterialCommunityIcons name="package-variant-closed" size={64} color={colors.textMuted} />
@@ -1529,7 +1525,17 @@ export function MaterialsListScreen() {
                                 ) : (
                                   <Text style={styles.itemUnitPrice}>
                                     {formatCurrency(material.price)} ea.
-                                    {isAiEstimate ? '  ·  AI est.' : ''}
+                                    {isAiEstimate ? (
+                                      <Text style={{
+                                        color: material.priceConfidence === 'high' ? colors.success
+                                          : material.priceConfidence === 'low' ? '#ef4444'
+                                          : '#f59e0b',
+                                        fontWeight: '600',
+                                      }}>
+                                        {'  ·  AI est. '}
+                                        ({material.priceConfidence || 'medium'})
+                                      </Text>
+                                    ) : ''}
                                   </Text>
                                 )}
                               </View>
@@ -1673,14 +1679,18 @@ export function MaterialsListScreen() {
        </ScrollView>
 
       <FixedBottomButton
-        label="Next: Labor & Markup"
-        onPress={handleNext}
-        secondaryLabel={materials.length > 0 ? "Fetch Prices" : undefined}
-        secondaryOnPress={materials.length > 0 ? handleFetchPrices : undefined}
+        label={isAiAnalyzing ? "Cancel" : "Next: Labor & Markup"}
+        onPress={isAiAnalyzing ? handleCancelGeneration : handleNext}
+        mode={isAiAnalyzing ? "outlined" : "contained"}
+        buttonStyle={isAiAnalyzing ? { borderColor: colors.error, borderWidth: 2 } : undefined}
+        labelStyle={isAiAnalyzing ? { color: colors.error } : undefined}
+        secondaryLabel={materials.length > 0 && !isAiAnalyzing ? "Fetch Prices" : undefined}
+        secondaryOnPress={materials.length > 0 && !isAiAnalyzing ? handleFetchPrices : undefined}
         secondaryLoading={isFetchingPrices}
         secondaryDisabled={isFetchingPrices}
         secondaryLoadingText={isFetchingPrices && fetchProgress.total > 0 ? `${chasingTitle.split(' ')[0]} ${fetchProgress.current} of ${fetchProgress.total}...` : undefined}
         secondaryLoadingOnPress={isFetchingPrices ? handleCancelFetchPrices : undefined}
+        secondaryRef={fetchPricesButtonRef}
       />
 
       {/* Delete Material Confirmation */}
@@ -1813,7 +1823,7 @@ export function MaterialsListScreen() {
                 setShowFetchEstimateModal(false);
                 setFetchMinimized(true);
               }}
-              style={[styles.fetchEstimateCloseButton, { width: '100%' }]}
+              style={[styles.fetchEstimateCloseButton, { width: '100%', marginTop: 10 }]}
               buttonColor={colors.primary}
               icon="bell-ring-outline"
             >
@@ -1863,7 +1873,7 @@ export function MaterialsListScreen() {
               tourId="materialsListItems"
               onActiveChange={setTourActive}
               scrollRef={materialsScrollRef}
-              scrollPositions={{ firstMaterialItem: 0, addMaterialButton: 99999 }}
+              scrollPositions={{ fetchPricesButton: 99999, firstMaterialItem: 0, addMaterialButton: 99999 }}
             />
           )}
         </>
@@ -2083,10 +2093,6 @@ const styles = StyleSheet.create({
   },
   generateButton: {
     marginTop: 8,
-  },
-  cancelButton: {
-    marginTop: 16,
-    borderColor: colors.error,
   },
   addMaterialButton: {
     flexDirection: 'row',

@@ -968,12 +968,16 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
         <tr>
           <td align="center">
-            <table role="presentation" cellpadding="0" cellspacing="0">
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
               <tr>
                 <td style="background:${accent};border-radius:10px;text-align:center;">
                   <a href="${esc(data.acceptanceUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Accept Quote</a>
                 </td>
-                <td width="12"></td>
+              </tr>
+              <tr>
+                <td height="16" style="font-size:16px;line-height:16px;">&nbsp;</td>
+              </tr>
+              <tr>
                 <td style="background:#9ca3af;border-radius:10px;text-align:center;">
                   <a href="${esc(data.acceptanceUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Decline</a>
                 </td>

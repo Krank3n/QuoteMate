@@ -20,6 +20,7 @@ import {
   Text,
   TextInput,
   Button,
+  Portal,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -301,6 +302,7 @@ export function EmailPreviewModal({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" statusBarTranslucent>
+      <Portal.Host>
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -455,6 +457,7 @@ export function EmailPreviewModal({
         primaryButtonAction={() => setAlertVisible(false)}
         showConfetti={alertType === 'success'}
       />
+      </Portal.Host>
     </Modal>
   );
 }

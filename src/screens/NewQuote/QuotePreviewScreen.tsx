@@ -79,6 +79,7 @@ export function QuotePreviewScreen() {
   const { registerRef } = useTourRefs();
   const editSectionsRef = useRef<View>(null);
   const sendButtonRef = useRef<View>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const [tourActive, setTourActive] = useState(false);
 
   useEffect(() => {
@@ -300,9 +301,9 @@ export function QuotePreviewScreen() {
   return (
     <View style={styles.outerContainer}>
       <ScrollView
+        ref={scrollRef}
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
-        scrollEnabled={!tourActive}
       >
         <WebContainer>
         {/* Quote Number & Date */}
@@ -422,17 +423,8 @@ export function QuotePreviewScreen() {
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <View ref={sendButtonRef} style={styles.bottomButtonHalf}>
-          <SendQuoteButton
-            quote={currentQuote}
-            businessSettings={businessSettings}
-            buttonMode="outlined"
-            buttonLabel="Send"
-            buttonIcon="send"
-          />
-        </View>
         <Button
-          mode="contained"
+          mode="outlined"
           onPress={handleBackToDashboard}
           loading={isSaving}
           disabled={isSaving}
@@ -442,6 +434,15 @@ export function QuotePreviewScreen() {
         >
           Back to Dashboard
         </Button>
+        <View ref={sendButtonRef} style={styles.bottomButtonHalf}>
+          <SendQuoteButton
+            quote={currentQuote}
+            businessSettings={businessSettings}
+            buttonMode="contained"
+            buttonLabel="Send"
+            buttonIcon="send"
+          />
+        </View>
       </View>
 
       {/* Confetti overlay — rendered last so it's on top */}
@@ -510,7 +511,13 @@ export function QuotePreviewScreen() {
       </View>
 
       {/* Screen Tour */}
-      <ScreenTour tourId="quotePreview" delay={1500} onActiveChange={setTourActive} />
+      <ScreenTour
+        tourId="quotePreview"
+        delay={1500}
+        onActiveChange={setTourActive}
+        scrollRef={scrollRef}
+        scrollPositions={{ editSections: 0, sendButton: 0 }}
+      />
     </View>
   );
 }

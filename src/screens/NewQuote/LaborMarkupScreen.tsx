@@ -42,12 +42,14 @@ export function LaborMarkupScreen() {
   // Tour refs
   const { registerRef } = useTourRefs();
   const travelSectionRef = useRef<View>(null);
+  const travelAdjustRef = useRef<View>(null);
   const laborSectionRef = useRef<View>(null);
   const markupSectionRef = useRef<View>(null);
   const [tourActive, setTourActive] = useState(false);
 
   useEffect(() => {
     if (travelSectionRef.current) registerRef('travelSection', travelSectionRef.current);
+    if (travelAdjustRef.current) registerRef('travelAdjust', travelAdjustRef.current);
     if (laborSectionRef.current) registerRef('laborSection', laborSectionRef.current);
     if (markupSectionRef.current) registerRef('markupSection', markupSectionRef.current);
   });
@@ -281,7 +283,7 @@ export function LaborMarkupScreen() {
                   <Text style={styles.travelPercent}>+{travelPct}%</Text>
                 </View>
               </Surface>
-              <View style={styles.travelButtonsRow}>
+              <View ref={travelAdjustRef} style={styles.travelButtonsRow}>
                 <View style={styles.travelStepperRow}>
                   <View style={styles.travelStepper}>
                     <Pressable

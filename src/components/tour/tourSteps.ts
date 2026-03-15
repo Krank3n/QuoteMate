@@ -122,15 +122,27 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
   // ─── Materials List (with items) ───
   materialsListItems: [
     {
+      id: 'fetchPricesButton',
+      title: "Time to get some real prices, legend",
+      description: "Smash this button and we'll **chase up actual prices** from Bunnings, Reece, and other suppliers. No more guessing what a bag of cement costs — we'll do the legwork for ya",
+      tooltipPosition: 'top',
+    },
+    {
+      id: 'fetchPricesButton',
+      title: "Chuck the kettle on while you wait",
+      description: "Price fetching takes a tick — we're ringing up every supplier in town. **Minimise and we'll ping you a push notification** when it's done. Go have a smoko, pat the dog, whatever — we've got this",
+      tooltipPosition: 'top',
+    },
+    {
       id: 'firstMaterialItem',
-      title: "Tap to see the deets",
-      description: "Tap any material to expand it — you'll see the **full description, brand, and photo**. Use the buttons to edit, delete, or open the store link",
+      title: "Now we're cooking with gas!",
+      description: "Once prices are in, **tap any material** to see the full description, brand, photo, and store link. Before fetching prices they're just names on a list — after, they're the real deal with all the deets",
       tooltipPosition: 'bottom',
     },
     {
       id: 'addMaterialButton',
       title: "Need more gear?",
-      description: "Tap here to **add more materials** to the list — search the catalogue or punch 'em in by hand",
+      description: "Tap here to **add more materials** to the list — search the catalogue or punch 'em in by hand. She'll be right",
       tooltipPosition: 'top',
     },
   ],
@@ -151,6 +163,12 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
       id: 'travelSection',
       title: "Petrol ain't free, mate",
       description: "We've sussed out **how far the job is** and worked out the fuel. Bump it up for Woop Woop jobs, or ditch it if they're just down the road",
+      tooltipPosition: 'bottom',
+    },
+    {
+      id: 'travelAdjust',
+      title: "Dial it in, ya tight-arse",
+      description: "Use the **plus and minus** to nudge the travel markup up or down. Reckon it's not worth charging? Hit **Dismiss** and we'll leave it out completely. No judgement",
       tooltipPosition: 'bottom',
     },
     {

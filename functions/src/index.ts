@@ -1543,13 +1543,13 @@ Material: "${materialName}"
 Store context: ${storeList}
 
 Based on your knowledge of typical Australian hardware store pricing, estimate a reasonable price for this material.
-Consider typical Bunnings/hardware store pricing from 2024.
+Consider typical Australian hardware store pricing from 2024.
 
 Return ONLY a JSON object in this exact format (no other text):
 {
   "price": <number>,
   "productName": "<material name>",
-  "store": "Bunnings (estimated)",
+  "store": "Hardware Store (AI estimate)",
   "confidence": "<low|medium|high>"
 }
 
@@ -1560,7 +1560,7 @@ Important:
 - Return ONLY valid JSON, no markdown, no other text
 
 Example:
-{"price": 15.90, "productName": "Treated Pine H3 90x45mm 2.4m", "store": "Bunnings (estimated)", "confidence": "medium"}`;
+{"price": 15.90, "productName": "Treated Pine H3 90x45mm 2.4m", "store": "Hardware Store (AI estimate)", "confidence": "medium"}`;
 
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -2507,22 +2507,24 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       const token = crypto.randomBytes(32).toString('hex');
       const hashedToken = hashToken(token);
 
-      // Only update quote status for real sends (not test sends)
+      // Always store the acceptance token so the link works (even for test sends)
+      // Only update quote status to 'sent' for real sends
+      const batch = firestore.batch();
+      const quoteUpdate: Record<string, any> = {
+        acceptanceTokenHash: hashedToken,
+        acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
       if (!isTestSend) {
-        const batch = firestore.batch();
-        batch.update(quoteDoc.ref, {
-          acceptanceToken: hashedToken,
-          acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          status: 'sent',
-          aiEmailBody: emailBody,
-        });
-        batch.set(firestore.doc(`quoteAcceptanceTokens/${hashedToken}`), {
-          userId,
-          quoteId,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        await batch.commit();
+        quoteUpdate.status = 'sent';
+        quoteUpdate.aiEmailBody = emailBody;
       }
+      batch.update(quoteDoc.ref, quoteUpdate);
+      batch.set(firestore.doc(`quoteAcceptanceTokens/${hashedToken}`), {
+        userId,
+        quoteId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
 
       const acceptanceUrl = `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
 

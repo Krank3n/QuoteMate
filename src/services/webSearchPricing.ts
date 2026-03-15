@@ -27,6 +27,7 @@ interface PriceSearchResult {
   productName?: string;
   store?: string;
   url?: string;
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 /**
@@ -61,13 +62,13 @@ Material: "${materialName}"
 Store context: ${storeList}
 
 Based on your knowledge of typical Australian hardware store pricing, estimate a reasonable price for this material.
-Consider typical Bunnings/hardware store pricing from 2024.
+Consider typical Australian hardware store pricing from 2024.
 
 Return ONLY a JSON object in this exact format (no other text):
 {
   "price": <number>,
   "productName": "<material name>",
-  "store": "Bunnings (estimated)",
+  "store": "Hardware Store (AI estimate)",
   "confidence": "<low|medium|high>"
 }
 
@@ -78,7 +79,7 @@ Important:
 - Return ONLY valid JSON, no markdown, no other text
 
 Example:
-{"price": 15.90, "productName": "Treated Pine H3 90x45mm 2.4m", "store": "Bunnings (estimated)", "confidence": "medium"}`;
+{"price": 15.90, "productName": "Treated Pine H3 90x45mm 2.4m", "store": "Hardware Store (AI estimate)", "confidence": "medium"}`;
 
     console.log('🔍 Estimating price for:', materialName);
 
@@ -144,8 +145,9 @@ Example:
     return {
       price: result.price || null,
       productName: result.productName,
-      store: result.store || 'Bunnings (estimated)',
+      store: result.store || 'Hardware Store (AI estimate)',
       url: undefined,
+      confidence: result.confidence || 'medium',
     };
   } catch (error) {
     console.error('❌ Price estimation error:', materialName, error);
@@ -195,8 +197,9 @@ async function searchPriceViaFirebaseFunction(
     return {
       price: data.price || null,
       productName: data.productName,
-      store: data.store || 'Bunnings (estimated)',
+      store: data.store || 'Hardware Store (AI estimate)',
       url: data.url,
+      confidence: data.confidence || 'medium',
     };
   } catch (error) {
     console.error('❌ Price estimation error:', materialName, error);

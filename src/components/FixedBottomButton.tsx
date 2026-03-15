@@ -4,7 +4,7 @@
  * Similar to the "Next: Labor & Markup" button in MaterialsListScreen
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, forwardRef } from 'react';
 import { View, StyleSheet, Platform, Animated, Easing, TouchableOpacity } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +26,8 @@ interface FixedBottomButtonProps {
   icon?: string;
   /** Custom button style */
   buttonStyle?: object;
+  /** Custom button label style */
+  labelStyle?: object;
   /** Optional secondary button label */
   secondaryLabel?: string;
   /** Optional secondary button press handler */
@@ -40,6 +42,8 @@ interface FixedBottomButtonProps {
   secondaryLoadingOnPress?: () => void;
   /** Disable the solid background block - useful when transparency is desired */
   disableSolidBackground?: boolean;
+  /** Ref forwarded to the secondary button wrapper for tour targeting */
+  secondaryRef?: React.Ref<View>;
 }
 
 /**
@@ -183,6 +187,7 @@ export function FixedBottomButton({
   mode = 'contained',
   icon,
   buttonStyle,
+  labelStyle,
   secondaryLabel,
   secondaryOnPress,
   secondaryLoading = false,
@@ -190,6 +195,7 @@ export function FixedBottomButton({
   secondaryLoadingText,
   secondaryLoadingOnPress,
   disableSolidBackground = false,
+  secondaryRef,
 }: FixedBottomButtonProps) {
   const insets = useSafeAreaInsets();
 
@@ -207,28 +213,30 @@ export function FixedBottomButton({
         renderToHardwareTextureAndroid={true}
       >
         {secondaryLabel && secondaryOnPress && (
-          secondaryLoading ? (
-            <PulsingBorderButton loadingText={secondaryLoadingText} onPress={secondaryLoadingOnPress}>
-              {secondaryLabel}
-            </PulsingBorderButton>
-          ) : (
-            <Button
-              mode="outlined"
-              onPress={secondaryOnPress}
-              style={styles.secondaryButton}
-              labelStyle={styles.secondaryButtonLabel}
-              contentStyle={styles.secondaryButtonContent}
-              disabled={secondaryDisabled}
-            >
-              {secondaryLabel}
-            </Button>
-          )
+          <View ref={secondaryRef} style={{ flex: 1 }}>
+            {secondaryLoading ? (
+              <PulsingBorderButton loadingText={secondaryLoadingText} onPress={secondaryLoadingOnPress}>
+                {secondaryLabel}
+              </PulsingBorderButton>
+            ) : (
+              <Button
+                mode="outlined"
+                onPress={secondaryOnPress}
+                style={styles.secondaryButton}
+                labelStyle={styles.secondaryButtonLabel}
+                contentStyle={styles.secondaryButtonContent}
+                disabled={secondaryDisabled}
+              >
+                {secondaryLabel}
+              </Button>
+            )}
+          </View>
         )}
         <Button
           mode={mode}
           onPress={() => { lightTap(); onPress(); }}
           style={[styles.button, buttonStyle, secondaryLabel && styles.buttonWithSecondary]}
-          labelStyle={styles.buttonLabel}
+          labelStyle={[styles.buttonLabel, labelStyle]}
           contentStyle={styles.buttonContent}
           disabled={disabled}
           loading={loading}

@@ -24,6 +24,7 @@ import { ProBadge } from '../components/ProBadge';
 import { isInvoiceOverdue } from '../utils/invoiceCalculator';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
+import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { QuoteSelectSheet } from '../components/QuoteSelectSheet';
 
 type FilterStatus = 'all' | 'draft' | 'sent' | 'paid' | 'overdue';
@@ -240,27 +241,30 @@ export function InvoicesListScreen() {
 
       {/* Invoices List */}
       <WebContainer style={styles.listContainer}>
-        <FlatList
-          ref={listRef}
-          data={filteredInvoices}
-          renderItem={renderInvoiceCard}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          style={styles.flatList}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={colors.primary}
-              colors={[colors.primary]}
-            />
+        <SkeletonCrossfade
+          loaded={initialLoaded}
+          skeleton={
+            <View style={{ padding: 16 }}>
+              <SkeletonCardList count={4} />
+            </View>
           }
-          ListEmptyComponent={
-            !initialLoaded ? (
-              <View style={{ padding: 16 }}>
-                <SkeletonCardList count={4} />
-              </View>
-            ) : (
+        >
+          <FlatList
+            ref={listRef}
+            data={filteredInvoices}
+            renderItem={renderInvoiceCard}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            style={styles.flatList}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
+            }
+            ListEmptyComponent={
               <View style={styles.emptyState}>
                 <View style={styles.emptyIconCircle}>
                   <MaterialCommunityIcons name="receipt-text-outline" size={36} color={colors.primary} />
@@ -286,9 +290,9 @@ export function InvoicesListScreen() {
                 </Text>
                 {!isPro && <View style={{ marginTop: 12 }}><ProBadge /></View>}
               </View>
-            )
-          }
-        />
+            }
+          />
+        </SkeletonCrossfade>
       </WebContainer>
 
       {/* FAB with Menu */}

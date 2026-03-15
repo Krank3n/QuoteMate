@@ -22,6 +22,7 @@ import { QuoteCard } from '../components/QuoteCard';
 import { AlertModal } from '../components/AlertModal';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
+import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
 import { lightTap } from '../utils/haptics';
 
@@ -280,27 +281,30 @@ export function QuotesListScreen() {
 
       {/* Quotes List */}
       <WebContainer style={styles.listContainer}>
-        <FlatList
-          ref={listRef}
-          data={filteredQuotes}
-          renderItem={renderQuoteCard}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          style={styles.flatList}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={colors.primary}
-              colors={[colors.primary]}
-            />
+        <SkeletonCrossfade
+          loaded={initialLoaded}
+          skeleton={
+            <View style={{ padding: 16 }}>
+              <SkeletonCardList count={4} />
+            </View>
           }
-          ListEmptyComponent={
-            !initialLoaded ? (
-              <View style={{ padding: 16 }}>
-                <SkeletonCardList count={4} />
-              </View>
-            ) : (
+        >
+          <FlatList
+            ref={listRef}
+            data={filteredQuotes}
+            renderItem={renderQuoteCard}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            style={styles.flatList}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
+            }
+            ListEmptyComponent={
               <View style={styles.emptyState}>
                 <View style={styles.emptyIconCircle}>
                   <MaterialCommunityIcons name="file-document-plus-outline" size={36} color={colors.primary} />
@@ -327,9 +331,9 @@ export function QuotesListScreen() {
                     : "Try another filter or tap + to whip one up"}
                 </Text>
               </View>
-            )
-          }
-        />
+            }
+          />
+        </SkeletonCrossfade>
       </WebContainer>
 
       {/* New Quote FAB */}

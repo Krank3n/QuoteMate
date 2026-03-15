@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Platform, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, InteractionManager, ActivityIndicator } from 'react-native';
 import {
   Text,
   Button,
@@ -40,7 +40,7 @@ export function ViewQuoteScreen() {
   const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote, createInvoiceFromQuote, saveInvoice, nextQuoteNumber } = useStore();
   const insets = useSafeAreaInsets();
 
-  const [displayQuote, setDisplayQuote] = useState(null);
+  const [displayQuote, setDisplayQuote] = useState(() => quotes.find(q => q.id === quoteId) || null);
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
@@ -49,23 +49,28 @@ export function ViewQuoteScreen() {
 
   // Refresh quote data when screen comes into focus
   // Auto-save if there are pending changes in currentQuote
+  // Defer state updates until after transition animation to prevent glitches
   useFocusEffect(
     React.useCallback(() => {
-      const savedQuote = quotes.find(q => q.id === quoteId);
+      const task = InteractionManager.runAfterInteractions(() => {
+        const savedQuote = quotes.find(q => q.id === quoteId);
 
-      // If currentQuote matches this quote ID, auto-save the changes
-      if (currentQuote && currentQuote.id === quoteId) {
-        const updatedQuote = {
-          ...currentQuote,
-          updatedAt: new Date(),
-        };
-        saveQuote(updatedQuote);
-        setDisplayQuote(updatedQuote);
-        // Clear currentQuote after saving
-        setCurrentQuote(null);
-      } else if (savedQuote) {
-        setDisplayQuote(savedQuote);
-      }
+        // If currentQuote matches this quote ID, auto-save the changes
+        if (currentQuote && currentQuote.id === quoteId) {
+          const updatedQuote = {
+            ...currentQuote,
+            updatedAt: new Date(),
+          };
+          saveQuote(updatedQuote);
+          setDisplayQuote(updatedQuote);
+          // Clear currentQuote after saving
+          setCurrentQuote(null);
+        } else if (savedQuote) {
+          setDisplayQuote(savedQuote);
+        }
+      });
+
+      return () => task.cancel();
     }, [quotes, currentQuote, quoteId, saveQuote, setCurrentQuote])
   );
 
@@ -88,8 +93,8 @@ export function ViewQuoteScreen() {
 
   if (!displayQuote) {
     return (
-      <View style={styles.container}>
-        <Text>Quote not found</Text>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }

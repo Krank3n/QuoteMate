@@ -85,11 +85,16 @@ export function SpotlightOverlay({ target, visible }: SpotlightOverlayProps) {
 
   if (!visible) return null;
 
-  const pathD = buildCutoutPath(screenW, screenH, cutout, RADIUS);
+  // Use generous overflow so the dark overlay always covers the full screen,
+  // even when useWindowDimensions lags behind actual layout (safe area, status bar, etc.)
+  const OVERFLOW = 100;
+  const svgW = screenW + OVERFLOW * 2;
+  const svgH = screenH + OVERFLOW * 2;
+  const pathD = buildCutoutPath(svgW, svgH, { ...cutout, x: cutout.x + OVERFLOW, y: cutout.y + OVERFLOW }, RADIUS);
 
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, { opacity }]} pointerEvents="none">
-      <Svg width={screenW} height={screenH}>
+    <Animated.View style={[StyleSheet.absoluteFill, { opacity, top: -OVERFLOW, left: -OVERFLOW }]} pointerEvents="none">
+      <Svg width={svgW} height={svgH}>
         <Path
           d={pathD}
           fill="rgba(0,0,0,0.7)"
@@ -101,8 +106,8 @@ export function SpotlightOverlay({ target, visible }: SpotlightOverlayProps) {
           styles.glowBorder,
           {
             opacity: glowOpacity,
-            left: cutout.x - 2,
-            top: cutout.y - 2,
+            left: cutout.x - 2 + OVERFLOW,
+            top: cutout.y - 2 + OVERFLOW,
             width: cutout.w + 4,
             height: cutout.h + 4,
             borderRadius: RADIUS + 2,

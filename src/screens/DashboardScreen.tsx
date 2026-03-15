@@ -13,7 +13,7 @@ import {
   Paragraph,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useNavigation, useScrollToTop } from '@react-navigation/native';
+import { useNavigation, useScrollToTop, useIsFocused } from '@react-navigation/native';
 import { format } from 'date-fns';
 
 import { useStore } from '../store/useStore';
@@ -27,6 +27,7 @@ import { updateActivityTimestamp } from '../services/emailService';
 import { AnimatedNumber } from '../components/AnimatedNumber';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
+import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
 import { SwipeableCard } from '../components/SwipeableCard';
 import { lightTap, successTap } from '../utils/haptics';
@@ -95,11 +96,23 @@ export function DashboardScreen() {
   // New Quote button pulse
   const btnPulse = useRef(new RNAnimated.Value(1)).current;
   const btnTilt = useRef(new RNAnimated.Value(0)).current;
-  const btnGlow = useRef(new RNAnimated.Value(0)).current;
   const emptyFloat = useRef(new RNAnimated.Value(0)).current;
   const draftWiggle = useRef(new RNAnimated.Value(0)).current;
 
+  const isFocused = useIsFocused();
+  const animsRef = useRef<RNAnimated.CompositeAnimation[]>([]);
+  const animTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // Start/stop ambient animations based on screen focus
   useEffect(() => {
+    // Stop previous animations
+    animTimersRef.current.forEach(clearTimeout);
+    animsRef.current.forEach((a) => a.stop());
+    animsRef.current = [];
+    animTimersRef.current = [];
+
+    if (!isFocused) return;
+
     const allAnims: RNAnimated.CompositeAnimation[] = [];
     const timers: ReturnType<typeof setTimeout>[] = [];
 
@@ -166,16 +179,9 @@ export function DashboardScreen() {
         RNAnimated.timing(btnTilt, { toValue: 0, duration: 2500, useNativeDriver: true }),
       ])
     );
-    const btnGlowA = RNAnimated.loop(
-      RNAnimated.sequence([
-        RNAnimated.timing(btnGlow, { toValue: 1, duration: 1800, useNativeDriver: false }),
-        RNAnimated.timing(btnGlow, { toValue: 0, duration: 1800, useNativeDriver: false }),
-      ])
-    );
-    allAnims.push(btnPulseA, btnTiltA, btnGlowA);
+    allAnims.push(btnPulseA, btnTiltA);
     btnPulseA.start();
     btnTiltA.start();
-    btnGlowA.start();
 
     // Empty state icon float
     const emptyA = RNAnimated.loop(
@@ -198,13 +204,17 @@ export function DashboardScreen() {
     allAnims.push(wiggleA);
     wiggleA.start();
 
+    animsRef.current = allAnims;
+    animTimersRef.current = timers;
+
     return () => {
       timers.forEach(clearTimeout);
       allAnims.forEach((a) => a.stop());
     };
-  }, []);
+  }, [isFocused]);
 
   useEffect(() => {
+    if (!isFocused) return;
     const CYCLE_MS = 12000;
     const interval = setInterval(() => {
       RNAnimated.timing(subtitleFade, {
@@ -225,7 +235,7 @@ export function DashboardScreen() {
       });
     }, CYCLE_MS);
     return () => clearInterval(interval);
-  }, [subtitleFade]);
+  }, [subtitleFade, isFocused]);
 
   // Track user activity for re-engagement emails (once per app session)
   const activityTracked = useRef(false);
@@ -611,13 +621,13 @@ export function DashboardScreen() {
           borderRadius: 28,
           overflow: 'hidden',
         }}>
-        <RNAnimated.View style={{
+        <View style={{
           borderRadius: 28,
           shadowColor: colors.primary,
           shadowOffset: { width: 0, height: 0 },
-          shadowRadius: btnGlow.interpolate({ inputRange: [0, 1], outputRange: [4, 14] }),
-          shadowOpacity: btnGlow.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] }),
-          elevation: btnGlow.interpolate({ inputRange: [0, 1], outputRange: [4, 12] }),
+          shadowRadius: 8,
+          shadowOpacity: 0.5,
+          elevation: 6,
         }}>
           <Button
             mode="contained"
@@ -629,7 +639,7 @@ export function DashboardScreen() {
           >
             New Quote
           </Button>
-        </RNAnimated.View>
+        </View>
         </View>
       </RNAnimated.View>
 
@@ -701,42 +711,45 @@ export function DashboardScreen() {
       </View>
 
       {/* Recent Quotes */}
-      {recentQuotes.length > 0 && (
-        <View ref={recentRef} style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Quotes</Text>
+      <SkeletonCrossfade
+        loaded={initialLoaded}
+        skeleton={
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Recent Quotes</Text>
+            <SkeletonCardList count={3} />
+          </View>
+        }
+      >
+        {recentQuotes.length > 0 ? (
+          <View ref={recentRef} style={styles.section}>
+            <Text style={styles.sectionTitle}>Recent Quotes</Text>
 
-          {recentQuotes.map((quote, index) => (
-            <AnimatedListItem key={quote.id} index={index}>
-              <QuoteCard
-                quote={quote}
-                businessSettings={businessSettings}
-                onView={handleViewQuote}
-                onEdit={handleEditQuote}
-                onDelete={handleDeleteQuote}
-                onDuplicate={handleDuplicateQuote}
-                onSave={saveQuote}
-                onStatusChange={handleOpenStatusSheet}
-                onConvertToInvoice={handleConvertToInvoice}
-              />
-            </AnimatedListItem>
-          ))}
+            {recentQuotes.map((quote, index) => (
+              <AnimatedListItem key={quote.id} index={index}>
+                <QuoteCard
+                  quote={quote}
+                  businessSettings={businessSettings}
+                  onView={handleViewQuote}
+                  onEdit={handleEditQuote}
+                  onDelete={handleDeleteQuote}
+                  onDuplicate={handleDuplicateQuote}
+                  onSave={saveQuote}
+                  onStatusChange={handleOpenStatusSheet}
+                  onConvertToInvoice={handleConvertToInvoice}
+                />
+              </AnimatedListItem>
+            ))}
 
-          <Button
-            mode="text"
-            onPress={() => navigation.navigate('Quotes')}
-            style={styles.viewAllButton}
-          >
-            View All Quotes
-          </Button>
-        </View>
-      )}
-
-      {recentQuotes.length === 0 && !initialLoaded && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Quotes</Text>
-          <SkeletonCardList count={3} />
-        </View>
-      )}
+            <Button
+              mode="text"
+              onPress={() => navigation.navigate('Quotes')}
+              style={styles.viewAllButton}
+            >
+              View All Quotes
+            </Button>
+          </View>
+        ) : null}
+      </SkeletonCrossfade>
 
       {recentQuotes.length === 0 && initialLoaded && (
         <View style={styles.emptyState}>

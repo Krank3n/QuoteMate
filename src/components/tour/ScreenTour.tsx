@@ -86,7 +86,36 @@ export function ScreenTour({ tourId, delay = 600, scrollRef, scrollPositions, on
 
     // Wait for layout to settle before measuring
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const rect = await measureTarget(step.id);
+    let rect = await measureTarget(step.id);
+
+    // If the target is off-screen (or mostly off-screen), try to scroll it into view
+    if (rect && scrollRef?.current) {
+      const TOOLTIP_SPACE = 220; // space needed for tooltip above or below
+      const isAboveScreen = rect.y + rect.height < 0;
+      const isBelowScreen = rect.y > screenH;
+      const tooltipWouldClip = step.tooltipPosition === 'bottom'
+        ? (rect.y + rect.height + TOOLTIP_SPACE > screenH)
+        : (rect.y - TOOLTIP_SPACE < 0);
+
+      if (isAboveScreen || isBelowScreen || tooltipWouldClip) {
+        // Calculate how much to scroll — aim to center the target + tooltip in view
+        const targetCenter = rect.y + rect.height / 2;
+        const idealCenter = screenH * 0.4; // slightly above center
+        const scrollDelta = targetCenter - idealCenter;
+
+        // We need the current scroll offset, so use scrollPositions as a base hint
+        const baseScroll = (scrollPositions && step.id in scrollPositions)
+          ? scrollPositions[step.id] : 0;
+        const newScrollY = Math.max(0, baseScroll + scrollDelta);
+
+        scrollRef.current.scrollTo({ y: newScrollY, animated: true });
+        await new Promise(resolve => setTimeout(resolve, 400));
+
+        // Re-measure after scrolling
+        rect = await measureTarget(step.id);
+      }
+    }
+
     if (rect) {
       setTargetRect(rect);
       setIsVisible(true);
@@ -100,7 +129,7 @@ export function ScreenTour({ tourId, delay = 600, scrollRef, scrollPositions, on
         handleFinish();
       }
     }
-  }, [steps, measureTarget, handleFinish, scrollRef, scrollPositions, onStepChange]);
+  }, [steps, measureTarget, handleFinish, scrollRef, scrollPositions, onStepChange, screenH]);
 
   // Start + step changes
   useEffect(() => {

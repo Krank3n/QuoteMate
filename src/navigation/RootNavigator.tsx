@@ -440,7 +440,7 @@ export function RootNavigator() {
         })
       }}
     >
-      <RootStack.Screen name="Main" component={MainTabs} options={{ freezeOnBlur: false }} />
+      <RootStack.Screen name="Main" component={MainTabs} />
       <RootStack.Screen
         name="ViewQuote"
         component={ViewQuoteScreen}

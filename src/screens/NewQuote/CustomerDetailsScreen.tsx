@@ -61,7 +61,9 @@ export function CustomerDetailsScreen() {
   const jobAddressRef = useRef<View>(null);
   const recentCustomersRef = useRef<View>(null);
   const [tourActive, setTourActive] = useState(false);
-  const tourNotSeen = !hasSeenScreenTour('customerDetails');
+  // Keep Davo in the recent customers list for the entire screen visit,
+  // not just until the tour finishes (markScreenTourSeen fires too early).
+  const [showDavo] = useState(() => !hasSeenScreenTour('customerDetails'));
 
   useEffect(() => {
     if (customerNameRef.current) registerRef('customerName', customerNameRef.current);
@@ -108,7 +110,11 @@ export function CustomerDetailsScreen() {
       .slice(0, 5);
   }, [customerName, pastCustomers]);
 
-  // Load existing customer data if editing
+  // Load existing customer data on mount (for editing existing quotes).
+  // Runs once only — the quote is always set in the store before navigating here,
+  // so mount-time is sufficient. Subsequent currentQuote reference changes (e.g.
+  // from a deferred saveDraft on the previous screen) carry the same field values
+  // and must NOT re-run, as they would wipe tour demo data (Davo).
   useEffect(() => {
     if (currentQuote) {
       setCustomerName(currentQuote.customerName || '');
@@ -116,7 +122,8 @@ export function CustomerDetailsScreen() {
       setCustomerPhone(currentQuote.customerPhone || '');
       setJobAddress(currentQuote.jobAddress || '');
     }
-  }, [currentQuote]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Save changes when navigating back
   useEffect(() => {
@@ -215,15 +222,19 @@ export function CustomerDetailsScreen() {
     name: 'Davo Snagsworth',
     email: 'davo@snagsworth.com.au',
     phone: '0412 345 678',
-    address: 'Sydney Opera House, Bennelong Point, Sydney NSW 2000',
+    address: 'Sydney Opera House',
     lastUsed: new Date(),
   };
 
   const realRecents = pastCustomers.slice(0, 3);
-  const recentCustomers = tourNotSeen
+  const recentCustomers = showDavo
     ? [TOUR_CUSTOMER, ...realRecents].slice(0, 3)
     : realRecents;
-  const showRecentCustomers = !showSuggestions && customerName.length === 0 && recentCustomers.length > 0;
+  // During the tour, always show recent customers so the section doesn't disappear
+  // when Davo is auto-selected (which would cause layout shifts and unmount the ref)
+  const showRecentCustomers = tourActive
+    ? recentCustomers.length > 0
+    : (!showSuggestions && customerName.length === 0 && recentCustomers.length > 0);
 
   return (
     <View style={styles.container}>
@@ -381,7 +392,7 @@ export function CustomerDetailsScreen() {
         }}
         onStepChange={(stepId) => {
           // When advancing past recentCustomers, auto-select Davo to demo the auto-fill
-          if (stepId === 'customerName' && tourNotSeen) {
+          if (stepId === 'customerName' && showDavo) {
             handleSelectCustomer(TOUR_CUSTOMER);
           }
         }}

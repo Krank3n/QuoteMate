@@ -297,7 +297,7 @@ export function AddMaterialScreen() {
             if (aiResult.price) {
               const estimatedProduct = {
                 productName: aiResult.productName || searchQuery,
-                description: aiResult.store ? `Estimated from ${aiResult.store}` : 'AI Estimated Price',
+                description: 'AI reckons about this much',
                 itemNumber: '',
                 brand: '',
                 price: aiResult.price,
@@ -346,7 +346,7 @@ export function AddMaterialScreen() {
           if (aiResult.price) {
             const estimatedProduct = {
               productName: aiResult.productName || searchQuery,
-              description: aiResult.store ? `Estimated from ${aiResult.store}` : 'AI Estimated Price',
+              description: 'AI reckons about this much',
               itemNumber: '',
               brand: '',
               price: aiResult.price,
