@@ -66,6 +66,7 @@ export function QuotePreviewScreen() {
   const { registerRef } = useTourRefs();
   const editSectionsRef = useRef<View>(null);
   const sendButtonRef = useRef<View>(null);
+  const [tourActive, setTourActive] = useState(false);
 
   useEffect(() => {
     if (editSectionsRef.current) registerRef('editSections', editSectionsRef.current);
@@ -257,45 +258,53 @@ export function QuotePreviewScreen() {
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
+        scrollEnabled={!tourActive}
       >
         <WebContainer>
         {/* Quote Number & Date */}
-        <View style={styles.headerRow}>
-          <View style={styles.headerLeft}>
-            {isEditingNumber ? (
-              <TextInput
-                value={quoteNumber}
-                onChangeText={setQuoteNumber}
-                onBlur={() => setIsEditingNumber(false)}
-                onSubmitEditing={() => setIsEditingNumber(false)}
-                placeholder="e.g. Q-001"
-                autoFocus
-                style={styles.quoteNumberInput}
-                mode="flat"
-                dense
-              />
-            ) : (
-              <TouchableOpacity
-                onPress={() => setIsEditingNumber(true)}
-                style={styles.quoteNumberTouchable}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.quoteNumberLabel}>Quote #</Text>
-                <Text style={styles.quoteNumber}>
-                  {quoteNumber || `Q-${String(nextQuoteNumber).padStart(3, '0')}`}
-                </Text>
-                <MaterialCommunityIcons name="pencil-outline" size={14} color={colors.textMuted} />
-              </TouchableOpacity>
-            )}
+        <Surface style={styles.headerCard}>
+          <View style={styles.headerRow}>
+            <View style={styles.headerLeft}>
+              {isEditingNumber ? (
+                <TextInput
+                  value={quoteNumber}
+                  onChangeText={setQuoteNumber}
+                  onBlur={() => setIsEditingNumber(false)}
+                  onSubmitEditing={() => setIsEditingNumber(false)}
+                  placeholder="e.g. Q-001"
+                  autoFocus
+                  style={styles.quoteNumberInput}
+                  mode="flat"
+                  dense
+                />
+              ) : (
+                <TouchableOpacity
+                  onPress={() => setIsEditingNumber(true)}
+                  style={styles.quoteNumberTouchable}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.quoteNumberBadge}>
+                    <MaterialCommunityIcons name="file-document-outline" size={14} color={colors.primary} />
+                    <Text style={styles.quoteNumber}>
+                      {quoteNumber || `Q-${String(nextQuoteNumber).padStart(3, '0')}`}
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="pencil-outline" size={12} color={colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+            <View style={styles.headerDateBadge}>
+              <MaterialCommunityIcons name="calendar-outline" size={13} color={colors.textMuted} />
+              <Text style={styles.quoteDate}>
+                {new Date(currentQuote.createdAt).toLocaleDateString('en-AU', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                })}
+              </Text>
+            </View>
           </View>
-          <Text style={styles.quoteDate}>
-            {new Date(currentQuote.createdAt).toLocaleDateString('en-AU', {
-              day: 'numeric',
-              month: 'short',
-              year: 'numeric',
-            })}
-          </Text>
-        </View>
+        </Surface>
 
         <View ref={editSectionsRef}>
         <CustomerSection
@@ -336,7 +345,14 @@ export function QuotePreviewScreen() {
         />
 
         <Surface style={documentStyles.section}>
-          <Title style={documentStyles.sectionTitle}>Notes (Optional)</Title>
+          <View style={documentStyles.sectionHeader}>
+            <View style={documentStyles.sectionHeaderLeft}>
+              <View style={[documentStyles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
+                <MaterialCommunityIcons name="note-text-outline" size={18} color={colors.info} />
+              </View>
+              <Title style={documentStyles.sectionTitle}>Notes (Optional)</Title>
+            </View>
+          </View>
           <TextInput
             value={notes}
             onChangeText={setNotes}
@@ -431,7 +447,7 @@ export function QuotePreviewScreen() {
       </View>
 
       {/* Screen Tour */}
-      <ScreenTour tourId="quotePreview" delay={1500} />
+      <ScreenTour tourId="quotePreview" delay={1500} onActiveChange={setTourActive} />
     </View>
   );
 }
@@ -493,27 +509,36 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.success,
   },
+  headerCard: {
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    elevation: 2,
+    backgroundColor: colors.surface,
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
-    paddingHorizontal: 4,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  quoteNumberLabel: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginRight: 4,
+  quoteNumberBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.primaryBg,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginRight: 8,
   },
   quoteNumber: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-    marginRight: 6,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
   },
   quoteNumberTouchable: {
     flexDirection: 'row',
@@ -526,8 +551,13 @@ const styles = StyleSheet.create({
     height: 32,
     width: 120,
   },
+  headerDateBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
   quoteDate: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.textMuted,
   },
   notesInput: {
@@ -540,15 +570,25 @@ const styles = StyleSheet.create({
   bottomBar: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 14,
     gap: 12,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    ...(Platform.OS === 'web' && {
-      position: 'sticky' as any,
-      bottom: 0,
-      paddingBottom: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      },
+      android: { elevation: 8 },
+      web: {
+        position: 'sticky' as any,
+        bottom: 0,
+        paddingBottom: 16,
+        boxShadow: '0 -2px 12px rgba(0,0,0,0.2)',
+      },
     }),
   },
   bottomButtonHalf: {

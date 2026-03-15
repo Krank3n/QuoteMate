@@ -34,6 +34,12 @@ export const TOUR_STEPS: TourStep[] = [
 ];
 
 /**
+ * Total steps across the intro flow (dashboard + jobDetails)
+ * Used for sequential "X of Y" numbering across both tours.
+ */
+export const INTRO_TOUR_TOTAL_STEPS = TOUR_STEPS.length + 4; // + jobDetails steps
+
+/**
  * Screen-specific contextual tours
  * Only shown once per screen, only for non-obvious features
  */
@@ -41,6 +47,8 @@ export type ScreenTourId =
   | 'jobDetails'
   | 'customerDetails'
   | 'materialsList'
+  | 'materialsListItems'
+  | 'addMaterial'
   | 'laborMarkup'
   | 'quotePreview';
 
@@ -51,6 +59,18 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
       id: 'micButton',
       title: "Describe the job, your way",
       description: "**Hit the mic** and yarn about the job like you're telling your apprentice, or bash it out on the keyboard. Measurements, scope, the works — **more detail = less stuffing around later**",
+      tooltipPosition: 'top',
+    },
+    {
+      id: 'jobDescription',
+      title: "Bit rough around the edges, ay?",
+      description: "That's what a voice note or quick brain dump looks like — **totally fine**. The AI's about to turn this drivel into something a customer would actually read. Hang tight...",
+      tooltipPosition: 'top',
+    },
+    {
+      id: 'jobDescriptionCleaned',
+      title: "From bogan to boardroom",
+      description: "The AI's cleaning up that mess right now — watch the description change. It'll spit out a **proper job description and a title** so you sound like a tradie who's got their act together",
       tooltipPosition: 'top',
     },
     {
@@ -89,6 +109,32 @@ export const SCREEN_TOURS: Record<ScreenTourId, TourStep[]> = {
       id: 'addManualCard',
       title: "Old school? No wuckas",
       description: "**Search the catalogue** for real prices from Bunnings and other suppliers, or punch in materials by hand. Whatever works for ya",
+      tooltipPosition: 'bottom',
+    },
+  ],
+
+  // ─── Materials List (with items) ───
+  materialsListItems: [
+    {
+      id: 'firstMaterialItem',
+      title: "Tap to see the deets",
+      description: "Tap any material to expand it — you'll see the **full description, brand, and photo**. Use the buttons to edit, delete, or open the store link",
+      tooltipPosition: 'bottom',
+    },
+    {
+      id: 'addMaterialButton',
+      title: "Need more gear?",
+      description: "Tap here to **add more materials** to the list — search the catalogue or punch 'em in by hand",
+      tooltipPosition: 'top',
+    },
+  ],
+
+  // ─── Add Material ───
+  addMaterial: [
+    {
+      id: 'savedItemsTab',
+      title: "Save time on repeat jobs",
+      description: "Tap **Saved Items** to reuse materials from past quotes — no more searching for the same stuff every time. Absolute game changer for regulars",
       tooltipPosition: 'bottom',
     },
   ],

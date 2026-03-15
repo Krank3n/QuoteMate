@@ -59,6 +59,7 @@ export function CustomerDetailsScreen() {
   const { registerRef } = useTourRefs();
   const customerNameRef = useRef<View>(null);
   const jobAddressRef = useRef<View>(null);
+  const [tourActive, setTourActive] = useState(false);
 
   useEffect(() => {
     if (customerNameRef.current) registerRef('customerName', customerNameRef.current);
@@ -182,12 +183,22 @@ export function CustomerDetailsScreen() {
               ...updatedQuote,
               estimatedDistance: result.distance,
               estimatedFuelCost: result.estimatedFuelCost,
+              travelGeocodeFailed: false,
               ...(hasExistingAdjustment ? {} : { travelAdjustment: result.suggestedMarkup }),
+            });
+          } else {
+            // Geocoding returned null — one or both addresses couldn't be resolved
+            updateDocument({
+              ...updatedQuote,
+              travelGeocodeFailed: true,
             });
           }
         })
         .catch(() => {
-          // Silently fail - user can adjust manually
+          updateDocument({
+            ...updatedQuote,
+            travelGeocodeFailed: true,
+          });
         });
     }
   };
@@ -205,16 +216,18 @@ export function CustomerDetailsScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        scrollEnabled={!tourActive}
       >
         <WebContainer>
           <Surface style={styles.section}>
             <View style={styles.sectionTitleContainer}>
-              <MaterialCommunityIcons
-                name="account"
-                size={24}
-                color={colors.primary}
-                style={styles.sectionIcon}
-              />
+              <View style={styles.sectionIconCircle}>
+                <MaterialCommunityIcons
+                  name="account"
+                  size={20}
+                  color={colors.info}
+                />
+              </View>
               <Title style={styles.sectionTitle}>Customer Details</Title>
             </View>
 
@@ -339,7 +352,7 @@ export function CustomerDetailsScreen() {
         disabled={!customerName.trim()}
       />
 
-      <ScreenTour tourId="customerDetails" />
+      <ScreenTour tourId="customerDetails" onActiveChange={setTourActive} />
     </View>
   );
 }
@@ -372,25 +385,31 @@ const styles = StyleSheet.create({
     }),
   },
   section: {
-    marginHorizontal: 20,
-    marginTop: 20,
+    marginHorizontal: 16,
+    marginTop: 16,
     marginBottom: 20,
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 14,
     elevation: 2,
     backgroundColor: colors.surface,
   },
   sectionTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
     marginBottom: 8,
   },
-  sectionIcon: {
-    marginRight: 8,
+  sectionIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: colors.infoBg,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     marginBottom: 0,
   },
   helperText: {
@@ -424,6 +443,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     marginTop: -8,
     elevation: 4,
+    borderRadius: 12,
     backgroundColor: colors.surface,
   },
   suggestionsContent: {

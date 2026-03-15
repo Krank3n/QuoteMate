@@ -570,6 +570,107 @@ export function getDefaultEmailBody(
 }
 
 /**
+ * Generate a professional email body for sending an invoice to a client
+ * Pro only - free users get a clean default template
+ */
+export async function generateInvoiceEmail(params: {
+  jobName: string;
+  jobDescription: string;
+  materials: { name: string; quantity: number; unit: string }[];
+  laborHours: number;
+  total: number;
+  businessName: string;
+  customerName: string;
+  dueDate: string;
+  invoiceNumber?: string;
+}): Promise<string> {
+  const { jobName, jobDescription, materials, laborHours, total, businessName, customerName, dueDate, invoiceNumber } = params;
+
+  const materialsSummary = materials.slice(0, 10).map(m => `${m.name} (${m.quantity} ${m.unit})`).join(', ');
+
+  const prompt = `You are writing a professional email body for an Australian tradie sending an invoice to their client. Write ONLY the email body text (no subject line, no greeting, no sign-off - those are added separately).
+
+Job: ${jobName}
+Description: ${jobDescription}
+Key materials: ${materialsSummary}
+Labour: ${laborHours} hours
+Total: $${total.toFixed(2)} (inc GST)
+Business: ${businessName}
+Client: ${customerName}
+${invoiceNumber ? `Invoice #: ${invoiceNumber}` : ''}
+Payment due: ${new Date(dueDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}
+
+Guidelines:
+- Write 2-3 short paragraphs about the completed work and payment
+- Be professional but friendly, in plain Australian English
+- Mention the work has been completed (or is ready for invoicing)
+- Be strictly factual - do NOT add any details not in the description
+- Do NOT include pricing or due dates (they're shown separately in the email template)
+- Do NOT include greetings or sign-offs (they're added by the template)
+- Keep it concise - under 120 words
+
+Return ONLY the email body text, no JSON wrapping or quotes.`;
+
+  // On web, use Firebase Functions
+  if (Platform.OS === 'web') {
+    return generateEmailViaFirebaseFunction(prompt);
+  }
+
+  // On mobile, call Anthropic API directly
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('API key not configured');
+  }
+
+  try {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    const content = data.content[0].text;
+    return parseEmailResponse(content);
+  } catch (error) {
+    console.error('Invoice email generation with Claude failed:', error);
+
+    try {
+      return await generateEmailViaGemini(prompt);
+    } catch (geminiError) {
+      console.error('Gemini fallback also failed:', geminiError);
+    }
+
+    return getDefaultInvoiceEmailBody(customerName, jobName, total, businessName, dueDate);
+  }
+}
+
+/**
+ * Default invoice email body for free users (no AI)
+ */
+export function getDefaultInvoiceEmailBody(
+  customerName: string,
+  jobName: string,
+  total: number,
+  businessName: string,
+  dueDate: string
+): string {
+  const dueDateFormatted = new Date(dueDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+  return `Please find attached your invoice for ${jobName}.\n\nThis invoice covers all materials and labour for the completed work as agreed. The total amount is $${total.toFixed(2)} (inc GST).\n\nPayment is due by ${dueDateFormatted}. If you have any questions about this invoice, please don't hesitate to get in touch.`;
+}
+
+/**
  * Fallback response when LLM is not available
  */
 function getFallbackResponse(jobDescription: string): LLMResponse {

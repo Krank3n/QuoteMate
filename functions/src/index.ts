@@ -18,8 +18,11 @@ import {
   handleUnsubscribe,
   sendNewUserNotificationEmail,
   sendFeedbackEmail,
+  sendQuoteFollowUpEmail,
   buildQuoteEmailHtml,
+  buildInvoiceEmailHtml,
 } from './email';
+import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from './pdfGenerator';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 
 // Initialize Firebase Admin
@@ -2467,7 +2470,7 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
  * Send a quote to a client via Brevo email
  * Generates acceptance link, sends branded HTML email, updates quote status
  */
-export const sendQuoteEmail = functions.https.onRequest((req, res) => {
+export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '1GB' }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
       res.status(405).send('Method Not Allowed');
@@ -2478,7 +2481,7 @@ export const sendQuoteEmail = functions.https.onRequest((req, res) => {
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { quoteId, emailBody, recipientEmail } = req.body;
+    const { quoteId, emailBody, recipientEmail, isTestSend } = req.body;
 
     if (!quoteId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: quoteId, emailBody, recipientEmail' });
@@ -2504,20 +2507,22 @@ export const sendQuoteEmail = functions.https.onRequest((req, res) => {
       const token = crypto.randomBytes(32).toString('hex');
       const hashedToken = hashToken(token);
 
-      // Store token on quote and in lookup collection
-      const batch = firestore.batch();
-      batch.update(quoteDoc.ref, {
-        acceptanceToken: hashedToken,
-        acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        status: 'sent',
-        aiEmailBody: emailBody,
-      });
-      batch.set(firestore.doc(`quoteAcceptanceTokens/${hashedToken}`), {
-        userId,
-        quoteId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      await batch.commit();
+      // Only update quote status for real sends (not test sends)
+      if (!isTestSend) {
+        const batch = firestore.batch();
+        batch.update(quoteDoc.ref, {
+          acceptanceToken: hashedToken,
+          acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          status: 'sent',
+          aiEmailBody: emailBody,
+        });
+        batch.set(firestore.doc(`quoteAcceptanceTokens/${hashedToken}`), {
+          userId,
+          quoteId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        await batch.commit();
+      }
 
       const acceptanceUrl = `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
 
@@ -2528,17 +2533,29 @@ export const sendQuoteEmail = functions.https.onRequest((req, res) => {
       let logoUrl = business.logoStorageUrl || '';
 
       // Build email HTML
+      const emailMaterials = (quote.materials || []).map((m: any) => ({
+        name: m.name,
+        quantity: m.quantity,
+        unit: m.unit,
+        totalPrice: m.totalPrice || 0,
+        section: m.section,
+      }));
+
+      const businessData = {
+        name: business.businessName || '',
+        abn: business.abn,
+        phone: business.phone,
+        email: business.email,
+        address: business.address,
+        logoUrl,
+        brandColor: business.brandColor,
+      };
+
       const htmlContent = buildQuoteEmailHtml({
         customerName: quote.customerName || 'Client',
         emailBody,
         jobName: quote.job?.name || 'Job',
-        materials: (quote.materials || []).map((m: any) => ({
-          name: m.name,
-          quantity: m.quantity,
-          unit: m.unit,
-          totalPrice: m.totalPrice || 0,
-          section: m.section,
-        })),
+        materials: emailMaterials,
         laborTotal: quote.laborTotal || 0,
         materialsSubtotal: quote.materialsSubtotal || 0,
         subtotal: quote.subtotal || 0,
@@ -2546,25 +2563,69 @@ export const sendQuoteEmail = functions.https.onRequest((req, res) => {
         total: quote.total || 0,
         acceptanceUrl,
         photoUrls,
-        business: {
-          name: business.businessName || '',
-          abn: business.abn,
-          phone: business.phone,
-          email: business.email,
-          address: business.address,
-          logoUrl,
-          brandColor: business.brandColor,
-        },
+        business: businessData,
       });
+
+      // Generate PDF attachment
+      const pdfHtml = buildQuotePdfHtml(
+        {
+          customerName: quote.customerName || 'Client',
+          customerEmail: quote.customerEmail,
+          customerPhone: quote.customerPhone,
+          jobAddress: quote.jobAddress,
+          quoteNumber: quote.quoteNumber,
+          quoteDate: quote.updatedAt || new Date().toISOString(),
+          job: quote.job || { name: 'Job', description: '' },
+          materials: (quote.materials || []).map((m: any) => ({
+            name: m.name,
+            quantity: m.quantity,
+            unit: m.unit,
+            price: m.price || 0,
+            totalPrice: m.totalPrice || 0,
+            section: m.section,
+          })),
+          materialsSubtotal: quote.materialsSubtotal || 0,
+          laborHours: quote.laborHours,
+          laborRate: quote.laborRate,
+          laborTotal: quote.laborTotal || 0,
+          subtotal: quote.subtotal || 0,
+          markup: quote.markup || 0,
+          markupAmount: quote.markupAmount || 0,
+          travelAdjustment: quote.travelAdjustment,
+          gst: quote.gst || 0,
+          total: quote.total || 0,
+          notes: quote.notes,
+          showLaborHours: business.showLaborHours,
+          groupMaterialsBySection: business.groupMaterialsBySection,
+          paymentMethods: business.paymentMethods,
+        },
+        {
+          businessName: business.businessName || 'Business',
+          email: business.email,
+          phone: business.phone,
+          abn: business.abn,
+          logoUrl: business.logoStorageUrl,
+          brandColor: business.brandColor,
+          pdfTemplate: business.pdfTemplate,
+        }
+      );
+
+      const pdfBuffer = await generateQuotePdfBuffer(pdfHtml);
+      const pdfBase64 = pdfBuffer.toString('base64');
+
+      // Build clean filename
+      const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 30);
+      const pdfFilename = `Quote_${sanitize(quote.customerName || 'Client')}_${sanitize(quote.job?.name || 'Job')}.pdf`;
 
       // Send via Brevo
       const sent = await sendEmail({
         to: recipientEmail,
-        subject: `Quotation from ${business.businessName || 'Your Tradie'} - ${quote.job?.name || 'Job'}`,
+        subject: `${isTestSend ? '[TEST] ' : ''}Quotation from ${business.businessName || 'Your Tradie'} - ${quote.job?.name || 'Job'}`,
         htmlContent,
         category: 'transactional',
         userId,
-        tags: ['quote-to-client'],
+        tags: isTestSend ? ['quote-test'] : ['quote-to-client'],
+        attachment: [{ name: pdfFilename, content: pdfBase64 }],
       });
 
       if (!sent) {
@@ -2572,21 +2633,185 @@ export const sendQuoteEmail = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Send confirmation to tradie
-      const tradieEmail = await getUserEmail(userId);
-      if (tradieEmail) {
-        await sendQuoteSentEmail(
-          tradieEmail,
-          quote.customerName || 'Client',
-          quote.quoteNumber || quoteId,
-          quote.total || 0,
-          userId
-        );
+      // Send confirmation to tradie (skip for test sends)
+      if (!isTestSend) {
+        const tradieEmail = await getUserEmail(userId);
+        if (tradieEmail) {
+          await sendQuoteSentEmail(
+            tradieEmail,
+            quote.customerName || 'Client',
+            quote.quoteNumber || quoteId,
+            quote.total || 0,
+            userId
+          );
+        }
       }
 
       res.json({ success: true, acceptanceUrl });
     } catch (error: any) {
       console.error('sendQuoteEmail error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Send an invoice to a customer via Brevo email with PDF attachment
+ */
+export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory: '1GB' }).https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.standard);
+    if (!decodedToken) return;
+
+    const userId = decodedToken.uid;
+    const { invoiceId, emailBody, recipientEmail, isTestSend } = req.body;
+
+    if (!invoiceId || !emailBody || !recipientEmail) {
+      res.status(400).json({ error: 'Missing required fields: invoiceId, emailBody, recipientEmail' });
+      return;
+    }
+
+    try {
+      const firestore = admin.firestore();
+
+      // Fetch invoice
+      const invoiceDoc = await firestore.doc(`users/${userId}/invoices/${invoiceId}`).get();
+      if (!invoiceDoc.exists) {
+        res.status(404).json({ error: 'Invoice not found' });
+        return;
+      }
+      const invoice = invoiceDoc.data()!;
+
+      // Fetch business settings
+      const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
+      const business = settingsDoc.exists ? settingsDoc.data()! : {};
+
+      // Only update invoice status for real sends (not test sends)
+      if (!isTestSend) {
+        await invoiceDoc.ref.update({
+          status: 'sent',
+          aiEmailBody: emailBody,
+          sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      // Resolve business logo URL
+      let logoUrl = business.logoStorageUrl || '';
+
+      // Build email HTML
+      const emailMaterials = (invoice.materials || []).map((m: any) => ({
+        name: m.name,
+        quantity: m.quantity,
+        unit: m.unit,
+        totalPrice: m.totalPrice || 0,
+        section: m.section,
+      }));
+
+      const businessData = {
+        name: business.businessName || '',
+        abn: business.abn,
+        phone: business.phone,
+        email: business.email,
+        address: business.address,
+        logoUrl,
+        brandColor: business.brandColor,
+      };
+
+      const htmlContent = buildInvoiceEmailHtml({
+        customerName: invoice.customerName || 'Client',
+        emailBody,
+        jobName: invoice.job?.name || 'Job',
+        materials: emailMaterials,
+        laborTotal: invoice.laborTotal || 0,
+        materialsSubtotal: invoice.materialsSubtotal || 0,
+        subtotal: invoice.subtotal || 0,
+        gst: invoice.gst || 0,
+        total: invoice.total || 0,
+        invoiceNumber: invoice.invoiceNumber,
+        dueDate: invoice.dueDate || new Date().toISOString(),
+        business: businessData,
+      });
+
+      // Generate Invoice PDF attachment
+      const pdfHtml = buildInvoicePdfHtml(
+        {
+          customerName: invoice.customerName || 'Client',
+          customerEmail: invoice.customerEmail,
+          customerPhone: invoice.customerPhone,
+          jobAddress: invoice.jobAddress,
+          quoteNumber: invoice.invoiceNumber,
+          quoteDate: invoice.updatedAt || new Date().toISOString(),
+          invoiceNumber: invoice.invoiceNumber,
+          issueDate: invoice.issueDate || invoice.createdAt || new Date().toISOString(),
+          dueDate: invoice.dueDate || new Date().toISOString(),
+          paymentTerms: invoice.paymentTerms,
+          paidAmount: invoice.paidAmount || 0,
+          job: invoice.job || { name: 'Job', description: '' },
+          materials: (invoice.materials || []).map((m: any) => ({
+            name: m.name,
+            quantity: m.quantity,
+            unit: m.unit,
+            price: m.price || 0,
+            totalPrice: m.totalPrice || 0,
+            section: m.section,
+          })),
+          materialsSubtotal: invoice.materialsSubtotal || 0,
+          laborHours: invoice.laborHours,
+          laborRate: invoice.laborRate,
+          laborTotal: invoice.laborTotal || 0,
+          subtotal: invoice.subtotal || 0,
+          markup: invoice.markup || 0,
+          markupAmount: invoice.markupAmount || 0,
+          travelAdjustment: invoice.travelAdjustment,
+          gst: invoice.gst || 0,
+          total: invoice.total || 0,
+          notes: invoice.notes,
+          showLaborHours: business.showLaborHours,
+          groupMaterialsBySection: business.groupMaterialsBySection,
+          paymentMethods: business.paymentMethods,
+        },
+        {
+          businessName: business.businessName || 'Business',
+          email: business.email,
+          phone: business.phone,
+          abn: business.abn,
+          logoUrl: business.logoStorageUrl,
+          brandColor: business.brandColor,
+          pdfTemplate: business.pdfTemplate,
+        }
+      );
+
+      const pdfBuffer = await generateQuotePdfBuffer(pdfHtml);
+      const pdfBase64 = pdfBuffer.toString('base64');
+
+      // Build clean filename
+      const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 30);
+      const pdfFilename = `Invoice_${sanitize(invoice.customerName || 'Client')}_${sanitize(invoice.job?.name || 'Job')}.pdf`;
+
+      // Send via Brevo
+      const sent = await sendEmail({
+        to: recipientEmail,
+        subject: `${isTestSend ? '[TEST] ' : ''}Invoice from ${business.businessName || 'Your Tradie'} - ${invoice.job?.name || 'Job'}`,
+        htmlContent,
+        category: 'transactional',
+        userId,
+        tags: isTestSend ? ['invoice-test'] : ['invoice-to-client'],
+        attachment: [{ name: pdfFilename, content: pdfBase64 }],
+      });
+
+      if (!sent) {
+        res.status(500).json({ error: 'Failed to send email' });
+        return;
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('sendInvoiceEmail error:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -3819,6 +4044,197 @@ export const updateActivityTimestamp = functions.https.onRequest((req, res) => {
       console.error('Error updating activity timestamp:', error);
       res.status(500).json({ error: error.message });
     }
+  });
+});
+
+/**
+ * Quick feedback from follow-up email — one-tap rating
+ */
+export const quickFeedback = functions.https.onRequest(async (req, res) => {
+  // POST = detailed feedback submission after initial rating
+  if (req.method === 'POST') {
+    const { userId, rating, feedbackId, details } = req.body;
+    if (!userId || !feedbackId) {
+      res.status(400).send('Invalid request');
+      return;
+    }
+
+    try {
+      // Update the existing feedback doc with detailed comments
+      await admin.firestore().collection('feedback').doc(feedbackId).update({
+        details: (details || '').slice(0, 5000),
+        detailsAddedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Notify admin about the detailed feedback
+      const userEmail = await getUserEmail(userId) || 'Unknown';
+      await sendEmail({
+        to: 'thomas.andrew.hansen@gmail.com',
+        subject: `Detailed feedback from ${userEmail} (rated: ${rating})`,
+        htmlContent: `<p>User <strong>${userEmail}</strong> (${userId}) left detailed feedback after rating "<strong>${rating}</strong>":</p><blockquote style="border-left:3px solid #f59e0b;padding:8px 16px;margin:16px 0;color:#333;">${(details || '').replace(/</g, '&lt;')}</blockquote>`,
+        category: 'transactional',
+        tags: ['quick-feedback-detail-admin'],
+      });
+
+      res.status(200).send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Feedback received!</title>
+          <style>
+            body { margin:0; padding:0; background:#0f172a; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; }
+            .card { background:#1e293b; border-radius:16px; padding:48px 32px; max-width:400px; text-align:center; }
+            .emoji { font-size:64px; margin:0 0 16px; }
+            h1 { color:#f8fafc; font-size:24px; margin:0 0 12px; }
+            p { color:#94a3b8; font-size:15px; line-height:1.6; margin:0; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="emoji">&#128079;</div>
+            <h1>You're a champion!</h1>
+            <p>That extra detail is gold — it'll help us make QuoteMate even better for you and every other tradie out there.</p>
+          </div>
+        </body>
+        </html>
+      `);
+    } catch (error: any) {
+      console.error('quickFeedback POST error:', error);
+      res.status(500).send('Something went wrong');
+    }
+    return;
+  }
+
+  // GET = initial one-tap rating click
+  const { userId, rating } = req.query as { userId?: string; rating?: string };
+
+  const validRatings = ['great', 'okay', 'bad'];
+  if (!userId || !rating || !validRatings.includes(rating)) {
+    res.status(400).send('Invalid request');
+    return;
+  }
+
+  try {
+    // Store the feedback and get the doc ID for the follow-up form
+    const feedbackRef = await admin.firestore().collection('feedback').add({
+      userId,
+      category: 'First Quote Follow-Up',
+      feedback: `Quick rating: ${rating}`,
+      rating,
+      source: 'email-quick-feedback',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Notify admin
+    const userEmail = await getUserEmail(userId) || 'Unknown';
+    await sendEmail({
+      to: 'thomas.andrew.hansen@gmail.com',
+      subject: `Quick feedback: "${rating}" from ${userEmail}`,
+      htmlContent: `<p>User <strong>${userEmail}</strong> (${userId}) rated their first quote experience: <strong>${rating}</strong></p>`,
+      category: 'transactional',
+      tags: ['quick-feedback-admin'],
+    });
+
+    const emoji = rating === 'great' ? '&#129321;' : rating === 'okay' ? '&#128528;' : '&#128169;';
+    const message = rating === 'great'
+      ? "Stoked to hear it! That's made our day."
+      : rating === 'okay'
+        ? "Fair enough! We'll keep working to make it a ripper experience."
+        : "Cheers for being honest — we'll get onto fixing that.";
+
+    const placeholder = rating === 'great'
+      ? "What did you love most? Any features you'd like to see?"
+      : rating === 'okay'
+        ? "What could we do better? What felt clunky?"
+        : "What went wrong? We want to fix it for you.";
+
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Thanks for the feedback!</title>
+        <style>
+          body { margin:0; padding:0; background:#0f172a; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; padding:24px; box-sizing:border-box; }
+          .card { background:#1e293b; border-radius:16px; padding:48px 32px; max-width:440px; width:100%; text-align:center; }
+          .emoji { font-size:64px; margin:0 0 16px; }
+          h1 { color:#f8fafc; font-size:24px; margin:0 0 12px; }
+          p { color:#94a3b8; font-size:15px; line-height:1.6; margin:0 0 24px; }
+          .divider { border:0; border-top:1px solid #334155; margin:28px 0; }
+          h2 { color:#cbd5e1; font-size:16px; font-weight:600; margin:0 0 12px; }
+          textarea { width:100%; min-height:100px; background:#0f172a; border:2px solid #334155; border-radius:10px; color:#f8fafc; font-size:14px; padding:12px; box-sizing:border-box; resize:vertical; font-family:inherit; }
+          textarea:focus { outline:none; border-color:#f59e0b; }
+          button { background:#f59e0b; color:#fff; border:none; border-radius:10px; padding:14px 32px; font-size:15px; font-weight:700; cursor:pointer; margin-top:16px; width:100%; }
+          button:hover { background:#d97706; }
+          button:disabled { opacity:0.6; cursor:not-allowed; }
+          .done { color:#00c897; font-size:15px; font-weight:600; display:none; margin-top:16px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="emoji">${emoji}</div>
+          <h1>Thanks, legend!</h1>
+          <p>${message}</p>
+
+          <hr class="divider">
+
+          <h2>Want to tell us more? (optional)</h2>
+          <form id="detailsForm">
+            <textarea id="details" placeholder="${placeholder}"></textarea>
+            <button type="submit" id="submitBtn">Send Feedback</button>
+          </form>
+          <p class="done" id="doneMsg">&#128079; You're a champion — thanks for the extra detail!</p>
+        </div>
+
+        <script>
+          document.getElementById('detailsForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var details = document.getElementById('details').value.trim();
+            if (!details) return;
+            var btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            try {
+              await fetch('https://us-central1-hansendev.cloudfunctions.net/quickFeedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  userId: '${userId}',
+                  rating: '${rating}',
+                  feedbackId: '${feedbackRef.id}',
+                  details: details
+                })
+              });
+            } catch(err) {}
+            document.getElementById('detailsForm').style.display = 'none';
+            document.getElementById('doneMsg').style.display = 'block';
+          });
+        </script>
+      </body>
+      </html>
+    `);
+  } catch (error: any) {
+    console.error('quickFeedback error:', error);
+    res.status(500).send('Something went wrong');
+  }
+});
+
+/**
+ * Test endpoint: send the quote follow-up email to admin
+ */
+export const testQuoteFollowUpEmail = functions.https.onRequest(async (req, res) => {
+  corsHandler(req, res, async () => {
+    const sent = await sendQuoteFollowUpEmail(
+      'thomas.andrew.hansen@gmail.com',
+      'Test Business',
+      'Bathroom Renovation',
+      2450.00,
+      'test'
+    );
+    res.json({ success: sent });
   });
 });
 
@@ -5321,6 +5737,66 @@ export const onQuoteExpiring = functions.pubsub
     }
 
     console.log('✅ Quote expiry check complete');
+  });
+
+// -----------------------------------------------------------
+// quoteFollowUp — Scheduled every 30 mins: send follow-up email 2hrs after first quote created
+// -----------------------------------------------------------
+export const quoteFollowUp = functions.pubsub
+  .schedule('every 30 minutes')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const now = new Date();
+    const usersSnapshot = await db.collection('users').get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      // Check if we already sent a follow-up for this user
+      const emailStateDoc = await userDoc.ref.collection('settings').doc('emailState').get();
+      if (emailStateDoc.exists && emailStateDoc.data()?.quoteFollowUpSentAt) continue;
+
+      // Get all quotes for this user
+      const allQuotes = await userDoc.ref
+        .collection('quotes')
+        .orderBy('createdAt', 'asc')
+        .limit(2)
+        .get();
+
+      // Only proceed if user has exactly 1 quote (their first)
+      if (allQuotes.size !== 1) continue;
+
+      const quoteDoc = allQuotes.docs[0];
+      const quote = quoteDoc.data();
+
+      // Check if quote was created at least 2 hours ago
+      const createdAt = quote.createdAt?.toDate ? quote.createdAt.toDate() : new Date(quote.createdAt);
+      const twoHoursAfter = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000);
+      if (now < twoHoursAfter) continue;
+
+      const email = await getUserEmail(userDoc.id);
+      if (!email) continue;
+
+      let businessName = '';
+      try {
+        const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
+        businessName = settingsDoc.data()?.businessName || '';
+      } catch {}
+
+      const sent = await sendQuoteFollowUpEmail(
+        email,
+        businessName,
+        quote.job?.name || 'the job',
+        quote.total || 0,
+        userDoc.id
+      );
+
+      if (sent) {
+        await userDoc.ref.collection('settings').doc('emailState').set({
+          quoteFollowUpSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+    }
+
+    console.log('✅ Quote follow-up check complete');
   });
 
 // -----------------------------------------------------------

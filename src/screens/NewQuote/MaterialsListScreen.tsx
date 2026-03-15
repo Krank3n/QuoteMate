@@ -33,7 +33,7 @@ import {
   SegmentedButtons,
   ActivityIndicator,
 } from 'react-native-paper';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import LottieView from 'lottie-react-native';
 import { generateId } from '../../utils/generateId';
@@ -51,6 +51,7 @@ import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../..
 import { AnimatedListItem } from '../../components/AnimatedListItem';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
+import { notificationService } from '../../services/notificationService';
 
 // Helper to get section display info
 function getSectionInfo(sectionName: string | undefined): { name: string; color: string } {
@@ -328,6 +329,7 @@ export function MaterialsListScreen() {
   const chasingTitle = useMemo(() => CHASING_TITLES[Math.floor(Math.random() * CHASING_TITLES.length)], []);
   const chasingSubtitle = useMemo(() => CHASING_SUBTITLES[Math.floor(Math.random() * CHASING_SUBTITLES.length)], []);
   const navigation = useNavigation<any>();
+  const isFocused = useIsFocused();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
   const { businessSettings, subscriptionStatus, saveDraft } = useStore();
@@ -338,10 +340,15 @@ export function MaterialsListScreen() {
   const { registerRef } = useTourRefs();
   const aiGenerateRef = useRef<View>(null);
   const addManualRef = useRef<View>(null);
+  const firstMaterialItemRef = useRef<View>(null);
+  const addMaterialButtonRef = useRef<View>(null);
+  const [tourActive, setTourActive] = useState(false);
 
   useEffect(() => {
     if (aiGenerateRef.current) registerRef('aiGenerateCard', aiGenerateRef.current);
     if (addManualRef.current) registerRef('addManualCard', addManualRef.current);
+    if (firstMaterialItemRef.current) registerRef('firstMaterialItem', firstMaterialItemRef.current);
+    if (addMaterialButtonRef.current) registerRef('addMaterialButton', addMaterialButtonRef.current);
   });
 
   // For compatibility, alias to currentQuote (used throughout this file)
@@ -379,6 +386,10 @@ export function MaterialsListScreen() {
   // Fetch time estimate modal state
   const [showFetchEstimateModal, setShowFetchEstimateModal] = useState(false);
   const [fetchMinimized, setFetchMinimized] = useState(false);
+  const [notifyWhenDone, setNotifyWhenDone] = useState(false);
+  const notifyWhenDoneRef = useRef(false);
+  const isFocusedRef = useRef(isFocused);
+  useEffect(() => { isFocusedRef.current = isFocused; }, [isFocused]);
   const [fetchEstimateSeconds, setFetchEstimateSeconds] = useState(0);
   const fetchCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fetchStartTimeRef = useRef<number>(0);
@@ -667,6 +678,7 @@ export function MaterialsListScreen() {
       Promise.race([promise, cancelPromise]);
 
     setIsFetchingPrices(true);
+    setNotifyWhenDone(false);
     cancelFetchRef.current = false;
 
     let fetchedCount = 0;
@@ -1120,6 +1132,17 @@ export function MaterialsListScreen() {
         setShowSuccessModal(true);
       }
     } finally {
+      // Send push notification if user chose "Fetch in Background" and screen is not focused
+      if (notifyWhenDoneRef.current && !isFocusedRef.current) {
+        const total = fetchedCount + failedCount + skippedCount;
+        const notifTitle = failedCount === 0 ? 'Prices are sorted!' : 'Price fetch finished';
+        const notifBody = fetchedCount > 0
+          ? `Got ${fetchedCount} of ${total} price${total > 1 ? 's' : ''}. Tap to check it out.`
+          : 'Done fetching prices. Tap to have a squiz.';
+        notificationService.scheduleLocalNotification(notifTitle, notifBody, { screen: 'MaterialsList' });
+        notifyWhenDoneRef.current = false;
+        setNotifyWhenDone(false);
+      }
       cancelFetchResolverRef.current = null;
       stopFetchCountdown();
       setCurrentFetchingName('');
@@ -1367,6 +1390,7 @@ export function MaterialsListScreen() {
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          scrollEnabled={!tourActive}
       >
         <WebContainer>
         {isAiAnalyzing ? (
@@ -1462,6 +1486,7 @@ export function MaterialsListScreen() {
                       return (
                         <AnimatedListItem key={material.id} index={animIndex} staggerDelay={100}>
                         <Animated.View
+                          ref={animIndex === 0 ? firstMaterialItemRef as any : undefined}
                           style={[
                             styles.listItem,
                             isCurrentlyFetching && styles.listItemFetching,
@@ -1642,7 +1667,7 @@ export function MaterialsListScreen() {
 
         {/* Add Material button - inline so it doesn't overlay content */}
         {materials.length > 0 && (
-          <TouchableOpacity style={styles.addMaterialButton} onPress={handleAddMaterial}>
+          <TouchableOpacity ref={addMaterialButtonRef as any} style={styles.addMaterialButton} onPress={handleAddMaterial}>
             <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
             <Text style={styles.addMaterialButtonText}>Add Material</Text>
           </TouchableOpacity>
@@ -1772,18 +1797,34 @@ export function MaterialsListScreen() {
               </View>
             </View>
 
-            <Button
-              mode="outlined"
-              onPress={() => {
-                setShowFetchEstimateModal(false);
-                setFetchMinimized(true);
-              }}
-              style={styles.fetchEstimateCloseButton}
-              textColor={colors.textMuted}
-              icon="chevron-down"
-            >
-              Minimize
-            </Button>
+            <View style={styles.fetchEstimateButtonRow}>
+              <Button
+                mode="outlined"
+                onPress={() => {
+                  setShowFetchEstimateModal(false);
+                  setFetchMinimized(true);
+                }}
+                style={[styles.fetchEstimateCloseButton, { flex: 1 }]}
+                textColor={colors.textMuted}
+                icon="chevron-down"
+              >
+                Minimize
+              </Button>
+              <Button
+                mode="contained"
+                onPress={() => {
+                  notifyWhenDoneRef.current = true;
+                  setNotifyWhenDone(true);
+                  setShowFetchEstimateModal(false);
+                  setFetchMinimized(true);
+                }}
+                style={[styles.fetchEstimateCloseButton, { flex: 1 }]}
+                buttonColor={colors.primary}
+                icon="bell-ring-outline"
+              >
+                Notify When Done
+              </Button>
+            </View>
           </View>
         </Modal>
       </Portal>
@@ -1807,6 +1848,7 @@ export function MaterialsListScreen() {
           <View style={styles.fetchMinimizedProgressBg}>
             <View style={[styles.fetchMinimizedProgressFill, { width: fetchProgress.total > 0 ? `${(fetchProgress.current / fetchProgress.total) * 100}%` : '0%' }]} />
           </View>
+          {notifyWhenDone && <MaterialCommunityIcons name="bell-ring-outline" size={14} color={colors.primary} />}
           <MaterialCommunityIcons name="chevron-up" size={18} color={colors.textMuted} />
         </TouchableOpacity>
       )}
@@ -1819,7 +1861,14 @@ export function MaterialsListScreen() {
         title={successTitle}
         message={successMessage}
       />
-      <ScreenTour tourId="materialsList" />
+      {!showSuccessModal && (
+        <>
+          <ScreenTour tourId="materialsList" onActiveChange={setTourActive} />
+          {materials.length > 0 && (
+            <ScreenTour tourId="materialsListItems" onActiveChange={setTourActive} />
+          )}
+        </>
+      )}
     </View>
   );
 }
@@ -2315,8 +2364,12 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '600',
   },
-  fetchEstimateCloseButton: {
+  fetchEstimateButtonRow: {
+    flexDirection: 'row',
+    gap: 8,
     width: '100%',
+  },
+  fetchEstimateCloseButton: {
     borderColor: colors.border,
   },
   fetchMinimizedPill: {

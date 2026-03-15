@@ -596,7 +596,7 @@ export function PDFTemplateScreen() {
 
           <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666666;">
             <p>This quote is valid for 30 days from the date of issue.</p>
-            <p>Generated with QuoteMate - quoting tool for Australian tradies</p>
+            <p>Powered by QuoteMate | quotemateapp.au</p>
           </div>
         </body>
         </html>

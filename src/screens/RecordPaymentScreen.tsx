@@ -14,6 +14,7 @@ import {
   Title,
   Menu,
 } from 'react-native-paper';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { format, subDays, isToday, isYesterday } from 'date-fns';
 
@@ -111,7 +112,12 @@ export function RecordPaymentScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
       {/* Invoice Summary */}
       <Surface style={styles.summaryCard}>
-        <Title style={styles.summaryTitle}>Invoice Summary</Title>
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
+            <MaterialCommunityIcons name="file-document-outline" size={18} color={colors.secondary} />
+          </View>
+          <Title style={styles.sectionTitle}>Invoice Summary</Title>
+        </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Invoice</Text>
           <Text style={styles.summaryValue}>{invoice.invoiceNumber || 'Draft'}</Text>
@@ -140,7 +146,12 @@ export function RecordPaymentScreen() {
 
       {/* Payment Amount */}
       <Surface style={styles.section}>
-        <Title style={styles.sectionTitle}>Payment Amount</Title>
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
+            <MaterialCommunityIcons name="cash" size={18} color={colors.primary} />
+          </View>
+          <Title style={styles.sectionTitle}>Payment Amount</Title>
+        </View>
         <TextInput
           label="Amount"
           value={amount}
@@ -174,7 +185,12 @@ export function RecordPaymentScreen() {
 
       {/* Payment Method */}
       <Surface style={styles.section}>
-        <Title style={styles.sectionTitle}>Payment Method</Title>
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
+            <MaterialCommunityIcons name="credit-card-outline" size={18} color={colors.info} />
+          </View>
+          <Title style={styles.sectionTitle}>Payment Method</Title>
+        </View>
         <RadioButton.Group
           onValueChange={(value) => setPaymentMethod(value as PaymentMethod)}
           value={paymentMethod}
@@ -193,7 +209,12 @@ export function RecordPaymentScreen() {
 
       {/* Payment Date */}
       <Surface style={styles.section}>
-        <Title style={styles.sectionTitle}>Payment Date</Title>
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.successBg }]}>
+            <MaterialCommunityIcons name="calendar-check" size={18} color={colors.success} />
+          </View>
+          <Title style={styles.sectionTitle}>Payment Date</Title>
+        </View>
         <Menu
           visible={dateMenuVisible}
           onDismiss={() => setDateMenuVisible(false)}
@@ -244,7 +265,12 @@ export function RecordPaymentScreen() {
 
       {/* Notes */}
       <Surface style={styles.section}>
-        <Title style={styles.sectionTitle}>Notes (Optional)</Title>
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
+            <MaterialCommunityIcons name="note-text-outline" size={18} color={colors.info} />
+          </View>
+          <Title style={styles.sectionTitle}>Notes (Optional)</Title>
+        </View>
         <TextInput
           label="Payment notes"
           value={notes}
@@ -283,14 +309,10 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     padding: 16,
-    borderRadius: 8,
-    marginBottom: 16,
-    backgroundColor: colors.surfaceGray,
-  },
-  summaryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    borderRadius: 14,
     marginBottom: 12,
+    backgroundColor: colors.surface,
+    elevation: 2,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -323,14 +345,29 @@ const styles = StyleSheet.create({
   },
   section: {
     padding: 16,
-    borderRadius: 8,
-    marginBottom: 16,
+    borderRadius: 14,
+    marginBottom: 12,
     backgroundColor: colors.surface,
+    elevation: 2,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  sectionIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 0,
+    lineHeight: 20,
   },
   input: {
     backgroundColor: colors.surface,
@@ -356,7 +393,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 4,
+    borderRadius: 10,
     backgroundColor: colors.surface,
   },
   dateText: {

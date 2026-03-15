@@ -93,6 +93,8 @@ export function ActionSheet({
       onDismiss={onDismiss}
       title={title}
       footer={footer}
+      scrollable
+      maxHeightRatio={0.7}
       overlay={<GrainOverlay density={160} intensity={0.07} borderRadius={24} />}
     >
       <View style={styles.optionsContainer}>

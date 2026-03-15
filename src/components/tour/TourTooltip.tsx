@@ -46,6 +46,10 @@ interface TourTooltipProps {
   onNext: () => void;
   onBack: () => void;
   onSkip: () => void;
+  /** Offset added to displayed step number for sequential numbering across tours */
+  stepOffset?: number;
+  /** Override displayed total for sequential numbering across tours */
+  globalTotalSteps?: number;
 }
 
 export function TourTooltip({
@@ -58,9 +62,13 @@ export function TourTooltip({
   onNext,
   onBack,
   onSkip,
+  stepOffset = 0,
+  globalTotalSteps,
 }: TourTooltipProps) {
   const isLast = stepIndex === totalSteps - 1;
   const isFirst = stepIndex === 0;
+  const displayStep = stepIndex + stepOffset + 1;
+  const displayTotal = globalTotalSteps ?? totalSteps;
   const padding = 8;
 
   const targetCenterX = target.x + target.width / 2;
@@ -152,7 +160,7 @@ export function TourTooltip({
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.counter}>{stepIndex + 1} of {totalSteps}</Text>
+        <Text style={styles.counter}>{displayStep} of {displayTotal}</Text>
         <Text style={styles.title}>{step.title}</Text>
         <BoldText style={styles.description}>{step.description}</BoldText>
 

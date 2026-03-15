@@ -260,7 +260,6 @@ export function ViewQuoteScreen() {
               style={styles.outlinedButton}
               contentStyle={styles.buttonContent}
               labelStyle={styles.outlinedButtonLabel}
-              icon="file-replace"
             >
               Convert to Invoice
             </Button>
@@ -380,10 +379,10 @@ const styles = StyleSheet.create({
   buttonContent: {
     height: 48,
     alignItems: 'center',
-    paddingHorizontal: 0,
+    paddingHorizontal: 12,
   },
   outlinedButtonLabel: {
-    fontSize: 12,
+    fontSize: 13,
     color: colors.primary,
     fontWeight: '600',
     marginVertical: 0,

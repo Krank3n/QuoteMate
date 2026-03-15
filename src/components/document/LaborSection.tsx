@@ -24,8 +24,17 @@ export function LaborSection({
   const content = (
     <Surface style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Title style={styles.sectionTitle}>Labor</Title>
-        {onEdit && <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />}
+        <View style={styles.sectionHeaderLeft}>
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.successBg }]}>
+            <MaterialCommunityIcons name="clock-outline" size={18} color={colors.success} />
+          </View>
+          <Title style={styles.sectionTitle}>Labor</Title>
+        </View>
+        {onEdit && (
+          <View style={styles.editButton}>
+            <MaterialCommunityIcons name="pencil" size={16} color={colors.primary} />
+          </View>
+        )}
       </View>
       <View style={styles.summaryRow}>
         <Text style={styles.text}>

@@ -27,8 +27,17 @@ export function CustomerSection({
   const content = (
     <Surface style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Title style={styles.sectionTitle}>Customer</Title>
-        {onEdit && <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />}
+        <View style={styles.sectionHeaderLeft}>
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
+            <MaterialCommunityIcons name="account" size={18} color={colors.info} />
+          </View>
+          <Title style={styles.sectionTitle}>Customer</Title>
+        </View>
+        {onEdit && (
+          <View style={styles.editButton}>
+            <MaterialCommunityIcons name="pencil" size={16} color={colors.primary} />
+          </View>
+        )}
       </View>
       {isEditing && onFieldChange ? (
         <>

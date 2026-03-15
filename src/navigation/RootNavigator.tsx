@@ -424,20 +424,21 @@ export function RootNavigator() {
     <RootStack.Navigator
       screenOptions={{
         headerShown: false,
+        cardStyle: { backgroundColor: colors.background },
         // Enable scrolling for modals on web
         ...(Platform.OS === 'web' && {
-          contentStyle: { overflow: 'auto' }
+          contentStyle: { overflow: 'auto', backgroundColor: colors.background }
         }),
         // Keep previous screen mounted during transitions to prevent remount glitches
         detachPreviousScreen: false,
         // Disable safe area for iOS to allow full height cards
         ...(Platform.OS === 'ios' && {
           safeAreaInsets: { top: 0, bottom: 0 },
-          contentStyle: { flex: 1 },
+          contentStyle: { flex: 1, backgroundColor: colors.background },
         })
       }}
     >
-      <RootStack.Screen name="Main" component={MainTabs} />
+      <RootStack.Screen name="Main" component={MainTabs} options={{ freezeOnBlur: false }} />
       <RootStack.Screen
         name="ViewQuote"
         component={ViewQuoteScreen}

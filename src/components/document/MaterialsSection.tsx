@@ -23,8 +23,17 @@ export function MaterialsSection({
   const content = (
     <Surface style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Title style={styles.sectionTitle}>Materials ({materials.length})</Title>
-        {onEdit && <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />}
+        <View style={styles.sectionHeaderLeft}>
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
+            <MaterialCommunityIcons name="package-variant" size={18} color={colors.primary} />
+          </View>
+          <Title style={styles.sectionTitle}>Materials ({materials.length})</Title>
+        </View>
+        {onEdit && (
+          <View style={styles.editButton}>
+            <MaterialCommunityIcons name="pencil" size={16} color={colors.primary} />
+          </View>
+        )}
       </View>
       {materials.length === 0 ? (
         <Text style={styles.subtext}>{emptyMessage}</Text>

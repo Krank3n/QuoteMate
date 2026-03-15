@@ -89,6 +89,7 @@ export interface Quote {
   travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
   estimatedDistance?: number;   // km (straight-line)
   estimatedFuelCost?: number;  // AUD (round trip)
+  travelGeocodeFailed?: boolean; // true when address geocoding couldn't resolve
   // Quote acceptance via email link fields
   acceptanceToken?: string; // 64-char secure token for email acceptance link
   acceptanceTokenCreatedAt?: Date; // When the token was generated (for 30-day expiration)
@@ -352,6 +353,7 @@ export interface Invoice {
   travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
   estimatedDistance?: number;   // km (straight-line)
   estimatedFuelCost?: number;  // AUD (round trip)
+  travelGeocodeFailed?: boolean; // true when address geocoding couldn't resolve
 }
 
 // Notification preferences (stored at users/{userId}/settings/notificationPreferences)

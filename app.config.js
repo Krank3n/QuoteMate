@@ -53,8 +53,8 @@ export default {
       [
         "expo-image-picker",
         {
-          photosPermission: "QuoteMate needs access to your photo library so you can select a company logo to display on your PDF quotes and invoices. For example, you can upload your business logo to appear in the header of every quote you generate.",
-          cameraPermission: "QuoteMate needs access to your camera so you can take a photo to use as your company logo on PDF quotes and invoices."
+          photosPermission: "QuoteMate uses your photo library to attach site photos to quotes for AI material analysis, and to set your company logo on PDF quotes and invoices.",
+          cameraPermission: "QuoteMate uses your camera to take site photos for quotes and AI material analysis, and to capture a company logo for PDF quotes and invoices."
         }
       ],
       "expo-iap",
@@ -81,8 +81,7 @@ export default {
       },
       package: "com.quotemate.app",
       versionCode: 78,
-      permissions: ["android.permission.RECORD_AUDIO"],
-      blockedPermissions: ["android.permission.CAMERA"]
+      permissions: ["android.permission.RECORD_AUDIO", "android.permission.CAMERA"]
     },
     experiments: {
       ...(isWebExport ? { baseUrl: isWebExport } : {}),

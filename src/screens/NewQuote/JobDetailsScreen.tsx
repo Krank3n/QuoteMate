@@ -26,7 +26,7 @@ import {
   ActivityIndicator,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 // Safe import — native module may not be available if dev client wasn't rebuilt
 let ExpoSpeechRecognitionModule: any = null;
 let useSpeechRecognitionEvent: any = (_event: string, _callback: Function) => {};
@@ -56,9 +56,12 @@ import { AlertModal } from '../../components/AlertModal';
 import { JobPhotos } from '../../components/JobPhotos';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
+import { TOUR_STEPS, INTRO_TOUR_TOTAL_STEPS } from '../../components/tour/tourSteps';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const fromTour = route.params?.fromTour;
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
   const { quotes, invoices, businessSettings, subscriptionStatus, saveDraft } = useStore();
@@ -84,16 +87,28 @@ export function JobDetailsScreen() {
   // Tour refs
   const { registerRef } = useTourRefs();
   const descriptionRef = useRef<View>(null);
+  const descriptionCleanedRef = useRef<View>(null);
   const micButtonRef = useRef<View>(null);
   const jobPhotosRef = useRef<View>(null);
   const analyzeRef = useRef<View>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const [tourActive, setTourActive] = useState(false);
+  const typewriterRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (descriptionRef.current) registerRef('jobDescription', descriptionRef.current);
+    if (descriptionCleanedRef.current) registerRef('jobDescriptionCleaned', descriptionCleanedRef.current);
     if (micButtonRef.current) registerRef('micButton', micButtonRef.current);
     if (jobPhotosRef.current) registerRef('jobPhotos', jobPhotosRef.current);
     if (analyzeRef.current) registerRef('analyzeButton', analyzeRef.current);
   });
+
+  // Clean up typewriter on unmount
+  useEffect(() => {
+    return () => {
+      if (typewriterRef.current) clearInterval(typewriterRef.current);
+    };
+  }, []);
 
   // Voice recording states
   const [isRecording, setIsRecording] = useState(false);
@@ -933,10 +948,12 @@ export function JobDetailsScreen() {
         keyboardVerticalOffset={-48}
       >
         <ScrollView
+          ref={scrollRef}
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={true}
+          scrollEnabled={!tourActive}
         >
           <WebContainer>
       {/* Niche-Specific Quick Templates */}
@@ -996,7 +1013,9 @@ export function JobDetailsScreen() {
                 </>
               ) : (
                 <View style={styles.sectionTitleRow}>
-                  <MaterialCommunityIcons name="briefcase-outline" size={24} color={colors.primary} style={styles.sectionIcon} />
+                  <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
+                    <MaterialCommunityIcons name="briefcase-outline" size={20} color={colors.secondary} />
+                  </View>
                   <Title style={styles.sectionTitle}>
                     {isTemplateCarouselExpanded ? 'Select Job Type' : `${uniqueTemplates.length + 1} Job Types Available`}
                   </Title>
@@ -1111,7 +1130,9 @@ export function JobDetailsScreen() {
         // TEMPLATE MODE: Show parameter inputs
         <Surface style={styles.paramsSection}>
           <View style={styles.sectionTitleContainer}>
-            <MaterialCommunityIcons name="format-list-numbered" size={24} color={colors.primary} style={styles.sectionIcon} />
+            <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
+              <MaterialCommunityIcons name="format-list-numbered" size={20} color={colors.primary} />
+            </View>
             <Title style={styles.sectionTitle}>Job Details</Title>
           </View>
           <Text style={styles.helperText}>
@@ -1139,8 +1160,10 @@ export function JobDetailsScreen() {
         // CUSTOM MODE: Show voice/text input (merged into one Surface)
         <Surface style={styles.paramsSection}>
           <View style={styles.sectionTitleContainer}>
-            <MaterialCommunityIcons name="hammer-wrench" size={24} color={colors.primary} style={styles.sectionIcon} />
-            <Title style={styles.sectionTitle}>Custom Job Description</Title>
+            <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
+              <MaterialCommunityIcons name="hammer-wrench" size={20} color={colors.secondary} />
+            </View>
+            <Title style={styles.sectionTitle}>Job Description</Title>
           </View>
           <Text style={styles.helperText}>
             Tap the microphone to describe the job with your voice, or type it manually below.
@@ -1286,9 +1309,10 @@ export function JobDetailsScreen() {
         )}
 
 
-        {/* Job Description Text Input */}
+        {/* Job Description + Clean-up Button + Title (wrapped for tour highlights) */}
+        <View ref={descriptionCleanedRef}>
+        <View ref={descriptionRef}>
         <TextInput
-          ref={descriptionRef}
           label="Job Description *"
           value={jobDescription}
           onChangeText={setJobDescription}
@@ -1336,6 +1360,7 @@ export function JobDetailsScreen() {
             )}
           </TouchableOpacity>
         )}
+        </View>
 
         {/* Job Title (moved below description) */}
         <TextInput
@@ -1351,6 +1376,7 @@ export function JobDetailsScreen() {
           autoComplete="off"
           textContentType="none"
         />
+        </View>
 
         {/* Job Photos */}
         {useCustomMode && (
@@ -1399,7 +1425,51 @@ export function JobDetailsScreen() {
       </KeyboardAvoidingView>
 
       {/* Screen Tour */}
-      <ScreenTour tourId="jobDetails" />
+      <ScreenTour
+        tourId="jobDetails"
+        delay={fromTour ? 200 : 600}
+        stepOffset={TOUR_STEPS.length}
+        globalTotalSteps={INTRO_TOUR_TOTAL_STEPS}
+        scrollRef={scrollRef}
+        scrollPositions={{ micButton: 0, jobDescription: 0, jobDescriptionCleaned: 0, jobPhotos: 600 }}
+        onActiveChange={setTourActive}
+        onStepChange={(stepId) => {
+          if (stepId === 'jobDescription' && !jobDescription.trim()) {
+            const demoText =
+              "yeah so the dunny door fell off again and the missus is losing it, " +
+              "hinges are cooked reckon the frames a bit dodgy too from when bazza " +
+              "reversed the mower into it last arvo. needs new hinges and maybe " +
+              "replace the bottom bit of the frame cos its gone all soggy from the rain";
+            // Typewriter effect — write word by word
+            const words = demoText.split(' ');
+            let i = 0;
+            if (typewriterRef.current) clearInterval(typewriterRef.current);
+            typewriterRef.current = setInterval(() => {
+              i++;
+              if (i >= words.length) {
+                clearInterval(typewriterRef.current!);
+                typewriterRef.current = null;
+                setJobDescription(demoText);
+              } else {
+                setJobDescription(words.slice(0, i + 1).join(' '));
+              }
+            }, 80);
+          } else if (stepId === 'jobDescriptionCleaned') {
+            // Auto-trigger cleanup when arriving at this step
+            if (typewriterRef.current) {
+              clearInterval(typewriterRef.current);
+              typewriterRef.current = null;
+            }
+            handleCleanupDescription();
+          } else {
+            // Clear typewriter if moving away from step
+            if (typewriterRef.current) {
+              clearInterval(typewriterRef.current);
+              typewriterRef.current = null;
+            }
+          }
+        }}
+      />
     </>
   );
 }
@@ -1449,22 +1519,27 @@ const styles = StyleSheet.create({
   },
   sectionTitleContainer: {
     marginBottom: 16,
-    // marginTop: 16,
     flexDirection: "row",
     alignItems: "center",
+    gap: 10,
   },
   sectionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 8,
+    gap: 10,
   },
-  sectionIcon: {
-    marginRight: 8,
+  sectionIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     marginBottom: 0,
     flex: 1,
   },
@@ -1648,12 +1723,12 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
   },
   paramsSection: {
-    marginHorizontal: 20,
-    marginTop: 20,
-    marginBottom: 20,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 16,
     padding: 16,
     paddingTop: 16,
-    borderRadius: 8,
+    borderRadius: 14,
     elevation: 2,
     backgroundColor: colors.surface,
   },

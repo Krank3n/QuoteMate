@@ -15,6 +15,7 @@ import {
   Alert,
   Platform,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -54,18 +55,41 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
       return;
     }
 
-    // Request permissions
+    // Request permissions — handle the "previously denied" case with a Settings shortcut
     if (useCamera) {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera access is needed to take photos.');
-        return;
+      const current = await ImagePicker.getCameraPermissionsAsync();
+      if (current.status !== 'granted') {
+        if (!current.canAskAgain) {
+          // Previously denied & system won't re-prompt — guide user to Settings
+          Alert.alert(
+            'Camera Access Needed',
+            'QuoteMate needs camera access to take site photos. You can enable it in Settings.',
+            [
+              { text: 'Not Now', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          );
+          return;
+        }
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') return;
       }
     } else {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Photo library access is needed to select photos.');
-        return;
+      const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+      if (current.status !== 'granted') {
+        if (!current.canAskAgain) {
+          Alert.alert(
+            'Photo Library Access Needed',
+            'QuoteMate needs photo library access to attach site photos. You can enable it in Settings.',
+            [
+              { text: 'Not Now', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          );
+          return;
+        }
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') return;
       }
     }
 

@@ -55,6 +55,8 @@ import { WebContainer } from '../../components/WebContainer';
 import { SwipeableCard } from '../../components/SwipeableCard';
 import { BUNNINGS_SCRAPER_URL } from '@env';
 import { TRADE_CATEGORIES } from '../../constants/tradeCategories';
+import { useTourRefs } from '../../components/tour/useTourRefs';
+import { ScreenTour } from '../../components/tour/ScreenTour';
 
 // Material categories for the picker (derived from trade categories)
 const MATERIAL_CATEGORIES = [
@@ -137,6 +139,14 @@ export function AddMaterialScreen() {
       setActiveTab('search'); // Start on manual entry area when editing
     }
   }, [editingMaterial]);
+
+  // Tour refs
+  const { registerRef } = useTourRefs();
+  const savedItemsTabRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (savedItemsTabRef.current) registerRef('savedItemsTab', savedItemsTabRef.current);
+  });
 
   // Saved items state
   const [savedItems, setSavedItems] = useState<any[]>([]);
@@ -997,7 +1007,7 @@ export function AddMaterialScreen() {
       {/* Tab Selector - hidden in edit mode */}
       {!isEditMode && (
         <WebContainer>
-        <View style={styles.tabBar}>
+        <View ref={savedItemsTabRef} style={styles.tabBar}>
           <SegmentedButtons
             value={activeTab}
             onValueChange={(value) => setActiveTab(value as TabValue)}
@@ -1029,6 +1039,9 @@ export function AddMaterialScreen() {
           icon={isEditMode ? 'check' : 'plus'}
         />
       )}
+
+      {/* Screen Tour */}
+      {!isEditMode && <ScreenTour tourId="addMaterial" />}
     </View>
   );
 }

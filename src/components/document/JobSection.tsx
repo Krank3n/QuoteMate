@@ -22,8 +22,17 @@ export function JobSection({
   const content = (
     <Surface style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Title style={styles.sectionTitle}>Job</Title>
-        {onEdit && <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />}
+        <View style={styles.sectionHeaderLeft}>
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
+            <MaterialCommunityIcons name="hammer-wrench" size={18} color={colors.secondary} />
+          </View>
+          <Title style={styles.sectionTitle}>Job</Title>
+        </View>
+        {onEdit && (
+          <View style={styles.editButton}>
+            <MaterialCommunityIcons name={isEditing ? "check" : "pencil"} size={16} color={colors.primary} />
+          </View>
+        )}
       </View>
       {isEditing && onJobChange ? (
         <>

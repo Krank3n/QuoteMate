@@ -25,6 +25,7 @@ interface SendEmailOptions {
   category: EmailCategory;
   userId?: string; // For logging and preference checking
   tags?: string[];
+  attachment?: Array<{ name: string; content: string }>; // base64 encoded
 }
 
 // Shared email wrapper (base layout for all emails)
@@ -184,7 +185,7 @@ async function canSendEmail(userId: string, category: EmailCategory): Promise<bo
 
 // Core send function via Brevo API
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to, subject, htmlContent, category, userId, tags } = options;
+  const { to, subject, htmlContent, category, userId, tags, attachment } = options;
   const apiKey = getBrevoApiKey();
 
   if (!apiKey) {
@@ -220,6 +221,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         subject,
         htmlContent,
         tags: tags || [],
+        ...(attachment?.length ? { attachment } : {}),
       }),
     });
 
@@ -812,7 +814,7 @@ export function sendUpdateAnnouncementEmail(
 }
 
 // ============================================================
-// CLIENT-FACING QUOTE EMAIL
+// CLIENT-FACING QUOTE EMAIL (light, business-branded theme)
 // ============================================================
 
 interface QuoteEmailData {
@@ -842,19 +844,76 @@ function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-export function buildQuoteEmailHtml(data: QuoteEmailData): string {
-  const accent = data.business.brandColor || '#009868';
-  const esc = escapeHtml;
+// Light-themed wrapper for client-facing quote emails (business-branded, no QM logo)
+function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string; businessName?: string; logoUrl?: string; preheader?: string }): string {
+  const { brandColor = '#059669', businessName = '', logoUrl, preheader } = options;
 
-  // Business logo
-  const logoSection = data.business.logoUrl
-    ? `<tr><td align="center" style="padding:0 0 20px;">
-        <img src="${esc(data.business.logoUrl)}" alt="${esc(data.business.name)}" width="120" style="display:block;width:120px;height:auto;border-radius:12px;" />
+  const logoSection = logoUrl
+    ? `<tr><td align="center" style="padding:0 0 16px;">
+        <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(businessName)}" width="100" style="display:block;width:100px;height:auto;border-radius:10px;" />
       </td></tr>`
     : '';
 
+  const businessNameSection = businessName
+    ? `<tr><td align="center" style="padding:0 0 24px;">
+        <h2 style="margin:0;font-size:22px;font-weight:700;color:#1f2937;">${escapeHtml(businessName)}</h2>
+      </td></tr>`
+    : '';
+
+  return `
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>${escapeHtml(businessName || 'Quote')}</title>
+  <!--[if mso]>
+  <style>table,td{font-family:Arial,sans-serif!important}</style>
+  <![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f7f7f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  ${preheader ? `<div style="display:none;font-size:1px;color:#f7f7f7;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${preheader}</div>` : ''}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f7f7f7;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+          ${logoSection}
+          ${businessNameSection}
+          <!-- Main Card -->
+          <tr>
+            <td>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;border-top:4px solid ${brandColor};">
+                <tr>
+                  <td style="padding:36px 32px;">
+                    ${content}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="padding:24px 0 0;text-align:center;">
+              <p style="color:#9ca3af;font-size:11px;margin:0;line-height:1.5;">
+                Powered by <a href="https://hansendev.web.app" style="color:#9ca3af;text-decoration:underline;">QuoteMate</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export function buildQuoteEmailHtml(data: QuoteEmailData): string {
+  const accent = data.business.brandColor || '#059669';
+  const esc = escapeHtml;
+
   // Email body paragraphs
-  const bodyHtml = esc(data.emailBody).replace(/\n\n/g, '</p><p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">').replace(/\n/g, '<br/>');
+  const bodyHtml = esc(data.emailBody).replace(/\n\n/g, '</p><p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">').replace(/\n/g, '<br/>');
 
   // Photos section
   let photosSection = '';
@@ -864,35 +923,43 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
     ).join('');
     photosSection = `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;">
-        <tr><td style="padding:0 0 8px;"><p style="color:#94a3b8;font-size:13px;font-weight:600;margin:0;">Site Photos</p></td></tr>
+        <tr><td style="padding:0 0 8px;"><p style="color:#6b7280;font-size:13px;font-weight:600;margin:0;">Site Photos</p></td></tr>
         <tr><td>
           <table role="presentation" cellpadding="0" cellspacing="0"><tr>${photoImgs}</tr></table>
         </td></tr>
       </table>`;
   }
 
-  // Pricing table
+  // Pricing table (light theme)
   const pricingRows = `
-    <tr>
-      <td style="padding:8px 0;color:#94a3b8;font-size:14px;border-bottom:1px solid #334155;">Materials</td>
-      <td style="padding:8px 0;color:#f1f5f9;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #334155;">$${data.materialsSubtotal.toFixed(2)}</td>
-    </tr>
-    <tr>
-      <td style="padding:8px 0;color:#94a3b8;font-size:14px;border-bottom:1px solid #334155;">Labour</td>
-      <td style="padding:8px 0;color:#f1f5f9;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #334155;">$${data.laborTotal.toFixed(2)}</td>
-    </tr>
-    <tr>
-      <td style="padding:8px 0;color:#94a3b8;font-size:14px;border-bottom:1px solid #334155;">Subtotal</td>
-      <td style="padding:8px 0;color:#f1f5f9;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #334155;">$${data.subtotal.toFixed(2)}</td>
-    </tr>
-    <tr>
-      <td style="padding:8px 0;color:#94a3b8;font-size:14px;border-bottom:1px solid #334155;">GST</td>
-      <td style="padding:8px 0;color:#f1f5f9;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #334155;">$${data.gst.toFixed(2)}</td>
-    </tr>
-    <tr>
-      <td style="padding:10px 0;color:#f8fafc;font-size:16px;font-weight:700;">Total (inc GST)</td>
-      <td style="padding:10px 0;color:${accent};font-size:18px;font-weight:700;text-align:right;">$${data.total.toFixed(2)}</td>
-    </tr>`;
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;margin:20px 0;">
+      <tr>
+        <td style="padding:16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Materials</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.materialsSubtotal.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Labour</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.laborTotal.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Subtotal</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.subtotal.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">GST</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.gst.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 0;color:#1f2937;font-size:16px;font-weight:700;">Total (inc GST)</td>
+              <td style="padding:10px 0;color:${accent};font-size:18px;font-weight:700;text-align:right;">$${data.total.toFixed(2)}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>`;
 
   // Accept/Decline buttons
   let ctaSection = '';
@@ -903,11 +970,11 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
           <td align="center">
             <table role="presentation" cellpadding="0" cellspacing="0">
               <tr>
-                <td style="background:${accent};border-radius:10px;text-align:center;margin-right:12px;">
+                <td style="background:${accent};border-radius:10px;text-align:center;">
                   <a href="${esc(data.acceptanceUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Accept Quote</a>
                 </td>
                 <td width="12"></td>
-                <td style="background:#475569;border-radius:10px;text-align:center;">
+                <td style="background:#9ca3af;border-radius:10px;text-align:center;">
                   <a href="${esc(data.acceptanceUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Decline</a>
                 </td>
               </tr>
@@ -917,54 +984,188 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
       </table>`;
   }
 
-  // Business footer
+  // Business contact footer
   const footerParts: string[] = [];
-  if (data.business.name) footerParts.push(`<strong style="color:#f1f5f9;">${esc(data.business.name)}</strong>`);
   if (data.business.abn) footerParts.push(`ABN: ${esc(data.business.abn)}`);
   if (data.business.phone) footerParts.push(esc(data.business.phone));
   if (data.business.email) footerParts.push(`<a href="mailto:${esc(data.business.email)}" style="color:${accent};text-decoration:none;">${esc(data.business.email)}</a>`);
   if (data.business.address) footerParts.push(esc(data.business.address));
 
   const businessFooter = footerParts.length ? `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;border-top:1px solid #334155;padding-top:20px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 0;border-top:1px solid #e5e7eb;padding-top:16px;">
       <tr><td style="text-align:center;">
-        <p style="color:#94a3b8;font-size:13px;line-height:1.8;margin:0;">${footerParts.join(' &bull; ')}</p>
+        <p style="color:#6b7280;font-size:13px;line-height:1.8;margin:0;">${footerParts.join(' &bull; ')}</p>
       </td></tr>
     </table>` : '';
 
   const content = `
-    ${logoSection}
-    <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 8px;line-height:1.3;">
+    <h1 style="color:#1f2937;font-size:24px;font-weight:700;margin:0 0 8px;line-height:1.3;">
       Quotation for ${esc(data.jobName)}
     </h1>
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 24px;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 24px;">
       Hi ${esc(data.customerName)},
     </p>
 
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       ${bodyHtml}
     </p>
 
     ${photosSection}
 
-    ${infoCard(pricingRows, accent)}
+    ${pricingRows}
+
+    <p style="color:#6b7280;font-size:13px;font-style:italic;margin:0 0 4px;">
+      A detailed PDF quote is attached for your records.
+    </p>
 
     ${ctaSection}
 
-    <p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:24px 0 0;">
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:24px 0 0;">
       This quote is valid for 30 days. If you have any questions, please don't hesitate to get in touch.
     </p>
 
-    <p style="color:#94a3b8;font-size:14px;margin:16px 0 0;">
+    <p style="color:#6b7280;font-size:14px;margin:16px 0 0;">
       Kind regards,<br/>
-      <strong style="color:#f1f5f9;">${esc(data.business.name)}</strong>
+      <strong style="color:#1f2937;">${esc(data.business.name)}</strong>
     </p>
 
     ${businessFooter}
   `;
 
-  return wrapEmailTemplate(content, {
+  return wrapQuoteEmailTemplate(content, {
+    brandColor: accent,
+    businessName: data.business.name,
+    logoUrl: data.business.logoUrl,
     preheader: `Quote for ${data.jobName} - $${data.total.toFixed(2)} from ${data.business.name}`,
+  });
+}
+
+// ============================================================
+// INVOICE EMAIL BUILDER
+// ============================================================
+
+interface InvoiceEmailData {
+  customerName: string;
+  emailBody: string;
+  jobName: string;
+  materials: { name: string; quantity: number; unit: string; totalPrice: number; section?: string }[];
+  laborTotal: number;
+  materialsSubtotal: number;
+  subtotal: number;
+  gst: number;
+  total: number;
+  invoiceNumber?: string;
+  dueDate: string; // ISO date string
+  business: {
+    name: string;
+    abn?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    logoUrl?: string;
+    brandColor?: string;
+  };
+}
+
+export function buildInvoiceEmailHtml(data: InvoiceEmailData): string {
+  const accent = data.business.brandColor || '#059669';
+  const esc = escapeHtml;
+
+  // Email body paragraphs
+  const bodyHtml = esc(data.emailBody).replace(/\n\n/g, '</p><p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">').replace(/\n/g, '<br/>');
+
+  // Format due date
+  const dueDateFormatted = new Date(data.dueDate).toLocaleDateString('en-AU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  // Pricing table (light theme)
+  const pricingRows = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;margin:20px 0;">
+      <tr>
+        <td style="padding:16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Materials</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.materialsSubtotal.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Labour</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.laborTotal.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Subtotal</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.subtotal.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">GST</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.gst.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 0;color:#1f2937;font-size:16px;font-weight:700;">Total (inc GST)</td>
+              <td style="padding:10px 0;color:${accent};font-size:18px;font-weight:700;text-align:right;">$${data.total.toFixed(2)}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>`;
+
+  // Business contact footer
+  const footerParts: string[] = [];
+  if (data.business.abn) footerParts.push(`ABN: ${esc(data.business.abn)}`);
+  if (data.business.phone) footerParts.push(esc(data.business.phone));
+  if (data.business.email) footerParts.push(`<a href="mailto:${esc(data.business.email)}" style="color:${accent};text-decoration:none;">${esc(data.business.email)}</a>`);
+  if (data.business.address) footerParts.push(esc(data.business.address));
+
+  const businessFooter = footerParts.length ? `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 0;border-top:1px solid #e5e7eb;padding-top:16px;">
+      <tr><td style="text-align:center;">
+        <p style="color:#6b7280;font-size:13px;line-height:1.8;margin:0;">${footerParts.join(' &bull; ')}</p>
+      </td></tr>
+    </table>` : '';
+
+  const content = `
+    <h1 style="color:#1f2937;font-size:24px;font-weight:700;margin:0 0 8px;line-height:1.3;">
+      Invoice for ${esc(data.jobName)}
+    </h1>
+    ${data.invoiceNumber ? `<p style="color:#6b7280;font-size:13px;margin:0 0 16px;">Invoice #${esc(data.invoiceNumber)}</p>` : ''}
+    <p style="color:#6b7280;font-size:14px;margin:0 0 24px;">
+      Hi ${esc(data.customerName)},
+    </p>
+
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      ${bodyHtml}
+    </p>
+
+    ${pricingRows}
+
+    <p style="color:#6b7280;font-size:13px;font-style:italic;margin:0 0 4px;">
+      A detailed PDF invoice is attached for your records.
+    </p>
+
+    <p style="color:#374151;font-size:14px;font-weight:600;line-height:1.6;margin:16px 0 0;">
+      Payment is due by ${dueDateFormatted}.
+    </p>
+
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:16px 0 0;">
+      If you have any questions, please don't hesitate to get in touch.
+    </p>
+
+    <p style="color:#6b7280;font-size:14px;margin:16px 0 0;">
+      Kind regards,<br/>
+      <strong style="color:#1f2937;">${esc(data.business.name)}</strong>
+    </p>
+
+    ${businessFooter}
+  `;
+
+  return wrapQuoteEmailTemplate(content, {
+    brandColor: accent,
+    businessName: data.business.name,
+    logoUrl: data.business.logoUrl,
+    preheader: `Invoice for ${data.jobName} - $${data.total.toFixed(2)} from ${data.business.name}`,
   });
 }
 
@@ -986,6 +1187,111 @@ export async function handleUnsubscribe(userId: string, category: string): Promi
     console.error('Error updating email preferences:', error);
     return false;
   }
+}
+
+// ============================================================
+// QUOTE FOLLOW-UP EMAIL (2hrs after first quote created)
+// ============================================================
+
+export function sendQuoteFollowUpEmail(
+  to: string,
+  businessName: string,
+  jobName: string,
+  total: number,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = businessName || 'legend';
+
+  const content = wrapEmailTemplate(`
+    <div style="text-align:center;margin:0 0 24px;">
+      <div style="background:#1e293b;border:2px solid #334155;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 12px;">
+        &#129488;
+      </div>
+    </div>
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;text-align:center;line-height:1.3;">
+      G'day ${greeting}, quick check-in
+    </h1>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      You just put together your first quote &mdash; <strong style="color:#f8fafc;">${jobName}</strong> for <strong style="color:#f8fafc;">$${total.toFixed(2)}</strong>. Ripper effort! We just wanted to check in and see how the experience was.
+    </p>
+
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
+      Look, we're more invested in this than your mum asking about your love life. We genuinely want to make sure QuoteMate is helping you win more jobs and not giving you the run-around.
+    </p>
+
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
+      <strong style="color:#f8fafc;">Did the prices stack up?</strong> Was anything missing or off? Was it easy enough to use, or did you nearly chuck your phone at the wall?
+    </p>
+
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
+      Even if everything went smooth as a cold beer on a Friday arvo, we'd still love to hear about it. And if something was a bit dodgy, that's even better &mdash; tell us so we can fix it up before your next one.
+    </p>
+
+    <p style="color:#f8fafc;font-size:15px;line-height:1.7;margin:0 0 4px;font-weight:600;">
+      Give us the quick version &mdash; one tap:
+    </p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:0 6px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=great" target="_blank" style="display:inline-block;background:#064e3b;border:2px solid #00c897;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                  <span style="font-size:28px;display:block;margin:0 0 4px;">&#129321;</span>
+                  <span style="color:#00c897;font-size:12px;font-weight:700;">Loved it</span>
+                </a>
+              </td>
+              <td style="padding:0 6px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=okay" target="_blank" style="display:inline-block;background:#1e293b;border:2px solid #f59e0b;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                  <span style="font-size:28px;display:block;margin:0 0 4px;">&#128528;</span>
+                  <span style="color:#f59e0b;font-size:12px;font-weight:700;">It was alright</span>
+                </a>
+              </td>
+              <td style="padding:0 6px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=bad" target="_blank" style="display:inline-block;background:#1e293b;border:2px solid #ef4444;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                  <span style="font-size:28px;display:block;margin:0 0 4px;">&#128169;</span>
+                  <span style="color:#ef4444;font-size:12px;font-weight:700;">Needs work</span>
+                </a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="color:#94a3b8;font-size:13px;line-height:1.6;margin:20px 0 0;text-align:center;">
+      Got more to say? We're all ears:
+    </p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="background:#f59e0b;border-radius:10px;text-align:center;">
+                <a href="${APP_LINK}" target="_blank" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Share Detailed Feedback</a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="color:#94a3b8;font-size:13px;line-height:1.6;margin:24px 0 0;text-align:center;">
+      No worries if you're flat out &mdash; we'll be here when you're ready. Cheers! &#127866;
+    </p>
+  `, { unsubscribeUrl, preheader: `How was your first quote? We'd love to hear about it.` });
+
+  return sendEmail({
+    to,
+    subject: `How'd your first quote go? 🤔`,
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['quote-follow-up'],
+  });
 }
 
 // ============================================================

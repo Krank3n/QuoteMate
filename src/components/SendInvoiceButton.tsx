@@ -1,27 +1,23 @@
 /**
  * Send Invoice Button Component
  * Reusable button with modal dialog for sending invoices via Email, SMS, Share, or Export PDF
+ * Email option now uses Brevo-powered branded HTML emails with PDF attachment
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Alert, Platform, TouchableOpacity, Share, Linking, Animated } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, Alert, Share, Linking, Platform } from 'react-native';
 import {
-  Text,
   Button,
-  Modal,
-  Portal,
-  IconButton,
 } from 'react-native-paper';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import * as Print from 'expo-print';
-import * as MailComposer from 'expo-mail-composer';
-import { format } from 'date-fns';
 
 import { Invoice, BusinessSettings } from '../types';
-import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { generateInvoicePDF, exportInvoicePDF, generatePdfFilename } from '../utils/pdfGenerator';
+import { exportInvoicePDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
+import { ActionSheet, ActionSheetOption } from './ActionSheet';
+import { InvoiceEmailPreviewModal } from './InvoiceEmailPreviewModal';
+import { generateInvoiceEmail, getDefaultInvoiceEmailBody } from '../services/llmService';
+import { format } from 'date-fns';
 
 interface SendInvoiceButtonProps {
   invoice: Invoice;
@@ -44,81 +40,81 @@ export function SendInvoiceButton({
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
   const [sendDialogVisible, setSendDialogVisible] = useState(false);
-  const scaleAnim = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [emailPreviewVisible, setEmailPreviewVisible] = useState(false);
+  const [emailBody, setEmailBody] = useState('');
+  const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
 
-  useEffect(() => {
-    if (sendDialogVisible) {
-      scaleAnim.setValue(0);
-      fadeAnim.setValue(0);
+  const handleEmailOption = async () => {
+    setSendDialogVisible(false);
+    setIsGeneratingEmail(true);
+    setEmailPreviewVisible(true);
 
-      Animated.parallel([
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          tension: 50,
-          friction: 7,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [sendDialogVisible]);
-
-  const handleSendInvoice = async () => {
     try {
-      if (Platform.OS === 'web') {
-        const html = await generateInvoicePDF(invoice, businessSettings, { isPro });
-        const filename = generatePdfFilename('Invoice', invoice.customerName, invoice.job.name, new Date(invoice.updatedAt));
-
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        document.body.appendChild(iframe);
-
-        const iframeDoc = iframe.contentWindow?.document;
-        if (iframeDoc) {
-          iframeDoc.open();
-          iframeDoc.write(html);
-          iframeDoc.close();
-
-          iframe.onload = () => {
-            setTimeout(() => {
-              iframe.contentWindow?.print();
-              setTimeout(() => {
-                document.body.removeChild(iframe);
-              }, 1000);
-            }, 250);
-          };
-        }
-      } else {
-        const isAvailable = await MailComposer.isAvailableAsync();
-        if (!isAvailable) {
-          Alert.alert('Email Not Available', 'Email is not configured on this device. Please set up an email account first.');
-          return;
-        }
-
-        const html = await generateInvoicePDF(invoice, businessSettings, { isPro });
-        const { uri } = await Print.printToFileAsync({ html, base64: false });
-
-        await MailComposer.composeAsync({
-          recipients: invoice.customerEmail ? [invoice.customerEmail] : [],
-          subject: `Invoice from ${businessSettings?.businessName || 'Your Business'} - ${invoice.job.name}`,
-          body: `Hi ${invoice.customerName},\n\nPlease find attached your invoice for ${invoice.job.name}.\n\nTotal: ${formatCurrency(invoice.total)}\n\nPayment is due by ${format(new Date(invoice.dueDate), 'dd MMMM yyyy')}.\n\nThank you for your business!\n\nBest regards,\n${businessSettings?.businessName || 'Your Business'}`,
-          attachments: [uri],
+      if (isPro) {
+        const body = await generateInvoiceEmail({
+          jobName: invoice.job.name,
+          jobDescription: invoice.job.description || '',
+          materials: invoice.materials.map(m => ({
+            name: m.name,
+            quantity: m.quantity,
+            unit: m.unit,
+          })),
+          laborHours: invoice.laborHours,
+          total: invoice.total,
+          businessName: businessSettings?.businessName || '',
+          customerName: invoice.customerName,
+          dueDate: new Date(invoice.dueDate).toISOString(),
+          invoiceNumber: invoice.invoiceNumber,
         });
+        setEmailBody(body);
+      } else {
+        setEmailBody(getDefaultInvoiceEmailBody(
+          invoice.customerName,
+          invoice.job.name,
+          invoice.total,
+          businessSettings?.businessName || 'Your Business',
+          new Date(invoice.dueDate).toISOString()
+        ));
       }
     } catch (error) {
-      console.error('Send error:', error);
-      Alert.alert('Error', 'Failed to send invoice. Please try again.');
+      console.error('Invoice email generation failed:', error);
+      setEmailBody(getDefaultInvoiceEmailBody(
+        invoice.customerName,
+        invoice.job.name,
+        invoice.total,
+        businessSettings?.businessName || 'Your Business',
+        new Date(invoice.dueDate).toISOString()
+      ));
+    } finally {
+      setIsGeneratingEmail(false);
     }
   };
 
-  const handleSendEmailFromDialog = async () => {
-    setSendDialogVisible(false);
-    await handleSendInvoice();
+  const handleRegenerateEmail = async () => {
+    setIsGeneratingEmail(true);
+    try {
+      const body = await generateInvoiceEmail({
+        jobName: invoice.job.name,
+        jobDescription: invoice.job.description || '',
+        materials: invoice.materials.map(m => ({
+          name: m.name,
+          quantity: m.quantity,
+          unit: m.unit,
+        })),
+        laborHours: invoice.laborHours,
+        total: invoice.total,
+        businessName: businessSettings?.businessName || '',
+        customerName: invoice.customerName,
+        dueDate: new Date(invoice.dueDate).toISOString(),
+        invoiceNumber: invoice.invoiceNumber,
+      });
+      setEmailBody(body);
+    } catch (error) {
+      console.error('Invoice email regeneration failed:', error);
+      Alert.alert('Error', 'Could not regenerate email. Please try again.');
+    } finally {
+      setIsGeneratingEmail(false);
+    }
   };
 
   const handleSendSMS = async () => {
@@ -163,6 +159,29 @@ export function SendInvoiceButton({
     }
   };
 
+  const sendOptions: ActionSheetOption[] = [
+    {
+      icon: 'email-outline',
+      label: 'Email',
+      onPress: handleEmailOption,
+    },
+    {
+      icon: 'message-text',
+      label: 'SMS',
+      onPress: handleSendSMS,
+    },
+    {
+      icon: 'share-variant',
+      label: 'Share',
+      onPress: handleShareFromDialog,
+    },
+    {
+      icon: 'file-pdf-box',
+      label: 'Export PDF',
+      onPress: handleExportFromDialog,
+    },
+  ];
+
   return (
     <>
       <Button
@@ -176,95 +195,24 @@ export function SendInvoiceButton({
         {buttonLabel}
       </Button>
 
-      <Portal>
-        <Modal
-          visible={sendDialogVisible}
-          onDismiss={() => setSendDialogVisible(false)}
-          dismissable={true}
-          contentContainerStyle={styles.modalContainer}
-        >
-          <Animated.View
-            style={[
-              styles.card,
-              {
-                opacity: fadeAnim,
-                transform: [{ scale: scaleAnim }],
-              },
-            ]}
-          >
-            <View style={styles.header}>
-              <View style={styles.iconContainer}>
-                <IconButton
-                  icon="receipt"
-                  iconColor={colors.primary}
-                  size={40}
-                />
-              </View>
-              <Text style={styles.title}>Send Invoice</Text>
-              <Text style={styles.subtitle}>Choose how to send this invoice to your customer</Text>
-            </View>
+      <ActionSheet
+        visible={sendDialogVisible}
+        onDismiss={() => setSendDialogVisible(false)}
+        title="Send Invoice"
+        options={sendOptions}
+      />
 
-            <View style={styles.optionsContainer}>
-              <TouchableOpacity style={styles.sendOption} onPress={handleSendEmailFromDialog}>
-                <View style={styles.optionIconContainer}>
-                  <MaterialCommunityIcons name="email" size={28} color={colors.primary} />
-                </View>
-                <View style={styles.sendOptionText}>
-                  <Text style={styles.sendOptionTitle}>Email</Text>
-                  <Text style={styles.sendOptionSubtitle}>
-                    {invoice.customerEmail || 'No email provided'}
-                  </Text>
-                </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.onSurface} />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.sendOption} onPress={handleSendSMS}>
-                <View style={styles.optionIconContainer}>
-                  <MaterialCommunityIcons name="message-text" size={28} color={colors.primary} />
-                </View>
-                <View style={styles.sendOptionText}>
-                  <Text style={styles.sendOptionTitle}>SMS</Text>
-                  <Text style={styles.sendOptionSubtitle}>
-                    {invoice.customerPhone || 'No phone provided'}
-                  </Text>
-                </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.onSurface} />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.sendOption} onPress={handleShareFromDialog}>
-                <View style={styles.optionIconContainer}>
-                  <MaterialCommunityIcons name="share-variant" size={28} color={colors.primary} />
-                </View>
-                <View style={styles.sendOptionText}>
-                  <Text style={styles.sendOptionTitle}>Share</Text>
-                  <Text style={styles.sendOptionSubtitle}>Share via other apps</Text>
-                </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.onSurface} />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.sendOption} onPress={handleExportFromDialog}>
-                <View style={styles.optionIconContainer}>
-                  <MaterialCommunityIcons name="file-pdf-box" size={28} color={colors.primary} />
-                </View>
-                <View style={styles.sendOptionText}>
-                  <Text style={styles.sendOptionTitle}>Export PDF</Text>
-                  <Text style={styles.sendOptionSubtitle}>Save or share PDF file</Text>
-                </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.onSurface} />
-              </TouchableOpacity>
-            </View>
-
-            <Button
-              mode="outlined"
-              onPress={() => setSendDialogVisible(false)}
-              style={styles.cancelButton}
-              textColor={colors.onSurface}
-            >
-              Cancel
-            </Button>
-          </Animated.View>
-        </Modal>
-      </Portal>
+      <InvoiceEmailPreviewModal
+        visible={emailPreviewVisible}
+        onDismiss={() => setEmailPreviewVisible(false)}
+        invoice={invoice}
+        businessSettings={businessSettings}
+        emailBody={emailBody}
+        onEmailBodyChange={setEmailBody}
+        onRegenerate={handleRegenerateEmail}
+        isPro={isPro}
+        isRegenerating={isGeneratingEmail}
+      />
     </>
   );
 }
@@ -274,110 +222,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   buttonLabel: {
-    marginVertical: 8,
-  },
-  modalContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 480,
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 32,
-    ...Platform.select({
-      android: {
-        elevation: 8,
-      },
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-      },
-      web: {
-        boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-      },
-    }),
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  iconContainer: {
-    backgroundColor: colors.primaryBg,
-    borderRadius: 50,
-    width: 80,
-    height: 80,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  subtitle: {
     fontSize: 15,
-    color: colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  optionsContainer: {
-    width: '100%',
-    marginBottom: 20,
-  },
-  sendOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 18,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    backgroundColor: colors.surfaceLight,
-    ...Platform.select({
-      android: {
-        elevation: 1,
-      },
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-      },
-    }),
-  },
-  optionIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.primaryBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  sendOptionText: {
-    flex: 1,
-  },
-  sendOptionTitle: {
-    fontSize: 17,
     fontWeight: '600',
-    color: colors.text,
-    marginBottom: 3,
-  },
-  sendOptionSubtitle: {
-    fontSize: 14,
-    color: colors.onSurface,
-  },
-  cancelButton: {
-    width: '100%',
-    paddingVertical: 6,
-    borderColor: colors.border,
   },
 });

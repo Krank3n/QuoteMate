@@ -6,7 +6,7 @@
  */
 
 import React, { createContext, useContext, useRef, useCallback } from 'react';
-import { View } from 'react-native';
+import { View, Platform, StatusBar } from 'react-native';
 
 export interface TargetRect {
   x: number;
@@ -49,7 +49,11 @@ export function TourRefsProvider({ children }: { children: React.ReactNode }) {
           if (width === 0 && height === 0) {
             resolve(null);
           } else {
-            resolve({ x, y, width, height });
+            // On Android, measureInWindow may not include the status bar
+            // offset relative to the Portal's coordinate space
+            const statusBarOffset =
+              Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
+            resolve({ x, y: y + statusBarOffset, width, height });
           }
         });
       } catch {

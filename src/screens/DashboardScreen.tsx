@@ -36,6 +36,7 @@ import { TapRipple } from '../components/TapRipple';
 import { GrainOverlay } from '../components/GrainOverlay';
 import { useTourRefs } from '../components/tour/useTourRefs';
 import { SpotlightTour } from '../components/tour/SpotlightTour';
+import { INTRO_TOUR_TOTAL_STEPS } from '../components/tour/tourSteps';
 
 const GREETINGS = [
   "G'day",
@@ -530,6 +531,7 @@ export function DashboardScreen() {
       ref={scrollRef}
       style={styles.container}
       contentContainerStyle={{ paddingBottom: 100 }}
+      scrollEnabled={!tourActive}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -602,11 +604,14 @@ export function DashboardScreen() {
       )}
 
       {/* New Quote Button */}
-      <View ref={newQuoteRef}>
       <RNAnimated.View style={{ transform: [{ scale: btnPulse }, { rotate: btnTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
-        <RNAnimated.View style={{
+        <View ref={newQuoteRef} style={{
           marginHorizontal: 20,
           marginBottom: 24,
+          borderRadius: 28,
+          overflow: 'hidden',
+        }}>
+        <RNAnimated.View style={{
           borderRadius: 28,
           shadowColor: colors.primary,
           shadowOffset: { width: 0, height: 0 },
@@ -625,8 +630,8 @@ export function DashboardScreen() {
             New Quote
           </Button>
         </RNAnimated.View>
+        </View>
       </RNAnimated.View>
-      </View>
 
       {/* Quick Stats */}
       <View ref={statsRef} style={styles.statsContainer}>
@@ -769,9 +774,11 @@ export function DashboardScreen() {
         setTourActive(false);
         // Auto-navigate into the quoting flow after the dashboard tour
         createNewQuote();
-        navigation.navigate('NewQuote' as never);
+        navigation.navigate('NewQuote' as never, { screen: 'JobDetails', params: { fromTour: true } } as never);
       }}
       scrollRef={scrollRef}
+      stepOffset={0}
+      globalTotalSteps={INTRO_TOUR_TOTAL_STEPS}
     />
 
   </>

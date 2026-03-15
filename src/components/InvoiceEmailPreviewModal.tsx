@@ -1,7 +1,7 @@
 /**
- * Email Preview Modal
+ * Invoice Email Preview Modal
  * Shows AI-generated or default email body with edit capability
- * Allows regeneration (Pro) and sends via Brevo cloud function
+ * Sends invoice via Brevo cloud function with PDF attachment
  */
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -23,14 +23,16 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { format } from 'date-fns';
 import { colors } from '../theme';
-import { Quote, BusinessSettings } from '../types';
+import { Invoice, BusinessSettings } from '../types';
+import { formatCurrency } from '../utils/quoteCalculator';
 import { auth } from '../config/firebase';
 import { AlertModal } from './AlertModal';
 
 // AI Email Generation Steps
 const EMAIL_STEPS = [
-  { icon: 'file-document-outline', text: 'Reading quote details...' },
+  { icon: 'file-document-outline', text: 'Reading invoice details...' },
   { icon: 'head-cog-outline', text: 'Crafting email tone...' },
   { icon: 'text-box-outline', text: 'Writing email body...' },
   { icon: 'check-circle-outline', text: 'Finalizing...' },
@@ -47,7 +49,6 @@ function EmailGeneratingState() {
   const pulseAnim = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
-    // Pulse animation for the icon
     const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
@@ -146,10 +147,10 @@ const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
   ? 'http://127.0.0.1:5001/hansendev/us-central1'
   : 'https://us-central1-hansendev.cloudfunctions.net';
 
-interface EmailPreviewModalProps {
+interface InvoiceEmailPreviewModalProps {
   visible: boolean;
   onDismiss: () => void;
-  quote: Quote;
+  invoice: Invoice;
   businessSettings: BusinessSettings | null;
   emailBody: string;
   onEmailBodyChange: (body: string) => void;
@@ -158,21 +159,21 @@ interface EmailPreviewModalProps {
   isRegenerating: boolean;
 }
 
-export function EmailPreviewModal({
+export function InvoiceEmailPreviewModal({
   visible,
   onDismiss,
-  quote,
+  invoice,
   businessSettings,
   emailBody,
   onEmailBodyChange,
   onRegenerate,
   isPro,
   isRegenerating,
-}: EmailPreviewModalProps) {
+}: InvoiceEmailPreviewModalProps) {
   const insets = useSafeAreaInsets();
-  const [recipientEmail, setRecipientEmail] = useState(quote.customerEmail || '');
+  const [recipientEmail, setRecipientEmail] = useState(invoice.customerEmail || '');
   const [subject, setSubject] = useState(
-    `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`
+    `Invoice from ${businessSettings?.businessName || 'Your Business'} - ${invoice.job.name}`
   );
   const [sending, setSending] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
@@ -204,13 +205,13 @@ export function EmailPreviewModal({
   // Reset state when modal opens
   React.useEffect(() => {
     if (visible) {
-      setRecipientEmail(quote.customerEmail || '');
-      setSubject(`Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`);
+      setRecipientEmail(invoice.customerEmail || '');
+      setSubject(`Invoice from ${businessSettings?.businessName || 'Your Business'} - ${invoice.job.name}`);
       setSent(false);
       setEmailTouched(false);
       setEmailError('');
     }
-  }, [visible, quote.customerEmail, quote.job.name, businessSettings?.businessName]);
+  }, [visible, invoice.customerEmail, invoice.job.name, businessSettings?.businessName]);
 
   const handleEmailChange = (text: string) => {
     setRecipientEmail(text);
@@ -235,14 +236,14 @@ export function EmailPreviewModal({
     setSending(true);
     try {
       const idToken = await auth.currentUser?.getIdToken();
-      const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/sendQuoteEmail`, {
+      const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/sendInvoiceEmail`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          quoteId: quote.id,
+          invoiceId: invoice.id,
           emailBody: emailBody,
           recipientEmail: recipientEmail.trim(),
         }),
@@ -255,7 +256,7 @@ export function EmailPreviewModal({
 
       setSent(true);
     } catch (error: any) {
-      console.error('Send email error:', error);
+      console.error('Send invoice email error:', error);
       showAlert('error', 'Send Failed', error.message || 'Could not send the email. Please try again.');
     } finally {
       setSending(false);
@@ -271,14 +272,14 @@ export function EmailPreviewModal({
     setSendingTest(true);
     try {
       const idToken = await auth.currentUser?.getIdToken();
-      const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/sendQuoteEmail`, {
+      const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/sendInvoiceEmail`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          quoteId: quote.id,
+          invoiceId: invoice.id,
           emailBody: emailBody,
           recipientEmail: ownerEmail,
           isTestSend: true,
@@ -310,7 +311,7 @@ export function EmailPreviewModal({
           <TouchableOpacity onPress={onDismiss} style={styles.headerButton}>
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Email Preview</Text>
+          <Text style={styles.headerTitle}>Invoice Email</Text>
           <View style={styles.headerButton} />
         </View>
 
@@ -396,7 +397,7 @@ export function EmailPreviewModal({
           <View style={styles.infoNote}>
             <MaterialCommunityIcons name="information-outline" size={16} color={colors.textMuted} />
             <Text style={styles.infoText}>
-              The email will include a pricing table, {quote.photos?.length ? 'job photos, ' : ''}accept/decline buttons, and your business details.
+              The email will include a pricing breakdown, payment details, and a PDF invoice attachment.
             </Text>
           </View>
         </ScrollView>
@@ -427,7 +428,7 @@ export function EmailPreviewModal({
               contentStyle={styles.sendButtonContent}
               icon="send"
             >
-              {sending ? 'Sending...' : 'Send Email'}
+              {sending ? 'Sending...' : 'Send Invoice'}
             </Button>
           </View>
         </View>
@@ -439,8 +440,8 @@ export function EmailPreviewModal({
         onDismiss={onDismiss}
         type="success"
         icon="email-check"
-        title="Quote Sent!"
-        message={`Your quote has been sent to ${recipientEmail}`}
+        title="Invoice Sent!"
+        message={`Your invoice has been sent to ${recipientEmail}\n${formatCurrency(invoice.total)} due by ${format(new Date(invoice.dueDate), 'dd MMM yyyy')}`}
         primaryButtonText="Done"
         primaryButtonAction={onDismiss}
       />
@@ -491,7 +492,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
   },
-  // Section card system
   sectionCard: {
     backgroundColor: colors.surface,
     borderRadius: 14,
@@ -561,7 +561,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingTop: 4,
   },
-  // Generating state styles
   generatingContainer: {
     alignItems: 'center',
     justifyContent: 'center',

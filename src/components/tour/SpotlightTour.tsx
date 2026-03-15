@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useWindowDimensions, TouchableWithoutFeedback, StyleSheet, View, ScrollView } from 'react-native';
+import { useWindowDimensions, StyleSheet, View, ScrollView } from 'react-native';
 import { Portal } from 'react-native-paper';
 import { SpotlightOverlay } from './SpotlightOverlay';
 import { TourTooltip } from './TourTooltip';
@@ -20,9 +20,13 @@ interface SpotlightTourProps {
   active: boolean;
   onFinish: () => void;
   scrollRef?: React.RefObject<ScrollView>;
+  /** Offset added to displayed step number for sequential numbering */
+  stepOffset?: number;
+  /** Override displayed total for sequential numbering across tours */
+  globalTotalSteps?: number;
 }
 
-export function SpotlightTour({ active, onFinish, scrollRef }: SpotlightTourProps) {
+export function SpotlightTour({ active, onFinish, scrollRef, stepOffset = 0, globalTotalSteps }: SpotlightTourProps) {
   const { width: screenW, height: screenH } = useWindowDimensions();
   const { setHasSeenTour } = useStore();
   const { measureTarget } = useTourRefs();
@@ -43,6 +47,8 @@ export function SpotlightTour({ active, onFinish, scrollRef }: SpotlightTourProp
     const step = TOUR_STEPS[stepIdx];
     if (!step) return;
 
+    // Wait for layout to settle before measuring
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const rect = await measureTarget(step.id);
     if (rect) {
       setTargetRect(rect);
@@ -77,22 +83,24 @@ export function SpotlightTour({ active, onFinish, scrollRef }: SpotlightTourProp
     await measureCurrentStep(stepIdx);
   }, [measureCurrentStep, scrollRef]);
 
-  // Start tour
+  // Reset step when tour starts/restarts
   useEffect(() => {
     if (active) {
       setCurrentStep(0);
-      const timer = setTimeout(() => scrollAndMeasure(0), 100);
-      return () => clearTimeout(timer);
+      setTargetRect(null);
+      setIsVisible(false);
     } else {
       setIsVisible(false);
     }
   }, [active]);
 
-  // Re-measure when step changes
+  // Measure when step changes (single source of truth for measurement)
   useEffect(() => {
-    if (active && currentStep >= 0) {
-      scrollAndMeasure(currentStep);
-    }
+    if (!active) return;
+    // Small delay on step 0 to let the reset settle
+    const delay = currentStep === 0 ? 150 : 0;
+    const timer = setTimeout(() => scrollAndMeasure(currentStep), delay);
+    return () => clearTimeout(timer);
   }, [currentStep, active]);
 
   const handleNext = useCallback(() => {
@@ -122,12 +130,10 @@ export function SpotlightTour({ active, onFinish, scrollRef }: SpotlightTourProp
 
   return (
     <Portal>
-      <View style={StyleSheet.absoluteFill}>
-        <TouchableWithoutFeedback onPress={handleNext}>
-          <View style={StyleSheet.absoluteFill}>
-            <SpotlightOverlay target={targetRect} visible={isVisible} />
-          </View>
-        </TouchableWithoutFeedback>
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        <View style={StyleSheet.absoluteFill}>
+          <SpotlightOverlay target={targetRect} visible={isVisible} />
+        </View>
       </View>
       {isVisible && (
         <TourTooltip
@@ -140,6 +146,8 @@ export function SpotlightTour({ active, onFinish, scrollRef }: SpotlightTourProp
           onNext={handleNext}
           onBack={handleBack}
           onSkip={handleSkip}
+          stepOffset={stepOffset}
+          globalTotalSteps={globalTotalSteps}
         />
       )}
     </Portal>

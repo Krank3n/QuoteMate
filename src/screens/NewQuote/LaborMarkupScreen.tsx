@@ -4,13 +4,11 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Pressable, TextInput as RNTextInput } from 'react-native';
 import {
   Text,
   TextInput,
-  Button,
   Surface,
-  Title,
   Divider,
 } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
@@ -46,6 +44,7 @@ export function LaborMarkupScreen() {
   const travelSectionRef = useRef<View>(null);
   const laborSectionRef = useRef<View>(null);
   const markupSectionRef = useRef<View>(null);
+  const [tourActive, setTourActive] = useState(false);
 
   useEffect(() => {
     if (travelSectionRef.current) registerRef('travelSection', travelSectionRef.current);
@@ -133,6 +132,7 @@ export function LaborMarkupScreen() {
   const fuelCost = estimatedDistance ? estimateFuelCost(estimatedDistance) : 0;
   const hasBusinessAddress = !!businessSettings?.address;
   const hasJobAddress = !!currentQuote.jobAddress;
+  const geocodeFailed = !!currentQuote.travelGeocodeFailed;
 
   const handleNext = () => {
     // Validate labor hours and rate
@@ -190,85 +190,17 @@ export function LaborMarkupScreen() {
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          scrollEnabled={!tourActive}
         >
         <WebContainer>
-        {/* Travel Adjustment Section */}
-        {estimatedDistance !== undefined ? (
-          <View ref={travelSectionRef} style={styles.section}>
-            {!travelDismissed ? (
-              <>
-                <Title style={styles.sectionTitle}>Travel Adjustment</Title>
-                <View style={styles.travelInfoRow}>
-                  <Text style={styles.travelDistance}>~{estimatedDistance}km from your business</Text>
-                  <Text style={styles.travelPercent}>+{travelPct}%</Text>
-                </View>
-                <Text style={styles.travelFuelText}>
-                  Fuel ~${DEFAULT_FUEL_PRICE.toFixed(2)}/L · ~${formatCurrency(fuelCost)} round trip
-                </Text>
-                <View style={styles.travelButtonsRow}>
-                  <TouchableOpacity
-                    style={styles.travelButton}
-                    onPress={() => {
-                      const current = parseFloat(travelAdjustment) || 0;
-                      const newVal = Math.max(0, current - 1).toString();
-                      setTravelAdjustment(newVal);
-                      setLastTravelValue(newVal);
-                    }}
-                  >
-                    <MaterialCommunityIcons name="minus" size={20} color={colors.primary} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.travelButton}
-                    onPress={() => {
-                      const current = parseFloat(travelAdjustment) || 0;
-                      const newVal = (current + 1).toString();
-                      setTravelAdjustment(newVal);
-                      setLastTravelValue(newVal);
-                    }}
-                  >
-                    <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.travelButton}
-                    onPress={() => {
-                      setTravelDismissed(true);
-                    }}
-                  >
-                    <MaterialCommunityIcons name="close" size={20} color={colors.onSurface} />
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <View style={styles.travelDismissedRow}>
-                <Text style={styles.travelDismissedText}>Travel adjustment dismissed</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    setTravelDismissed(false);
-                    setTravelAdjustment(lastTravelValue);
-                  }}
-                >
-                  <Text style={styles.travelUndoText}>Undo</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        ) : (
-          (!hasBusinessAddress || !hasJobAddress) && (
-            <View style={styles.section}>
-              <Text style={styles.travelHintText}>
-                {!hasBusinessAddress
-                  ? 'Set your business address in Settings to enable travel adjustment'
-                  : 'Add a job address to enable travel adjustment'}
-              </Text>
-            </View>
-          )
-        )}
-
-        <Divider />
+        {/* Labor Section */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionLine} />
+          <Text style={styles.sectionHeaderTitle}>LABOUR</Text>
+          <View style={styles.sectionLine} />
+        </View>
 
         <View ref={laborSectionRef} style={styles.section}>
-        <Title style={styles.sectionTitle}>Labor</Title>
-
         <TextInput
           label="Estimated Hours"
           value={laborHours}
@@ -298,11 +230,14 @@ export function LaborMarkupScreen() {
         </Surface>
       </View>
 
-      <Divider />
+      {/* Markup Section */}
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionLine} />
+        <Text style={styles.sectionHeaderTitle}>MARKUP</Text>
+        <View style={styles.sectionLine} />
+      </View>
 
       <View ref={markupSectionRef} style={styles.section}>
-        <Title style={styles.sectionTitle}>Markup</Title>
-
         <TextInput
           label="Markup Percentage"
           value={markup}
@@ -321,11 +256,158 @@ export function LaborMarkupScreen() {
         </Surface>
       </View>
 
-      <Divider />
+      {/* Travel Adjustment Section */}
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionLine} />
+        <Text style={styles.sectionHeaderTitle}>TRAVEL ADJUSTMENT</Text>
+        <View style={styles.sectionLine} />
+      </View>
+
+      {estimatedDistance !== undefined ? (
+        <View ref={travelSectionRef} style={styles.section}>
+          {!travelDismissed ? (
+            <>
+              <Surface style={styles.travelCard}>
+                <View style={styles.travelCardTop}>
+                  <View style={styles.travelCardIcon}>
+                    <MaterialCommunityIcons name="map-marker-distance" size={20} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.travelDistance}>~{estimatedDistance}km from your business</Text>
+                    <Text style={styles.travelFuelText}>
+                      Fuel ~${DEFAULT_FUEL_PRICE.toFixed(2)}/L · ~{formatCurrency(fuelCost)} round trip
+                    </Text>
+                  </View>
+                  <Text style={styles.travelPercent}>+{travelPct}%</Text>
+                </View>
+              </Surface>
+              <View style={styles.travelButtonsRow}>
+                <View style={styles.travelStepperRow}>
+                  <View style={styles.travelStepper}>
+                    <Pressable
+                      style={({ pressed }) => [styles.travelStepperBtn, pressed && styles.travelStepperBtnPressed]}
+                      onPress={() => {
+                        const current = parseFloat(travelAdjustment) || 0;
+                        const newVal = Math.max(0, current - 1).toString();
+                        setTravelAdjustment(newVal);
+                        setLastTravelValue(newVal);
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
+                    </Pressable>
+                    <RNTextInput
+                      style={styles.travelStepperInput}
+                      key={`travel-${travelAdjustment}`}
+                      defaultValue={String(travelPct)}
+                      onEndEditing={(e) => {
+                        const val = Math.max(0, parseInt(e.nativeEvent.text) || 0).toString();
+                        setTravelAdjustment(val);
+                        setLastTravelValue(val);
+                      }}
+                      keyboardType="number-pad"
+                      selectTextOnFocus
+                      returnKeyType="done"
+                    />
+                    <Pressable
+                      style={({ pressed }) => [styles.travelStepperBtn, pressed && styles.travelStepperBtnPressed]}
+                      onPress={() => {
+                        const current = parseFloat(travelAdjustment) || 0;
+                        const newVal = (current + 1).toString();
+                        setTravelAdjustment(newVal);
+                        setLastTravelValue(newVal);
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
+                    </Pressable>
+                  </View>
+                  <Text style={styles.travelStepperUnit}>%</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.travelDismissBtn}
+                  onPress={() => {
+                    setTravelDismissed(true);
+                  }}
+                >
+                  <MaterialCommunityIcons name="close" size={14} color="#ef4444" />
+                  <Text style={styles.travelDismissText}>Dismiss</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <View style={styles.travelDismissedRow}>
+              <Text style={styles.travelDismissedText}>Travel adjustment dismissed</Text>
+              <TouchableOpacity
+                style={styles.travelUndoBtn}
+                onPress={() => {
+                  setTravelDismissed(false);
+                  setTravelAdjustment(lastTravelValue);
+                }}
+              >
+                <MaterialCommunityIcons name="restore" size={14} color={colors.primary} />
+                <Text style={styles.travelUndoText}>Restore</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      ) : (
+        <View style={styles.section}>
+          {!hasBusinessAddress ? (
+            <>
+              <Text style={styles.travelCtaText}>
+                Can't calculate travel if we don't know where you're coming from, legend!
+              </Text>
+              <TouchableOpacity
+                style={styles.travelCtaButton}
+                onPress={() => navigation.navigate('BusinessProfile')}
+              >
+                <MaterialCommunityIcons name="map-marker-plus" size={18} color={colors.primary} />
+                <Text style={styles.travelCtaButtonText}>Set your business address</Text>
+              </TouchableOpacity>
+            </>
+          ) : !hasJobAddress ? (
+            <>
+              <Text style={styles.travelCtaText}>
+                Where's the job at, mate? Chuck in the address so we can sort out your travel costs.
+              </Text>
+              <TouchableOpacity
+                style={styles.travelCtaButton}
+                onPress={() => navigation.navigate('CustomerDetails')}
+              >
+                <MaterialCommunityIcons name="map-marker-plus" size={18} color={colors.primary} />
+                <Text style={styles.travelCtaButtonText}>Add the job address</Text>
+              </TouchableOpacity>
+            </>
+          ) : geocodeFailed ? (
+            <>
+              <Text style={styles.travelCtaText}>
+                Couldn't quite find that address, mate. Double-check the spelling and give it another crack.
+              </Text>
+              <TouchableOpacity
+                style={styles.travelCtaButton}
+                onPress={() => navigation.navigate('CustomerDetails')}
+              >
+                <MaterialCommunityIcons name="map-marker-alert" size={18} color={colors.primary} />
+                <Text style={styles.travelCtaButtonText}>Fix the address</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={styles.travelCtaText}>
+              Hang tight — calculating the distance...
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* Quote Summary */}
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionLine} />
+        <Text style={styles.sectionHeaderTitle}>QUOTE SUMMARY</Text>
+        <View style={styles.sectionLine} />
+      </View>
+
       <Surface style={styles.summarySection}>
-        <Title style={styles.sectionTitle}>Quote Summary</Title>
 
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Materials</Text>
@@ -399,7 +481,7 @@ export function LaborMarkupScreen() {
       </View>
 
       {/* Screen Tour */}
-      <ScreenTour tourId="laborMarkup" />
+      <ScreenTour tourId="laborMarkup" onActiveChange={setTourActive} />
     </>
   );
 
@@ -449,10 +531,25 @@ const styles = StyleSheet.create({
   section: {
     padding: 20,
   },
-  sectionTitle: {
-    fontSize: 18,
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginTop: 4,
+    gap: 10,
+  },
+  sectionLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  sectionHeaderTitle: {
+    fontSize: 13,
     fontWeight: '600',
-    marginBottom: 16,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   input: {
     marginBottom: 20,
@@ -511,39 +608,97 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: colors.primary,
   },
-  travelInfoRow: {
+  travelCard: {
+    borderRadius: 8,
+    padding: 14,
+    backgroundColor: colors.surface,
+    marginBottom: 12,
+  },
+  travelCardTop: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    gap: 12,
+  },
+  travelCardIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   travelDistance: {
-    fontSize: 14,
-    color: colors.onSurface,
+    fontSize: 15,
+    fontWeight: '500',
+    color: colors.text,
   },
   travelPercent: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
     color: colors.primary,
   },
   travelFuelText: {
     fontSize: 12,
-    color: colors.onSurface,
-    marginBottom: 12,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   travelButtonsRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  travelButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.onSurface,
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 4,
+  },
+  travelStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  travelStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  travelStepperBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  travelStepperBtnPressed: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    transform: [{ scale: 0.9 }],
+  },
+  travelStepperInput: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+    minWidth: 36,
+    textAlign: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: colors.border,
+  },
+  travelStepperUnit: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginLeft: 8,
+  },
+  travelDismissBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+  },
+  travelDismissText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#ef4444',
   },
   travelDismissedRow: {
     flexDirection: 'row',
@@ -554,14 +709,46 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.onSurface,
   },
+  travelUndoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+  },
   travelUndoText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '500',
     color: colors.primary,
   },
   travelHintText: {
     fontSize: 13,
     color: colors.onSurface,
     fontStyle: 'italic',
+  },
+  travelCtaText: {
+    fontSize: 14,
+    color: colors.onSurface,
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  travelCtaButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  travelCtaButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
   },
 });

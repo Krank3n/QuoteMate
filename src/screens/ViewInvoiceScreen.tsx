@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Platform, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, Alert, TouchableOpacity } from 'react-native';
 import {
   Text,
   Button,
@@ -16,10 +16,13 @@ import {
 } from 'react-native-paper';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { format } from 'date-fns';
+import * as Print from 'expo-print';
 
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
+import { generateInvoicePDF } from '../utils/pdfGenerator';
 import { SendInvoiceButton } from '../components/SendInvoiceButton';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -39,6 +42,7 @@ import {
   documentStyles,
 } from '../components/document';
 import { WebContainer } from '../components/WebContainer';
+import { StatusSheet, INVOICE_STATUS_OPTIONS } from '../components/StatusSheet';
 
 function formatPaymentMethod(method: PaymentMethod): string {
   const methods: Record<PaymentMethod, string> = {
@@ -69,7 +73,10 @@ export function ViewInvoiceScreen() {
 
   const [displayInvoice, setDisplayInvoice] = useState<Invoice | null>(null);
   const [isEditing, setIsEditing] = useState(isNew || false);
+  const [isEditingJob, setIsEditingJob] = useState(false);
   const [paymentTermsMenuVisible, setPaymentTermsMenuVisible] = useState(false);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
+  const [statusSheetVisible, setStatusSheetVisible] = useState(false);
 
   // Load invoice data
   useEffect(() => {
@@ -138,6 +145,53 @@ export function ViewInvoiceScreen() {
     navigation.navigate('NewInvoice', { screen: screenMap[section] });
   };
 
+  const handleStatusSelect = async (newStatus: string) => {
+    if (!displayInvoice) return;
+    try {
+      const updatedInvoice = {
+        ...displayInvoice,
+        status: newStatus as Invoice['status'],
+        updatedAt: new Date(),
+      };
+      await saveInvoice(updatedInvoice);
+      setDisplayInvoice(updatedInvoice);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update invoice status.');
+    }
+    setStatusSheetVisible(false);
+  };
+
+  const handleViewPDF = async () => {
+    if (!displayInvoice) return;
+    setIsPdfLoading(true);
+    try {
+      const html = await generateInvoicePDF(displayInvoice, businessSettings);
+      if (Platform.OS === 'web') {
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        document.body.appendChild(iframe);
+        const iframeDoc = iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(html);
+          iframeDoc.close();
+          iframe.onload = () => {
+            setTimeout(() => {
+              iframe.contentWindow?.print();
+              setTimeout(() => document.body.removeChild(iframe), 1000);
+            }, 250);
+          };
+        }
+      } else {
+        await Print.printAsync({ html });
+      }
+    } catch (error) {
+      console.error('PDF preview error:', error);
+    } finally {
+      setIsPdfLoading(false);
+    }
+  };
+
   if (!displayInvoice) {
     return (
       <View style={styles.container}>
@@ -153,28 +207,32 @@ export function ViewInvoiceScreen() {
   return (
     <View style={styles.container}>
       <DocumentHeader
-        title={`Invoice ${isEditing ? '(Editing)' : 'Preview'}`}
+        title="Invoice Preview"
         subtitle={invoice.invoiceNumber}
         onBackPress={() => {
           setCurrentInvoice(null);
           navigation.goBack();
         }}
-        rightIcon={isEditing ? 'check' : 'pencil'}
-        onRightPress={() => {
-          if (isEditing) {
-            handleSave();
-          } else {
-            setIsEditing(true);
-          }
-        }}
+        rightIcon="file-pdf-box"
+        onRightPress={handleViewPDF}
+        rightDisabled={isPdfLoading}
       />
 
       <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
         {/* Status Section */}
+        <TouchableOpacity onPress={() => setStatusSheetVisible(true)} activeOpacity={0.7}>
         <Surface style={documentStyles.section}>
           <View style={documentStyles.sectionHeader}>
-            <Title style={documentStyles.sectionTitle}>Status</Title>
+            <View style={documentStyles.sectionHeaderLeft}>
+              <View style={[documentStyles.sectionIconCircle, { backgroundColor: colors.successBg }]}>
+                <MaterialCommunityIcons name="flag-outline" size={18} color={colors.success} />
+              </View>
+              <Title style={documentStyles.sectionTitle}>Status</Title>
+            </View>
+            <View style={documentStyles.editButton}>
+              <MaterialCommunityIcons name="pencil" size={16} color={colors.primary} />
+            </View>
           </View>
           <View style={styles.statusRow}>
             <Chip
@@ -199,6 +257,7 @@ export function ViewInvoiceScreen() {
             </View>
           )}
         </Surface>
+        </TouchableOpacity>
 
         <CustomerSection
           customerName={invoice.customerName}
@@ -212,7 +271,29 @@ export function ViewInvoiceScreen() {
         {/* Dates Section */}
         <Surface style={documentStyles.section}>
           <View style={documentStyles.sectionHeader}>
-            <Title style={documentStyles.sectionTitle}>Invoice Details</Title>
+            <View style={documentStyles.sectionHeaderLeft}>
+              <View style={[documentStyles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
+                <MaterialCommunityIcons name="file-document-outline" size={18} color={colors.secondary} />
+              </View>
+              <Title style={documentStyles.sectionTitle}>Invoice Details</Title>
+            </View>
+            <TouchableOpacity
+              style={documentStyles.editButton}
+              onPress={() => {
+                if (isEditing) {
+                  handleSave();
+                } else {
+                  setIsEditing(true);
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons
+                name={isEditing ? 'check' : 'pencil'}
+                size={16}
+                color={colors.primary}
+              />
+            </TouchableOpacity>
           </View>
           {isEditing ? (
             <TextInput
@@ -333,8 +414,9 @@ export function ViewInvoiceScreen() {
 
         <JobSection
           job={invoice.job}
-          isEditing={isEditing}
+          isEditing={isEditingJob}
           onJobChange={(job) => handleFieldChange('job', job)}
+          onEdit={() => setIsEditingJob(!isEditingJob)}
         />
 
         <MaterialsSection
@@ -365,7 +447,14 @@ export function ViewInvoiceScreen() {
         {/* Notes Section */}
         {(invoice.notes || isEditing) && (
           <Surface style={documentStyles.section}>
-            <Title style={documentStyles.sectionTitle}>Notes</Title>
+            <View style={documentStyles.sectionHeader}>
+              <View style={documentStyles.sectionHeaderLeft}>
+                <View style={[documentStyles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
+                  <MaterialCommunityIcons name="note-text-outline" size={18} color={colors.info} />
+                </View>
+                <Title style={documentStyles.sectionTitle}>Notes</Title>
+              </View>
+            </View>
             {isEditing ? (
               <TextInput
                 value={invoice.notes || ''}
@@ -384,7 +473,14 @@ export function ViewInvoiceScreen() {
         {/* Payment History Section */}
         {invoice.paidAmount !== undefined && invoice.paidAmount > 0 && (
           <Surface style={documentStyles.section}>
-            <Title style={documentStyles.sectionTitle}>Payment History</Title>
+            <View style={documentStyles.sectionHeader}>
+              <View style={documentStyles.sectionHeaderLeft}>
+                <View style={[documentStyles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
+                  <MaterialCommunityIcons name="cash-check" size={18} color={colors.primary} />
+                </View>
+                <Title style={documentStyles.sectionTitle}>Payment History</Title>
+              </View>
+            </View>
             <View style={styles.paymentHistoryRow}>
               <View style={styles.paymentHistoryInfo}>
                 <Text style={styles.paymentHistoryMethod}>
@@ -436,6 +532,15 @@ export function ViewInvoiceScreen() {
           buttonStyle={styles.button}
         />
       </View>
+
+      {/* Status Sheet */}
+      <StatusSheet
+        visible={statusSheetVisible}
+        onDismiss={() => setStatusSheetVisible(false)}
+        currentStatus={invoice.status}
+        onSelect={handleStatusSelect}
+        options={INVOICE_STATUS_OPTIONS}
+      />
     </View>
   );
 }

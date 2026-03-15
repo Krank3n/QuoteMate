@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { View, StyleSheet, Alert, Platform, Pressable, Animated } from 'react-native';
+import { View, StyleSheet, Alert, Pressable, Animated } from 'react-native';
 import {
   Text,
   Card,
@@ -12,15 +12,12 @@ import {
   IconButton,
 } from 'react-native-paper';
 import { format, formatDistanceToNow, differenceInDays } from 'date-fns';
-import * as Print from 'expo-print';
-import * as MailComposer from 'expo-mail-composer';
-
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Invoice, BusinessSettings, InvoiceStatus } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { isInvoiceOverdue, getOverdueText, getAmountDue } from '../utils/invoiceCalculator';
-import { generateInvoicePDF, exportInvoicePDF, generatePdfFilename } from '../utils/pdfGenerator';
+import { exportInvoicePDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
 import { selectionTap } from '../utils/haptics';
 import { SwipeableCard } from './SwipeableCard';
@@ -30,6 +27,8 @@ import { ShimmerOverlay } from './ShimmerOverlay';
 import { TapRipple } from './TapRipple';
 import { GrainOverlay } from './GrainOverlay';
 import { ActionSheet } from './ActionSheet';
+import { InvoiceEmailPreviewModal } from './InvoiceEmailPreviewModal';
+import { generateInvoiceEmail, getDefaultInvoiceEmailBody } from '../services/llmService';
 
 interface InvoiceCardProps {
   invoice: Invoice;
@@ -57,6 +56,9 @@ export const InvoiceCard = React.memo(function InvoiceCard({
   const [menuVisible, setMenuVisible] = useState(false);
   const [statusMenuVisible, setStatusMenuVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [emailPreviewVisible, setEmailPreviewVisible] = useState(false);
+  const [emailBody, setEmailBody] = useState('');
+  const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const idleAnim = useRef(new Animated.Value(0)).current;
   const idleTilt = useRef(new Animated.Value(0)).current;
@@ -100,58 +102,74 @@ export const InvoiceCard = React.memo(function InvoiceCard({
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const handleSendInvoice = async () => {
+    setIsGeneratingEmail(true);
+    setEmailPreviewVisible(true);
+
     try {
-      if (Platform.OS === 'web') {
-        // Generate PDF HTML
-        const html = await generateInvoicePDF(invoice, businessSettings, { isPro });
-        const filename = generatePdfFilename('Invoice', invoice.customerName, invoice.job.name, new Date(invoice.updatedAt));
-
-        // Create a hidden iframe to print the PDF
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        document.body.appendChild(iframe);
-
-        const iframeDoc = iframe.contentWindow?.document;
-        if (iframeDoc) {
-          iframeDoc.open();
-          iframeDoc.write(html);
-          iframeDoc.close();
-
-          iframe.onload = () => {
-            setTimeout(() => {
-              iframe.contentWindow?.print();
-              setTimeout(() => {
-                document.body.removeChild(iframe);
-              }, 1000);
-            }, 250);
-          };
-        }
-      } else {
-        const isAvailable = await MailComposer.isAvailableAsync();
-        if (!isAvailable) {
-          Alert.alert('Email Not Available', 'Email is not configured on this device. Please set up an email account first.');
-          return;
-        }
-
-        const html = await generateInvoicePDF(invoice, businessSettings, { isPro });
-        const { uri } = await Print.printToFileAsync({ html, base64: false });
-
-        const result = await MailComposer.composeAsync({
-          recipients: invoice.customerEmail ? [invoice.customerEmail] : [],
-          subject: `Invoice from ${businessSettings?.businessName || 'Your Business'} - ${invoice.job.name}`,
-          body: `Hi ${invoice.customerName},\n\nPlease find attached your invoice for ${invoice.job.name}.\n\nTotal: ${formatCurrency(invoice.total)}\n\nPayment is due by ${format(new Date(invoice.dueDate), 'dd MMMM yyyy')}.\n\nThank you for your business!\n\nBest regards,\n${businessSettings?.businessName || 'Your Business'}`,
-          attachments: [uri],
+      if (isPro) {
+        const body = await generateInvoiceEmail({
+          jobName: invoice.job.name,
+          jobDescription: invoice.job.description || '',
+          materials: invoice.materials.map(m => ({
+            name: m.name,
+            quantity: m.quantity,
+            unit: m.unit,
+          })),
+          laborHours: invoice.laborHours,
+          total: invoice.total,
+          businessName: businessSettings?.businessName || '',
+          customerName: invoice.customerName,
+          dueDate: new Date(invoice.dueDate).toISOString(),
+          invoiceNumber: invoice.invoiceNumber,
         });
-
-        if (result.status === 'sent' && invoice.status === 'draft') {
-          const updatedInvoice = { ...invoice, status: 'sent' as const };
-          await onSave(updatedInvoice);
-          Alert.alert('Success', 'Invoice sent successfully!');
-        }
+        setEmailBody(body);
+      } else {
+        setEmailBody(getDefaultInvoiceEmailBody(
+          invoice.customerName,
+          invoice.job.name,
+          invoice.total,
+          businessSettings?.businessName || 'Your Business',
+          new Date(invoice.dueDate).toISOString()
+        ));
       }
     } catch (error) {
-      console.error('Send error:', error);
-      Alert.alert('Error', 'Failed to send invoice. Please try again.');
+      console.error('Invoice email generation failed:', error);
+      setEmailBody(getDefaultInvoiceEmailBody(
+        invoice.customerName,
+        invoice.job.name,
+        invoice.total,
+        businessSettings?.businessName || 'Your Business',
+        new Date(invoice.dueDate).toISOString()
+      ));
+    } finally {
+      setIsGeneratingEmail(false);
+    }
+  };
+
+  const handleRegenerateEmail = async () => {
+    setIsGeneratingEmail(true);
+    try {
+      const body = await generateInvoiceEmail({
+        jobName: invoice.job.name,
+        jobDescription: invoice.job.description || '',
+        materials: invoice.materials.map(m => ({
+          name: m.name,
+          quantity: m.quantity,
+          unit: m.unit,
+        })),
+        laborHours: invoice.laborHours,
+        total: invoice.total,
+        businessName: businessSettings?.businessName || '',
+        customerName: invoice.customerName,
+        dueDate: new Date(invoice.dueDate).toISOString(),
+        invoiceNumber: invoice.invoiceNumber,
+      });
+      setEmailBody(body);
+    } catch (error) {
+      console.error('Invoice email regeneration failed:', error);
+      Alert.alert('Error', 'Could not regenerate email. Please try again.');
+    } finally {
+      setIsGeneratingEmail(false);
     }
   };
 
@@ -343,6 +361,18 @@ export const InvoiceCard = React.memo(function InvoiceCard({
       secondaryButtonText="Cancel"
       secondaryButtonAction={() => setDeleteModalVisible(false)}
       showConfetti={false}
+    />
+
+    <InvoiceEmailPreviewModal
+      visible={emailPreviewVisible}
+      onDismiss={() => setEmailPreviewVisible(false)}
+      invoice={invoice}
+      businessSettings={businessSettings}
+      emailBody={emailBody}
+      onEmailBodyChange={setEmailBody}
+      onRegenerate={handleRegenerateEmail}
+      isPro={isPro}
+      isRegenerating={isGeneratingEmail}
     />
     </>
   );
