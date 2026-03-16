@@ -126,7 +126,7 @@ export function NotificationPreferencesScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           <Text style={styles.headerText}>
             Choose which Aussie notifications you want to receive, legend!

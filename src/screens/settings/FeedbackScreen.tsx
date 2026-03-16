@@ -76,7 +76,7 @@ export function FeedbackScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           {/* WhatsApp quick feedback */}
           <TouchableOpacity

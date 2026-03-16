@@ -30,7 +30,7 @@ export function SubscriptionSettingsScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           <Surface style={styles.card}>
             <Title style={styles.sectionTitle}>Your Subscription</Title>

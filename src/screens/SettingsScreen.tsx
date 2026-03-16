@@ -162,7 +162,7 @@ export function SettingsScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           {sections.map((section) => (
             <View key={section.title} style={styles.sectionContainer}>

@@ -89,9 +89,9 @@ function NewQuoteNavigator() {
           fontWeight: 'bold',
         },
         cardStyle: { backgroundColor: colors.background },
-        // Enable scrolling for new quote screens on web
         ...(Platform.OS === 'web' && {
-          contentStyle: { overflow: 'auto', backgroundColor: colors.background }
+          headerMode: 'float' as any,
+          contentStyle: { flex: 1, backgroundColor: colors.background },
         })
       }}
     >
@@ -149,9 +149,9 @@ function NewInvoiceNavigator() {
           fontWeight: 'bold',
         },
         cardStyle: { backgroundColor: colors.background },
-        // Enable scrolling for new invoice screens on web
         ...(Platform.OS === 'web' && {
-          contentStyle: { overflow: 'auto', backgroundColor: colors.background }
+          headerMode: 'float' as any,
+          contentStyle: { flex: 1, backgroundColor: colors.background },
         })
       }}
     >
@@ -448,9 +448,11 @@ export function RootNavigator() {
       screenOptions={{
         headerShown: false,
         cardStyle: { backgroundColor: colors.background },
-        // Enable scrolling for modals on web
+        // On web, use float header mode so CardContent uses flex:1 instead of
+        // minHeight:100% (pageOverflowEnabled=false), allowing ScrollViews to scroll
         ...(Platform.OS === 'web' && {
-          contentStyle: { overflow: 'auto', backgroundColor: colors.background }
+          headerMode: 'float' as any,
+          contentStyle: { flex: 1, backgroundColor: colors.background },
         }),
         // Keep previous screen mounted during transitions to prevent remount glitches
         detachPreviousScreen: false,

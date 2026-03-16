@@ -1012,26 +1012,26 @@ export function AddMaterialScreen() {
     <View style={styles.container}>
       {/* Tab Selector - hidden in edit mode */}
       {!isEditMode && (
-        <WebContainer>
         <View ref={savedItemsTabRef} style={styles.tabBar}>
-          <SegmentedButtons
-            value={activeTab}
-            onValueChange={(value) => setActiveTab(value as TabValue)}
-            buttons={[
-              {
-                value: 'search',
-                label: 'Search & Add',
-                icon: 'magnify',
-              },
-              {
-                value: 'saved',
-                label: 'Saved Items',
-                icon: 'star',
-              },
-            ]}
-          />
+          <WebContainer>
+            <SegmentedButtons
+              value={activeTab}
+              onValueChange={(value) => setActiveTab(value as TabValue)}
+              buttons={[
+                {
+                  value: 'search',
+                  label: 'Search & Add',
+                  icon: 'magnify',
+                },
+                {
+                  value: 'saved',
+                  label: 'Saved Items',
+                  icon: 'star',
+                },
+              ]}
+            />
+          </WebContainer>
         </View>
-        </WebContainer>
       )}
 
       {/* Tab Content */}

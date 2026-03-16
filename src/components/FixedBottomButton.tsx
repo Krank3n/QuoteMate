@@ -207,43 +207,45 @@ export function FixedBottomButton({
       <View
         style={[
           styles.bottomActions,
-             Platform.OS === 'web' && { marginBottom: Math.max(insets.bottom, 16) }
+             Platform.OS === 'web' && { marginBottom: insets.bottom }
         ]}
         needsOffscreenAlphaCompositing={false}
         renderToHardwareTextureAndroid={true}
       >
-        {secondaryLabel && secondaryOnPress && (
-          <View ref={secondaryRef} style={{ flex: 1 }}>
-            {secondaryLoading ? (
-              <PulsingBorderButton loadingText={secondaryLoadingText} onPress={secondaryLoadingOnPress}>
-                {secondaryLabel}
-              </PulsingBorderButton>
-            ) : (
-              <Button
-                mode="outlined"
-                onPress={secondaryOnPress}
-                style={styles.secondaryButton}
-                labelStyle={styles.secondaryButtonLabel}
-                contentStyle={styles.secondaryButtonContent}
-                disabled={secondaryDisabled}
-              >
-                {secondaryLabel}
-              </Button>
-            )}
-          </View>
-        )}
-        <Button
-          mode={mode}
-          onPress={() => { lightTap(); onPress(); }}
-          style={[styles.button, buttonStyle, secondaryLabel && styles.buttonWithSecondary]}
-          labelStyle={[styles.buttonLabel, labelStyle]}
-          contentStyle={styles.buttonContent}
-          disabled={disabled}
-          loading={loading}
-          icon={icon}
-        >
-          {loading ? '' : label}
-        </Button>
+        <View style={styles.bottomActionsInner}>
+          {secondaryLabel && secondaryOnPress && (
+            <View ref={secondaryRef} style={{ flex: 1 }}>
+              {secondaryLoading ? (
+                <PulsingBorderButton loadingText={secondaryLoadingText} onPress={secondaryLoadingOnPress}>
+                  {secondaryLabel}
+                </PulsingBorderButton>
+              ) : (
+                <Button
+                  mode="outlined"
+                  onPress={secondaryOnPress}
+                  style={styles.secondaryButton}
+                  labelStyle={styles.secondaryButtonLabel}
+                  contentStyle={styles.secondaryButtonContent}
+                  disabled={secondaryDisabled}
+                >
+                  {secondaryLabel}
+                </Button>
+              )}
+            </View>
+          )}
+          <Button
+            mode={mode}
+            onPress={() => { lightTap(); onPress(); }}
+            style={[styles.button, buttonStyle, secondaryLabel && styles.buttonWithSecondary]}
+            labelStyle={[styles.buttonLabel, labelStyle]}
+            contentStyle={styles.buttonContent}
+            disabled={disabled}
+            loading={loading}
+            icon={icon}
+          >
+            {loading ? '' : label}
+          </Button>
+        </View>
       </View>
     </>
   );
@@ -266,9 +268,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: 0,
     width: '100%',
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: 12,
+    alignItems: 'center',
     borderColor: colors.border,
     zIndex: 2, // Above the solid background
     ...(Platform.OS === 'android' && {
@@ -277,11 +277,18 @@ const styles = StyleSheet.create({
     }),
     ...(Platform.OS === 'web' && {
       flexShrink: 0,
-      position: 'sticky' as any,
-      bottom: 0,
-      margin: '0 auto' as any,
+      position: 'relative' as any,
       width: '100%',
       boxShadow: '0 -2px 8px rgba(0,0,0,0.1)' as any,
+    }),
+  },
+  bottomActionsInner: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 12,
+    width: '100%',
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
     }),
   },
   button: {

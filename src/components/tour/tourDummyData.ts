@@ -3,9 +3,21 @@
  * All fake data in one place — injected at each phase of the tour
  */
 
-import { Image } from 'react-native';
+import { Image, Platform } from 'react-native';
 import { Material, Quote, QuotePhoto } from '../../types';
 import { generateId } from '../../utils/generateId';
+
+/** Resolve a bundled asset to a URI string — works on both native and web */
+function resolveAssetUri(asset: any): string {
+  if (Platform.OS === 'web') {
+    // On web, require() for images returns a string (the URL) or an object with uri/default
+    if (typeof asset === 'string') return asset;
+    if (typeof asset === 'object' && asset?.default) return asset.default;
+    if (typeof asset === 'object' && asset?.uri) return asset.uri;
+    return String(asset);
+  }
+  return Image.resolveAssetSource(asset).uri;
+}
 
 // ─── Photos ───
 // Bundled assets for the tour — no network dependency
@@ -18,14 +30,14 @@ export const TOUR_PHOTO_ID = 'tour-photo-001';
 export function getTourPhoto(): QuotePhoto {
   return {
     id: TOUR_PHOTO_ID,
-    storageUrl: Image.resolveAssetSource(tourPhotoDamage).uri,
+    storageUrl: resolveAssetUri(tourPhotoDamage),
   };
 }
 
 export function getTourPhotoAnnotated(): QuotePhoto {
   return {
     id: TOUR_PHOTO_ID,
-    storageUrl: Image.resolveAssetSource(tourPhotoAnnotated).uri,
+    storageUrl: resolveAssetUri(tourPhotoAnnotated),
     annotated: true,
   };
 }
@@ -117,7 +129,7 @@ export function getTourMaterialsPriced(): Material[] {
       brand: 'Zenith',
       description: 'Zenith 100mm Brass Plated Fixed Pin Butt Hinge - 2 Pack',
       productUrl: 'https://www.bunnings.com.au',
-      imageUrl: Image.resolveAssetSource(tourHingeProduct).uri,
+      imageUrl: resolveAssetUri(tourHingeProduct),
     }),
     makeMaterial({
       name: '30mm Timber Screws (Box 100)',

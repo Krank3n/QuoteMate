@@ -27,7 +27,9 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import ColorPicker, { Panel1, HueSlider, returnedResults } from 'reanimated-color-picker';
 
 import { useNavigation } from '@react-navigation/native';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useStore } from '../../store/useStore';
+import { auth, storage } from '../../config/firebase';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -117,6 +119,20 @@ export function BusinessProfileScreen() {
     );
   };
 
+  const uploadLogoToStorage = async (uri: string): Promise<string> => {
+    // Already a remote URL (previously uploaded), no need to re-upload
+    if (uri.startsWith('https://')) return uri;
+
+    const userId = auth.currentUser?.uid;
+    if (!userId) throw new Error('Not signed in');
+
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const logoRef = ref(storage, `users/${userId}/logo.jpg`);
+    await uploadBytes(logoRef, blob);
+    return getDownloadURL(logoRef);
+  };
+
   const handleSave = async () => {
     if (!businessName.trim()) {
       Alert.alert('Required', 'Please enter your business name');
@@ -125,6 +141,20 @@ export function BusinessProfileScreen() {
 
     try {
       setIsLoading(true);
+
+      // Upload logo to Firebase Storage if it's a local/blob URI
+      let savedLogoUri = logoUri;
+      if (logoUri) {
+        try {
+          savedLogoUri = await uploadLogoToStorage(logoUri);
+          setLogoUri(savedLogoUri);
+        } catch (error) {
+          console.error('Logo upload failed:', error);
+          Alert.alert('Logo Upload Failed', 'Could not upload logo. Other settings will still be saved.');
+          savedLogoUri = undefined;
+        }
+      }
+
       await setBusinessSettings({
         ...businessSettings!,
         businessName: businessName.trim(),
@@ -132,7 +162,7 @@ export function BusinessProfileScreen() {
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
         address: address.trim() || undefined,
-        logoUri: logoUri,
+        logoUri: savedLogoUri,
         brandColor: brandColor,
         defaultLaborRate: parseFloat(laborRate) || 85,
         defaultMarkup: parseFloat(markup) || 20,
@@ -149,6 +179,7 @@ export function BusinessProfileScreen() {
   return (
     <View style={styles.container}>
       <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
@@ -402,6 +433,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  scrollView: {
+    flex: 1,
   },
   scrollContent: {
     padding: 16,

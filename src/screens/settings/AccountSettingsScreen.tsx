@@ -154,7 +154,7 @@ export function AccountSettingsScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           {currentUser && (
             <Surface style={styles.card}>

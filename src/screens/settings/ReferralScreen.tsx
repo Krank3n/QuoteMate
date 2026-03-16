@@ -284,7 +284,7 @@ export function ReferralScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView contentContainerStyle={[styles.scrollContent, activeTab === 'qr' && styles.scrollContentGrow]}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.scrollContent, activeTab === 'qr' && styles.scrollContentGrow]}>
           <WebContainer>
             {activeTab === 'qr' ? (
               <>
@@ -534,7 +534,7 @@ export function ReferralScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           {/* QR Hero Card */}
           {referralInfo?.referralCode ? (

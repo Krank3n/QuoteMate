@@ -134,7 +134,7 @@ export function TourTooltip({
           width: tooltipWidth,
           ...(caretOnTop
             ? { top }
-            : { bottom: screenHeight - top }),
+            : { bottom: screenHeight - top, top: SCREEN_PADDING, justifyContent: 'flex-end' as const }),
         },
       ]}
       pointerEvents="box-none"
