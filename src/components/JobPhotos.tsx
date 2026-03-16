@@ -26,6 +26,7 @@ import { uploadQuotePhoto, deleteQuotePhoto } from '../services/photoService';
 import { generateId } from '../utils/generateId';
 import { auth } from '../config/firebase';
 import { PhotoAnnotator } from './PhotoAnnotator';
+import { ActionSheet, ActionSheetOption } from './ActionSheet';
 
 const MAX_PHOTOS = 5;
 
@@ -46,6 +47,7 @@ interface JobPhotosProps {
 export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDisabled }: JobPhotosProps) {
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
   const [annotatingPhoto, setAnnotatingPhoto] = useState<LocalPhoto | null>(null);
+  const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
 
   // Merged view: committed photos from parent + local pending uploads
   const allPhotos: LocalPhoto[] = [
@@ -218,12 +220,13 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
       return;
     }
 
-    Alert.alert('Add Photo', 'Choose a source', [
-      { text: 'Camera', onPress: () => pickImage(true) },
-      { text: 'Photo Library', onPress: () => pickImage(false) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    setPhotoSheetVisible(true);
   };
+
+  const photoSheetOptions: ActionSheetOption[] = [
+    { icon: 'camera', label: 'Take Photo', onPress: () => pickImage(true) },
+    { icon: 'image-multiple', label: 'Photo Library', onPress: () => pickImage(false) },
+  ];
 
   const hasAnyUploading = localPhotos.some(p => p.uploading);
 
@@ -295,6 +298,13 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
           onCancel={() => setAnnotatingPhoto(null)}
         />
       )}
+
+      <ActionSheet
+        visible={photoSheetVisible}
+        onDismiss={() => setPhotoSheetVisible(false)}
+        title="Add Photo"
+        options={photoSheetOptions}
+      />
     </View>
   );
 }

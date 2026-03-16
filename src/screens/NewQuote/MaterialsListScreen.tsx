@@ -1881,49 +1881,43 @@ export function MaterialsListScreen() {
         title={successTitle}
         message={successMessage}
       />
-      {!showSuccessModal && (
+      {!showSuccessModal && unifiedTourActive && (
         <>
-          <ScreenTour
-            tourId="materialsList"
-            onActiveChange={setTourActive}
-            unifiedMode={unifiedTourActive && unifiedTourPhase === 'materialsList'}
-            onScreenComplete={() => notifyScreenComplete('materialsList')}
-            onSkipRequest={notifySkipRequest}
-            stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.materialsList : 0}
-            globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
-          />
-          {materials.length > 0 && !isAiAnalyzing && (
+          {unifiedTourPhase === 'materialsList' && (
+            <ScreenTour
+              tourId="materialsList"
+              onActiveChange={setTourActive}
+              unifiedMode={true}
+              onScreenComplete={() => notifyScreenComplete('materialsList')}
+              onSkipRequest={notifySkipRequest}
+              stepOffset={PHASE_STEP_OFFSETS.materialsList}
+              globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
+            />
+          )}
+          {materials.length > 0 && !isAiAnalyzing && unifiedTourPhase === 'materialsListItems' && (
             <ScreenTour
               tourId="materialsListItems"
-              delay={unifiedTourActive ? 800 : 600}
+              delay={800}
               onActiveChange={setTourActive}
               scrollRef={materialsScrollRef}
               scrollPositions={{ fetchPricesButton: 99999, firstMaterialItem: 0, addMaterialButton: 99999 }}
-              unifiedMode={unifiedTourActive && unifiedTourPhase === 'materialsListItems'}
+              unifiedMode={true}
               onScreenComplete={() => notifyScreenComplete('materialsListItems')}
               onSkipRequest={notifySkipRequest}
-              stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.materialsListItems : 0}
-              globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
+              stepOffset={PHASE_STEP_OFFSETS.materialsListItems}
+              globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
               onStepChange={(stepId) => {
-                if (!unifiedTourActive) return;
                 const quote = currentQuote;
                 if (!quote) return;
-                // onStepChange fires with the UPCOMING step id when user taps Next.
-                // Sequence: firstMaterialItem(0) → fetchPricesButton(1) → firstMaterialItem(2) → addMaterialButton(3)
-                // We want to inject prices when advancing TO step 2 (past fetchPricesButton).
-                // At that point, stepId='firstMaterialItem' but we've already seen fetchPricesButton.
                 if (stepId === 'addMaterialButton' && materials.length > 0) {
-                  // Advancing past the priced list — expand first item to show deets
                   setExpandedMaterials(new Set([materials[0].id]));
                 } else if (stepId === 'firstMaterialItem' && tourPastFetchRef.current) {
-                  // Advancing past fetchPricesButton → inject prices now
                   const pricedMaterials = getTourMaterialsPriced();
                   storeUpdateQuote({ ...quote, materials: pricedMaterials });
                   if (pricedMaterials.length > 0) {
                     setExpandedMaterials(new Set([pricedMaterials[0].id]));
                   }
                 } else if (stepId === 'fetchPricesButton') {
-                  // Mark that we've seen the fetch prices step
                   tourPastFetchRef.current = true;
                 }
               }}

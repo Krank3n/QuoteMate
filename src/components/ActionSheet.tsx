@@ -37,6 +37,8 @@ const ICON_COLOR_MAP: Record<string, { color: string; bg: string }> = {
   'file-document-edit-outline': { color: colors.info, bg: colors.infoBg },
   'check-circle-outline':    { color: colors.success, bg: colors.successBg },
   'close-circle-outline':    { color: colors.error, bg: colors.errorBg },
+  'camera':                  { color: colors.info, bg: colors.infoBg },
+  'image-multiple':          { color: '#8B5CF6', bg: '#2E1065' },      // violet
 };
 
 function getIconStyle(icon: string, explicitColor?: string) {

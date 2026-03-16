@@ -486,17 +486,19 @@ export function LaborMarkupScreen() {
       </View>
 
       {/* Screen Tour */}
-      <ScreenTour
-        tourId="laborMarkup"
-        onActiveChange={setTourActive}
-        scrollRef={scrollRef}
-        scrollPositions={{ laborSection: 0, markupSection: 300 }}
-        unifiedMode={unifiedTourActive && unifiedTourPhase === 'laborMarkup'}
-        onScreenComplete={() => notifyScreenComplete('laborMarkup')}
-        onSkipRequest={notifySkipRequest}
-        stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.laborMarkup : 0}
-        globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
-      />
+      {unifiedTourActive && unifiedTourPhase === 'laborMarkup' && (
+        <ScreenTour
+          tourId="laborMarkup"
+          onActiveChange={setTourActive}
+          scrollRef={scrollRef}
+          scrollPositions={{ laborSection: 0, markupSection: 300 }}
+          unifiedMode={true}
+          onScreenComplete={() => notifyScreenComplete('laborMarkup')}
+          onSkipRequest={notifySkipRequest}
+          stepOffset={PHASE_STEP_OFFSETS.laborMarkup}
+          globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
+        />
+      )}
     </>
   );
 

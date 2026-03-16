@@ -1436,15 +1436,15 @@ export function JobDetailsScreen() {
       </KeyboardAvoidingView>
 
       {/* Screen Tour */}
-      <ScreenTour
+      {unifiedTourActive && unifiedTourPhase === 'jobDetails' && <ScreenTour
         tourId="jobDetails"
         delay={fromTour ? 200 : 600}
-        stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.jobDetails : TOUR_STEPS.length}
-        globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : INTRO_TOUR_TOTAL_STEPS}
+        stepOffset={PHASE_STEP_OFFSETS.jobDetails}
+        globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
         scrollRef={scrollRef}
         scrollPositions={{ micButton: 0, jobDescription: 0, jobDescriptionCleaned: 200, jobPhotoThumbnail: 600, annotatorCanvas: 0, annotatorTools: 0, annotatorDone: 0, jobPhotoAnnotated: 600 }}
         onActiveChange={setTourActive}
-        unifiedMode={unifiedTourActive && unifiedTourPhase === 'jobDetails'}
+        unifiedMode={true}
         onScreenComplete={() => notifyScreenComplete('jobDetails')}
         onSkipRequest={notifySkipRequest}
         onStepChange={(stepId) => {
@@ -1497,7 +1497,7 @@ export function JobDetailsScreen() {
             }
           }
         }}
-      />
+      />}
 
       {/* Tour-mode annotator — rendered as absolute overlay (not Modal) so tour spotlight works on top */}
       {tourAnnotatorOpen && jobPhotos.length > 0 && (

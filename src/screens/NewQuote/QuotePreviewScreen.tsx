@@ -514,18 +514,18 @@ export function QuotePreviewScreen() {
       </View>
 
       {/* Screen Tour */}
-      <ScreenTour
+      {unifiedTourActive && unifiedTourPhase === 'quotePreview' && <ScreenTour
         tourId="quotePreview"
         delay={1500}
         onActiveChange={setTourActive}
         scrollRef={scrollRef}
         scrollPositions={{ editSections: 0, sendButton: 0 }}
-        unifiedMode={unifiedTourActive && unifiedTourPhase === 'quotePreview'}
+        unifiedMode={true}
         onScreenComplete={() => notifyScreenComplete('quotePreview')}
         onSkipRequest={notifySkipRequest}
-        stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.quotePreview : 0}
-        globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
-      />
+        stepOffset={PHASE_STEP_OFFSETS.quotePreview}
+        globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
+      />}
     </View>
   );
 }

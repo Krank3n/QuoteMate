@@ -63,9 +63,8 @@ export function CustomerDetailsScreen() {
   const jobAddressRef = useRef<View>(null);
   const recentCustomersRef = useRef<View>(null);
   const [tourActive, setTourActive] = useState(false);
-  // Keep Davo in the recent customers list for the entire screen visit,
-  // not just until the tour finishes (markScreenTourSeen fires too early).
-  const [showDavo] = useState(() => !hasSeenScreenTour('customerDetails'));
+  // Only show Davo during the unified tour
+  const showDavo = unifiedTourActive && unifiedTourPhase === 'customerDetails';
 
   useEffect(() => {
     if (customerNameRef.current) registerRef('customerName', customerNameRef.current);
@@ -380,21 +379,22 @@ export function CustomerDetailsScreen() {
         disabled={!customerName.trim()}
       />
 
-      <ScreenTour
-        tourId="customerDetails"
-        onActiveChange={setTourActive}
-        unifiedMode={unifiedTourActive && unifiedTourPhase === 'customerDetails'}
-        onScreenComplete={() => notifyScreenComplete('customerDetails')}
-        onSkipRequest={notifySkipRequest}
-        stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.customerDetails : 0}
-        globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
-        onStepChange={(stepId) => {
-          // When advancing past recentCustomers, auto-select Davo to demo the auto-fill
-          if (stepId === 'customerName' && showDavo) {
-            handleSelectCustomer(TOUR_CUSTOMER);
-          }
-        }}
-      />
+      {unifiedTourActive && unifiedTourPhase === 'customerDetails' && (
+        <ScreenTour
+          tourId="customerDetails"
+          onActiveChange={setTourActive}
+          unifiedMode={true}
+          onScreenComplete={() => notifyScreenComplete('customerDetails')}
+          onSkipRequest={notifySkipRequest}
+          stepOffset={PHASE_STEP_OFFSETS.customerDetails}
+          globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
+          onStepChange={(stepId) => {
+            if (stepId === 'customerName' && showDavo) {
+              handleSelectCustomer(TOUR_CUSTOMER);
+            }
+          }}
+        />
+      )}
     </View>
   );
 }

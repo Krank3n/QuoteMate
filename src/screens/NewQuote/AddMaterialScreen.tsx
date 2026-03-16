@@ -1047,14 +1047,14 @@ export function AddMaterialScreen() {
       )}
 
       {/* Screen Tour */}
-      {!isEditMode && (
+      {!isEditMode && unifiedTourActive && unifiedTourPhase === 'addMaterial' && (
         <ScreenTour
           tourId="addMaterial"
-          unifiedMode={unifiedTourActive && unifiedTourPhase === 'addMaterial'}
+          unifiedMode={true}
           onScreenComplete={() => notifyScreenComplete('addMaterial')}
           onSkipRequest={notifySkipRequest}
-          stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.addMaterial : 0}
-          globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : undefined}
+          stepOffset={PHASE_STEP_OFFSETS.addMaterial}
+          globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
         />
       )}
     </View>
