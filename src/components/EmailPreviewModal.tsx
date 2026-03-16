@@ -191,16 +191,23 @@ export function EmailPreviewModal({
   const scrollViewRef = useRef<ScrollView>(null);
   const [isBodyFocused, setIsBodyFocused] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const isEditingBody = isBodyFocused && isKeyboardVisible;
 
   useEffect(() => {
     const showSub = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      () => setIsKeyboardVisible(true),
+      (e) => {
+        setIsKeyboardVisible(true);
+        setKeyboardHeight(e.endCoordinates.height);
+      },
     );
     const hideSub = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setIsKeyboardVisible(false),
+      () => {
+        setIsKeyboardVisible(false);
+        setKeyboardHeight(0);
+      },
     );
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
@@ -367,7 +374,11 @@ export function EmailPreviewModal({
         <ScrollView
           ref={scrollViewRef}
           style={styles.scrollView}
-          contentContainerStyle={[styles.scrollContent, isEditingBody && styles.scrollContentEditing]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isEditingBody && styles.scrollContentEditing,
+            keyboardHeight > 0 && { paddingBottom: keyboardHeight },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
           {isEditingBody ? (

@@ -303,6 +303,15 @@ export function DashboardScreen() {
     }
   }, [hasSeenTour]);
 
+  // Scroll to top when tour ends
+  useEffect(() => {
+    if (!unifiedTourActive && hasSeenTour) {
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ y: 0, animated: true });
+      }, 500);
+    }
+  }, [unifiedTourActive]);
+
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 

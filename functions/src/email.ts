@@ -1431,3 +1431,45 @@ export function sendFeedbackEmail(
     tags: ['feedback', category.toLowerCase().replace(/\s+/g, '-')],
   });
 }
+
+/**
+ * Send a one-off affiliate invitation email
+ */
+export function sendAffiliateInviteEmail(
+  recipientEmail: string,
+): Promise<boolean> {
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#f1f5f9;font-size:24px;font-weight:700;margin:0 0 20px;">Hey Legend! 🤙</h1>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      It's Tom here — hope you're doing well mate!
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      I wanted to reach out because I've set you up as an affiliate for <strong style="color:#f1f5f9;">QuoteMate</strong> — my quoting app built for tradies.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      As an affiliate, you'll earn <strong style="color:#10b981;">50% commission</strong> on every Pro subscription that signs up through your referral link. It's a pretty sweet deal — you just share your link and earn cash when people subscribe.
+    </p>
+    ${infoCard(
+      infoRow('Commission Rate', '50% of net revenue', false) +
+      infoRow('Subscription Price', '$29 AUD/month', false) +
+      infoRow('How It Works', 'Share your referral link → they subscribe → you earn', true),
+      '#10b981'
+    )}
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      To get started, just sign up at the link below and your affiliate status will be activated automatically. You'll get a unique referral link and QR code to share around.
+    </p>
+    ${ctaButton('Get Started with QuoteMate', '#009868', 'https://quotemateapp.au')}
+    <p style="color:#94a3b8;font-size:13px;line-height:1.5;margin:24px 0 0;">
+      Cheers legend,<br/>
+      <strong style="color:#f1f5f9;">Tom</strong>
+    </p>
+  `);
+
+  return sendEmail({
+    to: recipientEmail,
+    subject: "You're in legend — QuoteMate Affiliate Invite 🤙",
+    htmlContent: content,
+    category: 'transactional',
+    tags: ['affiliate-invite'],
+  });
+}

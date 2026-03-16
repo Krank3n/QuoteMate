@@ -362,12 +362,12 @@ export function QuotePreviewScreen() {
           jobAddress={currentQuote.jobAddress}
           onEdit={() => navigation.navigate('CustomerDetails')}
         />
+        </View>
 
         <JobSection
           job={currentQuote.job}
           onEdit={() => navigation.navigate('JobDetails')}
         />
-        </View>
 
         <MaterialsSection
           materials={currentQuote.materials}

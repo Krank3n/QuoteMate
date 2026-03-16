@@ -21,6 +21,7 @@ import {
   sendQuoteFollowUpEmail,
   buildQuoteEmailHtml,
   buildInvoiceEmailHtml,
+  sendAffiliateInviteEmail,
 } from './email';
 import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from './pdfGenerator';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
@@ -57,6 +58,7 @@ const DEFAULT_COMMISSION_RATE = 0.50; // 50% of net revenue
 // Emails to auto-grant affiliate status on signup
 const PENDING_AFFILIATE_EMAILS = [
   'chargedtm11@gmail.com',
+  'b.o.l.development1@gmail.com',
 ];
 
 // Pricing in cents (AUD)
@@ -6190,3 +6192,31 @@ export const inactivityNudge = functions.pubsub
 
     console.log('✅ Inactivity nudge check complete');
   });
+
+/**
+ * Send an affiliate invite email (admin use).
+ */
+export const sendAffiliateInvite = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+
+  const adminEmails = (functions.config().admin?.emails || process.env.ADMIN_EMAILS || '').split(',');
+  const callerEmail = context.auth.token?.email || '';
+  if (!adminEmails.includes(callerEmail)) {
+    throw new functions.https.HttpsError('permission-denied', 'Only admins can send affiliate invites');
+  }
+
+  const { email } = data || {};
+  if (!email) {
+    throw new functions.https.HttpsError('invalid-argument', 'email is required');
+  }
+
+  const success = await sendAffiliateInviteEmail(email);
+  if (!success) {
+    throw new functions.https.HttpsError('internal', 'Failed to send affiliate invite email');
+  }
+
+  console.log(`✅ Affiliate invite email sent to ${email}`);
+  return { success: true };
+});
