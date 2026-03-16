@@ -1190,13 +1190,14 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   endUnifiedTour: async () => {
-    const { setHasSeenTour, saveDraft, currentQuote } = get();
-    // Save the tour quote as a real draft so it shows on the dashboard
-    if (currentQuote) {
+    const { unifiedTourQuoteId, deleteQuote, setHasSeenTour } = get();
+    // Delete the tour dummy quote — user was told to delete it themselves,
+    // but we clean it up to avoid leftovers
+    if (unifiedTourQuoteId) {
       try {
-        await saveDraft(currentQuote);
+        await deleteQuote(unifiedTourQuoteId);
       } catch (e) {
-        console.warn('Failed to save tour quote as draft:', e);
+        console.warn('Failed to delete tour dummy quote:', e);
       }
     }
     // Mark all tours as seen

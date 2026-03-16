@@ -45,6 +45,7 @@ import { InvoicePreviewScreen } from '../screens/NewQuote/InvoicePreviewScreen';
 import { colors } from '../theme';
 import { TourRefsProvider } from '../components/tour/useTourRefs';
 import { UnifiedTourController } from '../components/tour/UnifiedTourController';
+import { useStore } from '../store/useStore';
 
 // Type definitions for navigation
 export type RootTabParamList = {
@@ -421,6 +422,25 @@ function MainTabs() {
 /**
  * Root Navigator - Includes tabs and modal screens
  */
+function TourTouchBlocker() {
+  const { unifiedTourActive } = useStore();
+  if (!unifiedTourActive) return null;
+  // Global touch blocker that sits above the entire navigator stack.
+  // Prevents tapping through to screens underneath during tour step transitions.
+  // The tour tooltip and modals render via Portal/native Modal which sit above this.
+  return (
+    <View
+      style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', zIndex: 9990 }]}
+      pointerEvents="auto"
+      onStartShouldSetResponder={() => true}
+      onStartShouldSetResponderCapture={() => true}
+      onMoveShouldSetResponder={() => true}
+      onMoveShouldSetResponderCapture={() => true}
+      onResponderRelease={() => {}}
+    />
+  );
+}
+
 export function RootNavigator() {
   return (
     <TourRefsProvider>
@@ -623,6 +643,7 @@ export function RootNavigator() {
         }}
       />
     </RootStack.Navigator>
+    <TourTouchBlocker />
     <UnifiedTourController />
     </TourRefsProvider>
   );

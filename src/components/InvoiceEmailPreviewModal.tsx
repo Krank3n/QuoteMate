@@ -14,6 +14,7 @@ import {
   Platform,
   Alert,
   KeyboardAvoidingView,
+  Keyboard,
   Animated,
 } from 'react-native';
 import {
@@ -25,6 +26,7 @@ import {
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { format } from 'date-fns';
+import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../theme';
 import { Invoice, BusinessSettings } from '../types';
 import { formatCurrency } from '../utils/quoteCalculator';
@@ -187,6 +189,42 @@ export function InvoiceEmailPreviewModal({
   const hasPhotos = photoCount > 0;
   const [includePhotos, setIncludePhotos] = useState(true);
 
+  // Keyboard UX state
+  const scrollViewRef = useRef<ScrollView>(null);
+  const [isBodyFocused, setIsBodyFocused] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const isEditingBody = isBodyFocused && isKeyboardVisible;
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setIsKeyboardVisible(true),
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setIsKeyboardVisible(false),
+    );
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
+
+  const handleBodyFocus = () => {
+    setIsBodyFocused(true);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, 150);
+  };
+
+  const handleBodyBlur = () => {
+    setIsBodyFocused(false);
+  };
+
+  const handleCollapsedBarPress = () => {
+    Keyboard.dismiss();
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, 100);
+  };
+
   // Alert modal state
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertType, setAlertType] = useState<'success' | 'error'>('success');
@@ -314,58 +352,92 @@ export function InvoiceEmailPreviewModal({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <LinearGradient
+          colors={['#00785a', colors.primary, '#00b07a']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[styles.header, { paddingTop: insets.top + 12 }]}
+        >
           <TouchableOpacity onPress={onDismiss} style={styles.headerButton}>
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Invoice Email</Text>
           <View style={styles.headerButton} />
-        </View>
+        </LinearGradient>
 
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-          {/* Recipient Card */}
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <View style={[styles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
-                <MaterialCommunityIcons name="account-outline" size={18} color={colors.info} />
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={[styles.scrollContent, isEditingBody && styles.scrollContentEditing]}
+          keyboardShouldPersistTaps="handled"
+        >
+          {isEditingBody ? (
+            /* Collapsed Recipient + Subject bar */
+            <TouchableOpacity
+              style={styles.collapsedBar}
+              onPress={handleCollapsedBarPress}
+              activeOpacity={0.7}
+            >
+              <View style={styles.collapsedBarContent}>
+                <MaterialCommunityIcons name="account-outline" size={14} color={colors.textMuted} />
+                <Text style={styles.collapsedBarText} numberOfLines={1}>
+                  {recipientEmail || 'No recipient'}
+                </Text>
+                <Text style={styles.collapsedBarDivider}>|</Text>
+                <MaterialCommunityIcons name="tag-outline" size={14} color={colors.textMuted} />
+                <Text style={styles.collapsedBarText} numberOfLines={1}>
+                  {subject || 'No subject'}
+                </Text>
               </View>
-              <Text style={styles.sectionTitle}>Recipient</Text>
-            </View>
-            <TextInput
-              value={recipientEmail}
-              onChangeText={handleEmailChange}
-              onBlur={handleEmailBlur}
-              mode="outlined"
-              style={styles.recipientInput}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              placeholder="client@email.com"
-              placeholderTextColor={colors.textMuted}
-              error={emailTouched && !!emailError}
-            />
-            {emailTouched && !!emailError && (
-              <Text style={styles.emailErrorText}>{emailError}</Text>
-            )}
-          </View>
+              <MaterialCommunityIcons name="chevron-down" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : (
+            <>
+              {/* Recipient Card */}
+              <View style={styles.sectionCard}>
+                <View style={styles.sectionHeader}>
+                  <View style={[styles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
+                    <MaterialCommunityIcons name="account-outline" size={18} color={colors.info} />
+                  </View>
+                  <Text style={styles.sectionTitle}>Recipient</Text>
+                </View>
+                <TextInput
+                  value={recipientEmail}
+                  onChangeText={handleEmailChange}
+                  onBlur={handleEmailBlur}
+                  mode="outlined"
+                  style={styles.recipientInput}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  placeholder="client@email.com"
+                  placeholderTextColor={colors.textMuted}
+                  error={emailTouched && !!emailError}
+                />
+                {emailTouched && !!emailError && (
+                  <Text style={styles.emailErrorText}>{emailError}</Text>
+                )}
+              </View>
 
-          {/* Subject Card */}
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
-                <MaterialCommunityIcons name="tag-outline" size={18} color={colors.secondary} />
+              {/* Subject Card */}
+              <View style={styles.sectionCard}>
+                <View style={styles.sectionHeader}>
+                  <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
+                    <MaterialCommunityIcons name="tag-outline" size={18} color={colors.secondary} />
+                  </View>
+                  <Text style={styles.sectionTitle}>Subject</Text>
+                </View>
+                <TextInput
+                  value={subject}
+                  onChangeText={setSubject}
+                  mode="outlined"
+                  style={styles.subjectInput}
+                />
               </View>
-              <Text style={styles.sectionTitle}>Subject</Text>
-            </View>
-            <TextInput
-              value={subject}
-              onChangeText={setSubject}
-              mode="outlined"
-              style={styles.subjectInput}
-            />
-          </View>
+            </>
+          )}
 
           {/* Email Body Card */}
-          <View style={styles.sectionCard}>
+          <View style={[styles.sectionCard, isEditingBody && styles.sectionCardEditing]}>
             <View style={styles.sectionHeader}>
               <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
                 <MaterialCommunityIcons name="email-edit-outline" size={18} color={colors.primary} />
@@ -385,12 +457,14 @@ export function InvoiceEmailPreviewModal({
             {isRegenerating ? (
               <EmailGeneratingState />
             ) : (
-              <View style={styles.bodyCard}>
+              <View style={[styles.bodyCard, isEditingBody && styles.bodyCardEditing]}>
                 <TextInput
                   value={emailBody}
                   onChangeText={onEmailBodyChange}
+                  onFocus={handleBodyFocus}
+                  onBlur={handleBodyBlur}
                   mode="flat"
-                  style={styles.bodyInput}
+                  style={[styles.bodyInput, isEditingBody && styles.bodyInputEditing]}
                   multiline
                   numberOfLines={12}
                   underlineColor="transparent"
@@ -400,8 +474,8 @@ export function InvoiceEmailPreviewModal({
             )}
           </View>
 
-          {/* Photo attachment toggle */}
-          {hasPhotos && (
+          {/* Photo attachment toggle - hidden when editing body */}
+          {!isEditingBody && hasPhotos && (
             <View style={styles.sectionCard}>
               <View style={styles.toggleRow}>
                 <View style={styles.toggleLeft}>
@@ -422,45 +496,55 @@ export function InvoiceEmailPreviewModal({
             </View>
           )}
 
-          {/* Info note */}
-          <View style={styles.infoNote}>
-            <MaterialCommunityIcons name="information-outline" size={16} color={colors.textMuted} />
-            <Text style={styles.infoText}>
-              The email will include a pricing breakdown, payment details, and a PDF invoice attachment.{hasPhotos && includePhotos ? ' Job photos will be attached.' : ''}
-            </Text>
-          </View>
+          {/* Info note - hidden when editing body */}
+          {!isEditingBody && (
+            <View style={styles.infoNote}>
+              <MaterialCommunityIcons name="information-outline" size={16} color={colors.textMuted} />
+              <Text style={styles.infoText}>
+                The email will include a pricing breakdown, payment details, and a PDF invoice attachment.{hasPhotos && includePhotos ? ' Job photos will be attached.' : ''}
+              </Text>
+            </View>
+          )}
         </ScrollView>
 
-        {/* Send buttons */}
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <View style={styles.footerButtons}>
-            {ownerEmail ? (
-              <Button
-                mode="outlined"
-                onPress={handleTestSend}
-                loading={sendingTest}
-                disabled={sendingTest || sending || !emailBody.trim() || isRegenerating}
-                style={styles.testButton}
-                contentStyle={styles.sendButtonContent}
-                icon="email-check-outline"
-                compact
-              >
-                {sendingTest ? 'Sending...' : 'Test Send'}
-              </Button>
-            ) : null}
-            <Button
-              mode="contained"
-              onPress={handleSend}
-              loading={sending}
-              disabled={sending || sendingTest || !emailBody.trim() || !!validateEmail(recipientEmail) || isRegenerating}
-              style={styles.sendButton}
-              contentStyle={styles.sendButtonContent}
-              icon="send"
-            >
-              {sending ? 'Sending...' : 'Send Invoice'}
-            </Button>
+        {/* Footer: Done bar when editing body, send buttons otherwise */}
+        {isEditingBody ? (
+          <View style={styles.doneBar}>
+            <TouchableOpacity onPress={() => Keyboard.dismiss()} style={styles.doneButton}>
+              <Text style={styles.doneButtonText}>Done</Text>
+            </TouchableOpacity>
           </View>
-        </View>
+        ) : !isKeyboardVisible ? (
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <View style={styles.footerButtons}>
+              {ownerEmail ? (
+                <Button
+                  mode="outlined"
+                  onPress={handleTestSend}
+                  loading={sendingTest}
+                  disabled={sendingTest || sending || !emailBody.trim() || isRegenerating}
+                  style={styles.testButton}
+                  contentStyle={styles.sendButtonContent}
+                  icon="email-check-outline"
+                  compact
+                >
+                  {sendingTest ? 'Sending...' : 'Test Send'}
+                </Button>
+              ) : null}
+              <Button
+                mode="contained"
+                onPress={handleSend}
+                loading={sending}
+                disabled={sending || sendingTest || !emailBody.trim() || !!validateEmail(recipientEmail) || isRegenerating}
+                style={styles.sendButton}
+                contentStyle={styles.sendButtonContent}
+                icon="send"
+              >
+                {sending ? 'Sending...' : 'Send Invoice'}
+              </Button>
+            </View>
+          </View>
+        ) : null}
       </KeyboardAvoidingView>
 
       {/* Alert modals rendered outside KAV so they appear on top */}
@@ -521,6 +605,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
   },
+  scrollContentEditing: {
+    flexGrow: 1,
+  },
   sectionCard: {
     backgroundColor: colors.surface,
     borderRadius: 14,
@@ -577,10 +664,16 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '600',
   },
+  sectionCardEditing: {
+    flex: 1,
+  },
   bodyCard: {
     backgroundColor: colors.background,
     borderRadius: 10,
     overflow: 'hidden',
+  },
+  bodyCardEditing: {
+    flex: 1,
   },
   bodyInput: {
     backgroundColor: 'transparent',
@@ -589,6 +682,10 @@ const styles = StyleSheet.create({
     minHeight: 200,
     paddingHorizontal: 4,
     paddingTop: 4,
+  },
+  bodyInputEditing: {
+    flex: 1,
+    minHeight: undefined,
   },
   generatingContainer: {
     alignItems: 'center',
@@ -698,5 +795,49 @@ const styles = StyleSheet.create({
   },
   sendButtonContent: {
     paddingVertical: 8,
+  },
+  collapsedBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+    gap: 8,
+  },
+  collapsedBarContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  collapsedBarText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    flexShrink: 1,
+  },
+  collapsedBarDivider: {
+    fontSize: 13,
+    color: colors.border,
+    marginHorizontal: 2,
+  },
+  doneBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  doneButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  doneButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.primary,
   },
 });

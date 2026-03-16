@@ -202,11 +202,11 @@ export function TourTooltip({
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    zIndex: 1001,
+    zIndex: 9999,
   },
   caretContainer: {
     position: 'absolute',
-    zIndex: 1002,
+    zIndex: 10000,
   },
   card: {
     borderRadius: 12,

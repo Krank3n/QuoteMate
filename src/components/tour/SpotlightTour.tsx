@@ -137,6 +137,17 @@ export function SpotlightTour({ active, onFinish, onSkip, scrollRef, stepOffset 
 
   return (
     <Portal>
+      {/* Touch-blocking layer — intercepts ALL touches while tour is active.
+           Tapping anywhere (outside tooltip buttons) advances to the next step. */}
+      <View
+        style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.01)', zIndex: 9998 }]}
+        pointerEvents="auto"
+        onStartShouldSetResponder={() => true}
+        onStartShouldSetResponderCapture={() => true}
+        onMoveShouldSetResponder={() => true}
+        onMoveShouldSetResponderCapture={() => true}
+        onResponderRelease={() => { if (isVisible) handleNext(); }}
+      />
       <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
         <View style={StyleSheet.absoluteFill}>
           <SpotlightOverlay target={targetRect} visible={isVisible} />

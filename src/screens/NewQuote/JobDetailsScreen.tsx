@@ -1442,7 +1442,7 @@ export function JobDetailsScreen() {
         stepOffset={unifiedTourActive ? PHASE_STEP_OFFSETS.jobDetails : TOUR_STEPS.length}
         globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : INTRO_TOUR_TOTAL_STEPS}
         scrollRef={scrollRef}
-        scrollPositions={{ micButton: 0, jobDescription: 0, jobDescriptionCleaned: 0, jobPhotoThumbnail: 600, annotatorCanvas: 0, annotatorTools: 0, annotatorDone: 0, jobPhotoAnnotated: 600 }}
+        scrollPositions={{ micButton: 0, jobDescription: 0, jobDescriptionCleaned: 200, jobPhotoThumbnail: 600, annotatorCanvas: 0, annotatorTools: 0, annotatorDone: 0, jobPhotoAnnotated: 600 }}
         onActiveChange={setTourActive}
         unifiedMode={unifiedTourActive && unifiedTourPhase === 'jobDetails'}
         onScreenComplete={() => notifyScreenComplete('jobDetails')}

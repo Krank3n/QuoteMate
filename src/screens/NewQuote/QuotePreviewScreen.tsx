@@ -116,9 +116,10 @@ export function QuotePreviewScreen() {
   const checkScale = useRef(new Animated.Value(0)).current;
   const subtitleOpacity = useRef(new Animated.Value(0)).current;
 
-  // Auto-save on mount
+  // Auto-save on mount (skip during unified tour — dummy quote shouldn't be saved)
   useEffect(() => {
     if (!currentQuote) return;
+    if (unifiedTourActive) return;
 
     // Start celebration immediately — don't wait for save
     setShowSuccess(true);

@@ -40,6 +40,8 @@ interface QuoteCardProps {
   onSave: (quote: Quote) => void;
   onStatusChange?: (quote: Quote) => void;
   onConvertToInvoice?: (quote: Quote) => void;
+  /** Exposed ref to programmatically open the swipeable actions */
+  swipeableRef?: React.RefObject<any>;
 }
 
 export const QuoteCard = React.memo(function QuoteCard({
@@ -52,6 +54,7 @@ export const QuoteCard = React.memo(function QuoteCard({
   onSave,
   onStatusChange,
   onConvertToInvoice,
+  swipeableRef,
 }: QuoteCardProps) {
   const [menuVisible, setMenuVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -205,6 +208,7 @@ export const QuoteCard = React.memo(function QuoteCard({
       leftActions={[
         { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteQuote },
       ]}
+      swipeableRef={swipeableRef}
     >
       <Animated.View style={{ transform: [{ scale: scaleAnim }, { translateY: idleAnim }, { rotate: idleTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
       <Card style={styles.quoteCard}>

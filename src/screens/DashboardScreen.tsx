@@ -261,6 +261,7 @@ export function DashboardScreen() {
   const recentRef = useRef<View>(null);
   const referralRef = useRef<View>(null);
   const recentQuoteCardRef = useRef<View>(null);
+  const firstQuoteSwipeRef = useRef<any>(null);
 
   useEffect(() => {
     if (headerRef.current) registerRef('header', headerRef.current);
@@ -750,6 +751,7 @@ export function DashboardScreen() {
                   onSave={saveQuote}
                   onStatusChange={handleOpenStatusSheet}
                   onConvertToInvoice={handleConvertToInvoice}
+                  swipeableRef={index === 0 ? firstQuoteSwipeRef : undefined}
                 />
                 </View>
               </AnimatedListItem>
@@ -828,6 +830,18 @@ export function DashboardScreen() {
         globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
         scrollRef={scrollRef}
         scrollPositions={{ recentQuoteCard: 600 }}
+        onStepChange={(() => {
+          let stepCount = 0;
+          return (stepId: string) => {
+            stepCount++;
+            // Second time 'recentQuoteCard' fires = the last step. Auto-swipe to show delete.
+            if (stepId === 'recentQuoteCard' && stepCount > 1) {
+              setTimeout(() => {
+                firstQuoteSwipeRef.current?.openLeft?.();
+              }, 500);
+            }
+          };
+        })()}
       />
     )}
 

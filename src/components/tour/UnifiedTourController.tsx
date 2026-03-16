@@ -6,6 +6,9 @@
  */
 
 import { useRef, useCallback, useState } from 'react';
+import { View, StyleSheet, Modal, ActivityIndicator } from 'react-native';
+import { Text, Button } from 'react-native-paper';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../../store/useStore';
 import { TourPhase, getNextPhase } from './tourFlow';
@@ -18,6 +21,7 @@ import {
   TOUR_LABOR,
 } from './tourDummyData';
 import { TourSkipModal } from './TourSkipModal';
+import { colors } from '../../theme';
 
 // ─── Shared refs for screens to call back into the controller ───
 // Using module-level refs avoids prop drilling through navigation
@@ -43,11 +47,14 @@ export function UnifiedTourController() {
     currentQuote,
     setUnifiedTourPhase,
     updateQuote,
+    saveDraft,
     skipUnifiedTour,
     endUnifiedTour,
   } = useStore();
 
   const [showSkipModal, setShowSkipModal] = useState(false);
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [exitType, setExitType] = useState<'skip' | 'complete'>('skip');
   const isNavigating = useRef(false);
 
   /** Show the skip confirmation modal */
@@ -55,15 +62,36 @@ export function UnifiedTourController() {
     setShowSkipModal(true);
   }, []);
 
-  /** User confirmed skip — clean up and go home */
+  /** User confirmed skip — show exit screen, clean up in background */
   const handleConfirmSkip = useCallback(async () => {
     setShowSkipModal(false);
+    setExitType('skip');
+    setShowExitModal(true);
+
+    // Clean up in background
     await skipUnifiedTour();
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'Main' }],
-    });
+
+    // Brief pause so the message is readable
+    setTimeout(() => {
+      setShowExitModal(false);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Main' }],
+      });
+    }, 2000);
   }, [skipUnifiedTour, navigation]);
+
+  /** Tour completed naturally — show exit screen */
+  const handleTourComplete = useCallback(async () => {
+    setExitType('complete');
+    setShowExitModal(true);
+
+    await endUnifiedTour();
+
+    setTimeout(() => {
+      setShowExitModal(false);
+    }, 2500);
+  }, [endUnifiedTour]);
 
   /** User wants to keep going */
   const handleResume = useCallback(() => {
@@ -82,10 +110,9 @@ export function UnifiedTourController() {
     const next = getNextPhase(completedPhase);
 
     if (!next) {
-      // Tour is done! Just clean up — we're already on the dashboard
-      endUnifiedTour().then(() => {
-        isNavigating.current = false;
-      });
+      // Tour is done! Show completion screen
+      handleTourComplete();
+      isNavigating.current = false;
       return;
     }
 
@@ -178,7 +205,10 @@ export function UnifiedTourController() {
         break;
 
       case 'dashboardComplete':
-        // Quote preview complete → save the quote, go back to dashboard to show the card
+        // Quote preview complete → save the quote once, go back to dashboard to show the card
+        if (currentQuote) {
+          saveDraft(currentQuote);
+        }
         navigation.reset({
           index: 0,
           routes: [{ name: 'Main' }],
@@ -191,7 +221,7 @@ export function UnifiedTourController() {
     setTimeout(() => {
       isNavigating.current = false;
     }, 250);
-  }, [unifiedTourActive, currentQuote, navigation, setUnifiedTourPhase, updateQuote, endUnifiedTour]);
+  }, [unifiedTourActive, currentQuote, navigation, setUnifiedTourPhase, updateQuote, endUnifiedTour, saveDraft, handleTourComplete]);
 
   // Expose handleScreenComplete and handleSkipRequest via store-like pattern
   // Screens access these via the exported context
@@ -200,10 +230,85 @@ export function UnifiedTourController() {
   skipRequestRef.current = handleSkipRequest;
 
   return (
-    <TourSkipModal
-      visible={showSkipModal}
-      onResume={handleResume}
-      onConfirmSkip={handleConfirmSkip}
-    />
+    <>
+      <TourSkipModal
+        visible={showSkipModal}
+        onResume={handleResume}
+        onConfirmSkip={handleConfirmSkip}
+      />
+
+      {/* Exit screen — shown during skip/complete while cleanup happens */}
+      <Modal visible={showExitModal} transparent animationType="fade">
+        <View style={exitStyles.backdrop}>
+          <View style={exitStyles.card}>
+            <MaterialCommunityIcons
+              name={exitType === 'complete' ? 'party-popper' : 'hand-wave'}
+              size={56}
+              color={exitType === 'complete' ? colors.primary : '#eab308'}
+              style={exitStyles.icon}
+            />
+            <Text style={exitStyles.title}>
+              {exitType === 'complete'
+                ? "You bloody ripper!"
+                : "No worries, legend!"}
+            </Text>
+            <Text style={exitStyles.message}>
+              {exitType === 'complete'
+                ? "You've smashed through the whole tour — you're a QuoteMate pro now. Time to crank out some real quotes!"
+                : "The demo's been cleaned up. You can always take the tour again from Settings whenever you want."}
+            </Text>
+            <ActivityIndicator size="small" color={colors.primary} style={exitStyles.spinner} />
+            <Text style={exitStyles.hint}>
+              {exitType === 'complete'
+                ? "Tidying up Davo's quote..."
+                : "Cleaning up..."}
+            </Text>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
+
+const exitStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 32,
+    width: '100%',
+    maxWidth: 340,
+    alignItems: 'center',
+  },
+  icon: {
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  message: {
+    fontSize: 14,
+    color: colors.onSurface,
+    textAlign: 'center',
+    lineHeight: 21,
+    marginBottom: 24,
+  },
+  spinner: {
+    marginBottom: 8,
+  },
+  hint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: 'center',
+  },
+});

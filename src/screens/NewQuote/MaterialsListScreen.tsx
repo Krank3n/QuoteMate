@@ -334,6 +334,7 @@ export function MaterialsListScreen() {
   const fetchPricesButtonRef = useRef<View>(null);
   const materialsScrollRef = useRef<ScrollView>(null);
   const [tourActive, setTourActive] = useState(false);
+  const tourPastFetchRef = useRef(false);
 
   useEffect(() => {
     if (aiGenerateRef.current) registerRef('aiGenerateCard', aiGenerateRef.current);
@@ -1907,15 +1908,23 @@ export function MaterialsListScreen() {
                 if (!unifiedTourActive) return;
                 const quote = currentQuote;
                 if (!quote) return;
-                if (stepId === 'fetchPricesButton') {
-                  // Simulate price fetch when advancing past the "Strewth" step
+                // onStepChange fires with the UPCOMING step id when user taps Next.
+                // Sequence: firstMaterialItem(0) → fetchPricesButton(1) → firstMaterialItem(2) → addMaterialButton(3)
+                // We want to inject prices when advancing TO step 2 (past fetchPricesButton).
+                // At that point, stepId='firstMaterialItem' but we've already seen fetchPricesButton.
+                if (stepId === 'addMaterialButton' && materials.length > 0) {
+                  // Advancing past the priced list — expand first item to show deets
+                  setExpandedMaterials(new Set([materials[0].id]));
+                } else if (stepId === 'firstMaterialItem' && tourPastFetchRef.current) {
+                  // Advancing past fetchPricesButton → inject prices now
                   const pricedMaterials = getTourMaterialsPriced();
                   storeUpdateQuote({ ...quote, materials: pricedMaterials });
-                } else if (stepId === 'firstMaterialItem') {
-                  // Second time we hit firstMaterialItem — after prices. Expand first item.
-                  if (materials.some(m => m.price > 0) && materials.length > 0) {
-                    setExpandedMaterials(new Set([materials[0].id]));
+                  if (pricedMaterials.length > 0) {
+                    setExpandedMaterials(new Set([pricedMaterials[0].id]));
                   }
+                } else if (stepId === 'fetchPricesButton') {
+                  // Mark that we've seen the fetch prices step
+                  tourPastFetchRef.current = true;
                 }
               }}
             />

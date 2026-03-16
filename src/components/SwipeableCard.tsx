@@ -26,12 +26,15 @@ interface SwipeableCardProps {
   children: React.ReactNode;
   leftActions?: SwipeAction[];
   rightActions?: SwipeAction[];
+  /** Exposed ref to programmatically open/close the swipeable */
+  swipeableRef?: React.RefObject<Swipeable>;
 }
 
 const ACTION_WIDTH = 72;
 
-export function SwipeableCard({ children, leftActions, rightActions }: SwipeableCardProps) {
-  const swipeableRef = useRef<Swipeable>(null);
+export function SwipeableCard({ children, leftActions, rightActions, swipeableRef: externalRef }: SwipeableCardProps) {
+  const internalRef = useRef<Swipeable>(null);
+  const swipeableRef = externalRef || internalRef;
 
   if (Platform.OS === 'web') {
     return <>{children}</>;
