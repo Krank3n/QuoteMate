@@ -4678,6 +4678,30 @@ interface AnalyticsData {
     activeLastMonth: number;
     neverReturned: number;
   };
+ma  referrals: {
+    totalCodes: number;
+    totalReferrals: number;
+    convertedReferrals: number;
+    pendingReferrals: number;
+    rewardMonthsGranted: number;
+    affiliates: Array<{
+      email: string;
+      referralCode: string;
+      totalReferrals: number;
+      convertedReferrals: number;
+      commissionRate: number;
+      totalEarnings: number;
+      pendingEarnings: number;
+      paidEarnings: number;
+    }>;
+    topReferrers: Array<{
+      email: string;
+      referralCode: string;
+      totalReferrals: number;
+      convertedReferrals: number;
+      rewardMonthsEarned: number;
+    }>;
+  };
 }
 
 async function getAdminAnalyticsData(): Promise<AnalyticsData> {
@@ -4839,6 +4863,56 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
     }));
   }
 
+  // Referral data
+  let totalReferralCodes = 0;
+  let totalReferralsCount = 0;
+  let totalConvertedReferrals = 0;
+  let totalPendingReferrals = 0;
+  let totalRewardMonthsGranted = 0;
+  const affiliatesList: AnalyticsData['referrals']['affiliates'] = [];
+  const topReferrersList: AnalyticsData['referrals']['topReferrers'] = [];
+
+  for (const au of authUsers) {
+    try {
+      const referralDoc = await db.doc(`users/${au.uid}/profile/referral`).get();
+      if (!referralDoc.exists) continue;
+      const r = referralDoc.data()!;
+      if (!r.referralCode) continue;
+
+      totalReferralCodes++;
+      totalReferralsCount += r.totalReferrals || 0;
+      totalConvertedReferrals += r.convertedReferrals || 0;
+      totalRewardMonthsGranted += r.rewardMonthsEarned || 0;
+      if (r.referralPendingSince && !r.referralConverted) totalPendingReferrals++;
+
+      const email = authMap.get(au.uid)?.email || 'unknown';
+
+      if (r.isAffiliate) {
+        affiliatesList.push({
+          email,
+          referralCode: r.referralCode,
+          totalReferrals: r.totalReferrals || 0,
+          convertedReferrals: r.convertedReferrals || 0,
+          commissionRate: r.commissionRate || 0,
+          totalEarnings: r.totalEarnings || 0,
+          pendingEarnings: r.pendingEarnings || 0,
+          paidEarnings: r.paidEarnings || 0,
+        });
+      }
+
+      if ((r.totalReferrals || 0) > 0) {
+        topReferrersList.push({
+          email,
+          referralCode: r.referralCode,
+          totalReferrals: r.totalReferrals || 0,
+          convertedReferrals: r.convertedReferrals || 0,
+          rewardMonthsEarned: r.rewardMonthsEarned || 0,
+        });
+      }
+    } catch { /* skip */ }
+  }
+  topReferrersList.sort((a, b) => b.totalReferrals - a.totalReferrals);
+
   // Top-level collections
   const [cancellationsSnap, tokensSnap] = await Promise.all([
     db.collection('cancellations').get(),
@@ -4922,6 +4996,15 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
       activeLastMonth,
       neverReturned,
     },
+    referrals: {
+      totalCodes: totalReferralCodes,
+      totalReferrals: totalReferralsCount,
+      convertedReferrals: totalConvertedReferrals,
+      pendingReferrals: totalPendingReferrals,
+      rewardMonthsGranted: totalRewardMonthsGranted,
+      affiliates: affiliatesList,
+      topReferrers: topReferrersList.slice(0, 20),
+    },
   };
 }
 
@@ -4970,6 +5053,40 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
       <span class="trend-label">${m.substring(2)}</span>
     </div>`;
   }).join('');
+
+  // Referrals section
+  const referralsKpiHtml = `
+    <div class="kpi-grid" style="margin-bottom:0">
+      <div class="kpi"><div class="value">${d.referrals.totalCodes}</div><div class="label">Referral Codes</div></div>
+      <div class="kpi"><div class="value">${d.referrals.totalReferrals}</div><div class="label">Total Referrals</div></div>
+      <div class="kpi"><div class="value">${d.referrals.convertedReferrals}</div><div class="label">Converted</div></div>
+      <div class="kpi"><div class="value">${d.referrals.pendingReferrals}</div><div class="label">Pending (30d)</div></div>
+      <div class="kpi"><div class="value">${d.referrals.rewardMonthsGranted}</div><div class="label">Months Granted</div></div>
+      <div class="kpi"><div class="value">${d.referrals.affiliates.length}</div><div class="label">Affiliates</div></div>
+    </div>`;
+
+  const affiliatesRowsHtml = d.referrals.affiliates.length > 0
+    ? d.referrals.affiliates.map(a => `<tr>
+        <td>${escapeHtml(a.email)}</td>
+        <td><code>${escapeHtml(a.referralCode)}</code></td>
+        <td class="num">${a.totalReferrals}</td>
+        <td class="num">${a.convertedReferrals}</td>
+        <td class="num">${(a.commissionRate * 100).toFixed(0)}%</td>
+        <td class="num">$${(a.totalEarnings / 100).toFixed(2)}</td>
+        <td class="num">$${(a.pendingEarnings / 100).toFixed(2)}</td>
+        <td class="num">$${(a.paidEarnings / 100).toFixed(2)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="8" class="muted" style="text-align:center">No affiliates yet</td></tr>';
+
+  const topReferrersRowsHtml = d.referrals.topReferrers.length > 0
+    ? d.referrals.topReferrers.map(r => `<tr>
+        <td>${escapeHtml(r.email)}</td>
+        <td><code>${escapeHtml(r.referralCode)}</code></td>
+        <td class="num">${r.totalReferrals}</td>
+        <td class="num">${r.convertedReferrals}</td>
+        <td class="num">${r.rewardMonthsEarned}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" class="muted" style="text-align:center">No referrals yet</td></tr>';
 
   // Users table
   const usersRowsHtml = d.users.map(u => {
@@ -5162,6 +5279,37 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
       <span><span class="legend-dot" style="background:#f97316"></span> Quotes</span>
     </div>
     <div class="trends-container">${trendsHtml}</div>
+  </div>
+
+  <!-- Referrals & Affiliates -->
+  <div class="card">
+    <h2>Referrals & Affiliates</h2>
+    ${referralsKpiHtml}
+  </div>
+
+  <div class="two-col">
+    <div class="card">
+      <h2>Affiliates</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Email</th><th>Code</th><th>Referrals</th><th>Converted</th><th>Rate</th><th>Total</th><th>Pending</th><th>Paid</th>
+          </tr></thead>
+          <tbody>${affiliatesRowsHtml}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Top Referrers</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Email</th><th>Code</th><th>Referrals</th><th>Converted</th><th>Months Earned</th>
+          </tr></thead>
+          <tbody>${topReferrersRowsHtml}</tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <!-- Users Table -->

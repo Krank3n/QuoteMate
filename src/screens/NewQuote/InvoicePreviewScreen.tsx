@@ -22,6 +22,7 @@ import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { calculateDueDate, formatPaymentTerms } from '../../utils/invoiceCalculator';
 import { SuccessModal } from '../../components/SuccessModal';
+import { SendInvoiceButton } from '../../components/SendInvoiceButton';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { PaymentTerms, InvoiceStatus } from '../../types';
 
@@ -133,8 +134,16 @@ export function InvoicePreviewScreen() {
         message="Your invoice has been saved successfully and is ready to send to your customer."
         buttonText="Back to Invoices"
         icon="check-circle"
-        invoice={currentInvoice}
-        businessSettings={businessSettings}
+        secondaryActionComponent={
+          currentInvoice && businessSettings ? (
+            <SendInvoiceButton
+              invoice={currentInvoice}
+              businessSettings={businessSettings}
+              buttonMode="outlined"
+              buttonStyle={{ width: '100%', paddingVertical: 6, borderColor: colors.primary }}
+            />
+          ) : undefined
+        }
       />
 
       <ScrollView

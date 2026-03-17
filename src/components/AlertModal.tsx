@@ -14,9 +14,6 @@ import {
   IconButton,
 } from 'react-native-paper';
 import { colors } from '../theme';
-import { Quote, Invoice, BusinessSettings } from '../types';
-import { SendQuoteButton } from './SendQuoteButton';
-import { SendInvoiceButton } from './SendInvoiceButton';
 import { successTap, errorTap } from '../utils/haptics';
 
 export type AlertType = 'success' | 'warning' | 'error' | 'info';
@@ -34,11 +31,7 @@ interface AlertModalProps {
   secondaryButtonText?: string;
   secondaryButtonAction?: () => void;
   secondaryButtonLoading?: boolean;
-  // Special props for quote-related modals
-  quote?: Quote;
-  // Special props for invoice-related modals
-  invoice?: Invoice;
-  businessSettings?: BusinessSettings | null;
+  secondaryActionComponent?: React.ReactNode;
 }
 
 // Simple confetti piece
@@ -108,9 +101,7 @@ export function AlertModal({
   secondaryButtonText,
   secondaryButtonAction,
   secondaryButtonLoading = false,
-  quote,
-  invoice,
-  businessSettings,
+  secondaryActionComponent,
 }: AlertModalProps) {
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -334,21 +325,8 @@ export function AlertModal({
           <Text style={styles.message}>{message}</Text>
 
           <View style={styles.buttonContainer}>
-            {/* Quote or Invoice send button */}
-            {quote && businessSettings ? (
-              <SendQuoteButton
-                quote={quote}
-                businessSettings={businessSettings}
-                buttonMode="outlined"
-                buttonStyle={[styles.button, styles.secondaryButton]}
-              />
-            ) : invoice && businessSettings ? (
-              <SendInvoiceButton
-                invoice={invoice}
-                businessSettings={businessSettings}
-                buttonMode="outlined"
-                buttonStyle={[styles.button, styles.secondaryButton]}
-              />
+            {secondaryActionComponent ? (
+              secondaryActionComponent
             ) : secondaryButtonText && secondaryButtonAction ? (
               <Button
                 mode="outlined"
