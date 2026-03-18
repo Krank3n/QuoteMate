@@ -649,8 +649,6 @@ class FirestoreService {
           referredBy: data.referredBy || null,
           totalReferrals: data.totalReferrals || 0,
           convertedReferrals: data.convertedReferrals || 0,
-          rewardMonthsEarned: data.rewardMonthsEarned || 0,
-          rewardExpiresAt: data.rewardExpiresAt ? new Date(data.rewardExpiresAt.toDate ? data.rewardExpiresAt.toDate() : data.rewardExpiresAt) : null,
           // Affiliate fields
           isAffiliate: data.isAffiliate || false,
           commissionRate: data.commissionRate || 0.50,

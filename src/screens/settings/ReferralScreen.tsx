@@ -2,7 +2,7 @@
  * Referral Screen
  * Two distinct experiences:
  * - Affiliates: QR-first layout with earnings dashboard and commission tracking
- * - Regular users: Simple referral code sharing for 3 months free Pro
+ * - Regular users: Simple referral code sharing to help friends discover the app
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -95,8 +95,6 @@ export function ReferralScreen() {
   const commissionPercent = referralInfo?.commissionRate
     ? Math.round(referralInfo.commissionRate * 100) : 80;
 
-  const hasActiveReward = referralInfo?.rewardExpiresAt && new Date(referralInfo.rewardExpiresAt) > new Date();
-
   const handleGenerateCode = async () => {
     if (!auth.currentUser) {
       showModal('warning', 'Sign In Required', 'Please sign in to get your referral code.');
@@ -110,7 +108,7 @@ export function ReferralScreen() {
       const data = result.data as { referralCode: string };
       setReferralInfo({
         referralCode: data.referralCode, referredBy: null,
-        totalReferrals: 0, convertedReferrals: 0, rewardMonthsEarned: 0, rewardExpiresAt: null,
+        totalReferrals: 0, convertedReferrals: 0,
         isAffiliate: false, commissionRate: 0, totalEarnings: 0, pendingEarnings: 0, paidEarnings: 0, lastPayoutAt: null,
       });
     } catch (error: any) {
@@ -401,12 +399,6 @@ export function ReferralScreen() {
                       </View>
                     </View>
 
-                    {hasActiveReward && (
-                      <View style={styles.rewardBadge}>
-                        <MaterialCommunityIcons name="crown" size={18} color={colors.secondary} />
-                        <Text style={styles.rewardText}>Free Pro until {formatDate(new Date(referralInfo.rewardExpiresAt!))}</Text>
-                      </View>
-                    )}
                   </Surface>
                 )}
 
@@ -552,44 +544,24 @@ export function ReferralScreen() {
               <Text style={styles.adScanText}>Scan to download on iOS & Android</Text>
 
               <View style={styles.regularQrSubtext}>
-                <MaterialCommunityIcons name="gift" size={18} color={colors.secondary} />
+                <MaterialCommunityIcons name="account-plus" size={18} color={colors.primary} />
                 <Text style={styles.regularQrSubtextText}>
-                  You get 3 months free Pro when they sign up!
+                  Help your mates discover QuoteMate!
                 </Text>
               </View>
 
-              <View style={styles.buttonRow}>
-                <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-                  <MaterialCommunityIcons name="share-variant" size={20} color={colors.white} />
-                  <Text style={styles.shareButtonText}>Share with Mates</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.codeToggleButton}
-                  onPress={() => { handleCopyCode(); setShowCode(true); }}
-                >
-                  <MaterialCommunityIcons
-                    name={copied ? 'check' : 'content-copy'} size={20}
-                    color={copied ? colors.success : colors.primary}
-                  />
-                  <Text style={[styles.codeToggleText, copied && { color: colors.success }]}>
-                    {copied ? 'Copied!' : 'Code'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {showCode && (
-                <View style={styles.codeBox}>
-                  <Text style={styles.codeText}>{referralInfo.referralCode}</Text>
-                </View>
-              )}
+              <TouchableOpacity style={[styles.shareButton, { alignSelf: 'center' }]} onPress={handleShare}>
+                <MaterialCommunityIcons name="share-variant" size={20} color={colors.white} />
+                <Text style={styles.shareButtonText}>Share with Mates</Text>
+              </TouchableOpacity>
             </Surface>
           ) : (
             <Surface style={styles.heroCard}>
-              <MaterialCommunityIcons name="gift" size={48} color={colors.secondary} />
-              <Title style={styles.heroTitle}>Refer a Friend, Get 3 Months Free</Title>
+              <MaterialCommunityIcons name="account-plus" size={48} color={colors.primary} />
+              <Title style={styles.heroTitle}>Refer a Friend</Title>
               <Text style={styles.heroText}>
-                Share your referral code with mates. When they sign up and upgrade to Pro,
-                you get 3 months of free Pro access.
+                Share your referral code with mates and help them discover QuoteMate
+                for creating professional trade quotes.
               </Text>
               {renderGenerateCode()}
             </Surface>
@@ -612,36 +584,6 @@ export function ReferralScreen() {
             </View>
           )}
 
-          {/* Stats */}
-          {referralInfo?.referralCode && (
-            <Surface style={styles.card}>
-              <Title style={styles.sectionTitle}>Your Stats</Title>
-              <View style={styles.statsRow}>
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>{referralInfo.totalReferrals}</Text>
-                  <Text style={styles.statLabel}>Referrals</Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>{referralInfo.convertedReferrals}</Text>
-                  <Text style={styles.statLabel}>Converted</Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>{referralInfo.rewardMonthsEarned}</Text>
-                  <Text style={styles.statLabel}>Months Earned</Text>
-                </View>
-              </View>
-
-              {hasActiveReward && (
-                <View style={styles.rewardBadge}>
-                  <MaterialCommunityIcons name="crown" size={18} color={colors.secondary} />
-                  <Text style={styles.rewardText}>Free Pro until {formatDate(new Date(referralInfo.rewardExpiresAt!))}</Text>
-                </View>
-              )}
-            </Surface>
-          )}
-
           {renderApplyCode()}
 
           {/* How it works */}
@@ -650,8 +592,7 @@ export function ReferralScreen() {
             {[
               { step: '1', text: 'Share your unique referral code with friends' },
               { step: '2', text: 'They sign up and enter your code' },
-              { step: '3', text: 'When they upgrade to Pro, you get 3 months free' },
-              { step: '4', text: 'No limit — refer more friends, earn more free months' },
+              { step: '3', text: 'Track how many mates you\'ve referred' },
             ].map((item) => (
               <View key={item.step} style={styles.stepRow}>
                 <View style={styles.stepCircle}>
@@ -723,22 +664,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: colors.white,
-  },
-  rewardBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.secondary + '15',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    marginTop: 16,
-    gap: 8,
-  },
-  rewardText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.secondary,
   },
   copiedText: {
     fontSize: 13,

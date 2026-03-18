@@ -844,14 +844,14 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
 
     console.log(`✅ Firestore updated for user ${userId}: isPro=${isActive}`);
 
-    // Process referral reward if this user was referred and just became Pro
+    // Process referral commission if this user was referred and just became Pro
     if (isActive) {
       try {
         const priceId = subscription.items.data[0]?.price?.id || '';
         const amountCents = subscription.items.data[0]?.price?.unit_amount || 0;
-        await processReferralReward(userId, 'web', priceId, amountCents);
+        await processReferralCommission(userId, 'web', priceId, amountCents);
       } catch (refError) {
-        console.error('Referral reward processing failed (non-blocking):', refError);
+        console.error('Referral commission processing failed (non-blocking):', refError);
       }
     }
   } catch (error) {
@@ -934,7 +934,7 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
     const priceId = lineItem.price?.id || '';
 
     if (amountCents > 0 && priceId) {
-      await processReferralReward(userId, 'web', priceId, amountCents);
+      await processReferralCommission(userId, 'web', priceId, amountCents);
     }
   } catch (error) {
     console.error('Error processing affiliate commission on invoice payment:', error);
@@ -1215,12 +1215,12 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
 
       console.log(`✅ Apple receipt ${appleValidated ? 'validated' : 'saved (unvalidated)'} for user ${userId}`);
 
-      // Process referral reward
+      // Process referral commission
       try {
         const grossCents = PRODUCT_PRICES[productId] || 2900;
-        await processReferralReward(userId, 'ios', productId, grossCents);
+        await processReferralCommission(userId, 'ios', productId, grossCents);
       } catch (refError) {
-        console.error('Referral reward processing failed (non-blocking):', refError);
+        console.error('Referral commission processing failed (non-blocking):', refError);
       }
 
       res.status(200).json({
@@ -1330,12 +1330,12 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
 
       console.log(`✅ Google receipt ${googleValidated ? 'validated' : 'saved (unvalidated)'} for user ${userId}`);
 
-      // Process referral reward
+      // Process referral commission
       try {
         const grossCents = PRODUCT_PRICES[productId] || 2900;
-        await processReferralReward(userId, 'android', productId, grossCents);
+        await processReferralCommission(userId, 'android', productId, grossCents);
       } catch (refError) {
-        console.error('Referral reward processing failed (non-blocking):', refError);
+        console.error('Referral commission processing failed (non-blocking):', refError);
       }
 
       res.status(200).json({
@@ -1642,8 +1642,20 @@ Example:
 // Token cache to avoid requesting a new token on every call
 let reeceTokenCache: { token: string; expiresAt: number } | null = null;
 
+// Reece API environment configuration
+const REECE_USE_TEST_ENV = (functions.config().reece?.use_test_env || process.env.REECE_USE_TEST_ENV || 'true') === 'true';
+const REECE_AUTH_BASE_URL = REECE_USE_TEST_ENV
+  ? 'https://auth.api.test.reecegroup.com.au'
+  : 'https://auth.api.reecegroup.com.au';
+const REECE_API_BASE_URL = REECE_USE_TEST_ENV
+  ? 'https://open.api.test.reecegroup.com.au'
+  : 'https://open.api.reecegroup.com.au';
+const REECE_REGION = functions.config().reece?.region || process.env.REECE_REGION || 'au';
+
 /**
  * Get OAuth token for Reece API
+ * Uses OAuth2 client_credentials flow with Basic auth (base64 clientId:clientSecret)
+ * Token URL: {REECE_AUTH_BASE_URL}/oauth2/token
  */
 async function getReeceAuthToken(): Promise<string | null> {
   try {
@@ -1660,17 +1672,19 @@ async function getReeceAuthToken(): Promise<string | null> {
       return null;
     }
 
-    // Request OAuth token
-    const tokenResponse = await fetch('https://api.reecegroup.com.au/oauth/token', {
+    // OAuth2 client_credentials flow with Basic auth header
+    const basicAuth = Buffer.from(`${reeceClientId}:${reeceClientSecret}`).toString('base64');
+
+    const tokenResponse = await fetch(`${REECE_AUTH_BASE_URL}/oauth2/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${basicAuth}`,
       },
       body: new URLSearchParams({
         grant_type: 'client_credentials',
-        client_id: reeceClientId,
-        client_secret: reeceClientSecret,
-      }),
+        scope: 'Default/read Default/write',
+      }).toString(),
     });
 
     if (!tokenResponse.ok) {
@@ -1745,15 +1759,18 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Search for product using the catalog/search endpoint
+      // Search for product using the product-gateway/search endpoint
+      // Requires Customer-Token or Customer-Number header
+      const customerNumber = functions.config().reece?.customer_number || process.env.REECE_CUSTOMER_NUMBER;
       console.log('Searching Reece catalog for:', productName);
       const searchResponse = await fetch(
-        `https://api.reecegroup.com.au/api/v1/catalog/search?query=${encodeURIComponent(productName)}&limit=5`,
+        `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(productName)}&pageNumber=1&pageSize=5`,
         {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
+            ...(customerNumber ? { 'Customer-Number': customerNumber } : {}),
           },
         }
       );
@@ -1770,12 +1787,12 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
       // Return the first matching product if found
       if (searchData.products && searchData.products.length > 0) {
         const product = searchData.products[0];
-        console.log('Found product:', product.itemNumber, product.description);
+        console.log('Found product:', product.productId, product.productTitle);
 
         res.status(200).json({
           product: {
-            itemNumber: product.itemNumber,
-            description: product.description,
+            itemNumber: String(product.productId),
+            description: product.productTitle,
             brand: product.brand,
             category: product.category,
           },
@@ -1820,15 +1837,21 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Get pricing using the pricing endpoint
+      // Get pricing using price-gateway/price-file endpoint (MAX_JSON format)
+      // Note: Price file is a bulk download of all customer prices, not per-item lookup.
+      // For now we search the product to get inline pricing from the product search results.
+      const customerNumber = functions.config().reece?.customer_number || process.env.REECE_CUSTOMER_NUMBER;
       console.log('Getting price for Reece item:', itemNumber);
+
+      // Search by product ID to get price info from product results
       const priceResponse = await fetch(
-        `https://api.reecegroup.com.au/api/v1/pricing/${encodeURIComponent(itemNumber)}`,
+        `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(itemNumber)}&pageNumber=1&pageSize=1`,
         {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
+            ...(customerNumber ? { 'Customer-Number': customerNumber } : {}),
           },
         }
       );
@@ -1842,18 +1865,26 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
 
       const priceData = await priceResponse.json();
 
-      // Extract price (prefer GST-inclusive price)
-      const price = priceData.priceIncGst || priceData.price;
+      // Extract price from product search results
+      if (priceData.products && priceData.products.length > 0) {
+        const product = priceData.products[0];
+        const uom = product.unitOfMeasures?.[0];
+        const price = uom?.unitPriceIncludingGst || uom?.unitPriceExcludingGst;
 
-      if (price != null) {
-        console.log('Found price for', itemNumber, ':', price);
-        res.status(200).json({
-          price,
-          currency: priceData.currency || 'AUD',
-          priceIncGst: priceData.priceIncGst,
-        });
+        if (price != null) {
+          console.log('Found price for', itemNumber, ':', price);
+          res.status(200).json({
+            price,
+            currency: 'AUD',
+            priceIncGst: uom?.unitPriceIncludingGst,
+            gstRate: priceData.gstRate,
+          });
+        } else {
+          console.log('No price available for:', itemNumber);
+          res.status(200).json({ price: null });
+        }
       } else {
-        console.log('No price available for:', itemNumber);
+        console.log('No product found for price lookup:', itemNumber);
         res.status(200).json({ price: null });
       }
     } catch (error: any) {
@@ -1892,36 +1923,42 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Get inventory using the inventory endpoint
-      const url = branchCode
-        ? `https://api.reecegroup.com.au/api/v1/inventory/${encodeURIComponent(itemNumber)}?branchCode=${encodeURIComponent(branchCode)}`
-        : `https://api.reecegroup.com.au/api/v1/inventory/${encodeURIComponent(itemNumber)}`;
-
+      // Note: Reece API doesn't have a direct inventory/stock level endpoint.
+      // Inventory availability is shown through the product search results or punchout cart.
+      // For now, we return null - this will need to be revisited once we have full API access.
+      const customerNumber = functions.config().reece?.customer_number || process.env.REECE_CUSTOMER_NUMBER;
       console.log('Getting inventory for Reece item:', itemNumber, branchCode ? `at ${branchCode}` : '');
-      const inventoryResponse = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json',
-        },
-      });
+
+      // Use product search to check if item exists (basic availability check)
+      const inventoryResponse = await fetch(
+        `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(itemNumber)}&pageNumber=1&pageSize=1`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            ...(customerNumber ? { 'Customer-Number': customerNumber } : {}),
+          },
+        }
+      );
 
       if (!inventoryResponse.ok) {
         const errorText = await inventoryResponse.text();
-        console.error('Reece inventory fetch failed:', inventoryResponse.status, errorText);
+        console.error('Reece inventory check failed:', inventoryResponse.status, errorText);
         res.status(200).json({ inventory: null });
         return;
       }
 
       const inventoryData = await inventoryResponse.json();
 
-      if (inventoryData) {
-        console.log('Found inventory for', itemNumber);
+      if (inventoryData.products && inventoryData.products.length > 0) {
+        const product = inventoryData.products[0];
+        console.log('Product exists in catalog:', product.productId);
         res.status(200).json({
           inventory: {
-            itemNumber: inventoryData.itemNumber,
-            branchCode: inventoryData.branchCode,
-            quantityAvailable: inventoryData.quantityAvailable || 0,
+            itemNumber: String(product.productId),
+            branchCode: branchCode || 'unknown',
+            quantityAvailable: -1, // -1 indicates availability unknown, product exists
           },
         });
       } else {
@@ -4105,7 +4142,6 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
         commissionRate: DEFAULT_COMMISSION_RATE,
         totalReferrals: existingData?.totalReferrals || 0,
         convertedReferrals: existingData?.convertedReferrals || 0,
-        rewardMonthsEarned: existingData?.rewardMonthsEarned || 0,
         totalEarnings: existingData?.totalEarnings || 0,
         pendingEarnings: existingData?.pendingEarnings || 0,
         paidEarnings: existingData?.paidEarnings || 0,
@@ -4678,12 +4714,11 @@ interface AnalyticsData {
     activeLastMonth: number;
     neverReturned: number;
   };
-ma  referrals: {
+  referrals: {
     totalCodes: number;
     totalReferrals: number;
     convertedReferrals: number;
     pendingReferrals: number;
-    rewardMonthsGranted: number;
     affiliates: Array<{
       email: string;
       referralCode: string;
@@ -4699,7 +4734,6 @@ ma  referrals: {
       referralCode: string;
       totalReferrals: number;
       convertedReferrals: number;
-      rewardMonthsEarned: number;
     }>;
   };
 }
@@ -4868,7 +4902,6 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
   let totalReferralsCount = 0;
   let totalConvertedReferrals = 0;
   let totalPendingReferrals = 0;
-  let totalRewardMonthsGranted = 0;
   const affiliatesList: AnalyticsData['referrals']['affiliates'] = [];
   const topReferrersList: AnalyticsData['referrals']['topReferrers'] = [];
 
@@ -4882,7 +4915,6 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
       totalReferralCodes++;
       totalReferralsCount += r.totalReferrals || 0;
       totalConvertedReferrals += r.convertedReferrals || 0;
-      totalRewardMonthsGranted += r.rewardMonthsEarned || 0;
       if (r.referralPendingSince && !r.referralConverted) totalPendingReferrals++;
 
       const email = authMap.get(au.uid)?.email || 'unknown';
@@ -4906,7 +4938,6 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
           referralCode: r.referralCode,
           totalReferrals: r.totalReferrals || 0,
           convertedReferrals: r.convertedReferrals || 0,
-          rewardMonthsEarned: r.rewardMonthsEarned || 0,
         });
       }
     } catch { /* skip */ }
@@ -5001,7 +5032,6 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
       totalReferrals: totalReferralsCount,
       convertedReferrals: totalConvertedReferrals,
       pendingReferrals: totalPendingReferrals,
-      rewardMonthsGranted: totalRewardMonthsGranted,
       affiliates: affiliatesList,
       topReferrers: topReferrersList.slice(0, 20),
     },
@@ -5061,7 +5091,6 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
       <div class="kpi"><div class="value">${d.referrals.totalReferrals}</div><div class="label">Total Referrals</div></div>
       <div class="kpi"><div class="value">${d.referrals.convertedReferrals}</div><div class="label">Converted</div></div>
       <div class="kpi"><div class="value">${d.referrals.pendingReferrals}</div><div class="label">Pending (30d)</div></div>
-      <div class="kpi"><div class="value">${d.referrals.rewardMonthsGranted}</div><div class="label">Months Granted</div></div>
       <div class="kpi"><div class="value">${d.referrals.affiliates.length}</div><div class="label">Affiliates</div></div>
     </div>`;
 
@@ -5084,9 +5113,8 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
         <td><code>${escapeHtml(r.referralCode)}</code></td>
         <td class="num">${r.totalReferrals}</td>
         <td class="num">${r.convertedReferrals}</td>
-        <td class="num">${r.rewardMonthsEarned}</td>
       </tr>`).join('')
-    : '<tr><td colspan="5" class="muted" style="text-align:center">No referrals yet</td></tr>';
+    : '<tr><td colspan="4" class="muted" style="text-align:center">No referrals yet</td></tr>';
 
   // Users table
   const usersRowsHtml = d.users.map(u => {
@@ -5304,7 +5332,7 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>Email</th><th>Code</th><th>Referrals</th><th>Converted</th><th>Months Earned</th>
+            <th>Email</th><th>Code</th><th>Referrals</th><th>Converted</th>
           </tr></thead>
           <tbody>${topReferrersRowsHtml}</tbody>
         </table>
@@ -5544,8 +5572,6 @@ export const generateReferralCode = functions.https.onCall(async (data, context)
     referredBy: null,
     totalReferrals: 0,
     convertedReferrals: 0,
-    rewardMonthsEarned: 0,
-    rewardExpiresAt: null,
     // Affiliate is NOT enabled by default — must be enabled by admin
     isAffiliate: false,
     commissionRate: 0,
@@ -5624,15 +5650,11 @@ export const applyReferralCode = functions.https.onCall(async (data, context) =>
 });
 
 /**
- * Process referral reward when a referred user upgrades to Pro.
+ * Process referral commission when a referred user pays for Pro.
  * Called internally from subscription update handlers.
- *
- * Instead of granting the reward immediately, we record the Pro start date.
- * A daily scheduled function (processReferralRewards) checks for referred users
- * who have been subscribed for 30+ days and grants the reward then.
- * This prevents abuse where someone subscribes and immediately cancels/refunds.
+ * Records affiliate commission earnings only — no Pro reward is granted.
  */
-async function processReferralReward(
+async function processReferralCommission(
   userId: string,
   platform?: string,
   productId?: string,
@@ -5659,134 +5681,7 @@ async function processReferralReward(
       console.error('Failed to record affiliate earning (non-blocking):', err);
     }
   }
-
-  // Already converted or already pending — nothing to do for the free months reward
-  if (data.referralConverted || data.referralPendingSince) return;
-
-  // Store billing details for commission calculation during grant
-  const updateData: Record<string, any> = {
-    referralPendingSince: admin.firestore.FieldValue.serverTimestamp(),
-  };
-  if (platform) updateData.subscriptionPlatform = platform;
-  if (productId) updateData.subscriptionProductId = productId;
-  if (grossAmountCents) updateData.subscriptionAmount = grossAmountCents;
-
-  await userReferralRef.set(updateData, { merge: true });
-
-  console.log(`⏳ Referral reward pending for referrer ${referrerUserId} (referred user ${userId} must stay Pro for 30 days)`);
 }
-
-/**
- * Grant the actual referral reward to a referrer.
- * Called by the scheduled job after the 30-day waiting period.
- */
-async function grantReferralReward(referredUserId: string, referrerUserId: string): Promise<void> {
-  const firestore = admin.firestore();
-
-  // Mark as converted on the referred user
-  await firestore.doc(`users/${referredUserId}/profile/referral`).set({
-    referralConverted: true,
-  }, { merge: true });
-
-  // Grant 3 months free Pro to the referrer
-  const referrerReferralRef = firestore.doc(`users/${referrerUserId}/profile/referral`);
-  const referrerReferral = await referrerReferralRef.get();
-  const referrerData = referrerReferral.exists ? referrerReferral.data()! : {};
-
-  // Calculate new expiry: extend from current reward expiry or from now
-  const now = new Date();
-  const currentExpiry = referrerData.rewardExpiresAt
-    ? new Date(referrerData.rewardExpiresAt.toDate ? referrerData.rewardExpiresAt.toDate() : referrerData.rewardExpiresAt)
-    : null;
-  const baseDate = (currentExpiry && currentExpiry > now) ? currentExpiry : now;
-  const newExpiry = new Date(baseDate.getTime() + 90 * 24 * 60 * 60 * 1000); // 3 months (90 days)
-
-  await referrerReferralRef.set({
-    convertedReferrals: admin.firestore.FieldValue.increment(1),
-    rewardMonthsEarned: admin.firestore.FieldValue.increment(3),
-    rewardExpiresAt: newExpiry,
-  }, { merge: true });
-
-  console.log(`🎁 Referral reward granted to ${referrerUserId}: free Pro until ${newExpiry.toISOString()}`);
-}
-
-/**
- * Daily scheduled job: process pending referral rewards.
- * Finds referred users who have been Pro for 30+ days and grants the reward.
- * If the referred user is no longer Pro, clears the pending state (no reward).
- * Runs every day at 3:00 AM UTC.
- */
-export const processReferralRewards = functions.pubsub
-  .schedule('every day 03:00')
-  .timeZone('UTC')
-  .onRun(async () => {
-    const firestore = admin.firestore();
-    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-
-    // Query all users who have a pending referral (not yet converted, has pendingSince)
-    // We scan /users/*/profile/referral docs via a collectionGroup query
-    const referralDocs = await firestore.collectionGroup('profile')
-      .where('referralPendingSince', '!=', null)
-      .where('referralConverted', '==', false)
-      .get();
-
-    // Fallback: also catch docs where referralConverted doesn't exist yet
-    const referralDocsNoField = await firestore.collectionGroup('profile')
-      .where('referralPendingSince', '!=', null)
-      .get();
-
-    // Merge and deduplicate
-    const allDocs = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
-    for (const doc of referralDocs.docs) {
-      allDocs.set(doc.ref.path, doc);
-    }
-    for (const doc of referralDocsNoField.docs) {
-      if (!doc.data().referralConverted) {
-        allDocs.set(doc.ref.path, doc);
-      }
-    }
-
-    let granted = 0;
-    let cleared = 0;
-    let waiting = 0;
-
-    for (const [, referralDoc] of allDocs) {
-      const data = referralDoc.data();
-      if (!data.referredBy || !data.referralPendingSince) continue;
-      if (data.referralConverted) continue;
-
-      const pendingSince = data.referralPendingSince.toDate
-        ? data.referralPendingSince.toDate()
-        : new Date(data.referralPendingSince);
-      const elapsed = Date.now() - pendingSince.getTime();
-
-      if (elapsed < THIRTY_DAYS_MS) {
-        waiting++;
-        continue;
-      }
-
-      // 30 days have passed — check if the referred user is still Pro
-      // Extract userId from path: users/{userId}/profile/referral
-      const pathParts = referralDoc.ref.path.split('/');
-      const referredUserId = pathParts[1];
-
-      const subDoc = await firestore.doc(`users/${referredUserId}/profile/subscription`).get();
-      const isPro = subDoc.exists && subDoc.data()?.isPro === true;
-
-      if (isPro) {
-        await grantReferralReward(referredUserId, data.referredBy);
-        granted++;
-      } else {
-        // User cancelled before 30 days — clear the pending state, no reward
-        await referralDoc.ref.set({
-          referralPendingSince: null,
-        }, { merge: true });
-        cleared++;
-      }
-    }
-
-    console.log(`📊 Referral rewards processed: ${granted} granted, ${cleared} cleared, ${waiting} still waiting`);
-  });
 
 // ============================================
 // Affiliate Earnings API

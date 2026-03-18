@@ -271,8 +271,6 @@ export interface ReferralInfo {
   referredBy: string | null;
   totalReferrals: number;
   convertedReferrals: number;
-  rewardMonthsEarned: number;
-  rewardExpiresAt: Date | null;
   // Affiliate fields
   isAffiliate: boolean;
   commissionRate: number; // e.g. 0.50 for 50%

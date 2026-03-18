@@ -624,15 +624,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   canCreateQuote: () => {
-    const { subscriptionStatus, referralInfo } = get();
+    const { subscriptionStatus } = get();
     if (!subscriptionStatus) return true; // Allow if no status yet (trial not started)
     if (subscriptionStatus.isPro) return true;
-
-    // Check for active referral reward
-    if (referralInfo?.rewardExpiresAt) {
-      const rewardExpiry = new Date(referralInfo.rewardExpiresAt);
-      if (rewardExpiry > new Date()) return true;
-    }
 
     // If no trial started yet, allow (first quote will start the trial)
     if (!subscriptionStatus.trialStartedAt) return true;
