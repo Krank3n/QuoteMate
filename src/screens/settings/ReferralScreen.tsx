@@ -300,7 +300,7 @@ export function ReferralScreen() {
                         <QRCode value={referralLink} size={240} backgroundColor="#ffffff" color="#000000" />
                       </View>
 
-                      <Text style={styles.adScanText}>Scan to download on iOS & Android</Text>
+                      <Text style={styles.adScanText}>Scan to download QuoteMate</Text>
 
                       <View style={styles.buttonRow}>
                         <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
@@ -541,7 +541,7 @@ export function ReferralScreen() {
                 <QRCode value={referralLink} size={240} backgroundColor="#ffffff" color="#000000" />
               </View>
 
-              <Text style={styles.adScanText}>Scan to download on iOS & Android</Text>
+              <Text style={styles.adScanText}>Scan to download QuoteMate</Text>
 
               <View style={styles.regularQrSubtext}>
                 <MaterialCommunityIcons name="account-plus" size={18} color={colors.primary} />

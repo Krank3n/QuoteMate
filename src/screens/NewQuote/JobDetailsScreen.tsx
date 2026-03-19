@@ -565,7 +565,9 @@ export function JobDetailsScreen() {
             setIsRequestingPermission(false);
             Alert.alert(
               'Permission Request Failed',
-              'The permission dialog did not appear. Please check:\n\n1. Go to Android Settings > Apps > QuoteMate > Permissions\n2. Enable Microphone permission\n3. Try again'
+              Platform.OS === 'ios'
+                ? 'The permission dialog did not appear. Please go to Settings > QuoteMate > Microphone and enable it, then try again.'
+                : 'The permission dialog did not appear. Please check:\n\n1. Go to Settings > Apps > QuoteMate > Permissions\n2. Enable Microphone permission\n3. Try again'
             );
             return;
           }
