@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
-import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo } from '../types';
+import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus } from '../types';
 import { TourPhase } from '../components/tour/tourFlow';
 import { updateQuoteCalculations } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
@@ -96,6 +96,15 @@ interface AppState {
   endUnifiedTour: () => Promise<void>;
   skipUnifiedTour: () => Promise<void>;
 
+  // Xero integration
+  xeroConnection: XeroConnection | null;
+  xeroLoading: boolean;
+  loadXeroConnection: () => Promise<void>;
+  setXeroConnection: (connection: XeroConnection | null) => void;
+  pushInvoiceToXero: (invoice: Invoice) => Promise<void>;
+  pushPaymentToXero: (invoiceId: string, xeroInvoiceId: string, amount: number, date: Date, method?: string) => Promise<void>;
+  xeroBulkSync: (invoiceIds: string[]) => Promise<{ successCount: number; totalCount: number }>;
+
   // Cleanup
   clearAllData: () => Promise<void>;
 }
@@ -110,6 +119,7 @@ const STORAGE_KEYS = {
   INVOICES: '@quotemate:invoices',
   NEXT_INVOICE_NUMBER: '@quotemate:next_invoice_number',
   TOUR_SEEN: '@quotemate:tour_seen',
+  XERO_CONNECTION: '@quotemate:xero_connection',
 };
 
 // Helper to check if we need to reset monthly count
@@ -1119,6 +1129,12 @@ export const useStore = create<AppState>((set, get) => ({
         paymentNotes: undefined,
         // Clear source quote link
         sourceQuoteId: undefined,
+        // Clear Xero sync (new invoice needs fresh sync)
+        xeroInvoiceId: undefined,
+        xeroContactId: undefined,
+        xeroSyncStatus: undefined,
+        xeroSyncedAt: undefined,
+        xeroSyncError: undefined,
         // Regenerate material IDs
         materials: invoice.materials.map((m) => ({
           ...m,
@@ -1234,6 +1250,102 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
+  // Xero integration
+  xeroConnection: null,
+  xeroLoading: false,
+
+  loadXeroConnection: async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.XERO_CONNECTION);
+      if (stored) {
+        set({ xeroConnection: JSON.parse(stored) });
+      }
+    } catch (error) {
+      console.error('Failed to load Xero connection:', error);
+    }
+  },
+
+  setXeroConnection: (connection: XeroConnection | null) => {
+    set({ xeroConnection: connection });
+    if (connection) {
+      AsyncStorage.setItem(STORAGE_KEYS.XERO_CONNECTION, JSON.stringify(connection)).catch(() => {});
+    } else {
+      AsyncStorage.removeItem(STORAGE_KEYS.XERO_CONNECTION).catch(() => {});
+    }
+  },
+
+  pushInvoiceToXero: async (invoice: Invoice) => {
+    const { invoices } = get();
+    const xeroService = await import('../services/xeroService');
+
+    // Mark as syncing
+    const syncingInvoices = invoices.map((i) =>
+      i.id === invoice.id ? { ...i, xeroSyncStatus: 'syncing' as XeroSyncStatus } : i
+    );
+    set({ invoices: syncingInvoices });
+
+    try {
+      const result = await xeroService.pushInvoiceToXero(invoice);
+
+      // Update invoice with Xero IDs
+      const updatedInvoice: Invoice = {
+        ...invoice,
+        xeroInvoiceId: result.xeroInvoiceId,
+        xeroContactId: result.xeroContactId,
+        xeroSyncStatus: 'synced' as XeroSyncStatus,
+        xeroSyncedAt: new Date(),
+        xeroSyncError: undefined,
+        updatedAt: new Date(),
+      };
+
+      const updatedInvoices = get().invoices.map((i) =>
+        i.id === invoice.id ? updatedInvoice : i
+      );
+
+      await AsyncStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(updatedInvoices));
+      set({ invoices: updatedInvoices });
+
+      // Update Xero connection last sync time
+      const { xeroConnection } = get();
+      if (xeroConnection) {
+        const updatedConnection = { ...xeroConnection, lastSyncAt: new Date().toISOString() };
+        set({ xeroConnection: updatedConnection });
+        await AsyncStorage.setItem(STORAGE_KEYS.XERO_CONNECTION, JSON.stringify(updatedConnection));
+      }
+    } catch (error: any) {
+      // Mark as error
+      const errorInvoices = get().invoices.map((i) =>
+        i.id === invoice.id
+          ? { ...i, xeroSyncStatus: 'error' as XeroSyncStatus, xeroSyncError: error.message || 'Sync failed' }
+          : i
+      );
+      await AsyncStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(errorInvoices));
+      set({ invoices: errorInvoices });
+      throw error;
+    }
+  },
+
+  pushPaymentToXero: async (invoiceId: string, xeroInvoiceId: string, amount: number, date: Date, method?: string) => {
+    const xeroService = await import('../services/xeroService');
+    await xeroService.pushPaymentToXero(invoiceId, xeroInvoiceId, amount, date, method);
+  },
+
+  xeroBulkSync: async (invoiceIds: string[]) => {
+    set({ xeroLoading: true });
+    try {
+      const xeroService = await import('../services/xeroService');
+      const result = await xeroService.xeroBulkSync(invoiceIds);
+
+      // Reload invoices to get updated Xero fields from Firestore
+      const { loadInvoices } = get();
+      await loadInvoices();
+
+      return { successCount: result.successCount, totalCount: result.totalCount };
+    } finally {
+      set({ xeroLoading: false });
+    }
+  },
+
   // Clear all data (for logout)
   clearAllData: async () => {
     try {
@@ -1251,6 +1363,7 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.NEXT_QUOTE_NUMBER,
         STORAGE_KEYS.NEXT_INVOICE_NUMBER,
         STORAGE_KEYS.TOUR_SEEN,
+        STORAGE_KEYS.XERO_CONNECTION,
         '@quotemate:seen_screen_tours',
       ]);
       console.log('✅ clearAllData: AsyncStorage cleared');
@@ -1270,6 +1383,8 @@ export const useStore = create<AppState>((set, get) => ({
         nextQuoteNumber: 1,
         nextInvoiceNumber: 1,
         referralInfo: null,
+        xeroConnection: null,
+        xeroLoading: false,
       });
       console.log('✅ clearAllData: Store state reset');
 

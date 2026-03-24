@@ -69,6 +69,18 @@ export function SettingsScreen() {
       ],
     },
     {
+      title: 'Integrations',
+      items: [
+        {
+          id: 'xero',
+          title: 'Xero Accounting',
+          subtitle: 'Sync invoices and payments',
+          icon: 'cloud-sync',
+          screen: 'XeroIntegration',
+        },
+      ],
+    },
+    {
       title: 'Documents',
       items: [
         {

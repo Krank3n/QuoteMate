@@ -41,7 +41,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [userDataLoaded, setUserDataLoaded] = useState(false);
-  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, checkTourStatus } = useStore();
+  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, checkTourStatus, loadXeroConnection } = useStore();
 
   // ===== TESTING FLAGS =====
   // Set SKIP_AUTH_FOR_TESTING to true to bypass login and test onboarding
@@ -71,6 +71,7 @@ export default function App() {
           loadSubscription(),
           loadNextQuoteNumber(),
           checkTourStatus(),
+          loadXeroConnection(),
         ]);
 
         setUserDataLoaded(true); // Mark user data as loaded

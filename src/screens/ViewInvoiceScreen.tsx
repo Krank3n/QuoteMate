@@ -68,6 +68,8 @@ export function ViewInvoiceScreen() {
     saveInvoice,
     setCurrentInvoice,
     updateInvoice,
+    xeroConnection,
+    pushInvoiceToXero,
   } = useStore();
   const insets = useSafeAreaInsets();
 
@@ -77,6 +79,7 @@ export function ViewInvoiceScreen() {
   const [paymentTermsMenuVisible, setPaymentTermsMenuVisible] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [statusSheetVisible, setStatusSheetVisible] = useState(false);
+  const [isXeroPushing, setIsXeroPushing] = useState(false);
 
   // Load invoice data
   useEffect(() => {
@@ -159,6 +162,19 @@ export function ViewInvoiceScreen() {
       Alert.alert('Error', 'Failed to update invoice status.');
     }
     setStatusSheetVisible(false);
+  };
+
+  const handlePushToXero = async () => {
+    if (!displayInvoice) return;
+    setIsXeroPushing(true);
+    try {
+      await pushInvoiceToXero(displayInvoice);
+      Alert.alert('Synced', 'Invoice pushed to Xero successfully.');
+    } catch (error: any) {
+      Alert.alert('Sync Failed', error.message || 'Failed to push invoice to Xero. Please try again.');
+    } finally {
+      setIsXeroPushing(false);
+    }
   };
 
   const handleViewPDF = async () => {
@@ -247,6 +263,24 @@ export function ViewInvoiceScreen() {
                 textStyle={styles.statusChipText}
               >
                 Overdue
+              </Chip>
+            )}
+            {invoice.xeroSyncStatus === 'synced' && (
+              <Chip
+                style={[styles.statusChip, { backgroundColor: colors.successBg }]}
+                textStyle={[styles.statusChipText, { color: colors.success }]}
+                icon={() => <MaterialCommunityIcons name="cloud-check" size={14} color={colors.success} />}
+              >
+                Xero
+              </Chip>
+            )}
+            {invoice.xeroSyncStatus === 'error' && (
+              <Chip
+                style={[styles.statusChip, { backgroundColor: colors.errorBg }]}
+                textStyle={styles.statusChipText}
+                icon={() => <MaterialCommunityIcons name="cloud-alert" size={14} color={colors.error} />}
+              >
+                Xero Error
               </Chip>
             )}
           </View>
@@ -524,6 +558,20 @@ export function ViewInvoiceScreen() {
             icon="cash"
           >
             Record Payment
+          </Button>
+        )}
+        {xeroConnection && invoice.status !== 'draft' && (
+          <Button
+            mode="outlined"
+            onPress={handlePushToXero}
+            loading={isXeroPushing}
+            disabled={isXeroPushing}
+            style={styles.button}
+            contentStyle={styles.buttonContent}
+            icon={invoice.xeroSyncStatus === 'synced' ? 'check-circle' : 'cloud-sync'}
+            textColor={invoice.xeroSyncStatus === 'synced' ? colors.success : undefined}
+          >
+            {invoice.xeroSyncStatus === 'synced' ? 'Synced to Xero' : 'Push to Xero'}
           </Button>
         )}
         <SendInvoiceButton

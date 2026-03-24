@@ -353,6 +353,24 @@ export interface Invoice {
   estimatedDistance?: number;   // km (straight-line)
   estimatedFuelCost?: number;  // AUD (round trip)
   travelGeocodeFailed?: boolean; // true when address geocoding couldn't resolve
+
+  // Xero integration
+  xeroInvoiceId?: string;      // Xero invoice ID (for idempotent updates)
+  xeroContactId?: string;      // Xero contact ID
+  xeroSyncStatus?: XeroSyncStatus;
+  xeroSyncedAt?: Date;         // Last successful sync timestamp
+  xeroSyncError?: string;      // Last sync error message
+}
+
+// Xero integration types
+export type XeroSyncStatus = 'not_synced' | 'syncing' | 'synced' | 'error';
+
+export interface XeroConnection {
+  tenantId: string;            // Xero organisation ID
+  tenantName: string;          // Xero organisation name
+  connectedAt: string;         // ISO date
+  lastSyncAt?: string;         // ISO date
+  syncEnabled: boolean;        // Auto-push on invoice send
 }
 
 // Notification preferences (stored at users/{userId}/settings/notificationPreferences)

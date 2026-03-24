@@ -37,7 +37,7 @@ export function RecordPaymentScreen() {
   const route = useRoute<any>();
   const invoiceId = route.params?.invoiceId;
 
-  const { invoices, currentInvoice, recordPayment } = useStore();
+  const { invoices, currentInvoice, recordPayment, xeroConnection, pushPaymentToXero } = useStore();
 
   // Check both saved invoices and currentInvoice (for unsaved invoices)
   const invoice = invoices.find((i) => i.id === invoiceId) ||
@@ -90,6 +90,16 @@ export function RecordPaymentScreen() {
     setIsSubmitting(true);
     try {
       await recordPayment(invoice.id, paymentAmount, paymentMethod, notes || undefined, paymentDate);
+
+      // Also push payment to Xero if connected and invoice is synced
+      if (xeroConnection && invoice.xeroInvoiceId) {
+        try {
+          await pushPaymentToXero(invoice.id, invoice.xeroInvoiceId, paymentAmount, paymentDate, paymentMethod);
+        } catch (xeroError) {
+          console.warn('Xero payment sync failed (non-blocking):', xeroError);
+        }
+      }
+
       Alert.alert('Success', 'Payment recorded successfully!', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);

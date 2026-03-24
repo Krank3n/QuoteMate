@@ -523,6 +523,12 @@ class FirestoreService {
         issueDate: invoice.issueDate.toISOString(),
         dueDate: invoice.dueDate.toISOString(),
         paidDate: invoice.paidDate?.toISOString() || null,
+        // Xero integration fields
+        xeroInvoiceId: invoice.xeroInvoiceId || null,
+        xeroContactId: invoice.xeroContactId || null,
+        xeroSyncStatus: invoice.xeroSyncStatus || null,
+        xeroSyncedAt: invoice.xeroSyncedAt instanceof Date ? invoice.xeroSyncedAt.toISOString() : (invoice.xeroSyncedAt || null),
+        xeroSyncError: invoice.xeroSyncError || null,
         syncedAt: new Date().toISOString(),
       }));
       console.log('✅ Invoice saved to Firestore:', invoice.id);
@@ -556,6 +562,7 @@ class FirestoreService {
           issueDate: new Date(data.issueDate),
           dueDate: new Date(data.dueDate),
           paidDate: data.paidDate ? new Date(data.paidDate) : undefined,
+          xeroSyncedAt: data.xeroSyncedAt ? new Date(data.xeroSyncedAt) : undefined,
         } as Invoice;
       });
 
@@ -611,6 +618,7 @@ class FirestoreService {
             issueDate: new Date(data.issueDate),
             dueDate: new Date(data.dueDate),
             paidDate: data.paidDate ? new Date(data.paidDate) : undefined,
+            xeroSyncedAt: data.xeroSyncedAt ? new Date(data.xeroSyncedAt) : undefined,
           } as Invoice;
         });
 

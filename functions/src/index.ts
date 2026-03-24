@@ -6263,3 +6263,846 @@ export const sendAffiliateInvite = functions.https.onCall(async (data, context) 
   console.log(`✅ Affiliate invite email sent to ${email}`);
   return { success: true };
 });
+
+// ============================================
+// Xero Integration
+// Sync invoices and payments to Xero accounting
+// ============================================
+
+// Xero credentials — prefer .env (process.env), fall back to deprecated functions.config()
+const XERO_CLIENT_ID = process.env.XERO_CLIENT_ID || functions.config().xero?.client_id || '';
+const XERO_CLIENT_SECRET = process.env.XERO_CLIENT_SECRET || process.env.XERO_SECRET || functions.config().xero?.client_secret || '';
+const XERO_REDIRECT_URI = process.env.XERO_REDIRECT_URI || functions.config().xero?.redirect_uri || 'https://quotemateapp.au/xero/callback';
+const XERO_SCOPES = 'accounting.invoices accounting.contacts accounting.payments accounting.settings.read offline_access';
+
+/**
+ * Get Xero OAuth tokens from Firestore for a user.
+ * Automatically refreshes if the access token is expired.
+ */
+async function getXeroTokens(userId: string): Promise<{ accessToken: string; tenantId: string } | null> {
+  const firestore = admin.firestore();
+  const connRef = firestore.doc(`users/${userId}/settings/xeroConnection`);
+  const connDoc = await connRef.get();
+
+  if (!connDoc.exists) return null;
+
+  const data = connDoc.data()!;
+  const { accessToken, refreshToken, tokenExpiresAt, tenantId } = data;
+
+  if (!accessToken || !refreshToken || !tenantId) return null;
+
+  // Token still valid (with 60s buffer)
+  if (tokenExpiresAt && tokenExpiresAt > Date.now() + 60_000) {
+    return { accessToken, tenantId };
+  }
+
+  // Refresh the token
+  try {
+    const tokenResponse = await fetch('https://identity.xero.com/connect/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${Buffer.from(`${XERO_CLIENT_ID}:${XERO_CLIENT_SECRET}`).toString('base64')}`,
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }).toString(),
+    });
+
+    if (!tokenResponse.ok) {
+      const errText = await tokenResponse.text();
+      console.error('Xero token refresh failed:', tokenResponse.status, errText);
+      // Mark connection as disconnected
+      await connRef.update({ syncEnabled: false, disconnectedReason: 'token_refresh_failed' });
+      return null;
+    }
+
+    const tokenData: any = await tokenResponse.json();
+    const newAccessToken = tokenData.access_token;
+    const expiresIn = tokenData.expires_in || 1800; // 30 minutes default
+
+    const updateData: any = {
+      accessToken: newAccessToken,
+      tokenExpiresAt: Date.now() + expiresIn * 1000,
+    };
+    // Only update refresh token if Xero returns a new one (rotation)
+    if (tokenData.refresh_token) {
+      updateData.refreshToken = tokenData.refresh_token;
+    }
+    await connRef.update(updateData);
+
+    return { accessToken: newAccessToken, tenantId };
+  } catch (error) {
+    console.error('Error refreshing Xero token:', error);
+    return null;
+  }
+}
+
+/**
+ * Start Xero OAuth flow — returns the authorization URL.
+ * The mobile app opens this URL in the system browser.
+ */
+export const getXeroAuthUrl = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    if (!XERO_CLIENT_ID) {
+      res.status(500).json({ error: 'Xero integration not configured' });
+      return;
+    }
+
+    // Generate a state parameter that includes the user ID (for the callback)
+    const state = Buffer.from(JSON.stringify({
+      uid: decodedToken.uid,
+      ts: Date.now(),
+    })).toString('base64url');
+
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: XERO_CLIENT_ID,
+      redirect_uri: XERO_REDIRECT_URI,
+      scope: XERO_SCOPES,
+      state,
+    });
+
+    const authUrl = `https://login.xero.com/identity/connect/authorize?${params.toString()}`;
+
+    res.status(200).json({ authUrl, state });
+  });
+});
+
+/**
+ * Xero OAuth callback — exchanges the auth code for tokens.
+ * Called from the callback page hosted on Firebase Hosting.
+ */
+export const xeroCallback = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const { code, state } = req.body;
+
+    if (!isNonEmptyString(code) || !isNonEmptyString(state)) {
+      res.status(400).json({ error: 'Missing code or state' });
+      return;
+    }
+
+    // Decode the state to get user ID
+    let stateData: { uid: string; ts: number };
+    try {
+      stateData = JSON.parse(Buffer.from(state, 'base64url').toString());
+    } catch {
+      res.status(400).json({ error: 'Invalid state parameter' });
+      return;
+    }
+
+    // Reject if state is older than 10 minutes
+    if (Date.now() - stateData.ts > 10 * 60 * 1000) {
+      res.status(400).json({ error: 'Authorization expired. Please try again.' });
+      return;
+    }
+
+    const userId = stateData.uid;
+
+    try {
+      // Exchange auth code for tokens
+      const tokenResponse = await fetch('https://identity.xero.com/connect/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${Buffer.from(`${XERO_CLIENT_ID}:${XERO_CLIENT_SECRET}`).toString('base64')}`,
+        },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: XERO_REDIRECT_URI,
+        }).toString(),
+      });
+
+      if (!tokenResponse.ok) {
+        const errText = await tokenResponse.text();
+        console.error('Xero token exchange failed:', tokenResponse.status, errText);
+        res.status(400).json({ error: 'Failed to connect to Xero. Please try again.' });
+        return;
+      }
+
+      const tokenData: any = await tokenResponse.json();
+      const accessToken = tokenData.access_token;
+      const refreshToken = tokenData.refresh_token;
+      const expiresIn = tokenData.expires_in || 1800;
+
+      // Get the list of connected tenants (organisations)
+      const tenantsResponse = await fetch('https://api.xero.com/connections', {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      });
+
+      if (!tenantsResponse.ok) {
+        console.error('Failed to get Xero tenants:', await tenantsResponse.text());
+        res.status(500).json({ error: 'Failed to retrieve Xero organisations' });
+        return;
+      }
+
+      const tenants: any[] = await tenantsResponse.json();
+      if (tenants.length === 0) {
+        res.status(400).json({ error: 'No Xero organisations found. Please ensure you have a Xero account.' });
+        return;
+      }
+
+      // Use the first tenant (most tradies have one org)
+      const tenant = tenants[0];
+
+      // Store connection in Firestore
+      const firestore = admin.firestore();
+      await firestore.doc(`users/${userId}/settings/xeroConnection`).set({
+        tenantId: tenant.tenantId,
+        tenantName: tenant.tenantName,
+        accessToken,
+        refreshToken,
+        tokenExpiresAt: Date.now() + expiresIn * 1000,
+        connectedAt: new Date().toISOString(),
+        syncEnabled: true,
+        disconnectedReason: null,
+      });
+
+      console.log(`✅ Xero connected for user ${userId}: ${tenant.tenantName} (${tenant.tenantId})`);
+
+      // Return tenants so the callback page can show which org was connected
+      res.status(200).json({
+        success: true,
+        tenantName: tenant.tenantName,
+        allTenants: tenants.map((t: any) => ({ id: t.tenantId, name: t.tenantName })),
+      });
+    } catch (error: any) {
+      console.error('Error in Xero callback:', error);
+      res.status(500).json({ error: 'Internal error connecting to Xero' });
+    }
+  });
+});
+
+/**
+ * Switch which Xero tenant (organisation) is active.
+ */
+export const xeroSelectTenant = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { tenantId, tenantName } = req.body;
+    if (!isNonEmptyString(tenantId) || !isNonEmptyString(tenantName)) {
+      res.status(400).json({ error: 'Missing tenantId or tenantName' });
+      return;
+    }
+
+    const firestore = admin.firestore();
+    await firestore.doc(`users/${decodedToken.uid}/settings/xeroConnection`).update({
+      tenantId,
+      tenantName,
+    });
+
+    res.status(200).json({ success: true });
+  });
+});
+
+/**
+ * Disconnect Xero — revoke tokens and remove connection.
+ */
+export const xeroDisconnect = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const firestore = admin.firestore();
+    const connRef = firestore.doc(`users/${decodedToken.uid}/settings/xeroConnection`);
+    const connDoc = await connRef.get();
+
+    if (connDoc.exists) {
+      const data = connDoc.data()!;
+      // Attempt to revoke the refresh token at Xero
+      if (data.refreshToken) {
+        try {
+          await fetch('https://identity.xero.com/connect/revocation', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Authorization': `Basic ${Buffer.from(`${XERO_CLIENT_ID}:${XERO_CLIENT_SECRET}`).toString('base64')}`,
+            },
+            body: new URLSearchParams({
+              token: data.refreshToken,
+            }).toString(),
+          });
+        } catch (revokeError) {
+          console.warn('Failed to revoke Xero token (non-blocking):', revokeError);
+        }
+      }
+
+      await connRef.delete();
+    }
+
+    console.log(`✅ Xero disconnected for user ${decodedToken.uid}`);
+    res.status(200).json({ success: true });
+  });
+});
+
+/**
+ * Check Xero connection status.
+ */
+export const checkXeroConnection = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'GET' && req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const firestore = admin.firestore();
+    const connDoc = await firestore.doc(`users/${decodedToken.uid}/settings/xeroConnection`).get();
+
+    if (!connDoc.exists) {
+      res.status(200).json({ connected: false });
+      return;
+    }
+
+    const data = connDoc.data()!;
+    res.status(200).json({
+      connected: true,
+      tenantName: data.tenantName || null,
+      tenantId: data.tenantId || null,
+      connectedAt: data.connectedAt || null,
+      lastSyncAt: data.lastSyncAt || null,
+      syncEnabled: data.syncEnabled ?? true,
+      disconnectedReason: data.disconnectedReason || null,
+    });
+  });
+});
+
+/**
+ * Push an invoice to Xero (create or update).
+ * Handles contact upsert + invoice create/update in one call.
+ */
+export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { invoice } = req.body;
+    if (!invoice || !invoice.id) {
+      res.status(400).json({ error: 'Missing invoice data' });
+      return;
+    }
+
+    const tokens = await getXeroTokens(decodedToken.uid);
+    if (!tokens) {
+      res.status(401).json({ error: 'Xero not connected or token expired. Please reconnect.' });
+      return;
+    }
+
+    const { accessToken, tenantId } = tokens;
+    const xeroHeaders = {
+      'Authorization': `Bearer ${accessToken}`,
+      'xero-tenant-id': tenantId,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+
+    try {
+      // Step 1: Upsert contact
+      let xeroContactId = invoice.xeroContactId || null;
+
+      if (!xeroContactId && invoice.customerName) {
+        // Search for existing contact by name
+        const escapedName = invoice.customerName.replace(/"/g, '\\"');
+        const whereClause = encodeURIComponent(`Name=="${escapedName}"`);
+        const contactSearch = await fetch(
+          `https://api.xero.com/api.xro/2.0/Contacts?where=${whereClause}`,
+          { headers: xeroHeaders }
+        );
+
+        if (contactSearch.ok) {
+          const contactData: any = await contactSearch.json();
+          if (contactData.Contacts && contactData.Contacts.length > 0) {
+            xeroContactId = contactData.Contacts[0].ContactID;
+          }
+        }
+      }
+
+      if (!xeroContactId) {
+        // Create new contact
+        const contactPayload = {
+          Name: invoice.customerName || 'Unknown Customer',
+          EmailAddress: invoice.customerEmail || undefined,
+          Phones: invoice.customerPhone ? [{
+            PhoneType: 'DEFAULT',
+            PhoneNumber: invoice.customerPhone,
+          }] : undefined,
+          Addresses: invoice.jobAddress ? [{
+            AddressType: 'STREET',
+            AddressLine1: invoice.jobAddress,
+            Country: 'AU',
+          }] : undefined,
+        };
+
+        const createContact = await fetch('https://api.xero.com/api.xro/2.0/Contacts', {
+          method: 'POST',
+          headers: xeroHeaders,
+          body: JSON.stringify({ Contacts: [contactPayload] }),
+        });
+
+        if (createContact.ok) {
+          const created: any = await createContact.json();
+          if (created.Contacts && created.Contacts.length > 0) {
+            xeroContactId = created.Contacts[0].ContactID;
+          }
+        } else {
+          const errText = await createContact.text();
+          console.error('Failed to create Xero contact:', errText);
+        }
+      }
+
+      // Step 2: Build invoice line items
+      const lineItems: any[] = [];
+
+      // Material line items
+      if (invoice.materials && Array.isArray(invoice.materials)) {
+        for (const mat of invoice.materials) {
+          lineItems.push({
+            Description: mat.name || 'Material',
+            Quantity: mat.quantity || 1,
+            UnitAmount: mat.price || 0,
+            AccountCode: '4000',
+            TaxType: 'OUTPUT',
+          });
+        }
+      }
+
+      // Labour line item
+      if (invoice.laborHours > 0 && invoice.laborRate > 0) {
+        lineItems.push({
+          Description: `Labour - ${invoice.job?.name || 'General'}`,
+          Quantity: invoice.laborHours,
+          UnitAmount: invoice.laborRate,
+          AccountCode: '4000',
+          TaxType: 'OUTPUT',
+        });
+      }
+
+      // Markup line item
+      if (invoice.markupAmount > 0) {
+        lineItems.push({
+          Description: 'Markup',
+          Quantity: 1,
+          UnitAmount: invoice.markupAmount,
+          AccountCode: '4000',
+          TaxType: 'OUTPUT',
+        });
+      }
+
+      // Fallback: if no line items, create a summary line
+      if (lineItems.length === 0) {
+        lineItems.push({
+          Description: invoice.job?.name || 'Services',
+          Quantity: 1,
+          UnitAmount: invoice.subtotal || invoice.total || 0,
+          AccountCode: '4000',
+          TaxType: 'OUTPUT',
+        });
+      }
+
+      // Step 3: Determine Xero invoice status
+      let xeroStatus = 'DRAFT';
+      if (invoice.status === 'sent' || invoice.status === 'partial' || invoice.status === 'overdue') {
+        xeroStatus = 'AUTHORISED';
+      } else if (invoice.status === 'paid') {
+        xeroStatus = 'AUTHORISED'; // Payment will be added separately
+      }
+
+      // Step 4: Build invoice payload
+      const formatDate = (d: string | Date) => {
+        const date = new Date(d);
+        return date.toISOString().split('T')[0]; // YYYY-MM-DD
+      };
+
+      const invoicePayload: any = {
+        Type: 'ACCREC', // Accounts Receivable
+        Contact: { ContactID: xeroContactId },
+        InvoiceNumber: invoice.invoiceNumber || undefined,
+        Reference: invoice.job?.name || undefined,
+        Date: formatDate(invoice.issueDate),
+        DueDate: formatDate(invoice.dueDate),
+        Status: xeroStatus,
+        LineAmountTypes: 'Exclusive', // Amounts are ex-GST, Xero adds GST
+        LineItems: lineItems,
+        CurrencyCode: 'AUD',
+      };
+
+      // Step 5: Create or update the invoice
+      let xeroInvoiceId = invoice.xeroInvoiceId || null;
+      let xeroResponse;
+
+      if (xeroInvoiceId) {
+        // Update existing invoice
+        invoicePayload.InvoiceID = xeroInvoiceId;
+        xeroResponse = await fetch('https://api.xero.com/api.xro/2.0/Invoices', {
+          method: 'POST',
+          headers: xeroHeaders,
+          body: JSON.stringify({ Invoices: [invoicePayload] }),
+        });
+      } else {
+        // Create new invoice
+        xeroResponse = await fetch('https://api.xero.com/api.xro/2.0/Invoices', {
+          method: 'POST',
+          headers: xeroHeaders,
+          body: JSON.stringify({ Invoices: [invoicePayload] }),
+        });
+      }
+
+      if (!xeroResponse.ok) {
+        const errText = await xeroResponse.text();
+        console.error('Xero invoice push failed:', xeroResponse.status, errText);
+        res.status(400).json({ error: 'Failed to sync invoice to Xero', details: errText });
+        return;
+      }
+
+      const xeroResult: any = await xeroResponse.json();
+      const xeroInvoice = xeroResult.Invoices?.[0];
+      xeroInvoiceId = xeroInvoice?.InvoiceID || xeroInvoiceId;
+
+      // Step 6: Update the QuoteMate invoice in Firestore with Xero IDs
+      const firestore = admin.firestore();
+      const invoiceRef = firestore.doc(`users/${decodedToken.uid}/invoices/${invoice.id}`);
+      await invoiceRef.update({
+        xeroInvoiceId,
+        xeroContactId,
+        xeroSyncStatus: 'synced',
+        xeroSyncedAt: new Date().toISOString(),
+        xeroSyncError: null,
+      });
+
+      // Update last sync time on connection
+      await firestore.doc(`users/${decodedToken.uid}/settings/xeroConnection`).update({
+        lastSyncAt: new Date().toISOString(),
+      });
+
+      // Verify GST totals match
+      const xeroTotal = xeroInvoice?.Total;
+      const quoteMateTotal = invoice.total;
+      if (xeroTotal && Math.abs(xeroTotal - quoteMateTotal) > 0.02) {
+        console.warn(`⚠️ GST rounding difference: QuoteMate=$${quoteMateTotal}, Xero=$${xeroTotal} for invoice ${invoice.invoiceNumber}`);
+      }
+
+      console.log(`✅ Invoice ${invoice.invoiceNumber} pushed to Xero (${xeroInvoiceId})`);
+
+      res.status(200).json({
+        success: true,
+        xeroInvoiceId,
+        xeroContactId,
+        xeroTotal: xeroTotal || null,
+      });
+    } catch (error: any) {
+      console.error('Error pushing invoice to Xero:', error);
+      res.status(500).json({ error: 'Internal error syncing to Xero' });
+    }
+  });
+});
+
+/**
+ * Push a payment to Xero for an invoice that's already synced.
+ */
+export const pushPaymentToXero = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { xeroInvoiceId, amount, date, paymentMethod } = req.body;
+
+    if (!xeroInvoiceId || !amount) {
+      res.status(400).json({ error: 'Missing xeroInvoiceId or amount' });
+      return;
+    }
+
+    const tokens = await getXeroTokens(decodedToken.uid);
+    if (!tokens) {
+      res.status(401).json({ error: 'Xero not connected or token expired. Please reconnect.' });
+      return;
+    }
+
+    const { accessToken, tenantId } = tokens;
+    const xeroHeaders = {
+      'Authorization': `Bearer ${accessToken}`,
+      'xero-tenant-id': tenantId,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+
+    try {
+      // Map QuoteMate payment method to Xero account code
+      // Default to a general bank account; user can adjust in Xero
+      // Xero AU default chart of accounts: 800=Petty Cash, 090=Business Bank Account
+      // Fall back to the system bank account if codes don't exist
+      const accountCode = paymentMethod === 'cash' ? '800' : '090';
+
+      const formatDate = (d: string | Date) => {
+        const dt = new Date(d);
+        return dt.toISOString().split('T')[0];
+      };
+
+      const paymentPayload = {
+        Invoice: { InvoiceID: xeroInvoiceId },
+        Account: { Code: accountCode },
+        Date: formatDate(date || new Date()),
+        Amount: amount,
+        Reference: `QuoteMate payment${paymentMethod ? ` (${paymentMethod})` : ''}`,
+      };
+
+      const paymentResponse = await fetch('https://api.xero.com/api.xro/2.0/Payments', {
+        method: 'PUT',
+        headers: xeroHeaders,
+        body: JSON.stringify({ Payments: [paymentPayload] }),
+      });
+
+      if (!paymentResponse.ok) {
+        const errText = await paymentResponse.text();
+        console.error('Xero payment push failed:', paymentResponse.status, errText);
+        res.status(400).json({ error: 'Failed to record payment in Xero', details: errText });
+        return;
+      }
+
+      const paymentResult: any = await paymentResponse.json();
+      const xeroPaymentId = paymentResult.Payments?.[0]?.PaymentID;
+
+      // Update last sync time
+      const firestore = admin.firestore();
+      await firestore.doc(`users/${decodedToken.uid}/settings/xeroConnection`).update({
+        lastSyncAt: new Date().toISOString(),
+      });
+
+      console.log(`✅ Payment $${amount} pushed to Xero for invoice ${xeroInvoiceId}`);
+
+      res.status(200).json({
+        success: true,
+        xeroPaymentId,
+      });
+    } catch (error: any) {
+      console.error('Error pushing payment to Xero:', error);
+      res.status(500).json({ error: 'Internal error recording payment in Xero' });
+    }
+  });
+});
+
+/**
+ * Bulk push multiple invoices to Xero.
+ * Processes sequentially to respect rate limits.
+ */
+export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
+    if (!decodedToken) return;
+
+    const { invoiceIds } = req.body;
+    if (!Array.isArray(invoiceIds) || invoiceIds.length === 0) {
+      res.status(400).json({ error: 'Missing or empty invoiceIds array' });
+      return;
+    }
+
+    // Cap at 50 invoices per bulk sync
+    const ids = invoiceIds.slice(0, 50);
+    const firestore = admin.firestore();
+    const results: { invoiceId: string; success: boolean; error?: string; xeroInvoiceId?: string }[] = [];
+
+    for (const id of ids) {
+      try {
+        // Load invoice from Firestore
+        const invoiceDoc = await firestore.doc(`users/${decodedToken.uid}/invoices/${id}`).get();
+        if (!invoiceDoc.exists) {
+          results.push({ invoiceId: id, success: false, error: 'Invoice not found' });
+          continue;
+        }
+
+        const invoice = invoiceDoc.data()!;
+        invoice.id = id;
+
+        // Reuse the push logic by making an internal call structure
+        const tokens = await getXeroTokens(decodedToken.uid);
+        if (!tokens) {
+          results.push({ invoiceId: id, success: false, error: 'Xero not connected' });
+          break; // No point continuing if not connected
+        }
+
+        const { accessToken, tenantId } = tokens;
+        const xeroHeaders = {
+          'Authorization': `Bearer ${accessToken}`,
+          'xero-tenant-id': tenantId,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        };
+
+        // Upsert contact (same logic as single push)
+        let xeroContactId = invoice.xeroContactId || null;
+        if (!xeroContactId && invoice.customerName) {
+          const escapedName = invoice.customerName.replace(/"/g, '\\"');
+          const whereClause = encodeURIComponent(`Name=="${escapedName}"`);
+          const contactSearch = await fetch(
+            `https://api.xero.com/api.xro/2.0/Contacts?where=${whereClause}`,
+            { headers: xeroHeaders }
+          );
+          if (contactSearch.ok) {
+            const contactData: any = await contactSearch.json();
+            if (contactData.Contacts?.length > 0) {
+              xeroContactId = contactData.Contacts[0].ContactID;
+            }
+          }
+
+          if (!xeroContactId) {
+            const contactPayload = {
+              Name: invoice.customerName || 'Unknown Customer',
+              ...(invoice.customerEmail && { EmailAddress: invoice.customerEmail }),
+              ...(invoice.customerPhone && { Phones: [{ PhoneType: 'DEFAULT', PhoneNumber: invoice.customerPhone }] }),
+              ...(invoice.jobAddress && { Addresses: [{ AddressType: 'STREET', AddressLine1: invoice.jobAddress, Country: 'AU' }] }),
+            };
+            const createContact = await fetch('https://api.xero.com/api.xro/2.0/Contacts', {
+              method: 'POST',
+              headers: xeroHeaders,
+              body: JSON.stringify({ Contacts: [contactPayload] }),
+            });
+            if (createContact.ok) {
+              const created: any = await createContact.json();
+              xeroContactId = created.Contacts?.[0]?.ContactID;
+            } else {
+              console.error('Bulk sync: Failed to create contact for', invoice.customerName, await createContact.text().catch(() => ''));
+            }
+          }
+        }
+
+        // Build line items
+        const lineItems: any[] = [];
+        if (invoice.materials && Array.isArray(invoice.materials)) {
+          for (const mat of invoice.materials) {
+            lineItems.push({
+              Description: mat.name || 'Material',
+              Quantity: mat.quantity || 1,
+              UnitAmount: mat.price || 0,
+              AccountCode: '4000',
+              TaxType: 'OUTPUT',
+            });
+          }
+        }
+        if (invoice.laborHours > 0 && invoice.laborRate > 0) {
+          lineItems.push({
+            Description: `Labour - ${invoice.job?.name || 'General'}`,
+            Quantity: invoice.laborHours,
+            UnitAmount: invoice.laborRate,
+            AccountCode: '4000',
+            TaxType: 'OUTPUT',
+          });
+        }
+        if (invoice.markupAmount > 0) {
+          lineItems.push({ Description: 'Markup', Quantity: 1, UnitAmount: invoice.markupAmount, AccountCode: '4000', TaxType: 'OUTPUT' });
+        }
+        if (lineItems.length === 0) {
+          lineItems.push({ Description: invoice.job?.name || 'Services', Quantity: 1, UnitAmount: invoice.subtotal || 0, AccountCode: '4000', TaxType: 'OUTPUT' });
+        }
+
+        let xeroStatus = 'DRAFT';
+        if (['sent', 'partial', 'overdue', 'paid'].includes(invoice.status)) {
+          xeroStatus = 'AUTHORISED';
+        }
+
+        const formatDate = (d: any) => new Date(d).toISOString().split('T')[0];
+
+        const invoicePayload: any = {
+          Type: 'ACCREC',
+          Contact: { ContactID: xeroContactId },
+          InvoiceNumber: invoice.invoiceNumber || undefined,
+          Date: formatDate(invoice.issueDate),
+          DueDate: formatDate(invoice.dueDate),
+          Status: xeroStatus,
+          LineAmountTypes: 'Exclusive',
+          LineItems: lineItems,
+          CurrencyCode: 'AUD',
+        };
+
+        if (invoice.xeroInvoiceId) {
+          invoicePayload.InvoiceID = invoice.xeroInvoiceId;
+        }
+
+        const xeroResponse = await fetch('https://api.xero.com/api.xro/2.0/Invoices', {
+          method: 'POST',
+          headers: xeroHeaders,
+          body: JSON.stringify({ Invoices: [invoicePayload] }),
+        });
+
+        if (xeroResponse.ok) {
+          const xeroResult: any = await xeroResponse.json();
+          const xeroInvoiceId = xeroResult.Invoices?.[0]?.InvoiceID;
+
+          await firestore.doc(`users/${decodedToken.uid}/invoices/${id}`).update({
+            xeroInvoiceId,
+            xeroContactId,
+            xeroSyncStatus: 'synced',
+            xeroSyncedAt: new Date().toISOString(),
+            xeroSyncError: null,
+          });
+
+          results.push({ invoiceId: id, success: true, xeroInvoiceId });
+        } else {
+          const errText = await xeroResponse.text();
+          await firestore.doc(`users/${decodedToken.uid}/invoices/${id}`).update({
+            xeroSyncStatus: 'error',
+            xeroSyncError: errText.slice(0, 500),
+          });
+          results.push({ invoiceId: id, success: false, error: errText.slice(0, 200) });
+        }
+
+        // Rate limit: wait 500ms between pushes
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (error: any) {
+        results.push({ invoiceId: id, success: false, error: error.message || 'Unknown error' });
+      }
+    }
+
+    // Update last sync time
+    await firestore.doc(`users/${decodedToken.uid}/settings/xeroConnection`).update({
+      lastSyncAt: new Date().toISOString(),
+    });
+
+    const successCount = results.filter(r => r.success).length;
+    console.log(`✅ Xero bulk sync: ${successCount}/${results.length} invoices synced`);
+
+    res.status(200).json({ results, successCount, totalCount: results.length });
+  });
+});

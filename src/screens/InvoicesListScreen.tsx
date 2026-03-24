@@ -187,6 +187,21 @@ export function InvoicesListScreen() {
     }
   };
 
+  const handleExportCSV = async () => {
+    setFabOpen(false);
+    const exportable = invoices.filter((inv) => inv.status !== 'draft');
+    if (exportable.length === 0) {
+      Alert.alert('No Invoices', 'You need at least one non-draft invoice to export.');
+      return;
+    }
+    try {
+      const { exportInvoicesToCSV } = await import('../services/csvExportService');
+      await exportInvoicesToCSV(exportable);
+    } catch (error) {
+      Alert.alert('Export Failed', 'Could not export invoices. Please try again.');
+    }
+  };
+
   const renderInvoiceCard = useCallback(({ item: invoice, index }: { item: Invoice; index: number }) => (
     <AnimatedListItem index={index}>
       <InvoiceCard
@@ -310,6 +325,11 @@ export function InvoicesListScreen() {
             icon: 'file-replace',
             label: 'Convert from Quote',
             onPress: handleConvertFromQuote,
+          },
+          {
+            icon: 'file-export',
+            label: 'Export CSV (Xero)',
+            onPress: handleExportCSV,
           },
         ]}
         onStateChange={({ open }) => setFabOpen(open)}
