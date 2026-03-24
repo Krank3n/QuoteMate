@@ -6694,7 +6694,7 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
             Description: mat.name || 'Material',
             Quantity: mat.quantity || 1,
             UnitAmount: mat.price || 0,
-            AccountCode: '4000',
+            AccountCode: '200',
             TaxType: 'OUTPUT',
           });
         }
@@ -6706,7 +6706,7 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
           Description: `Labour - ${invoice.job?.name || 'General'}`,
           Quantity: invoice.laborHours,
           UnitAmount: invoice.laborRate,
-          AccountCode: '4000',
+          AccountCode: '200',
           TaxType: 'OUTPUT',
         });
       }
@@ -6717,7 +6717,7 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
           Description: 'Markup',
           Quantity: 1,
           UnitAmount: invoice.markupAmount,
-          AccountCode: '4000',
+          AccountCode: '200',
           TaxType: 'OUTPUT',
         });
       }
@@ -6728,7 +6728,7 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
           Description: invoice.job?.name || 'Services',
           Quantity: 1,
           UnitAmount: invoice.subtotal || invoice.total || 0,
-          AccountCode: '4000',
+          AccountCode: '200',
           TaxType: 'OUTPUT',
         });
       }
@@ -7016,7 +7016,7 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
               Description: mat.name || 'Material',
               Quantity: mat.quantity || 1,
               UnitAmount: mat.price || 0,
-              AccountCode: '4000',
+              AccountCode: '200',
               TaxType: 'OUTPUT',
             });
           }
@@ -7026,15 +7026,15 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
             Description: `Labour - ${invoice.job?.name || 'General'}`,
             Quantity: invoice.laborHours,
             UnitAmount: invoice.laborRate,
-            AccountCode: '4000',
+            AccountCode: '200',
             TaxType: 'OUTPUT',
           });
         }
         if (invoice.markupAmount > 0) {
-          lineItems.push({ Description: 'Markup', Quantity: 1, UnitAmount: invoice.markupAmount, AccountCode: '4000', TaxType: 'OUTPUT' });
+          lineItems.push({ Description: 'Markup', Quantity: 1, UnitAmount: invoice.markupAmount, AccountCode: '200', TaxType: 'OUTPUT' });
         }
         if (lineItems.length === 0) {
-          lineItems.push({ Description: invoice.job?.name || 'Services', Quantity: 1, UnitAmount: invoice.subtotal || 0, AccountCode: '4000', TaxType: 'OUTPUT' });
+          lineItems.push({ Description: invoice.job?.name || 'Services', Quantity: 1, UnitAmount: invoice.subtotal || 0, AccountCode: '200', TaxType: 'OUTPUT' });
         }
 
         let xeroStatus = 'DRAFT';

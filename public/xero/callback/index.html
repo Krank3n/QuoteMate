@@ -44,6 +44,25 @@
       color: #999;
       margin-top: 16px;
     }
+    .btn {
+      margin-top: 12px;
+      padding: 12px 32px;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+    }
+    .btn-primary {
+      background: #13855c;
+      color: white;
+    }
+    .btn-secondary {
+      background: #334155;
+      color: #e2e8f0;
+      border: 1px solid #475569;
+    }
     .hidden { display: none; }
   </style>
 </head>
@@ -60,13 +79,14 @@
     <div id="success" class="hidden">
       <h1 class="success">Connected!</h1>
       <p>Your Xero organisation <span id="org-name" class="org-name"></span> is now linked to QuoteMate.</p>
-      <p class="hint">You can close this window and return to the app.</p>
+      <button onclick="window.close()" class="btn btn-primary">Return to App</button>
+      <p class="hint">If the button doesn't work, just close this tab.</p>
     </div>
 
     <div id="error" class="hidden">
       <h1 class="error">Connection Failed</h1>
       <p id="error-message">Something went wrong. Please try again from the app.</p>
-      <p class="hint">You can close this window and try again.</p>
+      <button onclick="window.close()" class="btn btn-secondary">Close and Try Again</button>
     </div>
   </div>
 

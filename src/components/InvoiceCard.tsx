@@ -57,12 +57,13 @@ export const InvoiceCard = React.memo(function InvoiceCard({
   const [statusMenuVisible, setStatusMenuVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [emailPreviewVisible, setEmailPreviewVisible] = useState(false);
+  const [xeroResultModal, setXeroResultModal] = useState<{ visible: boolean; success: boolean; message: string }>({ visible: false, success: false, message: '' });
   const [emailBody, setEmailBody] = useState('');
   const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const idleAnim = useRef(new Animated.Value(0)).current;
   const idleTilt = useRef(new Animated.Value(0)).current;
-  const { subscriptionStatus, quotes } = useStore();
+  const { subscriptionStatus, quotes, xeroConnection, pushInvoiceToXero } = useStore();
   const sourceQuotePhotos = invoice.sourceQuoteId
     ? quotes.find(q => q.id === invoice.sourceQuoteId)?.photos || []
     : [];
@@ -192,6 +193,16 @@ export const InvoiceCard = React.memo(function InvoiceCard({
   const confirmDeleteInvoice = () => {
     setDeleteModalVisible(false);
     onDelete(invoice.id);
+  };
+
+  const handlePushToXero = async () => {
+    setMenuVisible(false);
+    try {
+      await pushInvoiceToXero(invoice);
+      setXeroResultModal({ visible: true, success: true, message: 'Invoice pushed to Xero successfully.' });
+    } catch (error: any) {
+      setXeroResultModal({ visible: true, success: false, message: error.message || 'Failed to sync invoice to Xero.' });
+    }
   };
 
   const handleStatusChange = async (newStatus: InvoiceStatus) => {
@@ -328,6 +339,13 @@ export const InvoiceCard = React.memo(function InvoiceCard({
           ? [{ icon: 'cash', label: 'Record Payment', onPress: () => onRecordPayment(invoice) }]
           : []),
         { icon: 'file-pdf-box', label: 'Export PDF', onPress: handleExportInvoice },
+        ...(xeroConnection && invoice.status !== 'draft'
+          ? [{
+              icon: invoice.xeroSyncStatus === 'synced' ? 'cloud-check' : 'cloud-sync',
+              label: invoice.xeroSyncStatus === 'synced' ? 'Re-sync to Xero' : 'Push to Xero',
+              onPress: handlePushToXero,
+            }]
+          : []),
         { icon: 'delete-outline', label: 'Delete', onPress: handleDeleteInvoice, color: colors.error, divider: true },
       ]}
     />
@@ -363,6 +381,18 @@ export const InvoiceCard = React.memo(function InvoiceCard({
       primaryButtonAction={confirmDeleteInvoice}
       secondaryButtonText="Cancel"
       secondaryButtonAction={() => setDeleteModalVisible(false)}
+      showConfetti={false}
+    />
+
+    <AlertModal
+      visible={xeroResultModal.visible}
+      onDismiss={() => setXeroResultModal({ ...xeroResultModal, visible: false })}
+      type={xeroResultModal.success ? 'success' : 'error'}
+      icon={xeroResultModal.success ? 'cloud-check' : 'cloud-alert'}
+      title={xeroResultModal.success ? 'Synced to Xero' : 'Sync Failed'}
+      message={xeroResultModal.message}
+      primaryButtonText="OK"
+      primaryButtonAction={() => setXeroResultModal({ ...xeroResultModal, visible: false })}
       showConfetti={false}
     />
 

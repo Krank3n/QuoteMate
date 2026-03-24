@@ -10,15 +10,20 @@ package-lock.json
 # Expo
 .expo/
 dist/
+dist-web/
 web-build/
 
 # Environment variables
 .env
+.env.*
 .env.local
 
 # IDE
 .vscode/*
 .idea/
+
+# Firebase
+.firebase/
 
 # OS
 .DS_Store

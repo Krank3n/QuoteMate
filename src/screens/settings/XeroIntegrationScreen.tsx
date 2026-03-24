@@ -8,8 +8,6 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Alert,
-  Linking,
 } from 'react-native';
 import {
   Text,
@@ -27,6 +25,7 @@ import { format } from 'date-fns';
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
+import { AlertModal } from '../../components/AlertModal';
 import * as xeroService from '../../services/xeroService';
 
 export function XeroIntegrationScreen() {
@@ -43,6 +42,11 @@ export function XeroIntegrationScreen() {
 
   const [loading, setLoading] = useState(false);
   const [checkingConnection, setCheckingConnection] = useState(true);
+  const [alertModal, setAlertModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'info'; title: string; message: string }>({ visible: false, type: 'info', title: '', message: '' });
+
+  const showAlert = (type: 'success' | 'error' | 'info', title: string, message: string) => {
+    setAlertModal({ visible: true, type, title, message });
+  };
 
   // Count unsynced invoices
   const unsyncedInvoices = invoices.filter(
@@ -85,80 +89,63 @@ export function XeroIntegrationScreen() {
 
   const handleConnect = async () => {
     if (!isPro) {
-      Alert.alert(
-        'Pro Feature',
-        'Xero integration is available on the Pro plan. Upgrade to sync your invoices and payments.',
-      );
+      showAlert('info', 'Pro Feature', 'Xero integration is available on the Pro plan. Upgrade to sync your invoices and payments.');
       return;
     }
 
     setLoading(true);
     try {
       const { authUrl } = await xeroService.getXeroAuthUrl();
-      await WebBrowser.openBrowserAsync(authUrl);
-      // After the browser closes, check if we're now connected
+      await WebBrowser.openBrowserAsync(authUrl, {
+        dismissButtonStyle: 'done',
+      });
+      // Browser closed — re-check connection (user may have completed OAuth)
+      setCheckingConnection(true);
       await checkConnection();
     } catch (error: any) {
-      Alert.alert('Connection Failed', error.message || 'Could not start Xero connection. Please try again.');
+      showAlert('error', 'Connection Failed', error.message || 'Could not start Xero connection. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  const [disconnectModalVisible, setDisconnectModalVisible] = useState(false);
+
   const handleDisconnect = () => {
-    Alert.alert(
-      'Disconnect Xero',
-      `This will unlink your Xero organisation "${xeroConnection?.tenantName}". Your existing invoices in Xero won't be affected.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Disconnect',
-          style: 'destructive',
-          onPress: async () => {
-            setLoading(true);
-            try {
-              await xeroService.disconnectXero();
-              setXeroConnection(null);
-            } catch (error: any) {
-              Alert.alert('Error', error.message || 'Failed to disconnect. Please try again.');
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ]
-    );
+    setDisconnectModalVisible(true);
+  };
+
+  const confirmDisconnect = async () => {
+    setDisconnectModalVisible(false);
+    setLoading(true);
+    try {
+      await xeroService.disconnectXero();
+      setXeroConnection(null);
+    } catch (error: any) {
+      showAlert('error', 'Error', error.message || 'Failed to disconnect. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleBulkSync = async () => {
     const ids = unsyncedInvoices.map((inv) => inv.id);
     if (ids.length === 0) {
-      Alert.alert('All Synced', 'All your invoices are already synced to Xero.');
+      showAlert('success', 'All Synced', 'All your invoices are already synced to Xero.');
       return;
     }
 
-    Alert.alert(
-      'Sync Invoices',
-      `Push ${ids.length} unsynced invoice${ids.length === 1 ? '' : 's'} to Xero?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sync',
-          onPress: async () => {
-            try {
-              const result = await xeroBulkSync(ids);
-              Alert.alert(
-                'Sync Complete',
-                `${result.successCount} of ${result.totalCount} invoices synced successfully.`
-              );
-              await checkConnection();
-            } catch (error: any) {
-              Alert.alert('Sync Failed', error.message || 'Some invoices failed to sync.');
-            }
-          },
-        },
-      ]
-    );
+    try {
+      const result = await xeroBulkSync(ids);
+      showAlert(
+        result.successCount > 0 ? 'success' : 'error',
+        'Sync Complete',
+        `${result.successCount} of ${result.totalCount} invoices synced successfully.`
+      );
+      await checkConnection();
+    } catch (error: any) {
+      showAlert('error', 'Sync Failed', error.message || 'Some invoices failed to sync.');
+    }
   };
 
   if (checkingConnection) {
@@ -171,6 +158,7 @@ export function XeroIntegrationScreen() {
   }
 
   return (
+    <>
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <WebContainer>
         {/* Xero Logo / Header */}
@@ -328,6 +316,33 @@ export function XeroIntegrationScreen() {
         <View style={styles.bottomPadding} />
       </WebContainer>
     </ScrollView>
+
+    <AlertModal
+      visible={alertModal.visible}
+      onDismiss={() => setAlertModal({ ...alertModal, visible: false })}
+      type={alertModal.type}
+      icon={alertModal.type === 'success' ? 'cloud-check' : alertModal.type === 'error' ? 'cloud-alert' : 'information'}
+      title={alertModal.title}
+      message={alertModal.message}
+      primaryButtonText="OK"
+      primaryButtonAction={() => setAlertModal({ ...alertModal, visible: false })}
+      showConfetti={false}
+    />
+
+    <AlertModal
+      visible={disconnectModalVisible}
+      onDismiss={() => setDisconnectModalVisible(false)}
+      type="error"
+      icon="link-off"
+      title="Disconnect Xero"
+      message={`This will unlink "${xeroConnection?.tenantName || 'your organisation'}". Your existing invoices in Xero won't be affected.`}
+      primaryButtonText="Disconnect"
+      primaryButtonAction={confirmDisconnect}
+      secondaryButtonText="Cancel"
+      secondaryButtonAction={() => setDisconnectModalVisible(false)}
+      showConfetti={false}
+    />
+    </>
   );
 }
 

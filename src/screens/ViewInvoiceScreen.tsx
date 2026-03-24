@@ -560,20 +560,6 @@ export function ViewInvoiceScreen() {
             Record Payment
           </Button>
         )}
-        {xeroConnection && invoice.status !== 'draft' && (
-          <Button
-            mode="outlined"
-            onPress={handlePushToXero}
-            loading={isXeroPushing}
-            disabled={isXeroPushing}
-            style={styles.button}
-            contentStyle={styles.buttonContent}
-            icon={invoice.xeroSyncStatus === 'synced' ? 'check-circle' : 'cloud-sync'}
-            textColor={invoice.xeroSyncStatus === 'synced' ? colors.success : undefined}
-          >
-            {invoice.xeroSyncStatus === 'synced' ? 'Synced to Xero' : 'Push to Xero'}
-          </Button>
-        )}
         <SendInvoiceButton
           invoice={invoice}
           businessSettings={businessSettings}
