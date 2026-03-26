@@ -5,7 +5,8 @@
  */
 
 import { auth } from '../config/firebase';
-import { Invoice } from '../types';
+import { Invoice, Contact } from '../types';
+import { generateId } from '../utils/generateId';
 
 // Firebase Functions URL configuration
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
@@ -139,4 +140,29 @@ export async function xeroBulkSync(invoiceIds: string[]): Promise<{
   totalCount: number;
 }> {
   return xeroFetch('xeroBulkSync', { invoiceIds });
+}
+
+/**
+ * Fetch contacts from Xero and map them to our Contact type.
+ */
+export async function fetchXeroContacts(): Promise<Contact[]> {
+  const data = await xeroFetch('getXeroContacts');
+  const now = new Date().toISOString();
+
+  return (data.contacts || []).map((xc: any) => ({
+    id: generateId(),
+    name: xc.Name || xc.name || 'Unknown',
+    email: xc.EmailAddress || xc.emailAddress || undefined,
+    phone: xc.Phones?.[0]?.PhoneNumber || xc.phones?.[0]?.phoneNumber || undefined,
+    address: xc.Addresses?.[0]
+      ? [xc.Addresses[0].AddressLine1, xc.Addresses[0].City, xc.Addresses[0].Region, xc.Addresses[0].PostalCode]
+          .filter(Boolean)
+          .join(', ')
+      : undefined,
+    website: xc.Website || undefined,
+    source: 'xero' as const,
+    xeroContactId: xc.ContactID || xc.contactId,
+    createdAt: now,
+    updatedAt: now,
+  }));
 }

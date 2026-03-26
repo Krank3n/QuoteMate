@@ -31,6 +31,7 @@ import {
   TotalsSection,
   documentStyles,
 } from '../components/document';
+import { useResolvedCustomer } from '../hooks/useResolvedCustomer';
 
 export function ViewQuoteScreen() {
   const navigation = useNavigation<any>();
@@ -100,6 +101,7 @@ export function ViewQuoteScreen() {
   }
 
   const quote = displayQuote;
+  const resolvedCustomer = useResolvedCustomer(displayQuote);
 
   const handleEditSection = (section: 'customer' | 'job' | 'materials' | 'labor') => {
     setCurrentQuote(quote);
@@ -109,7 +111,7 @@ export function ViewQuoteScreen() {
       materials: 'MaterialsList',
       labor: 'LaborMarkup',
     };
-    navigation.navigate('NewQuote', { screen: screenMap[section] });
+    navigation.navigate('NewQuote', { screen: screenMap[section], params: { editing: true } });
   };
 
   const handleConvertToInvoice = () => {
@@ -205,11 +207,13 @@ export function ViewQuoteScreen() {
         </View>
 
         <CustomerSection
-          customerName={quote.customerName}
-          customerEmail={quote.customerEmail}
-          customerPhone={quote.customerPhone}
-          jobAddress={quote.jobAddress}
+          customerName={resolvedCustomer?.customerName || quote.customerName}
+          customerEmail={resolvedCustomer?.customerEmail || quote.customerEmail}
+          customerPhone={resolvedCustomer?.customerPhone || quote.customerPhone}
+          jobAddress={resolvedCustomer?.jobAddress || quote.jobAddress}
+          website={resolvedCustomer?.website}
           onEdit={() => handleEditSection('customer')}
+          showActions
         />
 
         <JobSection

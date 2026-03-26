@@ -66,6 +66,7 @@ export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const fromTour = route.params?.fromTour;
+  const isEditFromPreview = route.params?.editing === true;
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
   const { quotes, invoices, businessSettings, subscriptionStatus, saveDraft, unifiedTourActive, unifiedTourPhase } = useStore();
@@ -843,6 +844,22 @@ export function JobDetailsScreen() {
       });
   };
 
+  const handleSaveAndReturn = () => {
+    if (!currentQuote) return;
+    const updatedQuote = {
+      ...currentQuote,
+      job: {
+        ...currentQuote.job,
+        name: jobName || currentQuote.job.name,
+        description: jobDescription,
+      },
+      photos: jobPhotos,
+    };
+    updateQuote(updatedQuote);
+    saveDraft(updatedQuote);
+    navigation.goBack();
+  };
+
   const handleNext = () => {
     if (!currentQuote) return;
 
@@ -1427,8 +1444,8 @@ export function JobDetailsScreen() {
 
         <View ref={analyzeRef}>
         <FixedBottomButton
-          label="Next: Customer Details"
-          onPress={handleNext}
+          label={isEditFromPreview ? 'Save' : 'Next: Customer Details'}
+          onPress={isEditFromPreview ? handleSaveAndReturn : handleNext}
           disabled={
             (useCustomMode && !jobDescription.trim()) ||
             (!useCustomMode && !selectedTemplate)

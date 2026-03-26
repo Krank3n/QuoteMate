@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
-import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus } from '../types';
+import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
 import { TourPhase } from '../components/tour/tourFlow';
 import { updateQuoteCalculations } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
@@ -96,6 +96,17 @@ interface AppState {
   endUnifiedTour: () => Promise<void>;
   skipUnifiedTour: () => Promise<void>;
 
+  // Contacts
+  contacts: Contact[];
+  contactsLoaded: boolean;
+  xeroContacts: Contact[];
+  loadContacts: () => Promise<void>;
+  saveContact: (contact: Contact) => Promise<void>;
+  deleteContact: (contactId: string) => Promise<void>;
+  importContacts: (contacts: Contact[]) => Promise<void>;
+  syncXeroContacts: () => Promise<void>;
+  migrateCustomersToContacts: () => Promise<void>;
+
   // Xero integration
   xeroConnection: XeroConnection | null;
   xeroLoading: boolean;
@@ -120,6 +131,8 @@ const STORAGE_KEYS = {
   NEXT_INVOICE_NUMBER: '@quotemate:next_invoice_number',
   TOUR_SEEN: '@quotemate:tour_seen',
   XERO_CONNECTION: '@quotemate:xero_connection',
+  CONTACTS: '@quotemate:contacts',
+  CONTACTS_MIGRATED: '@quotemate:contacts_migrated',
 };
 
 // Helper to check if we need to reset monthly count
@@ -148,6 +161,9 @@ export const useStore = create<AppState>((set, get) => ({
   currentInvoice: null,
   nextInvoiceNumber: 1,
   referralInfo: null,
+  contacts: [],
+  contactsLoaded: false,
+  xeroContacts: [],
   unifiedTourActive: false,
   unifiedTourPhase: null,
   unifiedTourQuoteId: null,
@@ -749,6 +765,11 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.TOUR_SEEN, JSON.stringify(value));
       set({ hasSeenTour: value });
+
+      // Sync to Firestore if user is signed in
+      if (auth.currentUser) {
+        await firestoreService.saveTourStatus(value);
+      }
     } catch (error) {
       console.error('Failed to save tour status:', error);
     }
@@ -756,6 +777,50 @@ export const useStore = create<AppState>((set, get) => ({
 
   checkTourStatus: async () => {
     try {
+      // If user is signed in, try loading from Firestore first
+      if (auth.currentUser) {
+        const cloudTourStatus = await firestoreService.loadTourStatus();
+        if (cloudTourStatus !== null) {
+          await AsyncStorage.setItem(STORAGE_KEYS.TOUR_SEEN, JSON.stringify(cloudTourStatus));
+          set({ hasSeenTour: cloudTourStatus });
+        } else {
+          // Fallback to local, and sync up if local says seen
+          const stored = await AsyncStorage.getItem(STORAGE_KEYS.TOUR_SEEN);
+          if (stored) {
+            const hasSeenTour = JSON.parse(stored);
+            set({ hasSeenTour });
+            if (hasSeenTour) {
+              await firestoreService.saveTourStatus(hasSeenTour);
+            }
+          }
+        }
+
+        const cloudScreenTours = await firestoreService.loadSeenScreenTours();
+        if (cloudScreenTours) {
+          // Merge cloud and local screen tours
+          const localStored = await AsyncStorage.getItem('@quotemate:seen_screen_tours');
+          const localTours: string[] = localStored ? JSON.parse(localStored) : [];
+          const merged = [...new Set([...localTours, ...cloudScreenTours])];
+          await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(merged));
+          set({ seenScreenTours: merged });
+          // Sync merged list back if local had extras
+          if (merged.length > cloudScreenTours.length) {
+            await firestoreService.saveSeenScreenTours(merged);
+          }
+        } else {
+          const screenToursStored = await AsyncStorage.getItem('@quotemate:seen_screen_tours');
+          if (screenToursStored) {
+            const parsed = JSON.parse(screenToursStored);
+            set({ seenScreenTours: parsed });
+            if (parsed.length > 0) {
+              await firestoreService.saveSeenScreenTours(parsed);
+            }
+          }
+        }
+        return;
+      }
+
+      // Fallback to local storage only
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.TOUR_SEEN);
       if (stored) {
         set({ hasSeenTour: JSON.parse(stored) });
@@ -776,6 +841,11 @@ export const useStore = create<AppState>((set, get) => ({
       const updated = [...seenScreenTours, tourId];
       await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(updated));
       set({ seenScreenTours: updated });
+
+      // Sync to Firestore if user is signed in
+      if (auth.currentUser) {
+        await firestoreService.saveSeenScreenTours(updated);
+      }
     } catch (error) {
       console.error('Failed to mark screen tour seen:', error);
     }
@@ -852,6 +922,7 @@ export const useStore = create<AppState>((set, get) => ({
       updatedAt: now,
       issueDate: now,
       dueDate: calculateDueDate(now, 'net_14'),
+      contactId: quote.contactId,
       customerName: quote.customerName,
       customerEmail: quote.customerEmail,
       customerPhone: quote.customerPhone,
@@ -1250,6 +1321,212 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
+  // Contacts
+  loadContacts: async () => {
+    try {
+      // If user is signed in, try loading from Firestore first
+      if (auth.currentUser) {
+        const cloudContacts = await firestoreService.loadContacts();
+        if (cloudContacts.length > 0) {
+          await AsyncStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(cloudContacts));
+          set({ contacts: cloudContacts, contactsLoaded: true });
+
+          // Run migration check after loading
+          const migrated = await AsyncStorage.getItem(STORAGE_KEYS.CONTACTS_MIGRATED);
+          if (!migrated) {
+            await get().migrateCustomersToContacts();
+          }
+          return;
+        }
+      }
+
+      // Fallback to local storage
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.CONTACTS);
+      if (stored) {
+        const contacts: Contact[] = JSON.parse(stored);
+        set({ contacts, contactsLoaded: true });
+
+        // Sync to cloud if user is signed in but no cloud data exists
+        if (auth.currentUser && contacts.length > 0) {
+          await firestoreService.saveContacts(contacts);
+        }
+      } else {
+        set({ contactsLoaded: true });
+      }
+
+      // Run migration check
+      const migrated = await AsyncStorage.getItem(STORAGE_KEYS.CONTACTS_MIGRATED);
+      if (!migrated) {
+        await get().migrateCustomersToContacts();
+      }
+    } catch (error) {
+      console.error('Failed to load contacts:', error);
+      set({ contactsLoaded: true });
+    }
+  },
+
+  saveContact: async (contact: Contact) => {
+    try {
+      const { contacts, quotes, invoices } = get();
+      const existingIndex = contacts.findIndex((c) => c.id === contact.id);
+      const updated =
+        existingIndex >= 0
+          ? contacts.map((c) => (c.id === contact.id ? contact : c))
+          : [...contacts, contact];
+
+      await AsyncStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(updated));
+      set({ contacts: updated });
+
+      if (auth.currentUser) {
+        firestoreService.saveContact(contact).catch(() => {});
+      }
+
+      // Sync snapshot fields on linked quotes and invoices
+      const linkedQuotes = quotes.filter((q) => q.contactId === contact.id);
+      if (linkedQuotes.length > 0) {
+        const updatedQuotes = quotes.map((q) =>
+          q.contactId === contact.id
+            ? { ...q, customerName: contact.name, customerEmail: contact.email, customerPhone: contact.phone, jobAddress: contact.address || q.jobAddress }
+            : q
+        );
+        await AsyncStorage.setItem(STORAGE_KEYS.QUOTES, JSON.stringify(updatedQuotes));
+        set({ quotes: updatedQuotes });
+        if (auth.currentUser) {
+          for (const q of updatedQuotes.filter((q) => q.contactId === contact.id)) {
+            firestoreService.saveQuote(q).catch(() => {});
+          }
+        }
+      }
+
+      const linkedInvoices = invoices.filter((i) => i.contactId === contact.id);
+      if (linkedInvoices.length > 0) {
+        const updatedInvoices = invoices.map((i) =>
+          i.contactId === contact.id
+            ? { ...i, customerName: contact.name, customerEmail: contact.email, customerPhone: contact.phone, jobAddress: contact.address || i.jobAddress }
+            : i
+        );
+        await AsyncStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(updatedInvoices));
+        set({ invoices: updatedInvoices });
+        if (auth.currentUser) {
+          for (const i of updatedInvoices.filter((i) => i.contactId === contact.id)) {
+            firestoreService.saveInvoice(i).catch(() => {});
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save contact:', error);
+      throw error;
+    }
+  },
+
+  deleteContact: async (contactId: string) => {
+    try {
+      const { contacts } = get();
+      const updated = contacts.filter((c) => c.id !== contactId);
+
+      await AsyncStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(updated));
+      set({ contacts: updated });
+
+      if (auth.currentUser) {
+        firestoreService.deleteContact(contactId).catch(() => {});
+      }
+    } catch (error) {
+      console.error('Failed to delete contact:', error);
+      throw error;
+    }
+  },
+
+  importContacts: async (newContacts: Contact[]) => {
+    try {
+      const { contacts } = get();
+      const all = [...contacts, ...newContacts];
+
+      await AsyncStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(all));
+      set({ contacts: all });
+
+      if (auth.currentUser) {
+        firestoreService.saveContacts(newContacts).catch(() => {});
+      }
+    } catch (error) {
+      console.error('Failed to import contacts:', error);
+      throw error;
+    }
+  },
+
+  syncXeroContacts: async () => {
+    try {
+      const xeroService = await import('../services/xeroService');
+      const xeroContacts = await xeroService.fetchXeroContacts();
+      set({ xeroContacts });
+    } catch (error) {
+      console.error('Failed to sync Xero contacts:', error);
+      throw error;
+    }
+  },
+
+  migrateCustomersToContacts: async () => {
+    try {
+      const { quotes, invoices, contacts } = get();
+      const existingNames = new Set(contacts.map((c) => c.name.toLowerCase().trim()));
+      const customerMap = new Map<string, { name: string; email?: string; phone?: string; address?: string; xeroContactId?: string }>();
+
+      // Extract from quotes
+      for (const quote of quotes) {
+        const key = quote.customerName.toLowerCase().trim();
+        if (key && !existingNames.has(key) && !customerMap.has(key)) {
+          customerMap.set(key, {
+            name: quote.customerName,
+            email: quote.customerEmail,
+            phone: quote.customerPhone,
+            address: quote.jobAddress,
+          });
+        }
+      }
+
+      // Extract from invoices (may have xeroContactId)
+      for (const invoice of invoices) {
+        const key = invoice.customerName.toLowerCase().trim();
+        if (key && !existingNames.has(key)) {
+          const existing = customerMap.get(key);
+          if (existing) {
+            if (invoice.xeroContactId) existing.xeroContactId = invoice.xeroContactId;
+            if (!existing.email && invoice.customerEmail) existing.email = invoice.customerEmail;
+            if (!existing.phone && invoice.customerPhone) existing.phone = invoice.customerPhone;
+          } else {
+            customerMap.set(key, {
+              name: invoice.customerName,
+              email: invoice.customerEmail,
+              phone: invoice.customerPhone,
+              address: invoice.jobAddress,
+              xeroContactId: invoice.xeroContactId,
+            });
+          }
+        }
+      }
+
+      if (customerMap.size > 0) {
+        const { createContact } = await import('../services/contactService');
+        const newContacts: Contact[] = Array.from(customerMap.values()).map((c) =>
+          createContact({
+            name: c.name,
+            email: c.email,
+            phone: c.phone,
+            address: c.address,
+            source: 'quote',
+            xeroContactId: c.xeroContactId,
+          })
+        );
+
+        await get().importContacts(newContacts);
+        console.log(`✅ Migrated ${newContacts.length} customers to contacts`);
+      }
+
+      await AsyncStorage.setItem(STORAGE_KEYS.CONTACTS_MIGRATED, 'true');
+    } catch (error) {
+      console.error('Failed to migrate customers to contacts:', error);
+    }
+  },
+
   // Xero integration
   xeroConnection: null,
   xeroLoading: false,
@@ -1364,6 +1641,8 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.NEXT_INVOICE_NUMBER,
         STORAGE_KEYS.TOUR_SEEN,
         STORAGE_KEYS.XERO_CONNECTION,
+        STORAGE_KEYS.CONTACTS,
+        STORAGE_KEYS.CONTACTS_MIGRATED,
         '@quotemate:seen_screen_tours',
       ]);
       console.log('✅ clearAllData: AsyncStorage cleared');
@@ -1385,6 +1664,9 @@ export const useStore = create<AppState>((set, get) => ({
         referralInfo: null,
         xeroConnection: null,
         xeroLoading: false,
+        contacts: [],
+        contactsLoaded: false,
+        xeroContacts: [],
       });
       console.log('✅ clearAllData: Store state reset');
 

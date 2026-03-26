@@ -93,6 +93,18 @@ export function SettingsScreen() {
       ],
     },
     {
+      title: 'Data',
+      items: [
+        {
+          id: 'contacts',
+          title: 'Contacts',
+          subtitle: 'Keep track of your regulars',
+          icon: 'account-group',
+          screen: 'Contacts',
+        },
+      ],
+    },
+    {
       title: 'Notifications',
       items: [
         {

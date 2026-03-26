@@ -41,6 +41,7 @@ import {
   TotalsSection,
   documentStyles,
 } from '../components/document';
+import { useResolvedCustomer } from '../hooks/useResolvedCustomer';
 import { WebContainer } from '../components/WebContainer';
 import { StatusSheet, INVOICE_STATUS_OPTIONS } from '../components/StatusSheet';
 
@@ -145,7 +146,7 @@ export function ViewInvoiceScreen() {
       materials: 'MaterialsList',
       labor: 'LaborMarkup',
     };
-    navigation.navigate('NewInvoice', { screen: screenMap[section] });
+    navigation.navigate('NewInvoice', { screen: screenMap[section], params: { editing: true } });
   };
 
   const handleStatusSelect = async (newStatus: string) => {
@@ -217,6 +218,7 @@ export function ViewInvoiceScreen() {
   }
 
   const invoice = displayInvoice;
+  const resolvedCustomer = useResolvedCustomer(displayInvoice);
   const amountDue = getAmountDue(invoice);
   const isOverdue = isInvoiceOverdue(invoice);
 
@@ -294,12 +296,14 @@ export function ViewInvoiceScreen() {
         </TouchableOpacity>
 
         <CustomerSection
-          customerName={invoice.customerName}
-          customerEmail={invoice.customerEmail}
-          customerPhone={invoice.customerPhone}
-          jobAddress={invoice.jobAddress}
+          customerName={isEditing ? invoice.customerName : (resolvedCustomer?.customerName || invoice.customerName)}
+          customerEmail={isEditing ? invoice.customerEmail : (resolvedCustomer?.customerEmail || invoice.customerEmail)}
+          customerPhone={isEditing ? invoice.customerPhone : (resolvedCustomer?.customerPhone || invoice.customerPhone)}
+          jobAddress={isEditing ? invoice.jobAddress : (resolvedCustomer?.jobAddress || invoice.jobAddress)}
+          website={resolvedCustomer?.website}
           isEditing={isEditing}
           onFieldChange={(field, value) => handleFieldChange(field as keyof Invoice, value)}
+          showActions
         />
 
         {/* Dates Section */}

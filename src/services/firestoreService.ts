@@ -19,7 +19,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
-import { Quote, BusinessSettings, SubscriptionStatus, Invoice, ReferralInfo } from '../types';
+import { Quote, BusinessSettings, SubscriptionStatus, Invoice, ReferralInfo, Contact } from '../types';
 
 /** Recursively strip undefined values from an object (Firestore rejects them) */
 function stripUndefined(obj: any): any {
@@ -278,6 +278,45 @@ class FirestoreService {
       return null;
     } catch (error) {
       console.error('Error loading tour status from Firestore:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Save seen screen tours to Firestore
+   */
+  async saveSeenScreenTours(seenScreenTours: string[]): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) return;
+
+    try {
+      const tourRef = doc(db, 'users', userId, 'profile', 'tour');
+      await setDoc(tourRef, {
+        seenScreenTours,
+        syncedAt: new Date().toISOString(),
+      }, { merge: true });
+    } catch (error) {
+      console.error('Error saving screen tours to Firestore:', error);
+    }
+  }
+
+  /**
+   * Load seen screen tours from Firestore
+   */
+  async loadSeenScreenTours(): Promise<string[] | null> {
+    const userId = this.getUserId();
+    if (!userId) return null;
+
+    try {
+      const tourRef = doc(db, 'users', userId, 'profile', 'tour');
+      const snapshot = await getDoc(tourRef);
+
+      if (snapshot.exists() && snapshot.data().seenScreenTours) {
+        return snapshot.data().seenScreenTours;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error loading screen tours from Firestore:', error);
       return null;
     }
   }
@@ -716,6 +755,102 @@ class FirestoreService {
       console.log('✅ FCM token removed from Firestore');
     } catch (error) {
       console.error('❌ Error removing FCM token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Save a contact to Firestore
+   */
+  async saveContact(contact: Contact): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, skipping cloud sync');
+      return;
+    }
+
+    try {
+      const contactRef = doc(db, 'users', userId, 'contacts', contact.id);
+      await setDoc(contactRef, stripUndefined({
+        ...contact,
+        syncedAt: new Date().toISOString(),
+      }));
+      console.log('✅ Contact saved to Firestore:', contact.id);
+    } catch (error) {
+      console.error('❌ Error saving contact to Firestore:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Load all contacts from Firestore
+   */
+  async loadContacts(): Promise<Contact[]> {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, returning empty contacts');
+      return [];
+    }
+
+    try {
+      const contactsRef = collection(db, 'users', userId, 'contacts');
+      const q = query(contactsRef, orderBy('name'));
+      const snapshot = await getDocs(q);
+
+      const contacts: Contact[] = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return data as Contact;
+      });
+
+      console.log(`✅ Loaded ${contacts.length} contacts from Firestore`);
+      return contacts;
+    } catch (error) {
+      console.error('❌ Error loading contacts from Firestore:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Delete a contact from Firestore
+   */
+  async deleteContact(contactId: string): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, skipping cloud delete');
+      return;
+    }
+
+    try {
+      const contactRef = doc(db, 'users', userId, 'contacts', contactId);
+      await deleteDoc(contactRef);
+      console.log('✅ Contact deleted from Firestore:', contactId);
+    } catch (error) {
+      console.error('❌ Error deleting contact from Firestore:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Batch save multiple contacts to Firestore
+   */
+  async saveContacts(contacts: Contact[]): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) {
+      console.log('No user signed in, skipping cloud sync');
+      return;
+    }
+
+    try {
+      for (const contact of contacts) {
+        const contactRef = doc(db, 'users', userId, 'contacts', contact.id);
+        await setDoc(contactRef, stripUndefined({
+          ...contact,
+          syncedAt: new Date().toISOString(),
+        }));
+      }
+      console.log(`✅ ${contacts.length} contacts saved to Firestore`);
+    } catch (error) {
+      console.error('❌ Error batch saving contacts to Firestore:', error);
       throw error;
     }
   }

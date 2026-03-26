@@ -275,7 +275,7 @@ export function TradePricingScreen() {
                 <Text style={styles.storeCategoryTitle}>Guestimates</Text>
               </View>
               <Text style={styles.storeCategoryDescription}>
-                AI-estimated pricing based on typical product costs
+                Estimated pricing based on typical product costs
               </Text>
 
               {['mitre10', 'hth', 'totaltools', 'flexihire', 'sydneysolvents'].map((storeId) => {
@@ -306,7 +306,7 @@ export function TradePricingScreen() {
                       </View>
                       <View style={styles.storeInfo}>
                         <Text style={styles.storeName}>{storeNames[storeId]}</Text>
-                        <Text style={styles.storeMethod}>AI Estimation</Text>
+                        <Text style={styles.storeMethod}>Price Estimate</Text>
                       </View>
                     </View>
                     <MaterialCommunityIcons name="approximately-equal" size={20} color="#FF9800" />
@@ -320,7 +320,7 @@ export function TradePricingScreen() {
               <Text style={styles.infoBoxText}>
                 {selectedStore === 'bunnings'
                   ? "Bunnings is selected. Real prices will be fetched using the Bunnings web search when available."
-                  : "Using AI estimation for typical product pricing."
+                  : "Using estimated typical product pricing."
                 }
               </Text>
             </View>

@@ -11,7 +11,7 @@ import {
   Surface,
   Divider,
 } from 'react-native-paper';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useStore } from '../../store/useStore';
@@ -30,6 +30,8 @@ import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/t
 
 export function LaborMarkupScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const isEditFromPreview = route.params?.editing === true;
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
   const { saveDraft, businessSettings, unifiedTourActive, unifiedTourPhase } = useStore();
@@ -138,6 +140,26 @@ export function LaborMarkupScreen() {
   const hasBusinessAddress = !!businessSettings?.address;
   const hasJobAddress = !!currentQuote.jobAddress;
   const geocodeFailed = !!currentQuote.travelGeocodeFailed;
+
+  const handleSaveAndReturn = () => {
+    if (!currentQuote) return;
+    const updatedQuote = {
+      ...currentQuote,
+      laborHours: hours,
+      laborRate: rate,
+      markup: markupPercent,
+      travelAdjustment: travelPct,
+      laborTotal: calculation.laborTotal,
+      materialsSubtotal: calculation.materialsSubtotal,
+      subtotal: calculation.subtotal,
+      markupAmount: calculation.markupAmount,
+      gst: calculation.gst,
+      total: calculation.total,
+    };
+    updateQuote(updatedQuote);
+    saveDraft(updatedQuote);
+    navigation.goBack();
+  };
 
   const handleNext = () => {
     // Validate labor hours and rate
@@ -480,8 +502,8 @@ export function LaborMarkupScreen() {
         </ScrollView>
 
         <FixedBottomButton
-          label={mode === 'invoice' ? "Next: Preview Invoice" : "Next: Preview Quote"}
-          onPress={handleNext}
+          label={isEditFromPreview ? 'Save' : (mode === 'invoice' ? "Next: Preview Invoice" : "Next: Preview Quote")}
+          onPress={isEditFromPreview ? handleSaveAndReturn : handleNext}
         />
       </View>
 

@@ -7106,3 +7106,61 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
     res.status(200).json({ results, successCount, totalCount: results.length });
   });
 });
+
+/**
+ * Get contacts from Xero for the authenticated user.
+ * Returns active contacts with name, email, phone, and address.
+ */
+export const getXeroContacts = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const tokens = await getXeroTokens(decodedToken.uid);
+    if (!tokens) {
+      res.status(400).json({ error: 'Xero not connected' });
+      return;
+    }
+
+    const { accessToken, tenantId } = tokens;
+    const xeroHeaders = {
+      'Authorization': `Bearer ${accessToken}`,
+      'xero-tenant-id': tenantId,
+      'Accept': 'application/json',
+    };
+
+    try {
+      const whereClause = encodeURIComponent('ContactStatus=="ACTIVE"');
+      const response = await fetch(
+        `https://api.xero.com/api.xro/2.0/Contacts?where=${whereClause}&order=Name&pageSize=100`,
+        { headers: xeroHeaders }
+      );
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('Xero contacts fetch failed:', response.status, errText);
+        res.status(502).json({ error: 'Failed to fetch contacts from Xero' });
+        return;
+      }
+
+      const data: any = await response.json();
+      const contacts = (data.Contacts || []).map((c: any) => ({
+        ContactID: c.ContactID,
+        Name: c.Name,
+        EmailAddress: c.EmailAddress || null,
+        Phones: c.Phones || [],
+        Addresses: c.Addresses || [],
+      }));
+
+      res.status(200).json({ contacts });
+    } catch (error: any) {
+      console.error('Error fetching Xero contacts:', error);
+      res.status(500).json({ error: error.message || 'Unknown error' });
+    }
+  });
+});

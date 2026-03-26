@@ -4,4 +4,5 @@ export { JobSection } from './JobSection';
 export { MaterialsSection } from './MaterialsSection';
 export { LaborSection } from './LaborSection';
 export { TotalsSection } from './TotalsSection';
+export { ContactActionsBar } from './ContactActionsBar';
 export { documentStyles } from './documentStyles';

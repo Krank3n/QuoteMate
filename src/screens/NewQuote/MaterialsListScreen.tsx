@@ -27,7 +27,7 @@ import {
   SegmentedButtons,
   ActivityIndicator,
 } from 'react-native-paper';
-import { useNavigation, useIsFocused } from '@react-navigation/native';
+import { useNavigation, useIsFocused, useRoute } from '@react-navigation/native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import LottieView from 'lottie-react-native';
 import { generateId } from '../../utils/generateId';
@@ -318,6 +318,8 @@ export function MaterialsListScreen() {
   const chasingTitle = useMemo(() => CHASING_TITLES[Math.floor(Math.random() * CHASING_TITLES.length)], []);
   const chasingSubtitle = useMemo(() => CHASING_SUBTITLES[Math.floor(Math.random() * CHASING_SUBTITLES.length)], []);
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const isEditFromPreview = route.params?.editing === true;
   const isFocused = useIsFocused();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
@@ -1358,6 +1360,14 @@ export function MaterialsListScreen() {
   };
 
 
+  const handleSaveAndReturn = useCallback(() => {
+    if (currentQuote) {
+      updateQuote(currentQuote);
+      saveDraft(currentQuote);
+    }
+    navigation.goBack();
+  }, [currentQuote, updateQuote, saveDraft, navigation]);
+
   const handleNext = useCallback(() => {
     // Allow proceeding with no materials (labor-only quotes)
     if (hasUnpricedMaterials) {
@@ -1695,8 +1705,8 @@ export function MaterialsListScreen() {
        </ScrollView>
 
       <FixedBottomButton
-        label={isAiAnalyzing ? "Cancel" : "Next: Labor & Markup"}
-        onPress={isAiAnalyzing ? handleCancelGeneration : handleNext}
+        label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labor & Markup")}
+        onPress={isAiAnalyzing ? handleCancelGeneration : (isEditFromPreview ? handleSaveAndReturn : handleNext)}
         mode={isAiAnalyzing ? "outlined" : "contained"}
         buttonStyle={isAiAnalyzing ? { borderColor: colors.error, borderWidth: 2 } : undefined}
         labelStyle={isAiAnalyzing ? { color: colors.error } : undefined}

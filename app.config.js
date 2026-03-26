@@ -57,6 +57,12 @@ export default {
           cameraPermission: "QuoteMate uses your camera to take site photos for quotes and AI material analysis, and to capture a company logo for PDF quotes and invoices."
         }
       ],
+      [
+        "expo-contacts",
+        {
+          contactsPermission: "QuoteMate uses your contacts to quickly fill in customer details when creating quotes and invoices."
+        }
+      ],
       "expo-iap",
       ["./plugins/withKotlinVersion", "2.2.0"]
     ],
@@ -81,7 +87,7 @@ export default {
       },
       package: "com.quotemate.app",
       versionCode: 81,
-      permissions: ["android.permission.RECORD_AUDIO", "android.permission.CAMERA"]
+      permissions: ["android.permission.RECORD_AUDIO", "android.permission.CAMERA", "android.permission.READ_CONTACTS"]
     },
     experiments: {
       ...(isWebExport ? { baseUrl: isWebExport } : {}),

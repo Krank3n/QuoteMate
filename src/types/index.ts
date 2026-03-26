@@ -67,6 +67,7 @@ export interface Quote {
   quoteNumber?: string; // Human-readable reference number (e.g., "Q-001")
   createdAt: Date;
   updatedAt: Date;
+  contactId?: string; // Link to Contact for live updates
   customerName: string;
   customerEmail?: string;
   customerPhone?: string;
@@ -312,6 +313,7 @@ export interface Invoice {
   dueDate: Date;
 
   // Customer (same as Quote)
+  contactId?: string; // Link to Contact for live updates
   customerName: string;
   customerEmail?: string;
   customerPhone?: string;
@@ -371,6 +373,28 @@ export interface XeroConnection {
   connectedAt: string;         // ISO date
   lastSyncAt?: string;         // ISO date
   syncEnabled: boolean;        // Auto-push on invoice send
+}
+
+// Contact types
+export type ContactSource = 'manual' | 'phone' | 'xero' | 'quote';
+
+export interface Contact {
+  id: string;
+  name: string;
+  businessName?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  website?: string;
+  source: ContactSource;
+  xeroContactId?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SearchableContact extends Contact {
+  searchSource: 'saved' | 'phone' | 'recent' | 'xero';
 }
 
 // Notification preferences (stored at users/{userId}/settings/notificationPreferences)
