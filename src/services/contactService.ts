@@ -47,19 +47,20 @@ export function normalizePhone(phone: string): string {
 }
 
 /**
- * Request permission to access device contacts
+ * Request permission to access device contacts.
+ * Returns { granted, canAskAgain } so callers know whether to retry or direct to settings.
  */
-export async function requestPhoneContactsPermission(): Promise<boolean> {
-  const { status } = await ExpoContacts.requestPermissionsAsync();
-  return status === 'granted';
+export async function requestPhoneContactsPermission(): Promise<{ granted: boolean; canAskAgain: boolean }> {
+  const { status, canAskAgain } = await ExpoContacts.requestPermissionsAsync();
+  return { granted: status === 'granted', canAskAgain: canAskAgain !== false };
 }
 
 /**
  * Check current phone contacts permission status
  */
-export async function checkPhoneContactsPermission(): Promise<boolean> {
-  const { status } = await ExpoContacts.getPermissionsAsync();
-  return status === 'granted';
+export async function checkPhoneContactsPermission(): Promise<{ granted: boolean; canAskAgain: boolean }> {
+  const { status, canAskAgain } = await ExpoContacts.getPermissionsAsync();
+  return { granted: status === 'granted', canAskAgain: canAskAgain !== false };
 }
 
 /**
