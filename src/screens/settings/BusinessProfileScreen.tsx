@@ -352,7 +352,7 @@ export function BusinessProfileScreen() {
             <View style={styles.pickerContainer}>
               <ColorPicker
                 value={brandColor || '#059669'}
-                onComplete={onColorChange}
+                onCompleteJS={onColorChange}
                 style={styles.picker}
               >
                 <Panel1 style={styles.pickerPanel} />

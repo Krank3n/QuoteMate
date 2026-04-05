@@ -6,6 +6,7 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
 import { Platform, View, Image, StyleSheet, LogBox } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 // Suppress known harmless warning from react-native-draggable-flatlist + reanimated v3
@@ -208,49 +209,58 @@ export default function App() {
   // Show loading screen while initializing OR while user data is being loaded after auth
   if (isLoading || !fontsLoaded || (user && !userDataLoaded)) {
     return (
-      <SafeAreaProvider>
-        <PaperProvider theme={theme}>
-          <View style={appStyles.loadingContainer}>
-            <StatusBar style="light" />
-            <Image
-              source={require('./assets/logo-scaled.png')}
-              style={appStyles.loadingLogo}
-              resizeMode="contain"
-            />
-            <ActivityIndicator size="large" color={theme.colors.primary} style={appStyles.loadingSpinner} />
-          </View>
-        </PaperProvider>
-      </SafeAreaProvider>
+      <GestureHandlerRootView style={appStyles.flex}>
+        <SafeAreaProvider>
+          <PaperProvider theme={theme}>
+            <View style={appStyles.loadingContainer}>
+              <StatusBar style="light" />
+              <Image
+                source={require('./assets/logo-scaled.png')}
+                style={appStyles.loadingLogo}
+                resizeMode="contain"
+              />
+              <ActivityIndicator size="large" color={theme.colors.primary} style={appStyles.loadingSpinner} />
+            </View>
+          </PaperProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   }
 
   // Require authentication on all platforms before showing the app
   if (requiresAuth && !user) {
     return (
-      <SafeAreaProvider>
-        <PaperProvider theme={theme}>
-          <NavigationContainer key="auth" theme={navigationTheme}>
-            <StatusBar style="light" />
-            <AuthScreen />
-          </NavigationContainer>
-        </PaperProvider>
-      </SafeAreaProvider>
+      <GestureHandlerRootView style={appStyles.flex}>
+        <SafeAreaProvider>
+          <PaperProvider theme={theme}>
+            <NavigationContainer key="auth" theme={navigationTheme}>
+              <StatusBar style="light" />
+              <AuthScreen />
+            </NavigationContainer>
+          </PaperProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   }
 
   return (
-    <SafeAreaProvider>
-      <PaperProvider theme={theme}>
-        <NavigationContainer key="main" theme={navigationTheme}>
-          <StatusBar style="light" />
-          {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
-        </NavigationContainer>
-      </PaperProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={appStyles.flex}>
+      <SafeAreaProvider>
+        <PaperProvider theme={theme}>
+          <NavigationContainer key="main" theme={navigationTheme}>
+            <StatusBar style="light" />
+            {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
+          </NavigationContainer>
+        </PaperProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const appStyles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   loadingContainer: {
     flex: 1,
     backgroundColor: colors.background,
