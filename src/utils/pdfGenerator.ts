@@ -239,7 +239,7 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
       });
       logoBase64 = `data:image/png;base64,${base64}`;
     } catch (error) {
-      console.error('Failed to load logo:', error);
+      // silently ignore
     }
   } else if (showLogo && businessSettings?.logoUri && Platform.OS === 'web') {
     // On web, the logoUri is already a URL that can be used directly
@@ -297,10 +297,22 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
         <h3>Labor</h3>
         <table>
           <tbody>
-            <tr>
-              <td>${businessSettings?.showLaborHours ? `Labor (${quote.laborHours} hours @ ${formatCurrency(quote.laborRate)}/hr)` : 'Labor'}</td>
+            ${quote.sections && quote.sections.length > 0 ? quote.sections.map(s => {
+              const sUnit = s.laborUnit || 'hours';
+              const sLabel = sUnit === 'days' ? 'days' : 'hours';
+              const sRate = sUnit === 'days' ? '/day' : '/hr';
+              return `<tr>
+                <td>${businessSettings?.showLaborHours ? `${s.name} (${s.laborHours} ${sLabel} @ ${formatCurrency(s.laborRate)}${sRate})` : s.name}</td>
+                <td style="text-align: right;">${formatCurrency(s.laborTotal)}</td>
+              </tr>`;
+            }).join('') : `<tr>
+              <td>${businessSettings?.showLaborHours ? `Labor (${quote.laborHours} ${(quote.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(quote.laborRate)}${(quote.laborUnit || 'hours') === 'days' ? '/day' : '/hr'})` : 'Labor'}</td>
               <td style="text-align: right;">${formatCurrency(quote.laborTotal)}</td>
-            </tr>
+            </tr>`}
+            ${quote.sections && quote.sections.length > 0 ? `<tr class="total-row">
+              <td>Labor Total</td>
+              <td style="text-align: right;">${formatCurrency(quote.laborTotal)}</td>
+            </tr>` : ''}
           </tbody>
         </table>
       </div>
@@ -318,10 +330,12 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
           <span>Subtotal</span>
           <span>${formatCurrency(quote.subtotal)}</span>
         </div>
+        ${quote.showMarkup === true ? `
         <div class="summary-row">
           <span>Markup (${quote.markup}%)</span>
           <span>${formatCurrency(quote.markupAmount)}</span>
         </div>
+        ` : ''}
         ${quote.travelAdjustment && quote.travelAdjustment > 0 ? `
         <div class="summary-row">
           <span>Travel Adjustment (${quote.travelAdjustment}%)</span>
@@ -438,7 +452,6 @@ export async function exportQuotePDF(
                     Alert.alert('Error', 'Email is not available on this device');
                   }
                 } catch (error) {
-                  console.error('Email error:', error);
                   Alert.alert('Error', 'Failed to compose email');
                 }
               },
@@ -462,7 +475,6 @@ export async function exportQuotePDF(
       }
     }
   } catch (error) {
-    console.error('PDF export error:', error);
     Alert.alert('Error', 'Failed to export PDF. Please try again.');
   }
 }
@@ -490,7 +502,7 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
       });
       logoBase64 = `data:image/png;base64,${base64}`;
     } catch (error) {
-      console.error('Failed to load logo:', error);
+      // silently ignore
     }
   } else if (showLogo && businessSettings?.logoUri && Platform.OS === 'web') {
     logoBase64 = businessSettings.logoUri;
@@ -556,10 +568,22 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
         <h3>Labor</h3>
         <table>
           <tbody>
-            <tr>
-              <td>${businessSettings?.showLaborHours ? `Labor (${invoice.laborHours} hours @ ${formatCurrency(invoice.laborRate)}/hr)` : 'Labor'}</td>
+            ${invoice.sections && invoice.sections.length > 0 ? invoice.sections.map(s => {
+              const sUnit = s.laborUnit || 'hours';
+              const sLabel = sUnit === 'days' ? 'days' : 'hours';
+              const sRate = sUnit === 'days' ? '/day' : '/hr';
+              return `<tr>
+                <td>${businessSettings?.showLaborHours ? `${s.name} (${s.laborHours} ${sLabel} @ ${formatCurrency(s.laborRate)}${sRate})` : s.name}</td>
+                <td style="text-align: right;">${formatCurrency(s.laborTotal)}</td>
+              </tr>`;
+            }).join('') : `<tr>
+              <td>${businessSettings?.showLaborHours ? `Labor (${invoice.laborHours} ${(invoice.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(invoice.laborRate)}${(invoice.laborUnit || 'hours') === 'days' ? '/day' : '/hr'})` : 'Labor'}</td>
               <td style="text-align: right;">${formatCurrency(invoice.laborTotal)}</td>
-            </tr>
+            </tr>`}
+            ${invoice.sections && invoice.sections.length > 0 ? `<tr class="total-row">
+              <td>Labor Total</td>
+              <td style="text-align: right;">${formatCurrency(invoice.laborTotal)}</td>
+            </tr>` : ''}
           </tbody>
         </table>
       </div>
@@ -577,10 +601,12 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
           <span>Subtotal</span>
           <span>${formatCurrency(invoice.subtotal)}</span>
         </div>
+        ${invoice.showMarkup === true ? `
         <div class="summary-row">
           <span>Markup (${invoice.markup}%)</span>
           <span>${formatCurrency(invoice.markupAmount)}</span>
         </div>
+        ` : ''}
         ${invoice.travelAdjustment && invoice.travelAdjustment > 0 ? `
         <div class="summary-row">
           <span>Travel Adjustment (${invoice.travelAdjustment}%)</span>
@@ -706,7 +732,6 @@ export async function exportInvoicePDF(
                     Alert.alert('Error', 'Email is not available on this device');
                   }
                 } catch (error) {
-                  console.error('Email error:', error);
                   Alert.alert('Error', 'Failed to compose email');
                 }
               },
@@ -730,7 +755,6 @@ export async function exportInvoicePDF(
       }
     }
   } catch (error) {
-    console.error('PDF export error:', error);
     Alert.alert('Error', 'Failed to export PDF. Please try again.');
   }
 }

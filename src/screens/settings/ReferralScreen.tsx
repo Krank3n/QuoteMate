@@ -60,7 +60,6 @@ export function ReferralScreen() {
       const info = await firestoreService.loadReferralInfo();
       setReferralInfo(info);
     } catch (error) {
-      console.error('Failed to load referral info:', error);
     } finally {
       setLoading(false);
     }
@@ -76,7 +75,6 @@ export function ReferralScreen() {
       const data = result.data as { summary: any; earnings: AffiliateEarning[] };
       setEarnings(data.earnings || []);
     } catch (error) {
-      console.error('Failed to load affiliate earnings:', error);
     } finally {
       setLoadingEarnings(false);
     }
@@ -136,7 +134,6 @@ export function ReferralScreen() {
           : `Try QuoteMate for creating professional trade quotes! Use my referral code ${referralInfo.referralCode} when you sign up. ${referralLink}`,
       });
     } catch (error) {
-      console.error('Share failed:', error);
     }
   };
 
@@ -264,7 +261,7 @@ export function ReferralScreen() {
   if (referralInfo?.isAffiliate) {
     return (
       <View style={styles.container}>
-        {/* Tab Switcher */}
+        {/* Tab Switcher - hidden for now
         <View style={styles.tabBar}>
           <TouchableOpacity
             style={[styles.tab, activeTab === 'qr' && styles.tabActive]}
@@ -281,6 +278,7 @@ export function ReferralScreen() {
             <Text style={[styles.tabText, activeTab === 'dashboard' && styles.tabTextActive]}>Dashboard</Text>
           </TouchableOpacity>
         </View>
+        */}
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.scrollContent, activeTab === 'qr' && styles.scrollContentGrow]}>
           <WebContainer>

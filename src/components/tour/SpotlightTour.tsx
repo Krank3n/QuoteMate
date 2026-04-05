@@ -21,7 +21,7 @@ interface SpotlightTourProps {
   onFinish: () => void;
   /** Optional override for Skip button — if provided, called instead of handleFinish */
   onSkip?: () => void;
-  scrollRef?: React.RefObject<ScrollView>;
+  scrollRef?: React.RefObject<ScrollView | null>;
   /** Offset added to displayed step number for sequential numbering */
   stepOffset?: number;
   /** Override displayed total for sequential numbering across tours */

@@ -83,7 +83,7 @@ export function ShimmerOverlay({
         ]}
       >
         <LinearGradient
-          colors={gradientColors as unknown as string[]}
+          colors={gradientColors as unknown as [string, string, ...string[]]}
           start={{ x: 0, y: 0.3 }}
           end={{ x: 1, y: 0.7 }}
           style={StyleSheet.absoluteFill}

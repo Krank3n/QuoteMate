@@ -31,7 +31,6 @@ class UnifiedBillingService {
 
   constructor() {
     this.currentPlatform = Platform.OS === 'web' ? 'web' : 'native';
-    console.log(`🔧 Billing platform: ${this.currentPlatform}`);
   }
 
   /**
@@ -45,7 +44,6 @@ class UnifiedBillingService {
         return await nativeBillingService.initialize();
       }
     } catch (error) {
-      console.error('❌ Error initializing billing service:', error);
       return false;
     }
   }
@@ -95,7 +93,6 @@ class UnifiedBillingService {
         });
       }
     } catch (error) {
-      console.error('❌ Error getting products:', error);
       return [];
     }
   }
@@ -115,7 +112,6 @@ class UnifiedBillingService {
         return !!purchase;
       }
     } catch (error) {
-      console.error('❌ Error purchasing subscription:', error);
       throw error;
     }
   }
@@ -134,7 +130,6 @@ class UnifiedBillingService {
         return await nativeBillingService.hasActiveSubscription();
       }
     } catch (error) {
-      console.error('❌ Error checking subscription status:', error);
       return false;
     }
   }
@@ -163,7 +158,6 @@ class UnifiedBillingService {
         };
       }
     } catch (error) {
-      console.error('❌ Error getting subscription status:', error);
       return {
         isPremium: false,
         subscriptionId: null,
@@ -186,12 +180,10 @@ class UnifiedBillingService {
         window.open(portalUrl, '_blank');
       } else {
         // For native platforms, you can open the respective store subscription pages
-        console.log('Open native subscription management');
         // iOS: https://apps.apple.com/account/subscriptions
         // Android: https://play.google.com/store/account/subscriptions
       }
     } catch (error) {
-      console.error('❌ Error opening subscription management:', error);
       throw error;
     }
   }

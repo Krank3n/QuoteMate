@@ -137,7 +137,6 @@ export const InvoiceCard = React.memo(function InvoiceCard({
         ));
       }
     } catch (error) {
-      console.error('Invoice email generation failed:', error);
       setEmailBody(getDefaultInvoiceEmailBody(
         invoice.customerName,
         invoice.job.name,
@@ -170,7 +169,6 @@ export const InvoiceCard = React.memo(function InvoiceCard({
       });
       setEmailBody(body);
     } catch (error) {
-      console.error('Invoice email regeneration failed:', error);
       Alert.alert('Error', 'Could not regenerate email. Please try again.');
     } finally {
       setIsGeneratingEmail(false);
@@ -181,7 +179,6 @@ export const InvoiceCard = React.memo(function InvoiceCard({
     try {
       await exportInvoicePDF(invoice, businessSettings, 'export', { isPro });
     } catch (error) {
-      console.error('Export error:', error);
       Alert.alert('Error', 'Failed to export invoice. Please try again.');
     }
   };

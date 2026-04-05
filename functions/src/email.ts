@@ -1,10 +1,9 @@
-import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 
 // Brevo API configuration
 const getBrevoApiKey = (): string => {
-  return functions.config().brevo?.api_key || process.env.BREVO_API_KEY || '';
+  return process.env.BREVO_API_KEY || '';
 };
 
 const SENDER = {
@@ -13,7 +12,7 @@ const SENDER = {
 };
 
 // Admin notification email
-const ADMIN_EMAIL = 'thomas.andrew.hansen@gmail.com';
+const ADMIN_EMAIL = process.env.ADMIN_EMAILS || '';
 
 // Email preference types that users can opt out of
 type EmailCategory = 'transactional' | 'marketing';
@@ -178,7 +177,6 @@ async function canSendEmail(userId: string, category: EmailCategory): Promise<bo
     const prefs = prefsDoc.data();
     return prefs?.marketing !== false;
   } catch (error) {
-    console.error('Error checking email preferences:', error);
     return true; // Fail open
   }
 }
@@ -189,12 +187,10 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
   const apiKey = getBrevoApiKey();
 
   if (!apiKey) {
-    console.error('Brevo API key not configured');
     return false;
   }
 
   if (!to) {
-    console.error('No recipient email provided');
     return false;
   }
 
@@ -202,7 +198,6 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
   if (userId && userId !== 'test') {
     const allowed = await canSendEmail(userId, category);
     if (!allowed) {
-      console.log(`User ${userId} has opted out of ${category} emails, skipping`);
       return false;
     }
   }
@@ -226,8 +221,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
     });
 
     if (!response.ok) {
-      const errorBody = await response.text();
-      console.error(`Brevo API error (${response.status}):`, errorBody);
+      await response.text();
       return false;
     }
 
@@ -236,10 +230,8 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
       await logEmail(userId, to, subject, category, tags);
     }
 
-    console.log(`Email sent: "${subject}" to ${to}`);
     return true;
   } catch (error: any) {
-    console.error('Error sending email:', error.message);
     return false;
   }
 }
@@ -264,7 +256,6 @@ async function logEmail(
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
       });
   } catch (error) {
-    console.error('Error logging email:', error);
   }
 }
 
@@ -287,7 +278,6 @@ export async function getUserEmail(userId: string): Promise<string | null> {
       return settingsDoc.data()?.email || null;
     }
   } catch (error) {
-    console.error('Error fetching user email:', error);
   }
 
   return null;
@@ -1190,7 +1180,6 @@ export async function handleUnsubscribe(userId: string, category: string): Promi
 
     return true;
   } catch (error) {
-    console.error('Error updating email preferences:', error);
     return false;
   }
 }
@@ -1373,6 +1362,78 @@ export function sendNewUserNotificationEmail(
     htmlContent: content,
     category: 'transactional',
     tags: ['admin-notification', 'new-user'],
+  });
+}
+
+export function sendNewProSubscriptionEmail(
+  userEmail: string,
+  userId: string,
+  platform: string,
+  productId: string,
+  businessName: string,
+): Promise<boolean> {
+  const platformLabels: Record<string, string> = {
+    ios: 'iOS (App Store)',
+    android: 'Android (Google Play)',
+    web: 'Web (Stripe)',
+  };
+  const platformDisplay = platformLabels[platform] || platform || 'Unknown';
+
+  const isYearly = productId.includes('yearly');
+  const planDisplay = isYearly ? 'Yearly ($199/yr)' : 'Monthly ($29/mo)';
+
+  const content = wrapEmailTemplate(`
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">New Pro Subscription 💰</p>
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      A user just upgraded to Pro!
+    </h1>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+      <tr>
+        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Email</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${userEmail}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Business Name</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${businessName || 'Not set'}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Plan</span><br/>
+                <span style="color:#22c55e;font-size:15px;font-weight:600;">${planDisplay}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Platform</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${platformDisplay}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;">
+                <span style="color:#94a3b8;font-size:13px;">User ID</span><br/>
+                <span style="color:#f8fafc;font-size:13px;font-family:monospace;">${userId}</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  `);
+
+  return sendEmail({
+    to: ADMIN_EMAIL,
+    subject: `💰 New Pro subscriber: ${userEmail} (${planDisplay} — ${platformDisplay})`,
+    htmlContent: content,
+    category: 'transactional',
+    tags: ['admin-notification', 'new-pro-subscription'],
   });
 }
 

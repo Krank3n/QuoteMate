@@ -91,7 +91,6 @@ export function NotificationPreferencesScreen() {
         setPrefs({ ...DEFAULT_PREFS, ...prefDoc.data() as Partial<NotificationPreferences> });
       }
     } catch (error) {
-      console.error('Error loading notification preferences:', error);
     } finally {
       setLoading(false);
     }
@@ -110,7 +109,6 @@ export function NotificationPreferencesScreen() {
         newPrefs
       );
     } catch (error) {
-      console.error('Error saving notification preferences:', error);
       // Revert on failure
       setPrefs(prefs);
     }

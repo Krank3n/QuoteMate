@@ -37,7 +37,6 @@ export function isScraperAvailable(): boolean {
   const available = !!(BUNNINGS_SCRAPER_URL && BUNNINGS_SCRAPER_API_KEY);
 
   if (!available) {
-    console.log('⚠️ Bunnings websearch not configured - will use OpenAI web search fallback');
   }
 
   return available;
@@ -58,7 +57,6 @@ export async function searchProductWithScraper(
   }
 
   try {
-    console.log(`🔍 Searching Bunnings scraper for: "${searchTerm}"`);
 
     const response = await fetch(`${BUNNINGS_SCRAPER_URL}/api/search`, {
       method: 'POST',
@@ -75,21 +73,17 @@ export async function searchProductWithScraper(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`❌ Scraper API error (${response.status}): ${errorText}`);
       return null;
     }
 
     const data: ScraperSearchResponse = await response.json();
 
     if (data.success && data.results && data.results.length > 0) {
-      console.log(`✅ Scraper found ${data.results.length} product(s) (cached: ${data.cached})`);
       return data;
     } else {
-      console.log(`⚠️ Scraper found no results for "${searchTerm}"`);
       return null;
     }
   } catch (error) {
-    console.error('❌ Scraper request failed:', error);
     return null;
   }
 }
@@ -201,13 +195,11 @@ export async function checkScraperHealth(): Promise<boolean> {
 
     if (response.ok) {
       const data = await response.json();
-      console.log('✅ Bunnings scraper is healthy:', data.status);
       return true;
     }
 
     return false;
   } catch (error) {
-    console.error('❌ Scraper health check failed:', error);
     return false;
   }
 }

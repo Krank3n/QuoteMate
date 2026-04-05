@@ -35,7 +35,7 @@ try {
   ExpoSpeechRecognitionModule = speechModule.ExpoSpeechRecognitionModule;
   useSpeechRecognitionEvent = speechModule.useSpeechRecognitionEvent;
 } catch (e) {
-  console.warn('expo-speech-recognition native module not available — speech features disabled');
+  // silently ignore - speech features disabled
 }
 
 import { useStore } from '../../store/useStore';
@@ -46,7 +46,8 @@ import { getTradeCategoryById, getTradeNicheById, PRICING_METHODS } from '../../
 import { createJobFromTemplate } from '../../utils/materialsEstimator';
 import { colors } from '../../theme';
 import { JobTemplate, QuotePhoto } from '../../types';
-import { analyzeJobDescription, convertLLMMaterialsToMaterials, cleanupTranscriptionAndGenerateTitle } from '../../services/llmService';
+import { analyzeJobDescription, convertLLMMaterialsToMaterials, cleanupTranscriptionAndGenerateTitle, TemplateMatchInput } from '../../services/llmService';
+import { loadTemplates } from '../../services/sectionTemplateService';
 import { generateId } from '../../utils/generateId';
 import { bunningsApi } from '../../services/bunningsApi';
 import { WebContainer } from '../../components/WebContainer';
@@ -164,17 +165,11 @@ export function JobDetailsScreen() {
   // Speech recognition event handlers
   useSpeechRecognitionEvent('start', () => {
     setRecognizing(true);
-    console.log('Speech recognition started');
   });
 
   useSpeechRecognitionEvent('end', () => {
     setRecognizing(false);
     const isStillRecording = isRecordingRef.current;
-
-    console.log('🔴 Speech recognition ended');
-    console.log('  - lastTranscript:', lastTranscriptRef.current);
-    console.log('  - accumulated:', startingDescriptionRef.current);
-    console.log('  - isRecording (ref):', isStillRecording);
 
     // If user is still recording (didn't manually stop), save and restart
     if (isStillRecording && lastTranscriptRef.current) {
@@ -186,10 +181,7 @@ export function JobDetailsScreen() {
       startingDescriptionRef.current = newAccumulated;
       lastTranscriptRef.current = '';
 
-      console.log('✅ Saved segment. Accumulated:', startingDescriptionRef.current);
-
       // Restart speech recognition
-      console.log('🔄 Restarting...');
       setTimeout(async () => {
         if (isRecordingRef.current) {
           try {
@@ -201,26 +193,20 @@ export function JobDetailsScreen() {
               requiresOnDeviceRecognition: false,
               contextualStrings: ['deck', 'handrail', 'timber', 'pine', 'meters', 'metres'],
             });
-            console.log('✅ Restarted');
           } catch (error) {
-            console.error('❌ Failed to restart:', error);
             setIsRecording(false);
           }
         }
       }, 100);
-    } else if (!isStillRecording) {
-      console.log('🛑 User stopped manually');
     }
   });
 
-  useSpeechRecognitionEvent('result', (event) => {
+  useSpeechRecognitionEvent('result', (event: any) => {
     if (!isRecordingRef.current) {
       return; // Ignore results if we're not recording
     }
 
     const allResults = event.results || [];
-
-    console.log('📊 Results count:', allResults.length);
 
     // Get the latest result (the last one in the array)
     // Each result contains the full transcript for that segment, not incremental text
@@ -233,9 +219,6 @@ export function JobDetailsScreen() {
     if (!currentTranscript) {
       return;
     }
-
-    console.log('Current segment:', currentTranscript);
-    console.log('Accumulated:', startingDescriptionRef.current);
 
     // If results count is 1 and we have a previous transcript that's different,
     // it means recognition restarted - check if it's a refinement or new segment
@@ -251,21 +234,16 @@ export function JobDetailsScreen() {
 
       // Check if this is truly a new segment (not just a refinement)
       if (!isRefinement && !currentLower.includes(lastLower) && !lastLower.includes(currentLower)) {
-        console.log('🔄 NEW SEGMENT DETECTED - saving previous:', lastTranscriptRef.current);
         const newAccumulated = startingDescriptionRef.current
           ? startingDescriptionRef.current + ' ' + lastTranscriptRef.current
           : lastTranscriptRef.current;
 
         startingDescriptionRef.current = newAccumulated;
-        console.log('✅ Accumulated now:', startingDescriptionRef.current);
-
         // Display ONLY accumulated text for this frame, next result will add current
         setJobDescription(startingDescriptionRef.current);
         lastTranscriptRef.current = currentTranscript;
-        console.log('Displayed (after segment save):', startingDescriptionRef.current);
         return; // Exit early to avoid double display
       } else if (isRefinement) {
-        console.log('🔧 REFINEMENT DETECTED - replacing with better recognition');
         // This is a refinement of what was already said, just update the display
         const displayText = startingDescriptionRef.current
           ? startingDescriptionRef.current + ' ' + currentTranscript
@@ -273,7 +251,6 @@ export function JobDetailsScreen() {
 
         setJobDescription(displayText);
         lastTranscriptRef.current = currentTranscript;
-        console.log('Displayed (refinement):', displayText);
         return;
       }
     }
@@ -286,11 +263,9 @@ export function JobDetailsScreen() {
     setJobDescription(displayText);
     lastTranscriptRef.current = currentTranscript;
 
-    console.log('Displayed:', displayText);
   });
 
-  useSpeechRecognitionEvent('error', (event) => {
-    console.error('Speech recognition error:', event.error);
+  useSpeechRecognitionEvent('error', (event: any) => {
     setIsRecording(false);
     setRecognizing(false);
     Alert.alert('Voice Recognition Error', event.error || 'Could not recognize speech');
@@ -426,13 +401,10 @@ export function JobDetailsScreen() {
   }, [navigation, currentQuote, jobName, jobDescription, updateQuote]);
 
   const handleVoiceRecording = async () => {
-    console.log('🎤 handleVoiceRecording called, Platform:', Platform.OS);
-
     // Web: Use native Web Speech API directly
     if (Platform.OS === 'web') {
       if (isRecording) {
         // Stop recording
-        console.log('🛑 Stopping web speech recognition');
         if (webRecognitionRef.current) {
           webRecognitionRef.current.stop();
         }
@@ -440,8 +412,6 @@ export function JobDetailsScreen() {
         // Auto-cleanup removed - user must press clean-up button manually
       } else {
         // Start recording
-        console.log('🎤 Starting web speech recognition');
-
         // @ts-ignore - Web Speech API
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
@@ -463,7 +433,6 @@ export function JobDetailsScreen() {
             const transcript = event.results[i][0].transcript;
             if (event.results[i].isFinal) {
               finalTranscript += (finalTranscript ? ' ' : '') + transcript;
-              console.log('✅ Final segment:', transcript);
             } else {
               interimTranscript += transcript;
             }
@@ -472,20 +441,16 @@ export function JobDetailsScreen() {
           // Show final + interim
           const displayText = finalTranscript + (interimTranscript ? ' ' + interimTranscript : '');
           setJobDescription(displayText);
-          console.log('Display:', displayText);
         };
 
         recognition.onerror = (event: any) => {
-          console.error('Speech recognition error:', event.error);
           setIsRecording(false);
           Alert.alert('Error', 'Speech recognition failed: ' + event.error);
         };
 
         recognition.onend = () => {
-          console.log('🔴 Recognition ended');
           if (isRecordingRef.current) {
             // Restart if still recording
-            console.log('🔄 Restarting...');
             recognition.start();
           }
         };
@@ -505,15 +470,11 @@ export function JobDetailsScreen() {
 
     if (isRecording) {
       // Stop recording manually
-      console.log('🛑 User manually stopped recording');
-
       try {
         // Build final description from accumulated + last segment BEFORE stopping
         const finalDescription = startingDescriptionRef.current && lastTranscriptRef.current
           ? startingDescriptionRef.current + ' ' + lastTranscriptRef.current
           : startingDescriptionRef.current || lastTranscriptRef.current || jobDescription;
-
-        console.log('📝 Final description:', finalDescription);
 
         // Set the description immediately to prevent any reset
         setJobDescription(finalDescription);
@@ -530,26 +491,18 @@ export function JobDetailsScreen() {
         lastTranscriptRef.current = '';
         // Auto-cleanup removed - user must press clean-up button manually
       } catch (error) {
-        console.error('Failed to stop recording:', error);
         setIsRecording(false);
         Alert.alert('Error', 'Failed to stop voice recording');
       }
     } else {
       // Start recording - append to existing description
-      console.log('🎤 Starting native recording...');
-
       try {
-        console.log('📝 Step 1: Checking current permission status...');
-
         // First check if we already have permission
         const currentStatus = await ExpoSpeechRecognitionModule.getPermissionsAsync();
-        console.log('📝 Current permission status:', currentStatus);
-
         let result = currentStatus;
 
         // Only request if not already granted
         if (!currentStatus.granted) {
-          console.log('📝 Permission not granted, requesting...');
           setIsRequestingPermission(true);
 
           // Add a timeout to prevent infinite loading
@@ -560,9 +513,7 @@ export function JobDetailsScreen() {
 
           try {
             result = await Promise.race([permissionPromise, timeoutPromise]) as any;
-            console.log('📝 Permission result:', result);
           } catch (timeoutError) {
-            console.error('⏱️ Permission request timed out');
             setIsRequestingPermission(false);
             Alert.alert(
               'Permission Request Failed',
@@ -576,26 +527,19 @@ export function JobDetailsScreen() {
           setIsRequestingPermission(false);
 
           if (!result.granted) {
-            console.log('❌ Permission denied');
             Alert.alert('Permission Required', 'Microphone permission is required for voice recording');
             return;
           }
         }
 
-        console.log('✅ Permission granted');
-
         // Check if speech recognition is available
-        console.log('📝 Step 2: Checking availability...');
         const available = await ExpoSpeechRecognitionModule.getStateAsync();
-        console.log('Speech recognition state:', available);
 
         // Save starting description and clear refs
-        console.log('📝 Step 3: Setting up refs...');
         startingDescriptionRef.current = jobDescription;
         lastTranscriptRef.current = '';
         setTranscript('');
 
-        console.log('📝 Step 4: Starting speech recognition...');
         await ExpoSpeechRecognitionModule.start({
           lang: 'en-AU', // Australian English
           interimResults: true,
@@ -604,11 +548,8 @@ export function JobDetailsScreen() {
           requiresOnDeviceRecognition: false,
           contextualStrings: ['deck', 'handrail', 'timber', 'pine', 'meters', 'metres'],
         });
-        console.log('✅ Speech recognition started successfully');
         setIsRecording(true);
       } catch (error: any) {
-        console.error('❌ Failed to start recording:', error);
-        console.error('Error details:', JSON.stringify(error, null, 2));
         // Ensure we always reset the loading state
         setIsRequestingPermission(false);
         setIsRecording(false);
@@ -636,13 +577,37 @@ export function JobDetailsScreen() {
 
     setIsProcessingVoice(true);
     try {
-      const result = await cleanupTranscriptionAndGenerateTitle(jobDescription);
+      // Load saved templates to include in the cleanup call
+      const savedTemplates = await loadTemplates();
+      const templateInputs: TemplateMatchInput[] | undefined = savedTemplates.length > 0
+        ? savedTemplates.map(t => ({
+            id: t.id,
+            name: t.name,
+            description: t.description,
+            materialCount: t.materials.length,
+            laborSummary: `${t.laborHours} ${t.laborUnit === 'days' ? 'days' : 'hrs'}`,
+          }))
+        : undefined;
+
+      const result = await cleanupTranscriptionAndGenerateTitle(jobDescription, templateInputs);
       setJobDescription(result.cleanedDescription);
       if (result.suggestedTitle && !jobName) {
         setJobName(result.suggestedTitle);
       }
+      // Store template suggestions on the quote for the materials screen
+      if (result.templateSuggestions && result.templateSuggestions.length > 0 && currentQuote) {
+        updateQuote({
+          ...currentQuote,
+          job: { ...currentQuote.job, description: result.cleanedDescription, name: result.suggestedTitle || currentQuote.job.name },
+          templateSuggestions: result.templateSuggestions.map(s => ({
+            templateId: s.templateId,
+            templateName: s.templateName,
+            suggestedQuantity: s.suggestedQuantity,
+            reasoning: s.reasoning,
+          })),
+        });
+      }
     } catch (error) {
-      console.error('Failed to clean up description:', error);
       Alert.alert('Cleanup Failed', 'Could not clean up the description. Please try again.');
     } finally {
       setIsProcessingVoice(false);
@@ -833,10 +798,8 @@ export function JobDetailsScreen() {
           }
         }
 
-        console.log('✅ AI analysis complete:', materials.length, 'materials generated');
       })
       .catch((error: any) => {
-        console.error('❌ Background analysis error:', error);
         // Silently fail - user can still add materials manually
       })
       .finally(() => {
@@ -1203,7 +1166,6 @@ export function JobDetailsScreen() {
             <View style={styles.recordButtonRow}>
               <TouchableOpacity
                 onPress={() => {
-                  console.log('🔘 Record button pressed!');
                   handleVoiceRecording();
                 }}
                 disabled={isProcessingVoice || isRequestingPermission}

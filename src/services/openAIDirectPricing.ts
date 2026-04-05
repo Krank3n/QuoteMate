@@ -9,12 +9,6 @@ import { OPENAI_API_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID } from '@env';
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 
-console.log('🔧 OpenAI Direct Pricing Config:', {
-  platform: Platform.OS,
-  hasApiKey: !!OPENAI_API_KEY,
-  hasOrgId: !!OPENAI_ORG_ID,
-  hasProjectId: !!OPENAI_PROJECT_ID,
-});
 
 export interface OpenAIDirectProductMatch {
   productName: string;
@@ -48,7 +42,6 @@ export async function searchMaterialWithOpenAIDirect(
   const key = apiKey || OPENAI_API_KEY;
 
   if (!key) {
-    console.error('❌ OpenAI API key not configured');
     return { match: null, searchTerm: materialName, stores: storeUrls };
   }
 
@@ -109,7 +102,6 @@ If you cannot find or estimate a price, return:
 }`;
 
   try {
-    console.log(`🤖 Asking OpenAI directly for "${term}" pricing...`);
 
     // Build headers with organization and project IDs
     const headers: Record<string, string> = {
@@ -159,7 +151,6 @@ If you cannot find or estimate a price, return:
       // If rate limited, wait and retry
       if (response.status === 429 && retries < maxRetries) {
         const waitTime = Math.pow(2, retries) * 2000; // Exponential backoff: 2s, 4s
-        console.log(`⏳ Rate limited, waiting ${waitTime/1000}s before retry ${retries + 1}/${maxRetries}...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         retries++;
         continue;
@@ -171,7 +162,6 @@ If you cannot find or estimate a price, return:
 
     if (!response || !response.ok) {
       const errorText = await response?.text();
-      console.error('❌ OpenAI API error:', response?.status, errorText);
       return { match: null, searchTerm: term, stores: storeUrls };
     }
 
@@ -190,7 +180,6 @@ If you cannot find or estimate a price, return:
 
     // Check if we got a valid result
     if (!parsed.price || parsed.price === null) {
-      console.log(`⚠️ OpenAI could not find/estimate price for "${term}"`);
       return { match: null, searchTerm: term, stores: storeUrls };
     }
 
@@ -206,7 +195,6 @@ If you cannot find or estimate a price, return:
       searchUrl: parsed.searchUrl,
     };
 
-    console.log(`✅ OpenAI found: ${match.productName} - $${match.price} (${match.confidence} confidence)`);
 
     return {
       match,
@@ -214,9 +202,7 @@ If you cannot find or estimate a price, return:
       stores: storeUrls,
     };
   } catch (error) {
-    console.error('❌ OpenAI direct pricing error:', error);
     if (error instanceof Error) {
-      console.error('Error details:', error.message);
     }
     return { match: null, searchTerm: term, stores: storeUrls };
   }

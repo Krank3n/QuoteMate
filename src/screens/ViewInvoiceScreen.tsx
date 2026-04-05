@@ -203,7 +203,6 @@ export function ViewInvoiceScreen() {
         await Print.printAsync({ html });
       }
     } catch (error) {
-      console.error('PDF preview error:', error);
     } finally {
       setIsPdfLoading(false);
     }

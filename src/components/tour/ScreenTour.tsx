@@ -23,7 +23,7 @@ interface ScreenTourProps {
   tourId: ScreenTourId;
   /** Delay before starting (ms). Default 600. */
   delay?: number;
-  scrollRef?: React.RefObject<ScrollView>;
+  scrollRef?: React.RefObject<ScrollView | null>;
   /** Map of step id → scroll Y position. Used to scroll targets into view. */
   scrollPositions?: Record<string, number>;
   /** Called when tour active state changes — use to disable scroll during tour */

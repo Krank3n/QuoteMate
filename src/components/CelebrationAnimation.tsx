@@ -35,9 +35,7 @@ export function CelebrationAnimation({
   ).current;
 
   useEffect(() => {
-    console.log('🎉 CelebrationAnimation useEffect, visible:', visible);
     if (visible) {
-      console.log('🎨 Resetting and starting animations...');
       // Reset all animations first
       fadeAnim.setValue(0);
       scaleAnim.setValue(0);
@@ -106,35 +104,29 @@ export function CelebrationAnimation({
 
       // Auto-complete after animation
       const timer = setTimeout(() => {
-        console.log('⏰ Auto-complete timer fired');
         Animated.timing(fadeAnim, {
           toValue: 0,
           duration: 300,
           useNativeDriver: true,
         }).start(() => {
-          console.log('✅ Fade out complete, calling onComplete');
           onComplete?.();
         });
       }, 2000);
 
       return () => {
-        console.log('🧹 Cleaning up celebration animation');
         clearTimeout(timer);
       };
     }
   }, [visible]);
 
   if (!visible) {
-    console.log('❌ CelebrationAnimation not visible, returning null');
     return null;
   }
 
-  console.log('✅ Rendering CelebrationAnimation');
   return (
     <TouchableOpacity
       activeOpacity={1}
       onPress={() => {
-        console.log('🎉 Celebration tapped, completing...');
         onComplete?.();
       }}
       style={StyleSheet.absoluteFill}

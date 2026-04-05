@@ -55,8 +55,8 @@ export function CustomerDetailsScreen() {
 
   // Tour refs
   const { registerRef } = useTourRefs();
-  const customerNameRef = useRef<View>(null);
-  const jobAddressRef = useRef<View>(null);
+  const customerNameRef = useRef<any>(null);
+  const jobAddressRef = useRef<any>(null);
   const recentCustomersRef = useRef<View>(null);
   const [tourActive, setTourActive] = useState(false);
   // Only show Davo during the unified tour

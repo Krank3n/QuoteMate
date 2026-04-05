@@ -80,7 +80,6 @@ export function SendInvoiceButton({
         ));
       }
     } catch (error) {
-      console.error('Invoice email generation failed:', error);
       setEmailBody(getDefaultInvoiceEmailBody(
         invoice.customerName,
         invoice.job.name,
@@ -113,7 +112,6 @@ export function SendInvoiceButton({
       });
       setEmailBody(body);
     } catch (error) {
-      console.error('Invoice email regeneration failed:', error);
       Alert.alert('Error', 'Could not regenerate email. Please try again.');
     } finally {
       setIsGeneratingEmail(false);
@@ -157,7 +155,6 @@ export function SendInvoiceButton({
     try {
       await exportInvoicePDF(invoice, businessSettings, 'export', { isPro });
     } catch (error) {
-      console.error('Export error:', error);
       Alert.alert('Error', 'Failed to export PDF. Please try again.');
     }
   };

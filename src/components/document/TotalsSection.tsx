@@ -12,6 +12,7 @@ interface TotalsSectionProps {
   gst: number;
   total: number;
   hideZeroMarkup?: boolean;
+  hideMarkup?: boolean;
   paidAmount?: number;
   balanceDue?: number;
 }
@@ -23,10 +24,11 @@ export function TotalsSection({
   gst,
   total,
   hideZeroMarkup,
+  hideMarkup,
   paidAmount,
   balanceDue,
 }: TotalsSectionProps) {
-  const showMarkup = hideZeroMarkup ? markup > 0 : true;
+  const showMarkup = hideMarkup ? false : (hideZeroMarkup ? markup > 0 : true);
 
   return (
     <Surface style={documentStyles.totalSection}>

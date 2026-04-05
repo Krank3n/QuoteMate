@@ -23,7 +23,6 @@ class StripeService {
    */
   async initialize(): Promise<boolean> {
     if (Platform.OS !== 'web') {
-      console.log('Stripe service is only available on web');
       return false;
     }
 
@@ -33,16 +32,13 @@ class StripeService {
 
     try {
       if (!STRIPE_PUBLISHABLE_KEY) {
-        console.error('Stripe publishable key is missing');
         return false;
       }
 
       this.stripe = await loadStripe(STRIPE_PUBLISHABLE_KEY);
       this.isInitialized = true;
-      console.log('✅ Stripe initialized');
       return true;
     } catch (error) {
-      console.error('❌ Error initializing Stripe:', error);
       return false;
     }
   }
@@ -56,7 +52,6 @@ class StripeService {
     }
 
     try {
-      console.log('🔄 Creating payment intent...');
 
       const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch(`${API_BASE_URL}/createPaymentIntent`, {
@@ -76,7 +71,6 @@ class StripeService {
       }
 
       const data = await response.json();
-      console.log('✅ Payment intent created');
 
       if (!data.clientSecret) {
         throw new Error('No client secret returned from server');
@@ -84,7 +78,6 @@ class StripeService {
 
       return data.clientSecret;
     } catch (error: any) {
-      console.error('❌ Error creating payment intent:', error);
       throw error;
     }
   }
@@ -99,7 +92,6 @@ class StripeService {
     }
 
     try {
-      console.log('🔄 Creating checkout session...');
 
       // Call your backend to create a checkout session
       const idToken = await auth.currentUser?.getIdToken();
@@ -122,7 +114,6 @@ class StripeService {
       }
 
       const data = await response.json();
-      console.log('✅ Checkout session created:', data.sessionId);
 
       if (!data.sessionId) {
         throw new Error('No session ID returned from server');
@@ -130,13 +121,11 @@ class StripeService {
 
       // Use the URL returned from the backend
       if (data.url) {
-        console.log('🔀 Redirecting to Stripe Checkout URL...');
         window.location.href = data.url;
       } else {
         throw new Error('No checkout URL returned from server');
       }
     } catch (error: any) {
-      console.error('❌ Error creating checkout session:', error);
       throw error;
     }
   }
@@ -161,7 +150,6 @@ class StripeService {
       const { url } = await response.json();
       return url;
     } catch (error: any) {
-      console.error('❌ Error creating portal session:', error);
       throw error;
     }
   }
@@ -192,7 +180,6 @@ class StripeService {
         expiryDate: data.expiryDate || null,
       };
     } catch (error) {
-      console.error('❌ Error checking subscription status:', error);
       return {
         isPremium: false,
         subscriptionId: null,

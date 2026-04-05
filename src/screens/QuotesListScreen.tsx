@@ -188,7 +188,6 @@ export function QuotesListScreen() {
       setQuoteToConvert(null);
       navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
     } catch (error) {
-      console.error('Failed to convert to invoice:', error);
     } finally {
       setIsConverting(false);
     }
@@ -307,7 +306,7 @@ export function QuotesListScreen() {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <View style={styles.emptyIconCircle}>
-                  <MaterialCommunityIcons name="file-document-plus-outline" size={36} color={colors.primary} />
+                  <MaterialCommunityIcons name={"file-document-plus-outline" as any} size={36} color={colors.primary} />
                 </View>
                 <Text style={styles.emptyTitle}>
                   {filterStatus === 'all' && "Nothing here yet, chief"}

@@ -10,12 +10,6 @@ import { KIMI_API_KEY, KIMI_PROJECT_ID } from '@env';
 const KIMI_API_BASE_URL = 'https://api.moonshot.ai/v1';
 const KIMI_MODEL = 'kimi-k2-turbo-preview'; // 60-100 tokens/s, 256K context
 
-console.log('🔧 Kimi K2 Web Search Pricing Config:', {
-  platform: Platform.OS,
-  hasApiKey: !!KIMI_API_KEY,
-  hasProjectId: !!KIMI_PROJECT_ID,
-  model: KIMI_MODEL,
-});
 
 export interface KimiK2ProductMatch {
   productName: string;
@@ -139,7 +133,6 @@ export async function searchMaterialWithKimiK2(
   const key = apiKey || KIMI_API_KEY;
 
   if (!key) {
-    console.error('❌ Kimi K2 API key not configured');
     return { match: null, searchTerm: materialName, stores: storeUrls };
   }
 
@@ -148,10 +141,6 @@ export async function searchMaterialWithKimiK2(
   const parsed = parseProductName(requestedName);
   const searchVariations = generateSearchVariations(requestedName, parsed);
 
-  console.log(`🎯 Kimi K2 Web Search: Product "${requestedName}"`);
-  console.log(`   Location: Sydney, NSW ${locationPostcode}`);
-  console.log(`   Parsed: Brand="${parsed.brand}" Model="${parsed.model}" Type="${parsed.type}" Size="${parsed.size}"`);
-  console.log(`   Will try ${searchVariations.length} search strategies:`, searchVariations);
 
   // Format domains
   let allowedDomains = storeUrls.map(url => {
@@ -171,11 +160,8 @@ export async function searchMaterialWithKimiK2(
   const hasBunnings = allowedDomains.some(d => d.includes('bunnings'));
 
   if (hasMitre10 && !hasBunnings) {
-    console.warn('⚠️  WARNING: Mitre 10 hides prices - Kimi K2 will try but may not find prices');
-    console.warn('   Recommendation: Add Bunnings for better results');
   }
 
-  console.log(`   Searching stores: ${allowedDomains.join(', ')} (prioritized by price visibility)`);
 
   const triedQueries: string[] = [];
 
@@ -184,7 +170,6 @@ export async function searchMaterialWithKimiK2(
     const searchQuery = searchVariations[i];
     triedQueries.push(searchQuery);
 
-    console.log(`\n🎯 Kimi K2 Strategy ${i + 1}/${searchVariations.length}: Searching for "${searchQuery}"...`);
 
     try {
       // Use Kimi K2's chat completions with built-in web search
@@ -270,17 +255,14 @@ Start your web search now and return the JSON result.`,
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`❌ Kimi K2 API error: ${response.status}`, errorText);
         continue;
       }
 
       const data = await response.json();
-      console.log('📦 Kimi K2 Response:', JSON.stringify(data, null, 2));
 
       // Extract the assistant's response
       const message = data.choices?.[0]?.message;
       if (!message || !message.content) {
-        console.warn('⚠️  No content in Kimi K2 response');
         continue;
       }
 
@@ -296,7 +278,6 @@ Start your web search now and return the JSON result.`,
 
       // Check if we got a valid result
       if (parsed.price === null || parsed.price === undefined) {
-        console.log(`   ⚠️  No products found with this strategy`);
         continue;
       }
 
@@ -305,7 +286,6 @@ Start your web search now and return the JSON result.`,
       const hasProductInfo = parsed.productName && (parsed.itemNumber || parsed.sourceUrl);
 
       if (!hasPrice && !hasProductInfo) {
-        console.log(`   ⚠️  No valid product info`);
         continue;
       }
 
@@ -325,12 +305,9 @@ Start your web search now and return the JSON result.`,
       };
 
       if (match.price > 0) {
-        console.log(`✅ SUCCESS with strategy ${i + 1}: ${match.productName} - $${match.price} (${match.confidence} confidence)`);
         if (match.sourceUrl) {
-          console.log(`   Source: ${match.sourceUrl}`);
         }
         if (match.imageUrl) {
-          console.log(`   Image: ${match.imageUrl}`);
         }
 
         return {
@@ -340,9 +317,6 @@ Start your web search now and return the JSON result.`,
           triedQueries,
         };
       } else if (match.priceUnavailable && match.sourceUrl) {
-        console.log(`⚠️  Product found but price unavailable: ${match.productName}`);
-        console.log(`   ${match.priceNote || 'Unknown reason'}`);
-        console.log(`   URL: ${match.sourceUrl}`);
         // Continue to next strategy
       }
 
@@ -351,16 +325,12 @@ Start your web search now and return the JSON result.`,
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     } catch (error) {
-      console.error(`❌ Kimi K2 error on strategy ${i + 1}:`, error);
       if (error instanceof Error) {
-        console.error('   Details:', error.message);
       }
       continue;
     }
   }
 
-  console.log(`\n❌ All ${searchVariations.length} Kimi K2 strategies failed for "${requestedName}"`);
-  console.log(`   Tried: ${triedQueries.join(', ')}`);
 
   return {
     match: null,

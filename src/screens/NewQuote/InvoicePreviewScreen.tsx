@@ -210,14 +210,38 @@ export function InvoicePreviewScreen() {
               <Title style={styles.sectionTitle}>Labor</Title>
               <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
             </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.text}>
-                {businessSettings?.showLaborHours
-                  ? `${currentInvoice.laborHours} hours @ ${formatCurrency(currentInvoice.laborRate)}/hr`
-                  : 'Labor'}
-              </Text>
-              <Text style={styles.summaryValue}>{formatCurrency(currentInvoice.laborTotal)}</Text>
-            </View>
+            {currentInvoice.sections && currentInvoice.sections.length > 0 ? (
+              <>
+                {currentInvoice.sections.map((section) => {
+                  const sUnit = section.laborUnit || 'hours';
+                  const sLabel = sUnit === 'days' ? 'days' : 'hours';
+                  const sRate = sUnit === 'days' ? '/day' : '/hr';
+                  return (
+                    <View key={section.id} style={styles.summaryRow}>
+                      <Text style={styles.text}>
+                        {businessSettings?.showLaborHours
+                          ? `${section.name}: ${section.laborHours} ${sLabel} @ ${formatCurrency(section.laborRate)}${sRate}`
+                          : section.name}
+                      </Text>
+                      <Text style={styles.summaryValue}>{formatCurrency(section.laborTotal)}</Text>
+                    </View>
+                  );
+                })}
+                <View style={styles.summaryRow}>
+                  <Text style={[styles.text, { fontWeight: '600' }]}>Labor Total</Text>
+                  <Text style={[styles.summaryValue, { fontWeight: '700' }]}>{formatCurrency(currentInvoice.laborTotal)}</Text>
+                </View>
+              </>
+            ) : (
+              <View style={styles.summaryRow}>
+                <Text style={styles.text}>
+                  {businessSettings?.showLaborHours
+                    ? `${currentInvoice.laborHours} ${(currentInvoice.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(currentInvoice.laborRate)}${(currentInvoice.laborUnit || 'hours') === 'days' ? '/day' : '/hr'}`
+                    : 'Labor'}
+                </Text>
+                <Text style={styles.summaryValue}>{formatCurrency(currentInvoice.laborTotal)}</Text>
+              </View>
+            )}
           </Surface>
         </TouchableOpacity>
 
@@ -287,10 +311,12 @@ export function InvoicePreviewScreen() {
             <Text style={styles.summaryLabel}>Subtotal</Text>
             <Text style={styles.summaryValue}>{formatCurrency(currentInvoice.subtotal)}</Text>
           </View>
+          {currentInvoice.showMarkup === true && (
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Markup ({currentInvoice.markup}%)</Text>
             <Text style={styles.summaryValue}>{formatCurrency(currentInvoice.markupAmount)}</Text>
           </View>
+          )}
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>GST (10%)</Text>
             <Text style={styles.summaryValue}>{formatCurrency(currentInvoice.gst)}</Text>

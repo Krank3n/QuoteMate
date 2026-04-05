@@ -82,12 +82,10 @@ export function PaywallScreen() {
       setLoading(false);
       if (products.length === 0 && Platform.OS !== 'web') {
         setProductsLoadError(true);
-        console.warn('[Paywall] Safety timeout: forcing loading state off');
       }
     }, 30000);
 
     loadProducts().catch(error => {
-      console.error('Failed to load products:', error);
       setLoading(false);
     }).finally(() => clearTimeout(safetyTimeout));
 
@@ -99,7 +97,6 @@ export function PaywallScreen() {
       purchaseUpdateSubscription = listeners.purchaseUpdateSubscription;
       purchaseErrorSubscription = listeners.purchaseErrorSubscription;
     } catch (error) {
-      console.error('Failed to setup purchase listener:', error);
     }
 
     return () => {
@@ -107,7 +104,6 @@ export function PaywallScreen() {
         purchaseUpdateSubscription?.remove();
         purchaseErrorSubscription?.remove();
       } catch (error) {
-        console.error('Error removing listeners:', error);
       }
     };
   }, []);
@@ -116,26 +112,20 @@ export function PaywallScreen() {
     setLoading(true);
     setProductsLoadError(false);
     try {
-      console.log(`[Paywall] Loading products (attempt ${retryCount + 1})...`);
-      console.log('[Paywall] Platform:', Platform.OS);
 
       // Use unified billing service for all platforms
       await unifiedBillingService.initialize();
       const availableProducts = await unifiedBillingService.getProducts();
-      console.log('[Paywall] Found products:', availableProducts.length);
 
       if (availableProducts.length === 0 && Platform.OS !== 'web') {
         // Auto-retry up to 2 more times with increasing delay
         if (retryCount < 2) {
-          console.log(`[Paywall] No products found, auto-retrying in ${(retryCount + 1) * 2}s...`);
           setLoading(true);
           await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000));
           return loadProducts(retryCount + 1);
         }
-        console.log('[Paywall] No subscription products found after retries on', Platform.OS);
         setProductsLoadError(true);
       } else if (availableProducts.length === 0 && Platform.OS === 'web') {
-        console.log('[Paywall] Web products loaded from configuration');
       }
 
       // Convert to RNIap.Subscription format for compatibility
@@ -149,17 +139,14 @@ export function PaywallScreen() {
       }));
       setProducts(formattedProducts as any);
     } catch (error: any) {
-      console.error('[Paywall] Error loading products:', error);
 
       // Handle IAP not available gracefully (expo-iap 3.x uses kebab-case error codes)
       const code = error?.code;
       const msg = error?.message || '';
       if (code === 'iap-not-available' || code === 'E_IAP_NOT_AVAILABLE' || msg.includes('iap-not-available') || msg.includes('E_IAP_NOT_AVAILABLE')) {
-        console.log('[Paywall] In-app purchases not available on this device');
         setIapNotAvailable(true);
       } else if (retryCount < 2) {
         // Auto-retry on error
-        console.log(`[Paywall] Error occurred, auto-retrying in ${(retryCount + 1) * 2}s...`);
         await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000));
         return loadProducts(retryCount + 1);
       } else {
@@ -174,7 +161,6 @@ export function PaywallScreen() {
   const setupPurchaseListener = () => {
     // Only set up purchase listeners on mobile platforms
     if (Platform.OS === 'web') {
-      console.log('ℹ️ Purchase listeners not needed on web');
       return { purchaseUpdateSubscription: null, purchaseErrorSubscription: null };
     }
 
@@ -185,7 +171,6 @@ export function PaywallScreen() {
       const purchaseUpdateSubscription = RNIap.purchaseUpdatedListener(
         async (purchase: any) => {
           try {
-            console.log('Purchase updated:', purchase);
             // expo-iap 3.x: check purchaseToken (not transactionReceipt)
             const hasValidPurchase = purchase.purchaseToken || purchase.transactionReceipt || purchase.id;
             if (hasValidPurchase) {
@@ -195,7 +180,6 @@ export function PaywallScreen() {
                 const API_BASE_URL = process.env.API_BASE_URL || 'https://us-central1-hansendev.cloudfunctions.net';
                 const endpoint = Platform.OS === 'ios' ? 'validateAppleReceipt' : 'validateGoogleReceipt';
                 try {
-                  console.log(`📤 Sending receipt to ${endpoint}...`);
                   const idToken = await currentUser.getIdToken();
                   const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
                     method: 'POST',
@@ -208,14 +192,11 @@ export function PaywallScreen() {
                   });
                   const data = await response.json();
                   if (data.success) {
-                    console.log('✅ Server-side receipt validation succeeded');
                     // Reload subscription from Firestore
                     await loadSubscription();
                   } else {
-                    console.warn('⚠️ Server validation returned error, falling back to local:', data.error);
                   }
                 } catch (serverError) {
-                  console.warn('⚠️ Server validation failed, falling back to local:', serverError);
                 }
               }
 
@@ -233,7 +214,6 @@ export function PaywallScreen() {
               );
             }
           } catch (error) {
-            console.error('Error processing purchase:', error);
             Alert.alert('Error', 'Failed to process purchase. Please contact support.');
           } finally {
             setIsUpgrading(false);
@@ -244,13 +224,11 @@ export function PaywallScreen() {
       const purchaseErrorSubscription = RNIap.purchaseErrorListener(
         (error: any) => {
           try {
-            console.error('Purchase error:', error);
             const errorCode = error.code;
           if (errorCode !== 'user-cancelled' && errorCode !== 'E_USER_CANCELLED' && errorCode !== 'iap-not-available' && errorCode !== 'E_IAP_NOT_AVAILABLE') {
               Alert.alert('Purchase Failed', error.message || 'An error occurred during purchase');
             }
           } catch (alertError) {
-            console.error('Error showing alert:', alertError);
           } finally {
             setIsUpgrading(false);
           }
@@ -259,7 +237,6 @@ export function PaywallScreen() {
 
       return { purchaseUpdateSubscription, purchaseErrorSubscription };
     } catch (error: any) {
-      console.error('Error setting up purchase listeners:', error);
       // Don't show alert for iap-not-available during setup
       if (error?.code !== 'iap-not-available' && error?.code !== 'E_IAP_NOT_AVAILABLE') {
         setIsUpgrading(false);
@@ -269,23 +246,18 @@ export function PaywallScreen() {
   };
 
   const handleUpgrade = async () => {
-    console.log('💳 handleUpgrade clicked');
-    console.log('Platform:', Platform.OS);
 
     setIsUpgrading(true);
     try {
       if (Platform.OS === 'ios') {
         // iOS MUST use Apple IAP only (App Store guidelines 3.1.1)
-        console.log('🍎 Using Apple IAP for iOS');
         await billingService.purchaseSubscription(selectedSku);
       } else if (Platform.OS === 'android') {
         // Android uses Google Play IAP
-        console.log('🤖 Using Google Play IAP for Android');
         await billingService.purchaseSubscription(selectedSku);
       } else if (Platform.OS === 'web') {
         // Web uses Stripe (multi-platform service - Guideline 3.1.3b)
         const currentUser = auth.currentUser;
-        console.log('🌐 Using Stripe for web, user:', currentUser?.uid);
 
         if (!currentUser) {
           Alert.alert('Error', 'Please sign in to purchase a subscription');
@@ -298,13 +270,11 @@ export function PaywallScreen() {
           title: 'Pro Monthly',
           localizedPrice: '$29',
         };
-        console.log('✅ Proceeding with Stripe checkout for user:', currentUser.uid);
         setSelectedProduct(webProduct);
         setShowCheckoutModal(true);
         setIsUpgrading(false);
       }
     } catch (error: any) {
-      console.error('❌ Error in handleUpgrade:', error);
       setIsUpgrading(false);
       if (error?.code !== 'user-cancelled' && error?.code !== 'E_USER_CANCELLED') {
         Alert.alert('Error', error?.message || 'Failed to start purchase. Please try again.');
@@ -351,7 +321,6 @@ export function PaywallScreen() {
               await loadSubscription();
             }
           } catch (serverError) {
-            console.warn('Server validation failed during restore:', serverError);
           }
         }
 
@@ -367,7 +336,6 @@ export function PaywallScreen() {
         Alert.alert('No Purchases Found', 'No previous subscriptions were found for this account.');
       }
     } catch (error) {
-      console.error('Error restoring purchases:', error);
       Alert.alert('Error', 'Failed to restore purchases. Please try again.');
     } finally {
       setIsRestoring(false);
@@ -445,7 +413,6 @@ export function PaywallScreen() {
         [{ text: 'OK' }]
       );
     } catch (error: any) {
-      console.error('Error canceling subscription:', error);
       Alert.alert(
         'Error',
         error.message || 'Failed to cancel subscription. Please try again or contact support.',
@@ -569,7 +536,6 @@ export function PaywallScreen() {
         );
       }
     } catch (error) {
-      console.error('Error checking subscription:', error);
       Alert.alert(
         'Error',
         'Failed to verify subscription. Please refresh the page or contact support.',

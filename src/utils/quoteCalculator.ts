@@ -3,29 +3,34 @@
  * Handles pricing calculations with GST for Australian quotes
  */
 
-import { Material, Quote, QuoteCalculation } from '../types';
+import { Material, Quote, QuoteSection, QuoteCalculation } from '../types';
 
 /**
  * Calculate quote totals
  * @param materials - List of materials with prices
- * @param laborRate - Hourly labor rate ($/hour)
- * @param laborHours - Number of hours
+ * @param laborRate - Hourly/daily labor rate
+ * @param laborHours - Number of hours/days
  * @param markupPercent - Markup percentage (e.g., 20 for 20%)
+ * @param travelAdjustment - Travel adjustment percentage
+ * @param sections - Optional sections with per-section labor
  */
 export function calculateQuote(
   materials: Material[],
   laborRate: number,
   laborHours: number,
   markupPercent: number,
-  travelAdjustment: number = 0
+  travelAdjustment: number = 0,
+  sections?: QuoteSection[]
 ): QuoteCalculation {
   // Calculate materials subtotal
   const materialsSubtotal = materials.reduce((sum, material) => {
     return sum + material.totalPrice;
   }, 0);
 
-  // Calculate labor total
-  const laborTotal = laborRate * laborHours;
+  // Calculate labor total — from sections if available, otherwise simple rate * hours
+  const laborTotal = sections && sections.length > 0
+    ? sections.reduce((sum, s) => sum + s.laborTotal, 0)
+    : laborRate * laborHours;
 
   // Subtotal before markup
   const subtotal = materialsSubtotal + laborTotal;
@@ -66,7 +71,8 @@ export function updateQuoteCalculations(quote: Quote): Quote {
     quote.laborRate,
     quote.laborHours,
     quote.markup,
-    quote.travelAdjustment || 0
+    quote.travelAdjustment || 0,
+    quote.sections
   );
 
   return {

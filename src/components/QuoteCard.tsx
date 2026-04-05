@@ -133,7 +133,6 @@ export const QuoteCard = React.memo(function QuoteCard({
         ));
       }
     } catch (error) {
-      console.error('Email generation failed:', error);
       setEmailBody(getDefaultEmailBody(
         quote.customerName,
         quote.job.name,
@@ -163,7 +162,6 @@ export const QuoteCard = React.memo(function QuoteCard({
       });
       setEmailBody(body);
     } catch (error) {
-      console.error('Email regeneration failed:', error);
       Alert.alert('Error', 'Could not regenerate email. Please try again.');
     } finally {
       setIsGeneratingEmail(false);
@@ -174,7 +172,6 @@ export const QuoteCard = React.memo(function QuoteCard({
     try {
       await exportQuotePDF(quote, businessSettings, 'share', { isPro });
     } catch (error) {
-      console.error('Share error:', error);
       Alert.alert('Error', 'Failed to share quote. Please try again.');
     }
   };
@@ -183,7 +180,6 @@ export const QuoteCard = React.memo(function QuoteCard({
     try {
       await exportQuotePDF(quote, businessSettings, 'export', { isPro });
     } catch (error) {
-      console.error('Export error:', error);
       Alert.alert('Error', 'Failed to export quote. Please try again.');
     }
   };

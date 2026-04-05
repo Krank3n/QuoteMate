@@ -90,6 +90,20 @@ export function SettingsScreen() {
           icon: 'file-document-outline',
           screen: 'PDFTemplate',
         },
+        {
+          id: 'sectionTemplates',
+          title: 'Job Templates',
+          subtitle: 'Reusable material + labour bundles',
+          icon: 'puzzle-outline',
+          screen: 'SectionTemplates',
+        },
+        // {
+        //   id: 'supplierGroups',
+        //   title: 'Supplier Groups',
+        //   subtitle: 'Manage your material suppliers',
+        //   icon: 'store-outline',
+        //   screen: 'SupplierGroups',
+        // },
       ],
     },
     {

@@ -13,8 +13,8 @@ if (Platform.OS !== 'web') {
   FileSystem = require('expo-file-system');
 }
 
-// For web, use Firebase Functions URL
-// For mobile, call Anthropic API directly
+// All platforms route through Firebase Functions so API keys stay server-side.
+// Direct API keys are still used for secondary features (email gen, cleanup, etc.)
 // Always use production URL unless explicitly running emulator
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
 const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
@@ -22,14 +22,8 @@ const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
   : 'https://us-central1-hansendev.cloudfunctions.net';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_LITE_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent';
 
-console.log('🔧 LLM Service Config:', {
-  platform: Platform.OS,
-  hasAnthropicKey: !!ANTHROPIC_API_KEY,
-  hasGeminiKey: !!GEMINI_API_KEY,
-  useEmulator: USE_EMULATOR,
-  functionsUrl: FIREBASE_FUNCTIONS_URL,
-});
 
 interface LLMMaterial {
   name: string;
@@ -38,6 +32,7 @@ interface LLMMaterial {
   unit: string;
   reasoning?: string;
   section?: string;
+  sectionMultiplier?: number;
 }
 
 interface LLMResponse {
@@ -63,116 +58,17 @@ export async function analyzeJobDescription(
     selectedStore?: string; // Which store will be used for pricing
   },
   retryCount: number = 3,
-  photoUrls?: string[]
+  photoUrls?: string[],
+  existingMaterials?: { name: string; quantity: number; unit: string; section?: string }[],
+  availableTemplates?: { name: string; materials: { name: string; quantity: number; unit: string }[]; laborHours: number }[]
 ): Promise<LLMResponse> {
-  // On web, use Firebase Functions to avoid CORS issues
-  if (Platform.OS === 'web') {
-    return analyzeViaFirebaseFunction(jobDescription, tradeContext, retryCount);
-  }
-
-  // On mobile, call Anthropic API directly
-  if (!ANTHROPIC_API_KEY) {
-    console.warn('ANTHROPIC_API_KEY not set');
-    throw new Error('API key not configured');
-  }
-
-  let lastError: Error | null = null;
-
-  // Retry loop
-  for (let attempt = 0; attempt < retryCount; attempt++) {
-    try {
-      const prompt = createPrompt(jobDescription, tradeContext);
-
-      // Build message content - text only or text + images (Pro vision)
-      const messageContent: any[] = [];
-
-      // Add photo images for vision analysis if provided
-      if (photoUrls?.length) {
-        for (const uri of photoUrls) {
-          try {
-            const base64Data = await FileSystem!.readAsStringAsync(uri, {
-              encoding: FileSystem!.EncodingType.Base64,
-            });
-            messageContent.push({
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: 'image/jpeg',
-                data: base64Data,
-              },
-            });
-          } catch (err) {
-            console.warn('Failed to read photo for AI analysis:', uri, err);
-          }
-        }
-      }
-
-      messageContent.push({
-        type: 'text',
-        text: photoUrls?.length
-          ? `${prompt}\n\nI've also attached ${photoUrls.length} site photo(s). Please examine them carefully to better understand the scope of work, identify specific materials visible, and refine your material estimates based on what you see.`
-          : prompt,
-      });
-
-      const response = await fetch(ANTHROPIC_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 4000,
-          messages: [
-            {
-              role: 'user',
-              content: messageContent,
-            },
-          ],
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API returned ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-      const content = data.content[0].text;
-
-      // Parse the JSON response
-      const result = parseResponse(content);
-      return result;
-    } catch (error) {
-      lastError = error as Error;
-      console.error(`LLM analysis attempt ${attempt + 1} failed:`, error);
-
-      // If this isn't the last attempt, wait before retrying
-      if (attempt < retryCount - 1) {
-        const delay = Math.min(1000 * Math.pow(2, attempt), 5000); // Exponential backoff, max 5s
-        console.log(`Retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
-
-  // All Claude retries failed, try Gemini as fallback
-  console.log('🔄 Claude API failed after retries, trying Gemini fallback...');
-  try {
-    return await analyzeViaGemini(jobDescription, tradeContext);
-  } catch (geminiError) {
-    console.error('Gemini fallback also failed:', geminiError);
-  }
-
-  // All retries failed
-  throw new Error(
-    lastError?.message || 'Failed to analyze job description after multiple attempts'
-  );
+  // All platforms route through Firebase Functions so API keys stay server-side
+  return analyzeViaFirebaseFunction(jobDescription, tradeContext, retryCount, photoUrls, existingMaterials, availableTemplates);
 }
 
 /**
- * Analyze job description via Firebase Cloud Function (for web)
+ * Analyze job description via Firebase Cloud Function
+ * All platforms use this path so API keys stay server-side.
  */
 async function analyzeViaFirebaseFunction(
   jobDescription: string,
@@ -181,11 +77,30 @@ async function analyzeViaFirebaseFunction(
     nicheName?: string;
     suggestedMaterials?: string[];
     pricingMethod?: string;
-    selectedStore?: string; // Which store will be used for pricing
+    selectedStore?: string;
   },
-  retryCount: number = 3
+  retryCount: number = 3,
+  photoUrls?: string[],
+  existingMaterials?: { name: string; quantity: number; unit: string; section?: string }[],
+  availableTemplates?: { name: string; materials: { name: string; quantity: number; unit: string }[]; laborHours: number }[]
 ): Promise<LLMResponse> {
   let lastError: Error | null = null;
+
+  // Convert local photo URIs to base64 for sending to the server
+  let photoBase64: string[] | undefined;
+  if (photoUrls?.length && Platform.OS !== 'web' && FileSystem) {
+    photoBase64 = [];
+    for (const uri of photoUrls) {
+      try {
+        const base64Data = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        photoBase64.push(base64Data);
+      } catch (err) {
+        // silently ignore failed photo read
+      }
+    }
+  }
 
   for (let attempt = 0; attempt < retryCount; attempt++) {
     try {
@@ -196,7 +111,13 @@ async function analyzeViaFirebaseFunction(
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${idToken}`,
         },
-        body: JSON.stringify({ jobDescription, tradeContext }),
+        body: JSON.stringify({
+          jobDescription,
+          tradeContext,
+          photoBase64,
+          existingMaterials,
+          availableTemplates,
+        }),
       });
 
       if (!response.ok) {
@@ -212,22 +133,18 @@ async function analyzeViaFirebaseFunction(
       };
     } catch (error) {
       lastError = error as Error;
-      console.error(`Firebase Function attempt ${attempt + 1} failed:`, error);
-
       if (attempt < retryCount - 1) {
         const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
-        console.log(`Retrying in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
   }
 
   // Try Gemini as fallback
-  console.log('🔄 Claude API failed, trying Gemini fallback...');
   try {
     return await analyzeViaGemini(jobDescription, tradeContext);
   } catch (geminiError) {
-    console.error('Gemini fallback also failed:', geminiError);
+    // Gemini fallback also failed
   }
 
   throw new Error(
@@ -270,7 +187,7 @@ async function analyzeViaGemini(
         },
       ],
       generationConfig: {
-        temperature: 0.7,
+        temperature: 0.2,
         maxOutputTokens: 2000,
       },
     }),
@@ -288,7 +205,6 @@ async function analyzeViaGemini(
     throw new Error('No content in Gemini response');
   }
 
-  console.log('✅ Gemini fallback succeeded');
   return parseResponse(content);
 }
 
@@ -303,7 +219,9 @@ function createPrompt(
     suggestedMaterials?: string[];
     pricingMethod?: string;
     selectedStore?: string; // Which store will be used for pricing
-  }
+  },
+  existingMaterials?: { name: string; quantity: number; unit: string; section?: string }[],
+  availableTemplates?: { name: string; materials: { name: string; quantity: number; unit: string }[]; laborHours: number }[]
 ): string {
   let contextSection = '';
 
@@ -331,30 +249,55 @@ function createPrompt(
   if (selectedStore === 'reece') storeName = 'Reece';
   if (selectedStore === 'bunnings') storeName = 'Bunnings';
 
-  return `You are an expert Australian tradie assistant specializing in construction and trade work. Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.
+  let existingMaterialsSection = '';
+  if (existingMaterials && existingMaterials.length > 0) {
+    const materialsList = existingMaterials.map(m =>
+      `- ${m.quantity} ${m.unit} of ${m.name}${m.section ? ` (${m.section})` : ''}`
+    ).join('\n');
+    existingMaterialsSection = `\n\nIMPORTANT - The following materials are ALREADY included in this quote (loaded from templates). Do NOT include these or similar items again. Only suggest ADDITIONAL materials that are missing:\n${materialsList}\n`;
+  }
 
-Job Description: "${jobDescription}"${contextSection}
+  let templateReferenceSection = '';
+  if (availableTemplates && availableTemplates.length > 0) {
+    const templateDescriptions = availableTemplates.map((t, i) => {
+      const matList = t.materials.slice(0, 8).map(m => `${m.quantity}x ${m.name}`).join(', ');
+      return `${i + 1}. "${t.name}" — Materials: ${matList} | Labor: ${t.laborHours}hrs`;
+    }).join('\n');
+    templateReferenceSection = `\n\nSAVED TEMPLATES (use as reference for section names and materials when they match the job):\n${templateDescriptions}\n\nWhen a saved template closely matches a section of this job:\n- Use the template's exact name as the section name\n- Use the template's material names where applicable (you can adjust quantities)\n- Set the sectionMultiplier to match the job scope\n`;
+  }
+
+  return `You are an expert Australian tradie assistant specializing in construction and trade work. ${existingMaterials && existingMaterials.length > 0 ? 'Some materials have already been added from templates. Analyze the job and suggest only the ADDITIONAL materials needed to complete the job.' : 'Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.'}
+
+Job Description: "${jobDescription}"${contextSection}${existingMaterialsSection}${templateReferenceSection}
 
 Hardware Store for pricing: ${storeName}
 
 Provide a JSON response with the following structure:
 {
   "jobSummary": "Short job title, 3-7 words max (e.g. 'Deck Construction', 'Bathroom Renovation', 'Timber Fence Installation')",
-  "estimatedHours": <number of hours>,
+  "estimatedHours": 8,
   "materials": [
     {
       "name": "Material name as it should appear in quote",
       "searchTerm": "Generic product search term (material type, size, specs - NOT brand-specific)",
-      "quantity": <number>,
+      "quantity": 2,
       "unit": "each|m|L|kg|box|pack",
-      "section": "Work area this material belongs to (e.g. Concreting, Timber Framing, Roofing, Plumbing, Electrical, Painting, Demolition, Site Prep, etc.)",
+      "section": "Descriptive section name (e.g. Colorbond Fence Bay, Merbau Deck Section, Concrete Footings)",
+      "sectionMultiplier": 8,
+      "sectionLaborHours": 1.5,
       "reasoning": "Why this material is needed"
     }
   ]
 }
 
+- "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
+
 Guidelines:
-- Group materials into logical work sections using the "section" field. Use short, clear labels like "Concreting", "Timber Framing", "Roofing", "Finishing", etc. Materials that belong to the same area of work should share the same section name.
+- Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
+- For each section, specify materials with PER-UNIT quantities and a "sectionMultiplier" for how many units the job needs. Example: a 20m fence with 2.4m bays → each material has per-bay quantity, sectionMultiplier = 9.
+- Non-repeating items (one-off materials like a single gate latch) should have sectionMultiplier: 1.
+- Use descriptive section names that include context from the job (e.g. "Colorbond Fence Bay" not just "Fencing", "Merbau Deck Section" not just "Decking").
+- All materials in the same section MUST have the same sectionMultiplier value.
 - Use GENERIC product terms suitable for ${storeName}
 - Specify material type, size, and specs but avoid brand-specific names
 - GOOD examples: "brass stop valve 15mm quarter turn", "treated pine H3 90x45 2.4m", "PTFE thread tape 12mm"
@@ -367,7 +310,96 @@ Guidelines:
 - Consider the suggested materials but don't limit yourself to only those
 - Think about what a professional ${tradeContext?.nicheName || 'tradie'} would need for this job
 
+EXAMPLE 1 — Repeating sections:
+Job: "20m colorbond fence 1.8m high"
+{
+  "jobSummary": "Colorbond Fence Installation",
+  "estimatedHours": 16,
+  "materials": [
+    { "name": "Steel Fence Post 50x50 2.4m", "searchTerm": "steel fence post 50x50 2400mm", "quantity": 2, "unit": "each", "section": "Colorbond Fence Bay", "sectionMultiplier": 9, "sectionLaborHours": 1.5, "reasoning": "2 posts per 2.4m bay, 20m / 2.4m ≈ 9 bays" },
+    { "name": "Colorbond Fence Sheet 1.8m", "searchTerm": "colorbond fence sheet 1800mm", "quantity": 3, "unit": "each", "section": "Colorbond Fence Bay", "sectionMultiplier": 9, "sectionLaborHours": 1.5, "reasoning": "3 sheets per bay width" },
+    { "name": "Post Cap 50x50", "searchTerm": "fence post cap 50x50mm", "quantity": 1, "unit": "each", "section": "Colorbond Fence Bay", "sectionMultiplier": 9, "sectionLaborHours": 1.5, "reasoning": "1 cap per post per bay" },
+    { "name": "Concrete Mix 20kg", "searchTerm": "concrete mix 20kg bag", "quantity": 2, "unit": "each", "section": "Concrete Footings", "sectionMultiplier": 10, "sectionLaborHours": 0.25, "reasoning": "2 bags per post hole, 10 posts total" }
+  ]
+}
+
+EXAMPLE 2 — Single section (no repeating unit):
+Job: "Install garden gate with latch"
+{
+  "jobSummary": "Garden Gate Installation",
+  "estimatedHours": 3,
+  "materials": [
+    { "name": "Timber Garden Gate 900mm", "searchTerm": "timber garden gate 900mm", "quantity": 1, "unit": "each", "section": "Garden Gate", "sectionMultiplier": 1, "sectionLaborHours": 3, "reasoning": "Single gate" },
+    { "name": "Gate Hinges Heavy Duty", "searchTerm": "gate hinges heavy duty pair", "quantity": 1, "unit": "pack", "section": "Garden Gate", "sectionMultiplier": 1, "sectionLaborHours": 3, "reasoning": "One pair of hinges" },
+    { "name": "Gate Latch", "searchTerm": "gate latch lockable", "quantity": 1, "unit": "each", "section": "Garden Gate", "sectionMultiplier": 1, "sectionLaborHours": 3, "reasoning": "Single latch for the gate" }
+  ]
+}
+
 Return ONLY valid JSON, no other text.`;
+}
+
+const VALID_UNITS = ['each', 'm', 'L', 'kg', 'box', 'pack'];
+
+/**
+ * Find the most common value in an array
+ */
+function mode(arr: number[]): number {
+  const freq = new Map<number, number>();
+  let maxCount = 0;
+  let modeVal = arr[0];
+  for (const v of arr) {
+    const count = (freq.get(v) || 0) + 1;
+    freq.set(v, count);
+    if (count > maxCount) {
+      maxCount = count;
+      modeVal = v;
+    }
+  }
+  return modeVal;
+}
+
+/**
+ * Validate and sanitize LLM materials output
+ */
+function validateMaterials(materials: LLMMaterial[]): LLMMaterial[] {
+  const filtered = materials
+    // Remove items missing required fields or with bad quantities
+    .filter(m => m.name && m.searchTerm && m.quantity > 0)
+    // Clamp and normalise values
+    .map(m => ({
+      ...m,
+      quantity: Math.min(Math.max(Math.round(m.quantity), 1), 999),
+      sectionMultiplier: m.sectionMultiplier
+        ? Math.min(Math.max(Math.round(m.sectionMultiplier), 1), 200)
+        : undefined,
+      unit: VALID_UNITS.includes(m.unit) ? m.unit : 'each',
+    }));
+
+  // Enforce consistent multiplier per section
+  const sectionMultipliers = new Map<string, number>();
+  for (const m of filtered) {
+    if (!m.section) continue;
+    const existing = sectionMultipliers.get(m.section);
+    if (!existing) {
+      const sectionMats = filtered.filter(x => x.section === m.section);
+      const multipliers = sectionMats.map(x => x.sectionMultiplier || 1);
+      sectionMultipliers.set(m.section, mode(multipliers));
+    }
+  }
+
+  return filtered
+    .map(m => {
+      if (!m.section) return m;
+      return { ...m, sectionMultiplier: sectionMultipliers.get(m.section) };
+    })
+    // Deduplicate very similar names within same section
+    .filter((m, i, arr) => {
+      const normalise = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const earlier = arr.slice(0, i).find(
+        x => x.section === m.section && normalise(x.name) === normalise(m.name)
+      );
+      return !earlier;
+    });
 }
 
 /**
@@ -388,12 +420,11 @@ function parseResponse(content: string): LLMResponse {
     const parsed = JSON.parse(jsonStr);
 
     return {
-      materials: parsed.materials || [],
-      estimatedHours: parsed.estimatedHours || 8,
+      materials: validateMaterials(parsed.materials || []),
+      estimatedHours: Math.max(1, Math.min(parsed.estimatedHours || 8, 200)),
       jobSummary: parsed.jobSummary || '',
     };
   } catch (error) {
-    console.error('Failed to parse LLM response:', error);
     throw new Error('Invalid response from LLM');
   }
 }
@@ -449,13 +480,11 @@ export async function generateQuoteEmail(params: {
     const content = data.content[0].text;
     return parseEmailResponse(content);
   } catch (error) {
-    console.error('Email generation with Claude failed:', error);
-
     // Try Gemini fallback
     try {
       return await generateEmailViaGemini(prompt);
     } catch (geminiError) {
-      console.error('Gemini fallback also failed:', geminiError);
+      // Gemini fallback also failed
     }
 
     // Final fallback - return a basic template
@@ -487,7 +516,6 @@ function createEmailPrompt(params: {
 Job: ${jobName}
 Description: ${jobDescription}
 Key materials: ${materialsSummary}
-Estimated labour: ${laborHours} hours
 Total: $${total.toFixed(2)} (inc GST)
 Business: ${businessName}
 Client: ${customerName}${photosSection}
@@ -498,6 +526,7 @@ Guidelines:
 - Mention key materials/work areas without listing every item
 - Be strictly factual - do NOT add any details, claims, or promises not in the description
 - Do NOT include pricing (it's shown separately in the email template)
+- Do NOT include specific labour hours or timeframes — just mention that labour is included
 - Do NOT include greetings or sign-offs (they're added by the template)
 - Keep it concise - under 150 words
 
@@ -644,12 +673,10 @@ Return ONLY the email body text, no JSON wrapping or quotes.`;
     const content = data.content[0].text;
     return parseEmailResponse(content);
   } catch (error) {
-    console.error('Invoice email generation with Claude failed:', error);
-
     try {
       return await generateEmailViaGemini(prompt);
     } catch (geminiError) {
-      console.error('Gemini fallback also failed:', geminiError);
+      // Gemini fallback also failed
     }
 
     return getDefaultInvoiceEmailBody(customerName, jobName, total, businessName, dueDate);
@@ -706,17 +733,23 @@ function getFallbackResponse(jobDescription: string): LLMResponse {
 /**
  * Convert LLM materials to app Material format
  */
-export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): Partial<Material>[] {
-  return llmMaterials.map((m) => ({
-    name: m.name,
-    searchTerm: m.searchTerm,
-    quantity: m.quantity,
-    unit: m.unit as 'each' | 'm' | 'L' | 'kg' | 'box' | 'pack',
-    price: 0,
-    totalPrice: 0,
-    manualPriceOverride: false,
-    ...(m.section && { section: m.section }),
-  }));
+export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Partial<Material> & { sectionMultiplier?: number; sectionLaborHours?: number })[] {
+  return llmMaterials.map((m) => {
+    const multiplier = m.sectionMultiplier || 1;
+    return {
+      name: m.name,
+      searchTerm: m.searchTerm,
+      templateBaseQuantity: multiplier > 1 ? m.quantity : undefined,
+      quantity: m.quantity * multiplier,
+      unit: m.unit as 'each' | 'm' | 'L' | 'kg' | 'box' | 'pack',
+      price: 0,
+      totalPrice: 0,
+      manualPriceOverride: false,
+      ...(m.section && { section: m.section }),
+      sectionMultiplier: multiplier,
+      ...((m as any).sectionLaborHours > 0 && { sectionLaborHours: (m as any).sectionLaborHours }),
+    };
+  });
 }
 
 /**
@@ -724,62 +757,71 @@ export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): Par
  * @param transcribedText - Raw text from voice transcription
  * @returns Cleaned description and suggested title
  */
+export interface TemplateMatchInput {
+  id: string;
+  name: string;
+  description?: string;
+  materialCount: number;
+  laborSummary: string;
+}
+
+export interface TemplateSuggestionResult {
+  templateId: string;
+  templateName: string;
+  suggestedQuantity: number;
+  reasoning: string;
+}
+
 export async function cleanupTranscriptionAndGenerateTitle(
-  transcribedText: string
-): Promise<{ cleanedDescription: string; suggestedTitle: string }> {
+  transcribedText: string,
+  templates?: TemplateMatchInput[]
+): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[] }> {
   // On web, use Firebase Functions
   if (Platform.OS === 'web') {
     return cleanupViaFirebaseFunction(transcribedText);
   }
 
-  // On mobile, call Anthropic API directly
-  if (!ANTHROPIC_API_KEY) {
-    console.warn('ANTHROPIC_API_KEY not set');
-    throw new Error('API key not configured');
-  }
-
+  // On mobile, try Gemini Flash Lite first (fast + cheap), then Claude as fallback
   try {
-    const prompt = createCleanupPrompt(transcribedText);
+    return await cleanupViaGemini(transcribedText, templates, true);
+  } catch (geminiError) {
 
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 1000,
-        messages: [
-          {
-            role: 'user',
-            content: prompt,
+    // Try Claude as fallback
+    if (ANTHROPIC_API_KEY) {
+      try {
+        const prompt = createCleanupPrompt(transcribedText, templates);
+
+        const response = await fetch(ANTHROPIC_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
           },
-        ],
-      }),
-    });
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 1500,
+            temperature: 0.2,
+            messages: [
+              {
+                role: 'user',
+                content: prompt,
+              },
+            ],
+          }),
+        });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API returned ${response.status}: ${errorText}`);
-    }
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`API returned ${response.status}: ${errorText}`);
+        }
 
-    const data = await response.json();
-    const content = data.content[0].text;
-
-    // Parse the JSON response
-    const result = parseCleanupResponse(content);
-    return result;
-  } catch (error) {
-    console.error('Text cleanup with Claude failed:', error);
-
-    // Try Gemini as fallback
-    try {
-      console.log('🔄 Trying Gemini fallback for text cleanup...');
-      return await cleanupViaGemini(transcribedText);
-    } catch (geminiError) {
-      console.error('Gemini fallback also failed:', geminiError);
+        const data = await response.json();
+        const content = data.content[0].text;
+        return parseCleanupResponse(content);
+      } catch (claudeError) {
+        // Claude fallback also failed
+      }
     }
 
     // Final fallback: return original text with a basic title
@@ -818,14 +860,11 @@ async function cleanupViaFirebaseFunction(
       suggestedTitle: data.suggestedTitle || '',
     };
   } catch (error) {
-    console.error('Firebase cleanup function failed:', error);
-
     // Try Gemini as fallback
     try {
-      console.log('🔄 Trying Gemini fallback for text cleanup...');
       return await cleanupViaGemini(transcribedText);
     } catch (geminiError) {
-      console.error('Gemini fallback also failed:', geminiError);
+      // Gemini fallback also failed
     }
 
     return {
@@ -839,15 +878,18 @@ async function cleanupViaFirebaseFunction(
  * Clean up transcription via Google Gemini API (fallback)
  */
 async function cleanupViaGemini(
-  transcribedText: string
-): Promise<{ cleanedDescription: string; suggestedTitle: string }> {
+  transcribedText: string,
+  templates?: TemplateMatchInput[],
+  useLiteModel: boolean = false
+): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[] }> {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API key not configured');
   }
 
-  const prompt = createCleanupPrompt(transcribedText);
+  const prompt = createCleanupPrompt(transcribedText, templates);
+  const apiUrl = useLiteModel ? GEMINI_LITE_API_URL : GEMINI_API_URL;
 
-  const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+  const response = await fetch(`${apiUrl}?key=${GEMINI_API_KEY}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -863,7 +905,7 @@ async function cleanupViaGemini(
         },
       ],
       generationConfig: {
-        temperature: 0.5,
+        temperature: 0.2,
         maxOutputTokens: 1000,
       },
     }),
@@ -881,14 +923,32 @@ async function cleanupViaGemini(
     throw new Error('No content in Gemini response');
   }
 
-  console.log('✅ Gemini cleanup fallback succeeded');
   return parseCleanupResponse(content);
 }
 
 /**
  * Create the prompt for text cleanup and title generation
  */
-function createCleanupPrompt(transcribedText: string): string {
+function createCleanupPrompt(transcribedText: string, templates?: TemplateMatchInput[]): string {
+  let templateSection = '';
+  if (templates && templates.length > 0) {
+    const templateList = templates.map((t, i) =>
+      `${i + 1}. "${t.name}" (ID: ${t.id}) - ${t.materialCount} materials${t.description ? `, ${t.description}` : ''}, ${t.laborSummary}`
+    ).join('\n');
+    templateSection = `
+
+Also, the user has these saved job templates. Analyze the job description and determine which templates are relevant and how many of each are needed:
+${templateList}
+
+For each relevant template, calculate the quantity based on the job scope (e.g. if the job is "20m fence" and a template covers ~2.4m per bay, suggest ~9). Only include templates that are actually relevant to this job.
+
+Include in your response:
+"templateSuggestions": [
+  { "templateId": "the-template-id", "suggestedQuantity": <number>, "reasoning": "Brief explanation of quantity calculation" }
+]
+If no templates are relevant, return "templateSuggestions": []`;
+  }
+
   return `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title. The cleaned description will appear on an invoice sent to the customer, so it must be written professionally. Do NOT add any details, claims, or information that are not present in the original text.
 
 Transcribed Text: "${transcribedText}"
@@ -897,12 +957,12 @@ Tasks:
 1. Fix any transcription errors or unclear phrases
 2. Rewrite the description in a professional, customer-facing tone suitable for an invoice
 3. Keep all important details (measurements, materials, locations, etc.) but do not invent or add any new details
-4. Generate a short, professional job title (3-7 words)
+4. Generate a short, professional job title (3-7 words)${templateSection}
 
 Provide a JSON response with this structure:
 {
   "cleanedDescription": "The cleaned and formatted description",
-  "suggestedTitle": "Short Job Title"
+  "suggestedTitle": "Short Job Title"${templates && templates.length > 0 ? ',\n  "templateSuggestions": [{ "templateId": "...", "suggestedQuantity": 1, "reasoning": "..." }]' : ''}
 }
 
 Return ONLY valid JSON, no other text.`;
@@ -911,12 +971,9 @@ Return ONLY valid JSON, no other text.`;
 /**
  * Parse the cleanup response
  */
-function parseCleanupResponse(content: string): { cleanedDescription: string; suggestedTitle: string } {
+function parseCleanupResponse(content: string): { cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[] } {
   try {
-    // Extract JSON from potential markdown code blocks
     let jsonStr = content.trim();
-
-    // Remove markdown code blocks if present
     if (jsonStr.startsWith('```json')) {
       jsonStr = jsonStr.replace(/```json\n?/, '').replace(/\n?```$/, '');
     } else if (jsonStr.startsWith('```')) {
@@ -925,13 +982,103 @@ function parseCleanupResponse(content: string): { cleanedDescription: string; su
 
     const parsed = JSON.parse(jsonStr);
 
+    // Parse template suggestions if present
+    let templateSuggestions: TemplateSuggestionResult[] | undefined;
+    if (parsed.templateSuggestions && Array.isArray(parsed.templateSuggestions)) {
+      templateSuggestions = parsed.templateSuggestions
+        .filter((s: any) => s.templateId && s.suggestedQuantity > 0)
+        .map((s: any) => ({
+          templateId: s.templateId,
+          templateName: s.templateName || '',
+          suggestedQuantity: Math.max(1, Math.round(s.suggestedQuantity)),
+          reasoning: s.reasoning || '',
+        }));
+    }
+
     return {
       cleanedDescription: parsed.cleanedDescription || '',
       suggestedTitle: parsed.suggestedTitle || '',
+      templateSuggestions,
     };
   } catch (error) {
-    console.error('Failed to parse cleanup response:', error);
     throw new Error('Invalid response from LLM');
+  }
+}
+
+/**
+ * Standalone template matching — used when description cleanup was skipped.
+ * Lightweight AI call that just matches templates to the job description.
+ */
+export async function matchTemplatesToJob(
+  jobDescription: string,
+  templates: TemplateMatchInput[]
+): Promise<TemplateSuggestionResult[]> {
+  if (!ANTHROPIC_API_KEY || templates.length === 0) return [];
+
+  const templateList = templates.map((t, i) =>
+    `${i + 1}. "${t.name}" (ID: ${t.id}) - ${t.materialCount} materials${t.description ? `, ${t.description}` : ''}, ${t.laborSummary}`
+  ).join('\n');
+
+  const prompt = `You are a helpful assistant for Australian tradies. Given this job description and available templates, determine which templates are relevant and how many of each are needed.
+
+Job Description: "${jobDescription}"
+
+Available Templates:
+${templateList}
+
+For each relevant template, calculate the quantity based on the job scope. Only include templates that are actually relevant.
+
+Return ONLY valid JSON, no explanation text:
+{
+  "templateSuggestions": [
+    { "templateId": "actual-template-id", "suggestedQuantity": 1, "reasoning": "Brief explanation" }
+  ]
+}`;
+
+  try {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 500,
+        temperature: 0.2,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    const content = data.content[0].text;
+
+    // Robust JSON extraction — find the JSON object anywhere in the response
+    let jsonStr = content.trim();
+    // Strip markdown code blocks
+    jsonStr = jsonStr.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+    // Try to find a JSON object with templateSuggestions
+    const jsonMatch = jsonStr.match(/\{[\s\S]*"templateSuggestions"[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[0];
+    }
+
+    const parsed = JSON.parse(jsonStr);
+    if (!parsed.templateSuggestions || !Array.isArray(parsed.templateSuggestions)) return [];
+
+    return parsed.templateSuggestions
+      .filter((s: any) => s.templateId && s.suggestedQuantity > 0)
+      .map((s: any) => ({
+        templateId: s.templateId,
+        templateName: s.templateName || '',
+        suggestedQuantity: Math.max(1, Math.round(s.suggestedQuantity)),
+        reasoning: s.reasoning || '',
+      }));
+  } catch (error) {
+    return [];
   }
 }
 

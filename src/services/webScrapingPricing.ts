@@ -94,7 +94,6 @@ async function fetchStoreSearchHTML(
       realisticHeaders['Sec-Fetch-User'] = '?1';
     }
 
-    console.log(`Attempting direct fetch from ${store} with enhanced headers...`);
 
     // Try direct fetch first (works on mobile, sometimes on web)
     const response = await fetch(searchUrl, {
@@ -103,10 +102,8 @@ async function fetchStoreSearchHTML(
     });
 
     if (!response.ok) {
-      console.warn(`Direct fetch failed from ${store}: ${response.status} ${response.statusText}`);
 
       // Try Firebase Function as fallback (has even more bypass strategies)
-      console.log('Attempting Firebase Function fallback with anti-scraping bypass...');
       const idToken = await auth.currentUser?.getIdToken();
       const fbResponse = await fetch(`${FIREBASE_FUNCTION_URL}/fetchStoreHTML`, {
         method: 'POST',
@@ -115,13 +112,11 @@ async function fetchStoreSearchHTML(
       });
 
       if (!fbResponse.ok) {
-        console.error(`Firebase Function also failed: ${fbResponse.status}`);
         return null;
       }
 
       const data = await fbResponse.json();
       if (data.html) {
-        console.log(`✅ Firebase Function succeeded using method: ${data.method || 'unknown'}`);
         return data.html;
       }
 
@@ -129,14 +124,11 @@ async function fetchStoreSearchHTML(
     }
 
     const html = await response.text();
-    console.log(`✅ Direct fetch succeeded from ${store}, HTML length: ${html.length}`);
     return html;
   } catch (error) {
-    console.error(`Error fetching HTML from ${store}:`, error);
 
     // Last attempt: Try Firebase Function
     try {
-      console.log('Last attempt: Firebase Function...');
       const idToken2 = await auth.currentUser?.getIdToken();
       const fbResponse = await fetch(`${FIREBASE_FUNCTION_URL}/fetchStoreHTML`, {
         method: 'POST',
@@ -147,12 +139,10 @@ async function fetchStoreSearchHTML(
       if (fbResponse.ok) {
         const data = await fbResponse.json();
         if (data.html) {
-          console.log(`✅ Firebase Function fallback succeeded`);
           return data.html;
         }
       }
     } catch (fbError) {
-      console.error('Firebase Function fallback also failed:', fbError);
     }
 
     return null;
@@ -194,7 +184,6 @@ async function parseProductsWithClaude(
     // Parse JSON from Claude's response (handle markdown code blocks)
     const jsonMatch = result.match(/```json\n?([\s\S]*?)\n?```/) || result.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.error('Could not extract JSON from Claude response:', result);
       return { matches: [], searchTerm, store };
     }
 
@@ -219,7 +208,6 @@ async function parseProductsWithClaude(
       store,
     };
   } catch (error) {
-    console.error('Error parsing products with Claude:', error);
     return { matches: [], searchTerm, store };
   }
 }
@@ -244,17 +232,14 @@ export async function searchMaterialWithWebScraping(
     // Get search URL template
     const searchUrlFn = STORE_SEARCH_URLS[store];
     if (!searchUrlFn) {
-      console.warn(`No search URL template for store: ${store}`);
       continue;
     }
 
     const searchUrl = searchUrlFn(term);
-    console.log(`Searching ${store} for "${term}":`, searchUrl);
 
     // Fetch HTML
     const html = await fetchStoreSearchHTML(searchUrl, store);
     if (!html) {
-      console.warn(`Failed to fetch HTML from ${store}`);
       continue;
     }
 

@@ -39,7 +39,7 @@ interface JobPhotosProps {
   photos: QuotePhoto[];
   onPhotosChange: (photos: QuotePhoto[]) => void;
   /** Ref attached to the first photo's wrapper — for tour spotlight targeting */
-  firstPhotoRef?: React.RefObject<View>;
+  firstPhotoRef?: React.RefObject<View | null>;
   /** When true, disable photo taps and add button (during tour) */
   interactionDisabled?: boolean;
 }
@@ -139,7 +139,6 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
         setLocalPhotos(prev => prev.filter(p => p.id !== pending.id));
         onPhotosChange([...photos, { id: pending.id, storageUrl, annotated: false }]);
       } catch (error) {
-        console.error('Photo upload failed:', error);
         // Remove the failed photo from local state
         setLocalPhotos(prev => prev.filter(p => p.id !== pending.id));
         Alert.alert('Upload Failed', 'Could not upload photo. Please try again.');
@@ -204,7 +203,6 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
         try { await deleteQuotePhoto(annotatingPhoto.storageUrl); } catch { /* non-critical */ }
       }
     } catch (error) {
-      console.error('Annotation save failed:', error);
       // Restore original photo
       if (annotatingPhoto.storageUrl) {
         onPhotosChange([...photos, { id: photoId, storageUrl: annotatingPhoto.storageUrl, annotated: annotatingPhoto.annotated }]);

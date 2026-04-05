@@ -1,6 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, setPersistence, browserLocalPersistence, initializeAuth, getReactNativePersistence } from 'firebase/auth';
+import { getAuth, setPersistence, browserLocalPersistence, initializeAuth } from 'firebase/auth';
+// @ts-ignore – getReactNativePersistence exists at runtime via the react-native entry point
+import { getReactNativePersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getFunctions } from 'firebase/functions';
 import { getStorage } from 'firebase/storage';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -31,11 +34,11 @@ export const auth = Platform.OS === 'web'
 // Set persistence for web
 if (Platform.OS === 'web') {
   setPersistence(auth, browserLocalPersistence).catch((error) => {
-    console.error('Failed to set auth persistence:', error);
   });
 }
 
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+export const functions = getFunctions(app);
 
 export default app;

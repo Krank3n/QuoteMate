@@ -282,7 +282,7 @@ export function InvoicesListScreen() {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <View style={styles.emptyIconCircle}>
-                  <MaterialCommunityIcons name="receipt-text-outline" size={36} color={colors.primary} />
+                  <MaterialCommunityIcons name={"receipt-text-outline" as any} size={36} color={colors.primary} />
                 </View>
                 <Text style={styles.emptyTitle}>
                   {filterStatus === 'all' && emptyMessage.title}

@@ -7,16 +7,8 @@
 
 import { BUNNINGS_SCRAPER_URL, BUNNINGS_SCRAPER_API_KEY } from '@env';
 
-// Defensive fallbacks for production builds
-const SCRAPER_API_URL = BUNNINGS_SCRAPER_URL || 'http://165.22.151.190';
-const SCRAPER_API_KEY = BUNNINGS_SCRAPER_API_KEY || '666d9a00cd10ee9a034215ec3cebc188cbf3e21c789093128e8bc1829c9b3266';
-
-// Log configuration on module load (only once)
-console.log('🔧 Bunnings Scraper Config:', {
-  url: SCRAPER_API_URL,
-  hasApiKey: !!SCRAPER_API_KEY,
-  apiKeyLength: SCRAPER_API_KEY?.length || 0,
-});
+const SCRAPER_API_URL = BUNNINGS_SCRAPER_URL;
+const SCRAPER_API_KEY = BUNNINGS_SCRAPER_API_KEY;
 
 export interface ScraperProduct {
   productName: string;
@@ -74,12 +66,9 @@ export async function searchBunningsProducts(
       throw new Error(data.error || 'Search failed');
     }
 
-    console.log(`✅ Bunnings scraper found ${data.results.length} products for "${searchTerm}"`);
-    console.log(`   Cached: ${data.cached}, Response time: ${data.cached ? '<100ms' : '~20s'}`);
 
     return data;
   } catch (error) {
-    console.error('Bunnings scraper API error:', error);
     throw error;
   }
 }
@@ -105,7 +94,6 @@ export async function getBunningsProduct(itemNumber: string): Promise<ScraperPro
     const data = await response.json();
     return data.success ? data.product : null;
   } catch (error) {
-    console.error('Error fetching product details:', error);
     return null;
   }
 }
@@ -123,7 +111,6 @@ export async function checkScraperHealth(): Promise<boolean> {
     });
 
     if (!response.ok) {
-      console.warn(`Scraper health check failed: ${response.status}`);
       return false;
     }
 
@@ -131,14 +118,11 @@ export async function checkScraperHealth(): Promise<boolean> {
     const isHealthy = data.success && data.status === 'healthy';
 
     if (isHealthy) {
-      console.log('✅ Bunnings scraper is healthy');
     } else {
-      console.warn('⚠️ Bunnings scraper is unhealthy:', data);
     }
 
     return isHealthy;
   } catch (error) {
-    console.error('Scraper health check error:', error);
     return false;
   }
 }
@@ -177,7 +161,47 @@ export async function findBestMatchForMaterial(
     // Last resort: return first result even if price is 0
     return response.results[0];
   } catch (error) {
-    console.error('Error finding best match:', error);
     return null;
   }
+}
+
+/**
+ * Batch search for best matches across multiple materials, processing in chunks.
+ * Calls onChunkComplete after each chunk finishes so the UI can update progressively.
+ */
+export async function batchFindBestMatchesProgressive(
+  searchTerms: string[],
+  _maxResultsPerTerm: number = 5,
+  chunkSize: number = 3,
+  onChunkComplete?: (
+    chunkResults: Map<string, ScraperProduct | null>,
+    chunkTerms: string[],
+    chunkIndex: number,
+    totalChunks: number,
+  ) => void,
+  isCancelled?: () => boolean,
+): Promise<Map<string, ScraperProduct | null>> {
+  const allResults = new Map<string, ScraperProduct | null>();
+  const totalChunks = Math.ceil(searchTerms.length / chunkSize);
+
+  for (let i = 0; i < totalChunks; i++) {
+    if (isCancelled?.()) {
+      throw new Error('__FETCH_CANCELLED__');
+    }
+
+    const chunkTerms = searchTerms.slice(i * chunkSize, (i + 1) * chunkSize);
+    const chunkResults = new Map<string, ScraperProduct | null>();
+
+    await Promise.all(
+      chunkTerms.map(async (term) => {
+        const result = await findBestMatchForMaterial(term);
+        chunkResults.set(term, result);
+        allResults.set(term, result);
+      }),
+    );
+
+    onChunkComplete?.(chunkResults, chunkTerms, i, totalChunks);
+  }
+
+  return allResults;
 }

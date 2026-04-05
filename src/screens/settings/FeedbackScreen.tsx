@@ -67,7 +67,6 @@ export function FeedbackScreen() {
       setFeedbackText('');
       setSelectedCategory(null);
     } catch (error: any) {
-      console.error('Failed to send feedback:', error);
       showModal('error', 'Failed to Send', 'Something went wrong. Please try again.');
     } finally {
       setSending(false);

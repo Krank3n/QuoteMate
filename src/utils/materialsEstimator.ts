@@ -154,7 +154,6 @@ function evaluateFormula(formula: string, params: Record<string, number>): numbe
     // Round to 2 decimal places
     return Math.round(result * 100) / 100;
   } catch (error) {
-    console.error(`Error evaluating formula "${formula}":`, error);
     return 0;
   }
 }

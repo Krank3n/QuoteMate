@@ -5,7 +5,7 @@ let RNIap: any = null;
 try {
   RNIap = require('expo-iap');
 } catch (error) {
-  console.log('expo-iap not available on this platform');
+  // silently ignore - not available on this platform
 }
 
 // Subscription product IDs (must match App Store Connect & Google Play Console)
@@ -56,14 +56,11 @@ class BillingService {
   async initialize(): Promise<boolean> {
     try {
       if (!RNIap) {
-        console.log('[IAP] expo-iap module not available on this platform');
         return false;
       }
       if (this.isInitialized) {
         return true;
       }
-
-      console.log('[IAP] Initializing billing service...');
 
       // Retry initConnection up to 3 times — sandbox can be slow on first launch
       const maxRetries = 3;
@@ -71,15 +68,12 @@ class BillingService {
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          console.log(`[IAP] initConnection attempt ${attempt}/${maxRetries}`);
           await withTimeout(RNIap.initConnection(), 10000, 'initConnection');
           this.isInitialized = true;
           this.initializationAttempts = attempt;
-          console.log(`[IAP] Billing service initialized successfully on attempt ${attempt}`);
           return true;
         } catch (err: any) {
           lastError = err;
-          console.warn(`[IAP] initConnection attempt ${attempt} failed:`, err?.code, err?.message);
           if (isIapNotAvailable(err)) {
             // No point retrying if IAP is genuinely unavailable
             break;
@@ -92,17 +86,9 @@ class BillingService {
       }
 
       // All attempts failed
-      if (isIapNotAvailable(lastError)) {
-        console.log('[IAP] In-app purchases not available on this device');
-      } else if (lastError?.message?.includes('SpillingKt') || lastError?.message?.includes('ClassNotFoundException')) {
-        console.log('[IAP] Billing module has compatibility issues, disabling IAP');
-      } else {
-        console.error('[IAP] All initConnection attempts failed:', lastError?.code, lastError?.message);
-      }
       this.isInitialized = false;
       return false;
     } catch (error: any) {
-      console.error('[IAP] Unexpected error during initialize:', error?.code, error?.message);
       this.isInitialized = false;
       return false;
     }
@@ -118,28 +104,23 @@ class BillingService {
       }
 
       if (!SUBSCRIPTION_PRODUCTS || SUBSCRIPTION_PRODUCTS.length === 0) {
-        console.error('[IAP] No subscription products configured for this platform');
         return [];
       }
 
-      console.log('[IAP] Fetching products for SKUs:', SUBSCRIPTION_PRODUCTS);
       let products = await this.fetchProductsWithRetry(SUBSCRIPTION_PRODUCTS);
 
       // If fetching all SKUs returned nothing, try fetching each individually
       // (a misconfigured product can cause the entire batch to fail)
       if ((!products || products.length === 0) && SUBSCRIPTION_PRODUCTS.length > 1) {
-        console.log('[IAP] Batch fetch returned empty, trying individual SKUs...');
         const individualResults: any[] = [];
         for (const sku of SUBSCRIPTION_PRODUCTS) {
           try {
             const result = await RNIap.fetchProducts({ skus: [sku], type: 'subs' });
             if (result && result.length > 0) {
               individualResults.push(...result);
-            } else {
-              console.warn(`[IAP] Product ${sku} returned empty`);
             }
           } catch (skuError: any) {
-            console.warn(`[IAP] Failed to fetch product ${sku}:`, skuError?.code, skuError?.message);
+            // silently ignore
           }
         }
         products = individualResults;
@@ -147,7 +128,6 @@ class BillingService {
 
       // If still empty after individual fetch, try reconnecting and fetching again
       if ((!products || products.length === 0) && this.isInitialized) {
-        console.log('[IAP] Products still empty, attempting connection reset...');
         try {
           await RNIap.endConnection();
           this.isInitialized = false;
@@ -155,21 +135,14 @@ class BillingService {
           const reinit = await this.initialize();
           if (reinit) {
             products = await RNIap.fetchProducts({ skus: SUBSCRIPTION_PRODUCTS, type: 'subs' });
-            console.log('[IAP] Products after reconnect:', JSON.stringify(products, null, 2));
           }
         } catch (reconnectError: any) {
-          console.warn('[IAP] Reconnect attempt failed:', reconnectError?.code, reconnectError?.message);
+          // silently ignore
         }
       }
 
-      console.log(`[IAP] Final product count: ${products?.length || 0}`);
       return products || [];
     } catch (error: any) {
-      if (isIapNotAvailable(error)) {
-        console.log('[IAP] In-app purchases not available on this device');
-      } else {
-        console.error('[IAP] Error getting products:', error?.code, error?.message);
-      }
       return [];
     }
   }
@@ -180,27 +153,21 @@ class BillingService {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`[IAP] fetchProducts attempt ${attempt}/${maxRetries}`);
         const products = await withTimeout(
           RNIap.fetchProducts({ skus, type: 'subs' }),
           15000,
           'fetchProducts'
-        );
-        console.log(`[IAP] Attempt ${attempt} returned ${products?.length || 0} products`);
-
+        ) as any[];
         if (products && products.length > 0) {
-          console.log('[IAP] Fetched products:', JSON.stringify(products, null, 2));
           return products;
         }
 
         // Products returned empty — wait and retry (sandbox may need time)
         if (attempt < maxRetries) {
-          console.log(`[IAP] Empty result, retrying in ${attempt}s...`);
           await delay(1000 * attempt);
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`[IAP] fetchProducts attempt ${attempt} error:`, err?.code, err?.message);
         if (attempt < maxRetries) {
           await delay(1000 * attempt);
         }
@@ -226,12 +193,9 @@ class BillingService {
         throw new Error('Invalid product ID');
       }
 
-      console.log('[IAP] Purchasing subscription:', sku);
 
       if (Platform.OS === 'android') {
         const products = await RNIap.fetchProducts({ skus: [sku], type: 'subs' });
-        console.log('[IAP] Product details for purchase:', JSON.stringify(products, null, 2));
-
         if (!products || products.length === 0) {
           throw new Error('Product not found');
         }
@@ -242,8 +206,6 @@ class BillingService {
         const offerDetails = product.subscriptionOffers || product.subscriptionOfferDetailsAndroid;
         if (offerDetails && offerDetails.length > 0) {
           const offerToken = offerDetails[0].offerToken;
-          console.log('[IAP] Using offer token:', offerToken);
-
           const purchase = await RNIap.requestPurchase({
             request: {
               google: {
@@ -253,10 +215,8 @@ class BillingService {
             },
             type: 'subs'
           });
-          console.log('[IAP] Purchase successful:', purchase);
           return purchase;
         } else {
-          console.warn('[IAP] No subscription offers found, attempting purchase without offers');
         }
       }
 
@@ -268,14 +228,8 @@ class BillingService {
         },
         type: 'subs'
       });
-      console.log('[IAP] Purchase successful:', purchase);
       return purchase;
     } catch (error: any) {
-      if (isUserCancelled(error)) {
-        console.log('[IAP] User cancelled purchase');
-      } else {
-        console.error('[IAP] Error purchasing subscription:', error?.code, error?.message);
-      }
       throw error;
     }
   }
@@ -296,7 +250,6 @@ class BillingService {
           SUBSCRIPTION_SKUS.MONTHLY,
           SUBSCRIPTION_SKUS.YEARLY,
         ]);
-        console.log('[IAP] Active subscriptions:', subscriptions);
         return subscriptions || [];
       }
 
@@ -316,7 +269,6 @@ class BillingService {
         p?.productId === SUBSCRIPTION_SKUS.YEARLY
       );
     } catch (error: any) {
-      console.error('[IAP] Error getting active subscriptions:', error?.code, error?.message);
       return [];
     }
   }
@@ -333,7 +285,6 @@ class BillingService {
       const subscriptions = await this.getActiveSubscriptions();
       return subscriptions.length > 0;
     } catch (error) {
-      console.error('[IAP] Error checking subscription status:', error);
       return false;
     }
   }
@@ -341,13 +292,11 @@ class BillingService {
   async finishTransaction(purchase: any): Promise<void> {
     try {
       if (!purchase) {
-        console.error('[IAP] No purchase to finish');
         return;
       }
       await RNIap.finishTransaction({ purchase, isConsumable: false });
-      console.log('[IAP] Transaction finished:', purchase.transactionId || purchase.id);
     } catch (error: any) {
-      console.error('[IAP] Error finishing transaction:', error?.code, error?.message);
+      // silently ignore
     }
   }
 
@@ -358,9 +307,7 @@ class BillingService {
       }
       await RNIap.endConnection();
       this.isInitialized = false;
-      console.log('[IAP] Billing service disconnected');
     } catch (error: any) {
-      console.error('[IAP] Error disconnecting billing:', error?.code, error?.message);
       this.isInitialized = false;
     }
   }

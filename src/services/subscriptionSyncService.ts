@@ -20,7 +20,6 @@ class SubscriptionSyncService {
    */
   async initialize(): Promise<void> {
     try {
-      console.log('🔄 Initializing subscription sync...');
 
       if (Platform.OS === 'web') {
         // For web, listen to Firestore changes
@@ -30,9 +29,7 @@ class SubscriptionSyncService {
         await this.syncNativeSubscription();
       }
 
-      console.log('✅ Subscription sync initialized');
     } catch (error) {
-      console.error('❌ Error initializing subscription sync:', error);
     }
   }
 
@@ -43,7 +40,6 @@ class SubscriptionSyncService {
   private async setupFirestoreListener(): Promise<void> {
     const currentUser = auth.currentUser;
     if (!currentUser) {
-      console.log('ℹ️ No user signed in, skipping Firestore listener');
       return;
     }
 
@@ -60,21 +56,14 @@ class SubscriptionSyncService {
           const subscriptionId = data.subscriptionId || data.transactionId || null;
           const expiryDate = data.currentPeriodEnd || null;
 
-          console.log('📡 Subscription updated from Firestore:', {
-            isPremium,
-            subscriptionId,
-            expiryDate,
-          });
 
           // Update local store
           useSubscriptionStore.getState().setPremium(isPremium, subscriptionId, expiryDate);
         } else {
-          console.log('ℹ️ No subscription data in Firestore');
           useSubscriptionStore.getState().setPremium(false);
         }
       },
       (error) => {
-        console.error('❌ Error in Firestore listener:', error);
       }
     );
   }
@@ -87,7 +76,6 @@ class SubscriptionSyncService {
     try {
       const status = await unifiedBillingService.getSubscriptionStatus();
 
-      console.log('📱 Native subscription status:', status);
 
       if (status.isPremium) {
         await useSubscriptionStore.getState().setPremium(
@@ -99,7 +87,6 @@ class SubscriptionSyncService {
         await useSubscriptionStore.getState().setPremium(false);
       }
     } catch (error) {
-      console.error('❌ Error syncing native subscription:', error);
     }
   }
 
@@ -109,12 +96,10 @@ class SubscriptionSyncService {
    */
   async syncNow(): Promise<void> {
     try {
-      console.log('🔄 Manually syncing subscription status...');
 
       if (Platform.OS === 'web') {
         const currentUser = auth.currentUser;
         if (!currentUser) {
-          console.log('ℹ️ No user signed in');
           return;
         }
 
@@ -128,9 +113,7 @@ class SubscriptionSyncService {
         await this.syncNativeSubscription();
       }
 
-      console.log('✅ Subscription synced');
     } catch (error) {
-      console.error('❌ Error syncing subscription:', error);
     }
   }
 
@@ -141,7 +124,6 @@ class SubscriptionSyncService {
     if (this.unsubscribeListener) {
       this.unsubscribeListener();
       this.unsubscribeListener = null;
-      console.log('🧹 Subscription listener cleaned up');
     }
   }
 }

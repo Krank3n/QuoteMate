@@ -16,11 +16,6 @@ const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
   ? 'http://127.0.0.1:5001/hansendev/us-central1'
   : 'https://us-central1-hansendev.cloudfunctions.net';
 
-console.log('🔧 Web Search Pricing Config:', {
-  platform: Platform.OS,
-  useEmulator: USE_EMULATOR,
-  functionsUrl: FIREBASE_FUNCTIONS_URL,
-});
 
 interface PriceSearchResult {
   price: number | null;
@@ -49,7 +44,6 @@ export async function searchMaterialPrice(
 
   // On mobile, call Anthropic API directly
   if (!ANTHROPIC_API_KEY) {
-    console.warn('ANTHROPIC_API_KEY not set');
     return { price: null };
   }
 
@@ -81,7 +75,6 @@ Important:
 Example:
 {"price": 15.90, "productName": "Treated Pine H3 90x45mm 2.4m", "store": "Hardware Store (AI estimate)", "confidence": "medium"}`;
 
-    console.log('🔍 Estimating price for:', materialName);
 
     const response = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
@@ -104,7 +97,6 @@ Example:
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ API error:', response.status, errorText);
       return { price: null };
     }
 
@@ -120,7 +112,6 @@ Example:
     }
 
     if (!textContent) {
-      console.error('❌ No text content in response');
       return { price: null };
     }
 
@@ -137,9 +128,7 @@ Example:
     const result = JSON.parse(jsonStr);
 
     if (result.price !== null) {
-      console.log('✅ Estimated price:', materialName, '→ $' + result.price, `(${result.confidence || 'unknown'} confidence)`);
     } else {
-      console.log('⚠️  Could not estimate price for:', materialName);
     }
 
     return {
@@ -150,9 +139,7 @@ Example:
       confidence: result.confidence || 'medium',
     };
   } catch (error) {
-    console.error('❌ Price estimation error:', materialName, error);
     if (error instanceof Error) {
-      console.error('Error details:', error.message);
     }
     return { price: null };
   }
@@ -166,7 +153,6 @@ async function searchPriceViaFirebaseFunction(
   hardwareStoreUrls: string[]
 ): Promise<PriceSearchResult> {
   try {
-    console.log('🔍 Estimating price via Firebase Function for:', materialName);
 
     const idToken = await auth.currentUser?.getIdToken();
     const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/searchMaterialPrice`, {
@@ -189,9 +175,7 @@ async function searchPriceViaFirebaseFunction(
     const data = await response.json();
 
     if (data.price !== null) {
-      console.log('✅ Estimated price:', materialName, '→ $' + data.price);
     } else {
-      console.log('⚠️  Could not estimate price for:', materialName);
     }
 
     return {
@@ -202,9 +186,7 @@ async function searchPriceViaFirebaseFunction(
       confidence: data.confidence || 'medium',
     };
   } catch (error) {
-    console.error('❌ Price estimation error:', materialName, error);
     if (error instanceof Error) {
-      console.error('Error details:', error.message);
     }
     return { price: null };
   }
@@ -222,7 +204,6 @@ export async function searchMultiplePrices(
 ): Promise<Map<string, number>> {
   const priceMap = new Map<string, number>();
 
-  console.log(`🔍 Searching prices for ${materials.length} materials using web search...`);
 
   // Search each material sequentially to avoid rate limits
   for (const materialName of materials) {
@@ -236,11 +217,9 @@ export async function searchMultiplePrices(
       // Small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 500));
     } catch (error) {
-      console.error(`Failed to search price for ${materialName}:`, error);
     }
   }
 
-  console.log(`✅ Found ${priceMap.size} prices out of ${materials.length} materials`);
 
   return priceMap;
 }

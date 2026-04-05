@@ -126,7 +126,6 @@ export function ViewQuoteScreen() {
       setShowConvertModal(false);
       navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
     } catch (error) {
-      console.error('Failed to convert to invoice:', error);
     } finally {
       setIsConverting(false);
     }
@@ -138,7 +137,6 @@ export function ViewQuoteScreen() {
       const html = await generateQuotePDF(quote, businessSettings);
       await Print.printAsync({ html });
     } catch (error) {
-      console.error('PDF preview error:', error);
     } finally {
       setIsPdfLoading(false);
     }

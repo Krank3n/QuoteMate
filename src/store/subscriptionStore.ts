@@ -93,7 +93,6 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       // Check if premium status is still valid
       await get().checkPremiumStatus();
     } catch (error) {
-      console.error('Error loading subscription data:', error);
     }
   },
 }));

@@ -36,7 +36,6 @@ async function saveRegistrationPlatform(uid: string, method: 'email' | 'google' 
       registeredAt: serverTimestamp(),
     });
   } catch (error) {
-    console.error('Error saving registration platform:', error);
   }
 }
 
@@ -75,12 +74,10 @@ export function AuthScreen() {
       getRedirectResult(auth)
         .then((result) => {
           if (result) {
-            console.log('✅ Google Sign-In successful (redirect)');
             saveRegistrationPlatform(result.user.uid, 'google');
           }
         })
         .catch((error) => {
-          console.error('Google redirect sign-in error:', error);
           setError('Failed to sign in with Google. Please try again.');
         });
     }
@@ -108,10 +105,7 @@ export function AuthScreen() {
   // Check if Apple Authentication is available (iOS only)
   useEffect(() => {
     const checkAppleAuth = async () => {
-      console.log('🍎 Checking Apple Authentication availability...');
-      console.log('Platform:', Platform.OS);
       const isAvailable = await AppleAuthentication.isAvailableAsync();
-      console.log('🍎 Apple Authentication available:', isAvailable);
       setAppleAuthAvailable(isAvailable);
     };
     checkAppleAuth();
@@ -125,12 +119,10 @@ export function AuthScreen() {
       const credential = GoogleAuthProvider.credential(id_token);
       signInWithCredential(auth, credential)
         .then((result) => {
-          console.log('✅ Google Sign-In successful (mobile)');
           saveRegistrationPlatform(result.user.uid, 'google');
           // Keep loading state - App.tsx will handle navigation
         })
         .catch((error) => {
-          console.error('Google Sign-In error:', error);
           setError('Failed to sign in with Google');
           setIsProcessingOAuth(false);
         });
@@ -150,7 +142,6 @@ export function AuthScreen() {
       await signInWithEmailAndPassword(auth, email, password);
       // Navigation will happen automatically when auth state changes
     } catch (err: any) {
-      console.error('Sign in error:', err);
       setError(getErrorMessage(err.code));
     } finally {
       setLoading(false);
@@ -181,7 +172,6 @@ export function AuthScreen() {
       await saveRegistrationPlatform(result.user.uid, 'email');
       // Navigation will happen automatically when auth state changes
     } catch (err: any) {
-      console.error('Sign up error:', err);
       setError(getErrorMessage(err.code));
     } finally {
       setLoading(false);
@@ -212,7 +202,6 @@ export function AuthScreen() {
         // OAuth state will be handled by response useEffect
       }
     } catch (err: any) {
-      console.error('Google sign in error:', err);
       if (err.code === 'auth/popup-closed-by-user') {
         setError('Sign-in cancelled');
       } else if (err.code === 'auth/popup-blocked') {
@@ -246,7 +235,6 @@ export function AuthScreen() {
         nonce
       );
 
-      console.log('🍎 Starting Apple Sign-In with nonce...');
 
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
@@ -256,7 +244,6 @@ export function AuthScreen() {
         nonce: hashedNonce,
       });
 
-      console.log('🍎 Apple credential received, signing in with Firebase...');
 
       // Sign in with Firebase using Apple credential
       const { identityToken } = credential;
@@ -269,16 +256,11 @@ export function AuthScreen() {
         });
         const appleResult = await signInWithCredential(auth, firebaseCredential);
         await saveRegistrationPlatform(appleResult.user.uid, 'apple');
-        console.log('✅ Apple Sign-In successful');
         // Keep loading state - App.tsx will handle navigation
       } else {
         throw new Error('No identity token returned from Apple');
       }
     } catch (err: any) {
-      console.error('Apple sign in error:', err);
-      console.error('Apple sign in error code:', err?.code);
-      console.error('Apple sign in error message:', err?.message);
-      console.error('Apple sign in error details:', JSON.stringify(err, null, 2));
 
       if (err.code === 'ERR_REQUEST_CANCELED') {
         setError('Sign-in cancelled');

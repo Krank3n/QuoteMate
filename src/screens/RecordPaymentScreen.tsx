@@ -96,7 +96,6 @@ export function RecordPaymentScreen() {
         try {
           await pushPaymentToXero(invoice.id, invoice.xeroInvoiceId, paymentAmount, paymentDate, paymentMethod);
         } catch (xeroError) {
-          console.warn('Xero payment sync failed (non-blocking):', xeroError);
         }
       }
 

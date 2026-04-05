@@ -12,7 +12,7 @@ import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme';
 
 interface TrialBannerProps {
-  trialStartedAt: string;
+  trialStartedAt: string | Date;
   quoteCount: number;
   /** Compact mode for settings screen (no upgrade button, slightly different layout) */
   compact?: boolean;

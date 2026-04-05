@@ -45,7 +45,6 @@ export async function compressImage(uri: string): Promise<string> {
     );
     return result.uri;
   } catch (error) {
-    console.warn('Image compression failed, using original:', error);
     return uri;
   }
 }
@@ -96,6 +95,5 @@ export async function deleteQuotePhoto(photoUri: string): Promise<void> {
       await FileSystem!.deleteAsync(photoUri, { idempotent: true });
     }
   } catch (error) {
-    console.warn('Failed to delete photo file:', error);
   }
 }

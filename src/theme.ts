@@ -18,6 +18,7 @@ export const theme = {
 
     // Background colors - Dark mode
     background: '#0F172A',
+    surfaceDark: '#162032',
     surface: '#1E293B',
     surfaceLight: '#334155',
     surfaceGray: '#475569',

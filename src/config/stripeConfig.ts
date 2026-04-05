@@ -55,8 +55,6 @@ export const stripeConfig = {
 };
 
 // Log current mode (useful for debugging)
-console.log(`🔑 Stripe Mode: ${stripeConfig.mode.toUpperCase()}`);
-console.log(`🔑 Using ${isTestMode ? 'TEST' : 'LIVE'} keys`);
 
 // Export price IDs for backward compatibility
 export const STRIPE_PRICES = {

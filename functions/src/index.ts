@@ -22,6 +22,7 @@ import {
   buildQuoteEmailHtml,
   buildInvoiceEmailHtml,
   sendAffiliateInviteEmail,
+  sendNewProSubscriptionEmail,
 } from './email';
 import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from './pdfGenerator';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
@@ -35,10 +36,8 @@ const isTestMode = stripeMode === 'test';
 
 // Select the appropriate secret key based on mode
 const stripeSecretKey = isTestMode
-  ? (functions.config().stripe?.test_secret_key || process.env.STRIPE_TEST_SECRET_KEY || '')
-  : (functions.config().stripe?.live_secret_key || process.env.STRIPE_LIVE_SECRET_KEY || '');
-
-console.log(`🔑 Initializing Stripe in ${stripeMode.toUpperCase()} mode`);
+  ? (process.env.STRIPE_TEST_SECRET_KEY || '')
+  : (process.env.STRIPE_LIVE_SECRET_KEY || '');
 
 const stripe = new Stripe(stripeSecretKey, {
   apiVersion: '2023-10-16',
@@ -55,11 +54,8 @@ const PLATFORM_FEES: Record<string, { percentage: number; fixedCents: number }> 
 
 const DEFAULT_COMMISSION_RATE = 0.50; // 50% of net revenue
 
-// Emails to auto-grant affiliate status on signup
-const PENDING_AFFILIATE_EMAILS = [
-  'chargedtm11@gmail.com',
-  'b.o.l.development1@gmail.com',
-];
+// Emails to auto-grant affiliate status on signup (loaded from env config)
+const PENDING_AFFILIATE_EMAILS = (process.env.PENDING_AFFILIATE_EMAILS || '').split(',').filter(Boolean);
 
 // Pricing in cents (AUD)
 const PRODUCT_PRICES: Record<string, number> = {
@@ -113,7 +109,6 @@ async function recordAffiliateEarning(
 
   // Only record earnings if the referrer is an approved affiliate
   if (!referrerData.isAffiliate) {
-    console.log(`Skipping affiliate earning — referrer ${referrerUserId} is not an affiliate`);
     return;
   }
 
@@ -128,7 +123,6 @@ async function recordAffiliateEarning(
     .get();
 
   if (!existingEarnings.empty) {
-    console.log(`Affiliate earning already exists for ${referrerUserId} <- ${referredUserId} period ${billingPeriod}`);
     return;
   }
 
@@ -174,7 +168,6 @@ async function recordAffiliateEarning(
   }, { merge: true });
 
   await batch.commit();
-  console.log(`💰 Affiliate earning recorded: ${referrerUserId} earns $${(commissionAmount / 100).toFixed(2)} from ${referredUserId} (${platform}, period ${billingPeriod})`);
 }
 
 // CORS configuration - whitelist allowed origins
@@ -253,7 +246,6 @@ async function checkRateLimit(
     }
     return true;
   } catch (error) {
-    console.error('Rate limit check failed:', error);
     // Allow request if rate limit check fails (fail open)
     return true;
   }
@@ -305,7 +297,6 @@ async function verifyAuth(
     const decodedToken = await admin.auth().verifyIdToken(idToken);
     return decodedToken;
   } catch (error) {
-    console.error('Auth token verification failed:', error);
     res.status(401).json({ error: 'Invalid or expired auth token' });
     return null;
   }
@@ -360,7 +351,6 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
         return;
       }
 
-      console.log('Creating checkout session for user:', userId);
 
       // Create Stripe customer directly (no database needed)
       const customer = await stripe.customers.create({
@@ -369,7 +359,6 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
         },
       });
 
-      console.log('Created Stripe customer:', customer.id);
 
       // Create Checkout Session
       const session = await stripe.checkout.sessions.create({
@@ -389,14 +378,12 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
         },
       });
 
-      console.log('Created checkout session:', session.id);
 
       res.status(200).json({
         sessionId: session.id,
         url: session.url
       });
     } catch (error: any) {
-      console.error('Error creating checkout session:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -426,7 +413,6 @@ export const createPaymentIntent = functions.https.onRequest((req, res) => {
         return;
       }
 
-      console.log('Creating subscription for user:', userId);
 
       // Find or create Stripe customer
       let customerId: string;
@@ -437,7 +423,6 @@ export const createPaymentIntent = functions.https.onRequest((req, res) => {
 
       if (customerList.data.length > 0) {
         customerId = customerList.data[0].id;
-        console.log('Found existing customer:', customerId);
       } else {
         const customer = await stripe.customers.create({
           metadata: {
@@ -445,7 +430,6 @@ export const createPaymentIntent = functions.https.onRequest((req, res) => {
           },
         });
         customerId = customer.id;
-        console.log('Created new customer:', customerId);
       }
 
       // Create the subscription with payment pending
@@ -466,8 +450,6 @@ export const createPaymentIntent = functions.https.onRequest((req, res) => {
       const invoice = subscription.latest_invoice as any;
       const paymentIntent = invoice.payment_intent;
 
-      console.log('Created subscription:', subscription.id);
-      console.log('Payment intent:', paymentIntent.id);
 
       res.status(200).json({
         clientSecret: paymentIntent.client_secret,
@@ -475,7 +457,6 @@ export const createPaymentIntent = functions.https.onRequest((req, res) => {
         customerId,
       });
     } catch (error: any) {
-      console.error('Error creating subscription:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -525,7 +506,6 @@ export const createPortalSession = functions.https.onRequest((req, res) => {
 
       res.status(200).json({ url: session.url });
     } catch (error: any) {
-      console.error('Error creating portal session:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -554,7 +534,6 @@ export const cancelSubscription = functions.https.onRequest((req, res) => {
         return;
       }
 
-      console.log('🚫 Canceling subscription for user:', userId);
 
       // Find customer by Firebase user ID in Stripe metadata
       const customerList = await stripe.customers.search({
@@ -588,7 +567,6 @@ export const cancelSubscription = functions.https.onRequest((req, res) => {
         cancel_at_period_end: true,
       });
 
-      console.log('✅ Subscription canceled at period end:', subscription.id);
 
       // Save cancellation reason to Firestore
       const db = admin.firestore();
@@ -606,7 +584,6 @@ export const cancelSubscription = functions.https.onRequest((req, res) => {
         platform: 'web',
       });
 
-      console.log('📝 Cancellation reason saved to Firestore');
 
       res.status(200).json({
         success: true,
@@ -615,7 +592,6 @@ export const cancelSubscription = functions.https.onRequest((req, res) => {
         periodEnd: new Date(canceledSubscription.current_period_end * 1000).toISOString(),
       });
     } catch (error: any) {
-      console.error('❌ Error canceling subscription:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -636,29 +612,15 @@ export const logCancellationFeedback = functions.https.onRequest((req, res) => {
     if (!decodedToken) return;
 
     try {
-      const { userId, userEmail, reason, feedback, timestamp } = req.body;
+      const { reason } = req.body;
 
       if (!isNonEmptyString(reason)) {
         res.status(400).json({ error: 'Missing or invalid reason' });
         return;
       }
 
-      const safeReason = sanitizeString(reason, 500);
-      const safeFeedback = typeof feedback === 'string' ? sanitizeString(feedback, 2000) : '';
-      const safeEmail = typeof userEmail === 'string' ? sanitizeString(userEmail, 320) : '';
-
-      // Log with a special prefix so it's easy to find in logs
-      console.log('🚫 ===== CANCELLATION FEEDBACK =====');
-      console.log('📧 User Email:', safeEmail);
-      console.log('🆔 User ID:', userId);
-      console.log('📝 Reason:', safeReason);
-      console.log('💬 Additional Feedback:', safeFeedback || 'None provided');
-      console.log('📅 Timestamp:', timestamp);
-      console.log('🚫 ==================================');
-
       res.status(200).json({ success: true, message: 'Feedback logged successfully' });
     } catch (error: any) {
-      console.error('Error logging cancellation feedback:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -721,7 +683,6 @@ export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
         platform: 'web',
       });
     } catch (error: any) {
-      console.error('Error getting subscription status:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -733,14 +694,13 @@ export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
  */
 export const stripeWebhook = functions.https.onRequest(async (req, res) => {
   const sig = req.headers['stripe-signature'] as string;
-  const webhookSecret = functions.config().stripe?.webhook_secret || process.env.STRIPE_WEBHOOK_SECRET || '';
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
 
   let event: Stripe.Event;
 
   try {
     event = stripe.webhooks.constructEvent(req.rawBody, sig, webhookSecret);
   } catch (err: any) {
-    console.error('Webhook signature verification failed:', err.message);
     res.status(400).send(`Webhook Error: ${err.message}`);
     return;
   }
@@ -775,12 +735,10 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         break;
       }
       default:
-        console.log(`Unhandled event type: ${event.type}`);
     }
 
     res.status(200).json({ received: true });
   } catch (error: any) {
-    console.error('Error handling webhook:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -790,14 +748,11 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
  */
 async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
   const userId = session.metadata?.userId;
-  const customerId = session.customer as string;
 
   if (!userId) {
-    console.error('No userId in session metadata');
     return;
   }
 
-  console.log(`✅ Checkout completed for user ${userId}, customer ${customerId}`);
   // No database storage needed - customer data is in Stripe with firebaseUserId in metadata
 }
 
@@ -808,20 +763,15 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
 async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
   const customerId = subscription.customer as string;
 
-  console.log(`📝 Subscription ${subscription.id} ${subscription.status} for customer ${customerId}`);
-  console.log(`   Period: ${new Date(subscription.current_period_start * 1000).toISOString()} to ${new Date(subscription.current_period_end * 1000).toISOString()}`);
-
   try {
     // Look up Firebase user ID from Stripe customer metadata
     const customer = await stripe.customers.retrieve(customerId);
     if (customer.deleted) {
-      console.error('Customer has been deleted:', customerId);
       return;
     }
 
     const userId = customer.metadata?.firebaseUserId;
     if (!userId) {
-      console.error('No firebaseUserId in customer metadata for:', customerId);
       return;
     }
 
@@ -842,7 +792,6 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
       quotesThisMonth: 0,
     }, { merge: true });
 
-    console.log(`✅ Firestore updated for user ${userId}: isPro=${isActive}`);
 
     // Process referral commission if this user was referred and just became Pro
     if (isActive) {
@@ -851,11 +800,21 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
         const amountCents = subscription.items.data[0]?.price?.unit_amount || 0;
         await processReferralCommission(userId, 'web', priceId, amountCents);
       } catch (refError) {
-        console.error('Referral commission processing failed (non-blocking):', refError);
+        // silently ignore
+      }
+
+      // Notify admin of new Pro subscription
+      try {
+        const userEmail = await getUserEmail(userId) || 'unknown';
+        const userProfile = await firestore.doc(`users/${userId}/profile/business`).get();
+        const businessName = userProfile.data()?.businessName || '';
+        const productId = subscription.items.data[0]?.price?.id || '';
+        await sendNewProSubscriptionEmail(userEmail, userId, 'web', productId, businessName);
+      } catch (emailError) {
+        // silently ignore
       }
     }
   } catch (error) {
-    console.error('Error updating Firestore from webhook:', error);
   }
 }
 
@@ -866,18 +825,15 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
 async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   const customerId = subscription.customer as string;
 
-  console.log(`❌ Subscription ${subscription.id} canceled for customer ${customerId}`);
 
   try {
     const customer = await stripe.customers.retrieve(customerId);
     if (customer.deleted) {
-      console.error('Customer has been deleted:', customerId);
       return;
     }
 
     const userId = customer.metadata?.firebaseUserId;
     if (!userId) {
-      console.error('No firebaseUserId in customer metadata for:', customerId);
       return;
     }
 
@@ -893,7 +849,6 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       quotesThisMonth: 0,
     }, { merge: true });
 
-    console.log(`✅ Firestore updated for user ${userId}: isPro=false (subscription deleted)`);
 
     // Send cancellation email
     try {
@@ -904,10 +859,8 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
         await sendSubscriptionCancelledEmail(email, businessName, userId);
       }
     } catch (emailError) {
-      console.error('Error sending cancellation email:', emailError);
     }
   } catch (error) {
-    console.error('Error updating Firestore from webhook:', error);
   }
 }
 
@@ -916,7 +869,6 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
  */
 async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
   const customerId = invoice.customer as string;
-  console.log(`Payment succeeded for customer ${customerId}`);
 
   // Record recurring affiliate commission for renewal payments
   try {
@@ -937,7 +889,6 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
       await processReferralCommission(userId, 'web', priceId, amountCents);
     }
   } catch (error) {
-    console.error('Error processing affiliate commission on invoice payment:', error);
   }
 }
 
@@ -946,7 +897,6 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
  */
 async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
   const customerId = invoice.customer as string;
-  console.log(`Payment failed for customer ${customerId}`);
 
   try {
     const customer = await stripe.customers.retrieve(customerId);
@@ -960,7 +910,6 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
       }
     }
   } catch (error) {
-    console.error('Error sending payment failed email:', error);
   }
 }
 
@@ -1110,7 +1059,6 @@ export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
         trialDaysRemaining: result.trialDaysRemaining,
       });
     } catch (error: any) {
-      console.error('Error checking quota:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -1140,11 +1088,10 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
         return;
       }
 
-      console.log(`🍎 Validating Apple receipt for user ${userId}, product ${productId}`);
 
       // Validate receipt with Apple's servers
       const receiptData = purchaseToken || transactionId;
-      const sharedSecret = functions.config().apple?.shared_secret || process.env.APPLE_SHARED_SECRET || '';
+      const sharedSecret = process.env.APPLE_SHARED_SECRET || '';
 
       let appleValidated = false;
       let appleExpiryDate: Date | null = null;
@@ -1181,14 +1128,11 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
               }
               break;
             } else if (appleData.status !== 21007) {
-              console.warn(`Apple validation failed with status ${appleData.status} at ${url}`);
             }
           }
         } catch (appleError) {
-          console.warn('Apple receipt validation API call failed, falling back to trust-based:', appleError);
         }
       } else {
-        console.warn('Apple shared secret not configured, skipping server validation');
       }
 
       const firestore = admin.firestore();
@@ -1213,14 +1157,24 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
         quotesThisMonth: 0,
       }, { merge: true });
 
-      console.log(`✅ Apple receipt ${appleValidated ? 'validated' : 'saved (unvalidated)'} for user ${userId}`);
 
       // Process referral commission
       try {
         const grossCents = PRODUCT_PRICES[productId] || 2900;
         await processReferralCommission(userId, 'ios', productId, grossCents);
       } catch (refError) {
-        console.error('Referral commission processing failed (non-blocking):', refError);
+        // silently ignore
+      }
+
+      // Notify admin of new Pro subscription
+      try {
+        const userEmail = await getUserEmail(userId) || 'unknown';
+        const iosFirestore = admin.firestore();
+        const userProfile = await iosFirestore.doc(`users/${userId}/profile/business`).get();
+        const businessName = userProfile.data()?.businessName || '';
+        await sendNewProSubscriptionEmail(userEmail, userId, 'ios', productId, businessName);
+      } catch (emailError) {
+        // silently ignore
       }
 
       res.status(200).json({
@@ -1230,7 +1184,6 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
         expiryDate: expiryDate.toISOString(),
       });
     } catch (error: any) {
-      console.error('❌ Error validating Apple receipt:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -1260,14 +1213,13 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
         return;
       }
 
-      console.log(`🤖 Validating Google receipt for user ${userId}, product ${productId}`);
 
       let googleValidated = false;
       let googleExpiryDate: Date | null = null;
 
       // Validate with Google Play Developer API if service account is configured
-      const googleServiceAccount = functions.config().google?.service_account_json || process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-      const googlePackageName = functions.config().google?.package_name || process.env.GOOGLE_PACKAGE_NAME || 'com.quotemate.app';
+      const googleServiceAccount = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+      const googlePackageName = process.env.GOOGLE_PACKAGE_NAME || 'com.quotemate.app';
 
       if (googleServiceAccount && purchaseToken) {
         try {
@@ -1296,14 +1248,11 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
               googleValidated = true;
               googleExpiryDate = new Date(expiryTimeMs);
             } else {
-              console.warn('Google subscription expired');
             }
           }
         } catch (googleError) {
-          console.warn('Google Play validation failed, falling back to trust-based:', googleError);
         }
       } else {
-        console.warn('Google service account not configured or no purchase token, skipping server validation');
       }
 
       const firestore = admin.firestore();
@@ -1328,14 +1277,23 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
         quotesThisMonth: 0,
       }, { merge: true });
 
-      console.log(`✅ Google receipt ${googleValidated ? 'validated' : 'saved (unvalidated)'} for user ${userId}`);
 
       // Process referral commission
       try {
         const grossCents = PRODUCT_PRICES[productId] || 2900;
         await processReferralCommission(userId, 'android', productId, grossCents);
       } catch (refError) {
-        console.error('Referral commission processing failed (non-blocking):', refError);
+        // silently ignore
+      }
+
+      // Notify admin of new Pro subscription
+      try {
+        const userEmail = await getUserEmail(userId) || 'unknown';
+        const userProfile = await firestore.doc(`users/${userId}/profile/business`).get();
+        const businessName = userProfile.data()?.businessName || '';
+        await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName);
+      } catch (emailError) {
+        // silently ignore
       }
 
       res.status(200).json({
@@ -1345,7 +1303,6 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
         expiryDate: expiryDate.toISOString(),
       });
     } catch (error: any) {
-      console.error('❌ Error validating Google receipt:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -1355,7 +1312,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
  * Analyze Job Description using Anthropic Claude API
  * This Cloud Function acts as a proxy to avoid CORS issues on web
  */
-export const analyzeJobDescription = functions.https.onRequest((req, res) => {
+export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
       res.status(405).send('Method Not Allowed');
@@ -1366,7 +1323,7 @@ export const analyzeJobDescription = functions.https.onRequest((req, res) => {
     if (!decodedToken) return;
 
     try {
-      const { jobDescription, tradeContext } = req.body;
+      const { jobDescription, tradeContext, photoBase64, existingMaterials, availableTemplates } = req.body;
 
       if (!isNonEmptyString(jobDescription)) {
         res.status(400).json({ error: 'Missing or invalid jobDescription' });
@@ -1378,7 +1335,7 @@ export const analyzeJobDescription = functions.https.onRequest((req, res) => {
       }
 
       // Get API key from Firebase config
-      const anthropicApiKey = functions.config().anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
       if (!anthropicApiKey) {
         res.status(500).json({ error: 'Anthropic API key not configured' });
@@ -1404,42 +1361,65 @@ export const analyzeJobDescription = functions.https.onRequest((req, res) => {
         }
       }
 
-      // Determine which stores will be searched
-      const stores = tradeContext?.hardwareStores || ['bunnings.com.au'];
-      const storeNames = stores.map((url: string) => {
-        if (url.includes('bunnings')) return 'Bunnings';
-        if (url.includes('mitre10')) return 'Mitre 10';
-        if (url.includes('reece')) return 'Reece';
-        if (url.includes('middy')) return 'Middy\'s';
-        return url;
-      });
-      const storesText = storeNames.join(', ');
+      // Determine store name
+      const selectedStore = tradeContext?.selectedStore || 'bunnings';
+      let storeName = 'Bunnings';
+      if (selectedStore === 'mitre10') storeName = 'Mitre 10';
+      if (selectedStore === 'reece') storeName = 'Reece';
 
-      const prompt = `You are an expert Australian tradie assistant specializing in construction and trade work. Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.
+      // Build existing materials section
+      let existingMaterialsSection = '';
+      if (existingMaterials && existingMaterials.length > 0) {
+        const materialsList = existingMaterials.map((m: any) =>
+          `- ${m.quantity} ${m.unit} of ${m.name}${m.section ? ` (${m.section})` : ''}`
+        ).join('\n');
+        existingMaterialsSection = `\n\nIMPORTANT - The following materials are ALREADY included in this quote (loaded from templates). Do NOT include these or similar items again. Only suggest ADDITIONAL materials that are missing:\n${materialsList}\n`;
+      }
 
-Job Description: "${jobDescription}"${contextSection}
+      // Build template reference section
+      let templateReferenceSection = '';
+      if (availableTemplates && availableTemplates.length > 0) {
+        const templateDescriptions = availableTemplates.map((t: any, i: number) => {
+          const matList = t.materials.slice(0, 8).map((m: any) => `${m.quantity}x ${m.name}`).join(', ');
+          return `${i + 1}. "${t.name}" — Materials: ${matList} | Labor: ${t.laborHours}hrs`;
+        }).join('\n');
+        templateReferenceSection = `\n\nSAVED TEMPLATES (use as reference for section names and materials when they match the job):\n${templateDescriptions}\n\nWhen a saved template closely matches a section of this job:\n- Use the template's exact name as the section name\n- Use the template's material names where applicable (you can adjust quantities)\n- Set the sectionMultiplier to match the job scope\n`;
+      }
 
-Hardware Stores that will be searched: ${storesText}
+      const hasExisting = existingMaterials && existingMaterials.length > 0;
+      const prompt = `You are an expert Australian tradie assistant specializing in construction and trade work. ${hasExisting ? 'Some materials have already been added from templates. Analyze the job and suggest only the ADDITIONAL materials needed to complete the job.' : 'Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.'}
+
+Job Description: "${jobDescription}"${contextSection}${existingMaterialsSection}${templateReferenceSection}
+
+Hardware Store for pricing: ${storeName}
 
 Provide a JSON response with the following structure:
 {
-  "jobSummary": "A brief summary of the job",
-  "estimatedHours": <number of hours>,
+  "jobSummary": "Short job title, 3-7 words max (e.g. 'Deck Construction', 'Bathroom Renovation', 'Timber Fence Installation')",
+  "estimatedHours": 8,
   "materials": [
     {
       "name": "Material name as it should appear in quote",
       "searchTerm": "Generic product search term (material type, size, specs - NOT brand-specific)",
-      "quantity": <number>,
+      "quantity": 2,
       "unit": "each|m|L|kg|box|pack",
-      "section": "Work area this material belongs to (e.g. Concreting, Timber Framing, Roofing, Plumbing, Electrical, Painting, Demolition, Site Prep, etc.)",
+      "section": "Descriptive section name (e.g. Colorbond Fence Bay, Merbau Deck Section, Concrete Footings)",
+      "sectionMultiplier": 8,
+      "sectionLaborHours": 1.5,
       "reasoning": "Why this material is needed"
     }
   ]
 }
 
+- "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
+
 Guidelines:
-- Group materials into logical work sections using the "section" field. Use short, clear labels like "Concreting", "Timber Framing", "Roofing", "Finishing", etc. Materials that belong to the same area of work should share the same section name.
-- Use GENERIC product terms that work across ${storesText}
+- Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
+- For each section, specify materials with PER-UNIT quantities and a "sectionMultiplier" for how many units the job needs. Example: a 20m fence with 2.4m bays → each material has per-bay quantity, sectionMultiplier = 9.
+- Non-repeating items (one-off materials like a single gate latch) should have sectionMultiplier: 1.
+- Use descriptive section names that include context from the job (e.g. "Colorbond Fence Bay" not just "Fencing", "Merbau Deck Section" not just "Decking").
+- All materials in the same section MUST have the same sectionMultiplier value.
+- Use GENERIC product terms suitable for ${storeName}
 - Specify material type, size, and specs but avoid brand-specific names
 - GOOD examples: "brass stop valve 15mm quarter turn", "treated pine H3 90x45 2.4m", "PTFE thread tape 12mm"
 - BAD examples: "Kinetic valve", "Ozito drill", "Ramset anchor" (these are brand-specific)
@@ -1453,6 +1433,29 @@ Guidelines:
 
 Return ONLY valid JSON, no other text.`;
 
+      // Build message content — text + optional photos
+      const messageContent: any[] = [];
+
+      if (Array.isArray(photoBase64) && photoBase64.length > 0) {
+        for (const b64 of photoBase64) {
+          messageContent.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/jpeg',
+              data: b64,
+            },
+          });
+        }
+      }
+
+      messageContent.push({
+        type: 'text',
+        text: Array.isArray(photoBase64) && photoBase64.length > 0
+          ? `${prompt}\n\nI've also attached ${photoBase64.length} site photo(s). Please examine them carefully to better understand the scope of work, identify specific materials visible, and refine your material estimates based on what you see.`
+          : prompt,
+      });
+
       // Call Anthropic API
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -1464,10 +1467,11 @@ Return ONLY valid JSON, no other text.`;
         body: JSON.stringify({
           model: 'claude-sonnet-4-5-20250929',
           max_tokens: 4000,
+          temperature: 0.2,
           messages: [
             {
               role: 'user',
-              content: prompt,
+              content: messageContent,
             },
           ],
         }),
@@ -1499,7 +1503,6 @@ Return ONLY valid JSON, no other text.`;
         jobSummary: parsed.jobSummary || '',
       });
     } catch (error: any) {
-      console.error('Error analyzing job description:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -1532,7 +1535,7 @@ export const searchMaterialPrice = functions.https.onRequest((req, res) => {
       }
 
       // Get API key from Firebase config
-      const anthropicApiKey = functions.config().anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
       if (!anthropicApiKey) {
         res.status(500).json({ error: 'Anthropic API key not configured' });
@@ -1601,7 +1604,6 @@ Example:
       }
 
       if (!textContent) {
-        console.error('No text content in response');
         res.status(500).json({ error: 'No text content in response' });
         return;
       }
@@ -1622,7 +1624,6 @@ Example:
         url: undefined,
       });
     } catch (error: any) {
-      console.error('Error searching material price:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -1643,14 +1644,14 @@ Example:
 let reeceTokenCache: { token: string; expiresAt: number } | null = null;
 
 // Reece API environment configuration
-const REECE_USE_TEST_ENV = (functions.config().reece?.use_test_env || process.env.REECE_USE_TEST_ENV || 'true') === 'true';
+const REECE_USE_TEST_ENV = (process.env.REECE_USE_TEST_ENV || 'true') === 'true';
 const REECE_AUTH_BASE_URL = REECE_USE_TEST_ENV
   ? 'https://auth.api.test.reecegroup.com.au'
   : 'https://auth.api.reecegroup.com.au';
 const REECE_API_BASE_URL = REECE_USE_TEST_ENV
   ? 'https://open.api.test.reecegroup.com.au'
   : 'https://open.api.reecegroup.com.au';
-const REECE_REGION = functions.config().reece?.region || process.env.REECE_REGION || 'au';
+const REECE_REGION = process.env.REECE_REGION || 'au';
 
 /**
  * Get OAuth token for Reece API
@@ -1664,11 +1665,10 @@ async function getReeceAuthToken(): Promise<string | null> {
       return reeceTokenCache.token;
     }
 
-    const reeceClientId = functions.config().reece?.client_id || process.env.REECE_CLIENT_ID;
-    const reeceClientSecret = functions.config().reece?.client_secret || process.env.REECE_CLIENT_SECRET;
+    const reeceClientId = process.env.REECE_CLIENT_ID;
+    const reeceClientSecret = process.env.REECE_CLIENT_SECRET;
 
     if (!reeceClientId || !reeceClientSecret) {
-      console.log('Reece API credentials not configured');
       return null;
     }
 
@@ -1688,8 +1688,7 @@ async function getReeceAuthToken(): Promise<string | null> {
     });
 
     if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text();
-      console.error('Failed to get Reece OAuth token:', errorText);
+      await tokenResponse.text();
       return null;
     }
 
@@ -1705,7 +1704,6 @@ async function getReeceAuthToken(): Promise<string | null> {
 
     return token;
   } catch (error: any) {
-    console.error('Error getting Reece auth token:', error);
     return null;
   }
 }
@@ -1724,7 +1722,6 @@ export const checkReeceApi = functions.https.onRequest((req, res) => {
 
       res.status(200).json({ available });
     } catch (error: any) {
-      console.error('Error checking Reece API:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -1754,15 +1751,13 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
       // Get OAuth token
       const token = await getReeceAuthToken();
       if (!token) {
-        console.log('Reece API credentials not configured - returning null');
         res.status(200).json({ product: null });
         return;
       }
 
       // Search for product using the product-gateway/search endpoint
       // Requires Customer-Token or Customer-Number header
-      const customerNumber = functions.config().reece?.customer_number || process.env.REECE_CUSTOMER_NUMBER;
-      console.log('Searching Reece catalog for:', productName);
+      const customerNumber = process.env.REECE_CUSTOMER_NUMBER;
       const searchResponse = await fetch(
         `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(productName)}&pageNumber=1&pageSize=5`,
         {
@@ -1776,8 +1771,7 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
       );
 
       if (!searchResponse.ok) {
-        const errorText = await searchResponse.text();
-        console.error('Reece product search failed:', searchResponse.status, errorText);
+        await searchResponse.text();
         res.status(200).json({ product: null });
         return;
       }
@@ -1787,7 +1781,6 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
       // Return the first matching product if found
       if (searchData.products && searchData.products.length > 0) {
         const product = searchData.products[0];
-        console.log('Found product:', product.productId, product.productTitle);
 
         res.status(200).json({
           product: {
@@ -1798,11 +1791,9 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
           },
         });
       } else {
-        console.log('No products found for:', productName);
         res.status(200).json({ product: null });
       }
     } catch (error: any) {
-      console.error('Error searching Reece product:', error);
       res.status(200).json({ product: null });
     }
   });
@@ -1832,7 +1823,6 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
       // Get OAuth token
       const token = await getReeceAuthToken();
       if (!token) {
-        console.log('Reece API credentials not configured - returning null');
         res.status(200).json({ price: null });
         return;
       }
@@ -1840,8 +1830,7 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
       // Get pricing using price-gateway/price-file endpoint (MAX_JSON format)
       // Note: Price file is a bulk download of all customer prices, not per-item lookup.
       // For now we search the product to get inline pricing from the product search results.
-      const customerNumber = functions.config().reece?.customer_number || process.env.REECE_CUSTOMER_NUMBER;
-      console.log('Getting price for Reece item:', itemNumber);
+      const customerNumber = process.env.REECE_CUSTOMER_NUMBER;
 
       // Search by product ID to get price info from product results
       const priceResponse = await fetch(
@@ -1857,8 +1846,7 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
       );
 
       if (!priceResponse.ok) {
-        const errorText = await priceResponse.text();
-        console.error('Reece price fetch failed:', priceResponse.status, errorText);
+        await priceResponse.text();
         res.status(200).json({ price: null });
         return;
       }
@@ -1872,7 +1860,6 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
         const price = uom?.unitPriceIncludingGst || uom?.unitPriceExcludingGst;
 
         if (price != null) {
-          console.log('Found price for', itemNumber, ':', price);
           res.status(200).json({
             price,
             currency: 'AUD',
@@ -1880,15 +1867,12 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
             gstRate: priceData.gstRate,
           });
         } else {
-          console.log('No price available for:', itemNumber);
           res.status(200).json({ price: null });
         }
       } else {
-        console.log('No product found for price lookup:', itemNumber);
         res.status(200).json({ price: null });
       }
     } catch (error: any) {
-      console.error('Error getting Reece price:', error);
       res.status(200).json({ price: null });
     }
   });
@@ -1918,7 +1902,6 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
       // Get OAuth token
       const token = await getReeceAuthToken();
       if (!token) {
-        console.log('Reece API credentials not configured - returning null');
         res.status(200).json({ inventory: null });
         return;
       }
@@ -1926,8 +1909,7 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
       // Note: Reece API doesn't have a direct inventory/stock level endpoint.
       // Inventory availability is shown through the product search results or punchout cart.
       // For now, we return null - this will need to be revisited once we have full API access.
-      const customerNumber = functions.config().reece?.customer_number || process.env.REECE_CUSTOMER_NUMBER;
-      console.log('Getting inventory for Reece item:', itemNumber, branchCode ? `at ${branchCode}` : '');
+      const customerNumber = process.env.REECE_CUSTOMER_NUMBER;
 
       // Use product search to check if item exists (basic availability check)
       const inventoryResponse = await fetch(
@@ -1943,8 +1925,7 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
       );
 
       if (!inventoryResponse.ok) {
-        const errorText = await inventoryResponse.text();
-        console.error('Reece inventory check failed:', inventoryResponse.status, errorText);
+        await inventoryResponse.text();
         res.status(200).json({ inventory: null });
         return;
       }
@@ -1953,7 +1934,6 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
 
       if (inventoryData.products && inventoryData.products.length > 0) {
         const product = inventoryData.products[0];
-        console.log('Product exists in catalog:', product.productId);
         res.status(200).json({
           inventory: {
             itemNumber: String(product.productId),
@@ -1962,11 +1942,9 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
           },
         });
       } else {
-        console.log('No inventory data for:', itemNumber);
         res.status(200).json({ inventory: null });
       }
     } catch (error: any) {
-      console.error('Error getting Reece inventory:', error);
       res.status(200).json({ inventory: null });
     }
   });
@@ -2002,31 +1980,25 @@ export const fetchStoreHTML = functions.https.onRequest((req, res) => {
         return;
       }
 
-      console.log('Fetching HTML from:', url);
 
       // Option 1: Try with ScraperAPI if configured (most reliable)
-      const scraperApiKey = functions.config().scraperapi?.key || process.env.SCRAPERAPI_KEY;
+      const scraperApiKey = process.env.SCRAPERAPI_KEY;
 
       if (scraperApiKey) {
-        console.log('Using ScraperAPI for enhanced scraping...');
         try {
           const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(url)}&country_code=au&render=true`;
           const scraperResponse = await fetch(scraperUrl);
 
           if (scraperResponse.ok) {
             const html = await scraperResponse.text();
-            console.log('✅ ScraperAPI succeeded, HTML length:', html.length);
             res.status(200).json({ html, method: 'scraperapi' });
             return;
           }
-          console.warn('ScraperAPI failed:', scraperResponse.status);
         } catch (scraperError) {
-          console.error('ScraperAPI error:', scraperError);
         }
       }
 
       // Option 2: Enhanced direct fetch with realistic browser fingerprinting
-      console.log('Trying enhanced direct fetch with realistic headers...');
 
       const response = await fetch(url, {
         method: 'GET',
@@ -2047,7 +2019,6 @@ export const fetchStoreHTML = functions.https.onRequest((req, res) => {
       });
 
       if (!response.ok) {
-        console.error('Enhanced fetch failed:', response.status);
         res.status(response.status).json({
           error: `Failed to fetch: ${response.statusText}`,
           method: 'direct',
@@ -2056,10 +2027,8 @@ export const fetchStoreHTML = functions.https.onRequest((req, res) => {
       }
 
       const html = await response.text();
-      console.log('✅ Enhanced fetch succeeded, HTML length:', html.length);
       res.status(200).json({ html, method: 'direct' });
     } catch (error: any) {
-      console.error('Error fetching store HTML:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -2091,7 +2060,7 @@ export const cleanupTranscription = functions.https.onRequest((req, res) => {
         return;
       }
 
-      const anthropicApiKey = functions.config().anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
       if (!anthropicApiKey) {
         res.status(500).json({ error: 'Anthropic API key not configured' });
@@ -2160,7 +2129,6 @@ Return ONLY valid JSON, no other text.`;
         suggestedTitle: parsed.suggestedTitle || '',
       });
     } catch (error: any) {
-      console.error('Error cleaning up transcription:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -2192,7 +2160,7 @@ export const parseProductsHTML = functions.https.onRequest((req, res) => {
         return;
       }
 
-      const anthropicApiKey = functions.config().anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
       if (!anthropicApiKey) {
         res.status(500).json({ error: 'Anthropic API key not configured' });
@@ -2288,7 +2256,6 @@ If no products found, return: {"matches": [], "quantityAdjustment": null}`;
 
       res.status(200).json({ parsed: content.text });
     } catch (error: any) {
-      console.error('Error parsing products HTML:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -2324,10 +2291,9 @@ export const selectBestProduct = functions.https.onRequest((req, res) => {
         return;
       }
 
-      const anthropicApiKey = functions.config().anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
       if (!anthropicApiKey) {
-        console.error('Missing Anthropic API key');
         res.status(200).json({
           selectedIndex: 1,
           reasoning: 'No AI selection available - using first product'
@@ -2335,7 +2301,6 @@ export const selectBestProduct = functions.https.onRequest((req, res) => {
         return;
       }
 
-      console.log(`🤖 Selecting best product from ${products.length} options for: "${requestedProductName}"`);
 
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -2386,8 +2351,7 @@ The selectedIndex should be 1-based (first product is 1, second is 2, etc.).`,
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Claude API error:', response.status, errorText);
+        await response.text();
         res.status(200).json({
           selectedIndex: 1,
           reasoning: 'Claude API error - using first product'
@@ -2410,14 +2374,12 @@ The selectedIndex should be 1-based (first product is 1, second is 2, etc.).`,
       const selectedIndex = selection.selectedIndex || 1;
       const reasoning = selection.reasoning || 'Selected by AI';
 
-      console.log(`✅ Selected product ${selectedIndex}: ${reasoning}`);
 
       res.status(200).json({
         selectedIndex,
         reasoning
       });
     } catch (error: any) {
-      console.error('Error selecting best product:', error);
       res.status(200).json({
         selectedIndex: 1,
         reasoning: 'Error during selection - using first product'
@@ -2462,7 +2424,6 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
         return;
       }
 
-      console.log(`🔑 Generating acceptance link for quote ${quoteId}`);
 
       const db = admin.firestore();
       const quoteRef = db.collection('users').doc(userId).collection('quotes').doc(quoteId);
@@ -2493,7 +2454,6 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
       // Build the acceptance URL
       const acceptanceUrl = `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
 
-      console.log(`✅ Generated acceptance link for quote ${quoteId}`);
 
       res.status(200).json({
         success: true,
@@ -2501,7 +2461,6 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
         token,
       });
     } catch (error: any) {
-      console.error('❌ Error generating acceptance link:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -2735,7 +2694,6 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
 
       res.json({ success: true, acceptanceUrl });
     } catch (error: any) {
-      console.error('sendQuoteEmail error:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -2915,7 +2873,6 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
 
       res.json({ success: true });
     } catch (error: any) {
-      console.error('sendInvoiceEmail error:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -2941,7 +2898,7 @@ export const generateQuoteEmail = functions.https.onRequest((req, res) => {
     }
 
     try {
-      const anthropicApiKey = functions.config().anthropic?.api_key || process.env.ANTHROPIC_API_KEY;
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
       if (!anthropicApiKey) {
         res.status(500).json({ error: 'API key not configured' });
         return;
@@ -2970,7 +2927,6 @@ export const generateQuoteEmail = functions.https.onRequest((req, res) => {
 
       res.json({ emailBody });
     } catch (error: any) {
-      console.error('generateQuoteEmail error:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -2997,7 +2953,6 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
         return;
       }
 
-      console.log(`🔍 Looking up quote by acceptance token`);
 
       const db = admin.firestore();
       let foundQuote: any = null;
@@ -3143,7 +3098,6 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
         },
       });
     } catch (error: any) {
-      console.error('❌ Error getting quote for acceptance:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -3178,7 +3132,6 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
       const safeClientName = typeof clientName === 'string' ? sanitizeString(clientName, 200) : undefined;
       const safeClientNotes = typeof clientNotes === 'string' ? sanitizeString(clientNotes, 2000) : undefined;
 
-      console.log(`📝 Processing quote response: ${response}`);
 
       const db = admin.firestore();
       let foundQuoteRef: admin.firestore.DocumentReference | null = null;
@@ -3285,7 +3238,6 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      console.log(`✅ Quote ${foundQuote.id} marked as ${response}`);
 
       // Send email notification to business owner
       if (businessSettings?.email) {
@@ -3313,7 +3265,6 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
             );
           }
         } catch (emailError: any) {
-          console.error('Error sending email notification:', emailError);
           // Don't fail the request if email fails
         }
       }
@@ -3347,11 +3298,9 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
             tokens: tokens,
           };
 
-          const fcmResponse = await admin.messaging().sendEachForMulticast(message);
-          console.log(`📱 Push notifications sent: ${fcmResponse.successCount} success, ${fcmResponse.failureCount} failed`);
+          await admin.messaging().sendEachForMulticast(message);
         }
       } catch (fcmError: any) {
-        console.error('❌ Error sending push notification:', fcmError);
         // Don't fail the request if push fails
       }
 
@@ -3362,7 +3311,6 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
           : 'The quote has been declined. The business has been notified.',
       });
     } catch (error: any) {
-      console.error('❌ Error responding to quote:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -3468,7 +3416,6 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
           await sendQuoteDeclinedEmail(businessSettings.email, foundQuote.customerName, quoteNumber, total, null, foundUserId);
         }
       } catch (emailError) {
-        console.error('Error sending email notification:', emailError);
       }
     }
 
@@ -3489,7 +3436,6 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
         });
       }
     } catch (fcmError) {
-      console.error('Error sending push notification:', fcmError);
     }
 
     // Show confirmation page
@@ -3507,7 +3453,6 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
       ));
     }
   } catch (error: any) {
-    console.error('Error processing quote response:', error);
     res.status(200).send(generateConfirmationPage('error', 'Something went wrong. Please try again later.'));
   }
 });
@@ -4147,9 +4092,7 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
         paidEarnings: existingData?.paidEarnings || 0,
       }, { merge: true });
 
-      console.log(`✅ Auto-granted affiliate status to ${email} (${user.uid})`);
     } catch (error) {
-      console.error(`Failed to auto-grant affiliate status to ${email}:`, error);
     }
   }
 
@@ -4274,7 +4217,6 @@ export const sendOnboardingDrip = functions.pubsub
       }
     }
 
-    console.log('Onboarding drip campaign completed');
   });
 
 /**
@@ -4327,7 +4269,6 @@ export const sendReEngagement = functions.pubsub
       }
     }
 
-    console.log('Re-engagement campaign completed');
   });
 
 /**
@@ -4353,7 +4294,6 @@ export const updateActivityTimestamp = functions.https.onRequest((req, res) => {
 
       res.status(200).json({ success: true });
     } catch (error: any) {
-      console.error('Error updating activity timestamp:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -4413,7 +4353,6 @@ export const quickFeedback = functions.https.onRequest(async (req, res) => {
         </html>
       `);
     } catch (error: any) {
-      console.error('quickFeedback POST error:', error);
       res.status(500).send('Something went wrong');
     }
     return;
@@ -4529,7 +4468,6 @@ export const quickFeedback = functions.https.onRequest(async (req, res) => {
       </html>
     `);
   } catch (error: any) {
-    console.error('quickFeedback error:', error);
     res.status(500).send('Something went wrong');
   }
 });
@@ -4579,7 +4517,6 @@ export const updateEmailPreferences = functions.https.onRequest((req, res) => {
 
       res.status(200).json({ success: true, marketing });
     } catch (error: any) {
-      console.error('Error updating email preferences:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -4633,10 +4570,9 @@ function generateErrorPage(title: string, message: string): string {
 
 function verifyAdminKey(req: functions.https.Request, res: functions.Response): boolean {
   const key = req.query.key as string;
-  const expectedKey = functions.config().admin?.dashboard_key || process.env.ADMIN_DASHBOARD_KEY;
+  const expectedKey = process.env.ADMIN_DASHBOARD_KEY;
 
   if (!expectedKey) {
-    console.error('Admin dashboard key not configured');
     res.status(500).send(generateErrorPage('Not Configured', 'Admin dashboard key not set. Run: firebase functions:config:set admin.dashboard_key="YOUR_SECRET"'));
     return false;
   }
@@ -5408,7 +5344,6 @@ export const adminDashboard = functions
       // HTML dashboard
       res.status(200).send(generateDashboardPage(data, req.query.key as string));
     } catch (error: any) {
-      console.error('Admin dashboard error:', error);
       res.status(500).send(generateErrorPage('Dashboard Error', error.message));
     }
   });
@@ -5422,7 +5357,7 @@ export const sendUpdateAnnouncement = functions
     const corsHandler = cors({ origin: true });
     corsHandler(req, res, async () => {
       // Gate with admin key
-      const adminKey = functions.config().admin?.dashboard_key;
+      const adminKey = process.env.ADMIN_DASHBOARD_KEY;
       if (!adminKey || req.query.key !== adminKey) {
         res.status(403).send('Unauthorized');
         return;
@@ -5464,14 +5399,12 @@ export const sendUpdateAnnouncement = functions
             const success = await sendUpdateAnnouncementEmail(email, businessName, user.uid);
             if (success) sent++; else failed++;
           } catch (e) {
-            console.error(`Failed to send to ${email}:`, e);
             failed++;
           }
         }
 
         res.status(200).json({ sent, failed, skipped, total: authUsers.users.length });
       } catch (error: any) {
-        console.error('Send announcement error:', error);
         res.status(500).json({ error: error.message });
       }
     });
@@ -5588,7 +5521,6 @@ export const generateReferralCode = functions.https.onCall(async (data, context)
   });
 
   await batch.commit();
-  console.log(`✅ Generated referral code ${code} for user ${userId}`);
 
   return { referralCode: code };
 });
@@ -5644,7 +5576,6 @@ export const applyReferralCode = functions.https.onCall(async (data, context) =>
   }, { merge: true });
 
   await batch.commit();
-  console.log(`✅ User ${userId} applied referral code ${referralCode} (referrer: ${referrerUserId})`);
 
   return { success: true };
 });
@@ -5678,7 +5609,6 @@ async function processReferralCommission(
         grossAmountCents, getBillingPeriod()
       );
     } catch (err) {
-      console.error('Failed to record affiliate earning (non-blocking):', err);
     }
   }
 }
@@ -5755,7 +5685,7 @@ export const setAffiliateStatus = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
   }
 
-  const adminEmails = (functions.config().admin?.emails || process.env.ADMIN_EMAILS || '').split(',');
+  const adminEmails = (process.env.ADMIN_EMAILS || '').split(',');
   const callerEmail = context.auth.token?.email || '';
   if (!adminEmails.includes(callerEmail)) {
     throw new functions.https.HttpsError('permission-denied', 'Only admins can manage affiliates');
@@ -5775,7 +5705,6 @@ export const setAffiliateStatus = functions.https.onCall(async (data, context) =
     commissionRate: commissionRate || DEFAULT_COMMISSION_RATE,
   }, { merge: true });
 
-  console.log(`${isAffiliate !== false ? '✅' : '❌'} Affiliate status updated for ${userId}: isAffiliate=${isAffiliate !== false}, rate=${commissionRate || DEFAULT_COMMISSION_RATE}`);
 
   return { success: true };
 });
@@ -5790,7 +5719,7 @@ export const recordAffiliatePayout = functions.https.onCall(async (data, context
   }
 
   // Simple admin check — only the app owner can record payouts
-  const adminEmails = (functions.config().admin?.emails || process.env.ADMIN_EMAILS || '').split(',');
+  const adminEmails = (process.env.ADMIN_EMAILS || '').split(',');
   const callerEmail = context.auth.token?.email || '';
   if (!adminEmails.includes(callerEmail)) {
     throw new functions.https.HttpsError('permission-denied', 'Only admins can record payouts');
@@ -5841,7 +5770,6 @@ export const recordAffiliatePayout = functions.https.onCall(async (data, context
   }, { merge: true });
 
   await batch.commit();
-  console.log(`💸 Payout recorded: $${(amount / 100).toFixed(2)} to affiliate ${affiliateUserId}`);
 
   return { success: true, earningsMarkedPaid: earningIds.length };
 });
@@ -5880,13 +5808,11 @@ async function sendAussiePush(
 
   const prefKey = prefMap[event];
   if (prefs && prefKey && prefs[prefKey] === false) {
-    console.log(`🔕 User ${userId} has ${prefKey} disabled, skipping ${event} notification`);
     return;
   }
 
   const fcmTokensSnapshot = await db.collection('users').doc(userId).collection('fcmTokens').get();
   if (fcmTokensSnapshot.empty) {
-    console.log(`📱 No FCM tokens for user ${userId}, skipping notification`);
     return;
   }
 
@@ -5906,7 +5832,6 @@ async function sendAussiePush(
   };
 
   const fcmResponse = await admin.messaging().sendEachForMulticast(message);
-  console.log(`📱 [${event}] Push sent to ${userId}: ${fcmResponse.successCount} success, ${fcmResponse.failureCount} failed`);
 
   // Clean up invalid tokens
   const tokensToDelete: string[] = [];
@@ -5921,7 +5846,6 @@ async function sendAussiePush(
       batch.delete(db.collection('users').doc(userId).collection('fcmTokens').doc(tokenDocId));
     }
     await batch.commit();
-    console.log(`🧹 Cleaned up ${tokensToDelete.length} stale FCM tokens for ${userId}`);
   }
 }
 
@@ -6011,7 +5935,6 @@ export const onInvoiceOverdue = functions.pubsub
       }
     }
 
-    console.log('✅ Overdue invoice check complete');
   });
 
 // -----------------------------------------------------------
@@ -6055,7 +5978,6 @@ export const onQuoteExpiring = functions.pubsub
       }
     }
 
-    console.log('✅ Quote expiry check complete');
   });
 
 // -----------------------------------------------------------
@@ -6115,7 +6037,6 @@ export const quoteFollowUp = functions.pubsub
       }
     }
 
-    console.log('✅ Quote follow-up check complete');
   });
 
 // -----------------------------------------------------------
@@ -6135,7 +6056,6 @@ export const dailyMotivation = functions.pubsub
       await sendAussiePush(userDoc.id, 'daily_motivation');
     }
 
-    console.log('✅ Daily motivation messages sent');
   });
 
 // -----------------------------------------------------------
@@ -6173,7 +6093,6 @@ export const milestoneChecker = functions.pubsub
       }, { merge: true });
     }
 
-    console.log('✅ Milestone check complete');
   });
 
 // -----------------------------------------------------------
@@ -6233,7 +6152,6 @@ export const inactivityNudge = functions.pubsub
       }, { merge: true });
     }
 
-    console.log('✅ Inactivity nudge check complete');
   });
 
 /**
@@ -6244,7 +6162,7 @@ export const sendAffiliateInvite = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
   }
 
-  const adminEmails = (functions.config().admin?.emails || process.env.ADMIN_EMAILS || '').split(',');
+  const adminEmails = (process.env.ADMIN_EMAILS || '').split(',');
   const callerEmail = context.auth.token?.email || '';
   if (!adminEmails.includes(callerEmail)) {
     throw new functions.https.HttpsError('permission-denied', 'Only admins can send affiliate invites');
@@ -6260,7 +6178,6 @@ export const sendAffiliateInvite = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError('internal', 'Failed to send affiliate invite email');
   }
 
-  console.log(`✅ Affiliate invite email sent to ${email}`);
   return { success: true };
 });
 
@@ -6269,10 +6186,10 @@ export const sendAffiliateInvite = functions.https.onCall(async (data, context) 
 // Sync invoices and payments to Xero accounting
 // ============================================
 
-// Xero credentials — prefer .env (process.env), fall back to deprecated functions.config()
-const XERO_CLIENT_ID = process.env.XERO_CLIENT_ID || functions.config().xero?.client_id || '';
-const XERO_CLIENT_SECRET = process.env.XERO_CLIENT_SECRET || process.env.XERO_SECRET || functions.config().xero?.client_secret || '';
-const XERO_REDIRECT_URI = process.env.XERO_REDIRECT_URI || functions.config().xero?.redirect_uri || 'https://quotemateapp.au/xero/callback';
+// Xero credentials
+const XERO_CLIENT_ID = process.env.XERO_CLIENT_ID || '';
+const XERO_CLIENT_SECRET = process.env.XERO_CLIENT_SECRET || process.env.XERO_SECRET || '';
+const XERO_REDIRECT_URI = process.env.XERO_REDIRECT_URI || 'https://quotemateapp.au/xero/callback';
 const XERO_SCOPES = 'accounting.invoices accounting.contacts accounting.payments accounting.settings.read offline_access';
 
 /**
@@ -6311,8 +6228,7 @@ async function getXeroTokens(userId: string): Promise<{ accessToken: string; ten
     });
 
     if (!tokenResponse.ok) {
-      const errText = await tokenResponse.text();
-      console.error('Xero token refresh failed:', tokenResponse.status, errText);
+      await tokenResponse.text();
       // Mark connection as disconnected
       await connRef.update({ syncEnabled: false, disconnectedReason: 'token_refresh_failed' });
       return null;
@@ -6334,7 +6250,6 @@ async function getXeroTokens(userId: string): Promise<{ accessToken: string; ten
 
     return { accessToken: newAccessToken, tenantId };
   } catch (error) {
-    console.error('Error refreshing Xero token:', error);
     return null;
   }
 }
@@ -6429,8 +6344,7 @@ export const xeroCallback = functions.https.onRequest((req, res) => {
       });
 
       if (!tokenResponse.ok) {
-        const errText = await tokenResponse.text();
-        console.error('Xero token exchange failed:', tokenResponse.status, errText);
+        await tokenResponse.text();
         res.status(400).json({ error: 'Failed to connect to Xero. Please try again.' });
         return;
       }
@@ -6446,7 +6360,6 @@ export const xeroCallback = functions.https.onRequest((req, res) => {
       });
 
       if (!tenantsResponse.ok) {
-        console.error('Failed to get Xero tenants:', await tenantsResponse.text());
         res.status(500).json({ error: 'Failed to retrieve Xero organisations' });
         return;
       }
@@ -6473,7 +6386,6 @@ export const xeroCallback = functions.https.onRequest((req, res) => {
         disconnectedReason: null,
       });
 
-      console.log(`✅ Xero connected for user ${userId}: ${tenant.tenantName} (${tenant.tenantId})`);
 
       // Return tenants so the callback page can show which org was connected
       res.status(200).json({
@@ -6482,7 +6394,6 @@ export const xeroCallback = functions.https.onRequest((req, res) => {
         allTenants: tenants.map((t: any) => ({ id: t.tenantId, name: t.tenantName })),
       });
     } catch (error: any) {
-      console.error('Error in Xero callback:', error);
       res.status(500).json({ error: 'Internal error connecting to Xero' });
     }
   });
@@ -6550,14 +6461,12 @@ export const xeroDisconnect = functions.https.onRequest((req, res) => {
             }).toString(),
           });
         } catch (revokeError) {
-          console.warn('Failed to revoke Xero token (non-blocking):', revokeError);
         }
       }
 
       await connRef.delete();
     }
 
-    console.log(`✅ Xero disconnected for user ${decodedToken.uid}`);
     res.status(200).json({ success: true });
   });
 });
@@ -6679,8 +6588,7 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
             xeroContactId = created.Contacts[0].ContactID;
           }
         } else {
-          const errText = await createContact.text();
-          console.error('Failed to create Xero contact:', errText);
+          await createContact.text();
         }
       }
 
@@ -6783,7 +6691,6 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
 
       if (!xeroResponse.ok) {
         const errText = await xeroResponse.text();
-        console.error('Xero invoice push failed:', xeroResponse.status, errText);
         res.status(400).json({ error: 'Failed to sync invoice to Xero', details: errText });
         return;
       }
@@ -6812,10 +6719,8 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
       const xeroTotal = xeroInvoice?.Total;
       const quoteMateTotal = invoice.total;
       if (xeroTotal && Math.abs(xeroTotal - quoteMateTotal) > 0.02) {
-        console.warn(`⚠️ GST rounding difference: QuoteMate=$${quoteMateTotal}, Xero=$${xeroTotal} for invoice ${invoice.invoiceNumber}`);
       }
 
-      console.log(`✅ Invoice ${invoice.invoiceNumber} pushed to Xero (${xeroInvoiceId})`);
 
       res.status(200).json({
         success: true,
@@ -6824,7 +6729,6 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
         xeroTotal: xeroTotal || null,
       });
     } catch (error: any) {
-      console.error('Error pushing invoice to Xero:', error);
       res.status(500).json({ error: 'Internal error syncing to Xero' });
     }
   });
@@ -6892,7 +6796,6 @@ export const pushPaymentToXero = functions.https.onRequest((req, res) => {
 
       if (!paymentResponse.ok) {
         const errText = await paymentResponse.text();
-        console.error('Xero payment push failed:', paymentResponse.status, errText);
         res.status(400).json({ error: 'Failed to record payment in Xero', details: errText });
         return;
       }
@@ -6906,14 +6809,12 @@ export const pushPaymentToXero = functions.https.onRequest((req, res) => {
         lastSyncAt: new Date().toISOString(),
       });
 
-      console.log(`✅ Payment $${amount} pushed to Xero for invoice ${xeroInvoiceId}`);
 
       res.status(200).json({
         success: true,
         xeroPaymentId,
       });
     } catch (error: any) {
-      console.error('Error pushing payment to Xero:', error);
       res.status(500).json({ error: 'Internal error recording payment in Xero' });
     }
   });
@@ -7003,7 +6904,6 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
               const created: any = await createContact.json();
               xeroContactId = created.Contacts?.[0]?.ContactID;
             } else {
-              console.error('Bulk sync: Failed to create contact for', invoice.customerName, await createContact.text().catch(() => ''));
             }
           }
         }
@@ -7101,7 +7001,6 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
     });
 
     const successCount = results.filter(r => r.success).length;
-    console.log(`✅ Xero bulk sync: ${successCount}/${results.length} invoices synced`);
 
     res.status(200).json({ results, successCount, totalCount: results.length });
   });
@@ -7142,8 +7041,7 @@ export const getXeroContacts = functions.https.onRequest((req, res) => {
       );
 
       if (!response.ok) {
-        const errText = await response.text();
-        console.error('Xero contacts fetch failed:', response.status, errText);
+        await response.text();
         res.status(502).json({ error: 'Failed to fetch contacts from Xero' });
         return;
       }
@@ -7159,8 +7057,172 @@ export const getXeroContacts = functions.https.onRequest((req, res) => {
 
       res.status(200).json({ contacts });
     } catch (error: any) {
-      console.error('Error fetching Xero contacts:', error);
       res.status(500).json({ error: error.message || 'Unknown error' });
+    }
+  });
+});
+
+// ============================================
+// Bunnings Scraper Proxy
+// ============================================
+// Routes scraper requests through Firebase Functions so API keys stay server-side.
+
+const SCRAPER_URL = process.env.BUNNINGS_SCRAPER_URL || '';
+const SCRAPER_API_KEY = process.env.BUNNINGS_SCRAPER_API_KEY || '';
+
+export const bunningsScraperSearch = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
+  const corsHandler = cors({ origin: true });
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    if (!SCRAPER_URL || !SCRAPER_API_KEY) {
+      res.status(503).json({ success: false, error: 'Scraper not configured' });
+      return;
+    }
+
+    try {
+      const { searchTerm, limit = 5, sortBy = 'relevance' } = req.body;
+
+      if (!searchTerm) {
+        res.status(400).json({ success: false, error: 'searchTerm is required' });
+        return;
+      }
+
+      const response = await fetch(`${SCRAPER_URL}/api/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': SCRAPER_API_KEY,
+        },
+        body: JSON.stringify({ searchTerm, limit, sortBy }),
+      });
+
+      if (!response.ok) {
+        await response.text();
+        res.status(response.status).json({ success: false, error: `Scraper returned ${response.status}` });
+        return;
+      }
+
+      const data = await response.json();
+      res.status(200).json(data);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message || 'Proxy error' });
+    }
+  });
+});
+
+export const bunningsScraperBatchSearch = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
+  const corsHandler = cors({ origin: true });
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    if (!SCRAPER_URL || !SCRAPER_API_KEY) {
+      res.status(503).json({ success: false, error: 'Scraper not configured' });
+      return;
+    }
+
+    try {
+      const { searches } = req.body;
+
+      if (!searches || !Array.isArray(searches)) {
+        res.status(400).json({ success: false, error: 'searches array is required' });
+        return;
+      }
+
+      const response = await fetch(`${SCRAPER_URL}/api/batch-search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': SCRAPER_API_KEY,
+        },
+        body: JSON.stringify({ searches }),
+      });
+
+      if (!response.ok) {
+        await response.text();
+        res.status(response.status).json({ success: false, error: `Scraper returned ${response.status}` });
+        return;
+      }
+
+      const data = await response.json();
+      res.status(200).json(data);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message || 'Proxy error' });
+    }
+  });
+});
+
+export const bunningsScraperProduct = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
+  const corsHandler = cors({ origin: true });
+  corsHandler(req, res, async () => {
+    if (req.method !== 'GET') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    if (!SCRAPER_URL || !SCRAPER_API_KEY) {
+      res.status(503).json({ success: false, error: 'Scraper not configured' });
+      return;
+    }
+
+    try {
+      const itemNumber = req.query.itemNumber as string;
+
+      if (!itemNumber) {
+        res.status(400).json({ success: false, error: 'itemNumber query param is required' });
+        return;
+      }
+
+      const response = await fetch(`${SCRAPER_URL}/api/product/${itemNumber}`, {
+        headers: { 'X-API-Key': SCRAPER_API_KEY },
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          res.status(404).json({ success: false, product: null });
+          return;
+        }
+        res.status(response.status).json({ success: false, error: `Scraper returned ${response.status}` });
+        return;
+      }
+
+      const data = await response.json();
+      res.status(200).json(data);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message || 'Proxy error' });
+    }
+  });
+});
+
+export const bunningsScraperHealth = functions.https.onRequest((req, res) => {
+  const corsHandler = cors({ origin: true });
+  corsHandler(req, res, async () => {
+    if (!SCRAPER_URL || !SCRAPER_API_KEY) {
+      res.status(200).json({ success: false, status: 'not_configured' });
+      return;
+    }
+
+    try {
+      const response = await fetch(`${SCRAPER_URL}/health`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!response.ok) {
+        res.status(200).json({ success: false, status: 'unhealthy' });
+        return;
+      }
+
+      const data = await response.json();
+      res.status(200).json(data);
+    } catch (error: any) {
+      res.status(200).json({ success: false, status: 'unreachable' });
     }
   });
 });

@@ -18,23 +18,24 @@ let isNativeModuleAvailable = false;
 const isExpoGo = Constants.appOwnership === 'expo';
 
 if (isExpoGo) {
-  console.log('Running in Expo Go — push notifications are not supported. Use a development build for push notification support.');
+  // Push notifications not supported in Expo Go
 } else {
   try {
     Notifications = require('expo-notifications');
     Device = require('expo-device');
 
-    Notifications.setNotificationHandler({
+    Notifications!.setNotificationHandler({
       handleNotification: async () => ({
         shouldShowAlert: true,
         shouldPlaySound: true,
         shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
       }),
     });
 
     isNativeModuleAvailable = true;
   } catch (error) {
-    console.log('expo-notifications native module not available. Use a development build for push notification support.');
     Notifications = null;
     Device = null;
     isNativeModuleAvailable = false;
@@ -75,13 +76,11 @@ class NotificationService {
   async registerForPushNotifications(): Promise<string | null> {
     // Check if native module is available
     if (!isNativeModuleAvailable || !Notifications || !Device) {
-      console.log('Push notifications not available (native module not loaded)');
       return null;
     }
 
     // Push notifications only work on physical devices
     if (!Device.isDevice) {
-      console.log('Push notifications only work on physical devices');
       return null;
     }
 
@@ -96,7 +95,6 @@ class NotificationService {
     }
 
     if (finalStatus !== 'granted') {
-      console.log('Push notification permission not granted');
       return null;
     }
 
@@ -108,8 +106,6 @@ class NotificationService {
       });
 
       this.expoPushToken = tokenData.data;
-      console.log('Expo push token:', this.expoPushToken);
-
       // Save token to Firestore for this device
       const deviceId = this.getDeviceId();
       await firestoreService.saveFcmToken(this.expoPushToken, deviceId);
@@ -126,7 +122,6 @@ class NotificationService {
 
       return this.expoPushToken;
     } catch (error) {
-      console.error('Error registering for push notifications:', error);
       return null;
     }
   }
@@ -139,19 +134,16 @@ class NotificationService {
     onNotificationResponse?: (response: any) => void
   ): void {
     if (!isNativeModuleAvailable || !Notifications) {
-      console.log('Cannot set up notification listeners (native module not available)');
       return;
     }
 
     // Listen for notifications received while app is foregrounded
     this.notificationListener = Notifications.addNotificationReceivedListener((notification) => {
-      console.log('Notification received in foreground:', notification);
       onNotificationReceived?.(notification);
     });
 
     // Listen for user interaction with notifications
     this.responseListener = Notifications.addNotificationResponseReceivedListener((response) => {
-      console.log('User interacted with notification:', response);
       onNotificationResponse?.(response);
     });
   }
@@ -183,9 +175,8 @@ class NotificationService {
       const deviceId = this.getDeviceId();
       await firestoreService.removeFcmToken(deviceId);
       this.expoPushToken = null;
-      console.log('Unregistered from push notifications');
     } catch (error) {
-      console.error('Error unregistering from push notifications:', error);
+      // silently ignore
     }
   }
 
@@ -205,7 +196,6 @@ class NotificationService {
     data?: Record<string, any>
   ): Promise<void> {
     if (!isNativeModuleAvailable || !Notifications) {
-      console.log('Cannot schedule notification (native module not available)');
       return;
     }
 

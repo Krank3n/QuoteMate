@@ -449,7 +449,6 @@ export function DashboardScreen() {
       setQuoteToConvert(null);
       navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
     } catch (error) {
-      console.error('Failed to convert to invoice:', error);
     } finally {
       setIsConverting(false);
     }

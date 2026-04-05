@@ -47,7 +47,6 @@ export function AccountSettingsScreen() {
           setMarketingEmails(prefsDoc.data()?.marketing !== false);
         }
       } catch (error) {
-        console.error('Failed to load email preferences:', error);
       } finally {
         setEmailPrefsLoading(false);
       }
@@ -88,12 +87,10 @@ export function AccountSettingsScreen() {
             }
           }
         } catch (e) {
-          console.warn('Could not clear browser storage:', e);
         }
         window.location.replace(window.location.origin);
       }
     } catch (error: any) {
-      console.error('Error during sign out:', error);
       Alert.alert('Error', 'Failed to sign out. Please try again.');
     }
   };
@@ -127,12 +124,10 @@ export function AccountSettingsScreen() {
             }
           }
         } catch (e) {
-          console.warn('Could not clear browser storage:', e);
         }
         window.location.replace(window.location.origin);
       }
     } catch (error: any) {
-      console.error('Error during account deletion:', error);
 
       if (error.code === 'auth/requires-recent-login') {
         Alert.alert(

@@ -33,6 +33,7 @@ export interface Material {
   // Material categorization
   category?: string; // Trade category ID (e.g., 'carpentry', 'electrical', 'plumbing')
   section?: string; // Work section within a job (e.g., 'Concreting', 'Timber Framing')
+  templateBaseQuantity?: number; // Per-unit qty from template/AI (e.g. 2 posts per bay). quantity = templateBaseQuantity * section.multiplier
 }
 
 export interface FavoriteProductMapping {
@@ -51,6 +52,56 @@ export interface QuotePhoto {
   storageUrl: string;    // Firebase Storage download URL
   thumbnailUrl?: string;  // Optional smaller version
   annotated?: boolean;    // Whether photo has been annotated
+}
+
+// Labor unit type for hours/days billing
+export type LaborUnit = 'hours' | 'days';
+
+// Section within a quote/invoice with its own labor
+export interface QuoteSection {
+  id: string;
+  name: string;               // e.g. "Colorbond Fence Bay", "Pedestrian Gate"
+  multiplier: number;          // How many units (e.g. 8 bays) — default 1
+  sourceTemplateId?: string;   // Which template this came from (if any)
+  laborHours: number;          // Per-unit labor hours/days
+  laborRate: number;           // $/hour or $/day
+  laborUnit: LaborUnit;        // 'hours' | 'days'
+  laborTotal: number;          // calculated: laborHours * laborRate * multiplier
+  sortOrder: number;
+}
+
+// Reusable section template (assembly)
+export interface SectionTemplate {
+  id: string;
+  name: string;                // e.g. "Standard Fence Bay"
+  description?: string;
+  keywords?: string[];         // e.g. ["fence bay", "colorbond fence"] — for matching to job descriptions
+  materials: Omit<Material, 'id'>[];  // Template materials (IDs generated on use)
+  laborHours: number;
+  laborRate: number;
+  laborUnit: LaborUnit;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// AI-generated template suggestion for a quote
+export interface TemplateSuggestion {
+  templateId: string;
+  templateName: string;
+  suggestedQuantity: number;
+  suggestedSectionName?: string; // AI-generated contextual name (e.g. "Colorbond Fence Bay")
+  reasoning: string;
+}
+
+// User-defined supplier group for materials search
+export interface SupplierGroup {
+  id: string;
+  name: string;              // e.g. "Local Timber Yard", "Fencing Supplies Co"
+  searchUrl?: string;        // Optional base URL for web scraping
+  isDefault?: boolean;       // Built-in groups (Bunnings, Reece) can't be deleted
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Job {
@@ -74,8 +125,9 @@ export interface Quote {
   jobAddress?: string;
   job: Job;
   materials: Material[];
-  laborRate: number; // $/hour
-  laborHours: number;
+  laborRate: number; // $/hour or $/day (depending on laborUnit)
+  laborHours: number; // quantity of hours or days
+  laborUnit?: LaborUnit; // 'hours' | 'days' — default 'hours' for backwards compat
   laborTotal: number;
   materialsSubtotal: number;
   markup: number; // percentage
@@ -83,10 +135,16 @@ export interface Quote {
   subtotal: number;
   gst: number;
   total: number;
-  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'completed';
+  // Sections — optional, for quotes with multiple work sections
+  sections?: QuoteSection[];
+  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'completed' | 'cancelled' | 'paid' | 'partial' | 'overdue';
   draftStep?: string; // Screen name where user left off during quote flow (e.g., 'CustomerDetails')
   notes?: string;
   aiSkipped?: boolean; // Flag to indicate AI analysis was intentionally skipped
+  // AI template suggestions (generated during description cleanup or on materials screen load)
+  templateSuggestions?: TemplateSuggestion[];
+  // Markup visibility
+  showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
   // Travel adjustment
   travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
   estimatedDistance?: number;   // km (straight-line)
@@ -118,7 +176,7 @@ export interface TemplateMaterial {
   name: string;
   searchTerm: string; // what to search in Bunnings
   quantityFormula: string; // e.g., "steps * 2"
-  unit: 'each' | 'm' | 'L' | 'kg' | 'box';
+  unit: 'each' | 'm' | 'L' | 'kg' | 'box' | 'pack';
 }
 
 export interface TemplateParam {
@@ -203,6 +261,7 @@ export interface BusinessSettings {
   selectedStore?: string; // Single selected hardware store (e.g., 'bunnings', 'mitre10')
   // Quote display settings
   showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)
+  showMarkup?: boolean; // If true, show markup line on documents. Default: true (show markup)
   // Payment method settings
   paymentMethods?: PaymentMethodSettings;
   // Branding
@@ -326,6 +385,7 @@ export interface Invoice {
   // Pricing (same as Quote)
   laborRate: number;
   laborHours: number;
+  laborUnit?: LaborUnit;
   laborTotal: number;
   materialsSubtotal: number;
   markup: number;
@@ -333,6 +393,12 @@ export interface Invoice {
   subtotal: number;
   gst: number;
   total: number;
+
+  // Sections — optional, for invoices with multiple work sections
+  sections?: QuoteSection[];
+
+  // Markup visibility
+  showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
 
   // Invoice-specific
   status: InvoiceStatus;

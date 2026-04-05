@@ -31,7 +31,6 @@ export async function loadFavoritesFromLocal(): Promise<
     const stored = await AsyncStorage.getItem(FAVORITES_STORAGE_KEY);
     return stored ? JSON.parse(stored) : {};
   } catch (error) {
-    console.error('Error loading favorites from local storage:', error);
     return {};
   }
 }
@@ -45,7 +44,6 @@ async function saveFavoritesToLocal(
   try {
     await AsyncStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favorites));
   } catch (error) {
-    console.error('Error saving favorites to local storage:', error);
   }
 }
 
@@ -82,7 +80,6 @@ export async function getFavoriteProduct(
       return favorite;
     }
   } catch (error) {
-    console.error('Error loading favorite from cloud:', error);
   }
 
   return null;
@@ -103,7 +100,6 @@ export async function saveFavoriteProduct(
   localFavorites[key] = favorite;
   await saveFavoritesToLocal(localFavorites);
 
-  console.log(`Saved favorite for "${key}":`, favorite.productName);
 
   // Save to cloud (async, doesn't block)
   try {
@@ -119,7 +115,6 @@ export async function saveFavoriteProduct(
       }
     );
   } catch (error) {
-    console.error('Error saving favorite to cloud:', error);
   }
 }
 
@@ -137,7 +132,6 @@ export async function removeFavoriteProduct(
   delete localFavorites[key];
   await saveFavoritesToLocal(localFavorites);
 
-  console.log(`Removed favorite for "${key}"`);
 
   // Remove from cloud
   try {
@@ -147,7 +141,6 @@ export async function removeFavoriteProduct(
     const db = getFirestore();
     await deleteDoc(doc(db, `users/${auth.currentUser.uid}/materialFavorites/${key}`));
   } catch (error) {
-    console.error('Error removing favorite from cloud:', error);
   }
 }
 
@@ -162,8 +155,6 @@ export async function syncFavoritesFromCloud(): Promise<void> {
     const db = getFirestore();
     // Note: This would require a collection query, which we'll implement if needed
     // For now, favorites are synced lazily when accessed
-    console.log('Favorites will sync lazily when accessed');
   } catch (error) {
-    console.error('Error syncing favorites from cloud:', error);
   }
 }

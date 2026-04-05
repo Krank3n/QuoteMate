@@ -222,7 +222,7 @@ export function QuotePreviewScreen() {
           ...currentQuote,
           notes,
           status,
-          draftStep: null,
+          draftStep: undefined,
           ...(quoteNumber ? { quoteNumber } : {}),
           updatedAt: new Date(),
         };
@@ -247,14 +247,13 @@ export function QuotePreviewScreen() {
           ...currentQuote,
           notes,
           status,
-          draftStep: null,
+          draftStep: undefined,
           ...(quoteNumber ? { quoteNumber } : {}),
           updatedAt: new Date(),
         };
         await saveQuote(updatedQuote);
       } catch (error) {
         // Non-blocking — navigate anyway
-        console.error('Failed to save notes on exit:', error);
       }
     }
 
@@ -291,7 +290,6 @@ export function QuotePreviewScreen() {
         await Print.printAsync({ html });
       }
     } catch (error) {
-      console.error('PDF preview error:', error);
     } finally {
       setIsPdfLoading(false);
     }
@@ -379,6 +377,8 @@ export function QuotePreviewScreen() {
           laborHours={currentQuote.laborHours}
           laborRate={currentQuote.laborRate}
           laborTotal={currentQuote.laborTotal}
+          laborUnit={currentQuote.laborUnit}
+          sections={currentQuote.sections}
           showLaborHours={businessSettings?.showLaborHours}
           onEdit={() => navigation.navigate('LaborMarkup')}
         />
@@ -390,6 +390,7 @@ export function QuotePreviewScreen() {
           gst={currentQuote.gst}
           total={currentQuote.total}
           hideZeroMarkup
+          hideMarkup={currentQuote.showMarkup !== true}
         />
 
         <Surface style={documentStyles.section}>

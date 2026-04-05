@@ -412,6 +412,7 @@ export function PDFTemplateScreen() {
 
   const [selectedTemplate, setSelectedTemplate] = useState<PdfTemplateId>('professional');
   const [showLaborHours, setShowLaborHours] = useState(false);
+  const [showMarkup, setShowMarkup] = useState(true);
   const [groupMaterialsBySection, setGroupMaterialsBySection] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState<PdfTemplateId | null>(null);
@@ -424,6 +425,7 @@ export function PDFTemplateScreen() {
         setSelectedTemplate(businessSettings.pdfTemplate);
       }
       setShowLaborHours(businessSettings.showLaborHours === true);
+      setShowMarkup(businessSettings.showMarkup !== false);
       setGroupMaterialsBySection(businessSettings.groupMaterialsBySection === true);
     }
   }, [businessSettings]);
@@ -435,6 +437,7 @@ export function PDFTemplateScreen() {
         ...businessSettings!,
         pdfTemplate: selectedTemplate,
         showLaborHours,
+        showMarkup,
         groupMaterialsBySection,
       });
       setShowSuccessModal(true);
@@ -587,7 +590,7 @@ export function PDFTemplateScreen() {
             <div class="summary-row"><span>Materials Subtotal</span><span>$1,526.25</span></div>
             <div class="summary-row"><span>Labor</span><span>$1,360.00</span></div>
             <div class="summary-row"><span>Subtotal</span><span>$2,886.25</span></div>
-            <div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>
+            ${showMarkup ? `<div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>` : ''}
             <div class="summary-row"><span>GST (10%)</span><span>$331.92</span></div>
             <hr>
             <div class="summary-row grand-total"><span>TOTAL</span><span>$3,651.11</span></div>
@@ -609,11 +612,10 @@ export function PDFTemplateScreen() {
 
       await Print.printAsync({ html });
     } catch (error) {
-      console.error('Preview error:', error);
     } finally {
       setPreviewLoading(null);
     }
-  }, [businessSettings, showLaborHours, groupMaterialsBySection]);
+  }, [businessSettings, showLaborHours, showMarkup, groupMaterialsBySection]);
 
   const businessName = businessSettings?.businessName || 'Your Business';
 
@@ -708,6 +710,21 @@ export function PDFTemplateScreen() {
                 onValueChange={setShowLaborHours}
                 trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
                 thumbColor={showLaborHours ? colors.primary : '#F3F4F6'}
+              />
+            </View>
+
+            <View style={styles.toggleDivider} />
+
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Show Markup on Documents</Text>
+                <Text style={styles.toggleSubtitle}>Display markup percentage and amount on quotes and invoices</Text>
+              </View>
+              <Switch
+                value={showMarkup}
+                onValueChange={setShowMarkup}
+                trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
+                thumbColor={showMarkup ? colors.primary : '#F3F4F6'}
               />
             </View>
 

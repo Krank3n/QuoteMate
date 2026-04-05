@@ -53,22 +53,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { SwipeableCard } from '../../components/SwipeableCard';
-import { BUNNINGS_SCRAPER_URL } from '@env';
-import { TRADE_CATEGORIES } from '../../constants/tradeCategories';
+import { SupplierGroup } from '../../types';
+import { loadGroups } from '../../services/supplierGroupService';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
 import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
 import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
-
-// Material categories for the picker (derived from trade categories)
-const MATERIAL_CATEGORIES = [
-  { id: '', name: 'No Category', icon: 'folder-outline' },
-  ...TRADE_CATEGORIES.filter(c => c.id !== 'general').map(c => ({
-    id: c.id,
-    name: c.name,
-    icon: c.icon,
-  })),
-];
 
 type TabValue = 'search' | 'saved';
 
@@ -85,12 +75,19 @@ export function AddMaterialScreen() {
   const currentQuote = currentDocument;
   const updateQuote = updateDocument;
 
-  // Check if we're in edit mode
+  // Check if we're in edit mode, template mode, or have a pre-selected section
   const materialId = route.params?.materialId;
+  const routeSection = route.params?.section as string | undefined;
+  const templateMode = route.params?.templateMode === true;
+  const editingTemplate = route.params?.editingTemplate === true;
   const isEditMode = !!materialId;
   const editingMaterial = isEditMode
     ? currentQuote?.materials.find(m => m.id === materialId)
     : null;
+
+  // When editing a template material, read the pending material from store
+  const { pendingTemplateMaterial: templateEditMaterial } = useStore();
+  const prefillMaterial = editingMaterial || (editingTemplate ? templateEditMaterial : null);
 
   // Tab state
   const [activeTab, setActiveTab] = useState<TabValue>('search');
@@ -101,21 +98,43 @@ export function AddMaterialScreen() {
   const [isSearching, setIsSearching] = useState(false);
 
   // Manual entry state - initialize with editing material if in edit mode
-  const [manualName, setManualName] = useState(editingMaterial?.name || '');
+  const [manualName, setManualName] = useState(prefillMaterial?.name || '');
   const [manualQuantity, setManualQuantity] = useState(
-    editingMaterial?.quantity.toString() || '1'
+    prefillMaterial?.quantity.toString() || '1'
   );
   const [manualUnit, setManualUnit] = useState<Material['unit']>(
-    editingMaterial?.unit || 'each'
+    prefillMaterial?.unit || 'each'
   );
   const [manualPrice, setManualPrice] = useState(
-    editingMaterial?.price.toString() || ''
+    prefillMaterial?.price.toString() || ''
   );
-  const [selectedCategory, setSelectedCategory] = useState(
-    editingMaterial?.category || ''
-  );
-  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+
+  // Section picker — show existing sections from the quote
+  const [selectedSection, setSelectedSection] = useState(editingMaterial?.section || routeSection || '');
+  const [showSectionPicker, setShowSectionPicker] = useState(false);
+  const existingSections = React.useMemo(() => {
+    if (!currentQuote) return [];
+    const sectionNames = new Set<string>();
+    // From QuoteSection entries
+    if (currentQuote.sections) {
+      currentQuote.sections.forEach(s => sectionNames.add(s.name));
+    }
+    // From material section fields
+    currentQuote.materials.forEach(m => {
+      if (m.section) sectionNames.add(m.section);
+    });
+    return Array.from(sectionNames).sort();
+  }, [currentQuote]);
+  const [newSectionName, setNewSectionName] = useState('');
+
+  // Supplier groups for search filtering
+  const [supplierGroups, setSupplierGroups] = useState<SupplierGroup[]>([]);
+  const [selectedSupplierGroup, setSelectedSupplierGroup] = useState<string>('');
+
+  useEffect(() => {
+    loadGroups().then(setSupplierGroups);
+  }, []);
 
   // Ref for auto-focusing manual name input for non-pro users
   const materialNameRef = useRef<any>(null);
@@ -137,7 +156,6 @@ export function AddMaterialScreen() {
       setManualQuantity(editingMaterial.quantity.toString());
       setManualUnit(editingMaterial.unit);
       setManualPrice(editingMaterial.price.toString());
-      setSelectedCategory(editingMaterial.category || '');
       setActiveTab('search'); // Start on manual entry area when editing
     }
   }, [editingMaterial]);
@@ -176,7 +194,7 @@ export function AddMaterialScreen() {
         setRecentMaterials(JSON.parse(stored));
       }
     } catch (error) {
-      console.error('Error loading recent materials:', error);
+      // silently ignore
     }
   };
 
@@ -199,7 +217,7 @@ export function AddMaterialScreen() {
       await AsyncStorage.setItem(RECENT_MATERIALS_KEY, JSON.stringify(recents));
       setRecentMaterials(recents);
     } catch (error) {
-      console.error('Error saving recent material:', error);
+      // silently ignore
     }
   };
 
@@ -220,7 +238,7 @@ export function AddMaterialScreen() {
       }));
       setSavedItems(items);
     } catch (error) {
-      console.error('Error loading saved items:', error);
+      // silently ignore
     } finally {
       setIsLoadingSaved(false);
     }
@@ -244,13 +262,11 @@ export function AddMaterialScreen() {
       const selectedStore = businessSettings?.selectedStore || 'bunnings';
       const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
       const firstStore = hardwareStores[0];
-      const useScraperApi = BUNNINGS_SCRAPER_URL ? true : false;
+      const useScraperApi = true; // Always available via Firebase proxy
 
       const isBunnings = selectedStore === 'bunnings' || firstStore.includes('bunnings.com.au');
 
       if (isBunnings && useScraperApi) {
-        console.log(`🔍 Searching Bunnings via scraper for: "${searchQuery}"`);
-
         const scraperResponse = await searchProductWithScraper(searchQuery, 10);
 
         if (scraperResponse && scraperResponse.success && scraperResponse.results.length > 0) {
@@ -269,10 +285,7 @@ export function AddMaterialScreen() {
           }));
 
           setSearchResults(products);
-          console.log(`✅ Found ${products.length} products from scraper`);
         } else {
-          // Fallback to web scraping method
-          console.log('⚠️ Scraper returned no results, trying web scraping fallback...');
           const scraperResults = await searchMaterialWithWebScraping(
             searchQuery,
             searchQuery,
@@ -297,7 +310,6 @@ export function AddMaterialScreen() {
 
           if (products.length === 0) {
             // Final fallback to AI estimation
-            console.log('⚠️ Web scraping also returned no results, trying AI estimation...');
             const aiResult = await searchMaterialPrice(searchQuery, [firstStore]);
 
             if (aiResult.price) {
@@ -314,16 +326,13 @@ export function AddMaterialScreen() {
                 isAiEstimate: true,
               };
               setSearchResults([estimatedProduct]);
-              console.log(`✅ AI estimation provided fallback result: $${aiResult.price}`);
             }
           }
         }
       } else if (isBunnings) {
-        console.log(`🔍 Searching Bunnings via API for: "${searchQuery}"`);
         const results = await bunningsApi.searchItem(searchQuery, 20);
         setSearchResults(results.map(item => ({ ...item, isScraperResult: false })));
       } else {
-        console.log(`🔍 Searching ${firstStore} via scraper for: "${searchQuery}"`);
         const scraperResults = await searchMaterialWithWebScraping(
           searchQuery,
           searchQuery,
@@ -367,7 +376,6 @@ export function AddMaterialScreen() {
         }
       }
     } catch (error) {
-      console.error('Search error:', error);
       Alert.alert('Search Error', 'Failed to search products. Please try again.');
     } finally {
       setIsSearching(false);
@@ -485,7 +493,7 @@ export function AddMaterialScreen() {
         totalPrice: price * quantity,
         manualPriceOverride: true,
         pricingSource: 'manual',
-        category: selectedCategory || undefined,
+        section: selectedSection || undefined,
       };
       updateMaterialInQuote(updatedMaterial);
     } else {
@@ -499,7 +507,7 @@ export function AddMaterialScreen() {
         totalPrice: price * quantity,
         manualPriceOverride: true,
         pricingSource: 'manual',
-        category: selectedCategory || undefined,
+        section: selectedSection || undefined,
       };
 
       if (saveAsTemplate) {
@@ -568,12 +576,26 @@ export function AddMaterialScreen() {
     );
   };
 
+  const { setPendingTemplateMaterial } = useStore();
+
   const addMaterialToQuote = (material: Material) => {
+    // Template mode: store material in staging area and go back
+    if (templateMode) {
+      setPendingTemplateMaterial(material);
+      navigation.goBack();
+      return;
+    }
+
     if (!currentQuote) return;
+
+    // Apply selected section to the material
+    const materialWithSection = selectedSection
+      ? { ...material, section: selectedSection }
+      : material;
 
     updateQuote({
       ...currentQuote,
-      materials: [...(currentQuote.materials || []), material],
+      materials: [...(currentQuote.materials || []), materialWithSection],
     });
 
     // Save to recently used
@@ -610,6 +632,27 @@ export function AddMaterialScreen() {
         </View>
         <View style={styles.manualEntryDividerLine} />
       </View>
+      {/* Supplier group filter */}
+      {supplierGroups.length > 0 && isPro && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.supplierChipsRow}>
+          <TouchableOpacity
+            style={[styles.supplierChip, !selectedSupplierGroup && styles.supplierChipActive]}
+            onPress={() => setSelectedSupplierGroup('')}
+          >
+            <Text style={[styles.supplierChipText, !selectedSupplierGroup && styles.supplierChipTextActive]}>All</Text>
+          </TouchableOpacity>
+          {supplierGroups.map(g => (
+            <TouchableOpacity
+              key={g.id}
+              style={[styles.supplierChip, selectedSupplierGroup === g.id && styles.supplierChipActive]}
+              onPress={() => setSelectedSupplierGroup(selectedSupplierGroup === g.id ? '' : g.id)}
+            >
+              <Text style={[styles.supplierChipText, selectedSupplierGroup === g.id && styles.supplierChipTextActive]}>{g.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
       {!isPro ? (
         <TouchableOpacity
           style={styles.proSearchPrompt}
@@ -623,7 +666,7 @@ export function AddMaterialScreen() {
         </TouchableOpacity>
       ) : (
       <TextInput
-        label="Search for materials"
+        label={selectedSupplierGroup ? `Search ${supplierGroups.find(g => g.id === selectedSupplierGroup)?.name || 'supplier'}` : "Search for materials"}
         value={searchQuery}
         onChangeText={setSearchQuery}
         mode="outlined"
@@ -798,62 +841,53 @@ export function AddMaterialScreen() {
         </View>
       </View>
 
-      {/* Category Picker */}
-      <View style={styles.categorySelector}>
-        <Text style={styles.unitLabel}>Category (for grouping)</Text>
-        <TouchableOpacity
-          style={styles.categoryButton}
-          onPress={() => setShowCategoryPicker(!showCategoryPicker)}
-        >
-          <MaterialCommunityIcons
-            name={(MATERIAL_CATEGORIES.find(c => c.id === selectedCategory)?.icon || 'folder-outline') as any}
-            size={20}
-            color={colors.primary}
-          />
-          <Text style={styles.categoryButtonText}>
-            {MATERIAL_CATEGORIES.find(c => c.id === selectedCategory)?.name || 'No Category'}
-          </Text>
-          <MaterialCommunityIcons
-            name={showCategoryPicker ? 'chevron-up' : 'chevron-down'}
-            size={20}
-            color={colors.onSurface}
-          />
-        </TouchableOpacity>
-        {showCategoryPicker && (
-          <View style={styles.categoryList}>
-            {MATERIAL_CATEGORIES.map((cat) => (
+
+      {/* Section Picker */}
+      {existingSections.length > 0 && (
+        <View style={styles.categorySelector}>
+          <Text style={styles.unitLabel}>Section (for grouping)</Text>
+          <TouchableOpacity
+            style={styles.categoryButton}
+            onPress={() => setShowSectionPicker(!showSectionPicker)}
+          >
+            <MaterialCommunityIcons
+              name="folder-outline"
+              size={20}
+              color={colors.primary}
+            />
+            <Text style={styles.categoryButtonText}>
+              {selectedSection || 'No Section'}
+            </Text>
+            <MaterialCommunityIcons
+              name={showSectionPicker ? 'chevron-up' : 'chevron-down'}
+              size={20}
+              color={colors.onSurface}
+            />
+          </TouchableOpacity>
+          {showSectionPicker && (
+            <View style={styles.categoryList}>
               <TouchableOpacity
-                key={cat.id}
-                style={[
-                  styles.categoryItem,
-                  selectedCategory === cat.id && styles.categoryItemSelected,
-                ]}
-                onPress={() => {
-                  setSelectedCategory(cat.id);
-                  setShowCategoryPicker(false);
-                }}
+                style={[styles.categoryItem, !selectedSection && styles.categoryItemSelected]}
+                onPress={() => { setSelectedSection(''); setShowSectionPicker(false); }}
               >
-                <MaterialCommunityIcons
-                  name={cat.icon as any}
-                  size={18}
-                  color={selectedCategory === cat.id ? colors.primary : colors.onSurface}
-                />
-                <Text
-                  style={[
-                    styles.categoryItemText,
-                    selectedCategory === cat.id && styles.categoryItemTextSelected,
-                  ]}
-                >
-                  {cat.name}
-                </Text>
-                {selectedCategory === cat.id && (
-                  <MaterialCommunityIcons name="check" size={18} color={colors.primary} />
-                )}
+                <Text style={[styles.categoryItemText, !selectedSection && styles.categoryItemTextSelected]}>No Section</Text>
               </TouchableOpacity>
-            ))}
-          </View>
-        )}
-      </View>
+              {existingSections.map((name) => (
+                <TouchableOpacity
+                  key={name}
+                  style={[styles.categoryItem, selectedSection === name && styles.categoryItemSelected]}
+                  onPress={() => { setSelectedSection(name); setShowSectionPicker(false); }}
+                >
+                  <Text style={[styles.categoryItemText, selectedSection === name && styles.categoryItemTextSelected]}>{name}</Text>
+                  {selectedSection === name && (
+                    <MaterialCommunityIcons name="check" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
 
       <View style={styles.toggleRow}>
         <Text style={styles.toggleLabel}>Save as template for future quotes</Text>
@@ -1137,6 +1171,32 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     marginBottom: 16,
+  },
+  supplierChipsRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    maxHeight: 36,
+  },
+  supplierChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    marginRight: 8,
+  },
+  supplierChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  supplierChipText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  supplierChipTextActive: {
+    color: '#FFFFFF',
   },
   loadingContainer: {
     flexDirection: 'row',

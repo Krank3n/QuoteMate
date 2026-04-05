@@ -77,7 +77,6 @@ export function SendQuoteButton({
         ));
       }
     } catch (error) {
-      console.error('Email generation failed:', error);
       // Fallback to default template
       setEmailBody(getDefaultEmailBody(
         quote.customerName,
@@ -108,7 +107,6 @@ export function SendQuoteButton({
       });
       setEmailBody(body);
     } catch (error) {
-      console.error('Email regeneration failed:', error);
       Alert.alert('Error', 'Could not regenerate email. Please try again.');
     } finally {
       setIsGeneratingEmail(false);
@@ -147,7 +145,6 @@ export function SendQuoteButton({
     try {
       await exportQuotePDF(quote, businessSettings, 'export', { isPro });
     } catch (error) {
-      console.error('Export error:', error);
       Alert.alert('Error', 'Failed to export PDF. Please try again.');
     }
   };

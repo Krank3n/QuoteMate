@@ -515,7 +515,6 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
         const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
         onSave(dataUrl);
       } catch (error) {
-        console.error('Failed to capture annotated image on web:', error);
         // Fallback: save original image
         onSave(imageUri);
       }
@@ -529,7 +528,6 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
       });
       onSave(uri);
     } catch (error) {
-      console.error('Failed to capture annotated image:', error);
     }
   };
 

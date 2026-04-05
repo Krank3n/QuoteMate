@@ -49,7 +49,6 @@ export async function searchReeceProduct(
   productName: string
 ): Promise<ReeceProduct | null> {
   try {
-    console.log('🔍 Searching Reece for:', productName);
 
     // For now, we'll use Firebase Functions to handle Reece API calls
     // This avoids exposing API keys in the client
@@ -74,10 +73,8 @@ export async function searchReeceProduct(
 
     // Mobile implementation would go here
     // For now, return null to fall back to AI estimation
-    console.warn('Reece API not yet implemented for mobile');
     return null;
   } catch (error) {
-    console.error('❌ Error searching Reece product:', error);
     return null;
   }
 }
@@ -89,7 +86,6 @@ export async function getReecePrice(
   itemNumber: string
 ): Promise<number | null> {
   try {
-    console.log('💰 Getting Reece price for item:', itemNumber);
 
     if (Platform.OS === 'web') {
       const idToken = await auth.currentUser?.getIdToken();
@@ -110,10 +106,8 @@ export async function getReecePrice(
       return data.price || null;
     }
 
-    console.warn('Reece API not yet implemented for mobile');
     return null;
   } catch (error) {
-    console.error('❌ Error getting Reece price:', error);
     return null;
   }
 }
@@ -126,13 +120,11 @@ export async function searchReeceMaterialPrice(
   materialName: string
 ): Promise<PriceSearchResult> {
   try {
-    console.log('🔍 Searching Reece price for:', materialName);
 
     // Search for the product
     const product = await searchReeceProduct(materialName);
 
     if (!product) {
-      console.log('⚠️  Product not found in Reece catalog');
       return { price: null };
     }
 
@@ -140,11 +132,9 @@ export async function searchReeceMaterialPrice(
     const price = await getReecePrice(product.itemNumber);
 
     if (price === null) {
-      console.log('⚠️  Price not available from Reece');
       return { price: null };
     }
 
-    console.log('✅ Found Reece price:', materialName, '→ $' + price);
 
     return {
       price,
@@ -153,7 +143,6 @@ export async function searchReeceMaterialPrice(
       itemNumber: product.itemNumber,
     };
   } catch (error) {
-    console.error('❌ Error searching Reece material price:', error);
     return { price: null };
   }
 }
@@ -166,7 +155,6 @@ export async function getReeceInventory(
   branchCode?: string
 ): Promise<ReeceInventory | null> {
   try {
-    console.log('📦 Getting Reece inventory for:', itemNumber, 'at branch:', branchCode);
 
     if (Platform.OS === 'web') {
       const idToken = await auth.currentUser?.getIdToken();
@@ -187,10 +175,8 @@ export async function getReeceInventory(
       return data.inventory || null;
     }
 
-    console.warn('Reece API not yet implemented for mobile');
     return null;
   } catch (error) {
-    console.error('❌ Error getting Reece inventory:', error);
     return null;
   }
 }
@@ -216,7 +202,6 @@ export async function checkReeceApiStatus(): Promise<boolean> {
     const data = await response.json();
     return data.available === true;
   } catch (error) {
-    console.error('❌ Error checking Reece API status:', error);
     return false;
   }
 }

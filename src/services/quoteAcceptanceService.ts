@@ -53,10 +53,8 @@ export async function generateAcceptanceLink(
       throw new Error(data.error || 'Failed to generate acceptance link');
     }
 
-    console.log('Generated acceptance link for quote:', quoteId);
     return data.acceptanceUrl;
   } catch (error: any) {
-    console.error('Error generating acceptance link:', error);
     throw error;
   }
 }

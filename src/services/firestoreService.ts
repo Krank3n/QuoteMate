@@ -54,7 +54,6 @@ class FirestoreService {
   async saveQuote(quote: Quote): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping cloud sync');
       return;
     }
 
@@ -72,9 +71,7 @@ class FirestoreService {
         clientNotes: quote.clientNotes || null,
         syncedAt: new Date().toISOString(),
       }));
-      console.log('✅ Quote saved to Firestore:', quote.id);
     } catch (error) {
-      console.error('❌ Error saving quote to Firestore:', error);
       throw error;
     }
   }
@@ -85,7 +82,6 @@ class FirestoreService {
   async loadQuotes(): Promise<Quote[]> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, returning empty quotes');
       return [];
     }
 
@@ -106,10 +102,8 @@ class FirestoreService {
         } as Quote;
       });
 
-      console.log(`✅ Loaded ${quotes.length} quotes from Firestore`);
       return quotes;
     } catch (error) {
-      console.error('❌ Error loading quotes from Firestore:', error);
       return [];
     }
   }
@@ -120,16 +114,13 @@ class FirestoreService {
   async deleteQuote(quoteId: string): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping cloud delete');
       return;
     }
 
     try {
       const quoteRef = doc(db, 'users', userId, 'quotes', quoteId);
       await deleteDoc(quoteRef);
-      console.log('✅ Quote deleted from Firestore:', quoteId);
     } catch (error) {
-      console.error('❌ Error deleting quote from Firestore:', error);
       throw error;
     }
   }
@@ -140,7 +131,6 @@ class FirestoreService {
   async saveBusinessSettings(settings: BusinessSettings): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping cloud sync');
       return;
     }
 
@@ -159,9 +149,7 @@ class FirestoreService {
         ...cleanedSettings,
         syncedAt: new Date().toISOString(),
       });
-      console.log('✅ Business settings saved to Firestore');
     } catch (error) {
-      console.error('❌ Error saving business settings to Firestore:', error);
       throw error;
     }
   }
@@ -172,7 +160,6 @@ class FirestoreService {
   async loadBusinessSettings(): Promise<BusinessSettings | null> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, returning null settings');
       return null;
     }
 
@@ -182,13 +169,11 @@ class FirestoreService {
 
       if (snapshot.exists()) {
         const data = snapshot.data();
-        console.log('✅ Business settings loaded from Firestore');
         return data as BusinessSettings;
       }
 
       return null;
     } catch (error) {
-      console.error('❌ Error loading business settings from Firestore:', error);
       return null;
     }
   }
@@ -199,7 +184,6 @@ class FirestoreService {
   async saveOnboardingStatus(isOnboarded: boolean): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping cloud sync');
       return;
     }
 
@@ -209,9 +193,7 @@ class FirestoreService {
         isOnboarded,
         syncedAt: new Date().toISOString(),
       });
-      console.log('✅ Onboarding status saved to Firestore');
     } catch (error) {
-      console.error('❌ Error saving onboarding status to Firestore:', error);
       throw error;
     }
   }
@@ -222,7 +204,6 @@ class FirestoreService {
   async loadOnboardingStatus(): Promise<boolean> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, returning false');
       return false;
     }
 
@@ -232,13 +213,11 @@ class FirestoreService {
 
       if (snapshot.exists()) {
         const data = snapshot.data();
-        console.log('✅ Onboarding status loaded from Firestore');
         return data.isOnboarded || false;
       }
 
       return false;
     } catch (error) {
-      console.error('❌ Error loading onboarding status from Firestore:', error);
       return false;
     }
   }
@@ -257,7 +236,6 @@ class FirestoreService {
         syncedAt: new Date().toISOString(),
       });
     } catch (error) {
-      console.error('Error saving tour status to Firestore:', error);
     }
   }
 
@@ -277,7 +255,6 @@ class FirestoreService {
       }
       return null;
     } catch (error) {
-      console.error('Error loading tour status from Firestore:', error);
       return null;
     }
   }
@@ -296,7 +273,6 @@ class FirestoreService {
         syncedAt: new Date().toISOString(),
       }, { merge: true });
     } catch (error) {
-      console.error('Error saving screen tours to Firestore:', error);
     }
   }
 
@@ -316,7 +292,6 @@ class FirestoreService {
       }
       return null;
     } catch (error) {
-      console.error('Error loading screen tours from Firestore:', error);
       return null;
     }
   }
@@ -327,7 +302,6 @@ class FirestoreService {
   async saveSubscriptionStatus(subscriptionStatus: SubscriptionStatus): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping cloud sync');
       return;
     }
 
@@ -343,9 +317,7 @@ class FirestoreService {
         trialExpired: subscriptionStatus.trialExpired || false,
         syncedAt: new Date().toISOString(),
       });
-      console.log('✅ Subscription status saved to Firestore');
     } catch (error) {
-      console.error('❌ Error saving subscription status to Firestore:', error);
       throw error;
     }
   }
@@ -356,7 +328,6 @@ class FirestoreService {
   async loadSubscriptionStatus(): Promise<SubscriptionStatus | null> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, returning null subscription status');
       return null;
     }
 
@@ -366,7 +337,6 @@ class FirestoreService {
 
       if (snapshot.exists()) {
         const data = snapshot.data();
-        console.log('✅ Subscription status loaded from Firestore');
         return {
           isPro: data.isPro,
           quotesThisMonth: data.quotesThisMonth,
@@ -380,7 +350,6 @@ class FirestoreService {
 
       return null;
     } catch (error) {
-      console.error('❌ Error loading subscription status from Firestore:', error);
       return null;
     }
   }
@@ -391,7 +360,6 @@ class FirestoreService {
   listenToQuotes(callback: (quotes: Quote[]) => void): Unsubscribe | null {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping quotes listener');
       return null;
     }
 
@@ -412,15 +380,12 @@ class FirestoreService {
           } as Quote;
         });
 
-        console.log(`📡 Quotes updated from Firestore: ${quotes.length} quotes`);
         callback(quotes);
       }, (error) => {
-        console.error('❌ Error in quotes listener:', error);
       });
 
       return this.quotesUnsubscribe;
     } catch (error) {
-      console.error('❌ Error setting up quotes listener:', error);
       return null;
     }
   }
@@ -431,7 +396,6 @@ class FirestoreService {
   listenToBusinessSettings(callback: (settings: BusinessSettings | null) => void): Unsubscribe | null {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping settings listener');
       return null;
     }
 
@@ -441,18 +405,15 @@ class FirestoreService {
       this.settingsUnsubscribe = onSnapshot(settingsRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
-          console.log('📡 Business settings updated from Firestore');
           callback(data as BusinessSettings);
         } else {
           callback(null);
         }
       }, (error) => {
-        console.error('❌ Error in settings listener:', error);
       });
 
       return this.settingsUnsubscribe;
     } catch (error) {
-      console.error('❌ Error setting up settings listener:', error);
       return null;
     }
   }
@@ -463,7 +424,6 @@ class FirestoreService {
   listenToOnboardingStatus(callback: (isOnboarded: boolean) => void): Unsubscribe | null {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping onboarding listener');
       return null;
     }
 
@@ -473,18 +433,15 @@ class FirestoreService {
       this.onboardingUnsubscribe = onSnapshot(profileRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
-          console.log('📡 Onboarding status updated from Firestore');
           callback(data.isOnboarded || false);
         } else {
           callback(false);
         }
       }, (error) => {
-        console.error('❌ Error in onboarding listener:', error);
       });
 
       return this.onboardingUnsubscribe;
     } catch (error) {
-      console.error('❌ Error setting up onboarding listener:', error);
       return null;
     }
   }
@@ -495,7 +452,6 @@ class FirestoreService {
   listenToSubscriptionStatus(callback: (subscriptionStatus: SubscriptionStatus | null) => void): Unsubscribe | null {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping subscription listener');
       return null;
     }
 
@@ -505,7 +461,6 @@ class FirestoreService {
       this.subscriptionUnsubscribe = onSnapshot(subscriptionRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
-          console.log('📡 Subscription status updated from Firestore');
           callback({
             isPro: data.isPro,
             quotesThisMonth: data.quotesThisMonth,
@@ -519,12 +474,10 @@ class FirestoreService {
           callback(null);
         }
       }, (error) => {
-        console.error('❌ Error in subscription listener:', error);
       });
 
       return this.subscriptionUnsubscribe;
     } catch (error) {
-      console.error('❌ Error setting up subscription listener:', error);
       return null;
     }
   }
@@ -535,7 +488,6 @@ class FirestoreService {
   async saveInvoice(invoice: Invoice): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping cloud sync');
       return;
     }
 
@@ -570,9 +522,7 @@ class FirestoreService {
         xeroSyncError: invoice.xeroSyncError || null,
         syncedAt: new Date().toISOString(),
       }));
-      console.log('✅ Invoice saved to Firestore:', invoice.id);
     } catch (error) {
-      console.error('❌ Error saving invoice to Firestore:', error);
       throw error;
     }
   }
@@ -583,7 +533,6 @@ class FirestoreService {
   async loadInvoices(): Promise<Invoice[]> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, returning empty invoices');
       return [];
     }
 
@@ -605,10 +554,8 @@ class FirestoreService {
         } as Invoice;
       });
 
-      console.log(`✅ Loaded ${invoices.length} invoices from Firestore`);
       return invoices;
     } catch (error) {
-      console.error('❌ Error loading invoices from Firestore:', error);
       return [];
     }
   }
@@ -619,16 +566,13 @@ class FirestoreService {
   async deleteInvoice(invoiceId: string): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping cloud delete');
       return;
     }
 
     try {
       const invoiceRef = doc(db, 'users', userId, 'invoices', invoiceId);
       await deleteDoc(invoiceRef);
-      console.log('✅ Invoice deleted from Firestore:', invoiceId);
     } catch (error) {
-      console.error('❌ Error deleting invoice from Firestore:', error);
       throw error;
     }
   }
@@ -639,7 +583,6 @@ class FirestoreService {
   listenToInvoices(callback: (invoices: Invoice[]) => void): Unsubscribe | null {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping invoices listener');
       return null;
     }
 
@@ -661,15 +604,12 @@ class FirestoreService {
           } as Invoice;
         });
 
-        console.log(`📡 Invoices updated from Firestore: ${invoices.length} invoices`);
         callback(invoices);
       }, (error) => {
-        console.error('❌ Error in invoices listener:', error);
       });
 
       return this.invoicesUnsubscribe;
     } catch (error) {
-      console.error('❌ Error setting up invoices listener:', error);
       return null;
     }
   }
@@ -680,7 +620,6 @@ class FirestoreService {
   async loadReferralInfo(): Promise<ReferralInfo | null> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, returning null referral info');
       return null;
     }
 
@@ -690,7 +629,6 @@ class FirestoreService {
 
       if (snapshot.exists()) {
         const data = snapshot.data();
-        console.log('✅ Referral info loaded from Firestore');
         return {
           referralCode: data.referralCode,
           referredBy: data.referredBy || null,
@@ -708,7 +646,6 @@ class FirestoreService {
 
       return null;
     } catch (error) {
-      console.error('❌ Error loading referral info from Firestore:', error);
       return null;
     }
   }
@@ -720,7 +657,6 @@ class FirestoreService {
   async saveFcmToken(token: string, deviceId: string): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping FCM token save');
       return;
     }
 
@@ -732,9 +668,7 @@ class FirestoreService {
         platform: require('react-native').Platform.OS,
         updatedAt: new Date().toISOString(),
       });
-      console.log('✅ FCM token saved to Firestore');
     } catch (error) {
-      console.error('❌ Error saving FCM token:', error);
       throw error;
     }
   }
@@ -745,16 +679,13 @@ class FirestoreService {
   async removeFcmToken(deviceId: string): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping FCM token removal');
       return;
     }
 
     try {
       const tokenRef = doc(db, 'users', userId, 'fcmTokens', deviceId);
       await deleteDoc(tokenRef);
-      console.log('✅ FCM token removed from Firestore');
     } catch (error) {
-      console.error('❌ Error removing FCM token:', error);
       throw error;
     }
   }
@@ -765,7 +696,6 @@ class FirestoreService {
   async saveContact(contact: Contact): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping cloud sync');
       return;
     }
 
@@ -775,9 +705,7 @@ class FirestoreService {
         ...contact,
         syncedAt: new Date().toISOString(),
       }));
-      console.log('✅ Contact saved to Firestore:', contact.id);
     } catch (error) {
-      console.error('❌ Error saving contact to Firestore:', error);
       throw error;
     }
   }
@@ -788,7 +716,6 @@ class FirestoreService {
   async loadContacts(): Promise<Contact[]> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, returning empty contacts');
       return [];
     }
 
@@ -802,10 +729,8 @@ class FirestoreService {
         return data as Contact;
       });
 
-      console.log(`✅ Loaded ${contacts.length} contacts from Firestore`);
       return contacts;
     } catch (error) {
-      console.error('❌ Error loading contacts from Firestore:', error);
       return [];
     }
   }
@@ -816,16 +741,13 @@ class FirestoreService {
   async deleteContact(contactId: string): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping cloud delete');
       return;
     }
 
     try {
       const contactRef = doc(db, 'users', userId, 'contacts', contactId);
       await deleteDoc(contactRef);
-      console.log('✅ Contact deleted from Firestore:', contactId);
     } catch (error) {
-      console.error('❌ Error deleting contact from Firestore:', error);
       throw error;
     }
   }
@@ -836,7 +758,6 @@ class FirestoreService {
   async saveContacts(contacts: Contact[]): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
-      console.log('No user signed in, skipping cloud sync');
       return;
     }
 
@@ -848,9 +769,7 @@ class FirestoreService {
           syncedAt: new Date().toISOString(),
         }));
       }
-      console.log(`✅ ${contacts.length} contacts saved to Firestore`);
     } catch (error) {
-      console.error('❌ Error batch saving contacts to Firestore:', error);
       throw error;
     }
   }
@@ -941,7 +860,6 @@ class FirestoreService {
 
       return result;
     } catch (error) {
-      console.error('❌ Error checking quota:', error);
       throw error;
     }
   }
@@ -970,7 +888,6 @@ class FirestoreService {
       this.invoicesUnsubscribe();
       this.invoicesUnsubscribe = null;
     }
-    console.log('🧹 Firestore listeners cleaned up');
   }
 }
 

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Pressable, TextInput as RNTextInput } from 'react-native';
+import { View, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Pressable, TextInput as RNTextInput, Switch } from 'react-native';
 import {
   Text,
   TextInput,
@@ -16,6 +16,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode, getPreviewScreenName } from '../../utils/documentMode';
+import { LaborUnit } from '../../types';
 
 import { colors } from '../../theme';
 import { formatCurrency, calculateQuote } from '../../utils/quoteCalculator';
@@ -61,23 +62,58 @@ export function LaborMarkupScreen() {
 
   const [laborHours, setLaborHours] = useState('');
   const [laborRate, setLaborRate] = useState('');
+  const [laborUnit, setLaborUnit] = useState<LaborUnit>('hours');
   const [markup, setMarkup] = useState('');
   const [travelAdjustment, setTravelAdjustment] = useState('0');
   const [travelDismissed, setTravelDismissed] = useState(false);
   const [lastTravelValue, setLastTravelValue] = useState('0');
+  const [showMarkup, setShowMarkup] = useState(false);
   const [warningDialogVisible, setWarningDialogVisible] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
 
+  const HOURS_PER_DAY = 8;
+
   useEffect(() => {
     if (currentQuote) {
-      setLaborHours(currentQuote.laborHours.toString());
-      setLaborRate(currentQuote.laborRate.toString());
+      const savedUnit = currentQuote.laborUnit || 'hours';
+      const savedHours = currentQuote.laborHours;
+
+      // Auto-default to days unless under 6 hours of work
+      if (!currentQuote.laborUnit && savedHours >= 6) {
+        setLaborUnit('days');
+        setLaborHours((savedHours / HOURS_PER_DAY).toString());
+        setLaborRate((currentQuote.laborRate * HOURS_PER_DAY).toString());
+      } else {
+        setLaborUnit(savedUnit);
+        setLaborHours(savedHours.toString());
+        setLaborRate(currentQuote.laborRate.toString());
+      }
+
       setMarkup(currentQuote.markup.toString());
+      setShowMarkup(currentQuote.showMarkup === true);
       const ta = (currentQuote.travelAdjustment || 0).toString();
       setTravelAdjustment(ta);
       setLastTravelValue(ta);
     }
   }, [currentQuote]);
+
+  // Convert values when toggling between hours/days
+  const handleToggleUnit = (newUnit: LaborUnit) => {
+    if (newUnit === laborUnit) return;
+    const currentValue = parseFloat(laborHours) || 0;
+    const currentRate = parseFloat(laborRate) || 0;
+
+    if (newUnit === 'days') {
+      // Hours → Days: divide by 8
+      setLaborHours(currentValue > 0 ? (currentValue / HOURS_PER_DAY).toString() : '');
+      setLaborRate(currentRate > 0 ? (currentRate * HOURS_PER_DAY).toString() : '');
+    } else {
+      // Days → Hours: multiply by 8
+      setLaborHours(currentValue > 0 ? (currentValue * HOURS_PER_DAY).toString() : '');
+      setLaborRate(currentRate > 0 ? (currentRate / HOURS_PER_DAY).toString() : '');
+    }
+    setLaborUnit(newUnit);
+  };
 
   // Save changes when navigating back
   useEffect(() => {
@@ -94,7 +130,8 @@ export function LaborMarkupScreen() {
         rate,
         hours,
         markupPercent,
-        travelPct
+        travelPct,
+        currentQuote.sections
       );
 
       // Save labor and calculated values before leaving
@@ -102,7 +139,9 @@ export function LaborMarkupScreen() {
         ...currentQuote,
         laborHours: hours,
         laborRate: rate,
+        laborUnit,
         markup: markupPercent,
+        showMarkup,
         travelAdjustment: travelPct,
         laborTotal: calculation.laborTotal,
         materialsSubtotal: calculation.materialsSubtotal,
@@ -115,7 +154,7 @@ export function LaborMarkupScreen() {
     });
 
     return unsubscribe;
-  }, [navigation, currentQuote, laborHours, laborRate, markup, travelAdjustment, travelDismissed, updateQuote]);
+  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, markup, showMarkup, travelAdjustment, travelDismissed, updateQuote]);
 
   if (!currentQuote) {
     return null;
@@ -132,8 +171,14 @@ export function LaborMarkupScreen() {
     rate,
     hours,
     markupPercent,
-    travelPct
+    travelPct,
+    currentQuote.sections
   );
+
+  // Helper: unit labels
+  const unitLabel = laborUnit === 'days' ? 'days' : 'hrs';
+  const unitRateLabel = laborUnit === 'days' ? '/day' : '/hr';
+  const unitInputLabel = laborUnit === 'days' ? 'Estimated Days' : 'Estimated Hours';
 
   const estimatedDistance = currentQuote.estimatedDistance;
   const fuelCost = estimatedDistance ? estimateFuelCost(estimatedDistance) : 0;
@@ -147,7 +192,9 @@ export function LaborMarkupScreen() {
       ...currentQuote,
       laborHours: hours,
       laborRate: rate,
+      laborUnit,
       markup: markupPercent,
+      showMarkup,
       travelAdjustment: travelPct,
       laborTotal: calculation.laborTotal,
       materialsSubtotal: calculation.materialsSubtotal,
@@ -181,7 +228,9 @@ export function LaborMarkupScreen() {
       ...currentQuote,
       laborHours: hours,
       laborRate: rate,
+      laborUnit,
       markup: markupPercent,
+      showMarkup,
       travelAdjustment: travelPct,
       laborTotal: calculation.laborTotal,
       materialsSubtotal: calculation.materialsSubtotal,
@@ -228,24 +277,40 @@ export function LaborMarkupScreen() {
         </View>
 
         <View ref={laborSectionRef} style={styles.section}>
+        {/* Hours/Days Toggle */}
+        <View style={styles.unitToggleRow}>
+          <TouchableOpacity
+            style={[styles.unitToggleBtn, laborUnit === 'hours' && styles.unitToggleBtnActive]}
+            onPress={() => handleToggleUnit('hours')}
+          >
+            <Text style={[styles.unitToggleText, laborUnit === 'hours' && styles.unitToggleTextActive]}>Hours</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.unitToggleBtn, laborUnit === 'days' && styles.unitToggleBtnActive]}
+            onPress={() => handleToggleUnit('days')}
+          >
+            <Text style={[styles.unitToggleText, laborUnit === 'days' && styles.unitToggleTextActive]}>Days</Text>
+          </TouchableOpacity>
+        </View>
+
         <TextInput
-          label="Estimated Hours"
+          label={unitInputLabel}
           value={laborHours}
           onChangeText={setLaborHours}
           mode="outlined"
           keyboardType="decimal-pad"
-          right={<TextInput.Affix text="hrs" />}
+          right={<TextInput.Affix text={unitLabel} />}
           style={styles.input}
         />
 
         <TextInput
-          label="Hourly Rate"
+          label={laborUnit === 'days' ? 'Daily Rate' : 'Hourly Rate'}
           value={laborRate}
           onChangeText={setLaborRate}
           mode="outlined"
           keyboardType="decimal-pad"
           left={<TextInput.Affix text="$" />}
-          right={<TextInput.Affix text="/hr" />}
+          right={<TextInput.Affix text={unitRateLabel} />}
           style={styles.input}
         />
 
@@ -281,6 +346,21 @@ export function LaborMarkupScreen() {
             {formatCurrency(calculation.markupAmount)}
           </Text>
         </Surface>
+
+        <View style={styles.showMarkupToggle}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.showMarkupTitle}>Show markup on quote</Text>
+            <Text style={styles.showMarkupSubtitle}>
+              When off, markup is included in the total but not shown as a separate line to the customer
+            </Text>
+          </View>
+          <Switch
+            value={showMarkup}
+            onValueChange={setShowMarkup}
+            trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
+            thumbColor={showMarkup ? colors.primary : '#F3F4F6'}
+          />
+        </View>
       </View>
 
       {/* Travel Adjustment Section */}
@@ -789,5 +869,51 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.primary,
+  },
+  showMarkupToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: 12,
+  },
+  showMarkupTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  showMarkupSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  // Hours/Days toggle
+  unitToggleRow: {
+    flexDirection: 'row',
+    marginBottom: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  unitToggleBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+  },
+  unitToggleBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  unitToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  unitToggleTextActive: {
+    color: '#FFFFFF',
   },
 });

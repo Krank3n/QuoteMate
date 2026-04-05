@@ -52,7 +52,6 @@ export async function updateEmailPreferences(marketing: boolean): Promise<boolea
 
     return true;
   } catch (error) {
-    console.error('Failed to update email preferences:', error);
     return false;
   }
 }

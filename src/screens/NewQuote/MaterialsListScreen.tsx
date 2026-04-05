@@ -12,9 +12,9 @@ import {
   Pressable,
   Platform,
   Linking,
-  Image,
   Animated,
   TextInput as RNTextInput,
+  Alert,
 } from 'react-native';
 import {
   Text,
@@ -24,8 +24,8 @@ import {
   Portal,
   Modal,
   TextInput,
-  SegmentedButtons,
   ActivityIndicator,
+  Surface,
 } from 'react-native-paper';
 import { useNavigation, useIsFocused, useRoute } from '@react-navigation/native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -34,7 +34,8 @@ import { generateId } from '../../utils/generateId';
 
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
-import { Material, BunningsItem } from '../../types';
+import { Material, QuoteSection, LaborUnit, SectionTemplate } from '../../types';
+import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
 import { bunningsApi } from '../../services/bunningsApi';
@@ -42,7 +43,8 @@ import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
-import { AnimatedListItem } from '../../components/AnimatedListItem';
+import { MaterialItemCard } from '../../components/MaterialItemCard';
+import { NestableScrollContainer, NestableDraggableFlatList, RenderItemParams } from 'react-native-draggable-flatlist';
 import { CollapsibleSection } from '../../components/CollapsibleSection';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
@@ -106,7 +108,6 @@ function groupMaterialsByCategory(materials: Material[]): Map<string, { info: { 
 import {
   searchMaterialWithWebScraping,
   ProductMatch,
-  PricingResult,
   getBestMatch,
 } from '../../services/webScrapingPricing';
 import {
@@ -116,12 +117,13 @@ import {
 import MaterialMatchSelector from '../../components/MaterialMatchSelector';
 import {
   findBestMatchForMaterial,
+  ScraperProduct,
+  batchFindBestMatchesProgressive,
 } from '../../services/bunningsScraperClient';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
-import { BUNNINGS_SCRAPER_URL } from '@env';
 
 // AI Analysis Loading State with Lottie Animation and scrolling progress steps
 const AI_STEPS = [
@@ -355,13 +357,33 @@ export function MaterialsListScreen() {
   const [fetchProgress, setFetchProgress] = useState({ current: 0, total: 0 });
   const [fetchedItemNames, setFetchedItemNames] = useState<{ name: string; success: boolean }[]>([]);
   const [currentFetchingName, setCurrentFetchingName] = useState<string>('');
+  const [fetchPhase, setFetchPhase] = useState<'idle' | 'batch' | 'applying' | 'individual'>('idle');
+  const [batchItemStatuses, setBatchItemStatuses] = useState<Map<string, 'pending' | 'searching' | 'done' | 'failed'>>(new Map());
+  const [batchChunkProgress, setBatchChunkProgress] = useState({ current: 0, total: 0 });
   const cancelFetchRef = useRef(false);
   const cancelFetchResolverRef = useRef<(() => void) | null>(null);
   const [recentlyPricedIds, setRecentlyPricedIds] = useState<Set<string>>(new Set());
+  const batchProgressAnim = useRef(new Animated.Value(0)).current;
   const priceFlashAnims = useRef<Map<string, Animated.Value>>(new Map());
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   const [initialMaterialCount, setInitialMaterialCount] = useState(0);
   const [cancelGeneration, setCancelGeneration] = useState(false);
+
+  // Animate indeterminate progress bar during batch fetch phase
+  useEffect(() => {
+    if (fetchPhase === 'batch') {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(batchProgressAnim, { toValue: 1, duration: 1200, useNativeDriver: false }),
+          Animated.timing(batchProgressAnim, { toValue: 0, duration: 1200, useNativeDriver: false }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    } else {
+      batchProgressAnim.setValue(0);
+    }
+  }, [fetchPhase]);
 
   // Unified tour: show brief fake AI loading when transitioning materialsList → materialsListItems
   useEffect(() => {
@@ -410,10 +432,141 @@ export function MaterialsListScreen() {
   // Expanded materials state for accordion
   const [expandedMaterials, setExpandedMaterials] = useState<Set<string>>(new Set());
 
+  // Section management
+  const [showNewSectionModal, setShowNewSectionModal] = useState(false);
+  const [newSectionName, setNewSectionName] = useState('');
+  const [renamingSectionKey, setRenamingSectionKey] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+
+  // Web drag-and-drop ref (must be at top level to avoid conditional hook call)
+  const webDragRef = React.useRef<{ materialId: string } | null>(null);
+
+  // Save section as template modal
+  const [saveTemplateModalVisible, setSaveTemplateModalVisible] = useState(false);
+  const [saveTemplateName, setSaveTemplateName] = useState('');
+  const [saveTemplateLaborHours, setSaveTemplateLaborHours] = useState('');
+  const [saveTemplateSectionName, setSaveTemplateSectionName] = useState('');
+  const [saveTemplateKeywords, setSaveTemplateKeywords] = useState<string[]>([]);
+  const [saveTemplateKeywordInput, setSaveTemplateKeywordInput] = useState('');
+
+  // Delete section confirm modal
+  const [deleteSectionModalVisible, setDeleteSectionModalVisible] = useState(false);
+  const [deleteSectionName, setDeleteSectionName] = useState('');
+
+  // Template picker modal
+  const [templatePickerVisible, setTemplatePickerVisible] = useState(false);
+  const [availableTemplates, setAvailableTemplates] = useState<SectionTemplate[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<SectionTemplate | null>(null);
+
+  // Template suggestions for empty state
+  const [allTemplates, setAllTemplates] = useState<SectionTemplate[]>([]);
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  const [suggestedTemplateIds, setSuggestedTemplateIds] = useState<Set<string>>(new Set());
+  const [checkedTemplateIds, setCheckedTemplateIds] = useState<Set<string>>(new Set());
+  const [templateQuantities, setTemplateQuantities] = useState<Record<string, number>>({});
+  const [isLoadingWithGaps, setIsLoadingWithGaps] = useState(false);
+
   // Optimistic quantity overrides — shown instantly before store re-render
   const [localQuantities, setLocalQuantities] = useState<Record<string, number>>({});
 
 
+
+  // Load templates and match by keywords (instant, no API calls)
+  useEffect(() => {
+    loadTemplates().then(templates => {
+      setAllTemplates(templates);
+      setTemplatesLoaded(true);
+
+      if (templates.length === 0) return;
+
+      const jobText = [currentQuote?.job?.name || '', currentQuote?.job?.description || ''].join(' ');
+      const matches = matchTemplatesByKeywords(templates, jobText);
+
+      const suggested = new Set(matches.map(m => m.templateId));
+      const quantities: Record<string, number> = {};
+      templates.forEach(t => { quantities[t.id] = 1; });
+
+      // Extract quantities from job text for matched templates
+      matches.forEach(m => {
+        const qty = extractQuantityForKeyword(jobText, m.matchedKeyword);
+        if (qty) quantities[m.templateId] = qty;
+      });
+
+      setSuggestedTemplateIds(suggested);
+      setCheckedTemplateIds(new Set(suggested));
+      setTemplateQuantities(quantities);
+    });
+  }, [currentQuote?.job?.description]);
+
+  // Load selected templates into quote (with optional quantity multiplier)
+  const loadSelectedTemplatesIntoQuote = () => {
+    if (!currentQuote) return;
+
+    const HOURS_PER_DAY = 8;
+    let newMaterials: Material[] = [];
+    let newSections: QuoteSection[] = [...(currentQuote.sections || [])];
+    let additionalLaborHours = 0;
+    let laborRate = currentQuote.laborRate;
+    const isDefaultRate = laborRate === (businessSettings?.defaultLaborRate || 85) && currentQuote.laborHours === 0;
+
+    const selectedTemplates = allTemplates.filter(t => checkedTemplateIds.has(t.id));
+
+    selectedTemplates.forEach(template => {
+      const qty = templateQuantities[template.id] || 1;
+      // Use AI-suggested contextual name if available
+      const suggestion = (currentQuote as any)?.templateSuggestions?.find((s: any) => s.templateId === template.id);
+      const baseName = suggestion?.suggestedSectionName || template.name;
+      const sectionName = getUniqueSectionName(baseName);
+
+      // Add materials with base quantities and multiplied totals
+      const templateMaterials: Material[] = template.materials.map((m) => ({
+        ...m,
+        id: generateId(),
+        section: sectionName,
+        templateBaseQuantity: m.quantity,
+        quantity: m.quantity * qty,
+        totalPrice: (m.quantity * qty) * m.price,
+        manualPriceOverride: m.manualPriceOverride ?? true,
+        favoriteProduct: (m as any).favoriteProduct,
+      }));
+      newMaterials = [...newMaterials, ...templateMaterials];
+
+      // Create QuoteSection with multiplier
+      newSections.push({
+        id: `section-${Date.now()}-${template.id}`,
+        name: sectionName,
+        multiplier: qty,
+        sourceTemplateId: template.id,
+        laborHours: template.laborHours,
+        laborRate: template.laborRate,
+        laborUnit: template.laborUnit,
+        laborTotal: template.laborHours * template.laborRate * qty,
+        sortOrder: newSections.length,
+      });
+
+      // Accumulate labor (convert to hours)
+      const templateHours = template.laborUnit === 'days'
+        ? template.laborHours * HOURS_PER_DAY * qty
+        : template.laborHours * qty;
+      additionalLaborHours += templateHours;
+
+      // Use first template's rate if quote has no labor set
+      if (isDefaultRate && template.laborRate > 0) {
+        laborRate = template.laborUnit === 'days'
+          ? template.laborRate / HOURS_PER_DAY
+          : template.laborRate;
+      }
+    });
+
+    updateQuote({
+      ...currentQuote,
+      materials: [...currentQuote.materials, ...newMaterials],
+      sections: newSections,
+      laborHours: currentQuote.laborHours + additionalLaborHours,
+      laborRate,
+    });
+  };
 
   // Cleanup fetch countdown on unmount
   useEffect(() => {
@@ -554,11 +707,24 @@ export function MaterialsListScreen() {
         ? quotePhotos.map((p: any) => p.storageUrl).filter(Boolean)
         : undefined;
 
-      const analysis = await analyzeJobDescription(jobDescription, tradeContext, 3, photoUrlsForAi);
+      // Pass existing materials so AI doesn't duplicate them (gap-fill mode)
+      const existingMatsForAi = currentQuote.materials.length > 0
+        ? currentQuote.materials.map(m => ({ name: m.name, quantity: m.quantity, unit: m.unit, section: m.section }))
+        : undefined;
+
+      // Pass saved templates so AI can reuse their section names and materials
+      const templateDataForAi = allTemplates.length > 0
+        ? allTemplates.map(t => ({
+            name: t.name,
+            materials: t.materials.map(m => ({ name: m.name, quantity: m.quantity, unit: m.unit })),
+            laborHours: t.laborHours,
+          }))
+        : undefined;
+
+      const analysis = await analyzeJobDescription(jobDescription, tradeContext, 3, photoUrlsForAi, existingMatsForAi, templateDataForAi);
 
       // Check if user canceled during AI analysis
       if (cancelGeneration) {
-        console.log('Generation canceled by user');
         return;
       }
 
@@ -576,7 +742,42 @@ export function MaterialsListScreen() {
         totalPrice: 0,
         manualPriceOverride: false,
         ...(m.section && { section: m.section }),
+        ...(m.templateBaseQuantity && { templateBaseQuantity: m.templateBaseQuantity }),
       }));
+
+      // Create QuoteSection objects from unique AI-generated sections with multipliers + labor
+      const sectionMultipliers = new Map<string, number>();
+      const sectionLaborHours = new Map<string, number>();
+      baseMaterials.forEach(m => {
+        if (m.section && m.sectionMultiplier && m.sectionMultiplier > 1) {
+          sectionMultipliers.set(m.section, m.sectionMultiplier);
+        }
+        if (m.section && (m as any).sectionLaborHours > 0) {
+          sectionLaborHours.set(m.section, (m as any).sectionLaborHours);
+        }
+      });
+      const existingSections = currentQuote.sections || [];
+      const existingSectionNames = new Set(existingSections.map(s => s.name));
+      const defaultRate = businessSettings?.defaultLaborRate || 85;
+      const newSections: QuoteSection[] = [];
+      sectionMultipliers.forEach((multiplier, sectionName) => {
+        if (!existingSectionNames.has(sectionName)) {
+          const perUnitHours = sectionLaborHours.get(sectionName) || 0;
+          const useDays = perUnitHours >= 5;
+          const laborRate = useDays ? defaultRate * 8 : defaultRate;
+          const laborHoursValue = useDays ? perUnitHours / 8 : perUnitHours;
+          newSections.push({
+            id: `section-${Date.now()}-${sectionName.replace(/\s/g, '')}`,
+            name: sectionName,
+            multiplier,
+            laborHours: laborHoursValue,
+            laborRate,
+            laborUnit: useDays ? 'days' : 'hours',
+            laborTotal: laborHoursValue * laborRate * multiplier,
+            sortOrder: existingSections.length + newSections.length,
+          });
+        }
+      });
 
       // Update the quote with analyzed data
       const updatedJob = {
@@ -584,21 +785,26 @@ export function MaterialsListScreen() {
         estimatedHours: analysis.estimatedHours,
       };
 
+      // If materials already exist (gap-fill mode), append instead of replace
+      const hasExistingMaterials = currentQuote.materials.length > 0;
       const updatedQuote = {
         ...currentQuote,
         job: updatedJob,
-        materials: generatedMaterials,
-        laborHours: analysis.estimatedHours,
+        sections: [...existingSections, ...newSections],
+        materials: hasExistingMaterials
+          ? [...currentQuote.materials, ...generatedMaterials]
+          : generatedMaterials,
+        laborHours: hasExistingMaterials
+          ? currentQuote.laborHours + (analysis.estimatedHours || 0)
+          : analysis.estimatedHours,
       };
 
       updateQuote(updatedQuote);
 
-      console.log('✅ AI analysis complete:', generatedMaterials.length, 'materials generated');
       setSuccessTitle('Materials Generated!');
       setSuccessMessage(`Generated ${generatedMaterials.length} material${generatedMaterials.length !== 1 ? 's' : ''} from your job description.`);
       setShowSuccessModal(true);
     } catch (error: any) {
-      console.error('❌ AI analysis error:', error);
       setSuccessType('error');
       setSuccessTitle('Generation Failed');
       setSuccessMessage('Could not generate materials list. Please add materials manually or try again.');
@@ -648,6 +854,7 @@ export function MaterialsListScreen() {
   };
 
   const handleFetchPrices = async () => {
+    if (isFetchingPrices) return; // Prevent double-fire
     if (materials.length === 0) {
       setSuccessType('info');
       setSuccessTitle('Nothing to Price');
@@ -658,8 +865,13 @@ export function MaterialsListScreen() {
 
     // Calculate estimated time and show modal
     const materialsNeedingPrices = materials.filter(m => !(m.price > 0 && !m.manualPriceOverride));
-    const estimatedSeconds = Math.max(materialsNeedingPrices.length * 35, 35);
+    const useScraperApiBatch = true; // Always available via Firebase proxy
+    // Batch mode processes 3 at a time (~35s per batch of 3) vs 35s per item individually
+    const estimatedSeconds = useScraperApiBatch
+      ? Math.max(Math.ceil(materialsNeedingPrices.length / 3) * 35, 35)
+      : Math.max(materialsNeedingPrices.length * 35, 35);
     setFetchedItemNames([]);
+    setFetchPhase('idle');
     setCurrentFetchingName('');
     startFetchCountdown(estimatedSeconds);
 
@@ -689,7 +901,7 @@ export function MaterialsListScreen() {
     // Determine which pricing method to use
     const useBunningsApi = businessSettings?.useBunningsApi === true;
     const useReeceApi = false; // Disabled - API coming soon
-    const useScraperApi = BUNNINGS_SCRAPER_URL ? true : false;
+    const useScraperApi = true; // Always available via Firebase proxy
 
     // Get selected store (single store only now)
     const selectedStore = businessSettings?.selectedStore || 'bunnings';
@@ -699,14 +911,6 @@ export function MaterialsListScreen() {
 
     const hardwareStores = [storeUrl]; // Single store array for backwards compatibility
 
-    console.log('💡 Pricing method settings:', {
-      selectedStore,
-      storeUrl,
-      useScraperApi,
-      useBunningsApi,
-      scraperUrl: BUNNINGS_SCRAPER_URL,
-    });
-
     let methodName = 'AI estimation';
     if (useScraperApi && selectedStore === 'bunnings') {
       methodName = 'Bunnings';
@@ -714,11 +918,131 @@ export function MaterialsListScreen() {
       methodName = 'Bunnings API';
     }
 
-    console.log(`📊 Using pricing method: ${methodName}`);
-
     const updatedMaterials = [...materials];
 
     try {
+
+      // --- BATCH FETCH: Progressive chunking (3 items at a time) ---
+      let batchResults: Map<string, ScraperProduct | null> | null = null;
+      const batchSucceededTerms = new Set<string>();
+      if (useScraperApi && materialsToFetch.length > 0) {
+        try {
+          const searchTermsToFetch = materialsToFetch.map(m => m.searchTerm || m.name);
+          const chunkSize = 3;
+          const totalChunks = Math.ceil(searchTermsToFetch.length / chunkSize);
+          setFetchPhase('batch');
+          setBatchChunkProgress({ current: 0, total: totalChunks });
+
+          // Initialize per-item statuses: first chunk "searching", rest "pending"
+          const initialStatuses = new Map<string, 'pending' | 'searching' | 'done' | 'failed'>();
+          searchTermsToFetch.forEach((term, idx) => {
+            initialStatuses.set(term, idx < chunkSize ? 'searching' : 'pending');
+          });
+          setBatchItemStatuses(new Map(initialStatuses));
+          setCurrentFetchingName(`Searching batch 1 of ${totalChunks}...`);
+
+          // Helper to apply a scraper product to a material
+          const applyProduct = (material: any, product: any) => {
+            material.price = product.price;
+            material.totalPrice = product.price * material.quantity;
+            material.manualPriceOverride = false;
+            material.pricingSource = 'scraper';
+            if (product.itemNumber) material.bunningsItemNumber = product.itemNumber;
+            if (product.productUrl) material.productUrl = product.productUrl;
+            if (product.imageUrl) material.imageUrl = product.imageUrl;
+            if (product.description) material.description = product.description;
+            if (product.brand &&
+                product.brand.toLowerCase() !== 'bunnings' &&
+                product.brand.toLowerCase() !== 'bunnings.com.au') {
+              material.brand = product.brand;
+            }
+            if (product.stockCheckedAt) material.stockCheckedAt = product.stockCheckedAt;
+          };
+
+          batchResults = await withCancel(batchFindBestMatchesProgressive(
+            searchTermsToFetch,
+            5,
+            chunkSize,
+            (chunkResults: Map<string, ScraperProduct | null>, chunkTerms: string[], chunkIndex: number, totalChunks: number) => {
+              // Apply prices from this chunk immediately
+              for (const [searchTerm, product] of chunkResults) {
+                const matIndex = updatedMaterials.findIndex(
+                  m => (m.searchTerm || m.name) === searchTerm
+                );
+                if (matIndex === -1) continue;
+                const material = updatedMaterials[matIndex];
+
+                if (product && product.price > 0) {
+                  applyProduct(material, product);
+                  fetchedCount++;
+                  batchSucceededTerms.add(searchTerm);
+                  triggerPriceFlash(material.id);
+                }
+              }
+
+              // Update statuses: mark this chunk done/failed, next chunk searching
+              setBatchItemStatuses(prev => {
+                const next = new Map(prev);
+                for (const [term, product] of chunkResults) {
+                  next.set(term, product && product.price > 0 ? 'done' : 'failed');
+                }
+                // Mark next chunk as searching
+                const nextChunkStart = (chunkIndex + 1) * chunkSize;
+                for (let j = nextChunkStart; j < Math.min(nextChunkStart + chunkSize, searchTermsToFetch.length); j++) {
+                  next.set(searchTermsToFetch[j], 'searching');
+                }
+                return next;
+              });
+
+              const completedCount = (chunkIndex + 1) * chunkSize;
+              const doneCount = Math.min(completedCount, searchTermsToFetch.length);
+              setBatchChunkProgress({ current: chunkIndex + 1, total: totalChunks });
+              setFetchProgress({ current: doneCount, total: materialsToFetch.length });
+              setCurrentFetchingName(`Searching batch ${Math.min(chunkIndex + 2, totalChunks)} of ${totalChunks}...`);
+
+              // Add completed items to the fetched list
+              for (const [term, product] of chunkResults) {
+                setFetchedItemNames(prev => [...prev, {
+                  name: term,
+                  success: !!(product && product.price > 0),
+                }]);
+              }
+
+              // Persist partial results to store
+              if (currentQuote) {
+                updateQuote({
+                  ...currentQuote,
+                  materials: [...updatedMaterials],
+                } as any);
+              }
+
+              // Recalculate time estimate
+              if (fetchCountdownRef.current) {
+                const chunksRemaining = totalChunks - (chunkIndex + 1);
+                if (chunksRemaining <= 0) {
+                  fetchEstimateSecondsRef.current = 0;
+                  setFetchEstimateSeconds(0);
+                } else {
+                  const elapsedMs = Date.now() - fetchStartTimeRef.current;
+                  const avgMsPerChunk = elapsedMs / (chunkIndex + 1);
+                  const newEstimate = Math.ceil((avgMsPerChunk * chunksRemaining) / 1000);
+                  fetchEstimateSecondsRef.current = newEstimate;
+                  setFetchEstimateSeconds(newEstimate);
+                }
+              }
+            },
+            () => cancelFetchRef.current,
+          ));
+
+          setBatchItemStatuses(new Map());
+          setFetchPhase('individual');
+        } catch (error: any) {
+          if (error?.message === '__FETCH_CANCELLED__') throw error;
+          batchResults = null;
+          setBatchItemStatuses(new Map());
+          setFetchPhase('individual');
+        }
+      }
 
       let fetchIndex = 0;
       for (let i = 0; i < updatedMaterials.length; i++) {
@@ -744,9 +1068,14 @@ export function MaterialsListScreen() {
 
         if (useScraperApi) {
           // Use Bunnings Scraper API (Priority #1 - Real Prices)
+          // Try batch result first (instant), fall back to individual search
           try {
-            console.log(`🔍 Scraper: Searching for "${searchTerm}"...`);
-            const product = await withCancel(findBestMatchForMaterial(searchTerm));
+            let product = batchResults?.get(searchTerm) ?? null;
+
+            if (!product) {
+              // Batch missed this one — try individual search
+              product = await withCancel(findBestMatchForMaterial(searchTerm));
+            }
 
             if (product && product.price > 0) {
               material.price = product.price;
@@ -783,19 +1112,14 @@ export function MaterialsListScreen() {
 
               fetchedCount++;
               triggerPriceFlash(material.id);
-              console.log(`✅ Scraper: ${product.productName} - $${product.price}`);
             } else {
-              console.log('⚠️ Scraper: No product found with price, trying next method...');
               throw new Error('No product found with price');
             }
           } catch (error: any) {
             // Re-throw cancellation so the outer catch handles it instantly
             if (error?.message === '__FETCH_CANCELLED__') throw error;
-            console.log('❌ Scraper failed, falling back to next pricing method:', error);
-
             // Fallback to next method: try Bunnings API first, then AI estimation
             if (useBunningsApi) {
-              console.log('🔄 Trying Bunnings API fallback...');
               const result = await withCancel(bunningsApi.findAndPriceMaterial(searchTerm));
               if (result) {
                 material.bunningsItemNumber = result.item.itemNumber;
@@ -805,10 +1129,7 @@ export function MaterialsListScreen() {
                 material.pricingSource = 'api';
                 fetchedCount++;
               triggerPriceFlash(material.id);
-                console.log(`✅ Bunnings API fallback succeeded: $${result.price.priceIncGst}`);
               } else {
-                // Bunnings API also failed, try AI estimation as final fallback
-                console.log('🔄 Bunnings API failed, trying AI estimation fallback...');
                 const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
                 if (aiResult.price) {
@@ -827,15 +1148,12 @@ export function MaterialsListScreen() {
 
                   fetchedCount++;
               triggerPriceFlash(material.id);
-                  console.log(`✅ AI estimation fallback succeeded: $${aiResult.price}`);
                 } else {
                   failedCount++;
-                  console.log('❌ All fallback methods failed');
                 }
               }
             } else {
               // No Bunnings API, fall back directly to AI estimation
-              console.log('🔄 Trying AI estimation fallback...');
               const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
               if (aiResult.price) {
@@ -854,10 +1172,8 @@ export function MaterialsListScreen() {
 
                 fetchedCount++;
               triggerPriceFlash(material.id);
-                console.log(`✅ AI estimation fallback succeeded: $${aiResult.price}`);
               } else {
                 failedCount++;
-                console.log('❌ AI estimation fallback failed');
               }
             }
           }
@@ -922,7 +1238,6 @@ export function MaterialsListScreen() {
 
           if (favorite) {
             // Use favorite product's last known price (user can manually update if needed)
-            console.log(`Using favorite for "${searchTerm}":`, favorite.productName);
             material.favoriteProduct = favorite;
             // Note: Favorite stores the product info but not price (prices change)
             // So we still need to search, but we'll auto-select the favorite
@@ -972,6 +1287,7 @@ export function MaterialsListScreen() {
               stopFetchCountdown();
               setCurrentFetchingName('');
               setIsFetchingPrices(false);
+              setFetchPhase('idle');
               return; // Exit early, user will resume after selection
             }
 
@@ -1017,7 +1333,6 @@ export function MaterialsListScreen() {
             }
           } else {
             // Web scraping failed, fall back to AI estimation
-            console.log(`Web scraping failed for "${searchTerm}", trying AI estimation...`);
             const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
             if (aiResult.price) {
@@ -1036,7 +1351,6 @@ export function MaterialsListScreen() {
 
               fetchedCount++;
               triggerPriceFlash(material.id);
-              console.log(`AI estimation succeeded for "${searchTerm}": $${aiResult.price}`);
             } else {
               failedCount++;
             }
@@ -1073,8 +1387,13 @@ export function MaterialsListScreen() {
           } as any);
         }
 
-        // Small delay to avoid overwhelming the API
-        await withCancel(new Promise(resolve => setTimeout(resolve, 1000)));
+        // Small delay to avoid overwhelming the API (skip if just applying batch results)
+        if (!batchResults) {
+          await withCancel(new Promise(resolve => setTimeout(resolve, 1000)));
+        } else {
+          // Brief delay so UI can render each item update
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       }
 
       // Final update to ensure all changes are saved
@@ -1130,7 +1449,6 @@ export function MaterialsListScreen() {
           setShowSuccessModal(true);
         }
       } else {
-        console.error('Error fetching prices:', error);
         setSuccessType('error');
         setSuccessTitle('Crikey!');
         setSuccessMessage(`Something went wrong fetching prices. ${useBunningsApi ? 'Bunnings API might be on smoko,' : 'The price service might be taking a sickie,'} or your internet\'s gone walkabout. Give it another crack later.`);
@@ -1154,6 +1472,9 @@ export function MaterialsListScreen() {
       setIsFetchingPrices(false);
       setFetchingMaterialId(null);
       setFetchProgress({ current: 0, total: 0 });
+      setFetchPhase('idle');
+      setBatchItemStatuses(new Map());
+      setBatchChunkProgress({ current: 0, total: 0 });
     }
   };
 
@@ -1246,10 +1567,229 @@ export function MaterialsListScreen() {
     navigation.navigate('AddMaterial');
   };
 
+  const handleCreateSection = () => {
+    if (!newSectionName.trim() || !currentQuote) return;
+    // Create a QuoteSection entry and add to quote
+    const defaultRate = currentQuote.laborRate || businessSettings?.defaultLaborRate || 85;
+    const existingSections = currentQuote.sections || [];
+    const section: QuoteSection = {
+      id: `section-${Date.now()}`,
+      name: newSectionName.trim(),
+      multiplier: 1,
+      laborHours: 0,
+      laborRate: defaultRate,
+      laborUnit: 'hours' as LaborUnit,
+      laborTotal: 0,
+      sortOrder: existingSections.length,
+    };
+    updateQuote({
+      ...currentQuote,
+      sections: [...existingSections, section],
+    });
+    setNewSectionName('');
+    setShowNewSectionModal(false);
+  };
+
+  const handleRenameSection = (oldName: string) => {
+    if (!renameValue.trim() || !currentQuote || renameValue.trim() === oldName) {
+      setRenamingSectionKey(null);
+      return;
+    }
+    const newName = renameValue.trim();
+    // Rename on all materials
+    const updatedMaterials = currentQuote.materials.map(m =>
+      m.section === oldName ? { ...m, section: newName } : m
+    );
+    // Rename in sections array
+    const updatedSections = (currentQuote.sections || []).map(s =>
+      s.name === oldName ? { ...s, name: newName } : s
+    );
+    updateQuote({
+      ...currentQuote,
+      materials: updatedMaterials,
+      sections: updatedSections,
+    });
+    setRenamingSectionKey(null);
+  };
+
+  const handleSaveSectionAsTemplate = (sectionName: string) => {
+    if (!currentQuote) return;
+    const sectionData = (currentQuote.sections || []).find(s => s.name === sectionName);
+    setSaveTemplateSectionName(sectionName);
+    setSaveTemplateName(sectionName);
+    setSaveTemplateLaborHours(String(sectionData?.laborHours || 0));
+    setSaveTemplateKeywords(suggestKeywordsFromName(sectionName));
+    setSaveTemplateKeywordInput('');
+    setSaveTemplateModalVisible(true);
+  };
+
+  const handleConfirmSaveTemplate = async () => {
+    if (!currentQuote || !saveTemplateSectionName) return;
+    const sectionMaterials = currentQuote.materials.filter(m => m.section === saveTemplateSectionName);
+    const sectionData = (currentQuote.sections || []).find(s => s.name === saveTemplateSectionName);
+    const laborHours = parseFloat(saveTemplateLaborHours) || 0;
+    const finalKeywords = saveTemplateKeywords.length > 0 ? saveTemplateKeywords : suggestKeywordsFromName(saveTemplateName || saveTemplateSectionName);
+    const template: SectionTemplate = {
+      id: `tpl-${Date.now()}`,
+      name: saveTemplateName.trim() || saveTemplateSectionName,
+      keywords: finalKeywords.length > 0 ? finalKeywords : undefined,
+      materials: sectionMaterials.map(({ id, ...rest }) => rest),
+      laborHours,
+      laborRate: sectionData?.laborRate || currentQuote.laborRate || 85,
+      laborUnit: sectionData?.laborUnit || currentQuote.laborUnit || 'hours',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await saveTemplate(template);
+    setSaveTemplateModalVisible(false);
+    setSuccessTitle('Bloody Ripper!');
+    setSuccessMessage(`"${template.name}" saved as a template. Chuck it on any future quote, easy as.`);
+    setSuccessType('success');
+    setShowSuccessModal(true);
+  };
+
+  const getUniqueSectionName = (baseName: string): string => {
+    if (!currentQuote) return baseName;
+    const existingNames = new Set<string>();
+    currentQuote.materials.forEach(m => { if (m.section) existingNames.add(m.section); });
+    (currentQuote.sections || []).forEach(s => existingNames.add(s.name));
+    if (!existingNames.has(baseName)) return baseName;
+    let counter = 2;
+    while (existingNames.has(`${baseName} (${counter})`)) counter++;
+    return `${baseName} (${counter})`;
+  };
+
+  const handleLoadTemplate = async () => {
+    const templates = await loadTemplates();
+    if (templates.length === 0) {
+      Alert.alert('No Templates', 'Save a section as a template first, or create one in Settings > Section Templates.');
+      return;
+    }
+    setAvailableTemplates(templates);
+    setSelectedTemplate(null);
+    setTemplatePickerVisible(true);
+  };
+
+  const handleConfirmLoadTemplate = (template: SectionTemplate) => {
+    if (!currentQuote) return;
+    const sectionName = getUniqueSectionName(template.name);
+    const newMaterials: Material[] = template.materials.map((m) => ({
+      ...m,
+      id: generateId(),
+      section: sectionName,
+      templateBaseQuantity: m.quantity,
+      manualPriceOverride: m.manualPriceOverride ?? true,
+      favoriteProduct: (m as any).favoriteProduct,
+    }));
+
+    const existingSections = currentQuote.sections || [];
+    const newSection: QuoteSection = {
+      id: `section-${Date.now()}`,
+      name: sectionName,
+      multiplier: 1,
+      sourceTemplateId: template.id,
+      laborHours: template.laborHours,
+      laborRate: template.laborRate,
+      laborUnit: template.laborUnit,
+      laborTotal: template.laborHours * template.laborRate,
+      sortOrder: existingSections.length,
+    };
+
+    const HOURS_PER_DAY = 8;
+    const templateLaborInHours = template.laborUnit === 'days'
+      ? template.laborHours * HOURS_PER_DAY
+      : template.laborHours;
+
+    const newLaborRate = currentQuote.laborHours === 0 && currentQuote.laborRate === (businessSettings?.defaultLaborRate || 85)
+      ? (template.laborUnit === 'days' ? template.laborRate / HOURS_PER_DAY : template.laborRate)
+      : currentQuote.laborRate;
+
+    updateQuote({
+      ...currentQuote,
+      materials: [...currentQuote.materials, ...newMaterials],
+      sections: [...existingSections, newSection],
+      laborHours: currentQuote.laborHours + templateLaborInHours,
+      laborRate: newLaborRate,
+    });
+    setTemplatePickerVisible(false);
+    setSelectedTemplate(null);
+  };
+
+  const handleSectionMultiplierChange = (sectionName: string, newMultiplier: number) => {
+    if (!currentQuote || newMultiplier < 1) return;
+    const updatedSections = (currentQuote.sections || []).map(s =>
+      s.name === sectionName ? { ...s, multiplier: newMultiplier, laborTotal: s.laborHours * s.laborRate * newMultiplier } : s
+    );
+    const updatedMaterials = currentQuote.materials.map(m => {
+      if (m.section !== sectionName || !m.templateBaseQuantity) return m;
+      const newQty = m.templateBaseQuantity * newMultiplier;
+      return { ...m, quantity: newQty, totalPrice: newQty * m.price };
+    });
+    updateQuote({ ...currentQuote, sections: updatedSections, materials: updatedMaterials });
+  };
+
+  const handleDeleteSection = (sectionName: string) => {
+    if (!currentQuote) return;
+    setDeleteSectionName(sectionName);
+    setDeleteSectionModalVisible(true);
+  };
+
+  const handleConfirmDeleteSection = () => {
+    if (!currentQuote || !deleteSectionName) return;
+    const updatedMaterials = currentQuote.materials.map(m =>
+      m.section === deleteSectionName ? { ...m, section: undefined } : m
+    );
+    const updatedSections = (currentQuote.sections || []).filter(s => s.name !== deleteSectionName);
+    updateQuote({ ...currentQuote, materials: updatedMaterials, sections: updatedSections });
+    setDeleteSectionModalVisible(false);
+  };
+
+  const handleMoveToSection = (materialId: string) => {
+    if (!currentQuote) return;
+    const material = currentQuote.materials.find(m => m.id === materialId);
+    const currentSection = material?.section || '';
+
+    const sectionNames = new Set<string>();
+    if (currentQuote.sections) currentQuote.sections.forEach(s => sectionNames.add(s.name));
+    currentQuote.materials.forEach(m => { if (m.section) sectionNames.add(m.section); });
+
+    // Build options: all sections except current, plus "Unsectioned"
+    const buttons: { text: string; onPress: () => void }[] = [];
+    Array.from(sectionNames).sort().forEach(name => {
+      if (name === currentSection) return; // Skip current section
+      buttons.push({
+        text: name,
+        onPress: () => {
+          const updatedMaterials = currentQuote.materials.map(m =>
+            m.id === materialId ? { ...m, section: name, templateBaseQuantity: undefined } : m
+          );
+          updateQuote({ ...currentQuote, materials: updatedMaterials });
+        },
+      });
+    });
+    if (currentSection) {
+      buttons.push({
+        text: 'Unsectioned',
+        onPress: () => {
+          const updatedMaterials = currentQuote.materials.map(m =>
+            m.id === materialId ? { ...m, section: undefined, templateBaseQuantity: undefined } : m
+          );
+          updateQuote({ ...currentQuote, materials: updatedMaterials });
+        },
+      });
+    }
+    if (buttons.length === 0) {
+      Alert.alert('No Other Sections', 'Create another section first.');
+      return;
+    }
+    buttons.push({ text: 'Cancel', onPress: () => {} });
+    Alert.alert('Move to Section', 'Choose a section:', buttons as any);
+  };
+
+
   const handleOpenInStore = (material: Material) => {
     // If we have a direct product URL (from scraper or API), use it!
     if (material.productUrl) {
-      console.log(`🔗 Opening product URL: ${material.productUrl}`);
       if (Platform.OS === 'web') {
         window.open(material.productUrl, '_blank');
       } else {
@@ -1258,7 +1798,6 @@ export function MaterialsListScreen() {
           setSuccessTitle('Error');
           setSuccessMessage('Could not open product link.');
           setShowSuccessModal(true);
-          console.error('Failed to open URL:', err);
         });
       }
       return;
@@ -1288,8 +1827,6 @@ export function MaterialsListScreen() {
       storeUrl = `https://www.google.com/search?q=${encodedSearch}+site:${firstStore}`;
     }
 
-    console.log(`🔍 Opening search URL: ${storeUrl}`);
-
     // Open URL
     if (Platform.OS === 'web') {
       window.open(storeUrl, '_blank');
@@ -1299,7 +1836,6 @@ export function MaterialsListScreen() {
         setSuccessTitle('Error');
         setSuccessMessage('Could not open store link.');
         setShowSuccessModal(true);
-        console.error('Failed to open URL:', err);
       });
     }
   };
@@ -1321,7 +1857,8 @@ export function MaterialsListScreen() {
     // Then update the store
     const updatedMaterials = materials.map(m => {
       if (m.id === materialId) {
-        return updateMaterialTotalPrice({ ...m, quantity: newQty });
+        // Break template link — user manually changed qty
+        return updateMaterialTotalPrice({ ...m, quantity: newQty, templateBaseQuantity: undefined });
       }
       return m;
     });
@@ -1335,7 +1872,8 @@ export function MaterialsListScreen() {
     setLocalQuantities(prev => ({ ...prev, [materialId]: newQty }));
     const updatedMaterials = materials.map(m => {
       if (m.id === materialId) {
-        return updateMaterialTotalPrice({ ...m, quantity: newQty });
+        // Break template link — user manually changed qty
+        return updateMaterialTotalPrice({ ...m, quantity: newQty, templateBaseQuantity: undefined });
       }
       return m;
     });
@@ -1399,8 +1937,8 @@ export function MaterialsListScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView
-          ref={materialsScrollRef}
+      <NestableScrollContainer
+          ref={materialsScrollRef as any}
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -1409,275 +1947,671 @@ export function MaterialsListScreen() {
         <WebContainer>
         {isAiAnalyzing ? (
             <AiAnalyzingState />
+        ) : materials.length === 0 && !templatesLoaded ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 40 }} />
+          </View>
         ) : materials.length === 0 ? (
           <View style={styles.emptyState}>
-            <MaterialCommunityIcons name="package-variant-closed" size={64} color={colors.textMuted} />
-            <Text style={styles.emptyText}>{emptyMessage.title}</Text>
-            <Text style={styles.emptySubtext}>
-              {emptyMessage.subtitle}
-            </Text>
+            {allTemplates.length > 0 && suggestedTemplateIds.size > 0 ? (
+              <>
+                {/* Templates matched — compact layout */}
+                <Text style={styles.suggestionsTitle}>Ready to load</Text>
 
-            {/* AI Generate Card */}
-            <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
-              if (!isPro) {
-                navigation.navigate('Paywall' as never);
-                return;
-              }
-              handleGenerateMaterialsList();
-            }} activeOpacity={0.7}>
-              <View style={styles.emptyActionIconWrap}>
-                <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
-              </View>
-              <View style={styles.emptyActionContent}>
-                <View style={styles.emptyActionTitleRow}>
-                  <Text style={styles.emptyActionTitle}>Generate with AI</Text>
-                  {!isPro && <ProBadge size="small" />}
+                {allTemplates
+                  .sort((a, b) => {
+                    const aMatch = suggestedTemplateIds.has(a.id) ? 0 : 1;
+                    const bMatch = suggestedTemplateIds.has(b.id) ? 0 : 1;
+                    return aMatch - bMatch;
+                  })
+                  .map(template => {
+                    const isChecked = checkedTemplateIds.has(template.id);
+                    const isSuggested = suggestedTemplateIds.has(template.id);
+                    const qty = templateQuantities[template.id] || 1;
+                    const materialsCost = template.materials.reduce((sum, m) => sum + (m.quantity * m.price), 0);
+                    const laborCost = template.laborHours * template.laborRate;
+                    const unitCost = materialsCost + laborCost;
+
+                    return (
+                      <Surface key={template.id} style={[styles.suggestionCard, isChecked && styles.suggestionCardChecked]}>
+                        <TouchableOpacity
+                          style={styles.suggestionCardInner}
+                          onPress={() => setCheckedTemplateIds(prev => {
+                            const next = new Set(prev);
+                            next.has(template.id) ? next.delete(template.id) : next.add(template.id);
+                            return next;
+                          })}
+                          activeOpacity={0.7}
+                        >
+                          <MaterialCommunityIcons
+                            name={isChecked ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                            size={22}
+                            color={isChecked ? colors.primary : colors.textMuted}
+                          />
+                          <View style={styles.suggestionInfo}>
+                            <View style={styles.suggestionCompactRow}>
+                              <Text style={styles.suggestionName} numberOfLines={1}>{template.name}</Text>
+                              <Text style={styles.suggestionQtyBadge}>×{qty}</Text>
+                              <Text style={styles.suggestionUnitCost}>{formatCurrency(unitCost)}/unit</Text>
+                            </View>
+                            {isSuggested && (
+                              <Text style={styles.suggestionMatchHint}>
+                                {template.materials.length} material{template.materials.length !== 1 ? 's' : ''}
+                                {laborCost > 0 ? ` · ${template.laborHours}${template.laborUnit === 'days' ? 'd' : 'h'} labour` : ''}
+                              </Text>
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                        {isChecked && (
+                          <View style={styles.suggestionQtyRow}>
+                            <Text style={styles.suggestionQtyLabel}>Qty:</Text>
+                            <View style={styles.suggestionStepper}>
+                              <Pressable
+                                style={({ pressed }) => [styles.suggestionStepperBtn, pressed && { opacity: 0.6 }]}
+                                onPress={() => setTemplateQuantities(prev => ({ ...prev, [template.id]: Math.max(1, qty - 1) }))}
+                              >
+                                <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
+                              </Pressable>
+                              <Text style={styles.suggestionStepperValue}>{qty}</Text>
+                              <Pressable
+                                style={({ pressed }) => [styles.suggestionStepperBtn, pressed && { opacity: 0.6 }]}
+                                onPress={() => setTemplateQuantities(prev => ({ ...prev, [template.id]: qty + 1 }))}
+                              >
+                                <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
+                              </Pressable>
+                            </View>
+                            <Text style={styles.suggestionQtyTotal}>
+                              {formatCurrency(unitCost * qty)}
+                            </Text>
+                          </View>
+                        )}
+                      </Surface>
+                    );
+                  })}
+
+                {/* Single load button */}
+                {checkedTemplateIds.size > 0 && (
+                  <View style={styles.suggestionActions}>
+                    <TouchableOpacity
+                      style={styles.loadAndFillBtn}
+                      onPress={() => {
+                        loadSelectedTemplatesIntoQuote();
+                        if (isLoadingWithGaps && isPro) {
+                          setTimeout(() => handleGenerateMaterialsList(), 300);
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <MaterialCommunityIcons name="download" size={20} color="#FFFFFF" />
+                      <Text style={styles.loadAndFillBtnText}>Load Materials</Text>
+                    </TouchableOpacity>
+
+                    {/* Fill gaps toggle (Pro) */}
+                    {isPro && (
+                      <TouchableOpacity
+                        style={styles.fillGapsToggle}
+                        onPress={() => setIsLoadingWithGaps(prev => !prev)}
+                        activeOpacity={0.7}
+                      >
+                        <MaterialCommunityIcons
+                          name={isLoadingWithGaps ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                          size={20}
+                          color={isLoadingWithGaps ? colors.primary : colors.textMuted}
+                        />
+                        <Text style={styles.fillGapsToggleText}>Fill remaining gaps</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                {/* Secondary options */}
+                <View style={styles.orDivider}>
+                  <View style={styles.orDividerLine} />
+                  <Text style={styles.orDividerText}>or start differently</Text>
+                  <View style={styles.orDividerLine} />
                 </View>
-                <Text style={styles.emptyActionDesc}>
-                  Automatically create a full materials list from your job description
-                </Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-            </TouchableOpacity>
+                <View style={styles.secondaryActionsRow}>
+                  <TouchableOpacity ref={aiGenerateRef} onPress={() => {
+                    if (!isPro) { navigation.navigate('Paywall' as never); return; }
+                    handleGenerateMaterialsList();
+                  }} style={styles.secondaryActionLink}>
+                    <Text style={styles.secondaryActionText}>Build from description</Text>
+                    {!isPro && <ProBadge size="small" />}
+                  </TouchableOpacity>
+                  <TouchableOpacity ref={addManualRef} onPress={handleAddMaterial} style={styles.secondaryActionLink}>
+                    <Text style={styles.secondaryActionText}>Start empty</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : allTemplates.length > 0 ? (
+              <>
+                {/* Templates exist but none matched */}
+                <Text style={styles.suggestionsTitle}>Your Job Templates</Text>
 
-            {/* Add Manually Card */}
-            <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
-              <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
-                <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
-              </View>
-              <View style={styles.emptyActionContent}>
-                <Text style={styles.emptyActionTitle}>Add manually</Text>
-                <Text style={styles.emptyActionDesc}>
-                  Search for products or enter materials by hand
+                {allTemplates.map(template => {
+                  const isChecked = checkedTemplateIds.has(template.id);
+                  const qty = templateQuantities[template.id] || 1;
+                  const materialsCost = template.materials.reduce((sum, m) => sum + (m.quantity * m.price), 0);
+                  const laborCost = template.laborHours * template.laborRate;
+                  const unitCost = materialsCost + laborCost;
+
+                  return (
+                    <Surface key={template.id} style={[styles.suggestionCard, isChecked && styles.suggestionCardChecked]}>
+                      <TouchableOpacity
+                        style={styles.suggestionCardInner}
+                        onPress={() => setCheckedTemplateIds(prev => {
+                          const next = new Set(prev);
+                          next.has(template.id) ? next.delete(template.id) : next.add(template.id);
+                          return next;
+                        })}
+                        activeOpacity={0.7}
+                      >
+                        <MaterialCommunityIcons
+                          name={isChecked ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                          size={22}
+                          color={isChecked ? colors.primary : colors.textMuted}
+                        />
+                        <View style={styles.suggestionInfo}>
+                          <View style={styles.suggestionCompactRow}>
+                            <Text style={styles.suggestionName} numberOfLines={1}>{template.name}</Text>
+                            {isChecked && <Text style={styles.suggestionQtyBadge}>×{qty}</Text>}
+                            <Text style={styles.suggestionUnitCost}>{formatCurrency(unitCost)}/unit</Text>
+                          </View>
+                          <Text style={styles.suggestionMatchHint}>
+                            {template.materials.length} material{template.materials.length !== 1 ? 's' : ''}
+                            {laborCost > 0 ? ` · ${template.laborHours}${template.laborUnit === 'days' ? 'd' : 'h'} labour` : ''}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                      {isChecked && (
+                        <View style={styles.suggestionQtyRow}>
+                          <Text style={styles.suggestionQtyLabel}>Qty:</Text>
+                          <View style={styles.suggestionStepper}>
+                            <Pressable
+                              style={({ pressed }) => [styles.suggestionStepperBtn, pressed && { opacity: 0.6 }]}
+                              onPress={() => setTemplateQuantities(prev => ({ ...prev, [template.id]: Math.max(1, qty - 1) }))}
+                            >
+                              <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
+                            </Pressable>
+                            <Text style={styles.suggestionStepperValue}>{qty}</Text>
+                            <Pressable
+                              style={({ pressed }) => [styles.suggestionStepperBtn, pressed && { opacity: 0.6 }]}
+                              onPress={() => setTemplateQuantities(prev => ({ ...prev, [template.id]: qty + 1 }))}
+                            >
+                              <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
+                            </Pressable>
+                          </View>
+                          <Text style={styles.suggestionQtyTotal}>{formatCurrency(unitCost * qty)}</Text>
+                        </View>
+                      )}
+                    </Surface>
+                  );
+                })}
+
+                {checkedTemplateIds.size > 0 && (
+                  <View style={styles.suggestionActions}>
+                    <TouchableOpacity
+                      style={styles.loadAndFillBtn}
+                      onPress={() => loadSelectedTemplatesIntoQuote()}
+                      activeOpacity={0.7}
+                    >
+                      <MaterialCommunityIcons name="download" size={20} color="#FFFFFF" />
+                      <Text style={styles.loadAndFillBtnText}>Load Materials</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                <View style={styles.orDivider}>
+                  <View style={styles.orDividerLine} />
+                  <Text style={styles.orDividerText}>or start differently</Text>
+                  <View style={styles.orDividerLine} />
+                </View>
+                <View style={styles.secondaryActionsRow}>
+                  <TouchableOpacity ref={aiGenerateRef} onPress={() => {
+                    if (!isPro) { navigation.navigate('Paywall' as never); return; }
+                    handleGenerateMaterialsList();
+                  }} style={styles.secondaryActionLink}>
+                    <Text style={styles.secondaryActionText}>Build from description</Text>
+                    {!isPro && <ProBadge size="small" />}
+                  </TouchableOpacity>
+                  <TouchableOpacity ref={addManualRef} onPress={handleAddMaterial} style={styles.secondaryActionLink}>
+                    <Text style={styles.secondaryActionText}>Start empty</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                {/* No templates at all */}
+                <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                  <MaterialCommunityIcons name="puzzle-outline" size={40} color={colors.textMuted} style={{ marginBottom: 8 }} />
+                  <Text style={{ color: colors.textMuted, fontSize: 14, textAlign: 'center' }}>
+                    No saved templates yet
+                  </Text>
+                </View>
+
+                <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
+                  if (!isPro) { navigation.navigate('Paywall' as never); return; }
+                  handleGenerateMaterialsList();
+                }} activeOpacity={0.7}>
+                  <View style={styles.emptyActionIconWrap}>
+                    <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
+                  </View>
+                  <View style={styles.emptyActionContent}>
+                    <View style={styles.emptyActionTitleRow}>
+                      <Text style={styles.emptyActionTitle}>Build from description</Text>
+                      {!isPro && <ProBadge size="small" />}
+                    </View>
+                    <Text style={styles.emptyActionDesc}>
+                      Create a full materials list from your job description
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
+
+                <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
+                  <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
+                    <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
+                  </View>
+                  <View style={styles.emptyActionContent}>
+                    <Text style={styles.emptyActionTitle}>Start empty</Text>
+                    <Text style={styles.emptyActionDesc}>
+                      Search for products or enter materials by hand
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
+
+                <Text style={{ color: colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: 16 }}>
+                  Save sections as templates for faster quoting next time.
                 </Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-            </TouchableOpacity>
+              </>
+            )}
           </View>
         ) : (
           <List.Section style={styles.listView}>
             {(() => {
               const groupedMaterials = groupMaterialsByCategory(materials);
-              const hasMultipleGroups = groupedMaterials.size > 1 || (groupedMaterials.size === 1 && !groupedMaterials.has(''));
 
-              let runningIndex = 0;
-              return Array.from(groupedMaterials.entries()).map(([groupKey, group]) => {
-                return (
-                  <View key={groupKey || 'uncategorized'}>
-                    {/* Section Header - only show if there are multiple groups */}
-                    {hasMultipleGroups && (
-                      <View style={styles.categoryHeader}>
-                        <View style={styles.sectionLine} />
-                        <Text style={styles.categoryTitle}>
-                          {group.info.name}
-                        </Text>
-                        <Text style={styles.categoryCount}>
-                          ({group.materials.length})
-                        </Text>
-                        <View style={styles.sectionLine} />
-                      </View>
-                    )}
+              // Build flat list: section-header, materials, section-footer interleaved
+              type FlatItem =
+                | { type: 'header'; key: string; sectionName: string }
+                | { type: 'material'; key: string; material: Material }
+                | { type: 'footer'; key: string; sectionName: string; subtotal: number }
 
-                    {/* Materials in this section */}
-                    {group.materials.map((material) => {
-                      const animIndex = runningIndex++;
-                      const isExpanded = expandedMaterials.has(material.id);
+              const sectionedGroups = Array.from(groupedMaterials.entries()).filter(([key]) => key !== '');
+              const unsectionedGroup = groupedMaterials.get('');
+              const existingSectionNames = new Set(sectionedGroups.map(([key]) => key));
+              if (currentQuote?.sections) {
+                currentQuote.sections.forEach(s => {
+                  if (!existingSectionNames.has(s.name)) {
+                    sectionedGroups.push([s.name, { info: { name: s.name, color: colors.primary }, materials: [] }]);
+                  }
+                });
+              }
 
-                      // Check if brand is meaningful (not just "Bunnings" or the store name)
-                      const hasMeaningfulBrand = material.brand &&
-                        material.brand.toLowerCase() !== 'bunnings' &&
-                        material.brand.toLowerCase() !== 'bunnings.com.au' &&
-                        material.brand.toLowerCase() !== 'reece' &&
-                        material.brand.toLowerCase() !== 'mitre 10';
+              const toggleSectionCollapsed = (sectionName: string) => {
+                setCollapsedSections(prev => {
+                  const next = new Set(prev);
+                  if (next.has(sectionName)) next.delete(sectionName);
+                  else next.add(sectionName);
+                  return next;
+                });
+              };
 
-                      const hasDetails = material.imageUrl || material.description || hasMeaningfulBrand || material.stockCheckedAt || material.bunningsItemNumber;
-                      const showLink = material.pricingSource === 'scraper' || material.pricingSource === 'api';
-                      const isAiEstimate = material.pricingSource === 'ai';
-                      const isCurrentlyFetching = fetchingMaterialId === material.id;
-                      const isRecentlyPriced = recentlyPricedIds.has(material.id);
-                      const flashAnim = priceFlashAnims.current.get(material.id);
+              const flatData: FlatItem[] = [];
+              sectionedGroups.forEach(([groupKey, group]) => {
+                const subtotal = group.materials.reduce((sum, m) => sum + m.totalPrice, 0);
+                flatData.push({ type: 'header', key: `h-${groupKey}`, sectionName: groupKey });
+                if (!collapsedSections.has(groupKey)) {
+                  group.materials.forEach(m => flatData.push({ type: 'material', key: m.id, material: m }));
+                }
+                flatData.push({ type: 'footer', key: `f-${groupKey}`, sectionName: groupKey, subtotal });
+              });
+              if (unsectionedGroup) {
+                unsectionedGroup.materials.forEach(m => flatData.push({ type: 'material', key: m.id, material: m }));
+              }
 
-                      return (
-                        <AnimatedListItem key={material.id} index={animIndex} staggerDelay={100}>
-                        <Animated.View
-                          ref={animIndex === 0 ? firstMaterialItemRef as any : undefined}
-                          style={[
-                            styles.listItem,
-                            isCurrentlyFetching && styles.listItemFetching,
-                            isRecentlyPriced && flashAnim && {
-                              backgroundColor: flashAnim.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [colors.surface, '#0a3d2a'],
-                              }),
-                              borderLeftWidth: 3,
-                              borderLeftColor: flashAnim.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: ['transparent', colors.success],
-                              }),
-                            },
-                          ]}
-                        >
-                          <TouchableOpacity
-                            onPress={() => hasDetails && toggleMaterialExpanded(material.id)}
-                            disabled={!hasDetails}
-                            activeOpacity={0.7}
-                          >
-                            {/* Top row: icon + name + total price */}
-                            <View style={styles.itemTopRow}>
-                              <View style={styles.itemStatusIcon}>
-                                {isCurrentlyFetching ? (
-                                  <ActivityIndicator
-                                    size={20}
-                                    color={colors.primary}
-                                  />
-                                ) : isRecentlyPriced ? (
-                                  <MaterialCommunityIcons
-                                    name="check-circle"
-                                    size={20}
-                                    color={colors.success}
-                                  />
-                                ) : (
-                                  <MaterialCommunityIcons
-                                    name="package-variant"
-                                    size={20}
-                                    color={colors.textMuted}
-                                  />
-                                )}
-                              </View>
-                              <View style={styles.itemNameWrap}>
-                                <Text style={styles.itemName} numberOfLines={2}>{material.name}</Text>
-                                {isCurrentlyFetching ? (
-                                  <Text style={styles.searchingLabel}>Searching...</Text>
-                                ) : (
-                                  <Text style={styles.itemUnitPrice}>
-                                    {formatCurrency(material.price)} ea.
-                                    {isAiEstimate ? (
-                                      <Text style={{
-                                        color: material.priceConfidence === 'high' ? colors.success
-                                          : material.priceConfidence === 'low' ? '#ef4444'
-                                          : '#f59e0b',
-                                        fontWeight: '600',
-                                      }}>
-                                        {'  ·  AI est. '}
-                                        ({material.priceConfidence || 'medium'})
-                                      </Text>
-                                    ) : ''}
-                                  </Text>
-                                )}
-                              </View>
-                              <View style={styles.itemPriceWrap}>
-                                {isCurrentlyFetching ? (
-                                  <Text style={styles.searchingPrice}>...</Text>
-                                ) : (
-                                  <Text style={[styles.itemTotal, isRecentlyPriced && styles.itemTotalSuccess]}>
-                                    {formatCurrency(material.totalPrice)}
-                                  </Text>
-                                )}
-                              </View>
-                            </View>
-
-                            {/* Bottom row: qty stepper + actions */}
-                            <View style={styles.itemBottomRow}>
-                              <View style={styles.qtyRow}>
-                                <View style={styles.qtyStepper}>
-                                  <Pressable
-                                    style={({ pressed }) => [styles.qtyBtn, pressed && styles.qtyBtnPressed]}
-                                    onPress={() => handleQuickQuantityUpdate(material.id, -1)}
-                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                  >
-                                    <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
-                                  </Pressable>
-                                  <RNTextInput
-                                    style={styles.qtyInput}
-                                    key={`${material.id}-${localQuantities[material.id] ?? material.quantity}`}
-                                    defaultValue={String(localQuantities[material.id] ?? material.quantity)}
-                                    onEndEditing={(e) => handleQuantityBlur(material.id, e.nativeEvent.text)}
-                                    keyboardType="number-pad"
-                                    selectTextOnFocus
-                                    returnKeyType="done"
-                                  />
-                                  <Pressable
-                                    style={({ pressed }) => [styles.qtyBtn, pressed && styles.qtyBtnPressed]}
-                                    onPress={() => handleQuickQuantityUpdate(material.id, 1)}
-                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                  >
-                                    <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
-                                  </Pressable>
-                                </View>
-                                <Text style={styles.qtyUnit}>{material.unit}</Text>
-                              </View>
-                              <View style={styles.itemActions}>
-                                {showLink && (
-                                  <TouchableOpacity
-                                    style={styles.actionBtn}
-                                    onPress={() => handleOpenInStore(material)}
-                                  >
-                                    <MaterialCommunityIcons name="open-in-new" size={18} color={colors.primary} />
-                                  </TouchableOpacity>
-                                )}
-                                <TouchableOpacity
-                                  style={styles.actionBtn}
-                                  onPress={() => handleEditMaterial(material)}
-                                >
-                                  <MaterialCommunityIcons name="pencil" size={18} color={colors.textMuted} />
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={styles.actionBtn}
-                                  onPress={() => handleDeleteMaterial(material.id)}
-                                >
-                                  <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
-                                </TouchableOpacity>
-                              </View>
-                            </View>
+              const renderFlatItem = ({ item, drag, isActive }: RenderItemParams<FlatItem>) => {
+                if (item.type === 'header') {
+                  const sd = currentQuote?.sections?.find(s => s.name === item.sectionName);
+                  const sectionMats = materials.filter(m => m.section === item.sectionName);
+                  const hasMultiplier = sd && sd.multiplier > 0 && sectionMats.some(m => m.templateBaseQuantity);
+                  const isCollapsed = collapsedSections.has(item.sectionName);
+                  return (
+                    <View collapsable={false}>
+                      <View style={[
+                        styles.sectionCardHeaderStandalone,
+                        isCollapsed && styles.sectionCardHeaderCollapsed,
+                      ]}>
+                        <TouchableOpacity onPress={() => toggleSectionCollapsed(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ marginRight: 8 }}>
+                          <MaterialCommunityIcons name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={22} color={colors.textMuted} />
+                        </TouchableOpacity>
+                        {renamingSectionKey === item.sectionName ? (
+                          <RNTextInput
+                            style={styles.sectionCardNameInput}
+                            value={renameValue}
+                            onChangeText={setRenameValue}
+                            onSubmitEditing={() => handleRenameSection(item.sectionName)}
+                            onBlur={() => handleRenameSection(item.sectionName)}
+                            autoFocus selectTextOnFocus returnKeyType="done"
+                          />
+                        ) : (
+                          <TouchableOpacity onPress={() => { setRenamingSectionKey(item.sectionName); setRenameValue(item.sectionName); }} activeOpacity={0.7} style={styles.sectionCardNameRow}>
+                            <Text style={styles.sectionCardName}>{item.sectionName}</Text>
                           </TouchableOpacity>
-                          {hasDetails && (
-                            <CollapsibleSection expanded={isExpanded}>
-                              <View style={styles.expandedContent}>
-                                <View style={styles.detailsContainer}>
-                                  {material.imageUrl && (
-                                    <Image
-                                      source={{ uri: material.imageUrl }}
-                                      style={styles.productImage}
-                                      resizeMode="contain"
-                                    />
-                                  )}
-                                  <View style={styles.detailsColumn}>
-                                    {material.description && (
-                                      <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Description:</Text>
-                                        <Text style={styles.detailValue}>{material.description}</Text>
-                                      </View>
-                                    )}
-                                    {hasMeaningfulBrand && (
-                                      <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Brand:</Text>
-                                        <Text style={styles.detailValue}>{material.brand}</Text>
-                                      </View>
-                                    )}
-                                    {material.stockCheckedAt && (
-                                      <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Last checked:</Text>
-                                        <Text style={styles.detailValue}>{formatTimeAgo(material.stockCheckedAt)}</Text>
-                                      </View>
-                                    )}
-                                    {material.bunningsItemNumber && (
-                                      <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Item #:</Text>
-                                        <Text style={styles.detailValue}>{material.bunningsItemNumber}</Text>
-                                      </View>
-                                    )}
-                                  </View>
-                                </View>
-                              </View>
-                            </CollapsibleSection>
-                          )}
-                        </Animated.View>
-                        </AnimatedListItem>
-                      );
-                    })}
+                        )}
+                        {hasMultiplier && (
+                          <View style={styles.multiplierStepper}>
+                            <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) - 1)}>
+                              <MaterialCommunityIcons name="minus" size={14} color={colors.text} />
+                            </Pressable>
+                            <Text style={styles.multiplierValue}>{sd?.multiplier || 1}</Text>
+                            <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) + 1)}>
+                              <MaterialCommunityIcons name="plus" size={14} color={colors.text} />
+                            </Pressable>
+                          </View>
+                        )}
+                        <View style={styles.sectionCardActions}>
+                          <TouchableOpacity onPress={() => handleSaveSectionAsTemplate(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <MaterialCommunityIcons name="content-save-outline" size={18} color={colors.textMuted} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => handleDeleteSection(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                }
+
+                if (item.type === 'footer') {
+                  const isCollapsed = collapsedSections.has(item.sectionName);
+                  return (
+                    <View collapsable={false}>
+                      <View style={[
+                        styles.sectionCardFooterStandalone,
+                        isCollapsed && styles.sectionCardFooterCollapsed,
+                      ]}>
+                        {!isCollapsed && (
+                          <TouchableOpacity style={styles.sectionAddMaterialBtn} onPress={() => navigation.navigate('AddMaterial', { section: item.sectionName })}>
+                            <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
+                            <Text style={styles.sectionAddMaterialText}>Add Material</Text>
+                          </TouchableOpacity>
+                        )}
+                        <View style={styles.sectionCardFooter}>
+                          <Text style={styles.sectionCardFooterLabel}>
+                            {isCollapsed ? `${materials.filter(m => m.section === item.sectionName).length} items` : 'Section Total'}
+                          </Text>
+                          <Text style={styles.sectionCardFooterValue}>{formatCurrency(item.subtotal)}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                }
+
+                // Material — draggable
+                return (
+                  <View collapsable={false}>
+                    <MaterialItemCard
+                      material={item.material}
+                      isExpanded={expandedMaterials.has(item.material.id)}
+                      isFetching={fetchingMaterialId === item.material.id}
+                      isRecentlyPriced={recentlyPricedIds.has(item.material.id)}
+                      localQuantity={localQuantities[item.material.id]}
+                      isActive={isActive}
+                      drag={drag}
+                      onToggleExpand={() => toggleMaterialExpanded(item.material.id)}
+                      onQuantityUpdate={(delta) => handleQuickQuantityUpdate(item.material.id, delta)}
+                      onQuantityBlur={(value) => handleQuantityBlur(item.material.id, value)}
+                      onMoveToSection={() => handleMoveToSection(item.material.id)}
+                      onOpenInStore={() => handleOpenInStore(item.material)}
+                      onEdit={() => handleEditMaterial(item.material)}
+                      onDelete={() => handleDeleteMaterial(item.material.id)}
+                    />
                   </View>
                 );
-              });
+              };
+
+              // After drag: walk the reordered flat list, assign sections based on which header each material is under.
+              // Materials dropped before the first header get assigned to the first section.
+              const handleFlatDragEnd = ({ data }: { data: FlatItem[] }) => {
+                if (!currentQuote) return;
+
+                // Find the first section name so orphan materials get assigned there
+                const firstSectionName = data.find(d => d.type === 'header')?.sectionName;
+
+                let currentSection: string | undefined = firstSectionName;
+                const newMaterials: Material[] = [];
+                data.forEach(item => {
+                  if (item.type === 'header') currentSection = item.sectionName;
+                  else if (item.type === 'material') {
+                    const assignedSection = currentSection || firstSectionName;
+                    newMaterials.push({
+                      ...item.material,
+                      section: assignedSection,
+                      templateBaseQuantity: item.material.section !== assignedSection ? undefined : item.material.templateBaseQuantity,
+                    });
+                  }
+                });
+                // Only update if something actually changed
+                let changed = false;
+                for (let i = 0; i < newMaterials.length; i++) {
+                  const orig = currentQuote.materials[i];
+                  if (!orig || newMaterials[i].id !== orig.id || newMaterials[i].section !== orig.section) {
+                    changed = true;
+                    break;
+                  }
+                }
+                if (changed) {
+                  updateQuote({ ...currentQuote, materials: newMaterials });
+                }
+              };
+
+              const WebDropZone = ({ children, onDropMaterial, style, keyProp }: {
+                children: React.ReactNode;
+                onDropMaterial?: (matId: string) => void;
+                style?: any;
+                keyProp: string;
+              }) => {
+                const ref = React.useRef<any>(null);
+                React.useEffect(() => {
+                  const el = ref.current;
+                  if (!el) return;
+                  const handleDragOver = (e: DragEvent) => { e.preventDefault(); };
+                  const handleDrop = (e: DragEvent) => {
+                    e.preventDefault();
+                    if (webDragRef.current && onDropMaterial) {
+                      onDropMaterial(webDragRef.current.materialId);
+                      webDragRef.current = null;
+                    }
+                  };
+                  el.addEventListener('dragover', handleDragOver);
+                  el.addEventListener('drop', handleDrop);
+                  return () => { el.removeEventListener('dragover', handleDragOver); el.removeEventListener('drop', handleDrop); };
+                });
+                return <View ref={ref} key={keyProp} style={style}>{children}</View>;
+              };
+
+              const WebDraggableItem = ({ children, materialId, onDropOnto, keyProp }: {
+                children: React.ReactNode;
+                materialId: string;
+                onDropOnto: (draggedId: string) => void;
+                keyProp: string;
+              }) => {
+                const ref = React.useRef<any>(null);
+                React.useEffect(() => {
+                  const el = ref.current;
+                  if (!el) return;
+                  el.draggable = true;
+                  el.style.cursor = 'grab';
+                  const handleDragStart = () => { webDragRef.current = { materialId }; };
+                  const handleDragOver = (e: DragEvent) => { e.preventDefault(); };
+                  const handleDrop = (e: DragEvent) => {
+                    e.preventDefault();
+                    if (webDragRef.current) {
+                      onDropOnto(webDragRef.current.materialId);
+                      webDragRef.current = null;
+                    }
+                  };
+                  el.addEventListener('dragstart', handleDragStart);
+                  el.addEventListener('dragover', handleDragOver);
+                  el.addEventListener('drop', handleDrop);
+                  return () => { el.removeEventListener('dragstart', handleDragStart); el.removeEventListener('dragover', handleDragOver); el.removeEventListener('drop', handleDrop); };
+                });
+                return <View ref={ref} key={keyProp}>{children}</View>;
+              };
+
+              const renderWebFlatItem = (item: FlatItem) => {
+                if (item.type === 'header') {
+                  const sd = currentQuote?.sections?.find(s => s.name === item.sectionName);
+                  const sectionMats = materials.filter(m => m.section === item.sectionName);
+                  const hasMultiplier = sd && sd.multiplier > 0 && sectionMats.some(m => m.templateBaseQuantity);
+                  const isCollapsed = collapsedSections.has(item.sectionName);
+                  return (
+                    <WebDropZone
+                      keyProp={item.key}
+                      onDropMaterial={(matId) => {
+                        if (!currentQuote) return;
+                        const mat = currentQuote.materials.find(m => m.id === matId);
+                        if (!mat || mat.section === item.sectionName) return;
+                        const updated = currentQuote.materials.map(m =>
+                          m.id === matId ? { ...m, section: item.sectionName, templateBaseQuantity: undefined } : m
+                        );
+                        updateQuote({ ...currentQuote, materials: updated });
+                      }}
+                    >
+                      <View style={[
+                        styles.sectionCardHeaderStandalone,
+                        isCollapsed && styles.sectionCardHeaderCollapsed,
+                      ]}>
+                        <TouchableOpacity onPress={() => toggleSectionCollapsed(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ marginRight: 8 }}>
+                          <MaterialCommunityIcons name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={22} color={colors.textMuted} />
+                        </TouchableOpacity>
+                        {renamingSectionKey === item.sectionName ? (
+                          <RNTextInput
+                            style={styles.sectionCardNameInput}
+                            value={renameValue}
+                            onChangeText={setRenameValue}
+                            onSubmitEditing={() => handleRenameSection(item.sectionName)}
+                            onBlur={() => handleRenameSection(item.sectionName)}
+                            autoFocus selectTextOnFocus returnKeyType="done"
+                          />
+                        ) : (
+                          <TouchableOpacity onPress={() => { setRenamingSectionKey(item.sectionName); setRenameValue(item.sectionName); }} activeOpacity={0.7} style={styles.sectionCardNameRow}>
+                            <Text style={styles.sectionCardName}>{item.sectionName}</Text>
+                          </TouchableOpacity>
+                        )}
+                        {hasMultiplier && (
+                          <View style={styles.multiplierStepper}>
+                            <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) - 1)}>
+                              <MaterialCommunityIcons name="minus" size={14} color={colors.text} />
+                            </Pressable>
+                            <Text style={styles.multiplierValue}>{sd?.multiplier || 1}</Text>
+                            <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) + 1)}>
+                              <MaterialCommunityIcons name="plus" size={14} color={colors.text} />
+                            </Pressable>
+                          </View>
+                        )}
+                        <View style={styles.sectionCardActions}>
+                          <TouchableOpacity onPress={() => handleSaveSectionAsTemplate(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <MaterialCommunityIcons name="content-save-outline" size={18} color={colors.textMuted} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => handleDeleteSection(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </WebDropZone>
+                  );
+                }
+
+                if (item.type === 'footer') {
+                  const isCollapsed = collapsedSections.has(item.sectionName);
+                  return (
+                    <WebDropZone
+                      keyProp={item.key}
+                      onDropMaterial={(matId) => {
+                        if (!currentQuote) return;
+                        const mat = currentQuote.materials.find(m => m.id === matId);
+                        if (!mat || mat.section === item.sectionName) return;
+                        const updated = currentQuote.materials.map(m =>
+                          m.id === matId ? { ...m, section: item.sectionName, templateBaseQuantity: undefined } : m
+                        );
+                        updateQuote({ ...currentQuote, materials: updated });
+                      }}
+                    >
+                      <View style={[
+                        styles.sectionCardFooterStandalone,
+                        isCollapsed && styles.sectionCardFooterCollapsed,
+                      ]}>
+                        {!isCollapsed && (
+                          <TouchableOpacity style={styles.sectionAddMaterialBtn} onPress={() => navigation.navigate('AddMaterial', { section: item.sectionName })}>
+                            <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
+                            <Text style={styles.sectionAddMaterialText}>Add Material</Text>
+                          </TouchableOpacity>
+                        )}
+                        <View style={styles.sectionCardFooter}>
+                          <Text style={styles.sectionCardFooterLabel}>
+                            {isCollapsed ? `${materials.filter(m => m.section === item.sectionName).length} items` : 'Section Total'}
+                          </Text>
+                          <Text style={styles.sectionCardFooterValue}>{formatCurrency(item.subtotal)}</Text>
+                        </View>
+                      </View>
+                    </WebDropZone>
+                  );
+                }
+
+                // Material — web draggable
+                return (
+                  <WebDraggableItem
+                    keyProp={item.key}
+                    materialId={item.material.id}
+                    onDropOnto={(draggedId) => {
+                      if (!currentQuote || draggedId === item.material.id) return;
+                      const targetSection = item.material.section;
+                      const mats = [...currentQuote.materials];
+                      const fromIdx = mats.findIndex(m => m.id === draggedId);
+                      const toIdx = mats.findIndex(m => m.id === item.material.id);
+                      if (fromIdx === -1 || toIdx === -1) return;
+                      const [moved] = mats.splice(fromIdx, 1);
+                      const insertIdx = mats.findIndex(m => m.id === item.material.id);
+                      mats.splice(insertIdx, 0, {
+                        ...moved,
+                        section: targetSection,
+                        templateBaseQuantity: moved.section !== targetSection ? undefined : moved.templateBaseQuantity,
+                      });
+                      updateQuote({ ...currentQuote, materials: mats });
+                    }}
+                  >
+                    <MaterialItemCard
+                      material={item.material}
+                      isExpanded={expandedMaterials.has(item.material.id)}
+                      isFetching={fetchingMaterialId === item.material.id}
+                      isRecentlyPriced={recentlyPricedIds.has(item.material.id)}
+                      localQuantity={localQuantities[item.material.id]}
+                      isActive={false}
+                      onToggleExpand={() => toggleMaterialExpanded(item.material.id)}
+                      onQuantityUpdate={(delta) => handleQuickQuantityUpdate(item.material.id, delta)}
+                      onQuantityBlur={(value) => handleQuantityBlur(item.material.id, value)}
+                      onMoveToSection={() => handleMoveToSection(item.material.id)}
+                      onOpenInStore={() => handleOpenInStore(item.material)}
+                      onEdit={() => handleEditMaterial(item.material)}
+                      onDelete={() => handleDeleteMaterial(item.material.id)}
+                    />
+                  </WebDraggableItem>
+                );
+              };
+
+              return Platform.OS !== 'web' ? (
+                <NestableDraggableFlatList
+                  data={flatData}
+                  keyExtractor={(item) => item.key}
+                  renderItem={renderFlatItem}
+                  onDragEnd={handleFlatDragEnd}
+                />
+              ) : (
+                flatData.map(item => renderWebFlatItem(item))
+              );
             })()}
           </List.Section>
         )}
@@ -1691,18 +2625,30 @@ export function MaterialsListScreen() {
           </View>
         )}
 
-        {/* Add Material button - inline so it doesn't overlay content */}
+        {/* Action buttons */}
         {materials.length > 0 && !isAiAnalyzing && (
-          <TouchableOpacity ref={addMaterialButtonRef as any} style={styles.addMaterialButton} onPress={handleAddMaterial}>
-            <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
-            <Text style={styles.addMaterialButtonText}>Add Material</Text>
-          </TouchableOpacity>
+          <View style={styles.materialsActionRow}>
+            <TouchableOpacity ref={addMaterialButtonRef as any} style={styles.addMaterialButtonFull} onPress={handleAddMaterial}>
+              <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
+              <Text style={styles.addMaterialButtonText}>Add Material</Text>
+            </TouchableOpacity>
+            <View style={styles.materialsActionHalfRow}>
+              <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={handleLoadTemplate}>
+                <MaterialCommunityIcons name="puzzle-outline" size={18} color={colors.primary} />
+                <Text style={styles.addMaterialButtonText}>Load Template</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { setNewSectionName(''); setShowNewSectionModal(true); }}>
+                <MaterialCommunityIcons name="folder-plus-outline" size={18} color={colors.primary} />
+                <Text style={styles.addMaterialButtonText}>New Section</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
 
         {/* Spacer for fixed bottom button */}
         <View style={{ height: 120 }} />
         </WebContainer>
-       </ScrollView>
+       </NestableScrollContainer>
 
       <FixedBottomButton
         label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labor & Markup")}
@@ -1714,10 +2660,121 @@ export function MaterialsListScreen() {
         secondaryOnPress={materials.length > 0 && !isAiAnalyzing ? handleFetchPrices : undefined}
         secondaryLoading={isFetchingPrices}
         secondaryDisabled={isFetchingPrices}
-        secondaryLoadingText={isFetchingPrices && fetchProgress.total > 0 ? `${chasingTitle.split(' ')[0]} ${fetchProgress.current} of ${fetchProgress.total}...` : undefined}
+        secondaryLoadingText={isFetchingPrices ? (fetchPhase === 'batch' ? `Searching ${fetchProgress.total || ''} items...` : fetchProgress.total > 0 ? `${chasingTitle.split(' ')[0]} ${fetchProgress.current} of ${fetchProgress.total}...` : undefined) : undefined}
         secondaryLoadingOnPress={isFetchingPrices ? handleCancelFetchPrices : undefined}
         secondaryRef={fetchPricesButtonRef}
       />
+
+      {/* New Section Modal */}
+      <Portal>
+        <Modal
+          visible={showNewSectionModal}
+          onDismiss={() => setShowNewSectionModal(false)}
+          contentContainerStyle={styles.newSectionModal}
+        >
+          <Text style={styles.newSectionModalTitle}>New Section</Text>
+          <TextInput
+            label="Section Name"
+            value={newSectionName}
+            onChangeText={setNewSectionName}
+            mode="outlined"
+            style={{ marginBottom: 16 }}
+            placeholder="e.g. Fence Bay, Gate, Footings"
+            autoFocus
+          />
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+            <TouchableOpacity
+              style={styles.newSectionCancelBtn}
+              onPress={() => setShowNewSectionModal(false)}
+            >
+              <Text style={styles.newSectionCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.newSectionSaveBtn}
+              onPress={handleCreateSection}
+            >
+              <Text style={styles.newSectionSaveText}>Create</Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Template Picker Modal */}
+      <Portal>
+        <Modal
+          visible={templatePickerVisible}
+          onDismiss={() => { setTemplatePickerVisible(false); setSelectedTemplate(null); }}
+          contentContainerStyle={styles.templatePickerModal}
+        >
+          {!selectedTemplate ? (
+            <>
+              <Text style={styles.templatePickerTitle}>Load Section Template</Text>
+              <ScrollView style={{ maxHeight: 400 }}>
+                {availableTemplates.map(t => {
+                  const matCost = t.materials.reduce((sum, m) => sum + (m.quantity * m.price), 0);
+                  const laborCost = t.laborHours * t.laborRate;
+                  return (
+                    <TouchableOpacity
+                      key={t.id}
+                      style={styles.templatePickerCard}
+                      onPress={() => setSelectedTemplate(t)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.templatePickerCardName}>{t.name}</Text>
+                      <Text style={styles.templatePickerCardInfo}>
+                        {t.materials.length} material{t.materials.length !== 1 ? 's' : ''} · {formatCurrency(matCost + laborCost)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              <TouchableOpacity
+                style={styles.newSectionCancelBtn}
+                onPress={() => setTemplatePickerVisible(false)}
+              >
+                <Text style={styles.newSectionCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.templatePickerTitle}>{selectedTemplate.name}</Text>
+              {selectedTemplate.description && (
+                <Text style={styles.templatePickerDesc}>{selectedTemplate.description}</Text>
+              )}
+              <ScrollView style={{ maxHeight: 300 }}>
+                {selectedTemplate.materials.map((m, i) => (
+                  <MaterialItemCard
+                    key={`preview-${i}`}
+                    material={{ ...m, id: `preview-${i}` } as Material}
+                  />
+                ))}
+              </ScrollView>
+              <View style={styles.templatePreviewLabor}>
+                <Text style={styles.templatePreviewLaborText}>
+                  Labor: {selectedTemplate.laborHours} {selectedTemplate.laborUnit === 'days' ? 'days' : 'hrs'} @ {formatCurrency(selectedTemplate.laborRate)}{selectedTemplate.laborUnit === 'days' ? '/day' : '/hr'}
+                </Text>
+                <Text style={styles.templatePreviewLaborTotal}>
+                  {formatCurrency(selectedTemplate.laborHours * selectedTemplate.laborRate)}
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+                <TouchableOpacity
+                  style={styles.newSectionCancelBtn}
+                  onPress={() => setSelectedTemplate(null)}
+                >
+                  <Text style={styles.newSectionCancelText}>Back</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.newSectionSaveBtn}
+                  onPress={() => handleConfirmLoadTemplate(selectedTemplate)}
+                >
+                  <Text style={styles.newSectionSaveText}>Add to Quote</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </Modal>
+      </Portal>
 
       {/* Delete Material Confirmation */}
       <AlertModal
@@ -1783,48 +2840,87 @@ export function MaterialsListScreen() {
               </Text>
             ) : null}
 
-            {/* Progress bar */}
-            {fetchProgress.total > 0 && (
+            {/* Progress bar - determinate during batch, shows chunk progress */}
+            {(fetchPhase === 'batch' || fetchProgress.total > 0) ? (
               <View style={styles.progressBarContainer}>
-                <View style={[styles.progressBarFill, { width: `${(fetchProgress.current / fetchProgress.total) * 100}%` }]} />
+                <View style={[styles.progressBarFill, {
+                  width: fetchPhase === 'batch'
+                    ? `${batchChunkProgress.total > 0 ? (batchChunkProgress.current / batchChunkProgress.total) * 100 : 0}%`
+                    : `${(fetchProgress.current / fetchProgress.total) * 100}%`,
+                }]} />
               </View>
-            )}
+            ) : null}
 
             <Text style={styles.fetchEstimateSubtext}>
-              {fetchProgress.total > 0 && currentFetchingName
+              {fetchPhase === 'batch'
+                ? `Batch ${Math.min(batchChunkProgress.current + 1, batchChunkProgress.total)} of ${batchChunkProgress.total} (${fetchProgress.current} of ${fetchProgress.total} done)`
+                : fetchProgress.total > 0 && currentFetchingName
                 ? `${chasingSubtitle} ${fetchProgress.current} of ${fetchProgress.total}`
                 : 'Warming up the ute...'}
             </Text>
-            {/* Item list - show last 2 completed + current = max 3 */}
-            <View style={styles.fetchItemsWindow}>
-              <View style={styles.fetchItemsContent}>
-                {fetchedItemNames.slice(-2).map((item, index) => (
-                  <View key={index} style={styles.fetchItemRow}>
-                    <MaterialCommunityIcons
-                      name={item.success ? 'check-circle' as any : 'close-circle' as any}
-                      size={16}
-                      color={item.success ? colors.success : colors.error}
-                    />
-                    <Text
-                      style={[
-                        styles.fetchItemText,
-                        item.success ? styles.fetchItemDone : styles.fetchItemFailed,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {item.name}
-                    </Text>
-                  </View>
-                ))}
-                {currentFetchingName ? (
-                  <View style={styles.fetchItemRow}>
-                    <ActivityIndicator size={14} color={colors.primary} />
-                    <Text style={[styles.fetchItemText, styles.fetchItemActive]} numberOfLines={1}>
-                      {currentFetchingName}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
+            {/* Item list - during batch show per-item status, otherwise show last 2 + current */}
+            <View style={[styles.fetchItemsWindow, fetchPhase === 'batch' && { maxHeight: 200 }]}>
+              <ScrollView style={{ flex: 1 }} nestedScrollEnabled>
+                <View style={styles.fetchItemsContent}>
+                  {fetchPhase === 'batch' && batchItemStatuses.size > 0 ? (
+                    // Show all items with per-item status icons
+                    Array.from(batchItemStatuses.entries()).map(([term, status], index) => (
+                      <View key={index} style={styles.fetchItemRow}>
+                        {status === 'searching' ? (
+                          <ActivityIndicator size={14} color={colors.primary} />
+                        ) : status === 'done' ? (
+                          <MaterialCommunityIcons name={'check-circle' as any} size={16} color={colors.success} />
+                        ) : status === 'failed' ? (
+                          <MaterialCommunityIcons name={'close-circle' as any} size={16} color={colors.error} />
+                        ) : (
+                          <MaterialCommunityIcons name={'clock-outline' as any} size={16} color={colors.textMuted} />
+                        )}
+                        <Text
+                          style={[
+                            styles.fetchItemText,
+                            status === 'searching' ? styles.fetchItemActive :
+                            status === 'done' ? styles.fetchItemDone :
+                            status === 'failed' ? styles.fetchItemFailed :
+                            { color: colors.textMuted },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {term}
+                        </Text>
+                      </View>
+                    ))
+                  ) : (
+                    <>
+                      {fetchedItemNames.slice(-2).map((item, index) => (
+                        <View key={index} style={styles.fetchItemRow}>
+                          <MaterialCommunityIcons
+                            name={item.success ? 'check-circle' as any : 'close-circle' as any}
+                            size={16}
+                            color={item.success ? colors.success : colors.error}
+                          />
+                          <Text
+                            style={[
+                              styles.fetchItemText,
+                              item.success ? styles.fetchItemDone : styles.fetchItemFailed,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item.name}
+                          </Text>
+                        </View>
+                      ))}
+                      {currentFetchingName ? (
+                        <View style={styles.fetchItemRow}>
+                          <ActivityIndicator size={14} color={colors.primary} />
+                          <Text style={[styles.fetchItemText, styles.fetchItemActive]} numberOfLines={1}>
+                            {currentFetchingName}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </>
+                  )}
+                </View>
+              </ScrollView>
             </View>
 
             <View style={styles.fetchEstimateButtonRow}>
@@ -1871,17 +2967,119 @@ export function MaterialsListScreen() {
         >
           <ActivityIndicator size={14} color={colors.primary} />
           <Text style={styles.fetchMinimizedText} numberOfLines={1}>
-            {fetchProgress.total > 0
+            {fetchPhase === 'batch'
+              ? `${fetchProgress.current}/${fetchProgress.total}`
+              : fetchProgress.total > 0
               ? `${fetchProgress.current}/${fetchProgress.total}`
               : 'Fetching...'}
           </Text>
           <View style={styles.fetchMinimizedProgressBg}>
-            <View style={[styles.fetchMinimizedProgressFill, { width: fetchProgress.total > 0 ? `${(fetchProgress.current / fetchProgress.total) * 100}%` : '0%' }]} />
+            <View style={[styles.fetchMinimizedProgressFill, {
+              width: fetchProgress.total > 0
+                ? `${(fetchProgress.current / fetchProgress.total) * 100}%`
+                : '0%',
+            }]} />
           </View>
           {notifyWhenDone && <MaterialCommunityIcons name="bell-ring-outline" size={14} color={colors.primary} />}
           <MaterialCommunityIcons name="chevron-up" size={18} color={colors.textMuted} />
         </TouchableOpacity>
       )}
+
+      {/* Save Section as Template Modal */}
+      <Portal>
+        <Modal
+          visible={saveTemplateModalVisible}
+          onDismiss={() => setSaveTemplateModalVisible(false)}
+          contentContainerStyle={styles.newSectionModal}
+        >
+          <Text style={styles.newSectionModalTitle}>Save as Template</Text>
+          <Text style={{ color: colors.textMuted, fontSize: 13, marginBottom: 16 }}>
+            Save this section so you can chuck it on future quotes, no worries.
+          </Text>
+          <TextInput
+            label="Template Name"
+            value={saveTemplateName}
+            onChangeText={setSaveTemplateName}
+            mode="outlined"
+            style={{ marginBottom: 12 }}
+            placeholder="e.g. Standard Fence Bay"
+          />
+          <TextInput
+            label="Labour Hours (per 1 unit)"
+            value={saveTemplateLaborHours}
+            onChangeText={setSaveTemplateLaborHours}
+            mode="outlined"
+            keyboardType="numeric"
+            style={{ marginBottom: 12 }}
+            placeholder="e.g. 2.5"
+          />
+          <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 6 }}>
+            Keywords (for matching to job descriptions)
+          </Text>
+          {saveTemplateKeywords.length > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+              {saveTemplateKeywords.map((kw, i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: colors.surfaceDark, borderWidth: 1, borderColor: colors.border }}>
+                  <Text style={{ fontSize: 12, color: colors.text }}>{kw}</Text>
+                  <Pressable onPress={() => setSaveTemplateKeywords(prev => prev.filter((_, idx) => idx !== i))} hitSlop={6}>
+                    <MaterialCommunityIcons name="close-circle" size={14} color={colors.textMuted} />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+          <TextInput
+            label="Add keyword"
+            value={saveTemplateKeywordInput}
+            onChangeText={(text) => {
+              if (text.endsWith(',')) {
+                const kw = text.slice(0, -1).trim().toLowerCase();
+                if (kw && !saveTemplateKeywords.includes(kw)) setSaveTemplateKeywords(prev => [...prev, kw]);
+                setSaveTemplateKeywordInput('');
+              } else {
+                setSaveTemplateKeywordInput(text);
+              }
+            }}
+            onSubmitEditing={() => {
+              const kw = saveTemplateKeywordInput.trim().toLowerCase();
+              if (kw && !saveTemplateKeywords.includes(kw)) setSaveTemplateKeywords(prev => [...prev, kw]);
+              setSaveTemplateKeywordInput('');
+            }}
+            mode="outlined"
+            style={{ marginBottom: 16 }}
+            placeholder='e.g. fence bay, colorbond fence'
+          />
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+            <TouchableOpacity
+              style={styles.newSectionCancelBtn}
+              onPress={() => setSaveTemplateModalVisible(false)}
+            >
+              <Text style={styles.newSectionCancelText}>Nah</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.newSectionSaveBtn}
+              onPress={handleConfirmSaveTemplate}
+            >
+              <Text style={styles.newSectionSaveText}>Save It</Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Delete Section Confirmation Modal */}
+      <AlertModal
+        visible={deleteSectionModalVisible}
+        onDismiss={() => setDeleteSectionModalVisible(false)}
+        type="warning"
+        title="Ditch This Section?"
+        message={`Gonna chuck "${deleteSectionName}" and move its materials to unsectioned. She'll be right, nothing gets deleted.`}
+        icon="delete-outline"
+        showConfetti={false}
+        primaryButtonText="Yeah, Ditch It"
+        primaryButtonAction={handleConfirmDeleteSection}
+        secondaryButtonText="Nah, Keep It"
+        secondaryButtonAction={() => setDeleteSectionModalVisible(false)}
+      />
 
       {/* Success Modal */}
       <AlertModal
@@ -2165,23 +3363,505 @@ const styles = StyleSheet.create({
   generateButton: {
     marginTop: 8,
   },
-  addMaterialButton: {
+  // Template suggestion styles
+  suggestionsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  suggestionCard: {
+    width: '100%',
+    borderRadius: 12,
+    marginBottom: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  suggestionCardChecked: {
+    borderColor: colors.primary,
+  },
+  suggestionCardInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    gap: 12,
+  },
+  suggestionInfo: {
+    flex: 1,
+  },
+  suggestionName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  suggestionMeta: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  suggestionReasoning: {
+    fontSize: 11,
+    color: colors.primary,
+    fontStyle: 'italic',
+    marginTop: 3,
+  },
+  suggestionCompactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  suggestionQtyBadge: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  suggestionUnitCost: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginLeft: 'auto',
+  },
+  suggestionMatchHint: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  fillGapsToggle: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginHorizontal: 16,
-    marginTop: 12,
+    paddingVertical: 10,
+  },
+  fillGapsToggleText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  secondaryActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    marginTop: 4,
+  },
+  secondaryActionLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 8,
+  },
+  secondaryActionText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.primary,
+  },
+  suggestionQtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    paddingTop: 4,
+    gap: 10,
+  },
+  suggestionQtyLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  suggestionStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  suggestionStepperBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  suggestionStepperValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+    minWidth: 30,
+    textAlign: 'center',
+    paddingVertical: 4,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: colors.border,
+  },
+  suggestionQtyTotal: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+    marginLeft: 'auto',
+  },
+  suggestionActions: {
+    width: '100%',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  loadAndFillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     paddingVertical: 14,
     borderRadius: 12,
+    backgroundColor: colors.primary,
+  },
+  loadAndFillBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  loadOnlyBtn: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+  },
+  loadOnlyBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  orDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    marginVertical: 16,
+    gap: 12,
+  },
+  orDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  orDividerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  // Section Card styles
+  sectionCard: {
+    borderRadius: 12,
+    marginHorizontal: 4,
+    marginBottom: 16,
+    backgroundColor: colors.surfaceDark,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sectionCardHeaderStandalone: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginHorizontal: 4,
+    marginTop: 16,
+    marginBottom: 8,
+    backgroundColor: colors.surfaceDark,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  sectionCardHeaderCollapsed: {
+    borderBottomWidth: 0,
+    marginBottom: 0,
+  },
+  sectionCardFooterStandalone: {
+    marginHorizontal: 4,
+    marginBottom: 8,
+    paddingTop: 4,
+    backgroundColor: colors.surfaceDark,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+  },
+  sectionCardFooterCollapsed: {
+    paddingTop: 0,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+  },
+  sectionCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 10,
+    backgroundColor: colors.primary + '18',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  sectionCardNameRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sectionCardName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  sectionCardNameInput: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 6,
+    backgroundColor: colors.surface,
+  },
+  multiplierStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    marginHorizontal: 8,
+  },
+  multiplierBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  multiplierValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    minWidth: 24,
+    textAlign: 'center',
+    paddingVertical: 3,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: colors.border,
+  },
+  sectionCardActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  sectionAddMaterialBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginHorizontal: 12,
+    marginVertical: 8,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderStyle: 'dashed',
+  },
+  sectionAddMaterialText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  sectionCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.primary + '0A',
+  },
+  sectionCardFooterLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  sectionCardFooterValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  materialsActionRow: {
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
+  materialsActionHalfRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  addMaterialButtonFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    borderStyle: 'dashed',
+  },
+  addMaterialButtonHalf: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    borderStyle: 'dashed',
+  },
+  addMaterialButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
     borderWidth: 1.5,
     borderColor: colors.primary,
     borderStyle: 'dashed',
   },
   addMaterialButtonText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
     color: colors.primary,
+  },
+  sectionRenameInput: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 6,
+    backgroundColor: colors.surface,
+  },
+  newSectionModal: {
+    backgroundColor: colors.surface,
+    margin: 20,
+    padding: 20,
+    borderRadius: 12,
+  },
+  // Template picker
+  templatePickerModal: {
+    backgroundColor: colors.surface,
+    margin: 16,
+    padding: 20,
+    borderRadius: 12,
+    maxHeight: '80%' as any,
+  },
+  templatePickerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 12,
+  },
+  templatePickerDesc: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginBottom: 12,
+  },
+  templatePickerCard: {
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 8,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  templatePickerCardName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  templatePickerCardInfo: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  templatePreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  templatePreviewQty: {
+    width: 60,
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  templatePreviewName: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.text,
+  },
+  templatePreviewPrice: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.text,
+    marginLeft: 8,
+  },
+  templatePreviewLabor: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  templatePreviewLaborText: {
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  templatePreviewLaborTotal: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  newSectionModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 16,
+  },
+  newSectionCancelBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  newSectionCancelText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  newSectionSaveBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+  },
+  newSectionSaveText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   summary: {
     flexDirection: 'row',
@@ -2403,6 +4083,10 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: colors.primary,
     borderRadius: 3,
+  },
+  progressBarIndeterminate: {
+    width: '40%',
+    opacity: 0.7,
   },
   fetchItemsWindow: {
     width: '100%',

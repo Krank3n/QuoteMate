@@ -35,12 +35,6 @@ export function StripeCheckoutModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stripePromise] = useState(() => {
-    console.log('🔑 Stripe Config:', {
-      mode: stripeConfig.mode,
-      isTestMode: stripeConfig.isTestMode,
-      publishableKey: stripeConfig.publishableKey,
-      keyPreview: stripeConfig.publishableKey?.substring(0, 20) + '...',
-    });
     return loadStripe(stripeConfig.publishableKey);
   });
 
@@ -60,7 +54,6 @@ export function StripeCheckoutModal({
       const secret = await stripeService.createPaymentIntent(priceId, userId);
       setClientSecret(secret);
     } catch (err: any) {
-      console.error('Error creating payment intent:', err);
       setError(err.message || 'Failed to initialize payment');
     } finally {
       setLoading(false);

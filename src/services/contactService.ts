@@ -130,7 +130,6 @@ export async function searchPhoneContacts(
         searchSource: 'phone' as const,
       }));
   } catch (error) {
-    console.error('Error searching phone contacts:', error);
     return [];
   }
 }

@@ -305,7 +305,6 @@ export function EmailPreviewModal({
 
       setSent(true);
     } catch (error: any) {
-      console.error('Send email error:', error);
       showAlert('error', 'Send Failed', error.message || 'Could not send the email. Please try again.');
     } finally {
       setSending(false);
@@ -343,7 +342,6 @@ export function EmailPreviewModal({
 
       showAlert('success', 'Test Sent', `A test email has been sent to ${ownerEmail}`);
     } catch (error: any) {
-      console.error('Test send error:', error);
       showAlert('error', 'Test Failed', error.message || 'Could not send test email.');
     } finally {
       setSendingTest(false);

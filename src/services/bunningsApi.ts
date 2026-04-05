@@ -9,11 +9,6 @@ import { BunningsAuthResponse, BunningsItem, BunningsPrice, BunningsInventory } 
 const CLIENT_ID = BUNNINGS_CLIENT_ID || '';
 const CLIENT_SECRET = BUNNINGS_CLIENT_SECRET || '';
 
-console.log('🔧 Bunnings API Config:', {
-  hasClientId: !!CLIENT_ID,
-  hasClientSecret: !!CLIENT_SECRET,
-  clientIdLength: CLIENT_ID?.length || 0,
-});
 
 const AUTH_URL = 'https://connect.api.bunnings.com.au';
 const ITEM_API_URL = 'https://item.api.bunnings.com.au';
@@ -40,7 +35,6 @@ class BunningsAPI {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Auth response error:', response.status, errorText);
         throw new Error(`Authentication failed: ${response.status} ${response.statusText}`);
       }
 
@@ -51,10 +45,7 @@ class BunningsAPI {
       const expirySeconds = data.expires_in - 60;
       this.tokenExpiry = new Date(Date.now() + expirySeconds * 1000);
 
-      console.log('✅ Bunnings API authenticated successfully');
-      console.log('Token expires in:', expirySeconds, 'seconds');
     } catch (error) {
-      console.error('Bunnings authentication error:', error);
       throw error;
     }
   }
@@ -92,8 +83,6 @@ class BunningsAPI {
       const encodedTerm = encodeURIComponent(searchTerm);
       const url = `${ITEM_API_URL}/item?q=${encodedTerm}&limit=${limit}`;
 
-      console.log('🔍 Searching Bunnings for:', searchTerm);
-      console.log('🔗 URL:', url);
 
       const response = await fetch(url, {
         method: 'GET',
@@ -105,24 +94,18 @@ class BunningsAPI {
 
       const responseText = await response.text();
 
-      console.log('📦 Search response status:', response.status);
-      console.log('📦 Search response body:', responseText.substring(0, 200));
 
       if (!response.ok) {
-        console.error('Search response error:', response.status, responseText);
         throw new Error(`Item search failed: ${response.status} ${response.statusText}`);
       }
 
       // Handle empty response (common in sandbox)
       if (!responseText || responseText.trim() === '') {
-        console.log('⚠️  Empty response from search API (Sandbox may not have search data)');
-        console.log('💡 Tip: Bunnings Sandbox typically only works with specific test item numbers');
         return [];
       }
 
       const data = JSON.parse(responseText);
 
-      console.log('✅ Search successful, found', Array.isArray(data) ? data.length : (data.items?.length || 0), 'items');
 
       // Handle different response formats from sandbox
       if (Array.isArray(data)) {
@@ -135,7 +118,6 @@ class BunningsAPI {
 
       return [];
     } catch (error) {
-      console.error('❌ Item search error:', error);
       return []; // Return empty array instead of throwing
     }
   }
@@ -151,8 +133,6 @@ class BunningsAPI {
     try {
       const url = `${PRICING_API_URL}/pricing/${itemNumber}`;
 
-      console.log('💰 Fetching price for item:', itemNumber);
-      console.log('🔗 URL:', url);
 
       const response = await fetch(url, {
         method: 'GET',
@@ -164,29 +144,22 @@ class BunningsAPI {
 
       const responseText = await response.text();
 
-      console.log('💰 Price response status:', response.status);
-      console.log('💰 Price response body:', responseText.substring(0, 200));
 
       if (!response.ok) {
         if (response.status === 404) {
-          console.log('⚠️  Item not found:', itemNumber);
           return null; // Item not found
         }
-        console.error('Price response error:', response.status, responseText);
         throw new Error(`Price fetch failed: ${response.status} ${response.statusText}`);
       }
 
       // Handle empty response
       if (!responseText || responseText.trim() === '') {
-        console.log('⚠️  Empty response from pricing API');
         return null;
       }
 
       const data: BunningsPrice = JSON.parse(responseText);
-      console.log('✅ Price fetched for', itemNumber, ':', data);
       return data;
     } catch (error) {
-      console.error('❌ Price fetch error:', error);
       return null; // Return null instead of throwing
     }
   }
@@ -208,7 +181,6 @@ class BunningsAPI {
         // Small delay to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 100));
       } catch (error) {
-        console.error(`Failed to get price for ${itemNumber}:`, error);
       }
     }
 
@@ -226,7 +198,6 @@ class BunningsAPI {
     try {
       const url = `${INVENTORY_API_URL}/inventory/${itemNumber}?location=${locationCode}`;
 
-      console.log('Checking inventory for:', itemNumber, 'at', locationCode);
 
       const response = await fetch(url, {
         method: 'GET',
@@ -247,7 +218,6 @@ class BunningsAPI {
       const data: BunningsInventory = await response.json();
       return data;
     } catch (error) {
-      console.error('Inventory check error:', error);
       throw error;
     }
   }
@@ -263,7 +233,6 @@ class BunningsAPI {
       const items = await this.searchItem(searchTerm, 1);
 
       if (items.length === 0) {
-        console.warn(`No items found for: ${searchTerm}`);
         return null;
       }
 
@@ -273,13 +242,11 @@ class BunningsAPI {
       const price = await this.getPrice(item.itemNumber);
 
       if (!price) {
-        console.warn(`No price found for item: ${item.itemNumber}`);
         return null;
       }
 
       return { item, price };
     } catch (error) {
-      console.error(`Failed to find and price material: ${searchTerm}`, error);
       return null;
     }
   }

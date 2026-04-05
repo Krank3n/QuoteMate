@@ -34,6 +34,9 @@ import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
 import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen';
+import { SectionTemplatesScreen } from '../screens/settings/SectionTemplatesScreen';
+import { JobTemplateEditorScreen } from '../screens/settings/JobTemplateEditorScreen';
+import { SupplierGroupsScreen } from '../screens/settings/SupplierGroupsScreen';
 import { ContactsScreen } from '../screens/ContactsScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
@@ -600,6 +603,50 @@ export function RootNavigator() {
           headerStyle: { backgroundColor: colors.primary },
           headerTintColor: colors.white,
           title: 'PDF Templates',
+        }}
+      />
+      <RootStack.Screen
+        name="SectionTemplates"
+        component={SectionTemplatesScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Job Templates',
+        }}
+      />
+      <RootStack.Screen
+        name="JobTemplateEditor"
+        component={JobTemplateEditorScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Job Template',
+        }}
+      />
+      <RootStack.Screen
+        name="AddMaterialStandalone"
+        component={AddMaterialScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Add Material',
+        }}
+      />
+      <RootStack.Screen
+        name="SupplierGroups"
+        component={SupplierGroupsScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Supplier Groups',
         }}
       />
       <RootStack.Screen

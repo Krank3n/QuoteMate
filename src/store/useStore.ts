@@ -96,6 +96,10 @@ interface AppState {
   endUnifiedTour: () => Promise<void>;
   skipUnifiedTour: () => Promise<void>;
 
+  // Template material staging (for adding materials to templates from AddMaterialScreen)
+  pendingTemplateMaterial: Material | null;
+  setPendingTemplateMaterial: (material: Material | null) => void;
+
   // Contacts
   contacts: Contact[];
   contactsLoaded: boolean;
@@ -161,6 +165,10 @@ export const useStore = create<AppState>((set, get) => ({
   currentInvoice: null,
   nextInvoiceNumber: 1,
   referralInfo: null,
+  // Template material staging
+  pendingTemplateMaterial: null,
+  setPendingTemplateMaterial: (material) => set({ pendingTemplateMaterial: material }),
+
   contacts: [],
   contactsLoaded: false,
   xeroContacts: [],
@@ -183,7 +191,6 @@ export const useStore = create<AppState>((set, get) => ({
         await firestoreService.saveBusinessSettings(settings);
       }
     } catch (error) {
-      console.error('Failed to save business settings:', error);
       throw error;
     }
   },
@@ -216,7 +223,7 @@ export const useStore = create<AppState>((set, get) => ({
         }
       }
     } catch (error) {
-      console.error('Failed to load business settings:', error);
+      // silently ignore
     }
   },
 
@@ -239,6 +246,7 @@ export const useStore = create<AppState>((set, get) => ({
       materials: [],
       laborRate: businessSettings?.defaultLaborRate || 85,
       laborHours: 0,
+      laborUnit: 'hours' as const,
       laborTotal: 0,
       materialsSubtotal: 0,
       markup: businessSettings?.defaultMarkup || 20,
@@ -292,12 +300,12 @@ export const useStore = create<AppState>((set, get) => ({
 
       // Sync to Firestore in background
       if (auth.currentUser) {
-        firestoreService.saveQuote(calculatedQuote).catch((err) => {
-          console.warn('Firestore draft sync failed:', err);
+        firestoreService.saveQuote(calculatedQuote).catch(() => {
+          // silently ignore
         });
       }
     } catch (error) {
-      console.error('Failed to save draft:', error);
+      // silently ignore
     }
   },
 
@@ -334,7 +342,6 @@ export const useStore = create<AppState>((set, get) => ({
             throw quotaError;
           }
           // If quota check fails (network error), fall back to client-side check
-          console.warn('Server quota check failed, using client-side check:', quotaError);
           const { canCreateQuote } = get();
           if (!canCreateQuote()) {
             throw new Error('TRIAL_EXPIRED');
@@ -372,7 +379,7 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           await firestoreService.saveQuote(calculatedQuote);
         } catch (syncError) {
-          console.warn('Firestore sync failed for quote, will retry on next load:', syncError);
+          // silently ignore - will retry on next load
         }
       }
 
@@ -382,7 +389,6 @@ export const useStore = create<AppState>((set, get) => ({
         await incrementQuoteCount();
       }
     } catch (error) {
-      console.error('Failed to save quote:', error);
       throw error;
     }
   },
@@ -405,11 +411,10 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           await firestoreService.deleteQuote(quoteId);
         } catch (syncError) {
-          console.warn('Firestore sync failed for quote deletion:', syncError);
+          // silently ignore
         }
       }
     } catch (error) {
-      console.error('Failed to delete quote:', error);
       throw error;
     }
   },
@@ -440,7 +445,6 @@ export const useStore = create<AppState>((set, get) => ({
           if (quotaError.message === 'QUOTA_EXCEEDED' || quotaError.message === 'TRIAL_EXPIRED') {
             throw quotaError;
           }
-          console.warn('Server quota check failed, using client-side check:', quotaError);
           const { canCreateQuote } = get();
           if (!canCreateQuote()) {
             throw new Error('TRIAL_EXPIRED');
@@ -483,11 +487,10 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           await firestoreService.saveQuote(duplicatedQuote);
         } catch (syncError) {
-          console.warn('Firestore sync failed for duplicated quote:', syncError);
+          // silently ignore
         }
       }
     } catch (error) {
-      console.error('Failed to duplicate quote:', error);
       throw error;
     }
   },
@@ -523,15 +526,13 @@ export const useStore = create<AppState>((set, get) => ({
 
         // Sync to cloud if user is signed in but no cloud data exists
         if (auth.currentUser && quotes.length > 0) {
-          console.log('📤 Syncing local quotes to Firestore...');
           for (const quote of quotes) {
             await firestoreService.saveQuote(quote);
           }
-          console.log('✅ Local quotes synced to Firestore');
         }
       }
     } catch (error) {
-      console.error('Failed to load quotes:', error);
+      // silently ignore
     }
   },
 
@@ -623,7 +624,7 @@ export const useStore = create<AppState>((set, get) => ({
         set({ subscriptionStatus: newSubscription });
       }
     } catch (error) {
-      console.error('Failed to load subscription:', error);
+      // silently ignore
     }
   },
 
@@ -645,7 +646,7 @@ export const useStore = create<AppState>((set, get) => ({
         await firestoreService.saveSubscriptionStatus(updatedSubscription);
       }
     } catch (error) {
-      console.error('Failed to increment quote count:', error);
+      // silently ignore
     }
   },
 
@@ -684,12 +685,12 @@ export const useStore = create<AppState>((set, get) => ({
 
       // Sync to Firestore if authenticated
       if (auth.currentUser) {
-        firestoreService.saveSubscriptionStatus(updatedSubscription).catch((err) => {
-          console.warn('Firestore trial sync failed:', err);
+        firestoreService.saveSubscriptionStatus(updatedSubscription).catch(() => {
+          // silently ignore
         });
       }
     } catch (error) {
-      console.error('Failed to start trial:', error);
+      // silently ignore
     }
   },
 
@@ -711,7 +712,6 @@ export const useStore = create<AppState>((set, get) => ({
         await firestoreService.saveSubscriptionStatus(updatedSubscription);
       }
     } catch (error) {
-      console.error('Failed to upgrade subscription:', error);
       throw error;
     }
   },
@@ -727,7 +727,7 @@ export const useStore = create<AppState>((set, get) => ({
         await firestoreService.saveOnboardingStatus(value);
       }
     } catch (error) {
-      console.error('Failed to save onboarding status:', error);
+      // silently ignore
     }
   },
 
@@ -756,7 +756,7 @@ export const useStore = create<AppState>((set, get) => ({
         }
       }
     } catch (error) {
-      console.error('Failed to check onboarding status:', error);
+      // silently ignore
     }
   },
 
@@ -771,7 +771,7 @@ export const useStore = create<AppState>((set, get) => ({
         await firestoreService.saveTourStatus(value);
       }
     } catch (error) {
-      console.error('Failed to save tour status:', error);
+      // silently ignore
     }
   },
 
@@ -830,7 +830,7 @@ export const useStore = create<AppState>((set, get) => ({
         set({ seenScreenTours: JSON.parse(screenToursStored) });
       }
     } catch (error) {
-      console.error('Failed to check tour status:', error);
+      // silently ignore
     }
   },
 
@@ -847,7 +847,7 @@ export const useStore = create<AppState>((set, get) => ({
         await firestoreService.saveSeenScreenTours(updated);
       }
     } catch (error) {
-      console.error('Failed to mark screen tour seen:', error);
+      // silently ignore
     }
   },
 
@@ -864,7 +864,7 @@ export const useStore = create<AppState>((set, get) => ({
         set({ nextQuoteNumber });
       }
     } catch (error) {
-      console.error('Failed to load next quote number:', error);
+      // silently ignore
     }
   },
 
@@ -900,6 +900,7 @@ export const useStore = create<AppState>((set, get) => ({
       materials: [],
       laborRate: businessSettings?.defaultLaborRate || 85,
       laborHours: 0,
+      laborUnit: 'hours' as const,
       laborTotal: 0,
       materialsSubtotal: 0,
       markup: businessSettings?.defaultMarkup || 20,
@@ -937,7 +938,9 @@ export const useStore = create<AppState>((set, get) => ({
       })),
       laborRate: quote.laborRate,
       laborHours: quote.laborHours,
+      laborUnit: quote.laborUnit,
       laborTotal: quote.laborTotal,
+      sections: quote.sections,
       materialsSubtotal: quote.materialsSubtotal,
       markup: quote.markup,
       markupAmount: quote.markupAmount,
@@ -959,10 +962,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   updateInvoice: (invoice: Invoice) => {
-    // Apply same calculations as quotes
+    // Apply same calculations as quotes — sections-aware
+    const laborTotal = invoice.sections && invoice.sections.length > 0
+      ? invoice.sections.reduce((sum, s) => sum + s.laborTotal, 0)
+      : invoice.laborRate * invoice.laborHours;
     const updatedInvoice = {
       ...invoice,
-      laborTotal: invoice.laborRate * invoice.laborHours,
+      laborTotal,
       materialsSubtotal: invoice.materials.reduce((sum, m) => sum + m.totalPrice, 0),
     };
     updatedInvoice.subtotal = updatedInvoice.laborTotal + updatedInvoice.materialsSubtotal;
@@ -1009,11 +1015,10 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           await firestoreService.saveInvoice(updatedInvoice);
         } catch (syncError) {
-          console.warn('Firestore sync failed for invoice:', syncError);
+          // silently ignore
         }
       }
     } catch (error) {
-      console.error('Failed to save invoice:', error);
       throw error;
     }
   },
@@ -1035,11 +1040,10 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           await firestoreService.deleteInvoice(invoiceId);
         } catch (syncError) {
-          console.warn('Firestore sync failed for invoice deletion:', syncError);
+          // silently ignore
         }
       }
     } catch (error) {
-      console.error('Failed to delete invoice:', error);
       throw error;
     }
   },
@@ -1080,15 +1084,13 @@ export const useStore = create<AppState>((set, get) => ({
 
         // Sync to cloud if user is signed in but no cloud data exists
         if (auth.currentUser && invoices.length > 0) {
-          console.log('📤 Syncing local invoices to Firestore...');
           for (const invoice of invoices) {
             await firestoreService.saveInvoice(invoice);
           }
-          console.log('✅ Local invoices synced to Firestore');
         }
       }
     } catch (error) {
-      console.error('Failed to load invoices:', error);
+      // silently ignore
     }
   },
 
@@ -1100,7 +1102,7 @@ export const useStore = create<AppState>((set, get) => ({
         set({ nextInvoiceNumber });
       }
     } catch (error) {
-      console.error('Failed to load next invoice number:', error);
+      // silently ignore
     }
   },
 
@@ -1170,11 +1172,10 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           await firestoreService.saveInvoice(updatedInvoice);
         } catch (syncError) {
-          console.warn('Firestore sync failed for payment recording:', syncError);
+          // silently ignore
         }
       }
     } catch (error) {
-      console.error('Failed to record payment:', error);
       throw error;
     }
   },
@@ -1231,13 +1232,12 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           await firestoreService.saveInvoice(duplicatedInvoice);
         } catch (syncError) {
-          console.warn('Firestore sync failed for duplicated invoice:', syncError);
+          // silently ignore
         }
       }
 
       return duplicatedInvoice;
     } catch (error) {
-      console.error('Failed to duplicate invoice:', error);
       throw error;
     }
   },
@@ -1250,7 +1250,7 @@ export const useStore = create<AppState>((set, get) => ({
         set({ referralInfo: info });
       }
     } catch (error) {
-      console.error('Failed to load referral info:', error);
+      // silently ignore
     }
   },
 
@@ -1278,7 +1278,7 @@ export const useStore = create<AppState>((set, get) => ({
       try {
         await deleteQuote(unifiedTourQuoteId);
       } catch (e) {
-        console.warn('Failed to delete tour dummy quote:', e);
+        // silently ignore
       }
     }
     // Mark all tours as seen
@@ -1303,7 +1303,7 @@ export const useStore = create<AppState>((set, get) => ({
       try {
         await deleteQuote(unifiedTourQuoteId);
       } catch (e) {
-        console.warn('Failed to delete tour dummy quote:', e);
+        // silently ignore
       }
     }
     // Mark all tours as seen
@@ -1360,7 +1360,6 @@ export const useStore = create<AppState>((set, get) => ({
         await get().migrateCustomersToContacts();
       }
     } catch (error) {
-      console.error('Failed to load contacts:', error);
       set({ contactsLoaded: true });
     }
   },
@@ -1414,7 +1413,6 @@ export const useStore = create<AppState>((set, get) => ({
         }
       }
     } catch (error) {
-      console.error('Failed to save contact:', error);
       throw error;
     }
   },
@@ -1431,7 +1429,6 @@ export const useStore = create<AppState>((set, get) => ({
         firestoreService.deleteContact(contactId).catch(() => {});
       }
     } catch (error) {
-      console.error('Failed to delete contact:', error);
       throw error;
     }
   },
@@ -1448,7 +1445,6 @@ export const useStore = create<AppState>((set, get) => ({
         firestoreService.saveContacts(newContacts).catch(() => {});
       }
     } catch (error) {
-      console.error('Failed to import contacts:', error);
       throw error;
     }
   },
@@ -1459,7 +1455,6 @@ export const useStore = create<AppState>((set, get) => ({
       const xeroContacts = await xeroService.fetchXeroContacts();
       set({ xeroContacts });
     } catch (error) {
-      console.error('Failed to sync Xero contacts:', error);
       throw error;
     }
   },
@@ -1518,12 +1513,11 @@ export const useStore = create<AppState>((set, get) => ({
         );
 
         await get().importContacts(newContacts);
-        console.log(`✅ Migrated ${newContacts.length} customers to contacts`);
       }
 
       await AsyncStorage.setItem(STORAGE_KEYS.CONTACTS_MIGRATED, 'true');
     } catch (error) {
-      console.error('Failed to migrate customers to contacts:', error);
+      // silently ignore
     }
   },
 
@@ -1538,7 +1532,7 @@ export const useStore = create<AppState>((set, get) => ({
         set({ xeroConnection: JSON.parse(stored) });
       }
     } catch (error) {
-      console.error('Failed to load Xero connection:', error);
+      // silently ignore
     }
   },
 
@@ -1626,11 +1620,7 @@ export const useStore = create<AppState>((set, get) => ({
   // Clear all data (for logout)
   clearAllData: async () => {
     try {
-      console.log('🧹 clearAllData: Starting to clear all app data...');
-      console.log('🧹 clearAllData: Storage keys to remove:', Object.values(STORAGE_KEYS));
-
       // Clear AsyncStorage
-      console.log('🧹 clearAllData: Removing items from AsyncStorage...');
       await AsyncStorage.multiRemove([
         STORAGE_KEYS.QUOTES,
         STORAGE_KEYS.BUSINESS_SETTINGS,
@@ -1645,10 +1635,7 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.CONTACTS_MIGRATED,
         '@quotemate:seen_screen_tours',
       ]);
-      console.log('✅ clearAllData: AsyncStorage cleared');
-
       // Reset store state to initial values
-      console.log('🧹 clearAllData: Resetting store state...');
       set({
         businessSettings: null,
         quotes: [],
@@ -1668,11 +1655,7 @@ export const useStore = create<AppState>((set, get) => ({
         contactsLoaded: false,
         xeroContacts: [],
       });
-      console.log('✅ clearAllData: Store state reset');
-
-      console.log('✅ clearAllData: All app data cleared successfully');
     } catch (error) {
-      console.error('❌ clearAllData: Failed to clear app data:', error);
       throw error;
     }
   },

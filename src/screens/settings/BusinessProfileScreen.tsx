@@ -24,7 +24,7 @@ import {
 } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import ColorPicker, { Panel1, HueSlider, returnedResults } from 'reanimated-color-picker';
+import ColorPicker, { Panel1, HueSlider, type ColorFormatsObject } from 'reanimated-color-picker';
 
 import { useNavigation } from '@react-navigation/native';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -72,7 +72,7 @@ export function BusinessProfileScreen() {
     }
   }, [businessSettings]);
 
-  const onColorChange = useCallback((result: returnedResults) => {
+  const onColorChange = useCallback((result: ColorFormatsObject) => {
     // Extract the 6-digit hex (strip alpha if present)
     const hex = result.hex.length === 9 ? result.hex.slice(0, 7) : result.hex;
     setBrandColor(hex);
@@ -100,7 +100,6 @@ export function BusinessProfileScreen() {
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to pick image. Please try again.');
-      console.error('Image picker error:', error);
     }
   };
 
@@ -149,7 +148,6 @@ export function BusinessProfileScreen() {
           savedLogoUri = await uploadLogoToStorage(logoUri);
           setLogoUri(savedLogoUri);
         } catch (error) {
-          console.error('Logo upload failed:', error);
           Alert.alert('Logo Upload Failed', 'Could not upload logo. Other settings will still be saved.');
           savedLogoUri = undefined;
         }
