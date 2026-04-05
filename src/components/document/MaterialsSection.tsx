@@ -12,6 +12,8 @@ interface MaterialsSectionProps {
   materialsSubtotal: number;
   onEdit?: () => void;
   emptyMessage?: string;
+  markupPercent?: number;
+  rollMarkupIntoMaterials?: boolean;
 }
 
 export function MaterialsSection({
@@ -19,7 +21,13 @@ export function MaterialsSection({
   materialsSubtotal,
   onEdit,
   emptyMessage = 'No materials required - Labor only',
+  markupPercent = 0,
+  rollMarkupIntoMaterials = false,
 }: MaterialsSectionProps) {
+  const multiplier = rollMarkupIntoMaterials && markupPercent > 0 ? (1 + markupPercent / 100) : 1;
+  const showMarkedUp = multiplier > 1;
+  const displaySubtotal = materialsSubtotal * multiplier;
+
   const content = (
     <Surface style={styles.section}>
       <View style={styles.sectionHeader}>
@@ -42,19 +50,37 @@ export function MaterialsSection({
           <View key={material.id} style={styles.itemRow}>
             <View style={styles.itemInfo}>
               <Text style={styles.itemName}>{material.name}</Text>
-              <Text style={styles.itemDetails}>
-                {material.quantity} {material.unit} × {formatCurrency(material.price)}
-              </Text>
+              {showMarkedUp ? (
+                <Text style={styles.itemDetails}>
+                  {material.quantity} {material.unit} ×{' '}
+                  <Text style={{ textDecorationLine: 'line-through', color: colors.textMuted }}>
+                    {formatCurrency(material.price)}
+                  </Text>
+                  {' → '}
+                  {formatCurrency(material.price * multiplier)}
+                </Text>
+              ) : (
+                <Text style={styles.itemDetails}>
+                  {material.quantity} {material.unit} × {formatCurrency(material.price)}
+                </Text>
+              )}
             </View>
-            <Text style={styles.itemTotal}>{formatCurrency(material.totalPrice)}</Text>
+            <Text style={styles.itemTotal}>
+              {formatCurrency(material.totalPrice * multiplier)}
+            </Text>
           </View>
         ))
       )}
       <Divider style={styles.divider} />
       <View style={styles.summaryRow}>
         <Text style={styles.summaryLabel}>Materials Subtotal</Text>
-        <Text style={styles.summaryValue}>{formatCurrency(materialsSubtotal)}</Text>
+        <Text style={styles.summaryValue}>{formatCurrency(displaySubtotal)}</Text>
       </View>
+      {showMarkedUp && (
+        <Text style={{ fontSize: 11, color: colors.textMuted, textAlign: 'right', marginTop: 2 }}>
+          (incl. {markupPercent}% markup)
+        </Text>
+      )}
     </Surface>
   );
 

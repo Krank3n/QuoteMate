@@ -371,6 +371,8 @@ export function QuotePreviewScreen() {
           materials={currentQuote.materials}
           materialsSubtotal={currentQuote.materialsSubtotal}
           onEdit={() => navigation.navigate('MaterialsList')}
+          markupPercent={currentQuote.markup}
+          rollMarkupIntoMaterials={currentQuote.showMarkup !== true && currentQuote.markup > 0}
         />
 
         <LaborSection

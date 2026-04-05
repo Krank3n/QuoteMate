@@ -223,6 +223,8 @@ export function ViewQuoteScreen() {
           materials={quote.materials}
           materialsSubtotal={quote.materialsSubtotal}
           onEdit={() => handleEditSection('materials')}
+          markupPercent={quote.markup}
+          rollMarkupIntoMaterials={quote.showMarkup !== true && quote.markup > 0}
         />
 
         <LaborSection
@@ -239,6 +241,8 @@ export function ViewQuoteScreen() {
           markupAmount={quote.markupAmount}
           gst={quote.gst}
           total={quote.total}
+          hideZeroMarkup
+          hideMarkup={quote.showMarkup !== true}
         />
 
         {quote.notes && (
@@ -251,7 +255,7 @@ export function ViewQuoteScreen() {
       </ScrollView>
 
       {/* Fixed bottom section with solid background */}
-      {Platform.OS !== 'ios' && <View style={styles.solidBackground} />}
+      <View style={[styles.solidBackground, { height: 60 + insets.bottom }]} />
 
       <View
         style={[
@@ -344,7 +348,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 60,
     backgroundColor: colors.surface,
     zIndex: 1,
   },
@@ -381,12 +384,15 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.primary,
     justifyContent: 'center',
+    height: 48,
   },
   buttonContent: {
-    paddingVertical: 6,
+    height: 48,
   },
   outlinedButtonLabel: {
     color: colors.primary,
+    fontSize: 15,
+    fontWeight: '600',
     marginVertical: 0,
     marginHorizontal: 0,
   },

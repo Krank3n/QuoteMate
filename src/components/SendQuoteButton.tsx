@@ -209,7 +209,7 @@ export function SendQuoteButton({
 
 const styles = StyleSheet.create({
   buttonContent: {
-    paddingVertical: 8,
+    height: 48,
   },
   buttonLabel: {
     fontSize: 15,

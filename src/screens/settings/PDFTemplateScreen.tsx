@@ -28,8 +28,7 @@ import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
-import { PDF_TEMPLATES, printMediaCSS, getTemplateCSS } from '../../utils/pdfTemplates';
-import { PdfTemplateId } from '../../types';
+import { PDF_TEMPLATES, printMediaCSS, getTemplateCSS, PdfTemplateId } from '../../../shared/pdf';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PREVIEW_WIDTH = Math.min(SCREEN_WIDTH - 64, 340);

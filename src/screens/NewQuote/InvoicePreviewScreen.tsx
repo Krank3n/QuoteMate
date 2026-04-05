@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
+import { MaterialsSection } from '../../components/document/MaterialsSection';
 import { calculateDueDate, formatPaymentTerms } from '../../utils/invoiceCalculator';
 import { SuccessModal } from '../../components/SuccessModal';
 import { SendInvoiceButton } from '../../components/SendInvoiceButton';
@@ -175,34 +176,13 @@ export function InvoicePreviewScreen() {
           </Surface>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={handleEditMaterials} activeOpacity={0.7}>
-          <Surface style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Title style={styles.sectionTitle}>Materials ({currentInvoice.materials.length})</Title>
-              <MaterialCommunityIcons name="pencil" size={20} color={colors.primary} />
-            </View>
-            {currentInvoice.materials.length === 0 ? (
-              <Text style={styles.subtext}>No materials required - Labor only</Text>
-            ) : (
-              currentInvoice.materials.map((material) => (
-                <View key={material.id} style={styles.itemRow}>
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemName}>{material.name}</Text>
-                    <Text style={styles.itemDetails}>
-                      {material.quantity} {material.unit} x {formatCurrency(material.price)}
-                    </Text>
-                  </View>
-                  <Text style={styles.itemTotal}>{formatCurrency(material.totalPrice)}</Text>
-                </View>
-              ))
-            )}
-            <Divider style={styles.divider} />
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Materials Subtotal</Text>
-              <Text style={styles.summaryValue}>{formatCurrency(currentInvoice.materialsSubtotal)}</Text>
-            </View>
-          </Surface>
-        </TouchableOpacity>
+        <MaterialsSection
+          materials={currentInvoice.materials}
+          materialsSubtotal={currentInvoice.materialsSubtotal}
+          onEdit={handleEditMaterials}
+          markupPercent={currentInvoice.markup}
+          rollMarkupIntoMaterials={currentInvoice.showMarkup !== true && currentInvoice.markup > 0}
+        />
 
         <TouchableOpacity onPress={handleEditLabor} activeOpacity={0.7}>
           <Surface style={styles.section}>

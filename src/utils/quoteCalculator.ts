@@ -35,8 +35,8 @@ export function calculateQuote(
   // Subtotal before markup
   const subtotal = materialsSubtotal + laborTotal;
 
-  // Calculate markup (base markup only)
-  const markupAmount = subtotal * (markupPercent / 100);
+  // Calculate markup on materials only (not labor)
+  const markupAmount = materialsSubtotal * (markupPercent / 100);
 
   // Calculate travel adjustment amount separately
   const travelAdjustmentAmount = subtotal * (travelAdjustment / 100);

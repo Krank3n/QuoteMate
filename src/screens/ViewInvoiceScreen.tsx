@@ -461,6 +461,8 @@ export function ViewInvoiceScreen() {
           materialsSubtotal={invoice.materialsSubtotal}
           onEdit={() => handleEditSection('materials')}
           emptyMessage="No materials - Labor only"
+          markupPercent={invoice.markup}
+          rollMarkupIntoMaterials={invoice.showMarkup !== true && invoice.markup > 0}
         />
 
         <LaborSection
@@ -477,6 +479,8 @@ export function ViewInvoiceScreen() {
           markupAmount={invoice.markupAmount}
           gst={invoice.gst}
           total={invoice.total}
+          hideZeroMarkup
+          hideMarkup={invoice.showMarkup !== true}
           paidAmount={invoice.paidAmount}
           balanceDue={amountDue}
         />

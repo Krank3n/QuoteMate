@@ -2617,7 +2617,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           customerPhone: quote.customerPhone,
           jobAddress: quote.jobAddress,
           quoteNumber: quote.quoteNumber,
-          quoteDate: quote.updatedAt || new Date().toISOString(),
+          quoteDate: new Date(quote.updatedAt || Date.now()).toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' }),
           job: quote.job || { name: 'Job', description: '' },
           materials: (quote.materials || []).map((m: any) => ({
             name: m.name,
@@ -2630,11 +2630,19 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           materialsSubtotal: quote.materialsSubtotal || 0,
           laborHours: quote.laborHours,
           laborRate: quote.laborRate,
+          laborUnit: quote.laborUnit,
           laborTotal: quote.laborTotal || 0,
+          sections: (quote.sections || []).map((s: any) => ({
+            name: s.name,
+            laborHours: s.laborHours,
+            laborRate: s.laborRate,
+            laborUnit: s.laborUnit,
+            laborTotal: s.laborTotal,
+          })),
           subtotal: quote.subtotal || 0,
           markup: quote.markup || 0,
           markupAmount: quote.markupAmount || 0,
-          showMarkup: quote.showMarkup === true,
+          showMarkup: quote.showMarkup === true && business.showMarkup !== false,
           travelAdjustment: quote.travelAdjustment,
           gst: quote.gst || 0,
           total: quote.total || 0,
@@ -2648,7 +2656,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           email: business.email,
           phone: business.phone,
           abn: business.abn,
-          logoUrl: business.logoStorageUrl,
+          logoHtml: business.logoStorageUrl ? `<img src="${business.logoStorageUrl}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
           brandColor: business.brandColor,
           pdfTemplate: business.pdfTemplate,
         }
@@ -2799,10 +2807,10 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
           customerPhone: invoice.customerPhone,
           jobAddress: invoice.jobAddress,
           quoteNumber: invoice.invoiceNumber,
-          quoteDate: invoice.updatedAt || new Date().toISOString(),
+          quoteDate: new Date(invoice.updatedAt || Date.now()).toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' }),
           invoiceNumber: invoice.invoiceNumber,
-          issueDate: invoice.issueDate || invoice.createdAt || new Date().toISOString(),
-          dueDate: invoice.dueDate || new Date().toISOString(),
+          issueDate: new Date(invoice.issueDate || invoice.createdAt || Date.now()).toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' }),
+          dueDate: new Date(invoice.dueDate || Date.now()).toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' }),
           paymentTerms: invoice.paymentTerms,
           paidAmount: invoice.paidAmount || 0,
           job: invoice.job || { name: 'Job', description: '' },
@@ -2817,11 +2825,19 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
           materialsSubtotal: invoice.materialsSubtotal || 0,
           laborHours: invoice.laborHours,
           laborRate: invoice.laborRate,
+          laborUnit: invoice.laborUnit,
           laborTotal: invoice.laborTotal || 0,
+          sections: (invoice.sections || []).map((s: any) => ({
+            name: s.name,
+            laborHours: s.laborHours,
+            laborRate: s.laborRate,
+            laborUnit: s.laborUnit,
+            laborTotal: s.laborTotal,
+          })),
           subtotal: invoice.subtotal || 0,
           markup: invoice.markup || 0,
           markupAmount: invoice.markupAmount || 0,
-          showMarkup: invoice.showMarkup === true,
+          showMarkup: invoice.showMarkup === true && business.showMarkup !== false,
           travelAdjustment: invoice.travelAdjustment,
           gst: invoice.gst || 0,
           total: invoice.total || 0,
@@ -2835,7 +2851,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
           email: business.email,
           phone: business.phone,
           abn: business.abn,
-          logoUrl: business.logoStorageUrl,
+          logoHtml: business.logoStorageUrl ? `<img src="${business.logoStorageUrl}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
           brandColor: business.brandColor,
           pdfTemplate: business.pdfTemplate,
         }
@@ -3074,6 +3090,10 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
         .map((p: any) => p.storageUrl)
         .filter(Boolean);
 
+      // When markup is hidden, roll it into material prices for the customer view
+      const hideMarkup = foundQuote.showMarkup !== true && (foundQuote.markup || 0) > 0;
+      const markupMultiplier = hideMarkup ? (1 + (foundQuote.markup || 0) / 100) : 1;
+
       res.status(200).json({
         success: true,
         quote: {
@@ -3086,12 +3106,12 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
             name: m.name,
             quantity: m.quantity,
             unit: m.unit,
-            totalPrice: m.totalPrice,
+            totalPrice: (m.totalPrice || 0) * markupMultiplier,
           })),
           laborTotal: foundQuote.laborTotal,
-          materialsSubtotal: foundQuote.materialsSubtotal,
+          materialsSubtotal: (foundQuote.materialsSubtotal || 0) * markupMultiplier,
           subtotal: foundQuote.subtotal,
-          markupAmount: foundQuote.markupAmount || 0,
+          markupAmount: hideMarkup ? 0 : (foundQuote.markupAmount || 0),
           travelAdjustmentAmount: foundQuote.travelAdjustmentAmount || 0,
           gst: foundQuote.gst,
           total: foundQuote.total,

@@ -3,7 +3,7 @@
  * CSS-only template variants for quotes and invoices
  */
 
-import { PdfTemplateId, PdfTemplateInfo } from '../types';
+import { PdfTemplateId, PdfTemplateInfo } from './types';
 
 export const PDF_TEMPLATES: PdfTemplateInfo[] = [
   {

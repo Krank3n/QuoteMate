@@ -1,6 +1,6 @@
 /**
  * PDF Generator Utility
- * Shared utility for generating consistent PDF quotes across the app
+ * Client-side PDF export using shared HTML templates and Expo Print
  */
 
 import * as FileSystem from 'expo-file-system';
@@ -8,110 +8,59 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as MailComposer from 'expo-mail-composer';
 import { format } from 'date-fns';
-import { Quote, BusinessSettings, Invoice, Material } from '../types';
+import { Quote, BusinessSettings, Invoice } from '../types';
 import { formatPaymentTerms, getAmountDue } from './invoiceCalculator';
 import { formatCurrency } from './quoteCalculator';
-import { printMediaCSS, getTemplateCSS } from './pdfTemplates';
-import { PdfTemplateId } from '../types';
 import { Platform, Alert } from 'react-native';
+import {
+  buildQuotePdfHtml,
+  buildInvoicePdfHtml,
+  QuotePdfData,
+  InvoicePdfData,
+  BusinessPdfData,
+} from '../../shared/pdf';
 
 /**
- * Generate materials table HTML, optionally grouped by work section
+ * Prepare the logo HTML tag from business settings (platform-specific)
  */
-function generateMaterialsHTML(materials: Material[], groupBySection: boolean, materialsSubtotal: number): string {
-  if (materials.length === 0) {
-    return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>`;
+async function prepareLogoHtml(businessSettings: BusinessSettings | null, isPro?: boolean): Promise<string> {
+  const showLogo = isPro !== false;
+  if (!showLogo || !businessSettings?.logoUri) return '';
+
+  if (Platform.OS !== 'web') {
+    try {
+      const base64 = await FileSystem.readAsStringAsync(businessSettings.logoUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      return `<img src="data:image/png;base64,${base64}" alt="${businessSettings.businessName || ''}" class="logo" />`;
+    } catch (error) {
+      return '';
+    }
+  } else {
+    // On web, the logoUri is already a URL that can be used directly
+    return `<img src="${businessSettings.logoUri}" alt="${businessSettings.businessName || ''}" class="logo" />`;
   }
+}
 
-  const tableHeader = `
-    <thead>
-      <tr>
-        <th>Item</th>
-        <th>Quantity</th>
-        <th>Unit Price</th>
-        <th>Total</th>
-      </tr>
-    </thead>`;
-
-  const materialRow = (m: Material) => `
-    <tr>
-      <td>${m.name}</td>
-      <td>${m.quantity} ${m.unit}</td>
-      <td>${formatCurrency(m.price)}</td>
-      <td>${formatCurrency(m.totalPrice)}</td>
-    </tr>`;
-
-  const hasSections = groupBySection && materials.some(m => m.section);
-
-  if (!hasSections) {
-    return `
-      <table>
-        ${tableHeader}
-        <tbody>
-          ${materials.map(materialRow).join('')}
-          <tr class="total-row">
-            <td colspan="3">Materials Subtotal</td>
-            <td>${formatCurrency(materialsSubtotal)}</td>
-          </tr>
-        </tbody>
-      </table>`;
-  }
-
-  // Group materials by section
-  const grouped = new Map<string, Material[]>();
-  materials.forEach(m => {
-    const key = m.section || '';
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(m);
-  });
-
-  // Sort: named sections first (alphabetically), then ungrouped
-  const sortedKeys = Array.from(grouped.keys()).sort((a, b) => {
-    if (a === '' && b !== '') return 1;
-    if (a !== '' && b === '') return -1;
-    return a.localeCompare(b);
-  });
-
-  let html = '';
-  sortedKeys.forEach(key => {
-    const sectionMaterials = grouped.get(key)!;
-    const sectionTotal = sectionMaterials.reduce((sum, m) => sum + m.totalPrice, 0);
-    const sectionName = key || 'Other';
-
-    html += `
-      <table>
-        <thead>
-          <tr>
-            <th colspan="4" class="section-label">${sectionName}</th>
-          </tr>
-          <tr>
-            <th>Item</th>
-            <th>Quantity</th>
-            <th>Unit Price</th>
-            <th>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${sectionMaterials.map(materialRow).join('')}
-          <tr class="total-row">
-            <td colspan="3">${sectionName} Subtotal</td>
-            <td>${formatCurrency(sectionTotal)}</td>
-          </tr>
-        </tbody>
-      </table>`;
-  });
-
-  html += `
-    <table>
-      <tbody>
-        <tr class="total-row">
-          <td colspan="3"><strong>All Materials Subtotal</strong></td>
-          <td><strong>${formatCurrency(materialsSubtotal)}</strong></td>
-        </tr>
-      </tbody>
-    </table>`;
-
-  return html;
+/**
+ * Map app BusinessSettings to shared BusinessPdfData
+ */
+function mapBusinessData(businessSettings: BusinessSettings | null, logoHtml: string): BusinessPdfData {
+  const business = businessSettings || {
+    businessName: 'Your Business',
+    email: '',
+    phone: '',
+    abn: '',
+  };
+  return {
+    businessName: business.businessName,
+    email: business.email,
+    phone: business.phone,
+    abn: business.abn,
+    logoHtml,
+    brandColor: businessSettings?.brandColor,
+    pdfTemplate: businessSettings?.pdfTemplate,
+  };
 }
 
 /**
@@ -141,233 +90,51 @@ export function generatePdfFilename(
   return `${type}_${sanitizedCustomer}_${sanitizedJob}_${dateStr}.pdf`;
 }
 
-/**
- * Generate HTML for payment methods section
- */
-function generatePaymentMethodsHTML(businessSettings: BusinessSettings | null): string {
-  const pm = businessSettings?.paymentMethods;
-  if (!pm?.showOnDocuments) return '';
-
-  const sections: string[] = [];
-
-  // Bank Transfer - check enabled and has at least one field with data
-  const bankHasData = pm.bankAccount?.accountName || pm.bankAccount?.bsb || pm.bankAccount?.accountNumber;
-  if (pm.bankAccount?.enabled && bankHasData) {
-    sections.push(`
-      <div class="payment-method">
-        <strong>Bank Transfer</strong><br>
-        ${pm.bankAccount.accountName ? `Account Name: ${pm.bankAccount.accountName}<br>` : ''}
-        ${pm.bankAccount.bsb ? `BSB: ${pm.bankAccount.bsb}<br>` : ''}
-        ${pm.bankAccount.accountNumber ? `Account: ${pm.bankAccount.accountNumber}` : ''}
-      </div>
-    `);
-  }
-
-  // PayID - check enabled and has value
-  if (pm.payId?.enabled && pm.payId?.payIdValue) {
-    const payIdLabel = pm.payId.payIdType === 'phone' ? 'Phone' :
-                       pm.payId.payIdType === 'email' ? 'Email' : 'ABN';
-    sections.push(`
-      <div class="payment-method">
-        <strong>PayID</strong><br>
-        ${payIdLabel}: ${pm.payId.payIdValue}
-      </div>
-    `);
-  }
-
-  // BPAY - check enabled and has at least one field with data
-  const bpayHasData = pm.bpay?.billerCode || pm.bpay?.referenceNumber;
-  if (pm.bpay?.enabled && bpayHasData) {
-    sections.push(`
-      <div class="payment-method">
-        <strong>BPAY</strong><br>
-        ${pm.bpay.billerCode ? `Biller Code: ${pm.bpay.billerCode}<br>` : ''}
-        ${pm.bpay.referenceNumber ? `Reference: ${pm.bpay.referenceNumber}` : ''}
-      </div>
-    `);
-  }
-
-  // PayPal - check enabled and has email
-  if (pm.paypal?.enabled && pm.paypal?.email) {
-    sections.push(`
-      <div class="payment-method">
-        <strong>PayPal</strong><br>
-        ${pm.paypal.email}
-      </div>
-    `);
-  }
-
-  // Other Instructions - check enabled and has instructions
-  if (pm.other?.enabled && pm.other?.instructions) {
-    sections.push(`
-      <div class="payment-method">
-        <strong>Other Payment Options</strong><br>
-        ${pm.other.instructions.replace(/\n/g, '<br>')}
-      </div>
-    `);
-  }
-
-  if (sections.length === 0) return '';
-
-  return `
-    <div class="payment-methods-section">
-      <h3>Payment Methods</h3>
-      <div class="payment-methods-grid">
-        ${sections.join('')}
-      </div>
-    </div>
-  `;
-}
-
 export async function generateQuotePDF(quote: Quote, businessSettings: BusinessSettings | null, options?: { isPro?: boolean }): Promise<string> {
-  const business = businessSettings || {
-    businessName: 'Your Business',
-    email: '',
-    phone: '',
-    abn: '',
+  const logoHtml = await prepareLogoHtml(businessSettings, options?.isPro);
+
+  const pdfData: QuotePdfData = {
+    customerName: quote.customerName,
+    customerEmail: quote.customerEmail,
+    customerPhone: quote.customerPhone,
+    jobAddress: quote.jobAddress,
+    quoteNumber: quote.quoteNumber,
+    quoteDate: format(new Date(quote.updatedAt), 'dd MMMM yyyy'),
+    job: quote.job,
+    materials: quote.materials.map(m => ({
+      name: m.name,
+      quantity: m.quantity,
+      unit: m.unit,
+      price: m.price,
+      totalPrice: m.totalPrice,
+      section: m.section,
+    })),
+    materialsSubtotal: quote.materialsSubtotal,
+    laborHours: quote.laborHours,
+    laborRate: quote.laborRate,
+    laborUnit: quote.laborUnit,
+    laborTotal: quote.laborTotal,
+    sections: quote.sections?.map(s => ({
+      name: s.name,
+      laborHours: s.laborHours,
+      laborRate: s.laborRate,
+      laborUnit: s.laborUnit,
+      laborTotal: s.laborTotal,
+    })),
+    subtotal: quote.subtotal,
+    markup: quote.markup,
+    markupAmount: quote.markupAmount,
+    showMarkup: quote.showMarkup === true && businessSettings?.showMarkup !== false,
+    travelAdjustment: quote.travelAdjustment,
+    gst: quote.gst,
+    total: quote.total,
+    notes: quote.notes,
+    showLaborHours: businessSettings?.showLaborHours,
+    groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
+    paymentMethods: businessSettings?.paymentMethods,
   };
 
-  const templateId: PdfTemplateId = businessSettings?.pdfTemplate || 'professional';
-
-  // Convert logo to base64 if it exists
-  let logoBase64 = '';
-  const showLogo = options?.isPro !== false; // Show logo unless explicitly not Pro
-  if (showLogo && businessSettings?.logoUri && Platform.OS !== 'web') {
-    try {
-      const base64 = await FileSystem.readAsStringAsync(businessSettings.logoUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      logoBase64 = `data:image/png;base64,${base64}`;
-    } catch (error) {
-      // silently ignore
-    }
-  } else if (showLogo && businessSettings?.logoUri && Platform.OS === 'web') {
-    // On web, the logoUri is already a URL that can be used directly
-    logoBase64 = businessSettings.logoUri;
-  }
-
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
-      <style>
-        ${printMediaCSS}
-        ${getTemplateCSS(templateId, businessSettings?.brandColor)}
-      </style>
-    </head>
-    <body>
-      <div class="content-wrapper">
-      <div class="header">
-        <div class="header-content">
-          ${logoBase64 ? `<img src="${logoBase64}" alt="${business.businessName}" class="logo" />` : ''}
-          <div class="header-text">
-            <h1>${business.businessName}</h1>
-            <p>
-              ${business.abn ? `ABN: ${business.abn}<br>` : ''}
-              ${business.email ? `Email: ${business.email}<br>` : ''}
-              ${business.phone ? `Phone: ${business.phone}` : ''}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div class="info-section">
-        <h2>QUOTATION</h2>
-        ${quote.quoteNumber ? `<p><strong>Quote #:</strong> ${quote.quoteNumber}</p>` : ''}
-        <p><strong>Quote Date:</strong> ${format(new Date(quote.updatedAt), 'dd MMMM yyyy')}</p>
-        <p><strong>Customer:</strong> ${quote.customerName}</p>
-        ${quote.customerEmail ? `<p><strong>Email:</strong> ${quote.customerEmail}</p>` : ''}
-        ${quote.customerPhone ? `<p><strong>Phone:</strong> ${quote.customerPhone}</p>` : ''}
-        ${quote.jobAddress ? `<p><strong>Job Address:</strong> ${quote.jobAddress}</p>` : ''}
-      </div>
-
-      <div class="info-section">
-        <h3>Job Details</h3>
-        <p><strong>${quote.job.name}</strong></p>
-        <p>${quote.job.description}</p>
-      </div>
-
-      <div class="section-wrapper">
-        <h3>Materials</h3>
-        ${generateMaterialsHTML(quote.materials, businessSettings?.groupMaterialsBySection === true, quote.materialsSubtotal)}
-      </div>
-
-      <div class="section-wrapper">
-        <h3>Labor</h3>
-        <table>
-          <tbody>
-            ${quote.sections && quote.sections.length > 0 ? quote.sections.map(s => {
-              const sUnit = s.laborUnit || 'hours';
-              const sLabel = sUnit === 'days' ? 'days' : 'hours';
-              const sRate = sUnit === 'days' ? '/day' : '/hr';
-              return `<tr>
-                <td>${businessSettings?.showLaborHours ? `${s.name} (${s.laborHours} ${sLabel} @ ${formatCurrency(s.laborRate)}${sRate})` : s.name}</td>
-                <td style="text-align: right;">${formatCurrency(s.laborTotal)}</td>
-              </tr>`;
-            }).join('') : `<tr>
-              <td>${businessSettings?.showLaborHours ? `Labor (${quote.laborHours} ${(quote.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(quote.laborRate)}${(quote.laborUnit || 'hours') === 'days' ? '/day' : '/hr'})` : 'Labor'}</td>
-              <td style="text-align: right;">${formatCurrency(quote.laborTotal)}</td>
-            </tr>`}
-            ${quote.sections && quote.sections.length > 0 ? `<tr class="total-row">
-              <td>Labor Total</td>
-              <td style="text-align: right;">${formatCurrency(quote.laborTotal)}</td>
-            </tr>` : ''}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="summary">
-        <div class="summary-row">
-          <span>Materials Subtotal</span>
-          <span>${formatCurrency(quote.materialsSubtotal)}</span>
-        </div>
-        <div class="summary-row">
-          <span>Labor</span>
-          <span>${formatCurrency(quote.laborTotal)}</span>
-        </div>
-        <div class="summary-row">
-          <span>Subtotal</span>
-          <span>${formatCurrency(quote.subtotal)}</span>
-        </div>
-        ${quote.showMarkup === true ? `
-        <div class="summary-row">
-          <span>Markup (${quote.markup}%)</span>
-          <span>${formatCurrency(quote.markupAmount)}</span>
-        </div>
-        ` : ''}
-        ${quote.travelAdjustment && quote.travelAdjustment > 0 ? `
-        <div class="summary-row">
-          <span>Travel Adjustment (${quote.travelAdjustment}%)</span>
-          <span>${formatCurrency(quote.subtotal * (quote.travelAdjustment / 100))}</span>
-        </div>
-        ` : ''}
-        <div class="summary-row">
-          <span>GST (10%)</span>
-          <span>${formatCurrency(quote.gst)}</span>
-        </div>
-        <hr>
-        <div class="summary-row grand-total">
-          <span>TOTAL</span>
-          <span>${formatCurrency(quote.total)}</span>
-        </div>
-      </div>
-
-      ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${quote.notes}</p></div>` : ''}
-
-      ${generatePaymentMethodsHTML(businessSettings)}
-
-      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
-        <p>This quote is valid for 30 days from the date of issue.</p>
-      </div>
-      </div>
-
-      <div class="pdf-footer">
-        <p>Powered by QuoteMate | quotemateapp.au</p>
-      </div>
-    </body>
-    </html>
-    `;
+  return buildQuotePdfHtml(pdfData, mapBusinessData(businessSettings, logoHtml));
 }
 
 /**
@@ -483,180 +250,55 @@ export async function exportQuotePDF(
  * Generate Invoice PDF HTML
  */
 export async function generateInvoicePDF(invoice: Invoice, businessSettings: BusinessSettings | null, options?: { isPro?: boolean }): Promise<string> {
-  const business = businessSettings || {
-    businessName: 'Your Business',
-    email: '',
-    phone: '',
-    abn: '',
+  const logoHtml = await prepareLogoHtml(businessSettings, options?.isPro);
+  const amountDue = getAmountDue(invoice);
+
+  const pdfData: InvoicePdfData = {
+    customerName: invoice.customerName,
+    customerEmail: invoice.customerEmail,
+    customerPhone: invoice.customerPhone,
+    jobAddress: invoice.jobAddress,
+    quoteDate: format(new Date(invoice.updatedAt), 'dd MMMM yyyy'),
+    invoiceNumber: invoice.invoiceNumber,
+    issueDate: format(new Date(invoice.issueDate), 'dd MMMM yyyy'),
+    dueDate: format(new Date(invoice.dueDate), 'dd MMMM yyyy'),
+    paymentTerms: formatPaymentTerms(invoice.paymentTerms, invoice.customPaymentDays),
+    paidAmount: invoice.paidAmount,
+    job: invoice.job,
+    materials: invoice.materials.map(m => ({
+      name: m.name,
+      quantity: m.quantity,
+      unit: m.unit,
+      price: m.price,
+      totalPrice: m.totalPrice,
+      section: m.section,
+    })),
+    materialsSubtotal: invoice.materialsSubtotal,
+    laborHours: invoice.laborHours,
+    laborRate: invoice.laborRate,
+    laborUnit: invoice.laborUnit,
+    laborTotal: invoice.laborTotal,
+    sections: invoice.sections?.map(s => ({
+      name: s.name,
+      laborHours: s.laborHours,
+      laborRate: s.laborRate,
+      laborUnit: s.laborUnit,
+      laborTotal: s.laborTotal,
+    })),
+    subtotal: invoice.subtotal,
+    markup: invoice.markup,
+    markupAmount: invoice.markupAmount,
+    showMarkup: invoice.showMarkup === true && businessSettings?.showMarkup !== false,
+    travelAdjustment: invoice.travelAdjustment,
+    gst: invoice.gst,
+    total: invoice.total,
+    notes: invoice.notes,
+    showLaborHours: businessSettings?.showLaborHours,
+    groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
+    paymentMethods: businessSettings?.paymentMethods,
   };
 
-  const templateId: PdfTemplateId = businessSettings?.pdfTemplate || 'professional';
-
-  // Convert logo to base64 if it exists
-  let logoBase64 = '';
-  const showLogo = options?.isPro !== false; // Show logo unless explicitly not Pro
-  if (showLogo && businessSettings?.logoUri && Platform.OS !== 'web') {
-    try {
-      const base64 = await FileSystem.readAsStringAsync(businessSettings.logoUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      logoBase64 = `data:image/png;base64,${base64}`;
-    } catch (error) {
-      // silently ignore
-    }
-  } else if (showLogo && businessSettings?.logoUri && Platform.OS === 'web') {
-    logoBase64 = businessSettings.logoUri;
-  }
-
-  const amountDue = getAmountDue(invoice);
-  const paidAmount = invoice.paidAmount || 0;
-
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
-      <style>
-        ${printMediaCSS}
-        ${getTemplateCSS(templateId, businessSettings?.brandColor)}
-      </style>
-    </head>
-    <body>
-      <div class="content-wrapper">
-      <div class="header">
-        <div class="header-content">
-          ${logoBase64 ? `<img src="${logoBase64}" alt="${business.businessName}" class="logo" />` : ''}
-          <div class="header-text">
-            <h1>${business.businessName}</h1>
-            <p>
-              ${business.abn ? `ABN: ${business.abn}<br>` : ''}
-              ${business.email ? `Email: ${business.email}<br>` : ''}
-              ${business.phone ? `Phone: ${business.phone}` : ''}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div class="info-section">
-        <h2>INVOICE</h2>
-        <div class="invoice-details">
-          <div class="invoice-details-left">
-            ${invoice.invoiceNumber ? `<p><strong>Invoice #:</strong> ${invoice.invoiceNumber}</p>` : ''}
-            <p><strong>Issue Date:</strong> ${format(new Date(invoice.issueDate), 'dd MMMM yyyy')}</p>
-            <p><strong>Due Date:</strong> ${format(new Date(invoice.dueDate), 'dd MMMM yyyy')}</p>
-            <p><strong>Payment Terms:</strong> ${formatPaymentTerms(invoice.paymentTerms, invoice.customPaymentDays)}</p>
-          </div>
-        </div>
-        <p><strong>Customer:</strong> ${invoice.customerName}</p>
-        ${invoice.customerEmail ? `<p><strong>Email:</strong> ${invoice.customerEmail}</p>` : ''}
-        ${invoice.customerPhone ? `<p><strong>Phone:</strong> ${invoice.customerPhone}</p>` : ''}
-        ${invoice.jobAddress ? `<p><strong>Job Address:</strong> ${invoice.jobAddress}</p>` : ''}
-      </div>
-
-      <div class="info-section">
-        <h3>Job Details</h3>
-        <p><strong>${invoice.job.name}</strong></p>
-        <p>${invoice.job.description}</p>
-      </div>
-
-      <div class="section-wrapper">
-        <h3>Materials</h3>
-        ${generateMaterialsHTML(invoice.materials, businessSettings?.groupMaterialsBySection === true, invoice.materialsSubtotal)}
-      </div>
-
-      <div class="section-wrapper">
-        <h3>Labor</h3>
-        <table>
-          <tbody>
-            ${invoice.sections && invoice.sections.length > 0 ? invoice.sections.map(s => {
-              const sUnit = s.laborUnit || 'hours';
-              const sLabel = sUnit === 'days' ? 'days' : 'hours';
-              const sRate = sUnit === 'days' ? '/day' : '/hr';
-              return `<tr>
-                <td>${businessSettings?.showLaborHours ? `${s.name} (${s.laborHours} ${sLabel} @ ${formatCurrency(s.laborRate)}${sRate})` : s.name}</td>
-                <td style="text-align: right;">${formatCurrency(s.laborTotal)}</td>
-              </tr>`;
-            }).join('') : `<tr>
-              <td>${businessSettings?.showLaborHours ? `Labor (${invoice.laborHours} ${(invoice.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(invoice.laborRate)}${(invoice.laborUnit || 'hours') === 'days' ? '/day' : '/hr'})` : 'Labor'}</td>
-              <td style="text-align: right;">${formatCurrency(invoice.laborTotal)}</td>
-            </tr>`}
-            ${invoice.sections && invoice.sections.length > 0 ? `<tr class="total-row">
-              <td>Labor Total</td>
-              <td style="text-align: right;">${formatCurrency(invoice.laborTotal)}</td>
-            </tr>` : ''}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="summary">
-        <div class="summary-row">
-          <span>Materials Subtotal</span>
-          <span>${formatCurrency(invoice.materialsSubtotal)}</span>
-        </div>
-        <div class="summary-row">
-          <span>Labor</span>
-          <span>${formatCurrency(invoice.laborTotal)}</span>
-        </div>
-        <div class="summary-row">
-          <span>Subtotal</span>
-          <span>${formatCurrency(invoice.subtotal)}</span>
-        </div>
-        ${invoice.showMarkup === true ? `
-        <div class="summary-row">
-          <span>Markup (${invoice.markup}%)</span>
-          <span>${formatCurrency(invoice.markupAmount)}</span>
-        </div>
-        ` : ''}
-        ${invoice.travelAdjustment && invoice.travelAdjustment > 0 ? `
-        <div class="summary-row">
-          <span>Travel Adjustment (${invoice.travelAdjustment}%)</span>
-          <span>${formatCurrency(invoice.subtotal * (invoice.travelAdjustment / 100))}</span>
-        </div>
-        ` : ''}
-        <div class="summary-row">
-          <span>GST (10%)</span>
-          <span>${formatCurrency(invoice.gst)}</span>
-        </div>
-        <hr>
-        <div class="summary-row grand-total">
-          <span>TOTAL</span>
-          <span>${formatCurrency(invoice.total)}</span>
-        </div>
-        ${paidAmount > 0 ? `
-        <div class="summary-row" style="color: #28a745;">
-          <span>Amount Paid</span>
-          <span>-${formatCurrency(paidAmount)}</span>
-        </div>
-        <div class="summary-row balance-due">
-          <span>BALANCE DUE</span>
-          <span>${formatCurrency(amountDue)}</span>
-        </div>
-        ` : ''}
-      </div>
-
-      ${invoice.notes ? `<div class="info-section"><h3>Notes</h3><p>${invoice.notes}</p></div>` : ''}
-
-      <div class="payment-box">
-        <h3>Payment Information</h3>
-        <p><strong>Amount Due:</strong> ${formatCurrency(amountDue)}</p>
-        <p><strong>Due Date:</strong> ${format(new Date(invoice.dueDate), 'dd MMMM yyyy')}</p>
-        <p>Please reference invoice number ${invoice.invoiceNumber || 'N/A'} with your payment.</p>
-      </div>
-
-      ${generatePaymentMethodsHTML(businessSettings)}
-
-      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
-        <p>Payment is due by ${format(new Date(invoice.dueDate), 'dd MMMM yyyy')}.</p>
-        <p>Thank you for your business!</p>
-      </div>
-      </div>
-
-      <div class="pdf-footer">
-        <p>Powered by QuoteMate | quotemateapp.au</p>
-      </div>
-    </body>
-    </html>
-    `;
+  return buildInvoicePdfHtml(pdfData, mapBusinessData(businessSettings, logoHtml));
 }
 
 /**

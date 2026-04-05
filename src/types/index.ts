@@ -1,14 +1,8 @@
 // Core data models for QuoteMate
 
-// PDF Template types
-export type PdfTemplateId = 'professional' | 'clean' | 'bold' | 'tradesman';
-
-export interface PdfTemplateInfo {
-  id: PdfTemplateId;
-  name: string;
-  description: string;
-  accentColor: string;
-}
+// PDF Template types (imported from shared module for local use, re-exported for consumers)
+import type { PdfTemplateId, PdfTemplateInfo } from '../../shared/pdf/types';
+export type { PdfTemplateId, PdfTemplateInfo };
 
 export interface Material {
   id: string;

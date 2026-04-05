@@ -1,0 +1,453 @@
+/**
+ * Shared HTML builders for PDF quote and invoice generation
+ * Used by both client (Expo Print) and server (Puppeteer) renderers
+ */
+
+import { PdfMaterial, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId } from './types';
+import { formatCurrency } from './formatCurrency';
+import { printMediaCSS, getTemplateCSS } from './templates';
+
+/**
+ * Generate materials table HTML, optionally grouped by work section
+ * When markupPercent > 0, material prices are inflated by the markup percentage
+ */
+export function generateMaterialsHTML(
+  materials: PdfMaterial[],
+  groupBySection: boolean,
+  materialsSubtotal: number,
+  markupPercent: number = 0,
+): string {
+  if (materials.length === 0) {
+    return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>`;
+  }
+
+  const multiplier = markupPercent > 0 ? (1 + markupPercent / 100) : 1;
+  const displaySubtotal = materialsSubtotal * multiplier;
+
+  const tableHeader = `
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Quantity</th>
+        <th>Unit Price</th>
+        <th>Total</th>
+      </tr>
+    </thead>`;
+
+  const materialRow = (m: PdfMaterial) => `
+    <tr>
+      <td>${m.name}</td>
+      <td>${m.quantity} ${m.unit}</td>
+      <td>${formatCurrency(m.price * multiplier)}</td>
+      <td>${formatCurrency(m.totalPrice * multiplier)}</td>
+    </tr>`;
+
+  const hasSections = groupBySection && materials.some(m => m.section);
+
+  if (!hasSections) {
+    return `
+      <table>
+        ${tableHeader}
+        <tbody>
+          ${materials.map(materialRow).join('')}
+          <tr class="total-row">
+            <td colspan="3">Materials Subtotal</td>
+            <td>${formatCurrency(displaySubtotal)}</td>
+          </tr>
+        </tbody>
+      </table>`;
+  }
+
+  // Group materials by section
+  const grouped = new Map<string, PdfMaterial[]>();
+  materials.forEach(m => {
+    const key = m.section || '';
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(m);
+  });
+
+  // Sort: named sections first (alphabetically), then ungrouped
+  const sortedKeys = Array.from(grouped.keys()).sort((a, b) => {
+    if (a === '' && b !== '') return 1;
+    if (a !== '' && b === '') return -1;
+    return a.localeCompare(b);
+  });
+
+  let html = '';
+  sortedKeys.forEach(key => {
+    const sectionMaterials = grouped.get(key)!;
+    const sectionTotal = sectionMaterials.reduce((sum, m) => sum + m.totalPrice, 0) * multiplier;
+    const sectionName = key || 'Other';
+
+    html += `
+      <table>
+        <thead>
+          <tr>
+            <th colspan="4" class="section-label">${sectionName}</th>
+          </tr>
+          <tr>
+            <th>Item</th>
+            <th>Quantity</th>
+            <th>Unit Price</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sectionMaterials.map(materialRow).join('')}
+          <tr class="total-row">
+            <td colspan="3">${sectionName} Subtotal</td>
+            <td>${formatCurrency(sectionTotal)}</td>
+          </tr>
+        </tbody>
+      </table>`;
+  });
+
+  html += `
+    <table>
+      <tbody>
+        <tr class="total-row">
+          <td colspan="3"><strong>All Materials Subtotal</strong></td>
+          <td><strong>${formatCurrency(displaySubtotal)}</strong></td>
+        </tr>
+      </tbody>
+    </table>`;
+
+  return html;
+}
+
+/**
+ * Generate HTML for payment methods section
+ */
+export function generatePaymentMethodsHTML(pm: any): string {
+  if (!pm?.showOnDocuments) return '';
+
+  const sections: string[] = [];
+
+  // Bank Transfer - check enabled and has at least one field with data
+  const bankHasData = pm.bankAccount?.accountName || pm.bankAccount?.bsb || pm.bankAccount?.accountNumber;
+  if (pm.bankAccount?.enabled && bankHasData) {
+    sections.push(`
+      <div class="payment-method">
+        <strong>Bank Transfer</strong><br>
+        ${pm.bankAccount.accountName ? `Account Name: ${pm.bankAccount.accountName}<br>` : ''}
+        ${pm.bankAccount.bsb ? `BSB: ${pm.bankAccount.bsb}<br>` : ''}
+        ${pm.bankAccount.accountNumber ? `Account: ${pm.bankAccount.accountNumber}` : ''}
+      </div>
+    `);
+  }
+
+  // PayID - check enabled and has value
+  if (pm.payId?.enabled && pm.payId?.payIdValue) {
+    const payIdLabel = pm.payId.payIdType === 'phone' ? 'Phone' :
+                       pm.payId.payIdType === 'email' ? 'Email' : 'ABN';
+    sections.push(`
+      <div class="payment-method">
+        <strong>PayID</strong><br>
+        ${payIdLabel}: ${pm.payId.payIdValue}
+      </div>
+    `);
+  }
+
+  // BPAY - check enabled and has at least one field with data
+  const bpayHasData = pm.bpay?.billerCode || pm.bpay?.referenceNumber;
+  if (pm.bpay?.enabled && bpayHasData) {
+    sections.push(`
+      <div class="payment-method">
+        <strong>BPAY</strong><br>
+        ${pm.bpay.billerCode ? `Biller Code: ${pm.bpay.billerCode}<br>` : ''}
+        ${pm.bpay.referenceNumber ? `Reference: ${pm.bpay.referenceNumber}` : ''}
+      </div>
+    `);
+  }
+
+  // PayPal - check enabled and has email
+  if (pm.paypal?.enabled && pm.paypal?.email) {
+    sections.push(`
+      <div class="payment-method">
+        <strong>PayPal</strong><br>
+        ${pm.paypal.email}
+      </div>
+    `);
+  }
+
+  // Other Instructions - check enabled and has instructions
+  if (pm.other?.enabled && pm.other?.instructions) {
+    sections.push(`
+      <div class="payment-method">
+        <strong>Other Payment Options</strong><br>
+        ${pm.other.instructions.replace(/\n/g, '<br>')}
+      </div>
+    `);
+  }
+
+  if (sections.length === 0) return '';
+
+  return `
+    <div class="payment-methods-section">
+      <h3>Payment Methods</h3>
+      <div class="payment-methods-grid">
+        ${sections.join('')}
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Build labor section HTML with support for per-section labor breakdown
+ */
+function buildLaborHTML(data: QuotePdfData): string {
+  return `
+      <div class="section-wrapper">
+        <h3>Labor</h3>
+        <table>
+          <tbody>
+            ${data.sections && data.sections.length > 0 ? data.sections.map(s => {
+              const sUnit = s.laborUnit || 'hours';
+              const sLabel = sUnit === 'days' ? 'days' : 'hours';
+              const sRate = sUnit === 'days' ? '/day' : '/hr';
+              return `<tr>
+                <td>${data.showLaborHours ? `${s.name} (${s.laborHours} ${sLabel} @ ${formatCurrency(s.laborRate)}${sRate})` : s.name}</td>
+                <td style="text-align: right;">${formatCurrency(s.laborTotal)}</td>
+              </tr>`;
+            }).join('') : `<tr>
+              <td>${data.showLaborHours && data.laborHours && data.laborRate ? `Labor (${data.laborHours} ${(data.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(data.laborRate)}${(data.laborUnit || 'hours') === 'days' ? '/day' : '/hr'})` : 'Labor'}</td>
+              <td style="text-align: right;">${formatCurrency(data.laborTotal)}</td>
+            </tr>`}
+            ${data.sections && data.sections.length > 0 ? `<tr class="total-row">
+              <td>Labor Total</td>
+              <td style="text-align: right;">${formatCurrency(data.laborTotal)}</td>
+            </tr>` : ''}
+          </tbody>
+        </table>
+      </div>`;
+}
+
+/**
+ * Build summary/totals HTML, with optional paid amount/balance for invoices
+ */
+function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: number): string {
+  // When markup is hidden but exists, it's rolled into material prices
+  const rollMarkup = data.showMarkup !== true && data.markup > 0;
+  const displayMaterialsSubtotal = rollMarkup
+    ? data.materialsSubtotal + data.markupAmount
+    : data.materialsSubtotal;
+  const displaySubtotal = rollMarkup
+    ? data.subtotal + data.markupAmount
+    : data.subtotal;
+
+  return `
+      <div class="summary">
+        <div class="summary-row">
+          <span>Materials Subtotal</span>
+          <span>${formatCurrency(displayMaterialsSubtotal)}</span>
+        </div>
+        <div class="summary-row">
+          <span>Labor</span>
+          <span>${formatCurrency(data.laborTotal)}</span>
+        </div>
+        <div class="summary-row">
+          <span>Subtotal</span>
+          <span>${formatCurrency(displaySubtotal)}</span>
+        </div>
+        ${data.showMarkup === true ? `
+        <div class="summary-row">
+          <span>Markup (${data.markup}%)</span>
+          <span>${formatCurrency(data.markupAmount)}</span>
+        </div>
+        ` : ''}
+        ${data.travelAdjustment && data.travelAdjustment > 0 ? `
+        <div class="summary-row">
+          <span>Travel Adjustment (${data.travelAdjustment}%)</span>
+          <span>${formatCurrency(data.subtotal * (data.travelAdjustment / 100))}</span>
+        </div>
+        ` : ''}
+        <div class="summary-row">
+          <span>GST (10%)</span>
+          <span>${formatCurrency(data.gst)}</span>
+        </div>
+        <hr>
+        <div class="summary-row grand-total">
+          <span>TOTAL</span>
+          <span>${formatCurrency(data.total)}</span>
+        </div>
+        ${paidAmount && paidAmount > 0 ? `
+        <div class="summary-row" style="color: #28a745;">
+          <span>Amount Paid</span>
+          <span>-${formatCurrency(paidAmount)}</span>
+        </div>
+        <div class="summary-row balance-due">
+          <span>BALANCE DUE</span>
+          <span>${formatCurrency(amountDue || 0)}</span>
+        </div>
+        ` : ''}
+      </div>`;
+}
+
+/**
+ * Build the full quote PDF HTML document
+ */
+export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData): string {
+  const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
+  const rollMarkup = quote.showMarkup !== true && quote.markup > 0;
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+      <style>
+        ${printMediaCSS}
+        ${getTemplateCSS(templateId, business.brandColor)}
+      </style>
+    </head>
+    <body>
+      <div class="content-wrapper">
+      <div class="header">
+        <div class="header-content">
+          ${business.logoHtml || ''}
+          <div class="header-text">
+            <h1>${business.businessName}</h1>
+            <p>
+              ${business.abn ? `ABN: ${business.abn}<br>` : ''}
+              ${business.email ? `Email: ${business.email}<br>` : ''}
+              ${business.phone ? `Phone: ${business.phone}` : ''}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-section">
+        <h2>QUOTATION</h2>
+        ${quote.quoteNumber ? `<p><strong>Quote #:</strong> ${quote.quoteNumber}</p>` : ''}
+        <p><strong>Quote Date:</strong> ${quote.quoteDate}</p>
+        <p><strong>Customer:</strong> ${quote.customerName}</p>
+        ${quote.customerEmail ? `<p><strong>Email:</strong> ${quote.customerEmail}</p>` : ''}
+        ${quote.customerPhone ? `<p><strong>Phone:</strong> ${quote.customerPhone}</p>` : ''}
+        ${quote.jobAddress ? `<p><strong>Job Address:</strong> ${quote.jobAddress}</p>` : ''}
+      </div>
+
+      <div class="info-section">
+        <h3>Job Details</h3>
+        <p><strong>${quote.job.name}</strong></p>
+        <p>${quote.job.description}</p>
+      </div>
+
+      <div class="section-wrapper">
+        <h3>Materials</h3>
+        ${generateMaterialsHTML(quote.materials, quote.groupMaterialsBySection === true, quote.materialsSubtotal, rollMarkup ? quote.markup : 0)}
+      </div>
+
+      ${buildLaborHTML(quote)}
+
+      ${buildSummaryHTML(quote)}
+
+      ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${quote.notes}</p></div>` : ''}
+
+      ${generatePaymentMethodsHTML(quote.paymentMethods)}
+
+      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
+        <p>This quote is valid for 30 days from the date of issue.</p>
+      </div>
+      </div>
+
+      <div class="pdf-footer">
+        <p>Powered by QuoteMate | quotemateapp.au</p>
+      </div>
+    </body>
+    </html>
+    `;
+}
+
+/**
+ * Build the full invoice PDF HTML document
+ */
+export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessPdfData): string {
+  const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
+  const rollMarkup = invoice.showMarkup !== true && invoice.markup > 0;
+
+  const paidAmount = invoice.paidAmount || 0;
+  const amountDue = invoice.total - paidAmount;
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+      <style>
+        ${printMediaCSS}
+        ${getTemplateCSS(templateId, business.brandColor)}
+      </style>
+    </head>
+    <body>
+      <div class="content-wrapper">
+      <div class="header">
+        <div class="header-content">
+          ${business.logoHtml || ''}
+          <div class="header-text">
+            <h1>${business.businessName}</h1>
+            <p>
+              ${business.abn ? `ABN: ${business.abn}<br>` : ''}
+              ${business.email ? `Email: ${business.email}<br>` : ''}
+              ${business.phone ? `Phone: ${business.phone}` : ''}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-section">
+        <h2>INVOICE</h2>
+        <div class="invoice-details">
+          <div class="invoice-details-left">
+            ${invoice.invoiceNumber ? `<p><strong>Invoice #:</strong> ${invoice.invoiceNumber}</p>` : ''}
+            <p><strong>Issue Date:</strong> ${invoice.issueDate}</p>
+            <p><strong>Due Date:</strong> ${invoice.dueDate}</p>
+            ${invoice.paymentTerms ? `<p><strong>Payment Terms:</strong> ${invoice.paymentTerms}</p>` : ''}
+          </div>
+        </div>
+        <p><strong>Customer:</strong> ${invoice.customerName}</p>
+        ${invoice.customerEmail ? `<p><strong>Email:</strong> ${invoice.customerEmail}</p>` : ''}
+        ${invoice.customerPhone ? `<p><strong>Phone:</strong> ${invoice.customerPhone}</p>` : ''}
+        ${invoice.jobAddress ? `<p><strong>Job Address:</strong> ${invoice.jobAddress}</p>` : ''}
+      </div>
+
+      <div class="info-section">
+        <h3>Job Details</h3>
+        <p><strong>${invoice.job.name}</strong></p>
+        <p>${invoice.job.description}</p>
+      </div>
+
+      <div class="section-wrapper">
+        <h3>Materials</h3>
+        ${generateMaterialsHTML(invoice.materials, invoice.groupMaterialsBySection === true, invoice.materialsSubtotal, rollMarkup ? invoice.markup : 0)}
+      </div>
+
+      ${buildLaborHTML(invoice)}
+
+      ${buildSummaryHTML(invoice, paidAmount, amountDue)}
+
+      ${invoice.notes ? `<div class="info-section"><h3>Notes</h3><p>${invoice.notes}</p></div>` : ''}
+
+      <div class="payment-box">
+        <h3>Payment Information</h3>
+        <p><strong>Amount Due:</strong> ${formatCurrency(amountDue)}</p>
+        <p><strong>Due Date:</strong> ${invoice.dueDate}</p>
+        ${invoice.invoiceNumber ? `<p>Please reference invoice number ${invoice.invoiceNumber} with your payment.</p>` : ''}
+      </div>
+
+      ${generatePaymentMethodsHTML(invoice.paymentMethods)}
+
+      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
+        <p>Payment is due by ${invoice.dueDate}.</p>
+        <p>Thank you for your business!</p>
+      </div>
+      </div>
+
+      <div class="pdf-footer">
+        <p>Powered by QuoteMate | quotemateapp.au</p>
+      </div>
+    </body>
+    </html>
+    `;
+}
