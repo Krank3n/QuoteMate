@@ -23,6 +23,7 @@ import {
   buildInvoiceEmailHtml,
   sendAffiliateInviteEmail,
   sendNewProSubscriptionEmail,
+  sendMaterialListErrorEmail,
 } from './email';
 import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from './pdfGenerator';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
@@ -1503,6 +1504,14 @@ Return ONLY valid JSON, no other text.`;
         jobSummary: parsed.jobSummary || '',
       });
     } catch (error: any) {
+      const userEmail = await getUserEmail(decodedToken.uid);
+      sendMaterialListErrorEmail(
+        userEmail || '',
+        decodedToken.uid,
+        req.body.jobDescription || '',
+        error.message,
+      ).catch(() => {});
+
       res.status(500).json({ error: error.message });
     }
   });
@@ -2625,6 +2634,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           subtotal: quote.subtotal || 0,
           markup: quote.markup || 0,
           markupAmount: quote.markupAmount || 0,
+          showMarkup: quote.showMarkup === true,
           travelAdjustment: quote.travelAdjustment,
           gst: quote.gst || 0,
           total: quote.total || 0,
@@ -2811,6 +2821,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
           subtotal: invoice.subtotal || 0,
           markup: invoice.markup || 0,
           markupAmount: invoice.markupAmount || 0,
+          showMarkup: invoice.showMarkup === true,
           travelAdjustment: invoice.travelAdjustment,
           gst: invoice.gst || 0,
           total: invoice.total || 0,

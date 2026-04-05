@@ -7,21 +7,38 @@ allowed-tools: Bash, Read, Edit, Glob, Grep
 
 # Build Android Production AAB
 
-Build a signed production Android App Bundle (AAB) locally using EAS for upload to the Google Play Store.
+Build a signed production Android App Bundle (AAB) locally using Gradle for upload to the Google Play Store.
 
 ## Steps
 
-1. Run the EAS local production build:
-   ```
-   eas build --platform android --profile production --local
-   ```
-   This will auto-increment the `versionCode` from the EAS remote version.
+1. Read `android/app/build.gradle` and note the current `versionCode` and `versionName`.
 
-2. Wait for the build to complete (typically ~2-3 minutes).
+2. Get the latest versionCode from the Play Store via EAS:
+   ```
+   eas build:version:get --platform android
+   ```
+   Parse the `Android versionCode` value from the output.
 
-3. Check the build output for success and report the following to the user:
-   - The full path to the `.aab` file
-   - The version name (from `app.config.js` version field)
-   - The version code used in the build
+3. Set the new versions:
+   - `versionCode` = max(current build.gradle value, EAS remote value) + 1
+   - Bump the patch number in `versionName` by 1 (e.g. "1.0.70" → "1.0.71")
+   - Use the Edit tool to update the values in `android/app/build.gradle`.
+
+4. Run the Gradle release bundle build:
+   ```
+   cd android && ./gradlew bundleRelease
+   ```
+   Set the timeout to 600000ms (10 minutes) to allow for the full Gradle build.
+
+5. After a successful build, copy the AAB to a consistent output location:
+   ```
+   mkdir -p builds/android
+   cp android/app/build/outputs/bundle/release/app-release.aab builds/android/quotemate-v{versionName}-{versionCode}.aab
+   ```
+   Replace `{versionName}` and `{versionCode}` with the actual values (e.g. `quotemate-v1.0.71-90.aab`).
+
+6. Report the following to the user:
+   - The full path to the `.aab` file in `builds/android/`
+   - The new `versionName` and `versionCode`
 
 The build timeout should be set to 600000ms (10 minutes) to allow for the full Gradle build.

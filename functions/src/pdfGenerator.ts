@@ -39,6 +39,7 @@ interface QuotePdfData {
   subtotal: number;
   markup: number;
   markupAmount: number;
+  showMarkup?: boolean;
   travelAdjustment?: number;
   gst: number;
   total: number;
@@ -491,10 +492,12 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
           <span>Subtotal</span>
           <span>${formatCurrency(quote.subtotal)}</span>
         </div>
+        ${quote.showMarkup === true ? `
         <div class="summary-row">
           <span>Markup (${quote.markup}%)</span>
           <span>${formatCurrency(quote.markupAmount)}</span>
         </div>
+        ` : ''}
         ${quote.travelAdjustment && quote.travelAdjustment > 0 ? `
         <div class="summary-row">
           <span>Travel Adjustment (${quote.travelAdjustment}%)</span>
@@ -628,10 +631,12 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
           <span>Subtotal</span>
           <span>${formatCurrency(invoice.subtotal)}</span>
         </div>
+        ${invoice.showMarkup === true ? `
         <div class="summary-row">
           <span>Markup (${invoice.markup}%)</span>
           <span>${formatCurrency(invoice.markupAmount)}</span>
         </div>
+        ` : ''}
         ${invoice.travelAdjustment && invoice.travelAdjustment > 0 ? `
         <div class="summary-row">
           <span>Travel Adjustment (${invoice.travelAdjustment}%)</span>

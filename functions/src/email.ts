@@ -1534,3 +1534,64 @@ export function sendAffiliateInviteEmail(
     tags: ['affiliate-invite'],
   });
 }
+
+export function sendMaterialListErrorEmail(
+  userEmail: string,
+  userId: string,
+  jobDescription: string,
+  errorMessage: string,
+): Promise<boolean> {
+  const truncatedJob = jobDescription.length > 500
+    ? jobDescription.substring(0, 500) + '...'
+    : jobDescription;
+
+  const timestamp = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
+
+  const content = wrapEmailTemplate(`
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">Material List Generation Failed</p>
+    <h1 style="color:#ef4444;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      A material list generation has failed
+    </h1>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+      <tr>
+        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">User</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${userEmail || userId}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Time (AEST)</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${timestamp}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Error</span><br/>
+                <span style="color:#ef4444;font-size:15px;font-weight:600;">${errorMessage}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;">
+                <span style="color:#94a3b8;font-size:13px;">Job Description</span><br/>
+                <span style="color:#f8fafc;font-size:14px;">${truncatedJob}</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  `);
+
+  return sendEmail({
+    to: ADMIN_EMAIL,
+    subject: `Material list generation failed for ${userEmail || userId}`,
+    htmlContent: content,
+    category: 'transactional',
+    tags: ['admin-notification', 'material-list-error'],
+  });
+}
