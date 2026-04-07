@@ -208,6 +208,8 @@ export function ViewInvoiceScreen() {
     }
   };
 
+  const resolvedCustomer = useResolvedCustomer(displayInvoice);
+
   if (!displayInvoice) {
     return (
       <View style={styles.container}>
@@ -217,7 +219,6 @@ export function ViewInvoiceScreen() {
   }
 
   const invoice = displayInvoice;
-  const resolvedCustomer = useResolvedCustomer(displayInvoice);
   const amountDue = getAmountDue(invoice);
   const isOverdue = isInvoiceOverdue(invoice);
 
@@ -469,8 +470,13 @@ export function ViewInvoiceScreen() {
           laborHours={invoice.laborHours}
           laborRate={invoice.laborRate}
           laborTotal={invoice.laborTotal}
+          laborUnit={invoice.laborUnit}
+          sections={invoice.sections}
           showLaborHours={businessSettings?.showLaborHours}
           onEdit={() => handleEditSection('labor')}
+          laborMarkupPercent={invoice.laborMarkup ?? invoice.markup}
+          rollMarkupIntoLabor={invoice.showMarkup !== true && (invoice.laborMarkup ?? invoice.markup) > 0}
+          laborExtraHours={invoice.laborExtraHours}
         />
 
         <TotalsSection
@@ -483,6 +489,8 @@ export function ViewInvoiceScreen() {
           hideMarkup={invoice.showMarkup !== true}
           paidAmount={invoice.paidAmount}
           balanceDue={amountDue}
+          travelAdjustmentAmount={invoice.subtotal * ((invoice.travelAdjustment ?? 0) / 100)}
+          travelAdjustmentPercent={invoice.travelAdjustment}
         />
 
         {/* Notes Section */}

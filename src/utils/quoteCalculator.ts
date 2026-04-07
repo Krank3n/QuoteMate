@@ -10,9 +10,11 @@ import { Material, Quote, QuoteSection, QuoteCalculation } from '../types';
  * @param materials - List of materials with prices
  * @param laborRate - Hourly/daily labor rate
  * @param laborHours - Number of hours/days
- * @param markupPercent - Markup percentage (e.g., 20 for 20%)
+ * @param markupPercent - Material markup percentage (e.g., 20 for 20%)
  * @param travelAdjustment - Travel adjustment percentage
  * @param sections - Optional sections with per-section labor
+ * @param laborMarkupPercent - Labor markup percentage (independent from material markup)
+ * @param laborExtraHours - Extra labour hours added on top of (or subtracted from) sections sum. Can be negative.
  */
 export function calculateQuote(
   materials: Material[],
@@ -20,23 +22,28 @@ export function calculateQuote(
   laborHours: number,
   markupPercent: number,
   travelAdjustment: number = 0,
-  sections?: QuoteSection[]
+  sections?: QuoteSection[],
+  laborMarkupPercent: number = 0,
+  laborExtraHours: number = 0
 ): QuoteCalculation {
   // Calculate materials subtotal
   const materialsSubtotal = materials.reduce((sum, material) => {
     return sum + material.totalPrice;
   }, 0);
 
-  // Calculate labor total — from sections if available, otherwise simple rate * hours
+  // Calculate labor total — from sections if available (plus any extra),
+  // otherwise simple rate × hours.
   const laborTotal = sections && sections.length > 0
-    ? sections.reduce((sum, s) => sum + s.laborTotal, 0)
+    ? sections.reduce((sum, s) => sum + s.laborTotal, 0) + (laborExtraHours * laborRate)
     : laborRate * laborHours;
 
   // Subtotal before markup
   const subtotal = materialsSubtotal + laborTotal;
 
-  // Calculate markup on materials only (not labor)
-  const markupAmount = materialsSubtotal * (markupPercent / 100);
+  // Calculate combined markup: material markup on materials + labor markup on labor
+  const materialMarkupAmount = materialsSubtotal * (markupPercent / 100);
+  const laborMarkupAmount = laborTotal * (laborMarkupPercent / 100);
+  const markupAmount = materialMarkupAmount + laborMarkupAmount;
 
   // Calculate travel adjustment amount separately
   const travelAdjustmentAmount = subtotal * (travelAdjustment / 100);
@@ -62,21 +69,62 @@ export function calculateQuote(
 }
 
 /**
+ * One-time recovery for the legacy "$0 labour bug" — quotes saved before the
+ * sectionLaborHours fix had sections with laborTotal: 0 even though the user
+ * had top-level labour values from LaborMarkupScreen. This helper detects that
+ * exact broken state and redistributes the top-level labour back across the
+ * sections proportionally to each section's multiplier, preserving the total.
+ *
+ * Heuristic is intentionally narrow:
+ *   - Sections exist
+ *   - EVERY section has laborTotal === 0 (no exceptions)
+ *   - Top-level laborHours × laborRate > 0
+ * Otherwise the quote is left untouched.
+ */
+export function healBrokenLabourSections<T extends { sections?: QuoteSection[]; laborHours: number; laborRate: number }>(quote: T): T {
+  if (!quote.sections || quote.sections.length === 0) return quote;
+  const allZero = quote.sections.every((s) => (s.laborTotal || 0) === 0);
+  if (!allZero) return quote;
+  const topLevelTotal = (quote.laborHours || 0) * (quote.laborRate || 0);
+  if (topLevelTotal <= 0) return quote;
+
+  const sumMul = quote.sections.reduce((sum, s) => sum + (s.multiplier || 1), 0);
+  if (sumMul <= 0) return quote;
+
+  // Per-unit hours is uniform across sections; each section's contribution
+  // scales by its multiplier. sum(perUnit × mul × rate) === topLevelTotal.
+  const perUnitHours = (quote.laborHours || 0) / sumMul;
+  const rate = quote.laborRate || 0;
+  const healedSections = quote.sections.map((s) => ({
+    ...s,
+    laborHours: perUnitHours,
+    laborRate: rate,
+    laborUnit: s.laborUnit || 'hours',
+    laborTotal: roundToTwoDecimals(perUnitHours * rate * (s.multiplier || 1)),
+  }));
+
+  return { ...quote, sections: healedSections };
+}
+
+/**
  * Update a quote with new calculations
  * @param quote - The quote to update
  */
 export function updateQuoteCalculations(quote: Quote): Quote {
+  const healed = healBrokenLabourSections(quote);
   const calculation = calculateQuote(
-    quote.materials,
-    quote.laborRate,
-    quote.laborHours,
-    quote.markup,
-    quote.travelAdjustment || 0,
-    quote.sections
+    healed.materials,
+    healed.laborRate,
+    healed.laborHours,
+    healed.markup,
+    healed.travelAdjustment || 0,
+    healed.sections,
+    healed.laborMarkup ?? healed.markup ?? 0,
+    healed.laborExtraHours ?? 0
   );
 
   return {
-    ...quote,
+    ...healed,
     materialsSubtotal: calculation.materialsSubtotal,
     laborTotal: calculation.laborTotal,
     subtotal: calculation.subtotal,

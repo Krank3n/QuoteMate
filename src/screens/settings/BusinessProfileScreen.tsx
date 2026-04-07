@@ -52,6 +52,7 @@ export function BusinessProfileScreen() {
   const [hexInput, setHexInput] = useState('');
   const [laborRate, setLaborRate] = useState('85');
   const [markup, setMarkup] = useState('20');
+  const [laborMarkup, setLaborMarkup] = useState('20');
   const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -68,6 +69,9 @@ export function BusinessProfileScreen() {
       setBrandColor(businessSettings.brandColor);
       setLaborRate(businessSettings.defaultLaborRate?.toString() || '85');
       setMarkup(businessSettings.defaultMarkup?.toString() || '20');
+      setLaborMarkup(
+        (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup ?? 20).toString()
+      );
       setTransportMarkupEnabled(businessSettings.transportMarkupEnabled !== false);
     }
   }, [businessSettings]);
@@ -164,6 +168,7 @@ export function BusinessProfileScreen() {
         brandColor: brandColor,
         defaultLaborRate: parseFloat(laborRate) || 85,
         defaultMarkup: parseFloat(markup) || 20,
+        defaultLaborMarkup: parseFloat(laborMarkup) || 0,
         transportMarkupEnabled,
       });
       setShowSuccessModal(true);
@@ -293,9 +298,19 @@ export function BusinessProfileScreen() {
             />
 
             <TextInput
-              label="Baseline Markup"
+              label="Material Markup"
               value={markup}
               onChangeText={setMarkup}
+              mode="outlined"
+              style={styles.input}
+              keyboardType="decimal-pad"
+              right={<TextInput.Affix text="%" />}
+            />
+
+            <TextInput
+              label="Labour Markup"
+              value={laborMarkup}
+              onChangeText={setLaborMarkup}
               mode="outlined"
               style={styles.input}
               keyboardType="decimal-pad"

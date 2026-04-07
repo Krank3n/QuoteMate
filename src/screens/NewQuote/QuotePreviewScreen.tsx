@@ -383,6 +383,9 @@ export function QuotePreviewScreen() {
           sections={currentQuote.sections}
           showLaborHours={businessSettings?.showLaborHours}
           onEdit={() => navigation.navigate('LaborMarkup')}
+          laborMarkupPercent={currentQuote.laborMarkup ?? currentQuote.markup}
+          rollMarkupIntoLabor={currentQuote.showMarkup !== true && (currentQuote.laborMarkup ?? currentQuote.markup) > 0}
+          laborExtraHours={currentQuote.laborExtraHours}
         />
 
         <TotalsSection
@@ -393,6 +396,8 @@ export function QuotePreviewScreen() {
           total={currentQuote.total}
           hideZeroMarkup
           hideMarkup={currentQuote.showMarkup !== true}
+          travelAdjustmentAmount={currentQuote.subtotal * ((currentQuote.travelAdjustment ?? 0) / 100)}
+          travelAdjustmentPercent={currentQuote.travelAdjustment}
         />
 
         <Surface style={documentStyles.section}>

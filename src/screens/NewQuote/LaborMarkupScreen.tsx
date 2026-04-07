@@ -63,11 +63,19 @@ export function LaborMarkupScreen() {
   const [laborHours, setLaborHours] = useState('');
   const [laborRate, setLaborRate] = useState('');
   const [laborUnit, setLaborUnit] = useState<LaborUnit>('hours');
+  // Per-section displayed total hours (= section.laborHours × multiplier),
+  // keyed by section.id. The user edits these directly via per-section steppers.
+  // The estimated-total input above the Labour Total mirrors sumSections + extra,
+  // where extra = (input value − sumSections) is derived and persisted as
+  // quote.laborExtraHours on save.
+  const [sectionTotalHoursMap, setSectionTotalHoursMap] = useState<Record<string, string>>({});
   const [markup, setMarkup] = useState('');
+  const [laborMarkup, setLaborMarkup] = useState('');
   const [travelAdjustment, setTravelAdjustment] = useState('0');
   const [travelDismissed, setTravelDismissed] = useState(false);
   const [lastTravelValue, setLastTravelValue] = useState('0');
   const [showMarkup, setShowMarkup] = useState(false);
+  const [showLaborBreakdown, setShowLaborBreakdown] = useState(true);
   const [warningDialogVisible, setWarningDialogVisible] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
 
@@ -75,22 +83,65 @@ export function LaborMarkupScreen() {
 
   useEffect(() => {
     if (currentQuote) {
-      const savedUnit = currentQuote.laborUnit || 'hours';
-      const savedHours = currentQuote.laborHours;
+      const hasSections = !!(currentQuote.sections && currentQuote.sections.length > 0);
 
-      // Auto-default to days unless under 6 hours of work
-      if (!currentQuote.laborUnit && savedHours >= 6) {
-        setLaborUnit('days');
-        setLaborHours((savedHours / HOURS_PER_DAY).toString());
-        setLaborRate((currentQuote.laborRate * HOURS_PER_DAY).toString());
+      // Compute the section totals (in stored units — usually hours) and the
+      // overall labour total = sum + laborExtraHours. The extra preserves any
+      // buffer the user added on top of the per-section labour.
+      let sectionsSumStored = 0;
+      let totalHoursStored: number;
+      let rateForInput: number;
+      const sectionMap: Record<string, string> = {};
+
+      if (hasSections && currentQuote.sections) {
+        for (const s of currentQuote.sections) {
+          const sectionTotal = (s.laborHours || 0) * (s.multiplier || 1);
+          sectionsSumStored += sectionTotal;
+          sectionMap[s.id] = sectionTotal.toString();
+        }
+        const firstNonZeroRate = currentQuote.sections.find((s) => (s.laborRate || 0) > 0)?.laborRate;
+        rateForInput = firstNonZeroRate || currentQuote.laborRate || 0;
+        totalHoursStored = sectionsSumStored + (currentQuote.laborExtraHours || 0);
       } else {
-        setLaborUnit(savedUnit);
-        setLaborHours(savedHours.toString());
-        setLaborRate(currentQuote.laborRate.toString());
+        totalHoursStored = currentQuote.laborHours;
+        rateForInput = currentQuote.laborRate;
+      }
+
+      // Auto-default to days when the total is 6+ hours of work. Fires on
+      // every load so legacy/sectioned quotes get the better default. The
+      // section map gets converted to days too so the per-section steppers
+      // are in the same unit as the input.
+      if (totalHoursStored >= 6) {
+        setLaborUnit('days');
+        setLaborHours((Math.round((totalHoursStored / HOURS_PER_DAY) * 10) / 10).toString());
+        setLaborRate((rateForInput * HOURS_PER_DAY).toString());
+        if (hasSections) {
+          const daysMap: Record<string, string> = {};
+          for (const [id, val] of Object.entries(sectionMap)) {
+            const num = parseFloat(val) || 0;
+            daysMap[id] = (Math.round((num / HOURS_PER_DAY) * 10) / 10).toString();
+          }
+          setSectionTotalHoursMap(daysMap);
+        }
+      } else {
+        setLaborUnit(currentQuote.laborUnit || 'hours');
+        setLaborHours((Math.round(totalHoursStored * 10) / 10).toString());
+        setLaborRate(rateForInput.toString());
+        if (hasSections) {
+          const tidyMap: Record<string, string> = {};
+          for (const [id, val] of Object.entries(sectionMap)) {
+            const num = parseFloat(val) || 0;
+            tidyMap[id] = (Math.round(num * 10) / 10).toString();
+          }
+          setSectionTotalHoursMap(tidyMap);
+        }
       }
 
       setMarkup(currentQuote.markup.toString());
+      const lm = currentQuote.laborMarkup ?? currentQuote.markup ?? 0;
+      setLaborMarkup(lm.toString());
       setShowMarkup(currentQuote.showMarkup === true);
+      setShowLaborBreakdown(currentQuote.showLaborBreakdown !== false);
       const ta = (currentQuote.travelAdjustment || 0).toString();
       setTravelAdjustment(ta);
       setLastTravelValue(ta);
@@ -102,17 +153,50 @@ export function LaborMarkupScreen() {
     if (newUnit === laborUnit) return;
     const currentValue = parseFloat(laborHours) || 0;
     const currentRate = parseFloat(laborRate) || 0;
+    const factor = newUnit === 'days' ? 1 / HOURS_PER_DAY : HOURS_PER_DAY;
+    const rateFactor = newUnit === 'days' ? HOURS_PER_DAY : 1 / HOURS_PER_DAY;
 
-    if (newUnit === 'days') {
-      // Hours → Days: divide by 8
-      setLaborHours(currentValue > 0 ? (currentValue / HOURS_PER_DAY).toString() : '');
-      setLaborRate(currentRate > 0 ? (currentRate * HOURS_PER_DAY).toString() : '');
-    } else {
-      // Days → Hours: multiply by 8
-      setLaborHours(currentValue > 0 ? (currentValue * HOURS_PER_DAY).toString() : '');
-      setLaborRate(currentRate > 0 ? (currentRate / HOURS_PER_DAY).toString() : '');
-    }
+    setLaborHours(currentValue > 0 ? (Math.round(currentValue * factor * 10) / 10).toString() : '');
+    setLaborRate(currentRate > 0 ? (currentRate * rateFactor).toString() : '');
+
+    // Convert per-section displayed totals so they stay in the new unit.
+    setSectionTotalHoursMap((prev) => {
+      const next: Record<string, string> = {};
+      for (const [id, val] of Object.entries(prev)) {
+        const num = parseFloat(val) || 0;
+        next[id] = num > 0 ? (Math.round(num * factor * 10) / 10).toString() : '';
+      }
+      return next;
+    });
+
     setLaborUnit(newUnit);
+  };
+
+  // Stepper handlers — bumps the total labour up or down. Sensible defaults:
+  // hours mode = ±1 hour per tap, days mode = ±0.5 days per tap.
+  const stepperIncrement = laborUnit === 'days' ? 0.5 : 1;
+  const handleStepHours = (delta: number) => {
+    const current = parseFloat(laborHours) || 0;
+    const next = Math.max(0, current + delta);
+    setLaborHours((Math.round(next * 10) / 10).toString());
+  };
+
+  // Per-section stepper — adjusts a single section's displayed total hours
+  // and bumps the global input by the same delta so the "extra" stays the
+  // same (i.e. the per-section change flows through to the total).
+  const handleStepSection = (sectionId: string, delta: number) => {
+    const currentSection = parseFloat(sectionTotalHoursMap[sectionId] ?? '0') || 0;
+    const newSection = currentSection + delta;
+    if (newSection < 0) return;
+
+    setSectionTotalHoursMap((prev) => ({
+      ...prev,
+      [sectionId]: (Math.round(newSection * 10) / 10).toString(),
+    }));
+
+    const currentTotal = parseFloat(laborHours) || 0;
+    const newTotal = Math.max(0, currentTotal + delta);
+    setLaborHours((Math.round(newTotal * 10) / 10).toString());
   };
 
   // Save changes when navigating back
@@ -120,9 +204,40 @@ export function LaborMarkupScreen() {
     const unsubscribe = navigation.addListener('beforeRemove', () => {
       if (!currentQuote) return;
 
-      const hours = parseFloat(laborHours) || 0;
+      const hasSections = !!(currentQuote.sections && currentQuote.sections.length > 0);
       const rate = parseFloat(laborRate) || 0;
+      const unit = laborUnit;
+      const hours = parseFloat(laborHours) || 0;
+
+      // Build updated sections from the per-section state. Round per-unit
+      // laborHours to 2dp on save so persisted data is reasonable, and
+      // recompute laborTotal so it stays consistent with the rounded value.
+      let sectionsSumLocal = 0;
+      const editedSectionsLocal = hasSections && currentQuote.sections
+        ? currentQuote.sections.map((s) => {
+            const sectionTotalDisplayed = parseFloat(sectionTotalHoursMap[s.id] ?? '0') || 0;
+            sectionsSumLocal += sectionTotalDisplayed;
+            const mul = s.multiplier || 1;
+            const perUnitHoursRounded = mul > 0
+              ? Math.round((sectionTotalDisplayed / mul) * 100) / 100
+              : 0;
+            return {
+              ...s,
+              laborHours: perUnitHoursRounded,
+              laborRate: rate,
+              laborUnit: unit,
+              laborTotal: Math.round(perUnitHoursRounded * rate * mul * 100) / 100,
+            };
+          })
+        : undefined;
+
+      // Extra is the buffer between the user-entered total and the section sum.
+      const extraHoursLocal = hasSections
+        ? Math.round((hours - sectionsSumLocal) * 10) / 10
+        : 0;
+
       const markupPercent = parseFloat(markup) || 0;
+      const laborMarkupPercent = parseFloat(laborMarkup) || 0;
       const travelPct = travelDismissed ? 0 : (parseFloat(travelAdjustment) || 0);
 
       const calculation = calculateQuote(
@@ -131,17 +246,23 @@ export function LaborMarkupScreen() {
         hours,
         markupPercent,
         travelPct,
-        currentQuote.sections
+        editedSectionsLocal ?? currentQuote.sections,
+        laborMarkupPercent,
+        extraHoursLocal
       );
 
       // Save labor and calculated values before leaving
       const updatedQuote = {
         ...currentQuote,
+        ...(editedSectionsLocal ? { sections: editedSectionsLocal } : {}),
         laborHours: hours,
         laborRate: rate,
-        laborUnit,
+        laborUnit: unit,
+        laborExtraHours: extraHoursLocal,
         markup: markupPercent,
+        laborMarkup: laborMarkupPercent,
         showMarkup,
+        showLaborBreakdown,
         travelAdjustment: travelPct,
         laborTotal: calculation.laborTotal,
         materialsSubtotal: calculation.materialsSubtotal,
@@ -154,16 +275,51 @@ export function LaborMarkupScreen() {
     });
 
     return unsubscribe;
-  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, markup, showMarkup, travelAdjustment, travelDismissed, updateQuote]);
+  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showMarkup, showLaborBreakdown, travelAdjustment, travelDismissed, updateQuote]);
 
   if (!currentQuote) {
     return null;
   }
 
-  // Calculate totals in real-time
-  const hours = parseFloat(laborHours) || 0;
+  // Calculate totals in real-time. In sections mode the user edits each
+  // section's total hours via per-section steppers; the input above the
+  // Labour Total mirrors sumSections + extra. Extra is derived from the
+  // input value − sumSections and persisted as quote.laborExtraHours.
+  const hasSectionsMode = !!(currentQuote.sections && currentQuote.sections.length > 0);
   const rate = parseFloat(laborRate) || 0;
+  const effectiveLaborUnit = laborUnit;
+  const totalHoursInput = parseFloat(laborHours) || 0;
+
+  // Build edited sections from the per-section state. laborHours per unit is
+  // derived from displayedTotal / multiplier — kept precise for accurate calc.
+  const editedSections = hasSectionsMode && currentQuote.sections
+    ? currentQuote.sections.map((s) => {
+        const sectionTotalHours = parseFloat(sectionTotalHoursMap[s.id] ?? '0') || 0;
+        const mul = s.multiplier || 1;
+        const perUnitHours = mul > 0 ? sectionTotalHours / mul : 0;
+        return {
+          ...s,
+          laborHours: perUnitHours,
+          laborRate: rate,
+          laborUnit: effectiveLaborUnit,
+          laborTotal: perUnitHours * rate * mul,
+        };
+      })
+    : undefined;
+
+  // Sum of section displayed totals (in current unit) and the derived extra.
+  const sectionsSumDisplayed = editedSections
+    ? editedSections.reduce((sum, s) => sum + s.laborHours * (s.multiplier || 1), 0)
+    : 0;
+  const extraHoursDerived = hasSectionsMode
+    ? Math.round((totalHoursInput - sectionsSumDisplayed) * 10) / 10
+    : 0;
+
+  // Top-level hours mirror the input value for legacy consumers.
+  const hours = totalHoursInput;
+
   const markupPercent = parseFloat(markup) || 0;
+  const laborMarkupPercent = parseFloat(laborMarkup) || 0;
   const travelPct = travelDismissed ? 0 : (parseFloat(travelAdjustment) || 0);
 
   const calculation = calculateQuote(
@@ -172,7 +328,9 @@ export function LaborMarkupScreen() {
     hours,
     markupPercent,
     travelPct,
-    currentQuote.sections
+    editedSections ?? currentQuote.sections,
+    laborMarkupPercent,
+    extraHoursDerived
   );
 
   // Helper: unit labels
@@ -190,11 +348,15 @@ export function LaborMarkupScreen() {
     if (!currentQuote) return;
     const updatedQuote = {
       ...currentQuote,
+      ...(editedSections ? { sections: editedSections } : {}),
       laborHours: hours,
       laborRate: rate,
-      laborUnit,
+      laborUnit: effectiveLaborUnit,
+      laborExtraHours: extraHoursDerived,
       markup: markupPercent,
+      laborMarkup: laborMarkupPercent,
       showMarkup,
+      showLaborBreakdown,
       travelAdjustment: travelPct,
       laborTotal: calculation.laborTotal,
       materialsSubtotal: calculation.materialsSubtotal,
@@ -209,8 +371,14 @@ export function LaborMarkupScreen() {
   };
 
   const handleNext = () => {
-    // Validate labor hours and rate
-    if (hours === 0 || rate === 0) {
+    // In sections mode, the real labour total is calculation.laborTotal (summed
+    // from sections), not hours × rate at top level. Validate against the real
+    // total instead so a sectioned quote with non-zero per-section labour
+    // doesn't trip the "Zero Labor Cost" warning.
+    const zeroLabour = hasSectionsMode
+      ? calculation.laborTotal === 0
+      : (hours === 0 || rate === 0);
+    if (zeroLabour) {
       const docType = mode === 'invoice' ? 'invoice' : 'quote';
       setWarningMessage(
         `Labor hours or rate is set to $0. This means no labor cost will be included in the ${docType}.\n\nDo you want to continue?`
@@ -226,11 +394,15 @@ export function LaborMarkupScreen() {
     // Update quote with labor details
     const updatedQuote = {
       ...currentQuote,
+      ...(editedSections ? { sections: editedSections } : {}),
       laborHours: hours,
       laborRate: rate,
-      laborUnit,
+      laborUnit: effectiveLaborUnit,
+      laborExtraHours: extraHoursDerived,
       markup: markupPercent,
+      laborMarkup: laborMarkupPercent,
       showMarkup,
+      showLaborBreakdown,
       travelAdjustment: travelPct,
       laborTotal: calculation.laborTotal,
       materialsSubtotal: calculation.materialsSubtotal,
@@ -293,16 +465,7 @@ export function LaborMarkupScreen() {
           </TouchableOpacity>
         </View>
 
-        <TextInput
-          label={unitInputLabel}
-          value={laborHours}
-          onChangeText={setLaborHours}
-          mode="outlined"
-          keyboardType="decimal-pad"
-          right={<TextInput.Affix text={unitLabel} />}
-          style={styles.input}
-        />
-
+        {/* Rate input */}
         <TextInput
           label={laborUnit === 'days' ? 'Daily Rate' : 'Hourly Rate'}
           value={laborRate}
@@ -314,12 +477,163 @@ export function LaborMarkupScreen() {
           style={styles.input}
         />
 
+        {/* Sections breakdown — each row has small ± steppers that adjust
+            the section's displayed total hours. Pressing ± also bumps the
+            global input by the same amount so "extra" stays the same. */}
+        {hasSectionsMode && currentQuote.sections && currentQuote.sections.length > 0 && (
+          <View style={{ marginBottom: 12 }}>
+            <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Distribution across {currentQuote.sections.length} sections
+            </Text>
+            {currentQuote.sections.map((s) => {
+              const sectionTotalHours = parseFloat(sectionTotalHoursMap[s.id] ?? '0') || 0;
+              const sectionDollars = sectionTotalHours * rate;
+              const canDecrement = sectionTotalHours > 0;
+              return (
+                <View
+                  key={s.id}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingVertical: 6,
+                  }}
+                >
+                  <Text style={{ fontSize: 13, color: colors.text, flex: 1 }} numberOfLines={1}>
+                    {s.name}
+                  </Text>
+                  <TouchableOpacity
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 6,
+                      backgroundColor: colors.primary + '15',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: 4,
+                    }}
+                    onPress={() => handleStepSection(s.id, -stepperIncrement)}
+                    disabled={!canDecrement}
+                  >
+                    <MaterialCommunityIcons
+                      name="minus"
+                      size={16}
+                      color={canDecrement ? colors.primary : colors.textMuted}
+                    />
+                  </TouchableOpacity>
+                  <Text style={{ fontSize: 12, color: colors.textMuted, minWidth: 56, textAlign: 'center' }}>
+                    {sectionTotalHours.toFixed(1)} {unitLabel}
+                  </Text>
+                  <TouchableOpacity
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 6,
+                      backgroundColor: colors.primary + '15',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginLeft: 4,
+                      marginRight: 8,
+                    }}
+                    onPress={() => handleStepSection(s.id, stepperIncrement)}
+                  >
+                    <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
+                  </TouchableOpacity>
+                  <Text style={{ fontSize: 13, color: colors.text, fontWeight: '600', minWidth: 70, textAlign: 'right' }}>
+                    {formatCurrency(sectionDollars)}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Extra/minus label — only shown when there's a non-zero buffer
+            between the user's estimated total and the section sum. Editing
+            the input below directly adjusts this. */}
+        {hasSectionsMode && extraHoursDerived !== 0 && (
+          <Text
+            style={{
+              fontSize: 12,
+              color: extraHoursDerived > 0 ? colors.primary : colors.warning,
+              marginBottom: 8,
+              fontWeight: '600',
+            }}
+          >
+            {extraHoursDerived > 0 ? 'Extra' : 'Adjustment'}: {extraHoursDerived > 0 ? '+' : ''}
+            {extraHoursDerived.toFixed(1)} {unitLabel}
+          </Text>
+        )}
+
+        {/* Hours input with stepper buttons — sits right above the total. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <TouchableOpacity
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 10,
+              backgroundColor: colors.primary + '15',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onPress={() => handleStepHours(-stepperIncrement)}
+            disabled={(parseFloat(laborHours) || 0) <= 0}
+          >
+            <MaterialCommunityIcons
+              name="minus"
+              size={22}
+              color={(parseFloat(laborHours) || 0) <= 0 ? colors.textMuted : colors.primary}
+            />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <TextInput
+              label={unitInputLabel}
+              value={laborHours}
+              onChangeText={setLaborHours}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              right={<TextInput.Affix text={unitLabel} />}
+              style={{ marginBottom: 0 }}
+            />
+          </View>
+          <TouchableOpacity
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 10,
+              backgroundColor: colors.primary + '15',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onPress={() => handleStepHours(stepperIncrement)}
+          >
+            <MaterialCommunityIcons name="plus" size={22} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Labour Total */}
         <Surface style={styles.calculationRow}>
-          <Text style={styles.calculationLabel}>Labor Total</Text>
+          <Text style={styles.calculationLabel}>Labour Total</Text>
           <Text style={styles.calculationValue}>
             {formatCurrency(calculation.laborTotal)}
           </Text>
         </Surface>
+
+        {hasSectionsMode && (
+          <View style={styles.showMarkupToggle}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.showMarkupTitle}>Show labour breakdown on PDFs</Text>
+              <Text style={styles.showMarkupSubtitle}>
+                When off, only the labour total appears on the document — per-section rows are hidden
+              </Text>
+            </View>
+            <Switch
+              value={showLaborBreakdown}
+              onValueChange={setShowLaborBreakdown}
+              trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
+              thumbColor={showLaborBreakdown ? colors.primary : '#F3F4F6'}
+            />
+          </View>
+        )}
       </View>
 
       {/* Markup Section */}
@@ -331,7 +645,7 @@ export function LaborMarkupScreen() {
 
       <View ref={markupSectionRef} style={styles.section}>
         <TextInput
-          label="Markup Percentage"
+          label="Material Markup"
           value={markup}
           onChangeText={setMarkup}
           mode="outlined"
@@ -340,8 +654,18 @@ export function LaborMarkupScreen() {
           style={styles.input}
         />
 
+        <TextInput
+          label="Labour Markup"
+          value={laborMarkup}
+          onChangeText={setLaborMarkup}
+          mode="outlined"
+          keyboardType="decimal-pad"
+          right={<TextInput.Affix text="%" />}
+          style={styles.input}
+        />
+
         <Surface style={styles.calculationRow}>
-          <Text style={styles.calculationLabel}>Markup Amount</Text>
+          <Text style={styles.calculationLabel}>Total Markup</Text>
           <Text style={styles.calculationValue}>
             {formatCurrency(calculation.markupAmount)}
           </Text>
@@ -538,7 +862,7 @@ export function LaborMarkupScreen() {
         </View>
 
         <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Markup ({markupPercent}%)</Text>
+          <Text style={styles.summaryLabel}>Markup</Text>
           <Text style={styles.summaryValue}>
             {formatCurrency(calculation.markupAmount)}
           </Text>
@@ -873,10 +1197,7 @@ const styles = StyleSheet.create({
   showMarkupToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 20,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    marginTop: 16,
     gap: 12,
   },
   showMarkupTitle: {

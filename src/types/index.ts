@@ -123,9 +123,14 @@ export interface Quote {
   laborHours: number; // quantity of hours or days
   laborUnit?: LaborUnit; // 'hours' | 'days' — default 'hours' for backwards compat
   laborTotal: number;
+  // Extra labour hours added on top of (or subtracted from) the section sums.
+  // Lets the user nudge total labour without rebalancing per-section values.
+  // Can be negative. Falls back to 0 for legacy quotes.
+  laborExtraHours?: number;
   materialsSubtotal: number;
-  markup: number; // percentage
-  markupAmount: number;
+  markup: number; // material markup percentage
+  laborMarkup?: number; // labor markup percentage (independent from material markup). Falls back to material markup for legacy quotes.
+  markupAmount: number; // combined material + labor markup amount
   subtotal: number;
   gst: number;
   total: number;
@@ -139,6 +144,9 @@ export interface Quote {
   templateSuggestions?: TemplateSuggestion[];
   // Markup visibility
   showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
+  // Labour breakdown visibility on PDFs. When false, the per-section labour
+  // rows are hidden and only the Labour Total is shown. Default: true.
+  showLaborBreakdown?: boolean;
   // Travel adjustment
   travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
   estimatedDistance?: number;   // km (straight-line)
@@ -240,6 +248,7 @@ export interface BusinessSettings {
   logoUri?: string; // Local file URI for company logo
   defaultLaborRate: number;
   defaultMarkup: number;
+  defaultLaborMarkup?: number; // Default labor markup percentage. Falls back to defaultMarkup if undefined.
   transportMarkupEnabled?: boolean; // Whether to include transport/logistics markup on quotes (default: true)
   // Trade type
   tradeType?: TradeType; // Default: 'all'
@@ -381,9 +390,13 @@ export interface Invoice {
   laborHours: number;
   laborUnit?: LaborUnit;
   laborTotal: number;
+  // Extra labour hours added on top of (or subtracted from) the section sums.
+  // Mirrors Quote.laborExtraHours. Falls back to 0 for legacy invoices.
+  laborExtraHours?: number;
   materialsSubtotal: number;
-  markup: number;
-  markupAmount: number;
+  markup: number; // material markup percentage
+  laborMarkup?: number; // labor markup percentage (independent from material markup). Falls back to material markup for legacy invoices.
+  markupAmount: number; // combined material + labor markup amount
   subtotal: number;
   gst: number;
   total: number;
@@ -393,6 +406,9 @@ export interface Invoice {
 
   // Markup visibility
   showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
+  // Labour breakdown visibility on PDFs. When false, the per-section labour
+  // rows are hidden and only the Labour Total is shown. Default: true.
+  showLaborBreakdown?: boolean;
 
   // Invoice-specific
   status: InvoiceStatus;

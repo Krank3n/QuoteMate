@@ -231,8 +231,13 @@ export function ViewQuoteScreen() {
           laborHours={quote.laborHours}
           laborRate={quote.laborRate}
           laborTotal={quote.laborTotal}
+          laborUnit={quote.laborUnit}
+          sections={quote.sections}
           showLaborHours={businessSettings?.showLaborHours}
           onEdit={() => handleEditSection('labor')}
+          laborMarkupPercent={quote.laborMarkup ?? quote.markup}
+          rollMarkupIntoLabor={quote.showMarkup !== true && (quote.laborMarkup ?? quote.markup) > 0}
+          laborExtraHours={quote.laborExtraHours}
         />
 
         <TotalsSection
@@ -243,6 +248,8 @@ export function ViewQuoteScreen() {
           total={quote.total}
           hideZeroMarkup
           hideMarkup={quote.showMarkup !== true}
+          travelAdjustmentAmount={quote.subtotal * ((quote.travelAdjustment ?? 0) / 100)}
+          travelAdjustmentPercent={quote.travelAdjustment}
         />
 
         {quote.notes && (

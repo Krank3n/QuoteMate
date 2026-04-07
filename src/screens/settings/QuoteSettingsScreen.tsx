@@ -27,6 +27,7 @@ export function QuoteSettingsScreen() {
 
   const [laborRate, setLaborRate] = useState('85');
   const [markup, setMarkup] = useState('20');
+  const [laborMarkup, setLaborMarkup] = useState('20');
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -35,6 +36,9 @@ export function QuoteSettingsScreen() {
     if (businessSettings) {
       setLaborRate(businessSettings.defaultLaborRate.toString());
       setMarkup(businessSettings.defaultMarkup.toString());
+      setLaborMarkup(
+        (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup).toString()
+      );
     }
   }, [businessSettings]);
 
@@ -45,6 +49,7 @@ export function QuoteSettingsScreen() {
         ...businessSettings!,
         defaultLaborRate: parseFloat(laborRate) || 85,
         defaultMarkup: parseFloat(markup) || 20,
+        defaultLaborMarkup: parseFloat(laborMarkup) || 0,
       });
       setShowSuccessModal(true);
     } catch (error) {
@@ -79,9 +84,19 @@ export function QuoteSettingsScreen() {
             />
 
             <TextInput
-              label="Markup Percentage"
+              label="Material Markup"
               value={markup}
               onChangeText={setMarkup}
+              mode="outlined"
+              style={styles.input}
+              keyboardType="decimal-pad"
+              right={<TextInput.Affix text="%" />}
+            />
+
+            <TextInput
+              label="Labour Markup"
+              value={laborMarkup}
+              onChangeText={setLaborMarkup}
               mode="outlined"
               style={styles.input}
               keyboardType="decimal-pad"

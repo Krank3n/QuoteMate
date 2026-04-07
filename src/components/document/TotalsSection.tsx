@@ -15,6 +15,8 @@ interface TotalsSectionProps {
   hideMarkup?: boolean;
   paidAmount?: number;
   balanceDue?: number;
+  travelAdjustmentAmount?: number;
+  travelAdjustmentPercent?: number;
 }
 
 export function TotalsSection({
@@ -27,8 +29,11 @@ export function TotalsSection({
   hideMarkup,
   paidAmount,
   balanceDue,
+  travelAdjustmentAmount = 0,
+  travelAdjustmentPercent = 0,
 }: TotalsSectionProps) {
   const showMarkup = hideMarkup ? false : (hideZeroMarkup ? markup > 0 : true);
+  const showTravel = travelAdjustmentAmount > 0;
 
   return (
     <Surface style={documentStyles.totalSection}>
@@ -38,8 +43,18 @@ export function TotalsSection({
       </View>
       {showMarkup && (
         <View style={documentStyles.summaryRow}>
-          <Text style={documentStyles.summaryLabel}>Markup ({markup}%)</Text>
+          <Text style={documentStyles.summaryLabel}>Markup</Text>
           <Text style={documentStyles.summaryValue}>{formatCurrency(markupAmount)}</Text>
+        </View>
+      )}
+      {showTravel && (
+        <View style={documentStyles.summaryRow}>
+          <Text style={documentStyles.summaryLabel}>
+            {travelAdjustmentPercent > 0
+              ? `Travel adjustment (+${travelAdjustmentPercent}%)`
+              : 'Travel adjustment'}
+          </Text>
+          <Text style={documentStyles.summaryValue}>{formatCurrency(travelAdjustmentAmount)}</Text>
         </View>
       )}
       <View style={documentStyles.summaryRow}>

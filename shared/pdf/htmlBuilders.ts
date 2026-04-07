@@ -194,28 +194,72 @@ export function generatePaymentMethodsHTML(pm: any): string {
 
 /**
  * Build labor section HTML with support for per-section labor breakdown
+ * and an optional "General Labour" row for any extra hours added on top of
+ * the section sums (laborExtraHours).
  */
 function buildLaborHTML(data: QuotePdfData): string {
-  return `
+  const hasSections = !!(data.sections && data.sections.length > 0);
+  // When the user has hidden the breakdown, collapse sections to a single
+  // "Labour" row showing only the total — no per-section rows.
+  const showBreakdown = data.showLaborBreakdown !== false;
+  const extra = data.laborExtraHours || 0;
+  // Labor markup is rolled into displayed labour prices unless the user has
+  // opted into showing markup as a separate line on the document.
+  const rollLaborMarkup = data.showMarkup !== true;
+  const laborMul = rollLaborMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
+  // Use the section's rate (or top-level fallback) for the extra row's per-hour math.
+  const extraRate = (hasSections && data.sections && data.sections[0]?.laborRate) || data.laborRate || 0;
+  const extraUnit = (hasSections && data.sections && data.sections[0]?.laborUnit) || data.laborUnit || 'hours';
+  const extraUnitLabel = extraUnit === 'days' ? 'days' : 'hours';
+  const extraRateLabel = extraUnit === 'days' ? '/day' : '/hr';
+  // Positive extra renders as "General Labour"; negative as "Labour Adjustment"
+  // so the customer-facing label still reads sensibly.
+  const extraLabel = extra >= 0 ? 'General Labour' : 'Labour Adjustment';
+  const extraDetails = data.showLaborHours
+    ? ` (${extra > 0 ? '+' : ''}${extra} ${extraUnitLabel} @ ${formatCurrency(extraRate * laborMul)}${extraRateLabel})`
+    : '';
+  const displayLaborTotal = data.laborTotal * laborMul;
+
+  // Collapsed view: a single "Labour" row with the displayed total.
+  if (hasSections && !showBreakdown) {
+    return `
       <div class="section-wrapper">
-        <h3>Labor</h3>
+        <h3>Labour</h3>
         <table>
           <tbody>
-            ${data.sections && data.sections.length > 0 ? data.sections.map(s => {
+            <tr>
+              <td>Labour</td>
+              <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  return `
+      <div class="section-wrapper">
+        <h3>Labour</h3>
+        <table>
+          <tbody>
+            ${hasSections ? data.sections!.map(s => {
               const sUnit = s.laborUnit || 'hours';
               const sLabel = sUnit === 'days' ? 'days' : 'hours';
               const sRate = sUnit === 'days' ? '/day' : '/hr';
               return `<tr>
-                <td>${data.showLaborHours ? `${s.name} (${s.laborHours} ${sLabel} @ ${formatCurrency(s.laborRate)}${sRate})` : s.name}</td>
-                <td style="text-align: right;">${formatCurrency(s.laborTotal)}</td>
+                <td>${data.showLaborHours ? `${s.name} (${s.laborHours} ${sLabel} @ ${formatCurrency(s.laborRate * laborMul)}${sRate})` : s.name}</td>
+                <td style="text-align: right;">${formatCurrency(s.laborTotal * laborMul)}</td>
               </tr>`;
             }).join('') : `<tr>
-              <td>${data.showLaborHours && data.laborHours && data.laborRate ? `Labor (${data.laborHours} ${(data.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(data.laborRate)}${(data.laborUnit || 'hours') === 'days' ? '/day' : '/hr'})` : 'Labor'}</td>
-              <td style="text-align: right;">${formatCurrency(data.laborTotal)}</td>
+              <td>${data.showLaborHours && data.laborHours && data.laborRate ? `Labour (${data.laborHours} ${(data.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(data.laborRate * laborMul)}${(data.laborUnit || 'hours') === 'days' ? '/day' : '/hr'})` : 'Labour'}</td>
+              <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
             </tr>`}
-            ${data.sections && data.sections.length > 0 ? `<tr class="total-row">
-              <td>Labor Total</td>
-              <td style="text-align: right;">${formatCurrency(data.laborTotal)}</td>
+            ${hasSections && extra !== 0 ? `<tr>
+              <td>${extraLabel}${extraDetails}</td>
+              <td style="text-align: right;">${formatCurrency(extra * extraRate * laborMul)}</td>
+            </tr>` : ''}
+            ${hasSections ? `<tr class="total-row">
+              <td>Labour Total</td>
+              <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
             </tr>` : ''}
           </tbody>
         </table>
@@ -226,14 +270,15 @@ function buildLaborHTML(data: QuotePdfData): string {
  * Build summary/totals HTML, with optional paid amount/balance for invoices
  */
 function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: number): string {
-  // When markup is hidden but exists, it's rolled into material prices
-  const rollMarkup = data.showMarkup !== true && data.markup > 0;
-  const displayMaterialsSubtotal = rollMarkup
-    ? data.materialsSubtotal + data.markupAmount
-    : data.materialsSubtotal;
-  const displaySubtotal = rollMarkup
-    ? data.subtotal + data.markupAmount
-    : data.subtotal;
+  // By default markup is rolled into the displayed line totals (combined).
+  // When showMarkup is explicitly true, the markup is broken out as its own
+  // line and the materials/labour rows show their raw (pre-markup) totals.
+  const rollMarkup = data.showMarkup !== true;
+  const materialMul = rollMarkup ? 1 + ((data.markup || 0) / 100) : 1;
+  const laborMul = rollMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
+  const displayMaterialsSubtotal = data.materialsSubtotal * materialMul;
+  const displayLaborTotal = data.laborTotal * laborMul;
+  const displaySubtotal = displayMaterialsSubtotal + displayLaborTotal;
 
   return `
       <div class="summary">
@@ -242,16 +287,16 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
           <span>${formatCurrency(displayMaterialsSubtotal)}</span>
         </div>
         <div class="summary-row">
-          <span>Labor</span>
-          <span>${formatCurrency(data.laborTotal)}</span>
+          <span>Labour</span>
+          <span>${formatCurrency(displayLaborTotal)}</span>
         </div>
         <div class="summary-row">
           <span>Subtotal</span>
           <span>${formatCurrency(displaySubtotal)}</span>
         </div>
-        ${data.showMarkup === true ? `
+        ${!rollMarkup && data.markupAmount > 0 ? `
         <div class="summary-row">
-          <span>Markup (${data.markup}%)</span>
+          <span>Markup</span>
           <span>${formatCurrency(data.markupAmount)}</span>
         </div>
         ` : ''}
@@ -310,6 +355,7 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
             <h1>${business.businessName}</h1>
             <p>
               ${business.abn ? `ABN: ${business.abn}<br>` : ''}
+              ${business.address ? `${business.address.replace(/\n/g, '<br>')}<br>` : ''}
               ${business.email ? `Email: ${business.email}<br>` : ''}
               ${business.phone ? `Phone: ${business.phone}` : ''}
             </p>
@@ -389,6 +435,7 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
             <h1>${business.businessName}</h1>
             <p>
               ${business.abn ? `ABN: ${business.abn}<br>` : ''}
+              ${business.address ? `${business.address.replace(/\n/g, '<br>')}<br>` : ''}
               ${business.email ? `Email: ${business.email}<br>` : ''}
               ${business.phone ? `Phone: ${business.phone}` : ''}
             </p>

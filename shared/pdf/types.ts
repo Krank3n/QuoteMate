@@ -42,16 +42,26 @@ export interface QuotePdfData {
   laborRate?: number;
   laborUnit?: 'hours' | 'days';
   laborTotal: number;
+  // Extra labour hours added on top of (or subtracted from) the sections sum.
+  // Rendered as a "General Labour" row in the PDF when non-zero.
+  laborExtraHours?: number;
   sections?: LaborSection[];
   subtotal: number;
   markup: number;
   markupAmount: number;
+  // Labor markup percentage (independent from material markup). When showMarkup
+  // is false and this is non-zero, labor totals are inflated to include it so
+  // the customer sees a single rolled-in price.
+  laborMarkup?: number;
   showMarkup?: boolean;
   travelAdjustment?: number;
   gst: number;
   total: number;
   notes?: string;
   showLaborHours?: boolean;
+  // When false, hide per-section labour rows on the PDF and show only the
+  // single Labour Total. Default: true (show breakdown).
+  showLaborBreakdown?: boolean;
   groupMaterialsBySection?: boolean;
   paymentMethods?: any;
 }
@@ -69,6 +79,7 @@ export interface BusinessPdfData {
   email?: string;
   phone?: string;
   abn?: string;
+  address?: string;
   logoHtml?: string; // Pre-built <img> tag or empty string
   brandColor?: string;
   pdfTemplate?: PdfTemplateId;

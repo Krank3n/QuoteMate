@@ -188,6 +188,7 @@ export function UnifiedTourController() {
           laborHours: TOUR_LABOR.laborHours,
           laborRate: TOUR_LABOR.laborRate,
           markup: TOUR_LABOR.markup,
+          laborMarkup: TOUR_LABOR.laborMarkup,
           travelAdjustment: TOUR_LABOR.travelAdjustment,
           estimatedDistance: TOUR_LABOR.estimatedDistance,
           estimatedFuelCost: TOUR_LABOR.estimatedFuelCost,

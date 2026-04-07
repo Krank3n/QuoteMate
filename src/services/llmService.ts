@@ -21,7 +21,7 @@ const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
   ? 'http://127.0.0.1:5001/hansendev/us-central1'
   : 'https://us-central1-hansendev.cloudfunctions.net';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
 const GEMINI_LITE_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent';
 
 
@@ -33,6 +33,10 @@ interface LLMMaterial {
   reasoning?: string;
   section?: string;
   sectionMultiplier?: number;
+  // Per-unit labour hours for this material's section. The LLM is asked to populate
+  // this in the prompt; if it omits it (LLMs are unreliable), MaterialsListScreen
+  // falls back to distributing analysis.estimatedHours across sections by multiplier.
+  sectionLaborHours?: number;
 }
 
 interface LLMResponse {
@@ -747,7 +751,7 @@ export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Pa
       manualPriceOverride: false,
       ...(m.section && { section: m.section }),
       sectionMultiplier: multiplier,
-      ...((m as any).sectionLaborHours > 0 && { sectionLaborHours: (m as any).sectionLaborHours }),
+      ...(m.sectionLaborHours && m.sectionLaborHours > 0 && { sectionLaborHours: m.sectionLaborHours }),
     };
   });
 }

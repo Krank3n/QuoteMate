@@ -123,7 +123,7 @@ function NewQuoteNavigator() {
       <NewQuoteStack.Screen
         name="LaborMarkup"
         component={LaborMarkupScreen}
-        options={{ title: 'Labor & Markup' }}
+        options={{ title: 'Pricing' }}
       />
       <NewQuoteStack.Screen
         name="QuotePreview"
@@ -187,7 +187,7 @@ function NewInvoiceNavigator() {
       <NewQuoteStack.Screen
         name="LaborMarkup"
         component={LaborMarkupScreen}
-        options={{ title: 'Labor & Markup' }}
+        options={{ title: 'Pricing' }}
         initialParams={{ mode: 'invoice' }}
       />
       <NewQuoteStack.Screen

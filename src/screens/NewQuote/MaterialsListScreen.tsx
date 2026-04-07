@@ -435,6 +435,7 @@ export function MaterialsListScreen() {
   // Section management
   const [showNewSectionModal, setShowNewSectionModal] = useState(false);
   const [newSectionName, setNewSectionName] = useState('');
+  const [newSectionLaborHours, setNewSectionLaborHours] = useState('');
   const [renamingSectionKey, setRenamingSectionKey] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
@@ -752,17 +753,24 @@ export function MaterialsListScreen() {
         if (m.section && m.sectionMultiplier && m.sectionMultiplier > 1) {
           sectionMultipliers.set(m.section, m.sectionMultiplier);
         }
-        if (m.section && (m as any).sectionLaborHours > 0) {
-          sectionLaborHours.set(m.section, (m as any).sectionLaborHours);
+        if (m.section && m.sectionLaborHours && m.sectionLaborHours > 0) {
+          sectionLaborHours.set(m.section, m.sectionLaborHours);
         }
       });
       const existingSections = currentQuote.sections || [];
       const existingSectionNames = new Set(existingSections.map(s => s.name));
       const defaultRate = businessSettings?.defaultLaborRate || 85;
+      // Fallback when the LLM omits sectionLaborHours: distribute the job's
+      // estimatedHours across sections proportionally to their multiplier so
+      // we never persist zero-labour sections (the cause of the $0 bug).
+      const totalMultipliers = Array.from(sectionMultipliers.values()).reduce((a, b) => a + b, 0);
+      const fallbackPerUnitHours = totalMultipliers > 0
+        ? (analysis.estimatedHours || 8) / totalMultipliers
+        : 1;
       const newSections: QuoteSection[] = [];
       sectionMultipliers.forEach((multiplier, sectionName) => {
         if (!existingSectionNames.has(sectionName)) {
-          const perUnitHours = sectionLaborHours.get(sectionName) || 0;
+          const perUnitHours = sectionLaborHours.get(sectionName) || fallbackPerUnitHours;
           const useDays = perUnitHours >= 5;
           const laborRate = useDays ? defaultRate * 8 : defaultRate;
           const laborHoursValue = useDays ? perUnitHours / 8 : perUnitHours;
@@ -805,9 +813,19 @@ export function MaterialsListScreen() {
       setSuccessMessage(`Generated ${generatedMaterials.length} material${generatedMaterials.length !== 1 ? 's' : ''} from your job description.`);
       setShowSuccessModal(true);
     } catch (error: any) {
+      console.error('[MaterialsListScreen] Generation failed:', error);
+      const message = String(error?.message || error || '');
+      const isNetworkError =
+        error?.name === 'TypeError' ||
+        /network request failed|failed to fetch|network error|offline|timeout|timed out/i.test(message);
       setSuccessType('error');
-      setSuccessTitle('Generation Failed');
-      setSuccessMessage('Could not generate materials list. Please add materials manually or try again.');
+      if (isNetworkError) {
+        setSuccessTitle('No Internet Connection');
+        setSuccessMessage('Generating materials needs an internet connection. Please check your connection and try again.');
+      } else {
+        setSuccessTitle('Generation Failed');
+        setSuccessMessage('Could not generate materials list. Please add materials manually or try again.');
+      }
       setShowSuccessModal(true);
     } finally {
       setIsAiAnalyzing(false);
@@ -1569,6 +1587,8 @@ export function MaterialsListScreen() {
 
   const handleCreateSection = () => {
     if (!newSectionName.trim() || !currentQuote) return;
+    const hours = parseFloat(newSectionLaborHours) || 0;
+    if (hours <= 0) return; // labour hours required — Create button is disabled in this state
     // Create a QuoteSection entry and add to quote
     const defaultRate = currentQuote.laborRate || businessSettings?.defaultLaborRate || 85;
     const existingSections = currentQuote.sections || [];
@@ -1576,10 +1596,10 @@ export function MaterialsListScreen() {
       id: `section-${Date.now()}`,
       name: newSectionName.trim(),
       multiplier: 1,
-      laborHours: 0,
+      laborHours: hours,
       laborRate: defaultRate,
       laborUnit: 'hours' as LaborUnit,
-      laborTotal: 0,
+      laborTotal: hours * defaultRate,
       sortOrder: existingSections.length,
     };
     updateQuote({
@@ -1587,6 +1607,7 @@ export function MaterialsListScreen() {
       sections: [...existingSections, section],
     });
     setNewSectionName('');
+    setNewSectionLaborHours('');
     setShowNewSectionModal(false);
   };
 
@@ -1736,9 +1757,7 @@ export function MaterialsListScreen() {
 
   const handleConfirmDeleteSection = () => {
     if (!currentQuote || !deleteSectionName) return;
-    const updatedMaterials = currentQuote.materials.map(m =>
-      m.section === deleteSectionName ? { ...m, section: undefined } : m
-    );
+    const updatedMaterials = currentQuote.materials.filter(m => m.section !== deleteSectionName);
     const updatedSections = (currentQuote.sections || []).filter(s => s.name !== deleteSectionName);
     updateQuote({ ...currentQuote, materials: updatedMaterials, sections: updatedSections });
     setDeleteSectionModalVisible(false);
@@ -2070,18 +2089,38 @@ export function MaterialsListScreen() {
                   <Text style={styles.orDividerText}>or start differently</Text>
                   <View style={styles.orDividerLine} />
                 </View>
-                <View style={styles.secondaryActionsRow}>
-                  <TouchableOpacity ref={aiGenerateRef} onPress={() => {
-                    if (!isPro) { navigation.navigate('Paywall' as never); return; }
-                    handleGenerateMaterialsList();
-                  }} style={styles.secondaryActionLink}>
-                    <Text style={styles.secondaryActionText}>Build from description</Text>
-                    {!isPro && <ProBadge size="small" />}
-                  </TouchableOpacity>
-                  <TouchableOpacity ref={addManualRef} onPress={handleAddMaterial} style={styles.secondaryActionLink}>
-                    <Text style={styles.secondaryActionText}>Start empty</Text>
-                  </TouchableOpacity>
-                </View>
+
+                <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
+                  if (!isPro) { navigation.navigate('Paywall' as never); return; }
+                  handleGenerateMaterialsList();
+                }} activeOpacity={0.7}>
+                  <View style={styles.emptyActionIconWrap}>
+                    <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
+                  </View>
+                  <View style={styles.emptyActionContent}>
+                    <View style={styles.emptyActionTitleRow}>
+                      <Text style={styles.emptyActionTitle}>Build from description</Text>
+                      {!isPro && <ProBadge size="small" />}
+                    </View>
+                    <Text style={styles.emptyActionDesc}>
+                      Create a full materials list from your job description
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
+
+                <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
+                  <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
+                    <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
+                  </View>
+                  <View style={styles.emptyActionContent}>
+                    <Text style={styles.emptyActionTitle}>Start empty</Text>
+                    <Text style={styles.emptyActionDesc}>
+                      Search for products or enter materials by hand
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
               </>
             ) : allTemplates.length > 0 ? (
               <>
@@ -2166,18 +2205,38 @@ export function MaterialsListScreen() {
                   <Text style={styles.orDividerText}>or start differently</Text>
                   <View style={styles.orDividerLine} />
                 </View>
-                <View style={styles.secondaryActionsRow}>
-                  <TouchableOpacity ref={aiGenerateRef} onPress={() => {
-                    if (!isPro) { navigation.navigate('Paywall' as never); return; }
-                    handleGenerateMaterialsList();
-                  }} style={styles.secondaryActionLink}>
-                    <Text style={styles.secondaryActionText}>Build from description</Text>
-                    {!isPro && <ProBadge size="small" />}
-                  </TouchableOpacity>
-                  <TouchableOpacity ref={addManualRef} onPress={handleAddMaterial} style={styles.secondaryActionLink}>
-                    <Text style={styles.secondaryActionText}>Start empty</Text>
-                  </TouchableOpacity>
-                </View>
+
+                <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
+                  if (!isPro) { navigation.navigate('Paywall' as never); return; }
+                  handleGenerateMaterialsList();
+                }} activeOpacity={0.7}>
+                  <View style={styles.emptyActionIconWrap}>
+                    <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
+                  </View>
+                  <View style={styles.emptyActionContent}>
+                    <View style={styles.emptyActionTitleRow}>
+                      <Text style={styles.emptyActionTitle}>Build from description</Text>
+                      {!isPro && <ProBadge size="small" />}
+                    </View>
+                    <Text style={styles.emptyActionDesc}>
+                      Create a full materials list from your job description
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
+
+                <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
+                  <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
+                    <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
+                  </View>
+                  <View style={styles.emptyActionContent}>
+                    <Text style={styles.emptyActionTitle}>Start empty</Text>
+                    <Text style={styles.emptyActionDesc}>
+                      Search for products or enter materials by hand
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
               </>
             ) : (
               <>
@@ -2669,7 +2728,11 @@ export function MaterialsListScreen() {
       <Portal>
         <Modal
           visible={showNewSectionModal}
-          onDismiss={() => setShowNewSectionModal(false)}
+          onDismiss={() => {
+            setShowNewSectionModal(false);
+            setNewSectionName('');
+            setNewSectionLaborHours('');
+          }}
           contentContainerStyle={styles.newSectionModal}
         >
           <Text style={styles.newSectionModalTitle}>New Section</Text>
@@ -2678,19 +2741,37 @@ export function MaterialsListScreen() {
             value={newSectionName}
             onChangeText={setNewSectionName}
             mode="outlined"
-            style={{ marginBottom: 16 }}
+            style={{ marginBottom: 12 }}
             placeholder="e.g. Fence Bay, Gate, Footings"
             autoFocus
+          />
+          <TextInput
+            label="Labour Hours"
+            value={newSectionLaborHours}
+            onChangeText={setNewSectionLaborHours}
+            mode="outlined"
+            keyboardType="decimal-pad"
+            placeholder="e.g. 2.5"
+            right={<TextInput.Affix text="hrs" />}
+            style={{ marginBottom: 16 }}
           />
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
             <TouchableOpacity
               style={styles.newSectionCancelBtn}
-              onPress={() => setShowNewSectionModal(false)}
+              onPress={() => {
+                setShowNewSectionModal(false);
+                setNewSectionName('');
+                setNewSectionLaborHours('');
+              }}
             >
               <Text style={styles.newSectionCancelText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.newSectionSaveBtn}
+              style={[
+                styles.newSectionSaveBtn,
+                (!newSectionName.trim() || !(parseFloat(newSectionLaborHours) > 0)) && { opacity: 0.5 },
+              ]}
+              disabled={!newSectionName.trim() || !(parseFloat(newSectionLaborHours) > 0)}
               onPress={handleCreateSection}
             >
               <Text style={styles.newSectionSaveText}>Create</Text>
@@ -3072,7 +3153,7 @@ export function MaterialsListScreen() {
         onDismiss={() => setDeleteSectionModalVisible(false)}
         type="warning"
         title="Ditch This Section?"
-        message={`Gonna chuck "${deleteSectionName}" and move its materials to unsectioned. She'll be right, nothing gets deleted.`}
+        message={`Gonna chuck "${deleteSectionName}" and all the materials in it. This can't be undone, mate.`}
         icon="delete-outline"
         showConfetti={false}
         primaryButtonText="Yeah, Ditch It"

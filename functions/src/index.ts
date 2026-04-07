@@ -1310,8 +1310,115 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
 });
 
 /**
- * Analyze Job Description using Anthropic Claude API
- * This Cloud Function acts as a proxy to avoid CORS issues on web
+ * Strip markdown code fences and parse JSON from an LLM response.
+ */
+function parseLLMJson(content: string): any {
+  let jsonStr = content.trim();
+  if (jsonStr.startsWith('```json')) {
+    jsonStr = jsonStr.replace(/```json\n?/, '').replace(/\n?```$/, '');
+  } else if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/```\n?/, '').replace(/\n?```$/, '');
+  }
+  return JSON.parse(jsonStr);
+}
+
+// Gemini 3 Pro Preview — primary model for material list generation.
+// Better image understanding than Claude for site photos.
+const GEMINI_MATERIALS_MODEL = 'gemini-3.1-pro-preview';
+
+async function callGeminiForMaterials(
+  apiKey: string,
+  prompt: string,
+  photoBase64?: string[],
+): Promise<any> {
+  const parts: any[] = [];
+  if (Array.isArray(photoBase64) && photoBase64.length > 0) {
+    for (const b64 of photoBase64) {
+      parts.push({
+        inline_data: {
+          mime_type: 'image/jpeg',
+          data: b64,
+        },
+      });
+    }
+  }
+  parts.push({ text: prompt });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MATERIALS_MODEL}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 4000,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API returned ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) {
+    throw new Error('No content in Gemini response');
+  }
+  return parseLLMJson(content);
+}
+
+async function callClaudeForMaterials(
+  apiKey: string,
+  prompt: string,
+  photoBase64?: string[],
+): Promise<any> {
+  const messageContent: any[] = [];
+  if (Array.isArray(photoBase64) && photoBase64.length > 0) {
+    for (const b64 of photoBase64) {
+      messageContent.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/jpeg',
+          data: b64,
+        },
+      });
+    }
+  }
+  messageContent.push({ type: 'text', text: prompt });
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-6',
+      max_tokens: 4000,
+      temperature: 0.2,
+      messages: [{ role: 'user', content: messageContent }],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Anthropic API returned ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data.content[0].text;
+  return parseLLMJson(content);
+}
+
+/**
+ * Analyze Job Description — Gemini 3 Pro Preview primary, Claude Opus 4.6 fallback.
+ * This Cloud Function acts as a proxy to avoid CORS issues on web.
  */
 export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -1335,11 +1442,14 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 120 }).
         return;
       }
 
-      // Get API key from Firebase config
+      // Get API keys from Firebase config.
+      // Gemini 3 Pro Preview is the PRIMARY model (better image understanding for site photos).
+      // Claude Opus 4.6 is the FALLBACK if Gemini fails.
+      const geminiApiKey = process.env.GEMINI_API_KEY;
       const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
-      if (!anthropicApiKey) {
-        res.status(500).json({ error: 'Anthropic API key not configured' });
+      if (!geminiApiKey && !anthropicApiKey) {
+        res.status(500).json({ error: 'No LLM API keys configured (GEMINI_API_KEY / ANTHROPIC_API_KEY)' });
         return;
       }
 
@@ -1434,69 +1544,30 @@ Guidelines:
 
 Return ONLY valid JSON, no other text.`;
 
-      // Build message content — text + optional photos
-      const messageContent: any[] = [];
+      const finalPrompt = Array.isArray(photoBase64) && photoBase64.length > 0
+        ? `${prompt}\n\nI've also attached ${photoBase64.length} site photo(s). Please examine them carefully to better understand the scope of work, identify specific materials visible, and refine your material estimates based on what you see.`
+        : prompt;
 
-      if (Array.isArray(photoBase64) && photoBase64.length > 0) {
-        for (const b64 of photoBase64) {
-          messageContent.push({
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: 'image/jpeg',
-              data: b64,
-            },
-          });
+      // Try Gemini 3 Pro Preview first (primary — better image understanding)
+      let parsed: any | null = null;
+      let primaryError: Error | null = null;
+
+      if (geminiApiKey) {
+        try {
+          parsed = await callGeminiForMaterials(geminiApiKey, finalPrompt, photoBase64);
+        } catch (err: any) {
+          primaryError = err;
+          console.warn('Gemini primary call failed, falling back to Claude Opus:', err.message);
         }
       }
 
-      messageContent.push({
-        type: 'text',
-        text: Array.isArray(photoBase64) && photoBase64.length > 0
-          ? `${prompt}\n\nI've also attached ${photoBase64.length} site photo(s). Please examine them carefully to better understand the scope of work, identify specific materials visible, and refine your material estimates based on what you see.`
-          : prompt,
-      });
-
-      // Call Anthropic API
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicApiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 4000,
-          temperature: 0.2,
-          messages: [
-            {
-              role: 'user',
-              content: messageContent,
-            },
-          ],
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API returned ${response.status}: ${errorText}`);
+      // Fallback to Claude Opus 4.6
+      if (!parsed) {
+        if (!anthropicApiKey) {
+          throw primaryError || new Error('Gemini failed and no Anthropic fallback key configured');
+        }
+        parsed = await callClaudeForMaterials(anthropicApiKey, finalPrompt, photoBase64);
       }
-
-      const data = await response.json();
-      const content = data.content[0].text;
-
-      // Parse the JSON response
-      let jsonStr = content.trim();
-
-      // Remove markdown code blocks if present
-      if (jsonStr.startsWith('```json')) {
-        jsonStr = jsonStr.replace(/```json\n?/, '').replace(/\n?```$/, '');
-      } else if (jsonStr.startsWith('```')) {
-        jsonStr = jsonStr.replace(/```\n?/, '').replace(/\n?```$/, '');
-      }
-
-      const parsed = JSON.parse(jsonStr);
 
       res.status(200).json({
         materials: parsed.materials || [],
@@ -2632,6 +2703,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           laborRate: quote.laborRate,
           laborUnit: quote.laborUnit,
           laborTotal: quote.laborTotal || 0,
+          laborExtraHours: quote.laborExtraHours,
           sections: (quote.sections || []).map((s: any) => ({
             name: s.name,
             laborHours: s.laborHours,
@@ -2642,12 +2714,14 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           subtotal: quote.subtotal || 0,
           markup: quote.markup || 0,
           markupAmount: quote.markupAmount || 0,
+          laborMarkup: quote.laborMarkup ?? quote.markup ?? 0,
           showMarkup: quote.showMarkup === true && business.showMarkup !== false,
           travelAdjustment: quote.travelAdjustment,
           gst: quote.gst || 0,
           total: quote.total || 0,
           notes: quote.notes,
           showLaborHours: business.showLaborHours,
+          showLaborBreakdown: quote.showLaborBreakdown !== false,
           groupMaterialsBySection: business.groupMaterialsBySection,
           paymentMethods: business.paymentMethods,
         },
@@ -2656,6 +2730,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           email: business.email,
           phone: business.phone,
           abn: business.abn,
+          address: business.address,
           logoHtml: business.logoStorageUrl ? `<img src="${business.logoStorageUrl}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
           brandColor: business.brandColor,
           pdfTemplate: business.pdfTemplate,
@@ -2827,6 +2902,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
           laborRate: invoice.laborRate,
           laborUnit: invoice.laborUnit,
           laborTotal: invoice.laborTotal || 0,
+          laborExtraHours: invoice.laborExtraHours,
           sections: (invoice.sections || []).map((s: any) => ({
             name: s.name,
             laborHours: s.laborHours,
@@ -2837,12 +2913,14 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
           subtotal: invoice.subtotal || 0,
           markup: invoice.markup || 0,
           markupAmount: invoice.markupAmount || 0,
+          laborMarkup: invoice.laborMarkup ?? invoice.markup ?? 0,
           showMarkup: invoice.showMarkup === true && business.showMarkup !== false,
           travelAdjustment: invoice.travelAdjustment,
           gst: invoice.gst || 0,
           total: invoice.total || 0,
           notes: invoice.notes,
           showLaborHours: business.showLaborHours,
+          showLaborBreakdown: invoice.showLaborBreakdown !== false,
           groupMaterialsBySection: business.groupMaterialsBySection,
           paymentMethods: business.paymentMethods,
         },
@@ -2851,6 +2929,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
           email: business.email,
           phone: business.phone,
           abn: business.abn,
+          address: business.address,
           logoHtml: business.logoStorageUrl ? `<img src="${business.logoStorageUrl}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
           brandColor: business.brandColor,
           pdfTemplate: business.pdfTemplate,
@@ -6639,8 +6718,21 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
         }
       }
 
-      // Labour line item
-      if (invoice.laborHours > 0 && invoice.laborRate > 0) {
+      // Labour line items — one per section if sectioned, otherwise one from top-level
+      if (Array.isArray(invoice.sections) && invoice.sections.length > 0) {
+        for (const s of invoice.sections) {
+          const totalHours = (s.laborHours || 0) * (s.multiplier || 1);
+          if (totalHours > 0 && (s.laborRate || 0) > 0) {
+            lineItems.push({
+              Description: `Labour - ${s.name || 'Section'}`,
+              Quantity: totalHours,
+              UnitAmount: s.laborRate,
+              AccountCode: '200',
+              TaxType: 'OUTPUT',
+            });
+          }
+        }
+      } else if (invoice.laborHours > 0 && invoice.laborRate > 0) {
         lineItems.push({
           Description: `Labour - ${invoice.job?.name || 'General'}`,
           Quantity: invoice.laborHours,
@@ -6952,7 +7044,20 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
             });
           }
         }
-        if (invoice.laborHours > 0 && invoice.laborRate > 0) {
+        if (Array.isArray(invoice.sections) && invoice.sections.length > 0) {
+          for (const s of invoice.sections) {
+            const totalHours = (s.laborHours || 0) * (s.multiplier || 1);
+            if (totalHours > 0 && (s.laborRate || 0) > 0) {
+              lineItems.push({
+                Description: `Labour - ${s.name || 'Section'}`,
+                Quantity: totalHours,
+                UnitAmount: s.laborRate,
+                AccountCode: '200',
+                TaxType: 'OUTPUT',
+              });
+            }
+          }
+        } else if (invoice.laborHours > 0 && invoice.laborRate > 0) {
           lineItems.push({
             Description: `Labour - ${invoice.job?.name || 'General'}`,
             Quantity: invoice.laborHours,

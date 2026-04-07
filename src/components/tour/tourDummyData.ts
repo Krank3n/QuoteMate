@@ -208,6 +208,7 @@ export const TOUR_LABOR = {
   laborHours: 3,
   laborRate: 85,
   markup: 20,
+  laborMarkup: 20,
   travelAdjustment: 5,
   estimatedDistance: 18,
   estimatedFuelCost: 12.60,

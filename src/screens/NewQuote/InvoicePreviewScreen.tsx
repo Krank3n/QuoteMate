@@ -293,7 +293,7 @@ export function InvoicePreviewScreen() {
           </View>
           {currentInvoice.showMarkup === true && (
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Markup ({currentInvoice.markup}%)</Text>
+            <Text style={styles.summaryLabel}>Markup</Text>
             <Text style={styles.summaryValue}>{formatCurrency(currentInvoice.markupAmount)}</Text>
           </View>
           )}

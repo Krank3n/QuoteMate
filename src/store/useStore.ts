@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
 import { TourPhase } from '../components/tour/tourFlow';
-import { updateQuoteCalculations } from '../utils/quoteCalculator';
+import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { firestoreService } from '../services/firestoreService';
 import { auth } from '../config/firebase';
@@ -250,6 +250,7 @@ export const useStore = create<AppState>((set, get) => ({
       laborTotal: 0,
       materialsSubtotal: 0,
       markup: businessSettings?.defaultMarkup || 20,
+      laborMarkup: businessSettings?.defaultLaborMarkup ?? businessSettings?.defaultMarkup ?? 20,
       markupAmount: 0,
       subtotal: 0,
       gst: 0,
@@ -502,12 +503,16 @@ export const useStore = create<AppState>((set, get) => ({
       if (auth.currentUser) {
         const cloudQuotes = await firestoreService.loadQuotes();
         if (cloudQuotes.length > 0) {
+          // Backfill laborMarkup from material markup for legacy quotes
+          const backfilled = cloudQuotes.map((q) =>
+            q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q
+          );
           // Save to local storage for offline access
           await AsyncStorage.setItem(
             STORAGE_KEYS.QUOTES,
-            JSON.stringify(cloudQuotes)
+            JSON.stringify(backfilled)
           );
-          set({ quotes: cloudQuotes });
+          set({ quotes: backfilled });
           return;
         }
       }
@@ -515,13 +520,17 @@ export const useStore = create<AppState>((set, get) => ({
       // Fallback to local storage
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.QUOTES);
       if (stored) {
-        const quotes: Quote[] = JSON.parse(stored, (key, value) => {
+        const parsed: Quote[] = JSON.parse(stored, (key, value) => {
           // Parse date strings back to Date objects
           if (key === 'createdAt' || key === 'updatedAt') {
             return new Date(value);
           }
           return value;
         });
+        // Backfill laborMarkup from material markup for legacy quotes
+        const quotes = parsed.map((q) =>
+          q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q
+        );
         set({ quotes });
 
         // Sync to cloud if user is signed in but no cloud data exists
@@ -904,6 +913,7 @@ export const useStore = create<AppState>((set, get) => ({
       laborTotal: 0,
       materialsSubtotal: 0,
       markup: businessSettings?.defaultMarkup || 20,
+      laborMarkup: businessSettings?.defaultLaborMarkup ?? businessSettings?.defaultMarkup ?? 20,
       markupAmount: 0,
       subtotal: 0,
       gst: 0,
@@ -943,6 +953,7 @@ export const useStore = create<AppState>((set, get) => ({
       sections: quote.sections,
       materialsSubtotal: quote.materialsSubtotal,
       markup: quote.markup,
+      laborMarkup: quote.laborMarkup ?? quote.markup,
       markupAmount: quote.markupAmount,
       subtotal: quote.subtotal,
       gst: quote.gst,
@@ -962,22 +973,34 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   updateInvoice: (invoice: Invoice) => {
-    // Apply same calculations as quotes — sections-aware
-    const laborTotal = invoice.sections && invoice.sections.length > 0
-      ? invoice.sections.reduce((sum, s) => sum + s.laborTotal, 0)
-      : invoice.laborRate * invoice.laborHours;
-    const updatedInvoice = {
-      ...invoice,
-      laborTotal,
-      materialsSubtotal: invoice.materials.reduce((sum, m) => sum + m.totalPrice, 0),
-    };
-    updatedInvoice.subtotal = updatedInvoice.laborTotal + updatedInvoice.materialsSubtotal;
-    updatedInvoice.markupAmount = updatedInvoice.subtotal * (invoice.markup / 100);
-    const subtotalWithMarkup = updatedInvoice.subtotal + updatedInvoice.markupAmount;
-    updatedInvoice.gst = subtotalWithMarkup * 0.1;
-    updatedInvoice.total = subtotalWithMarkup + updatedInvoice.gst;
+    // Heal legacy broken-labour invoices the same way quotes are healed.
+    const healed = healBrokenLabourSections(invoice);
+    // Apply same calculations as quotes — sections-aware (plus optional extra
+    // labour hours added on top of section sums), with separate material + labor markup
+    const extraHours = healed.laborExtraHours ?? 0;
+    const laborTotal = healed.sections && healed.sections.length > 0
+      ? healed.sections.reduce((sum, s) => sum + s.laborTotal, 0) + (extraHours * healed.laborRate)
+      : healed.laborRate * healed.laborHours;
+    const materialsSubtotal = healed.materials.reduce((sum, m) => sum + m.totalPrice, 0);
+    const subtotal = laborTotal + materialsSubtotal;
+    const laborMarkupPercent = healed.laborMarkup ?? healed.markup ?? 0;
+    const markupAmount =
+      materialsSubtotal * (healed.markup / 100) + laborTotal * (laborMarkupPercent / 100);
+    const subtotalWithMarkup = subtotal + markupAmount;
+    const gst = subtotalWithMarkup * 0.1;
+    const total = subtotalWithMarkup + gst;
 
-    set({ currentInvoice: updatedInvoice });
+    set({
+      currentInvoice: {
+        ...healed,
+        laborTotal,
+        materialsSubtotal,
+        subtotal,
+        markupAmount,
+        gst,
+        total,
+      },
+    });
   },
 
   saveInvoice: async (invoice: Invoice) => {
@@ -1054,12 +1077,16 @@ export const useStore = create<AppState>((set, get) => ({
       if (auth.currentUser) {
         const cloudInvoices = await firestoreService.loadInvoices();
         if (cloudInvoices.length > 0) {
+          // Backfill laborMarkup from material markup for legacy invoices
+          const backfilled = cloudInvoices.map((i) =>
+            i.laborMarkup === undefined ? { ...i, laborMarkup: i.markup } : i
+          );
           // Save to local storage for offline access
           await AsyncStorage.setItem(
             STORAGE_KEYS.INVOICES,
-            JSON.stringify(cloudInvoices)
+            JSON.stringify(backfilled)
           );
-          set({ invoices: cloudInvoices });
+          set({ invoices: backfilled });
           return;
         }
       }
@@ -1067,7 +1094,7 @@ export const useStore = create<AppState>((set, get) => ({
       // Fallback to local storage
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.INVOICES);
       if (stored) {
-        const invoices: Invoice[] = JSON.parse(stored, (key, value) => {
+        const parsed: Invoice[] = JSON.parse(stored, (key, value) => {
           // Parse date strings back to Date objects
           if (
             key === 'createdAt' ||
@@ -1080,6 +1107,10 @@ export const useStore = create<AppState>((set, get) => ({
           }
           return value;
         });
+        // Backfill laborMarkup from material markup for legacy invoices
+        const invoices = parsed.map((i) =>
+          i.laborMarkup === undefined ? { ...i, laborMarkup: i.markup } : i
+        );
         set({ invoices });
 
         // Sync to cloud if user is signed in but no cloud data exists
