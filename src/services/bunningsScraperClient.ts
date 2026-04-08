@@ -1,14 +1,15 @@
 /**
  * Bunnings Scraper API Client
  *
- * Connects to your separate Bunnings scraper microservice
- * to fetch real product data and pricing.
+ * Routes through Firebase Functions proxy so the scraper API key stays
+ * server-side and we avoid mixed-content (HTTP) blocking from web/iOS/Android.
+ * The proxy forwards to the same scraper microservice.
  */
 
-import { BUNNINGS_SCRAPER_URL, BUNNINGS_SCRAPER_API_KEY } from '@env';
-
-const SCRAPER_API_URL = BUNNINGS_SCRAPER_URL;
-const SCRAPER_API_KEY = BUNNINGS_SCRAPER_API_KEY;
+const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
+const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
+  ? 'http://127.0.0.1:5001/hansendev/us-central1'
+  : 'https://us-central1-hansendev.cloudfunctions.net';
 
 export interface ScraperProduct {
   productName: string;
@@ -43,11 +44,10 @@ export async function searchBunningsProducts(
   limit: number = 5
 ): Promise<ScraperSearchResponse> {
   try {
-    const response = await fetch(`${SCRAPER_API_URL}/api/search`, {
+    const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/bunningsScraperSearch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': SCRAPER_API_KEY,
       },
       body: JSON.stringify({
         searchTerm,
@@ -78,11 +78,9 @@ export async function searchBunningsProducts(
  */
 export async function getBunningsProduct(itemNumber: string): Promise<ScraperProduct | null> {
   try {
-    const response = await fetch(`${SCRAPER_API_URL}/api/product/${itemNumber}`, {
-      headers: {
-        'X-API-Key': SCRAPER_API_KEY,
-      },
-    });
+    const response = await fetch(
+      `${FIREBASE_FUNCTIONS_URL}/bunningsScraperProduct?itemNumber=${encodeURIComponent(itemNumber)}`,
+    );
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -103,7 +101,7 @@ export async function getBunningsProduct(itemNumber: string): Promise<ScraperPro
  */
 export async function checkScraperHealth(): Promise<boolean> {
   try {
-    const response = await fetch(`${SCRAPER_API_URL}/health`, {
+    const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/bunningsScraperHealth`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -166,12 +164,41 @@ export async function findBestMatchForMaterial(
 }
 
 /**
- * Batch search for best matches across multiple materials, processing in chunks.
- * Calls onChunkComplete after each chunk finishes so the UI can update progressively.
+ * Pick the best match from a list of scraper results, mirroring
+ * findBestMatchForMaterial's filter logic (high → medium → first).
+ */
+function pickBestMatch(results: ScraperProduct[]): ScraperProduct | null {
+  if (!results || results.length === 0) return null;
+
+  const highWithPrice = results.filter((p) => p.confidence === 'high' && p.price > 0);
+  if (highWithPrice.length > 0) return highWithPrice[0];
+
+  const mediumWithPrice = results.filter((p) => p.confidence === 'medium' && p.price > 0);
+  if (mediumWithPrice.length > 0) return mediumWithPrice[0];
+
+  return results[0];
+}
+
+/**
+ * Batch search for best matches across multiple materials.
+ *
+ * Splits the search terms into chunks of `chunkSize`, sends each chunk to the
+ * scraper's /api/batch-search endpoint (via the Firebase proxy) as ONE HTTP
+ * request, and fires `onChunkComplete` after each chunk so the UI can update
+ * progressively as results stream in.
+ *
+ * Why chunked-server-batches and not (a) one big batch or (b) N individual
+ * requests:
+ *  - One big batch = no progressive UI updates, app feels frozen for 30-60s
+ *    while waiting for the whole thing.
+ *  - N parallel single requests = each one is its own HTTP request with its
+ *    own iOS/Android 60s timeout, easy to time out under load.
+ *  - Chunked batches give us both: each chunk is fast (~5-15s for 3 items),
+ *    UI updates after each chunk, no per-item timeout problem.
  */
 export async function batchFindBestMatchesProgressive(
   searchTerms: string[],
-  _maxResultsPerTerm: number = 5,
+  maxResultsPerTerm: number = 5,
   chunkSize: number = 3,
   onChunkComplete?: (
     chunkResults: Map<string, ScraperProduct | null>,
@@ -182,25 +209,89 @@ export async function batchFindBestMatchesProgressive(
   isCancelled?: () => boolean,
 ): Promise<Map<string, ScraperProduct | null>> {
   const allResults = new Map<string, ScraperProduct | null>();
-  const totalChunks = Math.ceil(searchTerms.length / chunkSize);
 
-  for (let i = 0; i < totalChunks; i++) {
+  if (searchTerms.length === 0) {
+    return allResults;
+  }
+
+  // Server caps at 50 per batch request; clamp chunkSize to that just in case.
+  // The caller currently passes 3, which is the sweet spot for visible progress.
+  const effectiveChunkSize = Math.max(1, Math.min(chunkSize, 50));
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < searchTerms.length; i += effectiveChunkSize) {
+    chunks.push(searchTerms.slice(i, i + effectiveChunkSize));
+  }
+  const totalChunks = chunks.length;
+
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
     if (isCancelled?.()) {
       throw new Error('__FETCH_CANCELLED__');
     }
 
-    const chunkTerms = searchTerms.slice(i * chunkSize, (i + 1) * chunkSize);
+    const chunkTerms = chunks[chunkIndex];
     const chunkResults = new Map<string, ScraperProduct | null>();
 
-    await Promise.all(
-      chunkTerms.map(async (term) => {
-        const result = await findBestMatchForMaterial(term);
-        chunkResults.set(term, result);
-        allResults.set(term, result);
-      }),
-    );
+    try {
+      const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/bunningsScraperBatchSearch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          searches: chunkTerms.map((term) => ({
+            searchTerm: term,
+            limit: maxResultsPerTerm,
+            sortBy: 'relevance',
+          })),
+        }),
+      });
 
-    onChunkComplete?.(chunkResults, chunkTerms, i, totalChunks);
+      if (!response.ok) {
+        throw new Error(`Batch scraper returned ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.success || !Array.isArray(data.results)) {
+        throw new Error(data.error || 'Batch search failed');
+      }
+
+      // Map server results back to terms.
+      for (const item of data.results as Array<{
+        searchTerm: string;
+        success: boolean;
+        results: ScraperProduct[];
+      }>) {
+        const best = item.success ? pickBestMatch(item.results) : null;
+        chunkResults.set(item.searchTerm, best);
+        allResults.set(item.searchTerm, best);
+      }
+
+      // Any term the server didn't echo back gets null (defensive).
+      for (const term of chunkTerms) {
+        if (!chunkResults.has(term)) {
+          chunkResults.set(term, null);
+          allResults.set(term, null);
+        }
+      }
+    } catch (error) {
+      // On chunk failure, mark every term in this chunk as null so the UI
+      // doesn't hang waiting on it. Fire the callback so the UI updates,
+      // then continue to the next chunk instead of aborting the whole batch.
+      // (Re-throw cancellation immediately.)
+      if (error instanceof Error && error.message === '__FETCH_CANCELLED__') {
+        throw error;
+      }
+      for (const term of chunkTerms) {
+        chunkResults.set(term, null);
+        allResults.set(term, null);
+      }
+      // Don't throw — fire callback and continue to next chunk so a single
+      // failed chunk doesn't kill the whole quote.
+    }
+
+    onChunkComplete?.(chunkResults, chunkTerms, chunkIndex, totalChunks);
   }
 
   return allResults;
