@@ -3216,7 +3216,7 @@ export function MaterialsListScreen() {
                 if (stepId === 'addMaterialButton' && materials.length > 0) {
                   setExpandedMaterials(new Set([materials[0].id]));
                 } else if (stepId === 'firstMaterialItem' && tourPastFetchRef.current) {
-                  const pricedMaterials = getTourMaterialsPriced();
+                  const pricedMaterials = getTourMaterialsPriced(quote.materials || []);
                   storeUpdateQuote({ ...quote, materials: pricedMaterials });
                   if (pricedMaterials.length > 0) {
                     setExpandedMaterials(new Set([pricedMaterials[0].id]));

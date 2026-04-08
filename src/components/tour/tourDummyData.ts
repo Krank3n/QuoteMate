@@ -114,76 +114,64 @@ export function getTourMaterialsUnpriced(): Material[] {
   ];
 }
 
-/** Same materials but with realistic prices filled in */
-export function getTourMaterialsPriced(): Material[] {
-  return [
-    makeMaterial({
-      name: '100mm Brass Butt Hinge',
-      quantity: 3,
-      unit: 'each',
-      price: 8.90,
-      totalPrice: 26.70,
-      section: 'Door Hardware',
-      pricingSource: 'scraper',
-      priceConfidence: 'high',
-      brand: 'Zenith',
-      description: 'Zenith 100mm Brass Plated Fixed Pin Butt Hinge - 2 Pack',
-      productUrl: 'https://www.bunnings.com.au',
-      imageUrl: resolveAssetUri(tourHingeProduct),
-    }),
-    makeMaterial({
-      name: '30mm Timber Screws (Box 100)',
-      quantity: 1,
-      unit: 'box',
-      price: 12.50,
-      totalPrice: 12.50,
-      section: 'Door Hardware',
- pricingSource: 'scraper',
-      priceConfidence: 'high',
-      brand: 'Buildex',
-      description: 'Buildex 8-10 x 30mm Zinc Plated Countersunk Head Timber Screws - 100 Pack',
-      productUrl: 'https://www.bunnings.com.au',
-    }),
-    makeMaterial({
-      name: 'Treated Pine 90x45mm 2.4m',
-      quantity: 2,
-      unit: 'each',
-      price: 11.20,
-      totalPrice: 22.40,
-      section: 'Frame Repair',
-      pricingSource: 'scraper',
-      priceConfidence: 'high',
-      brand: 'Treated Pine',
-      description: 'Treated Pine 90 x 45mm 2.4m H3 Structural Framing',
-      productUrl: 'https://www.bunnings.com.au',
-    }),
-    makeMaterial({
-      name: 'Timber Weathershield Exterior',
-      quantity: 1,
-      unit: 'each',
-      price: 42.00,
-      totalPrice: 42.00,
-      section: 'Frame Repair',
-      pricingSource: 'scraper',
-      priceConfidence: 'medium',
-      brand: 'Dulux',
-      description: 'Dulux 1L Weathershield Exterior Low Sheen Paint',
-      productUrl: 'https://www.bunnings.com.au',
-    }),
-    makeMaterial({
-      name: 'Liquid Nails Construction Adhesive',
-      quantity: 1,
-      unit: 'each',
-      price: 9.80,
-      totalPrice: 9.80,
-      section: 'Frame Repair',
-      pricingSource: 'scraper',
-      priceConfidence: 'high',
-      brand: 'Selleys',
-      description: 'Selleys Liquid Nails Heavy Duty Construction Adhesive 350g',
-      productUrl: 'https://www.bunnings.com.au',
-    }),
-  ];
+/** Price overlays keyed by material name — applied on top of the unpriced list so IDs are preserved */
+const TOUR_PRICE_OVERLAYS: Record<string, Partial<Material>> = {
+  '100mm Brass Butt Hinge': {
+    price: 8.90,
+    pricingSource: 'scraper',
+    priceConfidence: 'high',
+    brand: 'Zenith',
+    description: 'Zenith 100mm Brass Plated Fixed Pin Butt Hinge - 2 Pack',
+    productUrl: 'https://www.bunnings.com.au',
+    imageUrl: resolveAssetUri(tourHingeProduct),
+  },
+  '30mm Timber Screws (Box 100)': {
+    price: 12.50,
+    pricingSource: 'scraper',
+    priceConfidence: 'high',
+    brand: 'Buildex',
+    description: 'Buildex 8-10 x 30mm Zinc Plated Countersunk Head Timber Screws - 100 Pack',
+    productUrl: 'https://www.bunnings.com.au',
+  },
+  'Treated Pine 90x45mm 2.4m': {
+    price: 11.20,
+    pricingSource: 'scraper',
+    priceConfidence: 'high',
+    brand: 'Treated Pine',
+    description: 'Treated Pine 90 x 45mm 2.4m H3 Structural Framing',
+    productUrl: 'https://www.bunnings.com.au',
+  },
+  'Timber Weathershield Exterior': {
+    price: 42.00,
+    pricingSource: 'scraper',
+    priceConfidence: 'medium',
+    brand: 'Dulux',
+    description: 'Dulux 1L Weathershield Exterior Low Sheen Paint',
+    productUrl: 'https://www.bunnings.com.au',
+  },
+  'Liquid Nails Construction Adhesive': {
+    price: 9.80,
+    pricingSource: 'scraper',
+    priceConfidence: 'high',
+    brand: 'Selleys',
+    description: 'Selleys Liquid Nails Heavy Duty Construction Adhesive 350g',
+    productUrl: 'https://www.bunnings.com.au',
+  },
+};
+
+/** Overlay realistic prices onto the existing unpriced materials, preserving IDs */
+export function getTourMaterialsPriced(unpriced: Material[]): Material[] {
+  return unpriced.map((m) => {
+    const overlay = TOUR_PRICE_OVERLAYS[m.name];
+    if (!overlay) return m;
+    const price = overlay.price ?? m.price;
+    return {
+      ...m,
+      ...overlay,
+      price,
+      totalPrice: price * m.quantity,
+    };
+  });
 }
 
 /** Extra material added via the "Add Material" screen during tour */
