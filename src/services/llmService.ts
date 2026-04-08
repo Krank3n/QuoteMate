@@ -744,7 +744,7 @@ export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Pa
       name: m.name,
       searchTerm: m.searchTerm,
       templateBaseQuantity: multiplier > 1 ? m.quantity : undefined,
-      quantity: m.quantity * multiplier,
+      quantity: Math.round(m.quantity * multiplier * 1000) / 1000,
       unit: m.unit as 'each' | 'm' | 'L' | 'kg' | 'box' | 'pack',
       price: 0,
       totalPrice: 0,

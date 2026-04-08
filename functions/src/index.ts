@@ -1566,7 +1566,26 @@ Return ONLY valid JSON, no other text.`;
         if (!anthropicApiKey) {
           throw primaryError || new Error('Gemini failed and no Anthropic fallback key configured');
         }
-        parsed = await callClaudeForMaterials(anthropicApiKey, finalPrompt, photoBase64);
+        try {
+          parsed = await callClaudeForMaterials(anthropicApiKey, finalPrompt, photoBase64);
+        } catch (fallbackErr: any) {
+          // Log full errors server-side; return short summary to client
+          console.error('Gemini primary error:', primaryError?.message);
+          console.error('Claude fallback error:', fallbackErr?.message);
+          const summarize = (msg: string): string => {
+            if (!msg) return 'unknown';
+            const m = msg.match(/returned (\d{3})/);
+            const status = m ? m[1] : '';
+            if (status === '429' || /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(msg)) return `${status || '429'} quota exceeded`;
+            if (status === '400' && /credit balance/i.test(msg)) return '400 out of credit';
+            if (status === '401' || status === '403') return `${status} auth denied`;
+            if (status === '500' || status === '503') return `${status} unavailable`;
+            return status ? `${status} error` : msg.slice(0, 60);
+          };
+          const geminiShort = primaryError ? `Gemini ${summarize(primaryError.message)}` : 'Gemini not attempted';
+          const claudeShort = `Claude ${summarize(fallbackErr.message)}`;
+          throw new Error(`Both LLM providers failed — ${geminiShort}; ${claudeShort}`);
+        }
       }
 
       res.status(200).json({
@@ -7250,7 +7269,7 @@ export const bunningsScraperSearch = functions.runWith({ timeoutSeconds: 120 }).
   });
 });
 
-export const bunningsScraperBatchSearch = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
+export const bunningsScraperBatchSearch = functions.runWith({ timeoutSeconds: 540, memory: '512MB' }).https.onRequest((req, res) => {
   const corsHandler = cors({ origin: true });
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
@@ -7362,3 +7381,285 @@ export const bunningsScraperHealth = functions.https.onRequest((req, res) => {
     }
   });
 });
+
+// ============================================
+// Bunnings Scraper — Claude fallback proxy
+// ============================================
+// The bunnings-scraper microservice used to call the Anthropic API directly when
+// Playwright failed to load Bunnings pages. That meant:
+//   1. The Anthropic API key had to live in the scraper's GitHub secrets / .env
+//   2. There was no central control point for cost — a single bad day burnt $22+
+//      because every Playwright failure triggered a Claude web_search call
+//
+// These two functions move all Anthropic calls behind Firebase, so:
+//   - The Anthropic key only lives here (already configured as ANTHROPIC_API_KEY)
+//   - We can add a budget cap, kill switch, and centralised metrics in one place
+//   - Rotating the key doesn't require redeploying the scraper
+//
+// Both endpoints are protected by the existing BUNNINGS_SCRAPER_API_KEY shared
+// secret so only the scraper can call them.
+
+function authenticateScraperRequest(req: any, res: any): boolean {
+  const providedKey = req.headers['x-api-key'] || req.headers['X-API-Key'];
+  if (!SCRAPER_API_KEY) {
+    res.status(503).json({ success: false, error: 'Scraper auth not configured on Firebase' });
+    return false;
+  }
+  if (providedKey !== SCRAPER_API_KEY) {
+    res.status(401).json({ success: false, error: 'Invalid API key' });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Claude product search via web_search tool. Replaces claudeWebSearch in
+ * bunnings-scraper/src/claude-fallback.ts. Called when Playwright fails to load
+ * a Bunnings page; uses Claude Sonnet 4.6 with web_search to find the product
+ * and price directly. THIS IS THE EXPENSIVE ONE — every call uses tokens AND
+ * web search credits.
+ */
+export const claudeProductSearch = functions
+  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .https.onRequest((req, res) => {
+    const corsHandler = cors({ origin: true });
+    corsHandler(req, res, async () => {
+      if (req.method !== 'POST') {
+        res.status(405).json({ success: false, error: 'Method not allowed' });
+        return;
+      }
+
+      if (!authenticateScraperRequest(req, res)) return;
+
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+      if (!anthropicApiKey) {
+        res.status(503).json({ success: false, error: 'Anthropic key not configured' });
+        return;
+      }
+
+      const { searchTerm, limit = 5 } = req.body || {};
+      if (!searchTerm || typeof searchTerm !== 'string') {
+        res.status(400).json({ success: false, error: 'searchTerm is required' });
+        return;
+      }
+
+      const prompt = `Find the top ${limit} most relevant product(s) for "${searchTerm}" on bunnings.com.au.
+
+SEARCH STRATEGY:
+1. Search bunnings.com.au for "${searchTerm}"
+2. From the search results, pick the ${limit} most relevant product(s) — the one a tradesperson would most likely want
+3. For EACH product, visit its actual Bunnings product page (bunnings.com.au/..._p1234567) to get the exact current price
+4. The price is displayed prominently on the product page — look for the dollar amount
+
+IMPORTANT:
+- You MUST visit the actual product page to confirm the price. Do NOT guess from search snippets.
+- If a search result shows a price, still visit the product page to verify it.
+- Pick the most relevant product: prefer the actual item over accessories, fittings, or related products.
+  For example, if searching "copper pipe", return actual copper pipe, not a copper pipe fitting or connector.
+
+After visiting the product page(s), return a JSON code block:
+\`\`\`json
+{
+  "products": [
+    {
+      "productName": "exact full product name as shown on Bunnings",
+      "price": 29.99,
+      "itemNumber": "8032172",
+      "brand": "Brand Name",
+      "productUrl": "https://www.bunnings.com.au/full-product-url_p1234567",
+      "imageUrl": "image url or empty string",
+      "description": "brief product description"
+    }
+  ]
+}
+\`\`\`
+
+RULES:
+- The itemNumber is the digits after "_p" in the Bunnings URL (e.g. _p8032172 -> "8032172")
+- Price MUST be a number in AUD including GST as shown on the product page
+- If you truly cannot find the price after visiting the page, set price to -1
+- Brand should be the manufacturer (e.g. "Makita", "DeWalt"), NOT dimensions
+- For generic timber/building products, use treatment/grade as brand (e.g. "H3 Treated Pine", "MGP10")`;
+
+      try {
+        const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': anthropicApiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 4096,
+            tools: [{ type: 'web_search_20260209', name: 'web_search' }],
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+
+        if (!anthropicResponse.ok) {
+          const errText = await anthropicResponse.text();
+          console.error(`[claudeProductSearch] Anthropic ${anthropicResponse.status}: ${errText}`);
+          res.status(502).json({
+            success: false,
+            error: `Anthropic returned ${anthropicResponse.status}`,
+            details: errText.slice(0, 500),
+          });
+          return;
+        }
+
+        const data: any = await anthropicResponse.json();
+
+        // Extract text from content blocks
+        let textContent = '';
+        for (const block of data.content || []) {
+          if (block.type === 'text') textContent += block.text;
+        }
+
+        // Parse JSON from response — code block first, then raw
+        const codeBlockMatch = textContent.match(/```json\s*([\s\S]*?)```/);
+        const jsonStr = codeBlockMatch
+          ? codeBlockMatch[1]
+          : textContent.match(/\{[\s\S]*"products"[\s\S]*\}/)?.[0];
+
+        if (!jsonStr) {
+          res.status(200).json({ success: true, products: [] });
+          return;
+        }
+
+        const parsed = JSON.parse(jsonStr);
+        const products = Array.isArray(parsed.products) ? parsed.products.slice(0, limit) : [];
+
+        res.status(200).json({ success: true, products });
+      } catch (error: any) {
+        console.error('[claudeProductSearch] Error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Unknown error' });
+      }
+    });
+  });
+
+/**
+ * Claude verify/enrich scraped products. Replaces claudeVerifyResults. Cheaper
+ * than the search variant — no web_search tool, just text reasoning over a
+ * pre-scraped list.
+ */
+export const claudeVerifyProducts = functions
+  .runWith({ timeoutSeconds: 120, memory: '256MB' })
+  .https.onRequest((req, res) => {
+    const corsHandler = cors({ origin: true });
+    corsHandler(req, res, async () => {
+      if (req.method !== 'POST') {
+        res.status(405).json({ success: false, error: 'Method not allowed' });
+        return;
+      }
+
+      if (!authenticateScraperRequest(req, res)) return;
+
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+      if (!anthropicApiKey) {
+        res.status(503).json({ success: false, error: 'Anthropic key not configured' });
+        return;
+      }
+
+      const { searchTerm, products } = req.body || {};
+      if (!searchTerm || !Array.isArray(products)) {
+        res.status(400).json({ success: false, error: 'searchTerm and products[] required' });
+        return;
+      }
+
+      if (products.length === 0) {
+        res.status(200).json({ success: true, verified: [] });
+        return;
+      }
+
+      const productSummary = products.map((p: any, i: number) => ({
+        index: i,
+        name: p.productName,
+        price: p.price,
+        brand: p.brand,
+        itemNumber: p.itemNumber,
+        url: p.productUrl,
+      }));
+
+      const prompt = `A user searched for "${searchTerm}" on Bunnings. Review these scraped results and fix any issues.
+
+Products found:
+${JSON.stringify(productSummary, null, 2)}
+
+Return a JSON code block:
+\`\`\`json
+{
+  "verified": [
+    {
+      "index": 0,
+      "relevant": true,
+      "brand": "Corrected Brand Name",
+      "confidence": "high"
+    }
+  ]
+}
+\`\`\`
+
+Rules:
+- Set "relevant" to false for products that DON'T match what the user is searching for
+  - e.g. if searching for "timber 90x45", a "Joist Hanger" or "Post Bracket" is NOT relevant
+  - accessories, fixings, and hardware are NOT the same as the main product
+- Fix the "brand" field:
+  - For branded products use the manufacturer (e.g. "Makita", "DeWalt", "Pryda")
+  - For generic timber/building products, use treatment/grade (e.g. "H3 Treated Pine", "MGP10 Blue Pine")
+  - NEVER use dimensions as brand (e.g. "90" is NOT a brand)
+- Set confidence: "high" if product closely matches search, "medium" if partially matches, "low" if poor match
+- Return ALL products with your assessment - don't skip any`;
+
+      try {
+        const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': anthropicApiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 2048,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+
+        if (!anthropicResponse.ok) {
+          const errText = await anthropicResponse.text();
+          console.error(`[claudeVerifyProducts] Anthropic ${anthropicResponse.status}: ${errText}`);
+          res.status(502).json({
+            success: false,
+            error: `Anthropic returned ${anthropicResponse.status}`,
+          });
+          return;
+        }
+
+        const data: any = await anthropicResponse.json();
+
+        let textContent = '';
+        for (const block of data.content || []) {
+          if (block.type === 'text') textContent += block.text;
+        }
+
+        const codeBlockMatch = textContent.match(/```json\s*([\s\S]*?)```/);
+        const jsonStr = codeBlockMatch
+          ? codeBlockMatch[1]
+          : textContent.match(/\{[\s\S]*"verified"[\s\S]*\}/)?.[0];
+
+        if (!jsonStr) {
+          res.status(200).json({ success: true, verified: [] });
+          return;
+        }
+
+        const parsed = JSON.parse(jsonStr);
+        const verified = Array.isArray(parsed.verified) ? parsed.verified : [];
+
+        res.status(200).json({ success: true, verified });
+      } catch (error: any) {
+        console.error('[claudeVerifyProducts] Error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Unknown error' });
+      }
+    });
+  });
