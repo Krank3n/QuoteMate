@@ -3,7 +3,7 @@
  * Trade categories, niches, and hardware store selection
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -24,6 +24,7 @@ import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
+import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import {
   TRADE_CATEGORIES,
   getTradeCategoryById,
@@ -38,14 +39,29 @@ export function TradePricingScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const initialSnapshotRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (businessSettings) {
-      setSelectedCategories(businessSettings.tradeCategories || (businessSettings.tradeCategory ? [businessSettings.tradeCategory] : []));
-      setSelectedNiches(businessSettings.tradeNiches || (businessSettings.tradeNiche ? [businessSettings.tradeNiche] : []));
-      setSelectedStore(businessSettings.selectedStore || 'bunnings');
+      const cats = businessSettings.tradeCategories || (businessSettings.tradeCategory ? [businessSettings.tradeCategory] : []);
+      const niches = businessSettings.tradeNiches || (businessSettings.tradeNiche ? [businessSettings.tradeNiche] : []);
+      const store = businessSettings.selectedStore || 'bunnings';
+      setSelectedCategories(cats);
+      setSelectedNiches(niches);
+      setSelectedStore(store);
+      initialSnapshotRef.current = JSON.stringify({ cats: [...cats].sort(), niches: [...niches].sort(), store });
     }
   }, [businessSettings]);
+
+  const isDirty = useMemo(() => {
+    if (!initialSnapshotRef.current) return false;
+    const current = JSON.stringify({
+      cats: [...selectedCategories].sort(),
+      niches: [...selectedNiches].sort(),
+      store: selectedStore,
+    });
+    return current !== initialSnapshotRef.current;
+  }, [selectedCategories, selectedNiches, selectedStore]);
 
   const handleCategoryToggle = (categoryId: string) => {
     setSelectedCategories(prev => {
@@ -94,7 +110,7 @@ export function TradePricingScreen() {
     setSelectedStore(storeId);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
       setIsLoading(true);
       await setBusinessSettings({
@@ -103,13 +119,25 @@ export function TradePricingScreen() {
         tradeNiches: selectedNiches.length > 0 ? selectedNiches : undefined,
         selectedStore: selectedStore,
       });
-      setShowSuccessModal(true);
+      initialSnapshotRef.current = JSON.stringify({
+        cats: [...selectedCategories].sort(),
+        niches: [...selectedNiches].sort(),
+        store: selectedStore,
+      });
+      if (!opts?.silent) setShowSuccessModal(true);
+      return true;
     } catch (error) {
       setShowErrorModal(true);
+      return false;
     } finally {
       setIsLoading(false);
     }
   };
+
+  const { unsavedModalProps } = useUnsavedChangesGuard({
+    isDirty,
+    onSave: () => handleSave({ silent: true }),
+  });
 
   return (
     <View style={styles.container}>
@@ -331,7 +359,7 @@ export function TradePricingScreen() {
       <FixedBottomButton
         mode="contained"
         label="Save"
-        onPress={handleSave}
+        onPress={() => handleSave()}
         disabled={isLoading}
         loading={isLoading}
       />
@@ -351,6 +379,8 @@ export function TradePricingScreen() {
         title="Save Failed"
         message="Failed to save settings. Please try again."
       />
+
+      <AlertModal {...unsavedModalProps} />
     </View>
   );
 }

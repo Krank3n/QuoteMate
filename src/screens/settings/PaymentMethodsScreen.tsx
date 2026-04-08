@@ -3,7 +3,7 @@
  * Bank transfer, PayID, BPAY, PayPal, Other
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -26,6 +26,7 @@ import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
+import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
 export function PaymentMethodsScreen() {
   const { businessSettings, setBusinessSettings } = useStore();
@@ -54,34 +55,70 @@ export function PaymentMethodsScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const initialSnapshotRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (businessSettings?.paymentMethods) {
       const pm = businessSettings.paymentMethods;
-      setShowPaymentOnDocuments(pm.showOnDocuments || false);
-      // Bank Transfer
-      setBankEnabled(pm.bankAccount?.enabled || false);
-      setBankAccountName(pm.bankAccount?.accountName || '');
-      setBankBsb(pm.bankAccount?.bsb || '');
-      setBankAccountNumber(pm.bankAccount?.accountNumber || '');
-      // PayID
-      setPayIdEnabled(pm.payId?.enabled || false);
-      setPayIdType(pm.payId?.payIdType || 'phone');
-      setPayIdValue(pm.payId?.payIdValue || '');
-      // BPAY
-      setBpayEnabled(pm.bpay?.enabled || false);
-      setBpayBillerCode(pm.bpay?.billerCode || '');
-      setBpayReference(pm.bpay?.referenceNumber || '');
-      // PayPal
-      setPaypalEnabled(pm.paypal?.enabled || false);
-      setPaypalEmail(pm.paypal?.email || '');
-      // Other
-      setOtherEnabled(pm.other?.enabled || false);
-      setOtherPaymentInstructions(pm.other?.instructions || '');
+      const sod = pm.showOnDocuments || false;
+      const bE = pm.bankAccount?.enabled || false;
+      const bAN = pm.bankAccount?.accountName || '';
+      const bB = pm.bankAccount?.bsb || '';
+      const bAcc = pm.bankAccount?.accountNumber || '';
+      const piE = pm.payId?.enabled || false;
+      const piT = pm.payId?.payIdType || 'phone';
+      const piV = pm.payId?.payIdValue || '';
+      const bpE = pm.bpay?.enabled || false;
+      const bpBC = pm.bpay?.billerCode || '';
+      const bpRef = pm.bpay?.referenceNumber || '';
+      const ppE = pm.paypal?.enabled || false;
+      const ppEmail = pm.paypal?.email || '';
+      const oE = pm.other?.enabled || false;
+      const oI = pm.other?.instructions || '';
+
+      setShowPaymentOnDocuments(sod);
+      setBankEnabled(bE);
+      setBankAccountName(bAN);
+      setBankBsb(bB);
+      setBankAccountNumber(bAcc);
+      setPayIdEnabled(piE);
+      setPayIdType(piT);
+      setPayIdValue(piV);
+      setBpayEnabled(bpE);
+      setBpayBillerCode(bpBC);
+      setBpayReference(bpRef);
+      setPaypalEnabled(ppE);
+      setPaypalEmail(ppEmail);
+      setOtherEnabled(oE);
+      setOtherPaymentInstructions(oI);
+
+      initialSnapshotRef.current = JSON.stringify({
+        sod, bE, bAN, bB, bAcc, piE, piT, piV, bpE, bpBC, bpRef, ppE, ppEmail, oE, oI,
+      });
     }
   }, [businessSettings]);
 
-  const handleSave = async () => {
+  const isDirty = useMemo(() => {
+    if (!initialSnapshotRef.current) return false;
+    const current = JSON.stringify({
+      sod: showPaymentOnDocuments,
+      bE: bankEnabled, bAN: bankAccountName, bB: bankBsb, bAcc: bankAccountNumber,
+      piE: payIdEnabled, piT: payIdType, piV: payIdValue,
+      bpE: bpayEnabled, bpBC: bpayBillerCode, bpRef: bpayReference,
+      ppE: paypalEnabled, ppEmail: paypalEmail,
+      oE: otherEnabled, oI: otherPaymentInstructions,
+    });
+    return current !== initialSnapshotRef.current;
+  }, [
+    showPaymentOnDocuments,
+    bankEnabled, bankAccountName, bankBsb, bankAccountNumber,
+    payIdEnabled, payIdType, payIdValue,
+    bpayEnabled, bpayBillerCode, bpayReference,
+    paypalEnabled, paypalEmail,
+    otherEnabled, otherPaymentInstructions,
+  ]);
+
+  const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     const paymentMethods: PaymentMethodSettings = {
       showOnDocuments: showPaymentOnDocuments,
       bankAccount: {
@@ -116,13 +153,28 @@ export function PaymentMethodsScreen() {
         ...businessSettings!,
         paymentMethods: paymentMethods,
       });
-      setShowSuccessModal(true);
+      initialSnapshotRef.current = JSON.stringify({
+        sod: showPaymentOnDocuments,
+        bE: bankEnabled, bAN: bankAccountName, bB: bankBsb, bAcc: bankAccountNumber,
+        piE: payIdEnabled, piT: payIdType, piV: payIdValue,
+        bpE: bpayEnabled, bpBC: bpayBillerCode, bpRef: bpayReference,
+        ppE: paypalEnabled, ppEmail: paypalEmail,
+        oE: otherEnabled, oI: otherPaymentInstructions,
+      });
+      if (!opts?.silent) setShowSuccessModal(true);
+      return true;
     } catch (error) {
       setShowErrorModal(true);
+      return false;
     } finally {
       setIsLoading(false);
     }
   };
+
+  const { unsavedModalProps } = useUnsavedChangesGuard({
+    isDirty,
+    onSave: () => handleSave({ silent: true }),
+  });
 
   return (
     <View style={styles.container}>
@@ -362,7 +414,7 @@ export function PaymentMethodsScreen() {
       <FixedBottomButton
         mode="contained"
         label="Save"
-        onPress={handleSave}
+        onPress={() => handleSave()}
         disabled={isLoading}
         loading={isLoading}
       />
@@ -382,6 +434,8 @@ export function PaymentMethodsScreen() {
         title="Save Failed"
         message="Failed to save settings. Please try again."
       />
+
+      <AlertModal {...unsavedModalProps} />
     </View>
   );
 }

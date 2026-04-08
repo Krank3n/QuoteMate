@@ -3,7 +3,7 @@
  * Choose document style for quotes and invoices
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -28,6 +28,7 @@ import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
+import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { PDF_TEMPLATES, printMediaCSS, getTemplateCSS, PdfTemplateId } from '../../../shared/pdf';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -417,19 +418,35 @@ export function PDFTemplateScreen() {
   const [previewLoading, setPreviewLoading] = useState<PdfTemplateId | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const initialSnapshotRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (businessSettings) {
+      const tpl = businessSettings.pdfTemplate || 'professional';
+      const slh = businessSettings.showLaborHours === true;
+      const sm = businessSettings.showMarkup !== false;
+      const gm = businessSettings.groupMaterialsBySection === true;
       if (businessSettings.pdfTemplate) {
         setSelectedTemplate(businessSettings.pdfTemplate);
       }
-      setShowLaborHours(businessSettings.showLaborHours === true);
-      setShowMarkup(businessSettings.showMarkup !== false);
-      setGroupMaterialsBySection(businessSettings.groupMaterialsBySection === true);
+      setShowLaborHours(slh);
+      setShowMarkup(sm);
+      setGroupMaterialsBySection(gm);
+      initialSnapshotRef.current = JSON.stringify({ tpl, slh, sm, gm });
     }
   }, [businessSettings]);
 
-  const handleSave = async () => {
+  const isDirty = useMemo(() => {
+    if (!initialSnapshotRef.current) return false;
+    return JSON.stringify({
+      tpl: selectedTemplate,
+      slh: showLaborHours,
+      sm: showMarkup,
+      gm: groupMaterialsBySection,
+    }) !== initialSnapshotRef.current;
+  }, [selectedTemplate, showLaborHours, showMarkup, groupMaterialsBySection]);
+
+  const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
       setIsLoading(true);
       await setBusinessSettings({
@@ -439,13 +456,26 @@ export function PDFTemplateScreen() {
         showMarkup,
         groupMaterialsBySection,
       });
-      setShowSuccessModal(true);
+      initialSnapshotRef.current = JSON.stringify({
+        tpl: selectedTemplate,
+        slh: showLaborHours,
+        sm: showMarkup,
+        gm: groupMaterialsBySection,
+      });
+      if (!opts?.silent) setShowSuccessModal(true);
+      return true;
     } catch (error) {
       setShowErrorModal(true);
+      return false;
     } finally {
       setIsLoading(false);
     }
   };
+
+  const { unsavedModalProps } = useUnsavedChangesGuard({
+    isDirty,
+    onSave: () => handleSave({ silent: true }),
+  });
 
   /** Generate a real sample PDF and show it via the system print preview */
   const handlePreviewPDF = useCallback(async (templateId: PdfTemplateId) => {
@@ -748,7 +778,7 @@ export function PDFTemplateScreen() {
       <FixedBottomButton
         mode="contained"
         label="Save"
-        onPress={handleSave}
+        onPress={() => handleSave()}
         disabled={isLoading}
         loading={isLoading}
       />
@@ -768,6 +798,8 @@ export function PDFTemplateScreen() {
         title="Save Failed"
         message="Failed to save template. Please try again."
       />
+
+      <AlertModal {...unsavedModalProps} />
     </View>
   );
 }

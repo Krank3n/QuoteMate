@@ -4,7 +4,7 @@
  * Reusable for both creating new templates and editing existing ones.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -29,6 +29,8 @@ import { WebContainer } from '../../components/WebContainer';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
 import { useStore } from '../../store/useStore';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
+import { AlertModal } from '../../components/AlertModal';
+import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
 export function JobTemplateEditorScreen() {
   const navigation = useNavigation<any>();
@@ -48,6 +50,22 @@ export function JobTemplateEditorScreen() {
   const [editingMaterialIndex, setEditingMaterialIndex] = useState<number | null>(null);
 
   const { pendingTemplateMaterial, setPendingTemplateMaterial } = useStore();
+
+  const initialSnapshotRef = useRef<string>(JSON.stringify({
+    name: existingTemplate?.name || '',
+    description: existingTemplate?.description || '',
+    laborHours: existingTemplate?.laborHours?.toString() || '',
+    laborRate: existingTemplate?.laborRate?.toString() || '85',
+    laborUnit: existingTemplate?.laborUnit || 'hours',
+    keywords: existingTemplate?.keywords || [],
+    materials: existingTemplate?.materials || [],
+  }));
+
+  const isDirty = useMemo(() => {
+    return JSON.stringify({
+      name, description, laborHours, laborRate, laborUnit, keywords, materials,
+    }) !== initialSnapshotRef.current;
+  }, [name, description, laborHours, laborRate, laborUnit, keywords, materials]);
 
   // Pick up material from AddMaterialScreen
   useFocusEffect(
@@ -93,10 +111,10 @@ export function JobTemplateEditorScreen() {
     setMaterials(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSave = async () => {
+  const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     if (!name.trim()) {
       Alert.alert('Enter Name', 'Please enter a template name');
-      return;
+      return false;
     }
     const now = new Date().toISOString();
     // Auto-suggest keywords if none set
@@ -114,8 +132,19 @@ export function JobTemplateEditorScreen() {
       updatedAt: now,
     };
     await saveTemplate(template);
-    navigation.goBack();
+    initialSnapshotRef.current = JSON.stringify({
+      name, description, laborHours, laborRate, laborUnit, keywords, materials,
+    });
+    if (!opts?.silent) {
+      navigation.goBack();
+    }
+    return true;
   };
+
+  const { unsavedModalProps } = useUnsavedChangesGuard({
+    isDirty,
+    onSave: () => handleSave({ silent: true }),
+  });
 
   const materialsTotal = materials.reduce((sum, m) => sum + (m.quantity * m.price), 0);
   const laborTotal = (parseFloat(laborHours) || 0) * (parseFloat(laborRate) || 0);
@@ -312,8 +341,10 @@ export function JobTemplateEditorScreen() {
 
       <FixedBottomButton
         label={existingTemplate ? 'Save Changes' : 'Save Template'}
-        onPress={handleSave}
+        onPress={() => handleSave()}
       />
+
+      <AlertModal {...unsavedModalProps} />
     </View>
   );
 }

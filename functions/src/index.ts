@@ -7415,12 +7415,22 @@ function authenticateScraperRequest(req: any, res: any): boolean {
 /**
  * Claude product search via web_search tool. Replaces claudeWebSearch in
  * bunnings-scraper/src/claude-fallback.ts. Called when Playwright fails to load
- * a Bunnings page; uses Claude Sonnet 4.6 with web_search to find the product
- * and price directly. THIS IS THE EXPENSIVE ONE — every call uses tokens AND
- * web search credits.
+ * a Bunnings page. No web_search tool — we're asking Claude to ESTIMATE
+ * products and prices from its training data, NOT do live web lookups.
+ *
+ * Why no web_search: the previous implementation with the web_search tool was
+ * costing $5-10 per call in pathological cases (Claude would loop: search,
+ * visit page 1, visit page 2, re-search, etc., burning 500K+ tokens per call).
+ * One runaway quote could hit $50+ in a few minutes.
+ *
+ * The Claude-guess version costs ~$0.005 per call (short prompt, short output,
+ * no tools). It's less accurate — prices and item numbers are estimates, not
+ * verified against the live Bunnings site — so products are returned with
+ * low confidence. Callers / the UI should treat these as "best guess" data
+ * and prompt the user to verify.
  */
 export const claudeProductSearch = functions
-  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .runWith({ timeoutSeconds: 60, memory: '256MB' })
   .https.onRequest((req, res) => {
     const corsHandler = cors({ origin: true });
     corsHandler(req, res, async () => {
@@ -7443,43 +7453,34 @@ export const claudeProductSearch = functions
         return;
       }
 
-      const prompt = `Find the top ${limit} most relevant product(s) for "${searchTerm}" on bunnings.com.au.
+      const prompt = `You are helping an Australian tradesperson estimate material costs. Based on your knowledge of Bunnings Warehouse (bunnings.com.au) products, suggest up to ${limit} likely product matches for: "${searchTerm}"
 
-SEARCH STRATEGY:
-1. Search bunnings.com.au for "${searchTerm}"
-2. From the search results, pick the ${limit} most relevant product(s) — the one a tradesperson would most likely want
-3. For EACH product, visit its actual Bunnings product page (bunnings.com.au/..._p1234567) to get the exact current price
-4. The price is displayed prominently on the product page — look for the dollar amount
+These are ESTIMATES from your training data — you do not have live web access. Give your best guess of typical Bunnings products, brands, and current AUD prices (including GST).
 
-IMPORTANT:
-- You MUST visit the actual product page to confirm the price. Do NOT guess from search snippets.
-- If a search result shows a price, still visit the product page to verify it.
-- Pick the most relevant product: prefer the actual item over accessories, fittings, or related products.
-  For example, if searching "copper pipe", return actual copper pipe, not a copper pipe fitting or connector.
-
-After visiting the product page(s), return a JSON code block:
+Return ONLY a JSON code block in this exact shape:
 \`\`\`json
 {
   "products": [
     {
-      "productName": "exact full product name as shown on Bunnings",
+      "productName": "full product name as it would appear on Bunnings",
       "price": 29.99,
-      "itemNumber": "8032172",
+      "itemNumber": "",
       "brand": "Brand Name",
-      "productUrl": "https://www.bunnings.com.au/full-product-url_p1234567",
-      "imageUrl": "image url or empty string",
-      "description": "brief product description"
+      "productUrl": "",
+      "imageUrl": "",
+      "description": "one-sentence product description"
     }
   ]
 }
 \`\`\`
 
-RULES:
-- The itemNumber is the digits after "_p" in the Bunnings URL (e.g. _p8032172 -> "8032172")
-- Price MUST be a number in AUD including GST as shown on the product page
-- If you truly cannot find the price after visiting the page, set price to -1
-- Brand should be the manufacturer (e.g. "Makita", "DeWalt"), NOT dimensions
-- For generic timber/building products, use treatment/grade as brand (e.g. "H3 Treated Pine", "MGP10")`;
+Rules:
+- Price is a number in AUD including GST. Use your best estimate; don't set to -1.
+- Leave itemNumber, productUrl, and imageUrl as empty strings — you don't have access to the live site.
+- Brand: manufacturer for branded items (e.g. "Makita"), treatment/grade for generic timber (e.g. "H3 Treated Pine").
+- Pick the products a tradie would most likely want — prefer the actual item over accessories.
+- If you genuinely have no idea what product matches, return an empty products array instead of making things up.
+- Return ONLY the JSON code block, no other text.`;
 
       try {
         const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
@@ -7491,8 +7492,9 @@ RULES:
           },
           body: JSON.stringify({
             model: 'claude-sonnet-4-6',
-            max_tokens: 4096,
-            tools: [{ type: 'web_search_20260209', name: 'web_search' }],
+            max_tokens: 1024,
+            // NO tools — pure text completion. Previous web_search tool caused
+            // runaway cost ($5-10/call in worst case).
             messages: [{ role: 'user', content: prompt }],
           }),
         });

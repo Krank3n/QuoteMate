@@ -35,6 +35,7 @@ import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
+import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
 export function BusinessProfileScreen() {
   const navigation = useNavigation<any>();
@@ -57,24 +58,65 @@ export function BusinessProfileScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const initialSnapshotRef = React.useRef<string | null>(null);
 
   useEffect(() => {
     if (businessSettings) {
-      setBusinessName(businessSettings.businessName);
-      setAbn(businessSettings.abn || '');
-      setEmail(businessSettings.email || '');
-      setPhone(businessSettings.phone || '');
-      setAddress(businessSettings.address || '');
-      setLogoUri(businessSettings.logoUri);
-      setBrandColor(businessSettings.brandColor);
-      setLaborRate(businessSettings.defaultLaborRate?.toString() || '85');
-      setMarkup(businessSettings.defaultMarkup?.toString() || '20');
-      setLaborMarkup(
-        (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup ?? 20).toString()
-      );
-      setTransportMarkupEnabled(businessSettings.transportMarkupEnabled !== false);
+      const name = businessSettings.businessName;
+      const a = businessSettings.abn || '';
+      const e = businessSettings.email || '';
+      const p = businessSettings.phone || '';
+      const addr = businessSettings.address || '';
+      const logo = businessSettings.logoUri;
+      const brand = businessSettings.brandColor;
+      const lr = businessSettings.defaultLaborRate?.toString() || '85';
+      const mk = businessSettings.defaultMarkup?.toString() || '20';
+      const lm = (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup ?? 20).toString();
+      const tm = businessSettings.transportMarkupEnabled !== false;
+
+      setBusinessName(name);
+      setAbn(a);
+      setEmail(e);
+      setPhone(p);
+      setAddress(addr);
+      setLogoUri(logo);
+      setBrandColor(brand);
+      setLaborRate(lr);
+      setMarkup(mk);
+      setLaborMarkup(lm);
+      setTransportMarkupEnabled(tm);
+
+      initialSnapshotRef.current = JSON.stringify({
+        name, a, e, p, addr, logo, brand, lr, mk, lm, tm,
+      });
     }
   }, [businessSettings]);
+
+  const isDirty = React.useMemo(() => {
+    if (!initialSnapshotRef.current) return false;
+    const current = JSON.stringify({
+      name: businessName,
+      a: abn,
+      e: email,
+      p: phone,
+      addr: address,
+      logo: logoUri,
+      brand: brandColor,
+      lr: laborRate,
+      mk: markup,
+      lm: laborMarkup,
+      tm: transportMarkupEnabled,
+    });
+    return current !== initialSnapshotRef.current;
+  }, [businessName, abn, email, phone, address, logoUri, brandColor, laborRate, markup, laborMarkup, transportMarkupEnabled]);
+
+  const { unsavedModalProps } = useUnsavedChangesGuard({
+    isDirty,
+    onSave: async () => {
+      const ok = await handleSave({ silent: true });
+      return ok;
+    },
+  });
 
   const onColorChange = useCallback((result: ColorFormatsObject) => {
     // Extract the 6-digit hex (strip alpha if present)
@@ -129,17 +171,30 @@ export function BusinessProfileScreen() {
     const userId = auth.currentUser?.uid;
     if (!userId) throw new Error('Not signed in');
 
-    const response = await fetch(uri);
-    const blob = await response.blob();
+    // On native, fetch(file://).blob() is unreliable in React Native — use XHR
+    // per Firebase's official RN guidance. On web, fetch works fine.
+    const blob: Blob = await new Promise((resolve, reject) => {
+      if (Platform.OS === 'web') {
+        fetch(uri).then(r => r.blob()).then(resolve).catch(reject);
+        return;
+      }
+      const xhr = new XMLHttpRequest();
+      xhr.onload = () => resolve(xhr.response);
+      xhr.onerror = () => reject(new Error('Failed to read image file'));
+      xhr.responseType = 'blob';
+      xhr.open('GET', uri, true);
+      xhr.send(null);
+    });
+
     const logoRef = ref(storage, `users/${userId}/logo.jpg`);
-    await uploadBytes(logoRef, blob);
+    await uploadBytes(logoRef, blob, { contentType: 'image/jpeg' });
     return getDownloadURL(logoRef);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     if (!businessName.trim()) {
       Alert.alert('Required', 'Please enter your business name');
-      return;
+      return false;
     }
 
     try {
@@ -151,8 +206,10 @@ export function BusinessProfileScreen() {
         try {
           savedLogoUri = await uploadLogoToStorage(logoUri);
           setLogoUri(savedLogoUri);
-        } catch (error) {
-          Alert.alert('Logo Upload Failed', 'Could not upload logo. Other settings will still be saved.');
+        } catch (error: any) {
+          console.error('[BusinessProfile] Logo upload failed:', error);
+          const reason = error?.code || error?.message || 'Unknown error';
+          Alert.alert('Logo Upload Failed', `Could not upload logo (${reason}). Other settings will still be saved.`);
           savedLogoUri = undefined;
         }
       }
@@ -171,9 +228,29 @@ export function BusinessProfileScreen() {
         defaultLaborMarkup: parseFloat(laborMarkup) || 0,
         transportMarkupEnabled,
       });
-      setShowSuccessModal(true);
+
+      // Refresh snapshot so the form is no longer "dirty"
+      initialSnapshotRef.current = JSON.stringify({
+        name: businessName.trim(),
+        a: abn,
+        e: email,
+        p: phone,
+        addr: address,
+        logo: savedLogoUri,
+        brand: brandColor,
+        lr: laborRate,
+        mk: markup,
+        lm: laborMarkup,
+        tm: transportMarkupEnabled,
+      });
+
+      if (!opts?.silent) {
+        setShowSuccessModal(true);
+      }
+      return true;
     } catch (error) {
       setShowErrorModal(true);
+      return false;
     } finally {
       setIsLoading(false);
     }
@@ -418,7 +495,7 @@ export function BusinessProfileScreen() {
       <FixedBottomButton
         mode="contained"
         label="Save"
-        onPress={handleSave}
+        onPress={() => handleSave()}
         disabled={isLoading}
         loading={isLoading}
       />
@@ -438,6 +515,8 @@ export function BusinessProfileScreen() {
         title="Save Failed"
         message="Failed to save settings. Please try again."
       />
+
+      <AlertModal {...unsavedModalProps} />
     </View>
   );
 }

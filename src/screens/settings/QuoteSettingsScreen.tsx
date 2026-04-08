@@ -3,7 +3,7 @@
  * Default rates for new quotes
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -21,6 +21,7 @@ import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
+import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
 export function QuoteSettingsScreen() {
   const { businessSettings, setBusinessSettings } = useStore();
@@ -31,18 +32,26 @@ export function QuoteSettingsScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const initialSnapshotRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (businessSettings) {
-      setLaborRate(businessSettings.defaultLaborRate.toString());
-      setMarkup(businessSettings.defaultMarkup.toString());
-      setLaborMarkup(
-        (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup).toString()
-      );
+      const lr = businessSettings.defaultLaborRate.toString();
+      const mk = businessSettings.defaultMarkup.toString();
+      const lm = (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup).toString();
+      setLaborRate(lr);
+      setMarkup(mk);
+      setLaborMarkup(lm);
+      initialSnapshotRef.current = JSON.stringify({ lr, mk, lm });
     }
   }, [businessSettings]);
 
-  const handleSave = async () => {
+  const isDirty = useMemo(() => {
+    if (!initialSnapshotRef.current) return false;
+    return JSON.stringify({ lr: laborRate, mk: markup, lm: laborMarkup }) !== initialSnapshotRef.current;
+  }, [laborRate, markup, laborMarkup]);
+
+  const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
       setIsLoading(true);
       await setBusinessSettings({
@@ -51,13 +60,21 @@ export function QuoteSettingsScreen() {
         defaultMarkup: parseFloat(markup) || 20,
         defaultLaborMarkup: parseFloat(laborMarkup) || 0,
       });
-      setShowSuccessModal(true);
+      initialSnapshotRef.current = JSON.stringify({ lr: laborRate, mk: markup, lm: laborMarkup });
+      if (!opts?.silent) setShowSuccessModal(true);
+      return true;
     } catch (error) {
       setShowErrorModal(true);
+      return false;
     } finally {
       setIsLoading(false);
     }
   };
+
+  const { unsavedModalProps } = useUnsavedChangesGuard({
+    isDirty,
+    onSave: () => handleSave({ silent: true }),
+  });
 
   return (
     <View style={styles.container}>
@@ -109,7 +126,7 @@ export function QuoteSettingsScreen() {
       <FixedBottomButton
         mode="contained"
         label="Save"
-        onPress={handleSave}
+        onPress={() => handleSave()}
         disabled={isLoading}
         loading={isLoading}
       />
@@ -129,6 +146,8 @@ export function QuoteSettingsScreen() {
         title="Save Failed"
         message="Failed to save settings. Please try again."
       />
+
+      <AlertModal {...unsavedModalProps} />
     </View>
   );
 }
