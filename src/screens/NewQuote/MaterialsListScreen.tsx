@@ -980,6 +980,9 @@ export function MaterialsListScreen() {
             material.totalPrice = product.price * material.quantity;
             material.manualPriceOverride = false;
             material.pricingSource = 'scraper';
+            // Preserve scraper confidence so low-confidence results (Claude
+            // guesses) get the "Est. — verify price" badge in the row.
+            if (product.confidence) material.priceConfidence = product.confidence;
             if (product.itemNumber) material.bunningsItemNumber = product.itemNumber;
             if (product.productUrl) material.productUrl = product.productUrl;
             if (product.imageUrl) material.imageUrl = product.imageUrl;

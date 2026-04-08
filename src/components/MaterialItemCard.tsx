@@ -64,7 +64,14 @@ export function MaterialItemCard({
     material.brand.toLowerCase() !== 'mitre 10';
   const hasDetails = material.imageUrl || material.description || hasMeaningfulBrand || material.stockCheckedAt || material.bunningsItemNumber;
   const showLink = material.pricingSource === 'scraper' || material.pricingSource === 'api';
-  const isAiEstimate = material.pricingSource === 'ai';
+  // Show "Est." badge for:
+  //  - materials priced by the LLM fallback (pricingSource === 'ai')
+  //  - scraper results that came back as Claude guesses (pricingSource 'scraper'
+  //    but priceConfidence === 'low', no productUrl/itemNumber)
+  // These all need user verification because the price isn't from a live
+  // scrape against the actual Bunnings product page.
+  const isEstimate =
+    material.pricingSource === 'ai' || material.priceConfidence === 'low';
 
   const qty = localQuantity ?? material.quantity;
 
@@ -96,13 +103,13 @@ export function MaterialItemCard({
               const unitWord = sectionWords.length > 0 ? sectionWords[sectionWords.length - 1].toLowerCase() : 'unit';
               return `${material.templateBaseQuantity}/${unitWord} · `;
             })() : ''}{formatCurrency(material.price)} ea.
-            {isAiEstimate ? (
+            {isEstimate ? (
               <Text style={{
                 color: material.priceConfidence === 'high' ? colors.success
                   : material.priceConfidence === 'low' ? '#ef4444' : '#f59e0b',
                 fontWeight: '600',
               }}>
-                {'  ·  AI est. '}({material.priceConfidence || 'medium'})
+                {'  ·  Est. — verify price'}
               </Text>
             ) : ''}
           </Text>

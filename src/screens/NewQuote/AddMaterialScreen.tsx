@@ -419,6 +419,9 @@ export function AddMaterialScreen() {
         manualPriceOverride: false,
         searchTerm: item.productName,
         pricingSource: 'scraper',
+        // Preserve scraper confidence so the UI can flag low-confidence
+        // results (Claude-guessed fallback) as "Est. — verify price".
+        priceConfidence: item.confidence,
         productUrl: item.productUrl,
         imageUrl: item.imageUrl,
         description: item.description,
