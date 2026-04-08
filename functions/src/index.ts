@@ -1314,12 +1314,43 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
  */
 function parseLLMJson(content: string): any {
   let jsonStr = content.trim();
+  // Strip markdown code fences if present.
   if (jsonStr.startsWith('```json')) {
-    jsonStr = jsonStr.replace(/```json\n?/, '').replace(/\n?```$/, '');
+    jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```\s*$/, '');
   } else if (jsonStr.startsWith('```')) {
-    jsonStr = jsonStr.replace(/```\n?/, '').replace(/\n?```$/, '');
+    jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```\s*$/, '');
   }
-  return JSON.parse(jsonStr);
+  // Happy path — full string is valid JSON.
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    // Fall through to extraction.
+  }
+  // Extract the first balanced JSON object or array, ignoring leading/trailing prose.
+  const startIdx = jsonStr.search(/[{[]/);
+  if (startIdx === -1) {
+    throw new Error('No JSON object found in LLM response');
+  }
+  const openChar = jsonStr[startIdx];
+  const closeChar = openChar === '{' ? '}' : ']';
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = startIdx; i < jsonStr.length; i++) {
+    const c = jsonStr[i];
+    if (escape) { escape = false; continue; }
+    if (inString && c === '\\') { escape = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === openChar) depth++;
+    else if (c === closeChar) {
+      depth--;
+      if (depth === 0) {
+        return JSON.parse(jsonStr.slice(startIdx, i + 1));
+      }
+    }
+  }
+  throw new Error('Unbalanced JSON in LLM response');
 }
 
 // Gemini 3 Pro Preview — primary model for material list generation.
@@ -1352,7 +1383,7 @@ async function callGeminiForMaterials(
       contents: [{ parts }],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: 4000,
+        maxOutputTokens: 8000,
         responseMimeType: 'application/json',
       },
     }),
@@ -1400,7 +1431,7 @@ async function callClaudeForMaterials(
     },
     body: JSON.stringify({
       model: 'claude-opus-4-6',
-      max_tokens: 4000,
+      max_tokens: 8000,
       temperature: 0.2,
       messages: [{ role: 'user', content: messageContent }],
     }),
@@ -1431,7 +1462,7 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 120 }).
     if (!decodedToken) return;
 
     try {
-      const { jobDescription, tradeContext, photoBase64, existingMaterials, availableTemplates } = req.body;
+      const { jobDescription, tradeContext, photoBase64, existingMaterials, availableTemplates, userSavedRates } = req.body;
 
       if (!isNonEmptyString(jobDescription)) {
         res.status(400).json({ error: 'Missing or invalid jobDescription' });
@@ -1497,10 +1528,23 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 120 }).
         templateReferenceSection = `\n\nSAVED TEMPLATES (use as reference for section names and materials when they match the job):\n${templateDescriptions}\n\nWhen a saved template closely matches a section of this job:\n- Use the template's exact name as the section name\n- Use the template's material names where applicable (you can adjust quantities)\n- Set the sectionMultiplier to match the job scope\n`;
       }
 
+      // Build user's saved supplier rates section
+      let savedRatesSection = '';
+      if (Array.isArray(userSavedRates) && userSavedRates.length > 0) {
+        const lines = userSavedRates.map((r: any) => {
+          const coverage = r.coveragePerUnit
+            ? ` — covers ${r.coveragePerUnit} ${r.coverageUnit} per unit`
+            : '';
+          const keywords = r.keywords?.length ? ` [keywords: ${r.keywords.join(', ')}]` : '';
+          return `- "${r.name}" — $${r.price} per ${r.unit}${coverage}${keywords}`;
+        }).join('\n');
+        savedRatesSection = `\n\nUSER'S SAVED SUPPLIER RATES — PREFER THESE OVER RETAIL\nThe tradie has personal supplier rates below. If a required material semantically matches one of these (by name, keywords, or job context), you MUST use that rate's unit and price instead of generating a generic retail search term.\n\n${lines}\n\nMatching rules:\n1. Match by meaning, not exact name. "concrete" matches a saved rate keyworded ["concrete","slab","footing"].\n2. If a rate has coveragePerUnit, that means one purchasable unit covers that much work-volume or work-area. Compute quantity = ceil(jobAmount / coveragePerUnit) where jobAmount is measured in coverageUnit. Examples: a sheet that covers 13 m² and a 40 m² wall → ceil(40/13) = 4 sheets; a mulch bag containing 0.5 m³ and a 2 m³ bed → ceil(2/0.5) = 4 bags. Always round UP — the tradie can't buy a fraction of a packaged unit.\n3. If the job gives an area but the rate is per m³ (e.g. ready-mix concrete sold loose by the m³ with no coveragePerUnit), pick a sensible slab thickness from job context (driveway ~125mm, residential slab ~100mm, footpath ~75mm) and explain your assumption in "reasoning". Compute m³ = area × thickness.\n4. For matched items set "savedRateName" to the exact saved rate name and "pricingSource": "saved_rate". Do NOT generate a retail searchTerm for these — leave searchTerm empty.\n5. Items with no matching saved rate flow through the normal retail pricing path — generate generic searchTerms for them as usual.\n`;
+      }
+
       const hasExisting = existingMaterials && existingMaterials.length > 0;
       const prompt = `You are an expert Australian tradie assistant specializing in construction and trade work. ${hasExisting ? 'Some materials have already been added from templates. Analyze the job and suggest only the ADDITIONAL materials needed to complete the job.' : 'Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.'}
 
-Job Description: "${jobDescription}"${contextSection}${existingMaterialsSection}${templateReferenceSection}
+Job Description: "${jobDescription}"${contextSection}${existingMaterialsSection}${templateReferenceSection}${savedRatesSection}
 
 Hardware Store for pricing: ${storeName}
 
@@ -1513,11 +1557,13 @@ Provide a JSON response with the following structure:
       "name": "Material name as it should appear in quote",
       "searchTerm": "Generic product search term (material type, size, specs - NOT brand-specific)",
       "quantity": 2,
-      "unit": "each|m|L|kg|box|pack",
+      "unit": "each|m|m²|m³|L|kg|box|pack",
       "section": "Descriptive section name (e.g. Colorbond Fence Bay, Merbau Deck Section, Concrete Footings)",
       "sectionMultiplier": 8,
       "sectionLaborHours": 1.5,
-      "reasoning": "Why this material is needed"
+      "reasoning": "Why this material is needed",
+      "savedRateName": "(only set when matched to a saved rate)",
+      "pricingSource": "(set to 'saved_rate' when matched)"
     }
   ]
 }
@@ -1606,6 +1652,238 @@ Return ONLY valid JSON, no other text.`;
     }
   });
 });
+
+// ----------------------------------------------------------------------------
+// Supplier Price List extraction — multimodal wrappers + endpoint
+// ----------------------------------------------------------------------------
+
+interface ExtractionInput {
+  pdfBase64?: string;
+  imageBase64?: string[];
+}
+
+async function callGeminiForExtraction(
+  apiKey: string,
+  prompt: string,
+  input: ExtractionInput,
+): Promise<any> {
+  const parts: any[] = [];
+  if (input.pdfBase64) {
+    parts.push({
+      inline_data: {
+        mime_type: 'application/pdf',
+        data: input.pdfBase64,
+      },
+    });
+  }
+  if (Array.isArray(input.imageBase64) && input.imageBase64.length > 0) {
+    for (const b64 of input.imageBase64) {
+      parts.push({
+        inline_data: {
+          mime_type: 'image/jpeg',
+          data: b64,
+        },
+      });
+    }
+  }
+  parts.push({ text: prompt });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MATERIALS_MODEL}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8000,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API returned ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) {
+    throw new Error('No content in Gemini response');
+  }
+  return parseLLMJson(content);
+}
+
+async function callClaudeForExtraction(
+  apiKey: string,
+  prompt: string,
+  input: ExtractionInput,
+): Promise<any> {
+  const messageContent: any[] = [];
+  if (input.pdfBase64) {
+    messageContent.push({
+      type: 'document',
+      source: {
+        type: 'base64',
+        media_type: 'application/pdf',
+        data: input.pdfBase64,
+      },
+    });
+  }
+  if (Array.isArray(input.imageBase64) && input.imageBase64.length > 0) {
+    for (const b64 of input.imageBase64) {
+      messageContent.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/jpeg',
+          data: b64,
+        },
+      });
+    }
+  }
+  messageContent.push({ type: 'text', text: prompt });
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-6',
+      max_tokens: 8000,
+      temperature: 0.1,
+      messages: [{ role: 'user', content: messageContent }],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Anthropic API returned ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const textBlock = data.content?.find((c: any) => c.type === 'text');
+  const content = textBlock?.text || data.content?.[0]?.text;
+  if (!content) {
+    throw new Error('No content in Claude response');
+  }
+  return parseLLMJson(content);
+}
+
+function buildExtractSupplierPrompt(supplierName?: string, defaultUnit?: string): string {
+  return `You are reading a tradesperson's supplier price list. Extract every line item visible.
+
+Supplier hint: ${supplierName || '(unknown)'}
+Default unit hint: ${defaultUnit || '(none)'}
+
+For each item, return:
+- name: clean product name (strip SKU codes unless they're the only identifier)
+- price: numeric AUD value (no currency symbol, no GST marker)
+- unit: one of "each|m|m²|m³|L|kg|box|pack" — the SALEABLE unit. If the supplier sells a packaged/bundled product (a bag, tub, bundle), use "each" for the unit and capture the contained quantity in coveragePerUnit/coverageUnit (see rules below).
+- coveragePerUnit: numeric, only if one purchasable unit contains a measurable amount of work (e.g. "covers 13 m² with 100 mm overlap" → 13, OR "1/2 m³ bag of mulch" → 0.5)
+- coverageUnit: "m²"|"m³"|"m" — only if coveragePerUnit set
+- keywords: 2-4 short lowercase words describing the product type (e.g. ["concrete","ready-mix","slab"])
+- confidence: "high"|"medium"|"low" — "low" if price OR unit is ambiguous, "medium" if one field was inferred, "high" only when the line is fully unambiguous
+- rawLine: the original line text as you read it, for the user to verify
+
+How to choose unit vs coverage:
+- "Ready-mix concrete — $450/m³" → unit:"m³", price:450, no coverage (sold loose by the m³).
+- "Mulch — $45 / ½ m³" → unit:"each", price:45, coveragePerUnit:0.5, coverageUnit:"m³" (one bag = 0.5 m³).
+- "FC sheet 6×2.4 — $X (covers 13 m²)" → unit:"each", price:X, coveragePerUnit:13, coverageUnit:"m²".
+- "Treated pine 90×45 2.4m — $Y" → unit:"each", price:Y, no coverage (length is part of the name).
+- "Sand — $30 per 20 kg bag" → unit:"each", price:30, coveragePerUnit:20, coverageUnit:"kg" is NOT supported — drop the coverage and put "20 kg" in the name. Only use coverage when the coverageUnit is m, m² or m³.
+
+The rule of thumb: if a tradie can't buy a fraction of the listed item (e.g. a whole bag, a whole sheet), the unit must be "each" and the bundled measurement goes into coveragePerUnit.
+
+Skip header rows, column headings, section titles, subtotals, totals, page numbers, ads, contact info, terms, disclaimers, and anything that is not a purchasable line item.
+
+Return ONLY valid JSON in this exact shape:
+{ "supplierName": "...", "items": [ { "name": "...", "price": 0, "unit": "each", "coveragePerUnit": null, "coverageUnit": null, "keywords": [], "confidence": "high", "rawLine": "..." } ] }`;
+}
+
+/**
+ * Extract Supplier Price List — multimodal (PDF or photos).
+ * Gemini 3 Pro Preview primary, Claude Opus 4.6 fallback. Both accept PDFs natively.
+ */
+export const extractSupplierPriceList = functions
+  .runWith({ timeoutSeconds: 240, memory: '1GB' })
+  .https.onRequest((req, res) => {
+    corsHandler(req, res, async () => {
+      if (req.method !== 'POST') {
+        res.status(405).send('Method Not Allowed');
+        return;
+      }
+
+      const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
+      if (!decodedToken) return;
+
+      try {
+        const { pdfBase64, imageBase64, supplierName, defaultUnit } = req.body;
+
+        if (!pdfBase64 && (!Array.isArray(imageBase64) || imageBase64.length === 0)) {
+          res.status(400).json({ error: 'Provide either pdfBase64 or imageBase64[]' });
+          return;
+        }
+        if (Array.isArray(imageBase64) && imageBase64.length > 10) {
+          res.status(400).json({ error: 'Maximum 10 images per import' });
+          return;
+        }
+        if (typeof pdfBase64 === 'string' && pdfBase64.length > 14_000_000) {
+          res.status(400).json({ error: 'PDF too large (max 10 MB)' });
+          return;
+        }
+
+        const geminiApiKey = process.env.GEMINI_API_KEY;
+        const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+
+        if (!geminiApiKey && !anthropicApiKey) {
+          res.status(500).json({ error: 'No LLM API keys configured (GEMINI_API_KEY / ANTHROPIC_API_KEY)' });
+          return;
+        }
+
+        const prompt = buildExtractSupplierPrompt(supplierName, defaultUnit);
+        const input: ExtractionInput = { pdfBase64, imageBase64 };
+
+        let parsed: any | null = null;
+        let primaryError: Error | null = null;
+
+        if (geminiApiKey) {
+          try {
+            parsed = await callGeminiForExtraction(geminiApiKey, prompt, input);
+          } catch (err: any) {
+            primaryError = err;
+            console.warn('Gemini extraction failed, falling back to Claude:', err.message);
+          }
+        }
+
+        if (!parsed) {
+          if (!anthropicApiKey) {
+            throw primaryError || new Error('Gemini failed and no Anthropic fallback key configured');
+          }
+          try {
+            parsed = await callClaudeForExtraction(anthropicApiKey, prompt, input);
+          } catch (fallbackErr: any) {
+            console.error('Gemini extraction error:', primaryError?.message);
+            console.error('Claude extraction error:', fallbackErr?.message);
+            throw new Error(
+              `Price list extraction failed — ${primaryError ? `Gemini: ${primaryError.message.slice(0, 80)}; ` : ''}Claude: ${fallbackErr.message.slice(0, 80)}`
+            );
+          }
+        }
+
+        res.status(200).json({
+          supplierName: parsed.supplierName || supplierName || '',
+          items: Array.isArray(parsed.items) ? parsed.items : [],
+        });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+  });
 
 /**
  * Search Material Price using Anthropic Claude API

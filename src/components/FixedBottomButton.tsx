@@ -202,12 +202,16 @@ export function FixedBottomButton({
   return (
     <>
       {/* Solid background that extends to the very bottom */}
-      {!disableSolidBackground && Platform.OS !== 'ios' && <View style={styles.solidBackground} />}
+      {!disableSolidBackground && Platform.OS !== 'ios' && (
+        <View style={[styles.solidBackground, { height: 60 + insets.bottom }]} />
+      )}
 
       <View
         style={[
           styles.bottomActions,
-             Platform.OS === 'web' && { marginBottom: insets.bottom }
+          Platform.OS === 'web'
+            ? { marginBottom: insets.bottom }
+            : { paddingBottom: Math.max(insets.bottom, 16) },
         ]}
         needsOffscreenAlphaCompositing={false}
         renderToHardwareTextureAndroid={true}

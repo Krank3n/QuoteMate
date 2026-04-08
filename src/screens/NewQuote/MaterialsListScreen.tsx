@@ -34,7 +34,7 @@ import { generateId } from '../../utils/generateId';
 
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
-import { Material, QuoteSection, LaborUnit, SectionTemplate } from '../../types';
+import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapping } from '../../types';
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
@@ -113,6 +113,8 @@ import {
 import {
   getFavoriteProduct,
   saveFavoriteProduct,
+  loadAllFavoritesForLLM,
+  loadFavoritesFromLocal,
 } from '../../services/materialFavorites';
 import MaterialMatchSelector from '../../components/MaterialMatchSelector';
 import {
@@ -737,7 +739,24 @@ export function MaterialsListScreen() {
           }))
         : undefined;
 
-      const analysis = await analyzeJobDescription(jobDescription, tradeContext, 3, photoUrlsForAi, existingMatsForAi, templateDataForAi);
+      // Pass user's personal supplier rates so the LLM prefers them over retail
+      const savedRateFavorites = await loadAllFavoritesForLLM();
+      const userSavedRatesForAi = savedRateFavorites.length > 0
+        ? savedRateFavorites
+            .filter(f => typeof f.price === 'number' && f.price > 0 && f.unit)
+            .map(f => ({
+              name: f.productName,
+              store: f.store,
+              unit: f.unit as string,
+              price: f.price as number,
+              coveragePerUnit: f.coveragePerUnit,
+              coverageUnit: f.coverageUnit,
+              keywords: f.keywords,
+              notes: f.notes,
+            }))
+        : [];
+
+      const analysis = await analyzeJobDescription(jobDescription, tradeContext, photoUrlsForAi, existingMatsForAi, templateDataForAi, userSavedRatesForAi);
 
       // Check if user canceled during AI analysis
       if (cancelGeneration) {
@@ -747,19 +766,55 @@ export function MaterialsListScreen() {
       // Convert LLM materials to app materials format
       const baseMaterials = convertLLMMaterialsToMaterials(analysis.materials);
 
+      // Build a name->favorite map of personal supplier rates so we can hydrate
+      // any LLM-matched items directly from the local cache.
+      const localFavoritesById = await loadFavoritesFromLocal();
+      const savedRateByName = new Map<string, FavoriteProductMapping>();
+      Object.values(localFavoritesById).forEach((f) => {
+        if (f.isPersonalRate && f.productName) {
+          savedRateByName.set(f.productName.toLowerCase().trim(), f);
+        }
+      });
+
       // Add IDs to materials and ensure all required fields are present
-      const generatedMaterials = baseMaterials.map((m) => ({
-        id: generateId(),
-        name: m.name || 'Unknown Material',
-        quantity: m.quantity || 1,
-        unit: m.unit || 'each',
-        searchTerm: m.searchTerm,
-        price: 0,
-        totalPrice: 0,
-        manualPriceOverride: false,
-        ...(m.section && { section: m.section }),
-        ...(m.templateBaseQuantity && { templateBaseQuantity: m.templateBaseQuantity }),
-      }));
+      const generatedMaterials = baseMaterials.map((m) => {
+        const matchedRate = m.savedRateName
+          ? savedRateByName.get(m.savedRateName.toLowerCase().trim())
+          : undefined;
+
+        const baseQty = m.quantity || 1;
+
+        if (matchedRate && typeof matchedRate.price === 'number' && matchedRate.price > 0) {
+          return {
+            id: generateId(),
+            name: m.name || matchedRate.productName,
+            quantity: baseQty,
+            unit: (matchedRate.unit || m.unit || 'each') as Material['unit'],
+            searchTerm: m.searchTerm,
+            price: matchedRate.price,
+            totalPrice: matchedRate.price * baseQty,
+            manualPriceOverride: false,
+            pricingSource: 'manual' as const,
+            priceConfidence: 'high' as const,
+            favoriteProduct: matchedRate,
+            ...(m.section && { section: m.section }),
+            ...(m.templateBaseQuantity && { templateBaseQuantity: m.templateBaseQuantity }),
+          };
+        }
+
+        return {
+          id: generateId(),
+          name: m.name || 'Unknown Material',
+          quantity: baseQty,
+          unit: (m.unit || 'each') as Material['unit'],
+          searchTerm: m.searchTerm,
+          price: 0,
+          totalPrice: 0,
+          manualPriceOverride: false,
+          ...(m.section && { section: m.section }),
+          ...(m.templateBaseQuantity && { templateBaseQuantity: m.templateBaseQuantity }),
+        };
+      });
 
       // Create QuoteSection objects from unique AI-generated sections with multipliers + labor
       const sectionMultipliers = new Map<string, number>();
@@ -1559,13 +1614,13 @@ export function MaterialsListScreen() {
 
       // Save as favorite if requested
       if (saveAsFavorite) {
-        const favoriteMapping = {
+        const favoriteMapping: FavoriteProductMapping = {
           productName: match.productName,
           store: match.store,
           productUrl: match.productUrl,
           itemNumber: match.itemNumber,
           dimensions: match.dimensions,
-          unit: match.unit,
+          unit: match.unit as Material['unit'] | undefined,
         };
         material.favoriteProduct = favoriteMapping;
         await saveFavoriteProduct(material.name, material.searchTerm, favoriteMapping);
