@@ -294,6 +294,9 @@ export function InvoiceEmailPreviewModal({
         },
         body: JSON.stringify({
           invoiceId: invoice.id,
+          // Send the full invoice so the server uses the user's latest in-memory
+          // edits instead of a possibly-stale Firestore copy.
+          invoice,
           emailBody: emailBody,
           recipientEmail: recipientEmail.trim(),
           includePhotos: hasPhotos && includePhotos,
@@ -330,6 +333,7 @@ export function InvoiceEmailPreviewModal({
         },
         body: JSON.stringify({
           invoiceId: invoice.id,
+          invoice,
           emailBody: emailBody,
           recipientEmail: ownerEmail,
           isTestSend: true,

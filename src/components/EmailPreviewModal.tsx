@@ -292,6 +292,10 @@ export function EmailPreviewModal({
         },
         body: JSON.stringify({
           quoteId: quote.id,
+          // Send the full quote so the server uses the user's latest in-memory
+          // edits instead of a possibly-stale Firestore copy (background sync
+          // may not have landed yet).
+          quote,
           emailBody: emailBody,
           recipientEmail: recipientEmail.trim(),
           includePhotos: hasPhotos && includePhotos,
@@ -328,6 +332,7 @@ export function EmailPreviewModal({
         },
         body: JSON.stringify({
           quoteId: quote.id,
+          quote,
           emailBody: emailBody,
           recipientEmail: ownerEmail,
           isTestSend: true,

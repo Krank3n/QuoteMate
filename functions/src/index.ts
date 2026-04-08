@@ -2612,7 +2612,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { quoteId, emailBody, recipientEmail, isTestSend, includePhotos } = req.body;
+    const { quoteId, quote: quoteFromClient, emailBody, recipientEmail, isTestSend, includePhotos } = req.body;
 
     if (!quoteId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: quoteId, emailBody, recipientEmail' });
@@ -2621,14 +2621,22 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
 
     try {
       const firestore = admin.firestore();
+      const quoteRef = firestore.doc(`users/${userId}/quotes/${quoteId}`);
 
-      // Fetch quote
-      const quoteDoc = await firestore.doc(`users/${userId}/quotes/${quoteId}`).get();
-      if (!quoteDoc.exists) {
-        res.status(404).json({ error: 'Quote not found' });
-        return;
+      // Prefer the client-provided quote (latest in-memory edits) over Firestore,
+      // because the client's background sync may not have persisted yet. Fall back
+      // to Firestore for older clients that don't send the full quote in the body.
+      let quote: any;
+      if (quoteFromClient && typeof quoteFromClient === 'object') {
+        quote = quoteFromClient;
+      } else {
+        const quoteDoc = await quoteRef.get();
+        if (!quoteDoc.exists) {
+          res.status(404).json({ error: 'Quote not found' });
+          return;
+        }
+        quote = quoteDoc.data()!;
       }
-      const quote = quoteDoc.data()!;
 
       // Fetch business settings
       const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
@@ -2645,11 +2653,19 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         acceptanceTokenHash: hashedToken,
         acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
+      if (quoteFromClient) {
+        // Persist the latest client-side version so subsequent reads (e.g. the
+        // acceptance page) see the same data the customer was emailed.
+        Object.assign(quoteUpdate, quoteFromClient);
+        delete quoteUpdate.id;
+      }
       if (!isTestSend) {
         quoteUpdate.status = 'sent';
         quoteUpdate.aiEmailBody = emailBody;
       }
-      batch.update(quoteDoc.ref, quoteUpdate);
+      // set+merge handles both updates and the case where the doc doesn't yet
+      // exist on the server (background sync hadn't fired before send).
+      batch.set(quoteRef, quoteUpdate, { merge: true });
       batch.set(firestore.doc(`quoteAcceptanceTokens/${hashedToken}`), {
         userId,
         quoteId,
@@ -2825,7 +2841,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { invoiceId, emailBody, recipientEmail, isTestSend, includePhotos } = req.body;
+    const { invoiceId, invoice: invoiceFromClient, emailBody, recipientEmail, isTestSend, includePhotos } = req.body;
 
     if (!invoiceId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: invoiceId, emailBody, recipientEmail' });
@@ -2834,26 +2850,40 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
 
     try {
       const firestore = admin.firestore();
+      const invoiceRef = firestore.doc(`users/${userId}/invoices/${invoiceId}`);
 
-      // Fetch invoice
-      const invoiceDoc = await firestore.doc(`users/${userId}/invoices/${invoiceId}`).get();
-      if (!invoiceDoc.exists) {
-        res.status(404).json({ error: 'Invoice not found' });
-        return;
+      // Prefer the client-provided invoice (latest in-memory edits) over Firestore,
+      // because the client's background sync may not have persisted yet. Fall back
+      // to Firestore for older clients.
+      let invoice: any;
+      if (invoiceFromClient && typeof invoiceFromClient === 'object') {
+        invoice = invoiceFromClient;
+      } else {
+        const invoiceDoc = await invoiceRef.get();
+        if (!invoiceDoc.exists) {
+          res.status(404).json({ error: 'Invoice not found' });
+          return;
+        }
+        invoice = invoiceDoc.data()!;
       }
-      const invoice = invoiceDoc.data()!;
 
       // Fetch business settings
       const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
       const business = settingsDoc.exists ? settingsDoc.data()! : {};
 
-      // Only update invoice status for real sends (not test sends)
+      // Persist any client-provided edits, plus mark as sent for real sends.
+      const invoiceUpdate: Record<string, any> = {};
+      if (invoiceFromClient) {
+        Object.assign(invoiceUpdate, invoiceFromClient);
+        delete invoiceUpdate.id;
+      }
       if (!isTestSend) {
-        await invoiceDoc.ref.update({
-          status: 'sent',
-          aiEmailBody: emailBody,
-          sentAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        invoiceUpdate.status = 'sent';
+        invoiceUpdate.aiEmailBody = emailBody;
+        invoiceUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
+      }
+      if (Object.keys(invoiceUpdate).length > 0) {
+        await invoiceRef.set(invoiceUpdate, { merge: true });
       }
 
       // Resolve business logo URL
