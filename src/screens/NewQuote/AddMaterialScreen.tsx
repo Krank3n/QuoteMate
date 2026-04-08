@@ -42,8 +42,9 @@ import {
   getBestMatch,
 } from '../../services/webScrapingPricing';
 import {
-  searchProductWithScraper,
-} from '../../services/bunningsScraperService';
+  searchBunningsProducts,
+  type ScraperSearchResponse,
+} from '../../services/bunningsScraperClient';
 import {
   loadFavoritesFromLocal,
   saveFavoriteProduct,
@@ -267,7 +268,15 @@ export function AddMaterialScreen() {
       const isBunnings = selectedStore === 'bunnings' || firstStore.includes('bunnings.com.au');
 
       if (isBunnings && useScraperApi) {
-        const scraperResponse = await searchProductWithScraper(searchQuery, 10);
+        // searchBunningsProducts throws on error; the old searchProductWithScraper
+        // returned null. Wrap to preserve the original null-on-error contract
+        // so the existing fallback flow still kicks in.
+        let scraperResponse: ScraperSearchResponse | null = null;
+        try {
+          scraperResponse = await searchBunningsProducts(searchQuery, 10);
+        } catch {
+          scraperResponse = null;
+        }
 
         if (scraperResponse && scraperResponse.success && scraperResponse.results.length > 0) {
           const products = scraperResponse.results.map(product => ({
