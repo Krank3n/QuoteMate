@@ -360,6 +360,21 @@ export function MaterialsListScreen() {
   const [fetchPhase, setFetchPhase] = useState<'idle' | 'batch' | 'applying' | 'individual'>('idle');
   const [batchItemStatuses, setBatchItemStatuses] = useState<Map<string, 'pending' | 'searching' | 'done' | 'failed'>>(new Map());
   const [batchChunkProgress, setBatchChunkProgress] = useState({ current: 0, total: 0 });
+
+  // True when this material is currently being fetched, whether via:
+  //  - a single-material refresh (fetchingMaterialId), or
+  //  - a batch chunk that includes this material (batchItemStatuses === 'searching')
+  // Used to drive the per-row spinner so the user sees activity on every item
+  // currently in flight, not just one at a time.
+  const isMaterialFetching = useCallback(
+    (material: { id: string; searchTerm?: string; name: string }): boolean => {
+      if (fetchingMaterialId === material.id) return true;
+      if (fetchPhase !== 'batch') return false;
+      const term = material.searchTerm || material.name;
+      return batchItemStatuses.get(term) === 'searching';
+    },
+    [fetchingMaterialId, fetchPhase, batchItemStatuses],
+  );
   const cancelFetchRef = useRef(false);
   const cancelFetchResolverRef = useRef<(() => void) | null>(null);
   const [recentlyPricedIds, setRecentlyPricedIds] = useState<Set<string>>(new Set());
@@ -2414,7 +2429,7 @@ export function MaterialsListScreen() {
                     <MaterialItemCard
                       material={item.material}
                       isExpanded={expandedMaterials.has(item.material.id)}
-                      isFetching={fetchingMaterialId === item.material.id}
+                      isFetching={isMaterialFetching(item.material)}
                       isRecentlyPriced={recentlyPricedIds.has(item.material.id)}
                       localQuantity={localQuantities[item.material.id]}
                       isActive={isActive}
@@ -2645,7 +2660,7 @@ export function MaterialsListScreen() {
                     <MaterialItemCard
                       material={item.material}
                       isExpanded={expandedMaterials.has(item.material.id)}
-                      isFetching={fetchingMaterialId === item.material.id}
+                      isFetching={isMaterialFetching(item.material)}
                       isRecentlyPriced={recentlyPricedIds.has(item.material.id)}
                       localQuantity={localQuantities[item.material.id]}
                       isActive={false}
