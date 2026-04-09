@@ -419,13 +419,16 @@ export function MaterialsListScreen() {
 
   const { unsavedModalProps, allowNextNavigation } = useUnsavedChangesGuard({
     isDirty,
-    onSave: () => {
+    onSave: async () => {
       if (!currentQuote) return true;
-      // saveDraft persists to AsyncStorage + Firestore (with pending-write
-      // tracking from Commit B). It's fire-and-forget but the local cache is
-      // updated synchronously, so by the time the hook navigates the data is
-      // safe locally — and the SyncErrorBanner will surface any cloud failure.
-      saveDraft(currentQuote);
+      // MUST await saveDraft. saveDraft does `await AsyncStorage.setItem(...)`
+      // BEFORE calling `set({ quotes, currentQuote })`. If we don't await here,
+      // the hook will navigate away before that set() runs, and the destination
+      // screen (e.g. ViewQuoteScreen) reads a stale `quotes` array and shows
+      // pre-edit data — making the save look like it didn't happen.
+      // The Firestore portion stays fire-and-forget (saveDraft handles it
+      // internally with the pending-write tracking from Commit B).
+      await saveDraft(currentQuote);
       return true;
     },
     onDiscard: () => {
