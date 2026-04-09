@@ -755,11 +755,26 @@ export function AddMaterialScreen() {
     //
     // Local results are always shown alongside remote ones so the user can
     // compare; remote results are appended below local hits.
+    //
+    // If a supplier chip is selected, the entire chain narrows to JUST that
+    // supplier — local favorites tagged with it, and the appropriate remote
+    // path for it (scraper if Bunnings, web-scrape its searchUrl otherwise).
     try {
+      // Resolve scope from the selected chip (if any).
+      const scopedSupplier = selectedSupplierGroup
+        ? supplierGroups.find(g => g.id === selectedSupplierGroup) ?? null
+        : null;
+      const scopedToOne = !!scopedSupplier;
+      const supplierScope = scopedSupplier ? [scopedSupplier] : supplierGroups;
+
       // ── Step 1: local sources ──
       let localResults: LocalSearchResult[] = [];
       try {
-        localResults = await searchLocalSources(searchQuery, supplierGroups);
+        // When narrowed to one supplier, skip templates — the user is asking
+        // "what does THIS supplier carry", not "what bundles do I have".
+        localResults = await searchLocalSources(searchQuery, supplierScope, {
+          includeTemplates: !scopedToOne,
+        });
         if (localResults.length > 0) {
           setSearchResults(localResults);
         }
@@ -772,21 +787,30 @@ export function AddMaterialScreen() {
       const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
       const fallbackStore = hardwareStores[0];
 
-      // Bunnings scraper only runs if the user has Bunnings configured as a
-      // supplier, OR has no suppliers at all (legacy/default behavior).
-      const hasBunningsSupplier = supplierGroups.some(g =>
-        g.name.trim().toLowerCase().includes('bunnings')
-      );
+      // Bunnings scraper runs when:
+      //  - the user is scoped to a Bunnings supplier, OR
+      //  - the user has no chip selected AND has Bunnings in their supplier
+      //    list (or has no suppliers at all → legacy default).
+      const isBunningsName = (name: string) =>
+        name.trim().toLowerCase().includes('bunnings');
       const noSuppliersConfigured = supplierGroups.length === 0;
-      const shouldTryBunnings = hasBunningsSupplier || noSuppliersConfigured;
+      const shouldTryBunnings = scopedToOne
+        ? isBunningsName(scopedSupplier!.name)
+        : supplierGroups.some(g => isBunningsName(g.name)) || noSuppliersConfigured;
 
-      // Web-scraping store list: prefer user-configured supplier websites,
-      // fall back to the hardwareStores setting if the user has no suppliers
-      // (or none of them have a website set).
+      // Web-scraping store list:
+      //  - scoped: just the selected supplier's searchUrl (if it has one)
+      //  - unscoped: all configured suppliers' websites, falling back to the
+      //    hardwareStores setting only when nothing is configured.
+      const scopedStores = scopedSupplier?.searchUrl?.trim()
+        ? [scopedSupplier.searchUrl.trim()]
+        : [];
       const supplierStores = supplierGroups
         .map(g => g.searchUrl?.trim())
         .filter((url): url is string => !!url);
-      const storesToScrape = supplierStores.length > 0 ? supplierStores : [fallbackStore];
+      const storesToScrape = scopedToOne
+        ? scopedStores
+        : (supplierStores.length > 0 ? supplierStores : [fallbackStore]);
 
       let remoteResults: any[] = [];
 
@@ -817,7 +841,10 @@ export function AddMaterialScreen() {
         }
       }
 
-      if (remoteResults.length === 0) {
+      // Web scraping only runs if we have stores to scrape against. When the
+      // user is scoped to a non-Bunnings supplier with no searchUrl, this
+      // step is skipped and we fall straight through to AI estimation.
+      if (remoteResults.length === 0 && storesToScrape.length > 0) {
         const scraperResults = await searchMaterialWithWebScraping(
           searchQuery,
           searchQuery,
@@ -841,7 +868,8 @@ export function AddMaterialScreen() {
 
       if (remoteResults.length === 0 && localResults.length === 0) {
         // Final fallback to AI estimation — only when we have nothing else.
-        const aiResult = await searchMaterialPrice(searchQuery, storesToScrape);
+        const aiStores = storesToScrape.length > 0 ? storesToScrape : [fallbackStore];
+        const aiResult = await searchMaterialPrice(searchQuery, aiStores);
         if (aiResult.price) {
           remoteResults = [{
             productName: aiResult.productName || searchQuery,
@@ -851,7 +879,7 @@ export function AddMaterialScreen() {
             price: aiResult.price,
             productUrl: undefined,
             imageUrl: undefined,
-            store: aiResult.store || storesToScrape[0],
+            store: aiResult.store || aiStores[0],
             isScraperResult: false,
             isAiEstimate: true,
           }];
@@ -864,7 +892,7 @@ export function AddMaterialScreen() {
     } finally {
       setIsSearching(false);
     }
-  }, [searchQuery, businessSettings, isPro, navigation, supplierGroups]);
+  }, [searchQuery, businessSettings, isPro, navigation, supplierGroups, selectedSupplierGroup]);
 
   const handleSelectProduct = async (item: any) => {
     let newMaterial: Material;

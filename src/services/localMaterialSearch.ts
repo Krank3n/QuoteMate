@@ -176,6 +176,16 @@ function searchFavorites(
   return results;
 }
 
+export interface LocalSearchOptions {
+  /**
+   * Include section-template matches alongside favorites. Defaults to true.
+   * Callers that have explicitly scoped to a single supplier (e.g. the
+   * supplier chip in AddMaterialScreen) usually want this off — the user
+   * is asking for "prices from this supplier", not template bundles.
+   */
+  includeTemplates?: boolean;
+}
+
 /**
  * Search the user's local sources (templates + supplier-scoped favorites) for
  * materials matching `query`. Returns ranked results — templates first, then
@@ -186,17 +196,19 @@ function searchFavorites(
  */
 export async function searchLocalSources(
   query: string,
-  suppliers: SupplierGroup[]
+  suppliers: SupplierGroup[],
+  options: LocalSearchOptions = {}
 ): Promise<LocalSearchResult[]> {
   if (!query.trim()) return [];
+  const { includeTemplates = true } = options;
 
   const [templates, favoritesMap] = await Promise.all([
-    loadTemplatesFromLocal(),
+    includeTemplates ? loadTemplatesFromLocal() : Promise.resolve([]),
     loadFavoritesFromLocal(),
   ]);
   const favorites = Object.values(favoritesMap);
 
-  const templateHits = searchTemplates(query, templates);
+  const templateHits = includeTemplates ? searchTemplates(query, templates) : [];
   const favoriteHits = searchFavorites(query, favorites, suppliers);
 
   return [...templateHits, ...favoriteHits].sort((a, b) => a._sortHint - b._sortHint);
