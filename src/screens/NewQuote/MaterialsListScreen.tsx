@@ -116,6 +116,8 @@ import {
   loadAllFavoritesForLLM,
   loadFavoritesFromLocal,
 } from '../../services/materialFavorites';
+import { searchLocalSources, type LocalSearchResult } from '../../services/localMaterialSearch';
+import { loadGroups as loadSupplierGroups } from '../../services/supplierGroupService';
 import MaterialMatchSelector from '../../components/MaterialMatchSelector';
 import {
   findBestMatchForMaterial,
@@ -1059,14 +1061,55 @@ export function MaterialsListScreen() {
 
     const updatedMaterials = [...materials];
 
+    // ── Local source preflight ──
+    // Try the user's saved templates + supplier-tagged favorites BEFORE any
+    // remote work. Materials filled in here are excluded from the scraper
+    // batch and the per-item fallback chain. Same priority logic as the
+    // single-item search in AddMaterialScreen — the user's own prices win.
+    const locallyPricedTerms = new Set<string>();
+    try {
+      const supplierList = await loadSupplierGroups();
+      for (let i = 0; i < updatedMaterials.length; i++) {
+        const m = updatedMaterials[i];
+        if (m.price > 0 && !m.manualPriceOverride) continue;
+        const term = m.searchTerm || m.name;
+        let hits: LocalSearchResult[] = [];
+        try {
+          hits = await searchLocalSources(term, supplierList);
+        } catch {
+          hits = [];
+        }
+        if (hits.length === 0) continue;
+        const top = hits[0];
+        m.price = top.price;
+        m.totalPrice = top.price * m.quantity;
+        m.manualPriceOverride = false;
+        m.pricingSource = 'manual';
+        if (top.productUrl) m.productUrl = top.productUrl;
+        if (top.imageUrl) m.imageUrl = top.imageUrl;
+        if (top.unit) m.unit = top.unit as Material['unit'];
+        fetchedCount++;
+        locallyPricedTerms.add(term);
+        triggerPriceFlash(m.id);
+      }
+    } catch {
+      // Best-effort — fall through to remote on any failure.
+    }
+
     try {
 
       // --- BATCH FETCH: Progressive chunking (3 items at a time) ---
       let batchResults: Map<string, ScraperProduct | null> | null = null;
       const batchSucceededTerms = new Set<string>();
-      if (useScraperApi && materialsToFetch.length > 0) {
+      // Skip terms we just filled from local sources — no point asking
+      // the scraper for prices we already have. If everything was priced
+      // locally, the batch is skipped entirely.
+      const remainingTerms = materialsToFetch
+        .map(m => m.searchTerm || m.name)
+        .filter(term => !locallyPricedTerms.has(term));
+      if (useScraperApi && remainingTerms.length > 0) {
         try {
-          const searchTermsToFetch = materialsToFetch.map(m => m.searchTerm || m.name);
+          const searchTermsToFetch = remainingTerms;
           const chunkSize = 3;
           const totalChunks = Math.ceil(searchTermsToFetch.length / chunkSize);
           setFetchPhase('batch');
