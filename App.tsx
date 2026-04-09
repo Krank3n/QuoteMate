@@ -95,9 +95,11 @@ export default function App() {
           );
         }
 
-        // Set up real-time listeners for cross-device sync
+        // Set up real-time listeners for cross-device sync.
+        // Use mergeRemoteQuotes (not setState) so an in-flight local edit isn't
+        // wiped by a stale snapshot — see useStore.mergeRemoteQuotes for the rules.
         firestoreService.listenToQuotes((quotes) => {
-          useStore.setState({ quotes });
+          useStore.getState().mergeRemoteQuotes(quotes);
         });
 
         firestoreService.listenToBusinessSettings((settings) => {

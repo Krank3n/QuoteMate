@@ -22,6 +22,12 @@ interface AppState {
   // Quotes
   quotes: Quote[];
   currentQuote: Quote | null;
+  /**
+   * Map of quote id → updatedAt (ms) for writes that have been issued to Firestore
+   * but not yet acknowledged. Used by mergeRemoteQuotes to ignore stale snapshots
+   * that would otherwise revert the user's unsynced edits.
+   */
+  pendingQuoteWrites: Record<string, number>;
 
   // Quote operations
   createNewQuote: () => void;
@@ -32,6 +38,16 @@ interface AppState {
   duplicateQuote: (quote: Quote) => Promise<void>;
   updateQuote: (quote: Quote) => void;
   loadQuotes: () => Promise<void>;
+  /**
+   * Merge a snapshot of quotes from the realtime Firestore listener into local state.
+   * Per-id rules:
+   *   - If a pending local write is newer than the snapshot's updatedAt → keep local.
+   *   - If local quote's updatedAt is newer than the snapshot's → keep local.
+   *   - Otherwise take remote.
+   * Locals that are missing from the snapshot are dropped UNLESS they have a pending
+   * write (which means we just created them and the listener echo hasn't caught up yet).
+   */
+  mergeRemoteQuotes: (remote: Quote[]) => void;
 
   // Subscription
   subscriptionStatus: SubscriptionStatus | null;
@@ -156,6 +172,7 @@ export const useStore = create<AppState>((set, get) => ({
   businessSettings: null,
   quotes: [],
   currentQuote: null,
+  pendingQuoteWrites: {},
   isOnboarded: false,
   hasSeenTour: false,
   seenScreenTours: [],
@@ -301,13 +318,84 @@ export const useStore = create<AppState>((set, get) => ({
 
       // Sync to Firestore in background
       if (auth.currentUser) {
-        firestoreService.saveQuote(calculatedQuote).catch(() => {
-          // silently ignore
-        });
+        // Track this write as pending so the realtime listener won't revert our
+        // local edit if a stale snapshot arrives before the write is acknowledged.
+        const writeTs = calculatedQuote.updatedAt.getTime();
+        set((state) => ({
+          pendingQuoteWrites: { ...state.pendingQuoteWrites, [calculatedQuote.id]: writeTs },
+        }));
+
+        firestoreService.saveQuote(calculatedQuote)
+          .then(() => {
+            // Clear the pending entry only if no NEWER write has been queued in
+            // the meantime. If the user kept editing while we were syncing, leave
+            // the newer pending entry in place so the listener still defers to local.
+            set((state) => {
+              if (state.pendingQuoteWrites[calculatedQuote.id] !== writeTs) return {};
+              const { [calculatedQuote.id]: _, ...rest } = state.pendingQuoteWrites;
+              return { pendingQuoteWrites: rest };
+            });
+          })
+          .catch(() => {
+            // Leave the pending entry in place — the listener will keep deferring
+            // to local until the next save attempt succeeds. Commit C will surface
+            // these failures so they're no longer silent.
+          });
       }
     } catch (error) {
       // silently ignore
     }
+  },
+
+  // Merge a remote snapshot of quotes into local state without clobbering unsynced edits.
+  mergeRemoteQuotes: (remote: Quote[]) => {
+    const { quotes: local, pendingQuoteWrites } = get();
+    const localById = new Map(local.map((q) => [q.id, q] as const));
+    const remoteIds = new Set<string>();
+    const merged: Quote[] = [];
+
+    for (const r of remote) {
+      remoteIds.add(r.id);
+      const localQ = localById.get(r.id);
+      const pendingTs = pendingQuoteWrites[r.id];
+      const remoteTs = r.updatedAt instanceof Date ? r.updatedAt.getTime() : 0;
+
+      if (pendingTs && pendingTs > remoteTs && localQ) {
+        // We have a newer in-flight local write — keep it.
+        merged.push(localQ);
+        continue;
+      }
+
+      if (
+        localQ &&
+        localQ.updatedAt instanceof Date &&
+        localQ.updatedAt.getTime() > remoteTs
+      ) {
+        // Local is newer than the snapshot (e.g. our write landed but the listener
+        // echoed an older revision first). Keep local.
+        merged.push(localQ);
+        continue;
+      }
+
+      merged.push(r);
+    }
+
+    // Locally created quotes that haven't yet been acknowledged by the listener.
+    // Without this, a snapshot delivered before our write round-trips would erase them.
+    for (const [id, q] of localById) {
+      if (!remoteIds.has(id) && pendingQuoteWrites[id]) {
+        merged.push(q);
+      }
+    }
+
+    // Match the listener's existing ordering (newest first).
+    merged.sort((a, b) => {
+      const aTs = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+      const bTs = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+      return bTs - aTs;
+    });
+
+    set({ quotes: merged });
   },
 
   // Save quote to storage
