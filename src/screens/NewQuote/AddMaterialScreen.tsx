@@ -3,7 +3,7 @@
  * Modern full-screen UX for adding materials with tabs for Search/Manual and Saved Items
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -81,6 +81,7 @@ import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
 import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
 import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
+import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
 type TabValue = 'search' | 'saved';
 
@@ -261,6 +262,79 @@ export function AddMaterialScreen() {
     })();
     return () => { cancelled = true; };
   }, [isSavedItemMode, isSavedItemEditMode, isSavedItemCreateMode, savedItemKey]);
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Unsaved-changes guard
+  //
+  // Snapshot the manual-entry form fields whenever the screen settles into a
+  // new "starting" state (mount, pre-fill from editing material, pre-fill from
+  // saved item). isDirty diffs the live values against that snapshot. The
+  // guard hooks beforeRemove and pops the standard confirmation modal.
+  //
+  // No onDiscard is needed: AddMaterialScreen never mutates currentQuote until
+  // the user explicitly hits the Save button — the form lives entirely in
+  // local component state, which is thrown away on unmount.
+  // ─────────────────────────────────────────────────────────────────────
+  const formSnapshotRef = useRef<string | null>(null);
+
+  // Capture a fresh snapshot whenever the form is re-initialised (mount,
+  // editingMaterial pre-fill, savedItem pre-fill). Run AFTER those effects so
+  // we capture the *post-prefill* state, not the empty defaults.
+  useEffect(() => {
+    formSnapshotRef.current = JSON.stringify({
+      manualName,
+      manualQuantity,
+      manualUnit,
+      manualPrice,
+      isPersonalRate,
+      coveragePerUnit,
+      coverageUnit,
+      rateKeywords,
+      supplierName,
+      selectedSection,
+    });
+    // Intentionally only run when the *prefill source* changes — not on every
+    // keystroke, otherwise the snapshot would constantly shift to match the
+    // current state and isDirty would always be false.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingMaterial, savedItemKey, isSavedItemCreateMode]);
+
+  const isDirty = useMemo(() => {
+    if (!formSnapshotRef.current) return false;
+    const current = JSON.stringify({
+      manualName,
+      manualQuantity,
+      manualUnit,
+      manualPrice,
+      isPersonalRate,
+      coveragePerUnit,
+      coverageUnit,
+      rateKeywords,
+      supplierName,
+      selectedSection,
+    });
+    return current !== formSnapshotRef.current;
+  }, [
+    manualName,
+    manualQuantity,
+    manualUnit,
+    manualPrice,
+    isPersonalRate,
+    coveragePerUnit,
+    coverageUnit,
+    rateKeywords,
+    supplierName,
+    selectedSection,
+  ]);
+
+  const { unsavedModalProps, allowNextNavigation } = useUnsavedChangesGuard({
+    isDirty,
+    onSave: async () => {
+      const ok = await handleAddManually({ silent: true });
+      // If validation failed (returned false), keep the user on screen.
+      return ok;
+    },
+  });
 
   // Tour refs
   const { registerRef } = useTourRefs();
@@ -799,10 +873,16 @@ export function AddMaterialScreen() {
     );
   };
 
-  const handleAddManually = async () => {
+  // When called from the Save button (default), navigates back on success.
+  // When called via the unsaved-changes guard with `{ silent: true }`, returns
+  // a boolean and lets the hook handle navigation. Returns false on validation
+  // failure so the guard can keep the user on screen instead of exiting.
+  const handleAddManually = async (opts?: { silent?: boolean }): Promise<boolean> => {
+    const silent = opts?.silent === true;
+
     if (!manualName.trim()) {
       Alert.alert('Enter Material Name', 'Please enter a material name');
-      return;
+      return false;
     }
 
     const quantity = parseFloat(manualQuantity) || 1;
@@ -814,7 +894,7 @@ export function AddMaterialScreen() {
       const trimmedName = manualName.trim();
       if (!trimmedName) {
         Alert.alert('Missing name', 'Please enter a name for the supplier book item.');
-        return;
+        return false;
       }
       const parsedKeywords = rateKeywords
         .split(',')
@@ -848,8 +928,11 @@ export function AddMaterialScreen() {
         try { await removeFavoriteProduct(savedItemKey); } catch { /* ignore */ }
       }
       await saveFavoriteProduct(trimmedName, trimmedName, favoritePayload);
-      navigation.goBack();
-      return;
+      if (!silent) {
+        allowNextNavigation();
+        navigation.goBack();
+      }
+      return true;
     }
 
     if (isEditMode && editingMaterial) {
@@ -865,7 +948,7 @@ export function AddMaterialScreen() {
         pricingSource: 'manual',
         section: selectedSection || undefined,
       };
-      updateMaterialInQuote(updatedMaterial);
+      updateMaterialInQuote(updatedMaterial, { silent });
 
       // If this material was linked to a supplier book entry — and the user
       // hasn't disabled the link by toggling off "Save to my saved items" —
@@ -954,8 +1037,10 @@ export function AddMaterialScreen() {
         );
       }
 
-      addMaterialToQuote(newMaterial);
+      addMaterialToQuote(newMaterial, { silent });
     }
+
+    return true;
   };
 
   // The screen is registered both as a nested route (`AddMaterial` inside the
@@ -1060,11 +1145,16 @@ export function AddMaterialScreen() {
 
   const { setPendingTemplateMaterial } = useStore();
 
-  const addMaterialToQuote = (material: Material) => {
+  // `silent` skips the trailing navigation.goBack() so the unsaved-changes guard
+  // can run persistence without double-firing the back transition.
+  const addMaterialToQuote = (material: Material, opts?: { silent?: boolean }) => {
     // Template mode: store material in staging area and go back
     if (templateMode) {
       setPendingTemplateMaterial(material);
-      navigation.goBack();
+      if (!opts?.silent) {
+        allowNextNavigation();
+        navigation.goBack();
+      }
       return;
     }
 
@@ -1083,11 +1173,13 @@ export function AddMaterialScreen() {
     // Save to recently used
     saveToRecentMaterials(material);
 
-    // Navigate back
-    navigation.goBack();
+    if (!opts?.silent) {
+      allowNextNavigation();
+      navigation.goBack();
+    }
   };
 
-  const updateMaterialInQuote = (updatedMaterial: Material) => {
+  const updateMaterialInQuote = (updatedMaterial: Material, opts?: { silent?: boolean }) => {
     if (!currentQuote) return;
 
     const updatedMaterials = currentQuote.materials.map(m =>
@@ -1099,8 +1191,10 @@ export function AddMaterialScreen() {
       materials: updatedMaterials,
     });
 
-    // Navigate back
-    navigation.goBack();
+    if (!opts?.silent) {
+      allowNextNavigation();
+      navigation.goBack();
+    }
   };
 
   // Search section component
@@ -1927,6 +2021,9 @@ export function AddMaterialScreen() {
         secondaryButtonAction={() => setDeleteSupplierDialog({ visible: false, supplier: '', count: 0 })}
         showConfetti={false}
       />
+
+      {/* Unsaved-changes confirmation when navigating away */}
+      <AlertModal {...unsavedModalProps} />
 
       {/* Review modal for extracted items */}
       <SupplierListReviewModal

@@ -27,9 +27,17 @@ interface Options {
    * return value (including void) lets the navigation proceed.
    */
   onSave: () => Promise<boolean | void> | boolean | void;
+  /**
+   * Optional. Called when the user picks "Nah, bin it" — before the
+   * navigation actually happens. Use this to revert in-memory edits that
+   * would otherwise survive the screen exit (e.g. mutations to a global
+   * store like `currentQuote`). For pure-form screens you can leave this
+   * undefined: the local component state is thrown away on unmount anyway.
+   */
+  onDiscard?: () => void | Promise<void>;
 }
 
-export function useUnsavedChangesGuard({ isDirty, onSave }: Options) {
+export function useUnsavedChangesGuard({ isDirty, onSave, onDiscard }: Options) {
   const navigation = useNavigation<any>();
   const [visible, setVisible] = useState(false);
   const [pendingAction, setPendingAction] = useState<NavigationAction | null>(null);
@@ -54,10 +62,15 @@ export function useUnsavedChangesGuard({ isDirty, onSave }: Options) {
     }
   };
 
-  const handleDiscard = () => {
+  const handleDiscard = async () => {
     const action = pendingAction;
     setVisible(false);
     setPendingAction(null);
+    if (onDiscard) {
+      // Run the consumer's revert hook before navigating so any in-memory
+      // edits are rolled back before the destination screen mounts.
+      await onDiscard();
+    }
     dispatchPending(action);
   };
 
@@ -79,6 +92,17 @@ export function useUnsavedChangesGuard({ isDirty, onSave }: Options) {
     setPendingAction(null);
   };
 
+  /**
+   * Bypass the guard for the next navigation. Use this from explicit save flows
+   * (e.g. a "Next" button that already calls saveDraft) so the user doesn't get
+   * prompted right after they hit save. The flag is consumed by the next
+   * beforeRemove and is otherwise sticky — call it immediately before the
+   * navigation that should be allowed through.
+   */
+  const allowNextNavigation = () => {
+    allowExitRef.current = true;
+  };
+
   return {
     unsavedModalProps: {
       visible,
@@ -91,5 +115,6 @@ export function useUnsavedChangesGuard({ isDirty, onSave }: Options) {
       secondaryButtonText: "Nah, bin it",
       secondaryButtonAction: handleDiscard,
     },
+    allowNextNavigation,
   };
 }

@@ -33,7 +33,7 @@ import LottieView from 'lottie-react-native';
 import { generateId } from '../../utils/generateId';
 
 import { useStore } from '../../store/useStore';
-import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
+import { useCurrentDocument, useDocumentMode, UnifiedDocument } from '../../utils/documentMode';
 import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapping } from '../../types';
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
@@ -52,6 +52,7 @@ import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/U
 import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 import { getTourMaterialsPriced } from '../../components/tour/tourDummyData';
 import { notificationService } from '../../services/notificationService';
+import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
 // Helper to get section display info
 function getSectionInfo(sectionName: string | undefined): { name: string; color: string } {
@@ -386,19 +387,56 @@ export function MaterialsListScreen() {
   const [initialMaterialCount, setInitialMaterialCount] = useState(0);
   const [cancelGeneration, setCancelGeneration] = useState(false);
 
-  // Persist edits on gesture-back. Materials editing trickles many tiny
-  // updates into currentQuote via inline updateQuote calls; without this
-  // listener, swiping back would only update memory, leaving the changes
-  // unsynced until ViewQuoteScreen's focus auto-save runs (or, on app quit,
-  // losing them entirely). Mirrors the explicit handleBack flow.
+  // ─────────────────────────────────────────────────────────────────────
+  // Unsaved-changes guard
+  //
+  // Materials editing trickles many tiny mutations into currentQuote via
+  // inline updateQuote calls — quantities, prices, sections, ordering, etc.
+  // Without a guard, swiping back would carry all those changes through to
+  // wherever currentQuote is read next, even if the user changed their mind.
+  //
+  // Snapshot the document on first focus so we can:
+  //   - "Save" → persist via saveDraft (the same flow as the explicit Next/Back buttons)
+  //   - "Discard" → revert currentQuote to the snapshot, throwing away the edits
+  // ─────────────────────────────────────────────────────────────────────
+  const documentSnapshotRef = useRef<string | null>(null);
+  const documentSnapshotObjRef = useRef<UnifiedDocument | null>(null);
+
+  // Capture once on mount, then leave alone — subsequent edits are exactly
+  // what we want to diff against this baseline.
   useEffect(() => {
-    const unsubscribe = navigation.addListener('beforeRemove', () => {
-      if (currentQuote) {
-        saveDraft(currentQuote);
+    if (!documentSnapshotRef.current && currentQuote) {
+      documentSnapshotRef.current = JSON.stringify(currentQuote);
+      documentSnapshotObjRef.current = currentQuote;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentQuote?.id]);
+
+  const isDirty = useMemo(() => {
+    if (!documentSnapshotRef.current || !currentQuote) return false;
+    return JSON.stringify(currentQuote) !== documentSnapshotRef.current;
+  }, [currentQuote]);
+
+  const { unsavedModalProps, allowNextNavigation } = useUnsavedChangesGuard({
+    isDirty,
+    onSave: () => {
+      if (!currentQuote) return true;
+      // saveDraft persists to AsyncStorage + Firestore (with pending-write
+      // tracking from Commit B). It's fire-and-forget but the local cache is
+      // updated synchronously, so by the time the hook navigates the data is
+      // safe locally — and the SyncErrorBanner will surface any cloud failure.
+      saveDraft(currentQuote);
+      return true;
+    },
+    onDiscard: () => {
+      // Revert currentQuote to the on-mount snapshot so the in-memory edits
+      // disappear before the destination screen renders.
+      const snapshot = documentSnapshotObjRef.current;
+      if (snapshot) {
+        updateQuote(snapshot);
       }
-    });
-    return unsubscribe;
-  }, [navigation, currentQuote, saveDraft]);
+    },
+  });
 
   // Animate indeterminate progress bar during batch fetch phase
   useEffect(() => {
@@ -2009,8 +2047,10 @@ export function MaterialsListScreen() {
       updateQuote(currentQuote);
       saveDraft(currentQuote);
     }
+    // Bypass the unsaved-changes guard — we just saved.
+    allowNextNavigation();
     navigation.goBack();
-  }, [currentQuote, updateQuote, saveDraft, navigation]);
+  }, [currentQuote, updateQuote, saveDraft, navigation, allowNextNavigation]);
 
   const handleNext = useCallback(() => {
     // Allow proceeding with no materials (labor-only quotes)
@@ -2022,9 +2062,11 @@ export function MaterialsListScreen() {
         updateQuote(draftQuote);
         saveDraft(draftQuote);
       }
+      // Bypass the unsaved-changes guard — we just saved.
+      allowNextNavigation();
       navigation.navigate('LaborMarkup');
     }
-  }, [hasUnpricedMaterials, navigation, currentQuote, updateQuote, saveDraft]);
+  }, [hasUnpricedMaterials, navigation, currentQuote, updateQuote, saveDraft, allowNextNavigation]);
 
   const proceedWithUnpricedMaterials = () => {
     setUnpricedDialogVisible(false);
@@ -2033,6 +2075,7 @@ export function MaterialsListScreen() {
       updateQuote(draftQuote);
       saveDraft(draftQuote);
     }
+    allowNextNavigation();
     navigation.navigate('LaborMarkup');
   };
 
@@ -3315,6 +3358,9 @@ export function MaterialsListScreen() {
           )}
         </>
       )}
+
+      {/* Unsaved-changes confirmation when navigating away */}
+      <AlertModal {...unsavedModalProps} />
     </View>
   );
 }
