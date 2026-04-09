@@ -145,6 +145,239 @@ export async function removeFavoriteProduct(
 }
 
 /**
+ * Load all personal supplier rates for the auto-generate LLM flow.
+ * Returns only favorites flagged as isPersonalRate.
+ */
+export async function loadAllFavoritesForLLM(): Promise<FavoriteProductMapping[]> {
+  const local = await loadFavoritesFromLocal();
+  return Object.values(local).filter((f) => f.isPersonalRate === true);
+}
+
+/**
+ * Bulk-save favorites from a supplier price list import.
+ *
+ * Merge policy:
+ * - If an existing favorite lives at the same slug key, update price/unit/
+ *   coverage/lastUpdatedAt/source/sourceRef but PRESERVE the user's
+ *   `keywords` and `notes` (unless the caller passes `{ force: true }`).
+ *   `store` is preserved when the existing store differs from the incoming
+ *   value (user may have manually re-labelled it).
+ * - If no existing favorite, create a new one.
+ *
+ * Returns counts suitable for a snackbar summary.
+ */
+export async function bulkSaveFavorites(
+  items: Array<Partial<FavoriteProductMapping> & { productName: string }>,
+  options?: { force?: boolean }
+): Promise<{ created: number; updated: number; unchanged: number }> {
+  const force = options?.force === true;
+  let created = 0;
+  let updated = 0;
+  let unchanged = 0;
+
+  const localFavorites = await loadFavoritesFromLocal();
+
+  // Pre-resolve auth + db once
+  const auth = getAuth();
+  const uid = auth.currentUser?.uid;
+  const db = uid ? getFirestore() : null;
+
+  for (const incoming of items) {
+    if (!incoming.productName) continue;
+    const key = getMaterialKey(incoming.productName);
+    const existing = localFavorites[key];
+
+    let merged: FavoriteProductMapping;
+    let status: 'created' | 'updated' | 'unchanged' = 'created';
+
+    if (existing && !force) {
+      // Refresh existing — preserve user-edited fields.
+      const nextPrice = incoming.price ?? existing.price;
+      const nextUnit = incoming.unit ?? existing.unit;
+      const nextCoveragePerUnit = incoming.coveragePerUnit ?? existing.coveragePerUnit;
+      const nextCoverageUnit = incoming.coverageUnit ?? existing.coverageUnit;
+
+      const priceChanged = nextPrice !== existing.price;
+      const unitChanged = nextUnit !== existing.unit;
+      const coverageChanged =
+        nextCoveragePerUnit !== existing.coveragePerUnit ||
+        nextCoverageUnit !== existing.coverageUnit;
+
+      merged = {
+        ...existing,
+        price: nextPrice,
+        unit: nextUnit,
+        coveragePerUnit: nextCoveragePerUnit,
+        coverageUnit: nextCoverageUnit,
+        // Preserve user-edited fields — keywords, notes, store.
+        keywords: existing.keywords ?? incoming.keywords,
+        notes: existing.notes,
+        store: existing.store || incoming.store || 'manual',
+        // Update provenance + timestamps.
+        source: incoming.source ?? existing.source,
+        sourceRef: incoming.sourceRef ?? existing.sourceRef,
+        isPersonalRate: incoming.isPersonalRate ?? existing.isPersonalRate,
+        lastUpdatedAt: incoming.lastUpdatedAt ?? new Date().toISOString(),
+      };
+
+      status = priceChanged || unitChanged || coverageChanged ? 'updated' : 'unchanged';
+    } else if (existing && force) {
+      merged = {
+        ...existing,
+        ...incoming,
+        productName: incoming.productName,
+        store: incoming.store || existing.store || 'manual',
+      } as FavoriteProductMapping;
+      status = 'updated';
+    } else {
+      merged = {
+        productName: incoming.productName,
+        store: incoming.store || 'manual',
+        productUrl: incoming.productUrl,
+        itemNumber: incoming.itemNumber,
+        dimensions: incoming.dimensions,
+        unit: incoming.unit,
+        price: incoming.price,
+        imageUrl: incoming.imageUrl,
+        source: incoming.source,
+        sourceRef: incoming.sourceRef,
+        lastUpdatedAt: incoming.lastUpdatedAt ?? new Date().toISOString(),
+        isPersonalRate: incoming.isPersonalRate,
+        coveragePerUnit: incoming.coveragePerUnit,
+        coverageUnit: incoming.coverageUnit,
+        keywords: incoming.keywords,
+        notes: incoming.notes,
+      };
+      status = 'created';
+    }
+
+    localFavorites[key] = merged;
+
+    if (status === 'created') created += 1;
+    else if (status === 'updated') updated += 1;
+    else unchanged += 1;
+
+    // Push to Firestore (best-effort, don't block the batch).
+    if (db && uid && status !== 'unchanged') {
+      try {
+        await setDoc(
+          doc(db, `users/${uid}/materialFavorites/${key}`),
+          {
+            ...merged,
+            savedAt: new Date().toISOString(),
+          }
+        );
+      } catch {
+        // non-critical — local cache is source of truth for this session
+      }
+    }
+  }
+
+  await saveFavoritesToLocal(localFavorites);
+
+  return { created, updated, unchanged };
+}
+
+/**
+ * Returns the unique set of supplier names already used by any saved
+ * favorite. Used by the import / edit flows to suggest existing suppliers
+ * so the user can consolidate items under one name instead of typing
+ * slight variants. Includes any favorite with a non-empty, non-"manual"
+ * store — does NOT require isPersonalRate, since older imports may not
+ * have that flag set but still belong to a real supplier.
+ */
+export async function getExistingPersonalRateSuppliers(): Promise<string[]> {
+  const local = await loadFavoritesFromLocal();
+  const names = new Set<string>();
+  for (const fav of Object.values(local)) {
+    const store = fav.store?.trim();
+    if (!store) continue;
+    if (store.toLowerCase() === 'manual') continue;
+    if (store.toLowerCase().includes('bunnings.com.au')) continue;
+    names.add(store);
+  }
+  return Array.from(names).sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Bulk-rename the `store` field on every favorite where `store === oldStore`.
+ * Used by the Supplier Book section header rename affordance to consolidate
+ * items that were imported under slightly different supplier names.
+ *
+ * Returns the number of favorites updated.
+ */
+export async function renameStoreOnFavorites(oldStore: string, newStore: string): Promise<number> {
+  const trimmedNew = newStore.trim();
+  if (!trimmedNew || trimmedNew === oldStore) return 0;
+
+  const local = await loadFavoritesFromLocal();
+  let updated = 0;
+  const auth = getAuth();
+  const uid = auth.currentUser?.uid;
+  const db = uid ? getFirestore() : null;
+
+  for (const [key, fav] of Object.entries(local)) {
+    if (fav.store !== oldStore) continue;
+    const next: FavoriteProductMapping = {
+      ...fav,
+      store: trimmedNew,
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    local[key] = next;
+    updated += 1;
+
+    if (db && uid) {
+      try {
+        await setDoc(
+          doc(db, `users/${uid}/materialFavorites/${key}`),
+          { ...next, savedAt: new Date().toISOString() }
+        );
+      } catch {
+        // non-critical — local cache is source of truth for this session
+      }
+    }
+  }
+
+  if (updated > 0) {
+    await saveFavoritesToLocal(local);
+  }
+  return updated;
+}
+
+/**
+ * Delete every favorite where `store === supplierName`. Used by the
+ * Supplier Book section header's "delete supplier" affordance to clear
+ * out an entire supplier's items in one go.
+ *
+ * Returns the number of favorites removed.
+ */
+export async function deleteAllFavoritesByStore(supplierName: string): Promise<number> {
+  const local = await loadFavoritesFromLocal();
+  const auth = getAuth();
+  const uid = auth.currentUser?.uid;
+  const db = uid ? getFirestore() : null;
+  let removed = 0;
+
+  for (const [key, fav] of Object.entries(local)) {
+    if (fav.store !== supplierName) continue;
+    delete local[key];
+    removed += 1;
+    if (db && uid) {
+      try {
+        await deleteDoc(doc(db, `users/${uid}/materialFavorites/${key}`));
+      } catch {
+        // non-critical — local cache is source of truth for this session
+      }
+    }
+  }
+
+  if (removed > 0) {
+    await saveFavoritesToLocal(local);
+  }
+  return removed;
+}
+
+/**
  * Sync favorites from cloud to local (run on app startup)
  */
 export async function syncFavoritesFromCloud(): Promise<void> {

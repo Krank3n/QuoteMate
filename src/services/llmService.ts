@@ -37,6 +37,9 @@ interface LLMMaterial {
   // this in the prompt; if it omits it (LLMs are unreliable), MaterialsListScreen
   // falls back to distributing analysis.estimatedHours across sections by multiplier.
   sectionLaborHours?: number;
+  // Set by LLM when matched to a user's saved supplier rate.
+  savedRateName?: string;
+  pricingSource?: string;
 }
 
 interface LLMResponse {
@@ -49,7 +52,6 @@ interface LLMResponse {
  * Analyze a job description and generate a materials list
  * @param jobDescription - Natural language description of the job
  * @param tradeContext - Optional trade category and niche information
- * @param retryCount - Number of retry attempts (default: 3)
  * @returns Materials list and estimated hours
  */
 export async function analyzeJobDescription(
@@ -61,13 +63,22 @@ export async function analyzeJobDescription(
     pricingMethod?: string;
     selectedStore?: string; // Which store will be used for pricing
   },
-  retryCount: number = 3,
   photoUrls?: string[],
   existingMaterials?: { name: string; quantity: number; unit: string; section?: string }[],
-  availableTemplates?: { name: string; materials: { name: string; quantity: number; unit: string }[]; laborHours: number }[]
+  availableTemplates?: { name: string; materials: { name: string; quantity: number; unit: string }[]; laborHours: number }[],
+  userSavedRates?: Array<{
+    name: string;
+    store?: string;
+    unit: string;
+    price: number;
+    coveragePerUnit?: number;
+    coverageUnit?: string;
+    keywords?: string[];
+    notes?: string;
+  }>
 ): Promise<LLMResponse> {
   // All platforms route through Firebase Functions so API keys stay server-side
-  return analyzeViaFirebaseFunction(jobDescription, tradeContext, retryCount, photoUrls, existingMaterials, availableTemplates);
+  return analyzeViaFirebaseFunction(jobDescription, tradeContext, photoUrls, existingMaterials, availableTemplates, userSavedRates);
 }
 
 /**
@@ -83,13 +94,20 @@ async function analyzeViaFirebaseFunction(
     pricingMethod?: string;
     selectedStore?: string;
   },
-  retryCount: number = 3,
   photoUrls?: string[],
   existingMaterials?: { name: string; quantity: number; unit: string; section?: string }[],
-  availableTemplates?: { name: string; materials: { name: string; quantity: number; unit: string }[]; laborHours: number }[]
+  availableTemplates?: { name: string; materials: { name: string; quantity: number; unit: string }[]; laborHours: number }[],
+  userSavedRates?: Array<{
+    name: string;
+    store?: string;
+    unit: string;
+    price: number;
+    coveragePerUnit?: number;
+    coverageUnit?: string;
+    keywords?: string[];
+    notes?: string;
+  }>
 ): Promise<LLMResponse> {
-  let lastError: Error | null = null;
-
   // Convert local photo URIs to base64 for sending to the server
   let photoBase64: string[] | undefined;
   if (photoUrls?.length && Platform.OS !== 'web' && FileSystem) {
@@ -106,54 +124,36 @@ async function analyzeViaFirebaseFunction(
     }
   }
 
-  for (let attempt = 0; attempt < retryCount; attempt++) {
-    try {
-      const idToken = await auth.currentUser?.getIdToken();
-      const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/analyzeJobDescription`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          jobDescription,
-          tradeContext,
-          photoBase64,
-          existingMaterials,
-          availableTemplates,
-        }),
-      });
+  // Single attempt — the server already handles Gemini → Claude fallback internally,
+  // so client-side retries just produce duplicate admin failure emails.
+  const idToken = await auth.currentUser?.getIdToken();
+  const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/analyzeJobDescription`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      jobDescription,
+      tradeContext,
+      photoBase64,
+      existingMaterials,
+      availableTemplates,
+      userSavedRates,
+    }),
+  });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-      return {
-        materials: data.materials || [],
-        estimatedHours: data.estimatedHours || 8,
-        jobSummary: data.jobSummary || '',
-      };
-    } catch (error) {
-      lastError = error as Error;
-      if (attempt < retryCount - 1) {
-        const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `API returned ${response.status}`);
   }
 
-  // Try Gemini as fallback
-  try {
-    return await analyzeViaGemini(jobDescription, tradeContext);
-  } catch (geminiError) {
-    // Gemini fallback also failed
-  }
-
-  throw new Error(
-    lastError?.message || 'Failed to analyze job description after multiple attempts'
-  );
+  const data = await response.json();
+  return {
+    materials: data.materials || [],
+    estimatedHours: data.estimatedHours || 8,
+    jobSummary: data.jobSummary || '',
+  };
 }
 
 /**
@@ -342,7 +342,7 @@ Job: "Install garden gate with latch"
 Return ONLY valid JSON, no other text.`;
 }
 
-const VALID_UNITS = ['each', 'm', 'L', 'kg', 'box', 'pack'];
+const VALID_UNITS = ['each', 'm', 'm²', 'm³', 'L', 'kg', 'box', 'pack'];
 
 /**
  * Find the most common value in an array
@@ -737,7 +737,7 @@ function getFallbackResponse(jobDescription: string): LLMResponse {
 /**
  * Convert LLM materials to app Material format
  */
-export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Partial<Material> & { sectionMultiplier?: number; sectionLaborHours?: number })[] {
+export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Partial<Material> & { sectionMultiplier?: number; sectionLaborHours?: number; savedRateName?: string })[] {
   return llmMaterials.map((m) => {
     const multiplier = m.sectionMultiplier || 1;
     return {
@@ -745,11 +745,12 @@ export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Pa
       searchTerm: m.searchTerm,
       templateBaseQuantity: multiplier > 1 ? m.quantity : undefined,
       quantity: Math.round(m.quantity * multiplier * 1000) / 1000,
-      unit: m.unit as 'each' | 'm' | 'L' | 'kg' | 'box' | 'pack',
+      unit: m.unit as Material['unit'],
       price: 0,
       totalPrice: 0,
       manualPriceOverride: false,
       ...(m.section && { section: m.section }),
+      ...(m.savedRateName && { savedRateName: m.savedRateName }),
       sectionMultiplier: multiplier,
       ...(m.sectionLaborHours && m.sectionLaborHours > 0 && { sectionLaborHours: m.sectionLaborHours }),
     };
@@ -1084,6 +1085,71 @@ Return ONLY valid JSON, no explanation text:
   } catch (error) {
     return [];
   }
+}
+
+/**
+ * Extract supplier price list from PDF or photos via Firebase Function.
+ * Mirrors the proxy / retry pattern used by analyzeJobDescription.
+ */
+export interface ExtractedSupplierItem {
+  name: string;
+  price: number;
+  unit: string;
+  coveragePerUnit?: number;
+  coverageUnit?: 'm²' | 'm³' | 'm';
+  keywords?: string[];
+  confidence?: 'high' | 'medium' | 'low';
+  rawLine?: string;
+}
+
+export interface SupplierExtractionResponse {
+  supplierName: string;
+  items: ExtractedSupplierItem[];
+}
+
+export async function extractSupplierPriceList(
+  payload: {
+    pdfBase64?: string;
+    imageBase64?: string[];
+    supplierName?: string;
+    defaultUnit?: string;
+  },
+  retryCount: number = 3,
+): Promise<SupplierExtractionResponse> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < retryCount; attempt++) {
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/extractSupplierPriceList`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        supplierName: data.supplierName || payload.supplierName || '',
+        items: Array.isArray(data.items) ? data.items : [],
+      };
+    } catch (error) {
+      lastError = error as Error;
+      if (attempt < retryCount - 1) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw new Error(lastError?.message || 'Failed to extract price list after multiple attempts');
 }
 
 /**

@@ -39,6 +39,15 @@ interface MaterialItemCardProps {
   onOpenInStore?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  /**
+   * Render a compact, non-interactive variant of the card — no qty stepper,
+   * no actions row, no expandable details panel. Used by the Saved Items tab
+   * to display saved favorites/personal-rate items consistently with the
+   * materials list.
+   */
+  readOnly?: boolean;
+  /** Tap handler for the readOnly variant (e.g. add-to-quote). */
+  onPress?: () => void;
 }
 
 export function MaterialItemCard({
@@ -56,6 +65,8 @@ export function MaterialItemCard({
   onOpenInStore,
   onEdit,
   onDelete,
+  readOnly = false,
+  onPress,
 }: MaterialItemCardProps) {
   const hasMeaningfulBrand = material.brand &&
     material.brand.toLowerCase() !== 'bunnings' &&
@@ -102,7 +113,11 @@ export function MaterialItemCard({
               const sectionWords = (material.section || '').split(/\s+/);
               const unitWord = sectionWords.length > 0 ? sectionWords[sectionWords.length - 1].toLowerCase() : 'unit';
               return `${material.templateBaseQuantity}/${unitWord} · `;
-            })() : ''}{formatCurrency(material.price)} ea.
+            })() : ''}{formatCurrency(material.price)}
+            {readOnly && material.unit ? ` / ${material.unit}` : ' ea.'}
+            {readOnly && material.favoriteProduct?.coveragePerUnit && material.favoriteProduct?.coverageUnit
+              ? `  ·  covers ${material.favoriteProduct.coveragePerUnit} ${material.favoriteProduct.coverageUnit}`
+              : ''}
             {isEstimate ? (
               <Text style={{
                 color: material.priceConfidence === 'high' ? colors.success
@@ -126,6 +141,43 @@ export function MaterialItemCard({
       </View>
     </View>
   );
+
+  // Compact, non-interactive variant — Saved Items tab uses this. No qty
+  // stepper, no expandable details. The top row taps `onPress` (e.g.
+  // add-to-quote); a bottom action row mirrors the materials-list layout
+  // with pencil + delete on the right, leaving the full width above for
+  // the name and price/coverage details.
+  if (readOnly) {
+    return (
+      <View style={[styles.listItem, styles.listItemReadOnly]}>
+        <TouchableOpacity onPress={onPress} activeOpacity={0.7} disabled={!onPress}>
+          {topRow}
+        </TouchableOpacity>
+        {(onEdit || onDelete) && (
+          <View style={styles.readOnlyActionsRow}>
+            {onEdit && (
+              <TouchableOpacity
+                style={styles.readOnlyActionBtn}
+                onPress={onEdit}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <MaterialCommunityIcons name="pencil" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+            {onDelete && (
+              <TouchableOpacity
+                style={styles.readOnlyActionBtn}
+                onPress={onDelete}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  }
 
   // Full interactive card
   return (
@@ -249,6 +301,25 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.primary,
     transform: [{ scale: 1.02 }],
+  },
+  listItemReadOnly: {
+    marginBottom: 8,
+  },
+  readOnlyActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 8,
+    paddingTop: 4,
+    paddingBottom: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    marginTop: 8,
+  },
+  readOnlyActionBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   itemTopRow: {
     flexDirection: 'row',

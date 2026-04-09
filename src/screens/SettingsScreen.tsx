@@ -28,6 +28,7 @@ interface SettingsMenuItem {
   subtitle: string;
   icon: string;
   screen: string;
+  screenParams?: Record<string, any>;
   badge?: string;
   badgeColor?: string;
 }
@@ -97,13 +98,14 @@ export function SettingsScreen() {
           icon: 'puzzle-outline',
           screen: 'SectionTemplates',
         },
-        // {
-        //   id: 'supplierGroups',
-        //   title: 'Supplier Groups',
-        //   subtitle: 'Manage your material suppliers',
-        //   icon: 'store-outline',
-        //   screen: 'SupplierGroups',
-        // },
+        {
+          id: 'supplierBook',
+          title: 'Supplier Book',
+          subtitle: 'Saved supplier prices grouped by store',
+          icon: 'format-list-bulleted',
+          screen: 'AddMaterialStandalone',
+          screenParams: { supplierBookOnly: true },
+        },
       ],
     },
     {
@@ -185,7 +187,7 @@ export function SettingsScreen() {
     },
   ];
 
-  const handleMenuPress = async (screen: string) => {
+  const handleMenuPress = async (screen: string, params?: Record<string, any>) => {
     if (screen === 'AppTour') {
       await setHasSeenTour(false);
       // Also reset screen-specific tours
@@ -195,7 +197,11 @@ export function SettingsScreen() {
       navigation.navigate('Dashboard');
       return;
     }
-    navigation.navigate(screen);
+    if (params) {
+      (navigation as any).navigate(screen, params);
+    } else {
+      navigation.navigate(screen);
+    }
   };
 
   return (
@@ -213,7 +219,7 @@ export function SettingsScreen() {
                       styles.menuItem,
                       index < section.items.length - 1 && styles.menuItemBorder,
                     ]}
-                    onPress={() => handleMenuPress(item.screen)}
+                    onPress={() => handleMenuPress(item.screen, item.screenParams)}
                   >
                     <View style={styles.menuItemLeft}>
                       <View style={styles.iconContainer}>

@@ -758,7 +758,7 @@ export function JobDetailsScreen() {
       ? jobPhotos.map(p => p.storageUrl).filter(Boolean)
       : undefined;
 
-    analyzeJobDescription(jobDescription, tradeContext, 3, photoUrlsForAi)
+    analyzeJobDescription(jobDescription, tradeContext, photoUrlsForAi)
       .then((analysis) => {
         // Convert LLM materials to app materials format
         const baseMaterials = convertLLMMaterialsToMaterials(analysis.materials);

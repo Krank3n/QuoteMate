@@ -19,6 +19,7 @@ import {
   Animated,
   Dimensions,
   Platform,
+  Keyboard,
   ViewStyle,
   ScrollView,
 } from 'react-native';
@@ -60,6 +61,11 @@ export function BottomSheet({
 }: BottomSheetProps) {
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
+  // Tracks the soft-keyboard height so the sheet can shift up when an
+  // input inside it gets focused. AndroidManifest.adjustResize doesn't
+  // help here because the sheet is rendered inside a Portal at absolute
+  // position — the OS resize never reaches it.
+  const keyboardOffset = useRef(new Animated.Value(0)).current;
 
   const runCloseAnimation = useCallback(
     (onFinished: () => void) => {
@@ -99,6 +105,33 @@ export function BottomSheet({
     }
   }, [visible]);
 
+  // Listen for soft-keyboard show/hide and translate the sheet up by the
+  // keyboard height so any TextInput inside the sheet stays visible.
+  useEffect(() => {
+    if (!visible) return;
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      const h = e.endCoordinates?.height ?? 0;
+      Animated.timing(keyboardOffset, {
+        toValue: -h,
+        duration: Platform.OS === 'ios' ? (e.duration ?? 250) : 200,
+        useNativeDriver: true,
+      }).start();
+    });
+    const hideSub = Keyboard.addListener(hideEvent, (e) => {
+      Animated.timing(keyboardOffset, {
+        toValue: 0,
+        duration: Platform.OS === 'ios' ? (e.duration ?? 200) : 200,
+        useNativeDriver: true,
+      }).start();
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [visible, keyboardOffset]);
+
   if (!shouldRender) return null;
 
   const content = scrollable ? (
@@ -128,7 +161,10 @@ export function BottomSheet({
             styles.sheet,
             { maxHeight: SCREEN_HEIGHT * maxHeightRatio },
             sheetStyle,
-            { transform: [{ translateY: slideAnim }] },
+            { transform: [
+              { translateY: slideAnim },
+              { translateY: keyboardOffset },
+            ] },
           ]}
         >
           {/* Handle */}

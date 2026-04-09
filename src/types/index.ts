@@ -8,7 +8,7 @@ export interface Material {
   id: string;
   name: string;
   quantity: number;
-  unit: 'each' | 'm' | 'L' | 'kg' | 'box' | 'pack';
+  unit: 'each' | 'm' | 'm²' | 'm³' | 'L' | 'kg' | 'box' | 'pack';
   bunningsItemNumber?: string;
   price: number; // per unit
   totalPrice: number;
@@ -36,9 +36,19 @@ export interface FavoriteProductMapping {
   productUrl?: string;
   itemNumber?: string;
   dimensions?: string;
-  unit?: string;
+  unit?: Material['unit'];
   price?: number; // Last known price
   imageUrl?: string; // Product image
+  // Personal supplier rate fields
+  isPersonalRate?: boolean;       // true → prefer over retail in auto-generate
+  coveragePerUnit?: number;       // 1 unit covers N of coverageUnit (e.g. 13 m² per sheet)
+  coverageUnit?: 'm²' | 'm³' | 'm';
+  keywords?: string[];            // ["concrete","slab","footing"] for LLM matching
+  notes?: string;
+  // Provenance — PR1: 'manual', PR2: 'imported', PR3: 'subscribed'
+  source?: 'manual' | 'imported' | 'subscribed';
+  sourceRef?: string;             // PR2: importBatchId | PR3: supplierListId
+  lastUpdatedAt?: string;         // ISO timestamp
 }
 
 export interface QuotePhoto {
@@ -178,7 +188,7 @@ export interface TemplateMaterial {
   name: string;
   searchTerm: string; // what to search in Bunnings
   quantityFormula: string; // e.g., "steps * 2"
-  unit: 'each' | 'm' | 'L' | 'kg' | 'box' | 'pack';
+  unit: 'each' | 'm' | 'm²' | 'm³' | 'L' | 'kg' | 'box' | 'pack';
 }
 
 export interface TemplateParam {
