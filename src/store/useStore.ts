@@ -13,6 +13,20 @@ import { calculateDueDate } from '../utils/invoiceCalculator';
 import { firestoreService } from '../services/firestoreService';
 import { auth } from '../config/firebase';
 
+/**
+ * A user-visible record of the last sync failure. Populated by the saveDraft /
+ * saveQuote / saveInvoice catch blocks so a banner can warn the user that their
+ * latest edit hasn't reached the cloud yet — instead of failing silently like
+ * the original "changes won't stick" bug.
+ */
+export interface SyncError {
+  kind: 'quote' | 'invoice';
+  id: string;
+  message: string;
+  /** ISO timestamp the error occurred */
+  at: string;
+}
+
 interface AppState {
   // Business settings
   businessSettings: BusinessSettings | null;
@@ -28,6 +42,15 @@ interface AppState {
    * that would otherwise revert the user's unsynced edits.
    */
   pendingQuoteWrites: Record<string, number>;
+
+  /**
+   * The most recent unrecovered sync failure. Set by saveDraft/saveQuote/saveInvoice
+   * when a Firestore write fails so the UI can surface a banner. Cleared on success
+   * or when the user dismisses it. Without this we have zero signal when sync breaks.
+   */
+  lastSyncError: SyncError | null;
+  setSyncError: (err: SyncError | null) => void;
+  clearSyncError: () => void;
 
   // Quote operations
   createNewQuote: () => void;
@@ -155,6 +178,20 @@ const STORAGE_KEYS = {
   CONTACTS_MIGRATED: '@quotemate:contacts_migrated',
 };
 
+/**
+ * Record a sync failure: log to console for dev/CI visibility, then capture it on
+ * the store so the SyncErrorBanner can warn the user. The original bug went
+ * unnoticed for ages because every sync failure was silently swallowed.
+ */
+function logSyncError(kind: SyncError['kind'], id: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  // eslint-disable-next-line no-console
+  console.warn(`[sync] ${kind} ${id} failed:`, message, error);
+  useStore.setState({
+    lastSyncError: { kind, id, message, at: new Date().toISOString() },
+  });
+}
+
 // Helper to check if we need to reset monthly count
 const getMonthStart = () => {
   const now = new Date();
@@ -173,6 +210,9 @@ export const useStore = create<AppState>((set, get) => ({
   quotes: [],
   currentQuote: null,
   pendingQuoteWrites: {},
+  lastSyncError: null,
+  setSyncError: (err) => set({ lastSyncError: err }),
+  clearSyncError: () => set({ lastSyncError: null }),
   isOnboarded: false,
   hasSeenTour: false,
   seenScreenTours: [],
@@ -333,13 +373,18 @@ export const useStore = create<AppState>((set, get) => ({
             set((state) => {
               if (state.pendingQuoteWrites[calculatedQuote.id] !== writeTs) return {};
               const { [calculatedQuote.id]: _, ...rest } = state.pendingQuoteWrites;
-              return { pendingQuoteWrites: rest };
+              // Also clear any lingering sync error for this quote on success.
+              const clearError = state.lastSyncError?.kind === 'quote' && state.lastSyncError.id === calculatedQuote.id;
+              return clearError
+                ? { pendingQuoteWrites: rest, lastSyncError: null }
+                : { pendingQuoteWrites: rest };
             });
           })
-          .catch(() => {
+          .catch((err) => {
             // Leave the pending entry in place — the listener will keep deferring
-            // to local until the next save attempt succeeds. Commit C will surface
-            // these failures so they're no longer silent.
+            // to local until the next save attempt succeeds. Surface the error so
+            // the user knows their edit isn't safely in the cloud yet.
+            logSyncError('quote', calculatedQuote.id, err);
           });
       }
     } catch (error) {
@@ -465,10 +510,24 @@ export const useStore = create<AppState>((set, get) => ({
 
       // Sync to Firestore if user is signed in (non-blocking — local save already succeeded)
       if (auth.currentUser) {
+        // Track this write as pending so the listener won't revert our local copy
+        // before the round-trip completes. Mirrors the saveDraft behaviour.
+        const writeTs = calculatedQuote.updatedAt.getTime();
+        set((state) => ({
+          pendingQuoteWrites: { ...state.pendingQuoteWrites, [calculatedQuote.id]: writeTs },
+        }));
         try {
           await firestoreService.saveQuote(calculatedQuote);
+          set((state) => {
+            if (state.pendingQuoteWrites[calculatedQuote.id] !== writeTs) return {};
+            const { [calculatedQuote.id]: _, ...rest } = state.pendingQuoteWrites;
+            const clearError = state.lastSyncError?.kind === 'quote' && state.lastSyncError.id === calculatedQuote.id;
+            return clearError
+              ? { pendingQuoteWrites: rest, lastSyncError: null }
+              : { pendingQuoteWrites: rest };
+          });
         } catch (syncError) {
-          // silently ignore - will retry on next load
+          logSyncError('quote', calculatedQuote.id, syncError);
         }
       }
 
@@ -1125,8 +1184,12 @@ export const useStore = create<AppState>((set, get) => ({
       if (auth.currentUser) {
         try {
           await firestoreService.saveInvoice(updatedInvoice);
+          set((state) => {
+            const clearError = state.lastSyncError?.kind === 'invoice' && state.lastSyncError.id === updatedInvoice.id;
+            return clearError ? { lastSyncError: null } : {};
+          });
         } catch (syncError) {
-          // silently ignore
+          logSyncError('invoice', updatedInvoice.id, syncError);
         }
       }
     } catch (error) {

@@ -32,6 +32,7 @@ import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
 import { SwipeableCard } from '../components/SwipeableCard';
 import { lightTap, successTap } from '../utils/haptics';
 import { TrialBanner } from '../components/TrialBanner';
+import { SyncErrorBanner } from '../components/SyncErrorBanner';
 import { ShimmerOverlay } from '../components/ShimmerOverlay';
 import { TapRipple } from '../components/TapRipple';
 import { GrainOverlay } from '../components/GrainOverlay';
@@ -596,6 +597,9 @@ export function DashboardScreen() {
             </View>
           </View>
         </View>
+
+      {/* Sync Error Banner — warns if the latest quote/invoice didn't sync to cloud */}
+      <SyncErrorBanner />
 
       {/* Trial Status */}
       {subscriptionStatus && !subscriptionStatus.isPro && subscriptionStatus.trialStartedAt && (
