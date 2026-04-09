@@ -27,7 +27,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 
-const MAX_PHOTOS = 10;
+const DEFAULT_MAX_PHOTOS = 10;
 
 const TIPS = [
   'Hold steady and let the autofocus settle',
@@ -49,6 +49,12 @@ interface Props {
   processing?: boolean;
   /** Optional label shown under the processing spinner. */
   processingLabel?: string;
+  /** Maximum number of photos that can be captured in one session. */
+  maxPhotos?: number;
+  /** Optional unit label shown in the counter (e.g. "pages", "photos"). */
+  counterLabel?: string;
+  /** Optional rotating tip strings to override the default supplier-list tips. */
+  tips?: string[];
 }
 
 export function SupplierListCaptureModal({
@@ -57,7 +63,11 @@ export function SupplierListCaptureModal({
   onCancel,
   processing = false,
   processingLabel,
+  maxPhotos = DEFAULT_MAX_PHOTOS,
+  counterLabel = 'pages',
+  tips,
 }: Props) {
+  const tipList = tips && tips.length ? tips : TIPS;
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [photos, setPhotos] = useState<string[]>([]);
@@ -89,13 +99,13 @@ export function SupplierListCaptureModal({
         Animated.timing(tipFade, { toValue: 0, duration: 200, useNativeDriver: true }),
         Animated.timing(tipFade, { toValue: 1, duration: 200, useNativeDriver: true }),
       ]).start();
-      setTimeout(() => setTipIndex((i) => (i + 1) % TIPS.length), 200);
+      setTimeout(() => setTipIndex((i) => (i + 1) % tipList.length), 200);
     }, 4000);
     return () => clearInterval(id);
   }, [visible, processing, tipFade]);
 
   const handleShutter = async () => {
-    if (busyShutter || photos.length >= MAX_PHOTOS) return;
+    if (busyShutter || photos.length >= maxPhotos) return;
     if (!cameraRef.current) return;
     setBusyShutter(true);
     try {
@@ -165,7 +175,7 @@ export function SupplierListCaptureModal({
           <View style={styles.topCounter}>
             <MaterialCommunityIcons name="image-multiple-outline" size={16} color="#fff" />
             <Text style={styles.topCounterText}>
-              {photos.length} / {MAX_PHOTOS} pages
+              {photos.length} / {maxPhotos} {counterLabel}
             </Text>
           </View>
           <View style={styles.topSpacer} />
@@ -175,7 +185,7 @@ export function SupplierListCaptureModal({
         <View style={[styles.bottomBar, { paddingBottom: safeInsets.bottom + 16 }]}>
           {/* Rotating tip — sits just above the thumbnail strip, small + subtle */}
           <Animated.View style={[styles.tipWrap, { opacity: tipFade }]}>
-            <Text style={styles.tipText}>{TIPS[tipIndex]}</Text>
+            <Text style={styles.tipText}>{tipList[tipIndex]}</Text>
           </Animated.View>
 
           {/* Thumbnail strip */}
@@ -206,7 +216,7 @@ export function SupplierListCaptureModal({
             <TouchableOpacity
               style={[styles.shutter, busyShutter && styles.shutterBusy]}
               onPress={handleShutter}
-              disabled={busyShutter || photos.length >= MAX_PHOTOS}
+              disabled={busyShutter || photos.length >= maxPhotos}
               activeOpacity={0.8}
             >
               <View style={styles.shutterInner} />

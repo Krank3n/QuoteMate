@@ -1102,8 +1102,17 @@ export interface ExtractedSupplierItem {
   rawLine?: string;
 }
 
+export interface ExtractedSupplierContact {
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  website?: string | null;
+}
+
 export interface SupplierExtractionResponse {
   supplierName: string;
+  supplierContact?: ExtractedSupplierContact | null;
   items: ExtractedSupplierItem[];
 }
 
@@ -1138,6 +1147,10 @@ export async function extractSupplierPriceList(
       const data = await response.json();
       return {
         supplierName: data.supplierName || payload.supplierName || '',
+        supplierContact:
+          data.supplierContact && typeof data.supplierContact === 'object'
+            ? data.supplierContact
+            : null,
         items: Array.isArray(data.items) ? data.items : [],
       };
     } catch (error) {

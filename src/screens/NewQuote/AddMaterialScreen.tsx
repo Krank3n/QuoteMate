@@ -53,7 +53,6 @@ import {
   removeFavoriteProduct,
   bulkSaveFavorites,
   getExistingPersonalRateSuppliers,
-  renameStoreOnFavorites,
   deleteAllFavoritesByStore,
 } from '../../services/materialFavorites';
 import { AlertModal } from '../../components/AlertModal';
@@ -64,6 +63,7 @@ import {
   extractFromPdf,
   type ExtractedItem,
   type ExtractResult,
+  type ExtractedSupplierContact,
 } from '../../services/supplierListImporter';
 import { SupplierListReviewModal, type ReviewItemState } from '../../components/SupplierListReviewModal';
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
@@ -76,7 +76,8 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { SwipeableCard } from '../../components/SwipeableCard';
 import { SupplierGroup } from '../../types';
-import { loadGroups } from '../../services/supplierGroupService';
+import { loadGroups, getSupplierGroupByName, saveGroup } from '../../services/supplierGroupService';
+import { ContactActionsBar } from '../../components/document/ContactActionsBar';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
 import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
@@ -169,13 +170,22 @@ export function AddMaterialScreen() {
   }, [currentQuote]);
   const [newSectionName, setNewSectionName] = useState('');
 
-  // Supplier groups for search filtering
+  // Supplier groups — used both as search filters and as the source of
+  // contact details (phone/email/etc.) shown in the Supplier Book section
+  // headers. Reloaded whenever the screen regains focus so edits made on
+  // EditSupplierScreen are reflected on return.
   const [supplierGroups, setSupplierGroups] = useState<SupplierGroup[]>([]);
   const [selectedSupplierGroup, setSelectedSupplierGroup] = useState<string>('');
 
   useEffect(() => {
     loadGroups().then(setSupplierGroups);
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadGroups().then(setSupplierGroups);
+    }, [])
+  );
 
   // Ref for auto-focusing manual name input for non-pro users
   const materialNameRef = useRef<any>(null);
@@ -361,13 +371,12 @@ export function AddMaterialScreen() {
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
   const [extractedItems, setExtractedItems] = useState<ExtractedItem[]>([]);
   const [extractedSupplierName, setExtractedSupplierName] = useState('');
+  // Optional contact details lifted from the supplier price list (header /
+  // footer / letterhead) — applied to the matching SupplierGroup record on
+  // save, but only for fields the user hasn't already filled in.
+  const [extractedSupplierContact, setExtractedSupplierContact] = useState<ExtractedSupplierContact | undefined>(undefined);
   const [existingForDiff, setExistingForDiff] = useState<any[] | undefined>(undefined);
   const [existingSupplierNames, setExistingSupplierNames] = useState<string[]>([]);
-  const [renameDialog, setRenameDialog] = useState<{ visible: boolean; oldName: string; draft: string }>({
-    visible: false,
-    oldName: '',
-    draft: '',
-  });
   // Collapsed supplier sections in the Supplier Book tab
   const [collapsedSuppliers, setCollapsedSuppliers] = useState<Set<string>>(new Set());
   // Delete confirmation dialogs
@@ -476,9 +485,30 @@ export function AddMaterialScreen() {
 
   const handleExtractionResult = async (result: ExtractResult) => {
     if (!result.items.length) {
+      // No purchasable line items found — but the photo may have been a
+      // contact card / business card. If the AI lifted any contact details,
+      // route the user to the EditSupplier form pre-filled with what was
+      // found, so they can review and save it as a supplier.
+      if (result.supplierContact) {
+        navigation.navigate(
+          'EditSupplier' as never,
+          {
+            supplierName: result.supplierName || undefined,
+            prefill: {
+              contactPerson: result.supplierContact.contactPerson,
+              phone: result.supplierContact.phone,
+              email: result.supplierContact.email,
+              address: result.supplierContact.address,
+              website: result.supplierContact.website,
+            },
+          } as never,
+        );
+        return;
+      }
+
       Alert.alert(
         'Nothing to import',
-        'No line items were recognised. Try a clearer photo or a different page.'
+        'No line items or contact details were recognised. Try a clearer photo.'
       );
       return;
     }
@@ -494,6 +524,7 @@ export function AddMaterialScreen() {
 
     setExtractedItems(result.items);
     setExtractedSupplierName(result.supplierName || '');
+    setExtractedSupplierContact(result.supplierContact);
     // Load existing personal-rate supplier names so the modal can offer them
     // as one-tap consolidation chips.
     try {
@@ -585,19 +616,84 @@ export function AddMaterialScreen() {
         }
       }
 
+      // If the AI lifted contact details from the price list header/footer,
+      // merge them into the matching SupplierGroup record. Only fill in fields
+      // the user hasn't already set — never overwrite existing data.
+      let contactFieldsApplied = 0;
+      if (extractedSupplierContact && supplierName) {
+        try {
+          const existing = await getSupplierGroupByName(supplierName);
+          const pickIfMissing = (current: string | undefined, incoming: string | undefined) => {
+            if (current && current.trim()) return { value: current, applied: false };
+            if (incoming && incoming.trim()) return { value: incoming.trim(), applied: true };
+            return { value: current, applied: false };
+          };
+
+          const contactPerson = pickIfMissing(existing?.contactPerson, extractedSupplierContact.contactPerson);
+          const phone = pickIfMissing(existing?.phone, extractedSupplierContact.phone);
+          const email = pickIfMissing(existing?.email, extractedSupplierContact.email);
+          const address = pickIfMissing(existing?.address, extractedSupplierContact.address);
+          const website = pickIfMissing(existing?.searchUrl, extractedSupplierContact.website);
+
+          contactFieldsApplied =
+            (contactPerson.applied ? 1 : 0) +
+            (phone.applied ? 1 : 0) +
+            (email.applied ? 1 : 0) +
+            (address.applied ? 1 : 0) +
+            (website.applied ? 1 : 0);
+
+          if (contactFieldsApplied > 0) {
+            const now = new Date().toISOString();
+            const record = existing
+              ? {
+                  ...existing,
+                  contactPerson: contactPerson.value || undefined,
+                  phone: phone.value || undefined,
+                  email: email.value || undefined,
+                  address: address.value || undefined,
+                  searchUrl: website.value || undefined,
+                  updatedAt: now,
+                }
+              : {
+                  id: generateId(),
+                  name: supplierName.trim(),
+                  contactPerson: contactPerson.value || undefined,
+                  phone: phone.value || undefined,
+                  email: email.value || undefined,
+                  address: address.value || undefined,
+                  searchUrl: website.value || undefined,
+                  sortOrder: (await loadGroups()).length,
+                  createdAt: now,
+                  updatedAt: now,
+                };
+            await saveGroup(record);
+            // Refresh local supplierGroups so the section header picks up
+            // the new contact icons immediately.
+            const refreshed = await loadGroups();
+            setSupplierGroups(refreshed);
+          }
+        } catch {
+          // Don't block the import if contact merge fails — items are already saved.
+        }
+      }
+
       const total = counts.created + counts.updated;
       const label = supplierName ? ` from ${supplierName}` : '';
+      const contactSuffix = contactFieldsApplied > 0
+        ? ` • Added ${contactFieldsApplied} contact detail${contactFieldsApplied === 1 ? '' : 's'}`
+        : '';
       const msg =
         total > 0
           ? `Saved ${total} item${total === 1 ? '' : 's'}${label}${
               counts.unchanged ? ` (${counts.unchanged} unchanged)` : ''
-            }`
-          : `No changes${counts.unchanged ? ` (${counts.unchanged} unchanged)` : ''}`;
+            }${contactSuffix}`
+          : `No changes${counts.unchanged ? ` (${counts.unchanged} unchanged)` : ''}${contactSuffix}`;
       setSnackbarMessage(msg);
       setSnackbarVisible(true);
 
       setReviewModalVisible(false);
       setExtractedItems([]);
+      setExtractedSupplierContact(undefined);
       setExistingForDiff(undefined);
       await loadSavedItems();
     } catch (err: any) {
@@ -1755,6 +1851,19 @@ export function AddMaterialScreen() {
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(item);
     }
+    // Surface SupplierGroup records that have no saved items yet — users can
+    // add a supplier (e.g. for contact details) before they've ever saved a
+    // price from them, and we still want to see that supplier here.
+    const lowerKeys = new Set(Array.from(groups.keys()).map(k => k.toLowerCase()));
+    for (const sg of supplierGroups) {
+      const name = sg.name.trim();
+      if (!name) continue;
+      if (name.toLowerCase() === 'other items') continue;
+      if (!lowerKeys.has(name.toLowerCase())) {
+        groups.set(name, []);
+        lowerKeys.add(name.toLowerCase());
+      }
+    }
     const sections: SavedSection[] = [];
     const personalKeys: string[] = [];
     const otherKeys: string[] = [];
@@ -1766,7 +1875,7 @@ export function AddMaterialScreen() {
     personalKeys.sort();
     otherKeys.sort();
     const buildSection = (title: string): SavedSection => {
-      const items = groups.get(title)!;
+      const items = groups.get(title) || [];
       const isCollapsed = collapsedSuppliers.has(title);
       return { title, data: isCollapsed ? [] : items, totalCount: items.length };
     };
@@ -1774,7 +1883,17 @@ export function AddMaterialScreen() {
     for (const k of otherKeys) sections.push(buildSection(k));
     if (groups.has('Other items')) sections.push(buildSection('Other items'));
     return sections;
-  }, [savedItems, collapsedSuppliers]);
+  }, [savedItems, collapsedSuppliers, supplierGroups]);
+
+  // Lookup helper: find the SupplierGroup record matching a section title
+  // (case-insensitive). Used to render contact details / actions in the header.
+  const findSupplierGroup = React.useCallback(
+    (title: string) => {
+      const target = title.trim().toLowerCase();
+      return supplierGroups.find(g => g.name.trim().toLowerCase() === target);
+    },
+    [supplierGroups]
+  );
 
   const renderSavedTab = () => (
     <View style={styles.tabContent}>
@@ -1785,7 +1904,7 @@ export function AddMaterialScreen() {
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>Loading supplier book...</Text>
         </View>
-      ) : savedItems.length === 0 ? (
+      ) : savedItems.length === 0 && savedSections.length === 0 ? (
         <View style={styles.emptyState}>
           <MaterialCommunityIcons name="format-list-bulleted" size={64} color={colors.onSurface} />
           <Text style={styles.emptyStateTitle}>Your supplier book is empty</Text>
@@ -1801,48 +1920,67 @@ export function AddMaterialScreen() {
           stickySectionHeadersEnabled={false}
           renderSectionHeader={({ section }) => {
             const title = section.title;
-            const isRenameable = title !== 'Other items';
+            const isEditable = title !== 'Other items';
             const isCollapsed = collapsedSuppliers.has(title);
             const count = (section as SavedSection).totalCount;
+            const sg = isEditable ? findSupplierGroup(title) : undefined;
+            const hasContactActions = !!(sg && (sg.phone || sg.email || sg.searchUrl));
             return (
               <View style={styles.supplierHeader}>
-                <TouchableOpacity
-                  onPress={() => toggleSupplierCollapsed(title)}
-                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                  style={styles.supplierHeaderChevron}
-                >
-                  <MaterialCommunityIcons
-                    name={isCollapsed ? 'chevron-right' : 'chevron-down'}
-                    size={22}
-                    color={colors.textMuted}
-                  />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => toggleSupplierCollapsed(title)}
-                  activeOpacity={0.7}
-                  style={styles.supplierHeaderNameWrap}
-                >
-                  <Text style={styles.supplierHeaderName} numberOfLines={1}>{title}</Text>
-                  <Text style={styles.supplierHeaderCount}>
-                    {count} {count === 1 ? 'item' : 'items'}
-                  </Text>
-                </TouchableOpacity>
-                {isRenameable && (
-                  <View style={styles.supplierHeaderActions}>
-                    <TouchableOpacity
-                      onPress={() => setRenameDialog({ visible: true, oldName: title, draft: title })}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      style={styles.supplierHeaderActionBtn}
-                    >
-                      <MaterialCommunityIcons name="pencil-outline" size={18} color={colors.textMuted} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleDeleteSupplier(title, count)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      style={styles.supplierHeaderActionBtn}
-                    >
-                      <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
-                    </TouchableOpacity>
+                <View style={styles.supplierHeaderTopRow}>
+                  <TouchableOpacity
+                    onPress={() => toggleSupplierCollapsed(title)}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                    style={styles.supplierHeaderChevron}
+                  >
+                    <MaterialCommunityIcons
+                      name={isCollapsed ? 'chevron-right' : 'chevron-down'}
+                      size={22}
+                      color={colors.textMuted}
+                    />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => toggleSupplierCollapsed(title)}
+                    activeOpacity={0.7}
+                    style={styles.supplierHeaderNameWrap}
+                  >
+                    <Text style={styles.supplierHeaderName} numberOfLines={1}>{title}</Text>
+                    <Text style={styles.supplierHeaderCount}>
+                      {count === 0 ? 'No saved items' : `${count} ${count === 1 ? 'item' : 'items'}`}
+                    </Text>
+                  </TouchableOpacity>
+                  {isEditable && (
+                    <View style={styles.supplierHeaderActions}>
+                      <TouchableOpacity
+                        onPress={() =>
+                          navigation.navigate(
+                            'EditSupplier' as never,
+                            { supplierName: title } as never,
+                          )
+                        }
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.supplierHeaderActionBtn}
+                      >
+                        <MaterialCommunityIcons name="pencil-outline" size={18} color={colors.textMuted} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => handleDeleteSupplier(title, count)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.supplierHeaderActionBtn}
+                      >
+                        <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+                {hasContactActions && sg && (
+                  <View style={styles.supplierHeaderContactRow}>
+                    <ContactActionsBar
+                      phone={sg.phone}
+                      email={sg.email}
+                      website={sg.searchUrl}
+                      compact
+                    />
                   </View>
                 )}
               </View>
@@ -1906,6 +2044,24 @@ export function AddMaterialScreen() {
         : isEditMode
         ? 'Edit Material'
         : 'Add Material',
+      // Inside the Supplier Book, expose a "+" header button to add a new
+      // supplier (with optional contact details) before any items have been
+      // saved against it.
+      headerRight: supplierBookOnly
+        ? () => (
+            <TouchableOpacity
+              onPress={() => navigation.navigate('EditSupplier' as never)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={{ marginRight: 12 }}
+            >
+              <MaterialCommunityIcons
+                name="account-plus-outline"
+                size={22}
+                color={colors.white}
+              />
+            </TouchableOpacity>
+          )
+        : undefined,
     });
   }, [isEditMode, isSavedItemEditMode, isSavedItemCreateMode, supplierBookOnly, navigation]);
 
@@ -2037,59 +2193,12 @@ export function AddMaterialScreen() {
           if (!savingImport) {
             setReviewModalVisible(false);
             setExtractedItems([]);
+            setExtractedSupplierContact(undefined);
             setExistingForDiff(undefined);
           }
         }}
         onSave={handleSaveImported}
       />
-
-      {/* Rename supplier — long-press a section header in the Saved tab */}
-      <BottomSheet
-        visible={renameDialog.visible}
-        onDismiss={() => setRenameDialog({ visible: false, oldName: '', draft: '' })}
-        title="Rename supplier"
-        subtitle={`Items under "${renameDialog.oldName}" will be moved to the new name.`}
-        footer={
-          <View style={styles.renameFooter}>
-            <Button
-              mode="text"
-              onPress={() => setRenameDialog({ visible: false, oldName: '', draft: '' })}
-              style={styles.renameFooterButton}
-            >
-              Cancel
-            </Button>
-            <Button
-              mode="contained"
-              onPress={async () => {
-                const newName = renameDialog.draft.trim();
-                const oldName = renameDialog.oldName;
-                const updated = await renameStoreOnFavorites(oldName, newName);
-                setRenameDialog({ visible: false, oldName: '', draft: '' });
-                if (updated > 0) {
-                  await loadSavedItems();
-                  setSnackbarMessage(`Moved ${updated} item${updated === 1 ? '' : 's'} to "${newName}"`);
-                  setSnackbarVisible(true);
-                }
-              }}
-              disabled={!renameDialog.draft.trim() || renameDialog.draft.trim() === renameDialog.oldName}
-              style={styles.renameFooterButton}
-            >
-              Save
-            </Button>
-          </View>
-        }
-      >
-        <View style={styles.renameBody}>
-          <TextInput
-            mode="outlined"
-            label="Supplier name"
-            value={renameDialog.draft}
-            onChangeText={(v) => setRenameDialog((d) => ({ ...d, draft: v }))}
-            autoFocus
-            dense
-          />
-        </View>
-      </BottomSheet>
 
       {/* Snackbar for save confirmation */}
       <Snackbar
@@ -2251,14 +2360,22 @@ const styles = StyleSheet.create({
   },
   // Supplier section header — modeled on the materials-list section card header
   supplierHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 12,
     marginTop: 12,
     marginBottom: 8,
     backgroundColor: colors.surface,
     borderRadius: 12,
+  },
+  supplierHeaderTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  supplierHeaderContactRow: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
   supplierHeaderChevron: {
     width: 28,
@@ -2289,21 +2406,6 @@ const styles = StyleSheet.create({
   },
   savedItemSeparator: {
     height: 0,
-  },
-  renameBody: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 16,
-  },
-  renameFooter: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  renameFooterButton: {
-    minWidth: 100,
   },
   scrollContent: {
     paddingBottom: 140,

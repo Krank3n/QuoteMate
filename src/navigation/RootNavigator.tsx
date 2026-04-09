@@ -36,7 +36,7 @@ import { NotificationPreferencesScreen } from '../screens/settings/NotificationP
 import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen';
 import { SectionTemplatesScreen } from '../screens/settings/SectionTemplatesScreen';
 import { JobTemplateEditorScreen } from '../screens/settings/JobTemplateEditorScreen';
-import { SupplierGroupsScreen } from '../screens/settings/SupplierGroupsScreen';
+import { EditSupplierScreen } from '../screens/settings/EditSupplierScreen';
 import { ContactsScreen } from '../screens/ContactsScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
@@ -639,14 +639,14 @@ export function RootNavigator() {
         }}
       />
       <RootStack.Screen
-        name="SupplierGroups"
-        component={SupplierGroupsScreen}
+        name="EditSupplier"
+        component={EditSupplierScreen}
         options={{
           presentation: 'card',
           headerShown: true,
           headerStyle: { backgroundColor: colors.primary },
           headerTintColor: colors.white,
-          title: 'Supplier Groups',
+          title: 'Edit Supplier',
         }}
       />
       <RootStack.Screen

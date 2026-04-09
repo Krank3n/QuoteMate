@@ -23,6 +23,19 @@ function getMaterialKey(materialName: string, searchTerm?: string): string {
 }
 
 /**
+ * Firestore rejects writes that contain `undefined` field values. Imported
+ * supplier-list items are sparse (no productUrl/itemNumber/imageUrl/etc.) so
+ * we strip undefineds before every setDoc to keep the sync from failing.
+ */
+function stripUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) (out as any)[k] = v;
+  }
+  return out;
+}
+
+/**
  * Load all favorites from local storage
  */
 export async function loadFavoritesFromLocal(): Promise<
@@ -118,10 +131,10 @@ export async function saveFavoriteProduct(
     const db = getFirestore();
     await setDoc(
       doc(db, `users/${auth.currentUser.uid}/materialFavorites/${key}`),
-      {
+      stripUndefined({
         ...favorite,
         savedAt: new Date().toISOString(),
-      },
+      }),
       { merge: true }
     );
   } catch (error) {
@@ -274,10 +287,10 @@ export async function bulkSaveFavorites(
       try {
         await setDoc(
           doc(db, `users/${uid}/materialFavorites/${key}`),
-          {
+          stripUndefined({
             ...merged,
             savedAt: new Date().toISOString(),
-          },
+          }),
           { merge: true }
         );
       } catch (error) {
@@ -347,7 +360,7 @@ export async function renameStoreOnFavorites(oldStore: string, newStore: string)
       try {
         await setDoc(
           doc(db, `users/${uid}/materialFavorites/${key}`),
-          { ...next, savedAt: new Date().toISOString() },
+          stripUndefined({ ...next, savedAt: new Date().toISOString() }),
           { merge: true }
         );
       } catch (error) {

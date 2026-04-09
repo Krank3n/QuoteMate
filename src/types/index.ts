@@ -106,6 +106,12 @@ export interface SupplierGroup {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  // Optional contact details — surfaced in the supplier book card
+  contactPerson?: string;    // Account manager / rep name
+  phone?: string;
+  email?: string;
+  address?: string;
+  notes?: string;
 }
 
 export interface Job {

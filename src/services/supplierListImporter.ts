@@ -30,9 +30,37 @@ export interface ExtractedItem {
   rawLine?: string;
 }
 
+export interface ExtractedSupplierContact {
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  website?: string;
+}
+
 export interface ExtractResult {
   supplierName: string;
+  supplierContact?: ExtractedSupplierContact;
   items: ExtractedItem[];
+}
+
+function normaliseContact(raw: any): ExtractedSupplierContact | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const clean = (v: any): string | undefined => {
+    if (v === null || v === undefined) return undefined;
+    const s = v.toString().trim();
+    return s ? s : undefined;
+  };
+  const contact: ExtractedSupplierContact = {
+    contactPerson: clean(raw.contactPerson),
+    phone: clean(raw.phone),
+    email: clean(raw.email),
+    address: clean(raw.address),
+    website: clean(raw.website),
+  };
+  // Drop the object entirely if no field survived.
+  const hasAny = Object.values(contact).some(v => !!v);
+  return hasAny ? contact : undefined;
 }
 
 const MAX_IMAGES = 10;
@@ -116,6 +144,7 @@ export async function extractFromPhotos(
 
   return {
     supplierName: result.supplierName || supplierName || '',
+    supplierContact: normaliseContact(result.supplierContact),
     items: (result.items || []).map(normaliseItem).filter(i => i.name && i.price > 0),
   };
 }
@@ -141,6 +170,7 @@ export async function extractFromPdf(
 
   return {
     supplierName: result.supplierName || supplierName || '',
+    supplierContact: normaliseContact(result.supplierContact),
     items: (result.items || []).map(normaliseItem).filter(i => i.name && i.price > 0),
   };
 }

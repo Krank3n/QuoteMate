@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
   compactRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-evenly',
   },
   compactButton: {
     width: 32,

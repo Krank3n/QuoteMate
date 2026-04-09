@@ -12,7 +12,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  Alert,
   Platform,
   ActivityIndicator,
   Linking,
@@ -27,6 +26,18 @@ import { generateId } from '../utils/generateId';
 import { auth } from '../config/firebase';
 import { PhotoAnnotator } from './PhotoAnnotator';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
+import { SupplierListCaptureModal } from './SupplierListCaptureModal';
+import { AlertModal, AlertType } from './AlertModal';
+
+interface AlertConfig {
+  type: AlertType;
+  title: string;
+  message: string;
+  primaryButtonText?: string;
+  primaryButtonAction?: () => void;
+  secondaryButtonText?: string;
+  secondaryButtonAction?: () => void;
+}
 
 const MAX_PHOTOS = 5;
 
@@ -48,6 +59,11 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
   const [annotatingPhoto, setAnnotatingPhoto] = useState<LocalPhoto | null>(null);
   const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
+  const [captureModalVisible, setCaptureModalVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
+
+  const showAlert = (config: AlertConfig) => setAlertConfig(config);
+  const dismissAlert = () => setAlertConfig(null);
 
   // Merged view: committed photos from parent + local pending uploads
   const allPhotos: LocalPhoto[] = [
@@ -55,95 +71,161 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
     ...localPhotos,
   ];
 
-  const pickImage = async (useCamera: boolean) => {
-    if (allPhotos.length >= MAX_PHOTOS) {
-      Alert.alert('Limit Reached', `Maximum ${MAX_PHOTOS} photos per quote.`);
-      return;
-    }
-
-    // Request permissions — handle the "previously denied" case with a Settings shortcut
-    if (useCamera) {
-      const current = await ImagePicker.getCameraPermissionsAsync();
-      if (current.status !== 'granted') {
-        if (!current.canAskAgain) {
-          // Previously denied & system won't re-prompt — guide user to Settings
-          Alert.alert(
-            'Camera Access Needed',
-            'QuoteMate needs camera access to take site photos. You can enable it in Settings.',
-            [
-              { text: 'Not Now', style: 'cancel' },
-              { text: 'Open Settings', onPress: () => Linking.openSettings() },
-            ]
-          );
-          return;
-        }
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') return;
-      }
-    } else {
-      const current = await ImagePicker.getMediaLibraryPermissionsAsync();
-      if (current.status !== 'granted') {
-        if (!current.canAskAgain) {
-          Alert.alert(
-            'Photo Library Access Needed',
-            'QuoteMate needs photo library access to attach site photos. You can enable it in Settings.',
-            [
-              { text: 'Not Now', style: 'cancel' },
-              { text: 'Open Settings', onPress: () => Linking.openSettings() },
-            ]
-          );
-          return;
-        }
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') return;
-      }
-    }
-
-    const result = useCamera
-      ? await ImagePicker.launchCameraAsync({
-          mediaTypes: ['images'],
-          quality: 0.8,
-        })
-      : await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          quality: 0.8,
-          allowsMultipleSelection: true,
-          selectionLimit: MAX_PHOTOS - allPhotos.length,
-        });
-
-    if (result.canceled || !result.assets?.length) return;
+  /**
+   * Upload a list of local URIs as job photos. Shared by both the gallery
+   * picker and the multi-shot camera modal. Uploads run in parallel and the
+   * parent's photo list is updated as each one finishes — using a running
+   * `committed` snapshot rather than the (stale) `photos` closure, so all
+   * uploads from the same batch survive instead of clobbering each other.
+   */
+  const uploadUris = async (uris: string[]) => {
+    if (!uris.length) return;
 
     const userId = auth.currentUser?.uid;
     if (!userId) {
-      Alert.alert('Error', 'You must be signed in to upload photos.');
+      showAlert({
+        type: 'error',
+        title: 'Not Signed In',
+        message: 'You must be signed in to upload photos.',
+      });
       return;
     }
 
-    // Immediately show local previews
-    const pendingPhotos: LocalPhoto[] = result.assets.map(asset => ({
+    const pendingPhotos: LocalPhoto[] = uris.map(uri => ({
       id: generateId(),
       storageUrl: '',
-      localUri: asset.uri,
+      localUri: uri,
       uploading: true,
       annotated: false,
     }));
 
     setLocalPhotos(prev => [...prev, ...pendingPhotos]);
 
-    // Upload each in background
+    // Snapshot the parent's committed list once, then append to it as each
+    // upload completes. Avoids the stale-closure bug where sequential commits
+    // would each replace the parent state with `photos + onlyTheLastNewOne`.
+    // Uploads run sequentially: parallel `uploadBytes` calls from RN have
+    // historically hit XHR/blob races on some devices.
+    let committed: QuotePhoto[] = [...photos];
+    let anyFailed = false;
+
     for (const pending of pendingPhotos) {
       try {
         const storageUrl = await uploadQuotePhoto(userId, pending.localUri!);
-
-        // Move from local state to parent (committed) state
         setLocalPhotos(prev => prev.filter(p => p.id !== pending.id));
-        onPhotosChange([...photos, { id: pending.id, storageUrl, annotated: false }]);
-      } catch (error) {
-        // Remove the failed photo from local state
+        committed = [...committed, { id: pending.id, storageUrl, annotated: false }];
+        onPhotosChange(committed);
+      } catch (err) {
         setLocalPhotos(prev => prev.filter(p => p.id !== pending.id));
-        Alert.alert('Upload Failed', 'Could not upload photo. Please try again.');
+        anyFailed = true;
+        console.warn('[JobPhotos] upload failed', err);
       }
     }
+
+    if (anyFailed) {
+      showAlert({
+        type: 'error',
+        title: 'Upload Failed',
+        message: 'One or more photos could not be uploaded. Please try again.',
+      });
+    }
+  };
+
+  const pickFromGallery = async () => {
+    if (allPhotos.length >= MAX_PHOTOS) {
+      showAlert({
+        type: 'warning',
+        title: 'Limit Reached',
+        message: `Maximum ${MAX_PHOTOS} photos per quote.`,
+      });
+      return;
+    }
+
+    const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+    if (current.status !== 'granted') {
+      if (!current.canAskAgain) {
+        showAlert({
+          type: 'warning',
+          title: 'Photo Library Access Needed',
+          message:
+            'QuoteMate needs photo library access to attach site photos. You can enable it in Settings.',
+          primaryButtonText: 'Open Settings',
+          primaryButtonAction: () => {
+            dismissAlert();
+            Linking.openSettings();
+          },
+          secondaryButtonText: 'Not Now',
+          secondaryButtonAction: dismissAlert,
+        });
+        return;
+      }
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') return;
+    }
+
+    const remainingSlots = MAX_PHOTOS - allPhotos.length;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      allowsMultipleSelection: true,
+      // Use 0 (unlimited) so iOS always shows the multi-select checkmark UI.
+      // Setting this to 1 (e.g. when only one slot remains) makes PHPicker
+      // fall back to single-tap mode. We trim to remainingSlots below.
+      selectionLimit: 0,
+    });
+
+    if (result.canceled || !result.assets?.length) return;
+
+    let assets = result.assets;
+    if (assets.length > remainingSlots) {
+      assets = assets.slice(0, remainingSlots);
+      showAlert({
+        type: 'info',
+        title: 'Photo Limit',
+        message: `Only the first ${remainingSlots} photo${remainingSlots === 1 ? '' : 's'} were added (max ${MAX_PHOTOS} per quote).`,
+      });
+    }
+
+    await uploadUris(assets.map(a => a.uri));
+  };
+
+  const openCameraCapture = async () => {
+    if (allPhotos.length >= MAX_PHOTOS) {
+      showAlert({
+        type: 'warning',
+        title: 'Limit Reached',
+        message: `Maximum ${MAX_PHOTOS} photos per quote.`,
+      });
+      return;
+    }
+
+    // SupplierListCaptureModal handles its own camera permission UI, but we
+    // still pre-flight the "previously denied" case so we can deep-link to
+    // Settings rather than leaving the user stuck on the in-modal prompt.
+    const current = await ImagePicker.getCameraPermissionsAsync();
+    if (current.status !== 'granted' && !current.canAskAgain) {
+      showAlert({
+        type: 'warning',
+        title: 'Camera Access Needed',
+        message:
+          'QuoteMate needs camera access to take site photos. You can enable it in Settings.',
+        primaryButtonText: 'Open Settings',
+        primaryButtonAction: () => {
+          dismissAlert();
+          Linking.openSettings();
+        },
+        secondaryButtonText: 'Not Now',
+        secondaryButtonAction: dismissAlert,
+      });
+      return;
+    }
+
+    setCaptureModalVisible(true);
+  };
+
+  const handleCaptureComplete = async (uris: string[]) => {
+    setCaptureModalVisible(false);
+    await uploadUris(uris);
   };
 
   const handleDelete = (photoId: string) => {
@@ -157,21 +239,23 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
     const photo = photos.find(p => p.id === photoId);
     if (!photo) return;
 
-    Alert.alert('Remove Photo', 'Are you sure you want to remove this photo?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          onPhotosChange(photos.filter(p => p.id !== photoId));
-          try {
-            await deleteQuotePhoto(photo.storageUrl);
-          } catch {
-            // Non-critical
-          }
-        },
+    showAlert({
+      type: 'warning',
+      title: 'Remove Photo',
+      message: 'Are you sure you want to remove this photo?',
+      primaryButtonText: 'Remove',
+      primaryButtonAction: async () => {
+        dismissAlert();
+        onPhotosChange(photos.filter(p => p.id !== photoId));
+        try {
+          await deleteQuotePhoto(photo.storageUrl);
+        } catch {
+          // Non-critical
+        }
       },
-    ]);
+      secondaryButtonText: 'Cancel',
+      secondaryButtonAction: dismissAlert,
+    });
   };
 
   const handleAnnotationSave = async (annotatedUri: string) => {
@@ -208,13 +292,17 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
         onPhotosChange([...photos, { id: photoId, storageUrl: annotatingPhoto.storageUrl, annotated: annotatingPhoto.annotated }]);
       }
       setLocalPhotos(prev => prev.filter(p => p.id !== photoId));
-      Alert.alert('Save Failed', 'Could not save annotated photo.');
+      showAlert({
+        type: 'error',
+        title: 'Save Failed',
+        message: 'Could not save annotated photo.',
+      });
     }
   };
 
   const showAddOptions = () => {
     if (Platform.OS === 'web') {
-      pickImage(false);
+      pickFromGallery();
       return;
     }
 
@@ -222,8 +310,8 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
   };
 
   const photoSheetOptions: ActionSheetOption[] = [
-    { icon: 'camera', label: 'Take Photo', onPress: () => pickImage(true) },
-    { icon: 'image-multiple', label: 'Photo Library', onPress: () => pickImage(false) },
+    { icon: 'camera', label: 'Take Photo', onPress: openCameraCapture },
+    { icon: 'image-multiple', label: 'Photo Library', onPress: pickFromGallery },
   ];
 
   const hasAnyUploading = localPhotos.some(p => p.uploading);
@@ -302,6 +390,33 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
         onDismiss={() => setPhotoSheetVisible(false)}
         title="Add Photo"
         options={photoSheetOptions}
+      />
+
+      <SupplierListCaptureModal
+        visible={captureModalVisible}
+        onCancel={() => setCaptureModalVisible(false)}
+        onComplete={handleCaptureComplete}
+        maxPhotos={MAX_PHOTOS - allPhotos.length}
+        counterLabel="photos"
+        tips={[
+          'Capture each angle of the job site',
+          'Get close to anything that needs work',
+          'Snap measurements, fences, walls, gates',
+          'Include any obstacles or access issues',
+          'Multiple shots? Take them all before hitting Done',
+        ]}
+      />
+
+      <AlertModal
+        visible={!!alertConfig}
+        onDismiss={dismissAlert}
+        type={alertConfig?.type ?? 'info'}
+        title={alertConfig?.title ?? ''}
+        message={alertConfig?.message ?? ''}
+        primaryButtonText={alertConfig?.primaryButtonText}
+        primaryButtonAction={alertConfig?.primaryButtonAction}
+        secondaryButtonText={alertConfig?.secondaryButtonText}
+        secondaryButtonAction={alertConfig?.secondaryButtonAction}
       />
     </View>
   );

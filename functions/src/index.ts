@@ -1780,6 +1780,13 @@ function buildExtractSupplierPrompt(supplierName?: string, defaultUnit?: string)
 Supplier hint: ${supplierName || '(unknown)'}
 Default unit hint: ${defaultUnit || '(none)'}
 
+ALSO extract the supplier's contact details if they are clearly printed on the document (typically in the header, footer, or letterhead). Only include each field if you are confident the value is explicitly printed — never guess, never infer from the supplier name, never make up phone numbers or emails. Omit any field you are unsure about. The fields are:
+- contactPerson: account manager / sales rep name, if labelled as such
+- phone: primary phone number, digits and spacing as printed
+- email: primary email address (one address only)
+- address: street/postal address as printed (single line, comma separated)
+- website: primary website URL
+
 For each item, return:
 - name: clean product name (strip SKU codes unless they're the only identifier)
 - price: numeric AUD value (no currency symbol, no GST marker)
@@ -1799,10 +1806,17 @@ How to choose unit vs coverage:
 
 The rule of thumb: if a tradie can't buy a fraction of the listed item (e.g. a whole bag, a whole sheet), the unit must be "each" and the bundled measurement goes into coveragePerUnit.
 
-Skip header rows, column headings, section titles, subtotals, totals, page numbers, ads, contact info, terms, disclaimers, and anything that is not a purchasable line item.
+Skip header rows, column headings, section titles, subtotals, totals, page numbers, ads, terms, disclaimers, and anything that is not a purchasable line item. Contact info goes in the supplierContact block, NOT in items.
+
+If the photo contains ONLY contact details (a business card, letterhead, contact page) and no purchasable line items, return items: [] and fill in supplierContact with whatever you can read.
 
 Return ONLY valid JSON in this exact shape:
-{ "supplierName": "...", "items": [ { "name": "...", "price": 0, "unit": "each", "coveragePerUnit": null, "coverageUnit": null, "keywords": [], "confidence": "high", "rawLine": "..." } ] }`;
+{
+  "supplierName": "...",
+  "supplierContact": { "contactPerson": null, "phone": null, "email": null, "address": null, "website": null },
+  "items": [ { "name": "...", "price": 0, "unit": "each", "coveragePerUnit": null, "coverageUnit": null, "keywords": [], "confidence": "high", "rawLine": "..." } ]
+}
+For supplierContact, use null for any field that is not clearly printed on the document. If no contact details are visible at all, set every field to null.`;
 }
 
 /**
@@ -1877,6 +1891,9 @@ export const extractSupplierPriceList = functions
 
         res.status(200).json({
           supplierName: parsed.supplierName || supplierName || '',
+          supplierContact: parsed.supplierContact && typeof parsed.supplierContact === 'object'
+            ? parsed.supplierContact
+            : null,
           items: Array.isArray(parsed.items) ? parsed.items : [],
         });
       } catch (error: any) {
@@ -2851,8 +2868,11 @@ async function fetchPhotoAttachments(
 ): Promise<Array<{ name: string; content: string }>> {
   const attachments: Array<{ name: string; content: string }> = [];
 
+  // Only fetch remote URLs — legacy quotes may carry local file:// URIs
+  const remoteUrls = photoUrls.filter((url) => /^https?:\/\//i.test(url));
+
   const results = await Promise.allSettled(
-    photoUrls.map(async (url, index) => {
+    remoteUrls.map(async (url, index) => {
       const response = await fetch(url);
       if (!response.ok) return null;
 
@@ -4273,10 +4293,13 @@ function generateAcceptancePage(token: string): string {
           '</div>';
       }
 
-      // Photos section
+      // Photos section — skip non-http(s) URLs (legacy local file:// URIs)
       var photosHtml = '';
-      if (quote.photoUrls && quote.photoUrls.length > 0) {
-        var imgs = quote.photoUrls.map(function(url) {
+      var remotePhotoUrls = (quote.photoUrls || []).filter(function(url: string) {
+        return /^https?:\/\//i.test(url);
+      });
+      if (remotePhotoUrls.length > 0) {
+        var imgs = remotePhotoUrls.map(function(url: string) {
           return '<img src="' + escapeHtml(url) + '" alt="Job photo" />';
         }).join('');
         photosHtml =

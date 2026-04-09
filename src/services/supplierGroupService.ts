@@ -99,14 +99,30 @@ export async function saveGroup(group: SupplierGroup): Promise<void> {
     const auth = getAuth();
     if (auth.currentUser) {
       const db = getFirestore();
+      // Firestore rejects raw `undefined` — strip optional fields that aren't set.
+      const cleaned = Object.fromEntries(
+        Object.entries(group).filter(([, v]) => v !== undefined)
+      );
       await setDoc(
         doc(db, `users/${auth.currentUser.uid}/supplierGroups/${group.id}`),
-        group
+        cleaned
       );
     }
   } catch (error) {
     // silently ignore
   }
+}
+
+/**
+ * Look up a supplier group by name (case-insensitive).
+ * Returns null if no match. Used to join the materialFavorites supplier
+ * string back to its SupplierGroup record (e.g. for contact details).
+ */
+export async function getSupplierGroupByName(name: string): Promise<SupplierGroup | null> {
+  if (!name) return null;
+  const target = name.trim().toLowerCase();
+  const groups = await loadGroups();
+  return groups.find(g => g.name.trim().toLowerCase() === target) || null;
 }
 
 /**

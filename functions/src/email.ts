@@ -905,10 +905,12 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
   // Email body paragraphs
   const bodyHtml = esc(data.emailBody).replace(/\n\n/g, '</p><p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">').replace(/\n/g, '<br/>');
 
-  // Photos section
+  // Photos section — only embed http(s) URLs; legacy quotes may hold local
+  // file:// or blob: URIs that the recipient's mail client cannot resolve.
   let photosSection = '';
-  if (data.photoUrls?.length) {
-    const photoImgs = data.photoUrls.map(url =>
+  const remotePhotoUrls = (data.photoUrls || []).filter(url => /^https?:\/\//i.test(url));
+  if (remotePhotoUrls.length) {
+    const photoImgs = remotePhotoUrls.map(url =>
       `<td style="padding:4px;"><img src="${esc(url)}" width="160" style="display:block;width:160px;height:120px;object-fit:cover;border-radius:8px;" /></td>`
     ).join('');
     photosSection = `
