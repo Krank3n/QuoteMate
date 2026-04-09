@@ -60,10 +60,12 @@ Record and monitor payments on invoices.
 
 Get accurate material prices from multiple sources.
 
-**Price Sources:**
-- **Bunnings API** - Direct pricing from Bunnings warehouse
-- **Web Search** - Fallback pricing from online sources
-- **AI Estimation** - Intelligent price estimates when other sources unavailable
+**Price Sources** (resolved in order — your own data always wins):
+- **Section templates** - Saved bundles with prices attached
+- **Supplier price book** - Your favourites scoped to your suppliers
+- **Bunnings scraper** - Live pricing when Bunnings is in your supplier list
+- **Web Search** - Scraping for other configured supplier websites
+- **AI Estimation** - Claude-powered fallback when nothing else is available
 
 **Material Management:**
 - Search for materials by name

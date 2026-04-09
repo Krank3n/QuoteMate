@@ -178,7 +178,7 @@ export function estimateMaterialsFromTemplate(
       name: templateMaterial.name,
       quantity,
       unit: templateMaterial.unit,
-      price: 0, // Will be fetched from Bunnings API
+      price: 0, // Resolved later via the local-first pricing chain
       totalPrice: 0,
       manualPriceOverride: false,
       searchTerm: templateMaterial.searchTerm,

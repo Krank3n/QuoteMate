@@ -1,6 +1,6 @@
 /**
  * QuoteMate - Main App Entry Point
- * A quoting tool for Australian tradies with Bunnings API integration
+ * A quoting tool for Australian tradies.
  */
 
 import 'react-native-gesture-handler';

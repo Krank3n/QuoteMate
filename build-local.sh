@@ -10,10 +10,11 @@ echo "🔨 Building QuoteMate locally..."
 # Check for .env file
 if [ ! -f ".env" ]; then
     echo "❌ Error: .env file not found!"
-    echo "Please create a .env file with:"
+    echo "Please create a .env file with at minimum:"
     echo "  ANTHROPIC_API_KEY=your_key"
-    echo "  BUNNINGS_CLIENT_ID=your_id"
-    echo "  BUNNINGS_CLIENT_SECRET=your_secret"
+    echo "  BUNNINGS_SCRAPER_URL=..."
+    echo "  BUNNINGS_SCRAPER_API_KEY=..."
+    echo "(See .env.example for the full list of supported keys.)"
     exit 1
 fi
 

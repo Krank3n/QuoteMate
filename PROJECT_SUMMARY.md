@@ -2,7 +2,7 @@
 
 ## ✅ What's Been Built
 
-A complete, production-ready React Native mobile app for Australian tradies to create professional quotes with Bunnings API integration.
+A complete, production-ready React Native mobile app for Australian tradies to create professional quotes. Material pricing flows through a local-first chain (saved templates → supplier price book → Bunnings scraper → AI estimation).
 
 ### Core Features Implemented
 
@@ -157,7 +157,11 @@ QuoteMate/
     ├── types/
     │   └── index.ts               # TypeScript definitions
     ├── services/
-    │   └── bunningsApi.ts         # API service
+    │   ├── bunningsScraperClient.ts  # Bunnings price scraper client
+    │   ├── localMaterialSearch.ts    # Templates + favorites lookup
+    │   ├── materialFavorites.ts      # Per-user supplier price book
+    │   ├── sectionTemplateService.ts # Reusable section bundles
+    │   └── supplierGroupService.ts   # User-defined suppliers
     ├── store/
     │   └── useStore.ts            # Zustand store
     ├── data/

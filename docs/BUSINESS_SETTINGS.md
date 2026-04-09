@@ -183,19 +183,16 @@ Control whether payment methods appear on invoices.
 
 ## Pricing Source
 
-### Price Fetching Method
+Material prices are resolved automatically through a local-first chain:
 
-Choose how material prices are fetched:
+1. **Section templates** — your saved bundles with prices already attached
+2. **Supplier price book** — your favourites tagged to your configured suppliers
+3. **Bunnings scraper** — runs only if Bunnings is in your supplier list
+4. **Web scraping** — for other configured suppliers with a search URL
+5. **AI estimation** — Claude-powered fallback when nothing else turns up
 
-**Bunnings API:**
-- Direct pricing from Bunnings
-- Most accurate for Bunnings products
-- Requires internet connection
-
-**AI Estimation:**
-- Uses AI to estimate prices
-- Works when API unavailable
-- May be less precise
+You don't pick a method — the chain runs in order so your own data
+always wins over a retail lookup.
 
 ## Payment Methods
 

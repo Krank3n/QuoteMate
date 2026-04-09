@@ -1,14 +1,16 @@
 # QuoteMate
 
-**A modern quoting tool for Australian tradies with Bunnings Sandbox API integration**
+**A modern quoting tool for Australian tradies**
 
-QuoteMate is a React Native mobile app designed to help Australian tradies quickly create professional quotes by auto-populating material pricing from Bunnings APIs. Built with Expo, TypeScript, and React Native Paper for a polished, work-site-friendly interface.
+QuoteMate is a React Native mobile app designed to help Australian tradies quickly create professional quotes. It auto-populates material pricing from a local-first chain (saved templates → user supplier price book → Bunnings scraper → AI estimation), so the user's own data always wins. Built with Expo, TypeScript, and React Native Paper for a polished, work-site-friendly interface.
 
 ## Features
 
 ✅ **Smart Job Templates** - Pre-configured templates for common jobs (stairs, decks, fences, pergolas)
-✅ **AI-Powered Custom Jobs** - Describe any job in plain English, AI analyzes and suggests materials
-✅ **Bunnings API Integration** - Auto-fetch current pricing for materials
+✅ **Section Templates** - Save reusable bundles like "fence bay" with materials + labour pre-attached
+✅ **Supplier Price Book** - Per-user material favourites scoped to your real suppliers
+✅ **AI-Powered Custom Jobs** - Describe any job in plain English, Claude analyzes and suggests materials
+✅ **Local-First Pricing** - Your saved prices win over any retail lookup
 ✅ **Professional Quotes** - Generate and export PDF quotes with GST calculations
 ✅ **Company Branding** - Upload your logo to appear on all PDF invoices
 ✅ **Offline Support** - Save quotes locally with AsyncStorage
@@ -29,7 +31,9 @@ QuoteMate is a React Native mobile app designed to help Australian tradies quick
 - **Navigation**: React Navigation (Stack + Bottom Tabs)
 - **Storage**: AsyncStorage
 - **PDF Generation**: expo-print
-- **APIs**: Bunnings Sandbox APIs (OAuth 2.0, Item Query, Pricing)
+- **Pricing**: Bunnings price scraper, web scraping, Claude/AI estimation
+- **AI**: Anthropic Claude (via Firebase Functions)
+- **Backend**: Firebase (Auth, Firestore, Functions, Storage)
 
 ## Prerequisites
 
@@ -39,7 +43,6 @@ Before you begin, ensure you have the following installed:
 - **npm** or **yarn**
 - **Expo CLI** - Install globally: `npm install -g expo-cli`
 - **Expo Go** app on your phone (iOS or Android)
-- **Bunnings Sandbox API Credentials** - [Register here](https://developer.bunnings.com.au/)
 
 ## Installation
 
@@ -64,20 +67,20 @@ Create a `.env` file in the root directory (copy from `.env.example`):
 cp .env.example .env
 ```
 
-Edit `.env` and add your Bunnings Sandbox API credentials:
+Edit `.env` and add the API keys you need. At minimum:
 
 ```env
-BUNNINGS_CLIENT_ID=your_client_id_here
-BUNNINGS_CLIENT_SECRET=your_client_secret_here
-BUNNINGS_API_BASE_URL=https://sandbox.api.bunnings.com.au
-
-# Optional: For AI-powered custom job analysis
+# Anthropic — used for AI material generation and the Claude-powered
+# pricing fallback. Required for the auto-generate flow.
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# Bunnings scraper service (managed; ask the maintainer for these)
+BUNNINGS_SCRAPER_URL=...
+BUNNINGS_SCRAPER_API_KEY=...
 ```
 
-**Note**:
-- You need to register at the [Bunnings Developer Portal](https://developer.bunnings.com.au/) to get your credentials.
-- For AI-powered custom jobs, get an API key from [Anthropic Console](https://console.anthropic.com/) (optional but recommended)
+See `.env.example` for the full list of optional integrations
+(Reece, OpenAI, Kimi, Stripe, Firebase, Google OAuth, Xero).
 
 ### 4. Start the development server
 
@@ -101,7 +104,11 @@ QuoteMate/
 │   ├── types/
 │   │   └── index.ts            # TypeScript type definitions
 │   ├── services/
-│   │   └── bunningsApi.ts      # Bunnings API service
+│   │   ├── bunningsScraperClient.ts  # Bunnings price scraper client
+│   │   ├── localMaterialSearch.ts    # Templates + favorites lookup
+│   │   ├── materialFavorites.ts      # Per-user supplier price book
+│   │   ├── sectionTemplateService.ts # Reusable section bundles
+│   │   └── supplierGroupService.ts   # User-defined suppliers
 │   ├── store/
 │   │   └── useStore.ts         # Zustand state management
 │   ├── data/
@@ -142,7 +149,9 @@ QuoteMate/
    - For templates: e.g., number of steps, deck area, fence length
    - For custom jobs: Describe the job in plain English, AI will analyze and suggest materials
 5. **Review Materials** - Edit quantities, add/remove items
-6. **Fetch Bunnings Prices** - Auto-populate current pricing
+6. **Fetch Prices** - Auto-populate pricing from your saved templates,
+   supplier price book, the Bunnings scraper, or AI estimation (in that
+   priority order)
 7. **Set Labor & Markup** - Configure hours, rate, and markup percentage
 8. **Preview & Export** - Review the quote and export as PDF
 
@@ -150,11 +159,13 @@ QuoteMate/
 
 When you select "Custom Job":
 1. Enter a detailed description like: *"Build a 5x4 meter outdoor deck with 10 steps leading down to the garden. Need to replace old timber and add handrails."*
-2. The AI (Claude) analyzes your description and automatically:
-   - Identifies required materials with specific Bunnings product terms
+2. Claude analyzes your description and automatically:
+   - Identifies required materials with specific search terms
    - Estimates quantities based on job scope
    - Suggests labor hours
-3. Materials are then priced using the Bunnings API
+   - Groups materials into work sections
+3. Materials are then priced via the local-first chain (templates →
+   supplier favorites → Bunnings scraper → AI estimation)
 4. You can edit any suggestions before finalizing the quote
 
 ### Managing Quotes
@@ -165,35 +176,25 @@ When you select "Custom Job":
 - **Update Status** - Mark as draft, sent, accepted, or rejected
 - **Share** - Export quotes as PDF via email, SMS, or WhatsApp
 
-## Bunnings API Integration
+## Pricing Sources
 
-### Authentication
+Material prices are resolved through a priority chain so the user's own
+data always wins:
 
-The app uses OAuth 2.0 client credentials flow to authenticate with Bunnings APIs:
+1. **Section templates** — saved bundles like "fence bay" with prices
+   already attached. Matched by name/keywords.
+2. **Supplier favorites** — the per-user price book, scoped to the
+   suppliers configured in Settings.
+3. **Bunnings scraper** — only runs if Bunnings is in the supplier list
+   (or no suppliers are configured at all).
+4. **Web scraping** — runs against the user's other configured
+   supplier websites.
+5. **AI estimation** — Claude-powered fallback when nothing else turns
+   up a price.
 
-```typescript
-// Automatically handled by BunningsAPI service
-await bunningsApi.authenticate();
-```
-
-### Search Items
-
-```typescript
-const items = await bunningsApi.searchItem('treated pine 90x45');
-```
-
-### Get Pricing
-
-```typescript
-const price = await bunningsApi.getPrice('ITEM_NUMBER');
-```
-
-### Find and Price Material
-
-```typescript
-const result = await bunningsApi.findAndPriceMaterial('deck screws 75mm');
-// Returns: { item, price }
-```
+The same chain is used for both single-material search
+(`AddMaterialScreen.handleSearch`) and the bulk "Fetch Prices" flow
+(`MaterialsListScreen`).
 
 ## Customization
 
@@ -249,23 +250,14 @@ expo build:android
 
 For detailed instructions, see [Expo Build Documentation](https://docs.expo.dev/build/setup/).
 
-## API Limitations
-
-⚠️ **This app uses Bunnings Sandbox APIs which return mock data**
-
-For production use:
-- Register for production API access
-- Update API endpoints in `src/services/bunningsApi.ts`
-- Implement proper error handling for rate limits
-- Add caching to reduce API calls
-
 ## Troubleshooting
 
-### "Cannot connect to Bunnings API"
+### "No prices found"
 
-- Check your `.env` file has correct credentials
-- Ensure you have internet connection
-- Verify credentials at Bunnings Developer Portal
+- Make sure the Bunnings scraper env vars are set (or that the user has
+  saved supplier favorites for the materials they're searching)
+- Check your internet connection
+- Try tweaking the material name to match what's on the shelf
 
 ### "Expo Go app not connecting"
 
