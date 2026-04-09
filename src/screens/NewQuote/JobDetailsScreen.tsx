@@ -377,12 +377,13 @@ export function JobDetailsScreen() {
     }
   }, [currentQuote]);
 
-  // Save changes when navigating back
+  // Save changes when navigating back. updateQuote keeps currentQuote in sync,
+  // saveDraft persists to AsyncStorage + Firestore. Both are needed — without
+  // saveDraft, a gesture-back only updates memory and the edit can be lost.
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', () => {
       if (!currentQuote) return;
 
-      // Save any changes to job name and description before leaving
       if (jobName.trim() || jobDescription.trim()) {
         const updatedQuote = {
           ...currentQuote,
@@ -394,11 +395,12 @@ export function JobDetailsScreen() {
           photos: jobPhotos,
         };
         updateQuote(updatedQuote);
+        saveDraft(updatedQuote);
       }
     });
 
     return unsubscribe;
-  }, [navigation, currentQuote, jobName, jobDescription, updateQuote]);
+  }, [navigation, currentQuote, jobName, jobDescription, jobPhotos, updateQuote, saveDraft]);
 
   const handleVoiceRecording = async () => {
     // Web: Use native Web Speech API directly

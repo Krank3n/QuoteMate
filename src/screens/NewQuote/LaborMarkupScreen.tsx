@@ -251,7 +251,10 @@ export function LaborMarkupScreen() {
         extraHoursLocal
       );
 
-      // Save labor and calculated values before leaving
+      // Save labor and calculated values before leaving. Both updateQuote
+      // (sync, in-memory) and saveDraft (persists) are needed — gesture-back
+      // without saveDraft would leave the edit only in currentQuote and risk
+      // losing it to a stale snapshot or app quit.
       const updatedQuote = {
         ...currentQuote,
         ...(editedSectionsLocal ? { sections: editedSectionsLocal } : {}),
@@ -272,10 +275,11 @@ export function LaborMarkupScreen() {
         total: calculation.total,
       };
       updateQuote(updatedQuote);
+      saveDraft(updatedQuote);
     });
 
     return unsubscribe;
-  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showMarkup, showLaborBreakdown, travelAdjustment, travelDismissed, updateQuote]);
+  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showMarkup, showLaborBreakdown, travelAdjustment, travelDismissed, updateQuote, saveDraft]);
 
   if (!currentQuote) {
     return null;

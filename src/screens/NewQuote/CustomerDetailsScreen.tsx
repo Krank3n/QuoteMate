@@ -112,12 +112,15 @@ export function CustomerDetailsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Save changes when navigating back
+  // Save changes when navigating back. We must call BOTH updateQuote (sync,
+  // updates currentQuote in memory) AND saveDraft (persists to AsyncStorage +
+  // Firestore). Without saveDraft, gesture-back leaves the edit only in the
+  // store and it can be lost if the user quits the app or the listener fires
+  // a stale snapshot before they hit ViewQuoteScreen's auto-save.
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', () => {
       if (!currentQuote) return;
 
-      // Save any changes before leaving
       if (customerName.trim()) {
         const updatedQuote = {
           ...currentQuote,
@@ -128,11 +131,14 @@ export function CustomerDetailsScreen() {
           jobAddress: jobAddress.trim(),
         };
         updateQuote(updatedQuote);
+        // Fire-and-forget — saveDraft handles its own pending-write tracking
+        // and surfaces sync failures via the SyncErrorBanner.
+        saveDraft(updatedQuote);
       }
     });
 
     return unsubscribe;
-  }, [navigation, currentQuote, customerName, customerEmail, customerPhone, jobAddress, selectedContactId, updateQuote]);
+  }, [navigation, currentQuote, customerName, customerEmail, customerPhone, jobAddress, selectedContactId, updateQuote, saveDraft]);
 
   const handleSelectCustomer = (customer: SearchableContact | { name: string; email?: string; phone?: string; address?: string; searchSource?: string; id?: string }) => {
     setCustomerName(customer.name);

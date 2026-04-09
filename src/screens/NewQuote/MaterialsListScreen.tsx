@@ -384,6 +384,20 @@ export function MaterialsListScreen() {
   const [initialMaterialCount, setInitialMaterialCount] = useState(0);
   const [cancelGeneration, setCancelGeneration] = useState(false);
 
+  // Persist edits on gesture-back. Materials editing trickles many tiny
+  // updates into currentQuote via inline updateQuote calls; without this
+  // listener, swiping back would only update memory, leaving the changes
+  // unsynced until ViewQuoteScreen's focus auto-save runs (or, on app quit,
+  // losing them entirely). Mirrors the explicit handleBack flow.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      if (currentQuote) {
+        saveDraft(currentQuote);
+      }
+    });
+    return unsubscribe;
+  }, [navigation, currentQuote, saveDraft]);
+
   // Animate indeterminate progress bar during batch fetch phase
   useEffect(() => {
     if (fetchPhase === 'batch') {
