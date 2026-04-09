@@ -1877,6 +1877,55 @@ export function MaterialsListScreen() {
     updateQuote({ ...currentQuote, sections: updatedSections, materials: updatedMaterials });
   };
 
+  // Move a section up or down in the rendered order. Sort order is stored on
+  // each QuoteSection; we re-index everything after a swap so the values stay
+  // contiguous and don't drift over time.
+  const handleMoveSection = (sectionName: string, direction: 'up' | 'down') => {
+    if (!currentQuote) return;
+    const sections = currentQuote.sections || [];
+    if (sections.length < 2) return;
+    const sorted = [...sections].sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+    const idx = sorted.findIndex(s => s.name === sectionName);
+    if (idx === -1) return;
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= sorted.length) return;
+    [sorted[idx], sorted[swapIdx]] = [sorted[swapIdx], sorted[idx]];
+    const renumbered = sorted.map((s, i) => ({ ...s, sortOrder: i }));
+    updateQuote({ ...currentQuote, sections: renumbered });
+  };
+
+  // Duplicate a section: copies the section record + all its materials with
+  // fresh ids and a unique name. Useful when the user has e.g. 3 fence bays
+  // that share most settings but need slightly different quantities.
+  const handleDuplicateSection = (sectionName: string) => {
+    if (!currentQuote) return;
+    const original = (currentQuote.sections || []).find(s => s.name === sectionName);
+    if (!original) return;
+    const newName = getUniqueSectionName(`${sectionName} (copy)`);
+    const sourceMaterials = currentQuote.materials.filter(m => m.section === sectionName);
+    const newMaterials: Material[] = sourceMaterials.map(m => ({
+      ...m,
+      id: generateId(),
+      section: newName,
+    }));
+    const existingSections = currentQuote.sections || [];
+    const maxSortOrder = existingSections.reduce(
+      (max, s) => Math.max(max, s.sortOrder ?? -1),
+      -1
+    );
+    const newSection: QuoteSection = {
+      ...original,
+      id: `section-${Date.now()}`,
+      name: newName,
+      sortOrder: maxSortOrder + 1,
+    };
+    updateQuote({
+      ...currentQuote,
+      materials: [...currentQuote.materials, ...newMaterials],
+      sections: [...existingSections, newSection],
+    });
+  };
+
   const handleDeleteSection = (sectionName: string) => {
     if (!currentQuote) return;
     setDeleteSectionName(sectionName);
@@ -2441,6 +2490,21 @@ export function MaterialsListScreen() {
                 });
               }
 
+              // Order sections by their stored sortOrder. groupMaterialsByCategory
+              // returns them alphabetically, but the user expects to see them in
+              // the order they laid out (and reordered) on screen. Sections with
+              // no record (orphan materials whose section name was never added to
+              // currentQuote.sections) drop to the end.
+              const sortOrderByName = new Map(
+                (currentQuote?.sections || []).map(s => [s.name, s.sortOrder ?? 999])
+              );
+              sectionedGroups.sort(([a], [b]) => {
+                const oa = sortOrderByName.get(a) ?? 999;
+                const ob = sortOrderByName.get(b) ?? 999;
+                if (oa !== ob) return oa - ob;
+                return a.localeCompare(b);
+              });
+
               const toggleSectionCollapsed = (sectionName: string) => {
                 setCollapsedSections(prev => {
                   const next = new Set(prev);
@@ -2463,12 +2527,21 @@ export function MaterialsListScreen() {
                 unsectionedGroup.materials.forEach(m => flatData.push({ type: 'material', key: m.id, material: m }));
               }
 
+              // Section ordering helpers used by the up/down reorder buttons.
+              // Computed once per render so each header just looks itself up.
+              const orderedSectionNames = sectionedGroups.map(([key]) => key);
+
               const renderFlatItem = ({ item, drag, isActive }: RenderItemParams<FlatItem>) => {
                 if (item.type === 'header') {
                   const sd = currentQuote?.sections?.find(s => s.name === item.sectionName);
-                  const sectionMats = materials.filter(m => m.section === item.sectionName);
-                  const hasMultiplier = sd && sd.multiplier > 0 && sectionMats.some(m => m.templateBaseQuantity);
+                  // Show the multiplier stepper for any section with a record,
+                  // not just template-derived ones — non-template sections still
+                  // benefit from a visible multiplier (it scales labour).
+                  const showMultiplier = !!sd;
                   const isCollapsed = collapsedSections.has(item.sectionName);
+                  const sectionIdx = orderedSectionNames.indexOf(item.sectionName);
+                  const canMoveUp = sectionIdx > 0;
+                  const canMoveDown = sectionIdx >= 0 && sectionIdx < orderedSectionNames.length - 1;
                   return (
                     <View collapsable={false}>
                       <View style={[
@@ -2492,7 +2565,7 @@ export function MaterialsListScreen() {
                             <Text style={styles.sectionCardName}>{item.sectionName}</Text>
                           </TouchableOpacity>
                         )}
-                        {hasMultiplier && (
+                        {showMultiplier && (
                           <View style={styles.multiplierStepper}>
                             <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) - 1)}>
                               <MaterialCommunityIcons name="minus" size={14} color={colors.text} />
@@ -2504,6 +2577,23 @@ export function MaterialsListScreen() {
                           </View>
                         )}
                         <View style={styles.sectionCardActions}>
+                          <TouchableOpacity
+                            disabled={!canMoveUp}
+                            onPress={() => handleMoveSection(item.sectionName, 'up')}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <MaterialCommunityIcons name="arrow-up" size={18} color={canMoveUp ? colors.textMuted : colors.border} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            disabled={!canMoveDown}
+                            onPress={() => handleMoveSection(item.sectionName, 'down')}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <MaterialCommunityIcons name="arrow-down" size={18} color={canMoveDown ? colors.textMuted : colors.border} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => handleDuplicateSection(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <MaterialCommunityIcons name="content-copy" size={18} color={colors.textMuted} />
+                          </TouchableOpacity>
                           <TouchableOpacity onPress={() => handleSaveSectionAsTemplate(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                             <MaterialCommunityIcons name="content-save-outline" size={18} color={colors.textMuted} />
                           </TouchableOpacity>
@@ -2656,9 +2746,11 @@ export function MaterialsListScreen() {
               const renderWebFlatItem = (item: FlatItem) => {
                 if (item.type === 'header') {
                   const sd = currentQuote?.sections?.find(s => s.name === item.sectionName);
-                  const sectionMats = materials.filter(m => m.section === item.sectionName);
-                  const hasMultiplier = sd && sd.multiplier > 0 && sectionMats.some(m => m.templateBaseQuantity);
+                  const showMultiplier = !!sd;
                   const isCollapsed = collapsedSections.has(item.sectionName);
+                  const sectionIdx = orderedSectionNames.indexOf(item.sectionName);
+                  const canMoveUp = sectionIdx > 0;
+                  const canMoveDown = sectionIdx >= 0 && sectionIdx < orderedSectionNames.length - 1;
                   return (
                     <WebDropZone
                       keyProp={item.key}
@@ -2693,7 +2785,7 @@ export function MaterialsListScreen() {
                             <Text style={styles.sectionCardName}>{item.sectionName}</Text>
                           </TouchableOpacity>
                         )}
-                        {hasMultiplier && (
+                        {showMultiplier && (
                           <View style={styles.multiplierStepper}>
                             <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) - 1)}>
                               <MaterialCommunityIcons name="minus" size={14} color={colors.text} />
@@ -2705,6 +2797,23 @@ export function MaterialsListScreen() {
                           </View>
                         )}
                         <View style={styles.sectionCardActions}>
+                          <TouchableOpacity
+                            disabled={!canMoveUp}
+                            onPress={() => handleMoveSection(item.sectionName, 'up')}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <MaterialCommunityIcons name="arrow-up" size={18} color={canMoveUp ? colors.textMuted : colors.border} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            disabled={!canMoveDown}
+                            onPress={() => handleMoveSection(item.sectionName, 'down')}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <MaterialCommunityIcons name="arrow-down" size={18} color={canMoveDown ? colors.textMuted : colors.border} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => handleDuplicateSection(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <MaterialCommunityIcons name="content-copy" size={18} color={colors.textMuted} />
+                          </TouchableOpacity>
                           <TouchableOpacity onPress={() => handleSaveSectionAsTemplate(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                             <MaterialCommunityIcons name="content-save-outline" size={18} color={colors.textMuted} />
                           </TouchableOpacity>
