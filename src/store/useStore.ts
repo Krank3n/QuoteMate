@@ -15,12 +15,12 @@ import { auth } from '../config/firebase';
 
 /**
  * A user-visible record of the last sync failure. Populated by the saveDraft /
- * saveQuote / saveInvoice catch blocks so a banner can warn the user that their
- * latest edit hasn't reached the cloud yet — instead of failing silently like
- * the original "changes won't stick" bug.
+ * saveQuote / saveInvoice / favorites catch blocks so a banner can warn the user
+ * that their latest edit hasn't reached the cloud yet — instead of failing
+ * silently like the original "changes won't stick" bug.
  */
 export interface SyncError {
-  kind: 'quote' | 'invoice';
+  kind: 'quote' | 'invoice' | 'favorite';
   id: string;
   message: string;
   /** ISO timestamp the error occurred */
@@ -186,8 +186,11 @@ const STORAGE_KEYS = {
  * Record a sync failure: log to console for dev/CI visibility, then capture it on
  * the store so the SyncErrorBanner can warn the user. The original bug went
  * unnoticed for ages because every sync failure was silently swallowed.
+ *
+ * Exported so other services (e.g. materialFavorites) can route their own
+ * sync failures through the same banner instead of silently swallowing them.
  */
-function logSyncError(kind: SyncError['kind'], id: string, error: unknown): void {
+export function logSyncError(kind: SyncError['kind'], id: string, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   // eslint-disable-next-line no-console
   console.warn(`[sync] ${kind} ${id} failed:`, message, error);

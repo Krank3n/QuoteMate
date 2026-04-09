@@ -10,6 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getFirestore, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { FavoriteProductMapping } from '../types';
+import { logSyncError } from '../store/useStore';
 
 const FAVORITES_STORAGE_KEY = 'material_favorites';
 
@@ -31,6 +32,8 @@ export async function loadFavoritesFromLocal(): Promise<
     const stored = await AsyncStorage.getItem(FAVORITES_STORAGE_KEY);
     return stored ? JSON.parse(stored) : {};
   } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn('[favorites] failed to load from AsyncStorage', error);
     return {};
   }
 }
@@ -44,6 +47,8 @@ async function saveFavoritesToLocal(
   try {
     await AsyncStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favorites));
   } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn('[favorites] failed to write to AsyncStorage', error);
   }
 }
 
@@ -80,6 +85,10 @@ export async function getFavoriteProduct(
       return favorite;
     }
   } catch (error) {
+    // Read failure isn't fatal — local cache is the source of truth and we'll
+    // try again next time. Log it so the failure isn't completely invisible.
+    // eslint-disable-next-line no-console
+    console.warn(`[favorites] cloud read failed for ${key}`, error);
   }
 
   return null;
@@ -112,9 +121,11 @@ export async function saveFavoriteProduct(
       {
         ...favorite,
         savedAt: new Date().toISOString(),
-      }
+      },
+      { merge: true }
     );
   } catch (error) {
+    logSyncError('favorite', key, error);
   }
 }
 
@@ -141,6 +152,7 @@ export async function removeFavoriteProduct(
     const db = getFirestore();
     await deleteDoc(doc(db, `users/${auth.currentUser.uid}/materialFavorites/${key}`));
   } catch (error) {
+    logSyncError('favorite', key, error);
   }
 }
 
@@ -265,10 +277,15 @@ export async function bulkSaveFavorites(
           {
             ...merged,
             savedAt: new Date().toISOString(),
-          }
+          },
+          { merge: true }
         );
-      } catch {
-        // non-critical — local cache is source of truth for this session
+      } catch (error) {
+        // Local cache is source of truth for this session, but surface the
+        // failure so the user knows their bulk import didn't fully sync.
+        // logSyncError keeps only the most recent error, so a noisy import
+        // won't spam the banner — the user just sees that *something* failed.
+        logSyncError('favorite', key, error);
       }
     }
   }
@@ -330,10 +347,11 @@ export async function renameStoreOnFavorites(oldStore: string, newStore: string)
       try {
         await setDoc(
           doc(db, `users/${uid}/materialFavorites/${key}`),
-          { ...next, savedAt: new Date().toISOString() }
+          { ...next, savedAt: new Date().toISOString() },
+          { merge: true }
         );
-      } catch {
-        // non-critical — local cache is source of truth for this session
+      } catch (error) {
+        logSyncError('favorite', key, error);
       }
     }
   }
@@ -365,8 +383,8 @@ export async function deleteAllFavoritesByStore(supplierName: string): Promise<n
     if (db && uid) {
       try {
         await deleteDoc(doc(db, `users/${uid}/materialFavorites/${key}`));
-      } catch {
-        // non-critical — local cache is source of truth for this session
+      } catch (error) {
+        logSyncError('favorite', key, error);
       }
     }
   }
@@ -389,5 +407,7 @@ export async function syncFavoritesFromCloud(): Promise<void> {
     // Note: This would require a collection query, which we'll implement if needed
     // For now, favorites are synced lazily when accessed
   } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn('[favorites] startup sync failed', error);
   }
 }

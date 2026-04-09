@@ -22,7 +22,12 @@ export function SyncErrorBanner() {
 
   if (!lastSyncError) return null;
 
-  const label = lastSyncError.kind === 'invoice' ? 'invoice' : 'quote';
+  const label =
+    lastSyncError.kind === 'invoice'
+      ? 'invoice'
+      : lastSyncError.kind === 'favorite'
+      ? 'saved item'
+      : 'quote';
 
   return (
     <Surface style={styles.banner} elevation={2}>
