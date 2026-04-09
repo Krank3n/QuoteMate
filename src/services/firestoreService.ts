@@ -34,6 +34,49 @@ function stripUndefined(obj: any): any {
   return cleaned;
 }
 
+/**
+ * Convert any Firestore-shaped date value into a JS Date.
+ * Handles: Date, Firestore Timestamp, plain {seconds, nanoseconds}, ISO string, epoch number,
+ * null/undefined. Returns undefined for missing or unparseable input — NEVER returns Invalid Date.
+ *
+ * This exists because cloud functions write `serverTimestamp()` (a Firestore Timestamp),
+ * and the previous code did `new Date(timestampObj)` which silently produces Invalid Date.
+ * Downstream `.toISOString()` calls then threw, breaking all subsequent saves for that quote.
+ */
+function toDate(value: any): Date | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (value instanceof Date) return isNaN(value.getTime()) ? undefined : value;
+  if (value instanceof Timestamp) return value.toDate();
+  // Object that quacks like a Timestamp (covers SDK shape variations)
+  if (typeof value === 'object' && typeof (value as any).toDate === 'function') {
+    try {
+      const d = (value as any).toDate();
+      return d instanceof Date && !isNaN(d.getTime()) ? d : undefined;
+    } catch {
+      // fall through
+    }
+  }
+  // Plain object that survived JSON round-trip (e.g. {seconds, nanoseconds})
+  if (typeof value === 'object' && typeof (value as any).seconds === 'number') {
+    return new Date((value as any).seconds * 1000 + ((value as any).nanoseconds || 0) / 1e6);
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? undefined : d;
+  }
+  return undefined;
+}
+
+/**
+ * Convert a date-ish value into an ISO string for Firestore. Returns null for missing or
+ * unparseable input — never throws. Use this in place of `value.toISOString()` whenever the
+ * value originated from Firestore (could be a Timestamp object, not a JS Date).
+ */
+function safeIsoString(value: any): string | null {
+  const d = toDate(value);
+  return d ? d.toISOString() : null;
+}
+
 class FirestoreService {
   private quotesUnsubscribe: Unsubscribe | null = null;
   private settingsUnsubscribe: Unsubscribe | null = null;
@@ -59,18 +102,22 @@ class FirestoreService {
 
     try {
       const quoteRef = doc(db, 'users', userId, 'quotes', quote.id);
+      // Use safeIsoString everywhere — these fields may have round-tripped through Firestore
+      // as Timestamps and could be Invalid Dates if previously parsed with `new Date(<Timestamp>)`.
+      // Use merge:true so we don't clobber server-only fields like acceptanceTokenHash that the
+      // sendQuoteEmail cloud function maintains.
       await setDoc(quoteRef, stripUndefined({
         ...quote,
-        createdAt: quote.createdAt.toISOString(),
-        updatedAt: quote.updatedAt.toISOString(),
+        createdAt: safeIsoString(quote.createdAt) || new Date().toISOString(),
+        updatedAt: safeIsoString(quote.updatedAt) || new Date().toISOString(),
         // Handle new quote acceptance fields
         acceptanceToken: quote.acceptanceToken || null,
-        acceptanceTokenCreatedAt: quote.acceptanceTokenCreatedAt?.toISOString() || null,
-        respondedAt: quote.respondedAt?.toISOString() || null,
+        acceptanceTokenCreatedAt: safeIsoString(quote.acceptanceTokenCreatedAt),
+        respondedAt: safeIsoString(quote.respondedAt),
         respondedBy: quote.respondedBy || null,
         clientNotes: quote.clientNotes || null,
         syncedAt: new Date().toISOString(),
-      }));
+      }), { merge: true });
     } catch (error) {
       throw error;
     }
@@ -92,13 +139,14 @@ class FirestoreService {
 
       const quotes: Quote[] = snapshot.docs.map((doc) => {
         const data = doc.data();
+        const createdAt = toDate(data.createdAt) || new Date();
         return {
           ...data,
-          createdAt: new Date(data.createdAt),
-          updatedAt: data.updatedAt ? new Date(data.updatedAt) : new Date(data.createdAt),
+          createdAt,
+          updatedAt: toDate(data.updatedAt) || createdAt,
           // Handle new quote acceptance fields
-          acceptanceTokenCreatedAt: data.acceptanceTokenCreatedAt ? new Date(data.acceptanceTokenCreatedAt) : undefined,
-          respondedAt: data.respondedAt ? new Date(data.respondedAt) : undefined,
+          acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
+          respondedAt: toDate(data.respondedAt),
         } as Quote;
       });
 
@@ -370,13 +418,14 @@ class FirestoreService {
       this.quotesUnsubscribe = onSnapshot(q, (snapshot) => {
         const quotes: Quote[] = snapshot.docs.map((doc) => {
           const data = doc.data();
+          const createdAt = toDate(data.createdAt) || new Date();
           return {
             ...data,
-            createdAt: new Date(data.createdAt),
-            updatedAt: data.updatedAt ? new Date(data.updatedAt) : new Date(data.createdAt),
+            createdAt,
+            updatedAt: toDate(data.updatedAt) || createdAt,
             // Handle new quote acceptance fields
-            acceptanceTokenCreatedAt: data.acceptanceTokenCreatedAt ? new Date(data.acceptanceTokenCreatedAt) : undefined,
-            respondedAt: data.respondedAt ? new Date(data.respondedAt) : undefined,
+            acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
+            respondedAt: toDate(data.respondedAt),
           } as Quote;
         });
 
@@ -493,7 +542,11 @@ class FirestoreService {
 
     try {
       const invoiceRef = doc(db, 'users', userId, 'invoices', invoice.id);
-      // Convert undefined values to null for Firestore compatibility
+      // Use safeIsoString — these dates may have round-tripped through Firestore as Timestamps,
+      // and the previous `.toISOString()` calls would throw on Invalid Date and silently kill
+      // every subsequent sync. Use merge:true so we don't clobber server-only fields like
+      // sentAt or status that the sendInvoiceEmail cloud function maintains.
+      const nowIso = new Date().toISOString();
       await setDoc(invoiceRef, stripUndefined({
         ...invoice,
         // Optional string fields - convert undefined to null
@@ -509,19 +562,19 @@ class FirestoreService {
         customPaymentDays: invoice.customPaymentDays ?? null,
         paidAmount: invoice.paidAmount ?? null,
         // Date fields
-        createdAt: invoice.createdAt.toISOString(),
-        updatedAt: invoice.updatedAt.toISOString(),
-        issueDate: invoice.issueDate.toISOString(),
-        dueDate: invoice.dueDate.toISOString(),
-        paidDate: invoice.paidDate?.toISOString() || null,
+        createdAt: safeIsoString(invoice.createdAt) || nowIso,
+        updatedAt: safeIsoString(invoice.updatedAt) || nowIso,
+        issueDate: safeIsoString(invoice.issueDate) || nowIso,
+        dueDate: safeIsoString(invoice.dueDate) || nowIso,
+        paidDate: safeIsoString(invoice.paidDate),
         // Xero integration fields
         xeroInvoiceId: invoice.xeroInvoiceId || null,
         xeroContactId: invoice.xeroContactId || null,
         xeroSyncStatus: invoice.xeroSyncStatus || null,
-        xeroSyncedAt: invoice.xeroSyncedAt instanceof Date ? invoice.xeroSyncedAt.toISOString() : (invoice.xeroSyncedAt || null),
+        xeroSyncedAt: safeIsoString(invoice.xeroSyncedAt),
         xeroSyncError: invoice.xeroSyncError || null,
-        syncedAt: new Date().toISOString(),
-      }));
+        syncedAt: nowIso,
+      }), { merge: true });
     } catch (error) {
       throw error;
     }
@@ -543,14 +596,15 @@ class FirestoreService {
 
       const invoices: Invoice[] = snapshot.docs.map((doc) => {
         const data = doc.data();
+        const createdAt = toDate(data.createdAt) || new Date();
         return {
           ...data,
-          createdAt: new Date(data.createdAt),
-          updatedAt: new Date(data.updatedAt),
-          issueDate: new Date(data.issueDate),
-          dueDate: new Date(data.dueDate),
-          paidDate: data.paidDate ? new Date(data.paidDate) : undefined,
-          xeroSyncedAt: data.xeroSyncedAt ? new Date(data.xeroSyncedAt) : undefined,
+          createdAt,
+          updatedAt: toDate(data.updatedAt) || createdAt,
+          issueDate: toDate(data.issueDate) || createdAt,
+          dueDate: toDate(data.dueDate) || createdAt,
+          paidDate: toDate(data.paidDate),
+          xeroSyncedAt: toDate(data.xeroSyncedAt),
         } as Invoice;
       });
 
@@ -593,14 +647,15 @@ class FirestoreService {
       this.invoicesUnsubscribe = onSnapshot(q, (snapshot) => {
         const invoices: Invoice[] = snapshot.docs.map((doc) => {
           const data = doc.data();
+          const createdAt = toDate(data.createdAt) || new Date();
           return {
             ...data,
-            createdAt: new Date(data.createdAt),
-            updatedAt: new Date(data.updatedAt),
-            issueDate: new Date(data.issueDate),
-            dueDate: new Date(data.dueDate),
-            paidDate: data.paidDate ? new Date(data.paidDate) : undefined,
-            xeroSyncedAt: data.xeroSyncedAt ? new Date(data.xeroSyncedAt) : undefined,
+            createdAt,
+            updatedAt: toDate(data.updatedAt) || createdAt,
+            issueDate: toDate(data.issueDate) || createdAt,
+            dueDate: toDate(data.dueDate) || createdAt,
+            paidDate: toDate(data.paidDate),
+            xeroSyncedAt: toDate(data.xeroSyncedAt),
           } as Invoice;
         });
 
