@@ -13,10 +13,16 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import {
-  Modal,
-  Portal,
+  View,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Modal as RNModal,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import {
   Text,
   Button,
   TextInput,
@@ -26,6 +32,7 @@ import {
   IconButton,
   Divider,
 } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import type { ExtractedItem } from '../services/supplierListImporter';
@@ -93,6 +100,7 @@ export function SupplierListReviewModal({
   onCancel,
   onSave,
 }: Props) {
+  const safeInsets = useSafeAreaInsets();
   const [supplierName, setSupplierName] = useState(initialSupplierName);
   const [rows, setRows] = useState<ReviewItemState[]>([]);
   const [keywordDraft, setKeywordDraft] = useState<Record<string, string>>({});
@@ -211,20 +219,31 @@ export function SupplierListReviewModal({
   };
 
   return (
-    <Portal>
-      <Modal
-        visible={visible}
-        onDismiss={onCancel}
-        contentContainerStyle={styles.container}
+    <RNModal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={onCancel}
+    >
+      <KeyboardAvoidingView
+        style={styles.fullScreen}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.header}>
-          <Text style={styles.title}>
-            Found {initialItems.length} item{initialItems.length === 1 ? '' : 's'}. Review and save.
-          </Text>
+        <View style={[styles.header, { paddingTop: safeInsets.top + 8 }]}>
+          <View style={styles.headerTextWrap}>
+            <Text style={styles.title}>
+              Found {initialItems.length} item{initialItems.length === 1 ? '' : 's'}
+            </Text>
+            <Text style={styles.subtitle}>Review and save</Text>
+          </View>
           <IconButton icon="close" onPress={onCancel} disabled={saving} />
         </View>
 
-        <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
+        <ScrollView
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+          keyboardShouldPersistTaps="handled"
+        >
           <TextInput
             label="Supplier name"
             value={supplierName}
@@ -364,7 +383,7 @@ export function SupplierListReviewModal({
           ))}
         </ScrollView>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: safeInsets.bottom + 12 }]}>
           <Button mode="text" onPress={onCancel} disabled={saving}>
             Cancel
           </Button>
@@ -377,36 +396,40 @@ export function SupplierListReviewModal({
             Save selected ({selectedCount})
           </Button>
         </View>
-      </Modal>
-    </Portal>
+      </KeyboardAvoidingView>
+    </RNModal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.surface,
-    margin: 16,
-    borderRadius: 16,
-    maxHeight: '92%',
-    overflow: 'hidden',
+  fullScreen: {
+    flex: 1,
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.surfaceLight,
   },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
+  headerTextWrap: {
     flex: 1,
   },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  subtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
   body: {
-    flexGrow: 0,
+    flex: 1,
   },
   bodyContent: {
     padding: 16,
@@ -437,15 +460,13 @@ const styles = StyleSheet.create({
   chipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 4,
+    rowGap: 6,
+    columnGap: 6,
+    marginTop: 6,
   },
-  confidenceChip: {
-    height: 22,
-  },
+  confidenceChip: {},
   newChip: {
     backgroundColor: '#22c55e22',
-    height: 22,
   },
   newChipText: {
     color: '#22c55e',
@@ -453,7 +474,6 @@ const styles = StyleSheet.create({
   },
   changedChip: {
     backgroundColor: '#f59e0b22',
-    height: 22,
   },
   changedChipText: {
     color: '#f59e0b',
@@ -461,7 +481,6 @@ const styles = StyleSheet.create({
   },
   unchangedChip: {
     backgroundColor: colors.surfaceLight,
-    height: 22,
   },
   unchangedChipText: {
     color: colors.textMuted,
@@ -469,7 +488,6 @@ const styles = StyleSheet.create({
   },
   removedChip: {
     backgroundColor: '#ef444422',
-    height: 22,
   },
   removedChipText: {
     color: '#ef4444',
@@ -493,17 +511,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 4,
-    marginTop: 8,
+    rowGap: 8,
+    columnGap: 6,
+    marginTop: 10,
   },
   keywordChip: {
-    height: 26,
+    // Let Paper compute the natural height — explicit height was clipping
+    // the chip content in flexWrap rows.
   },
   keywordInput: {
     flex: 1,
-    minWidth: 100,
+    minWidth: 120,
     backgroundColor: 'transparent',
-    height: 34,
   },
   rawLine: {
     fontSize: 11,
