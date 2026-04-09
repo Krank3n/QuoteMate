@@ -37,7 +37,7 @@ export function SendQuoteButton({
   buttonStyle,
   onEmailDialogOpen,
 }: SendQuoteButtonProps) {
-  const { subscriptionStatus } = useStore();
+  const { subscriptionStatus, saveDraft } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
   const [sendDialogVisible, setSendDialogVisible] = useState(false);
@@ -47,13 +47,25 @@ export function SendQuoteButton({
 
   const handleEmailOption = async () => {
     setSendDialogVisible(false);
+
+    // If we already have a saved draft for this quote, reuse it directly —
+    // no AI generation, no spinner. The user gets back exactly what they
+    // had last time, including any manual edits. Regenerate is still
+    // available if they want a fresh one.
+    if (quote.draftEmailBody) {
+      setEmailBody(quote.draftEmailBody);
+      setEmailPreviewVisible(true);
+      return;
+    }
+
     setIsGeneratingEmail(true);
     setEmailPreviewVisible(true);
 
     try {
+      let body: string;
       if (isPro) {
         // Generate AI email body
-        const body = await generateQuoteEmail({
+        body = await generateQuoteEmail({
           jobName: quote.job.name,
           jobDescription: quote.job.description || '',
           materials: quote.materials.map(m => ({
@@ -66,24 +78,30 @@ export function SendQuoteButton({
           businessName: businessSettings?.businessName || '',
           customerName: quote.customerName,
         });
-        setEmailBody(body);
       } else {
         // Free users get default template
-        setEmailBody(getDefaultEmailBody(
+        body = getDefaultEmailBody(
           quote.customerName,
           quote.job.name,
           quote.total,
           businessSettings?.businessName || 'Your Business'
-        ));
+        );
       }
+      setEmailBody(body);
+      // Persist so subsequent opens skip generation. Fire-and-forget;
+      // saveDraft handles its own AsyncStorage + Firestore writes.
+      saveDraft({ ...quote, draftEmailBody: body });
     } catch (error) {
-      // Fallback to default template
-      setEmailBody(getDefaultEmailBody(
+      // Fallback to default template — also persisted so we don't keep
+      // hitting the failing AI endpoint on reopen.
+      const fallback = getDefaultEmailBody(
         quote.customerName,
         quote.job.name,
         quote.total,
         businessSettings?.businessName || 'Your Business'
-      ));
+      );
+      setEmailBody(fallback);
+      saveDraft({ ...quote, draftEmailBody: fallback });
     } finally {
       setIsGeneratingEmail(false);
     }
@@ -106,10 +124,20 @@ export function SendQuoteButton({
         customerName: quote.customerName,
       });
       setEmailBody(body);
+      // Persist the regenerated body so it sticks for next open.
+      saveDraft({ ...quote, draftEmailBody: body });
     } catch (error) {
       Alert.alert('Error', 'Could not regenerate email. Please try again.');
     } finally {
       setIsGeneratingEmail(false);
+    }
+  };
+
+  const handleEmailPreviewDismiss = () => {
+    setEmailPreviewVisible(false);
+    // Persist any manual edits the user made before closing.
+    if (emailBody && emailBody !== (quote.draftEmailBody || '')) {
+      saveDraft({ ...quote, draftEmailBody: emailBody });
     }
   };
 
@@ -194,7 +222,7 @@ export function SendQuoteButton({
 
       <EmailPreviewModal
         visible={emailPreviewVisible}
-        onDismiss={() => setEmailPreviewVisible(false)}
+        onDismiss={handleEmailPreviewDismiss}
         quote={quote}
         businessSettings={businessSettings}
         emailBody={emailBody}

@@ -3,8 +3,8 @@
  * Full screen view for viewing and managing saved quotes
  */
 
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, InteractionManager, ActivityIndicator } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, ActivityIndicator } from 'react-native';
 import {
   Text,
   Button,
@@ -41,38 +41,36 @@ export function ViewQuoteScreen() {
   const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote, createInvoiceFromQuote, saveInvoice, nextQuoteNumber } = useStore();
   const insets = useSafeAreaInsets();
 
-  const [displayQuote, setDisplayQuote] = useState(() => quotes.find(q => q.id === quoteId) || null);
+  // displayQuote is derived directly from the store so edits made on
+  // MaterialsListScreen / LaborMarkupScreen via saveDraft show up the moment
+  // the store updates (~100ms), instead of waiting for a focus effect +
+  // InteractionManager handle that could stay open for several seconds and
+  // froze the materials card for ~10s after returning from MaterialsList.
+  const displayQuote = useMemo(
+    () => quotes.find((q) => q.id === quoteId) || null,
+    [quotes, quoteId]
+  );
+
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [isEditingNumber, setIsEditingNumber] = useState(false);
   const [quoteNumber, setQuoteNumber] = useState('');
 
-  // Refresh quote data when screen comes into focus
-  // Auto-save if there are pending changes in currentQuote
-  // Defer state updates until after transition animation to prevent glitches
+  // Clear the in-progress edit sentinel when we re-focus this screen after
+  // editing materials/labor. This MUST be in a focus effect (not a plain
+  // useEffect) because handleEditSection calls setCurrentQuote(quote) right
+  // before navigating to MaterialsList — clearing it on render would null
+  // out the quote the edit screen needs and the edit screen would mount
+  // blank. By gating on focus, we only clear AFTER the user has come back.
+  // The MaterialsList unsaved-changes guard already persisted via saveDraft,
+  // so there is nothing to flush here.
   useFocusEffect(
     React.useCallback(() => {
-      const task = InteractionManager.runAfterInteractions(() => {
-        const savedQuote = quotes.find(q => q.id === quoteId);
-
-        // If currentQuote matches this quote ID, auto-save the changes
-        if (currentQuote && currentQuote.id === quoteId) {
-          const updatedQuote = {
-            ...currentQuote,
-            updatedAt: new Date(),
-          };
-          saveQuote(updatedQuote);
-          setDisplayQuote(updatedQuote);
-          // Clear currentQuote after saving
-          setCurrentQuote(null);
-        } else if (savedQuote) {
-          setDisplayQuote(savedQuote);
-        }
-      });
-
-      return () => task.cancel();
-    }, [quotes, currentQuote, quoteId, saveQuote, setCurrentQuote])
+      if (currentQuote && currentQuote.id === quoteId) {
+        setCurrentQuote(null);
+      }
+    }, [currentQuote, quoteId, setCurrentQuote])
   );
 
   // Sync quoteNumber when displayQuote loads/changes
@@ -87,7 +85,8 @@ export function ViewQuoteScreen() {
     if (!displayQuote) return;
     if (quoteNumber !== (displayQuote.quoteNumber || '')) {
       const updated = { ...displayQuote, quoteNumber, updatedAt: new Date() };
-      setDisplayQuote(updated);
+      // saveQuote updates the `quotes` array in the store; our memo above
+      // re-derives displayQuote from that, so no manual local update needed.
       await saveQuote(updated);
     }
   };

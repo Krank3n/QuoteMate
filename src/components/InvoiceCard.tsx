@@ -63,7 +63,7 @@ export const InvoiceCard = React.memo(function InvoiceCard({
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const idleAnim = useRef(new Animated.Value(0)).current;
   const idleTilt = useRef(new Animated.Value(0)).current;
-  const { subscriptionStatus, quotes, xeroConnection, pushInvoiceToXero } = useStore();
+  const { subscriptionStatus, quotes, xeroConnection, pushInvoiceToXero, saveInvoice } = useStore();
   const sourceQuotePhotos = invoice.sourceQuoteId
     ? quotes.find(q => q.id === invoice.sourceQuoteId)?.photos || []
     : [];
@@ -106,12 +106,20 @@ export const InvoiceCard = React.memo(function InvoiceCard({
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const handleSendInvoice = async () => {
+    // Reuse the saved draft if we have one — no AI call, no spinner.
+    if (invoice.draftEmailBody) {
+      setEmailBody(invoice.draftEmailBody);
+      setEmailPreviewVisible(true);
+      return;
+    }
+
     setIsGeneratingEmail(true);
     setEmailPreviewVisible(true);
 
     try {
+      let body: string;
       if (isPro) {
-        const body = await generateInvoiceEmail({
+        body = await generateInvoiceEmail({
           jobName: invoice.job.name,
           jobDescription: invoice.job.description || '',
           materials: invoice.materials.map(m => ({
@@ -126,24 +134,27 @@ export const InvoiceCard = React.memo(function InvoiceCard({
           dueDate: new Date(invoice.dueDate).toISOString(),
           invoiceNumber: invoice.invoiceNumber,
         });
-        setEmailBody(body);
       } else {
-        setEmailBody(getDefaultInvoiceEmailBody(
+        body = getDefaultInvoiceEmailBody(
           invoice.customerName,
           invoice.job.name,
           invoice.total,
           businessSettings?.businessName || 'Your Business',
           new Date(invoice.dueDate).toISOString()
-        ));
+        );
       }
+      setEmailBody(body);
+      saveInvoice({ ...invoice, draftEmailBody: body });
     } catch (error) {
-      setEmailBody(getDefaultInvoiceEmailBody(
+      const fallback = getDefaultInvoiceEmailBody(
         invoice.customerName,
         invoice.job.name,
         invoice.total,
         businessSettings?.businessName || 'Your Business',
         new Date(invoice.dueDate).toISOString()
-      ));
+      );
+      setEmailBody(fallback);
+      saveInvoice({ ...invoice, draftEmailBody: fallback });
     } finally {
       setIsGeneratingEmail(false);
     }
@@ -168,10 +179,18 @@ export const InvoiceCard = React.memo(function InvoiceCard({
         invoiceNumber: invoice.invoiceNumber,
       });
       setEmailBody(body);
+      saveInvoice({ ...invoice, draftEmailBody: body });
     } catch (error) {
       Alert.alert('Error', 'Could not regenerate email. Please try again.');
     } finally {
       setIsGeneratingEmail(false);
+    }
+  };
+
+  const handleEmailPreviewDismiss = () => {
+    setEmailPreviewVisible(false);
+    if (emailBody && emailBody !== (invoice.draftEmailBody || '')) {
+      saveInvoice({ ...invoice, draftEmailBody: emailBody });
     }
   };
 
@@ -395,7 +414,7 @@ export const InvoiceCard = React.memo(function InvoiceCard({
 
     <InvoiceEmailPreviewModal
       visible={emailPreviewVisible}
-      onDismiss={() => setEmailPreviewVisible(false)}
+      onDismiss={handleEmailPreviewDismiss}
       invoice={invoice}
       businessSettings={businessSettings}
       emailBody={emailBody}

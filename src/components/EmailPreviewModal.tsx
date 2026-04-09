@@ -25,7 +25,7 @@ import {
   Switch,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets, initialWindowMetrics } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../theme';
 import { Quote, BusinessSettings } from '../types';
@@ -174,6 +174,14 @@ export function EmailPreviewModal({
   isRegenerating,
 }: EmailPreviewModalProps) {
   const insets = useSafeAreaInsets();
+  // RN's <Modal> renders in its own native view hierarchy, so the root
+  // SafeAreaProvider doesn't reach inside — useSafeAreaInsets().bottom
+  // returns 0 here and the footer ends up sitting on top of the gesture/nav
+  // bar. initialWindowMetrics is a module-level value captured at app startup
+  // from the native side, so it gives us the real device bottom inset
+  // regardless of where in the tree we read it.
+  const fallbackBottom = initialWindowMetrics?.insets.bottom ?? 0;
+  const bottomInset = Math.max(insets.bottom, fallbackBottom, 16);
   const [recipientEmail, setRecipientEmail] = useState(quote.customerEmail || '');
   const [subject, setSubject] = useState(
     `Quotation from ${businessSettings?.businessName || 'Your Business'} - ${quote.job.name}`
@@ -528,7 +536,7 @@ export function EmailPreviewModal({
             </TouchableOpacity>
           </View>
         ) : !isKeyboardVisible ? (
-          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <View style={[styles.footer, { paddingBottom: bottomInset }]}>
             <View style={styles.footerButtons}>
               {ownerEmail ? (
                 <Button
@@ -783,7 +791,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   footer: {
-    padding: 16,
+    // Match the quote flow's bottomBar (QuotePreviewScreen.tsx) so the
+    // footer button area looks identical across the app. The dynamic
+    // paddingBottom is applied inline at the call site via insets.bottom.
+    paddingHorizontal: 16,
+    paddingTop: 14,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.surface,

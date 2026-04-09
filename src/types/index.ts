@@ -172,6 +172,11 @@ export interface Quote {
   photos?: QuotePhoto[];
   // AI email content (stored at send time for acceptance page)
   aiEmailBody?: string;
+  // In-progress email body shown in the email preview modal. Generated (or
+  // typed) on first open and persisted so reopening the modal doesn't trigger
+  // a fresh AI generation. The Regenerate button overwrites this. Distinct
+  // from aiEmailBody, which is the canonical record of what was sent.
+  draftEmailBody?: string;
 }
 
 export interface JobTemplate {
@@ -448,6 +453,11 @@ export interface Invoice {
   xeroSyncStatus?: XeroSyncStatus;
   xeroSyncedAt?: Date;         // Last successful sync timestamp
   xeroSyncError?: string;      // Last sync error message
+
+  // In-progress email body shown in the invoice email preview modal.
+  // Generated (or typed) on first open and persisted so reopening doesn't
+  // trigger a fresh AI generation. Regenerate overwrites it.
+  draftEmailBody?: string;
 }
 
 // Xero integration types

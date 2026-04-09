@@ -64,7 +64,7 @@ export const QuoteCard = React.memo(function QuoteCard({
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const idleAnim = useRef(new Animated.Value(0)).current;
   const idleTilt = useRef(new Animated.Value(0)).current;
-  const { subscriptionStatus } = useStore();
+  const { subscriptionStatus, saveDraft } = useStore();
 
   // Subtle idle bob + tilt — randomized so cards are never in sync
   // Uses Animated.loop + delay for proper cleanup
@@ -105,12 +105,20 @@ export const QuoteCard = React.memo(function QuoteCard({
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const handleSendQuote = async () => {
+    // Reuse the saved draft if we have one — no AI call, no spinner.
+    if (quote.draftEmailBody) {
+      setEmailBody(quote.draftEmailBody);
+      setEmailPreviewVisible(true);
+      return;
+    }
+
     setIsGeneratingEmail(true);
     setEmailPreviewVisible(true);
 
     try {
+      let body: string;
       if (isPro) {
-        const body = await generateQuoteEmail({
+        body = await generateQuoteEmail({
           jobName: quote.job.name,
           jobDescription: quote.job.description || '',
           materials: quote.materials.map(m => ({
@@ -123,22 +131,25 @@ export const QuoteCard = React.memo(function QuoteCard({
           businessName: businessSettings?.businessName || '',
           customerName: quote.customerName,
         });
-        setEmailBody(body);
       } else {
-        setEmailBody(getDefaultEmailBody(
+        body = getDefaultEmailBody(
           quote.customerName,
           quote.job.name,
           quote.total,
           businessSettings?.businessName || 'Your Business'
-        ));
+        );
       }
+      setEmailBody(body);
+      saveDraft({ ...quote, draftEmailBody: body });
     } catch (error) {
-      setEmailBody(getDefaultEmailBody(
+      const fallback = getDefaultEmailBody(
         quote.customerName,
         quote.job.name,
         quote.total,
         businessSettings?.businessName || 'Your Business'
-      ));
+      );
+      setEmailBody(fallback);
+      saveDraft({ ...quote, draftEmailBody: fallback });
     } finally {
       setIsGeneratingEmail(false);
     }
@@ -161,10 +172,18 @@ export const QuoteCard = React.memo(function QuoteCard({
         customerName: quote.customerName,
       });
       setEmailBody(body);
+      saveDraft({ ...quote, draftEmailBody: body });
     } catch (error) {
       Alert.alert('Error', 'Could not regenerate email. Please try again.');
     } finally {
       setIsGeneratingEmail(false);
+    }
+  };
+
+  const handleEmailPreviewDismiss = () => {
+    setEmailPreviewVisible(false);
+    if (emailBody && emailBody !== (quote.draftEmailBody || '')) {
+      saveDraft({ ...quote, draftEmailBody: emailBody });
     }
   };
 
@@ -331,7 +350,7 @@ export const QuoteCard = React.memo(function QuoteCard({
 
     <EmailPreviewModal
       visible={emailPreviewVisible}
-      onDismiss={() => setEmailPreviewVisible(false)}
+      onDismiss={handleEmailPreviewDismiss}
       quote={quote}
       businessSettings={businessSettings}
       emailBody={emailBody}
