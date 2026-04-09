@@ -280,7 +280,6 @@ export interface BusinessSettings {
   tradeCategory?: string;
   tradeNiche?: string;
   // Price fetching settings
-  useBunningsApi?: boolean; // If true, use Bunnings API. If false/undefined, use AI estimation (default: false)
   useReeceApi?: boolean; // If true and tradeType is plumber, use Reece API for plumbing supplies
   selectedStore?: string; // Single selected hardware store (e.g., 'bunnings', 'mitre10')
   // Quote display settings
@@ -297,35 +296,6 @@ export interface BusinessSettings {
   // Legacy fields (kept for backwards compatibility)
   hardwareStores?: string[]; // DEPRECATED - use selectedStore instead
   customStores?: string[]; // DEPRECATED - Custom store URLs added by user
-}
-
-// Bunnings API types
-export interface BunningsAuthResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-}
-
-export interface BunningsItem {
-  itemNumber: string;
-  description: string;
-  productName: string;
-  brand?: string;
-  uom?: string; // unit of measure
-}
-
-export interface BunningsPrice {
-  itemNumber: string;
-  price: number;
-  priceIncGst: number;
-  currency: string;
-}
-
-export interface BunningsInventory {
-  itemNumber: string;
-  locationCode: string;
-  quantityAvailable: number;
-  quantityOnHand: number;
 }
 
 // Quote calculation result

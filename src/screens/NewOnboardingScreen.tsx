@@ -159,7 +159,6 @@ export function NewOnboardingScreen() {
       defaultMarkup: parseFloat(markup) || 20,
       tradeType: tradeType,
       tradeCategories: selectedCategories.length > 0 ? selectedCategories : undefined,
-      useBunningsApi: false,
       useReeceApi: false,
       hardwareStores: defaultStores.length > 0 ? defaultStores : ['bunnings.com.au'],
     };

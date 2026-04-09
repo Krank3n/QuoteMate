@@ -37,7 +37,6 @@ import { Material, FavoriteProductMapping } from '../../types';
 import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { ProBadge } from '../../components/ProBadge';
-import { bunningsApi } from '../../services/bunningsApi';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import {
   searchMaterialWithWebScraping,
@@ -925,19 +924,21 @@ export function AddMaterialScreen() {
         stockCheckedAt: new Date().toISOString(),
       };
     } else {
-      const price = await bunningsApi.getPrice(item.itemNumber);
-
+      // Defensive fallback. After the PR1 search refactor, every result row
+      // is one of: AI estimate, local source, or scraper result — so this
+      // branch should be unreachable. We keep it as a "treat as manual" path
+      // to avoid silently dropping a tap if something upstream changes shape.
       newMaterial = {
         id: generateId(),
         name: item.productName || item.description,
         quantity: 1,
         unit: 'each',
         bunningsItemNumber: item.itemNumber,
-        price: price?.priceIncGst || 0,
-        totalPrice: price?.priceIncGst || 0,
+        price: item.price || 0,
+        totalPrice: item.price || 0,
         manualPriceOverride: false,
         searchTerm: item.description,
-        pricingSource: 'api',
+        pricingSource: 'manual',
       };
     }
 

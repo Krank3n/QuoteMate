@@ -38,7 +38,6 @@ import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapp
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
-import { bunningsApi } from '../../services/bunningsApi';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
@@ -1042,7 +1041,6 @@ export function MaterialsListScreen() {
     setFetchProgress({ current: 0, total: materialsToFetch.length });
 
     // Determine which pricing method to use
-    const useBunningsApi = businessSettings?.useBunningsApi === true;
     const useReeceApi = false; // Disabled - API coming soon
     const useScraperApi = true; // Always available via Firebase proxy
 
@@ -1057,8 +1055,6 @@ export function MaterialsListScreen() {
     let methodName = 'AI estimation';
     if (useScraperApi && selectedStore === 'bunnings') {
       methodName = 'Bunnings';
-    } else if (useBunningsApi) {
-      methodName = 'Bunnings API';
     }
 
     const updatedMaterials = [...materials];
@@ -1264,94 +1260,30 @@ export function MaterialsListScreen() {
           } catch (error: any) {
             // Re-throw cancellation so the outer catch handles it instantly
             if (error?.message === '__FETCH_CANCELLED__') throw error;
-            // Fallback to next method: try Bunnings API first, then AI estimation
-            if (useBunningsApi) {
-              const result = await withCancel(bunningsApi.findAndPriceMaterial(searchTerm));
-              if (result) {
-                material.bunningsItemNumber = result.item.itemNumber;
-                material.price = result.price.priceIncGst;
-                material.totalPrice = material.price * material.quantity;
-                material.manualPriceOverride = false;
-                material.pricingSource = 'api';
-                fetchedCount++;
-              triggerPriceFlash(material.id);
-              } else {
-                const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
+            // Scraper missed — fall back to AI estimation directly. The dead
+            // bunningsApi.findAndPriceMaterial path used to sit in between
+            // here; it's been removed because we never had working creds.
+            const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
-                if (aiResult.price) {
-                  material.price = aiResult.price;
-                  material.totalPrice = material.price * material.quantity;
-                  material.manualPriceOverride = false;
-                  material.pricingSource = 'ai';
-                  material.priceConfidence = aiResult.confidence || 'medium';
+            if (aiResult.price) {
+              material.price = aiResult.price;
+              material.totalPrice = material.price * material.quantity;
+              material.manualPriceOverride = false;
+              material.pricingSource = 'ai';
+              material.priceConfidence = aiResult.confidence || 'medium';
 
-                  if (aiResult.productName) {
-                    material.name = aiResult.productName;
-                  }
-                  if (aiResult.store) {
-                    material.description = `AI reckons about this much`;
-                  }
-
-                  fetchedCount++;
-              triggerPriceFlash(material.id);
-                } else {
-                  failedCount++;
-                }
+              if (aiResult.productName) {
+                material.name = aiResult.productName;
               }
+              if (aiResult.store) {
+                material.description = `AI reckons about this much`;
+              }
+
+              fetchedCount++;
+              triggerPriceFlash(material.id);
             } else {
-              // No Bunnings API, fall back directly to AI estimation
-              const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
-
-              if (aiResult.price) {
-                material.price = aiResult.price;
-                material.totalPrice = material.price * material.quantity;
-                material.manualPriceOverride = false;
-                material.pricingSource = 'ai';
-                material.priceConfidence = aiResult.confidence || 'medium';
-
-                if (aiResult.productName) {
-                  material.name = aiResult.productName;
-                }
-                if (aiResult.store) {
-                  material.description = `AI reckons about this much`;
-                }
-
-                fetchedCount++;
-              triggerPriceFlash(material.id);
-              } else {
-                failedCount++;
-              }
+              failedCount++;
             }
-          }
-        } else if (useBunningsApi) {
-          // Use Bunnings API
-          const result = await withCancel(bunningsApi.findAndPriceMaterial(searchTerm));
-
-          if (result) {
-            material.bunningsItemNumber = result.item.itemNumber;
-            material.price = result.price.priceIncGst;
-            material.totalPrice = material.price * material.quantity;
-            material.manualPriceOverride = false;
-            material.pricingSource = 'api';
-
-            // Store additional info from Bunnings API
-            if (result.item.productName) {
-              material.name = result.item.productName;
-            }
-            // Only save brand if it's not just the store name
-            if (result.item.brand &&
-                result.item.brand.toLowerCase() !== 'bunnings' &&
-                result.item.brand.toLowerCase() !== 'bunnings.com.au') {
-              material.brand = result.item.brand;
-            }
-            if (result.item.description) {
-              material.description = result.item.description;
-            }
-
-            fetchedCount++;
-            triggerPriceFlash(material.id);
-          } else {
-            failedCount++;
           }
         } else if (useReeceApi) {
           // Use Reece API for plumbing supplies
@@ -1565,7 +1497,7 @@ export function MaterialsListScreen() {
       } else if (fetchedCount === 0 && failedCount > 0) {
         setSuccessType('warning');
         setSuccessTitle('No Luck, Mate');
-        setSuccessMessage(`Couldn't track down prices for ${failedCount} item${failedCount > 1 ? 's' : ''}.\n\nGive these a crack:\n• Tweak material names to match what's on the shelf\n• Punch in prices manually\n• ${useBunningsApi ? 'Bunnings API might be having a smoko' : 'Try a different hardware store in Settings'}\n• Have another go later`);
+        setSuccessMessage(`Couldn't track down prices for ${failedCount} item${failedCount > 1 ? 's' : ''}.\n\nGive these a crack:\n• Tweak material names to match what's on the shelf\n• Punch in prices manually\n• Try a different hardware store in Settings\n• Have another go later`);
         setShowSuccessModal(true);
       } else if (fetchedCount > 0 && failedCount === 0) {
         setSuccessTitle('Beauty!');
@@ -1573,7 +1505,7 @@ export function MaterialsListScreen() {
         setShowSuccessModal(true);
       } else if (fetchedCount > 0 && failedCount > 0) {
         setSuccessTitle('Nearly There');
-        setSuccessMessage(`Got ${fetchedCount} price${fetchedCount > 1 ? 's' : ''}, but ${failedCount} item${failedCount > 1 ? 's' : ''} gave us the slip. ${useBunningsApi ? 'Bunnings API might be having a rough one.' : 'Try tweaking material names or switching stores in Settings.'}`);
+        setSuccessMessage(`Got ${fetchedCount} price${fetchedCount > 1 ? 's' : ''}, but ${failedCount} item${failedCount > 1 ? 's' : ''} gave us the slip. Try tweaking material names or switching stores in Settings.`);
         setShowSuccessModal(true);
       } else {
         setSuccessTitle('All Done');
@@ -1597,7 +1529,7 @@ export function MaterialsListScreen() {
       } else {
         setSuccessType('error');
         setSuccessTitle('Crikey!');
-        setSuccessMessage(`Something went wrong fetching prices. ${useBunningsApi ? 'Bunnings API might be on smoko,' : 'The price service might be taking a sickie,'} or your internet\'s gone walkabout. Give it another crack later.`);
+        setSuccessMessage(`Something went wrong fetching prices. The price service might be taking a sickie, or your internet's gone walkabout. Give it another crack later.`);
         setShowSuccessModal(true);
       }
     } finally {

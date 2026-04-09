@@ -49,7 +49,6 @@ import { JobTemplate, QuotePhoto } from '../../types';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials, cleanupTranscriptionAndGenerateTitle, TemplateMatchInput } from '../../services/llmService';
 import { loadTemplates } from '../../services/sectionTemplateService';
 import { generateId } from '../../utils/generateId';
-import { bunningsApi } from '../../services/bunningsApi';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { ProBadge } from '../../components/ProBadge';
