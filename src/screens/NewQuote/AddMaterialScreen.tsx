@@ -77,6 +77,7 @@ import { WebContainer } from '../../components/WebContainer';
 import { SwipeableCard } from '../../components/SwipeableCard';
 import { SupplierGroup } from '../../types';
 import { loadGroups, getSupplierGroupByName, saveGroup } from '../../services/supplierGroupService';
+import { searchLocalSources, type LocalSearchResult } from '../../services/localMaterialSearch';
 import { ContactActionsBar } from '../../components/document/ContactActionsBar';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
@@ -743,18 +744,56 @@ export function AddMaterialScreen() {
     setIsSearching(true);
     setSearchResults([]);
 
+    // Search order:
+    //  1. Local sources — section templates + favorites scoped to the user's
+    //     configured suppliers. Always tried first; the user's own prices
+    //     beat any retail lookup.
+    //  2. Bunnings scraper — only if Bunnings is in the supplier list, OR the
+    //     user has no suppliers configured at all (default behavior).
+    //  3. Web scraping — driven by the user's configured supplier websites,
+    //     falling back to the legacy hardwareStores setting if none are set.
+    //  4. AI estimation — last resort.
+    //
+    // Local results are always shown alongside remote ones so the user can
+    // compare; remote results are appended below local hits.
     try {
-      const selectedStore = businessSettings?.selectedStore || 'bunnings';
+      // ── Step 1: local sources ──
+      let localResults: LocalSearchResult[] = [];
+      try {
+        localResults = await searchLocalSources(searchQuery, supplierGroups);
+        if (localResults.length > 0) {
+          setSearchResults(localResults);
+        }
+      } catch {
+        // Local search must never block the remote fallback chain.
+        localResults = [];
+      }
+
+      // ── Step 2/3/4: remote fallback ──
       const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
-      const firstStore = hardwareStores[0];
-      const useScraperApi = true; // Always available via Firebase proxy
+      const fallbackStore = hardwareStores[0];
 
-      const isBunnings = selectedStore === 'bunnings' || firstStore.includes('bunnings.com.au');
+      // Bunnings scraper only runs if the user has Bunnings configured as a
+      // supplier, OR has no suppliers at all (legacy/default behavior).
+      const hasBunningsSupplier = supplierGroups.some(g =>
+        g.name.trim().toLowerCase().includes('bunnings')
+      );
+      const noSuppliersConfigured = supplierGroups.length === 0;
+      const shouldTryBunnings = hasBunningsSupplier || noSuppliersConfigured;
 
-      if (isBunnings && useScraperApi) {
-        // searchBunningsProducts throws on error; the old searchProductWithScraper
-        // returned null. Wrap to preserve the original null-on-error contract
-        // so the existing fallback flow still kicks in.
+      // Web-scraping store list: prefer user-configured supplier websites,
+      // fall back to the hardwareStores setting if the user has no suppliers
+      // (or none of them have a website set).
+      const supplierStores = supplierGroups
+        .map(g => g.searchUrl?.trim())
+        .filter((url): url is string => !!url);
+      const storesToScrape = supplierStores.length > 0 ? supplierStores : [fallbackStore];
+
+      let remoteResults: any[] = [];
+
+      if (shouldTryBunnings) {
+        // searchBunningsProducts throws on error; preserve the old null-on-
+        // error contract so the fallback flow still kicks in.
         let scraperResponse: ScraperSearchResponse | null = null;
         try {
           scraperResponse = await searchBunningsProducts(searchQuery, 10);
@@ -763,7 +802,7 @@ export function AddMaterialScreen() {
         }
 
         if (scraperResponse && scraperResponse.success && scraperResponse.results.length > 0) {
-          const products = scraperResponse.results.map(product => ({
+          remoteResults = scraperResponse.results.map(product => ({
             productName: product.productName,
             description: product.description || '',
             itemNumber: product.itemNumber || '',
@@ -776,65 +815,19 @@ export function AddMaterialScreen() {
             isScraperResult: true,
             confidence: product.confidence,
           }));
-
-          setSearchResults(products);
-        } else {
-          const scraperResults = await searchMaterialWithWebScraping(
-            searchQuery,
-            searchQuery,
-            1,
-            'each',
-            [firstStore]
-          );
-
-          const products = scraperResults.flatMap(r => r.matches).map(match => ({
-            productName: match.productName,
-            description: match.description || '',
-            itemNumber: match.itemNumber || '',
-            brand: match.brand || '',
-            price: match.price,
-            productUrl: match.productUrl,
-            imageUrl: match.imageUrl,
-            store: match.store,
-            isScraperResult: true,
-          }));
-
-          setSearchResults(products);
-
-          if (products.length === 0) {
-            // Final fallback to AI estimation
-            const aiResult = await searchMaterialPrice(searchQuery, [firstStore]);
-
-            if (aiResult.price) {
-              const estimatedProduct = {
-                productName: aiResult.productName || searchQuery,
-                description: 'AI reckons about this much',
-                itemNumber: '',
-                brand: '',
-                price: aiResult.price,
-                productUrl: undefined,
-                imageUrl: undefined,
-                store: aiResult.store || firstStore,
-                isScraperResult: false,
-                isAiEstimate: true,
-              };
-              setSearchResults([estimatedProduct]);
-            }
-          }
         }
-      } else if (isBunnings) {
-        const results = await bunningsApi.searchItem(searchQuery, 20);
-        setSearchResults(results.map(item => ({ ...item, isScraperResult: false })));
-      } else {
+      }
+
+      if (remoteResults.length === 0) {
         const scraperResults = await searchMaterialWithWebScraping(
           searchQuery,
           searchQuery,
           1,
           'each',
-          [firstStore]
+          storesToScrape
         );
 
-        const products = scraperResults.flatMap(r => r.matches).map(match => ({
+        remoteResults = scraperResults.flatMap(r => r.matches).map(match => ({
           productName: match.productName,
           description: match.description || '',
           itemNumber: match.itemNumber || '',
@@ -845,35 +838,34 @@ export function AddMaterialScreen() {
           store: match.store,
           isScraperResult: true,
         }));
+      }
 
-        setSearchResults(products);
-
-        if (products.length === 0) {
-          const aiResult = await searchMaterialPrice(searchQuery, [firstStore]);
-
-          if (aiResult.price) {
-            const estimatedProduct = {
-              productName: aiResult.productName || searchQuery,
-              description: 'AI reckons about this much',
-              itemNumber: '',
-              brand: '',
-              price: aiResult.price,
-              productUrl: undefined,
-              imageUrl: undefined,
-              store: aiResult.store || firstStore,
-              isScraperResult: false,
-              isAiEstimate: true,
-            };
-            setSearchResults([estimatedProduct]);
-          }
+      if (remoteResults.length === 0 && localResults.length === 0) {
+        // Final fallback to AI estimation — only when we have nothing else.
+        const aiResult = await searchMaterialPrice(searchQuery, storesToScrape);
+        if (aiResult.price) {
+          remoteResults = [{
+            productName: aiResult.productName || searchQuery,
+            description: 'AI reckons about this much',
+            itemNumber: '',
+            brand: '',
+            price: aiResult.price,
+            productUrl: undefined,
+            imageUrl: undefined,
+            store: aiResult.store || storesToScrape[0],
+            isScraperResult: false,
+            isAiEstimate: true,
+          }];
         }
       }
+
+      setSearchResults([...localResults, ...remoteResults]);
     } catch (error) {
       Alert.alert('Search Error', 'Failed to search products. Please try again.');
     } finally {
       setIsSearching(false);
     }
-  }, [searchQuery, businessSettings, isPro, navigation]);
+  }, [searchQuery, businessSettings, isPro, navigation, supplierGroups]);
 
   const handleSelectProduct = async (item: any) => {
     let newMaterial: Material;
@@ -889,6 +881,21 @@ export function AddMaterialScreen() {
         manualPriceOverride: false,
         searchTerm: item.productName,
         pricingSource: 'ai',
+        description: item.description,
+      };
+    } else if (item.isLocalSource) {
+      newMaterial = {
+        id: generateId(),
+        name: item.productName,
+        quantity: 1,
+        unit: (item.unit as Material['unit']) || 'each',
+        price: item.price || 0,
+        totalPrice: item.price || 0,
+        manualPriceOverride: false,
+        searchTerm: item.productName,
+        pricingSource: 'manual',
+        productUrl: item.productUrl,
+        imageUrl: item.imageUrl,
         description: item.description,
       };
     } else if (item.isScraperResult) {
@@ -1405,6 +1412,17 @@ export function AddMaterialScreen() {
                       textStyle={styles.aiChipText}
                     >
                       AI Estimate
+                    </Chip>
+                  )}
+                  {item.isLocalSource && (
+                    <Chip
+                      icon={item.localSource === 'template' ? 'shape-outline' : 'bookmark-outline'}
+                      mode="outlined"
+                      compact
+                      style={styles.aiChip}
+                      textStyle={styles.aiChipText}
+                    >
+                      {item.localSourceLabel}
                     </Chip>
                   )}
                 </View>
