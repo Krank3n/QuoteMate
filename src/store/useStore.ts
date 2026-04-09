@@ -102,6 +102,8 @@ interface AppState {
   invoices: Invoice[];
   currentInvoice: Invoice | null;
   nextInvoiceNumber: number;
+  /** Mirror of pendingQuoteWrites for invoices — used by mergeRemoteInvoices. */
+  pendingInvoiceWrites: Record<string, number>;
 
   // Invoice operations
   createNewInvoice: () => void;
@@ -111,6 +113,8 @@ interface AppState {
   saveInvoice: (invoice: Invoice) => Promise<void>;
   deleteInvoice: (invoiceId: string) => Promise<void>;
   loadInvoices: () => Promise<void>;
+  /** Mirror of mergeRemoteQuotes for invoices. */
+  mergeRemoteInvoices: (remote: Invoice[]) => void;
   loadNextInvoiceNumber: () => Promise<void>;
   getNextInvoiceNumber: () => Promise<string>;
   recordPayment: (
@@ -221,6 +225,7 @@ export const useStore = create<AppState>((set, get) => ({
   invoices: [],
   currentInvoice: null,
   nextInvoiceNumber: 1,
+  pendingInvoiceWrites: {},
   referralInfo: null,
   // Template material staging
   pendingTemplateMaterial: null,
@@ -1182,11 +1187,24 @@ export const useStore = create<AppState>((set, get) => ({
 
       // Sync to Firestore if user is signed in (non-blocking)
       if (auth.currentUser) {
+        // Track this write as pending so the realtime invoice listener won't
+        // revert our local edit before the round-trip completes.
+        const writeTs = updatedInvoice.updatedAt.getTime();
+        set((state) => ({
+          pendingInvoiceWrites: { ...state.pendingInvoiceWrites, [updatedInvoice.id]: writeTs },
+        }));
         try {
           await firestoreService.saveInvoice(updatedInvoice);
           set((state) => {
-            const clearError = state.lastSyncError?.kind === 'invoice' && state.lastSyncError.id === updatedInvoice.id;
-            return clearError ? { lastSyncError: null } : {};
+            const updates: Partial<AppState> = {};
+            if (state.pendingInvoiceWrites[updatedInvoice.id] === writeTs) {
+              const { [updatedInvoice.id]: _, ...rest } = state.pendingInvoiceWrites;
+              updates.pendingInvoiceWrites = rest;
+            }
+            if (state.lastSyncError?.kind === 'invoice' && state.lastSyncError.id === updatedInvoice.id) {
+              updates.lastSyncError = null;
+            }
+            return updates;
           });
         } catch (syncError) {
           logSyncError('invoice', updatedInvoice.id, syncError);
@@ -1195,6 +1213,52 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (error) {
       throw error;
     }
+  },
+
+  // Merge a remote snapshot of invoices into local state without clobbering unsynced edits.
+  // Mirrors mergeRemoteQuotes — same per-id rules.
+  mergeRemoteInvoices: (remote: Invoice[]) => {
+    const { invoices: local, pendingInvoiceWrites } = get();
+    const localById = new Map(local.map((i) => [i.id, i] as const));
+    const remoteIds = new Set<string>();
+    const merged: Invoice[] = [];
+
+    for (const r of remote) {
+      remoteIds.add(r.id);
+      const localI = localById.get(r.id);
+      const pendingTs = pendingInvoiceWrites[r.id];
+      const remoteTs = r.updatedAt instanceof Date ? r.updatedAt.getTime() : 0;
+
+      if (pendingTs && pendingTs > remoteTs && localI) {
+        merged.push(localI);
+        continue;
+      }
+
+      if (
+        localI &&
+        localI.updatedAt instanceof Date &&
+        localI.updatedAt.getTime() > remoteTs
+      ) {
+        merged.push(localI);
+        continue;
+      }
+
+      merged.push(r);
+    }
+
+    for (const [id, i] of localById) {
+      if (!remoteIds.has(id) && pendingInvoiceWrites[id]) {
+        merged.push(i);
+      }
+    }
+
+    merged.sort((a, b) => {
+      const aTs = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+      const bTs = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+      return bTs - aTs;
+    });
+
+    set({ invoices: merged });
   },
 
   deleteInvoice: async (invoiceId: string) => {
