@@ -14,6 +14,7 @@ import {
   Image,
   Alert,
   Platform,
+  Linking,
 } from 'react-native';
 import {
   Text,
@@ -379,6 +380,8 @@ export function AddMaterialScreen() {
   const [existingSupplierNames, setExistingSupplierNames] = useState<string[]>([]);
   // Collapsed supplier sections in the Supplier Book tab
   const [collapsedSuppliers, setCollapsedSuppliers] = useState<Set<string>>(new Set());
+  // Expanded saved items (for showing details like image, description, etc.)
+  const [expandedSavedItems, setExpandedSavedItems] = useState<Set<string>>(new Set());
   // Delete confirmation dialogs
   const [deleteItemDialog, setDeleteItemDialog] = useState<{ visible: boolean; item: any | null }>({
     visible: false,
@@ -389,6 +392,11 @@ export function AddMaterialScreen() {
     supplier: '',
     count: 0,
   });
+  const [saveFavoriteDialog, setSaveFavoriteDialog] = useState<{
+    visible: boolean;
+    material: Material | null;
+    item: any | null;
+  }>({ visible: false, material: null, item: null });
   const [savingImport, setSavingImport] = useState(false);
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
@@ -789,14 +797,19 @@ export function AddMaterialScreen() {
 
       // Bunnings scraper runs when:
       //  - the user is scoped to a Bunnings supplier, OR
-      //  - the user has no chip selected AND has Bunnings in their supplier
-      //    list (or has no suppliers at all → legacy default).
-      const isBunningsName = (name: string) =>
-        name.trim().toLowerCase().includes('bunnings');
-      const noSuppliersConfigured = supplierGroups.length === 0;
-      const shouldTryBunnings = scopedToOne
-        ? isBunningsName(scopedSupplier!.name)
-        : supplierGroups.some(g => isBunningsName(g.name)) || noSuppliersConfigured;
+      //  - the user has no chip selected AND Bunnings is in their hardware
+      //    stores setting, supplier list, or they have no suppliers at all.
+      const hasBunningsInHardwareStores = hardwareStores.some(s =>
+        s.toLowerCase().includes('bunnings'));
+      // Hardware stores (like Bunnings) are big catalogues — always search
+      // them regardless of which supplier chip is selected. The chip only
+      // narrows the local supplier-book results.
+      const shouldTryBunnings = hasBunningsInHardwareStores || supplierGroups.length === 0;
+
+      console.log('[search] shouldTryBunnings:', shouldTryBunnings,
+        '| scopedToOne:', scopedToOne,
+        '| hasBunningsInHardwareStores:', hasBunningsInHardwareStores,
+        '| hardwareStores:', hardwareStores);
 
       // Web-scraping store list:
       //  - scoped: just the selected supplier's searchUrl (if it has one)
@@ -970,39 +983,48 @@ export function AddMaterialScreen() {
       };
     }
 
-    // Ask if user wants to save as template
-    Alert.alert(
-      'Material Added',
-      'Would you like to save this as a template for future quotes?',
-      [
-        {
-          text: 'No',
-          style: 'cancel',
-          onPress: () => {
-            addMaterialToQuote(newMaterial);
-          },
-        },
-        {
-          text: 'Yes, Save Template',
-          onPress: async () => {
-            await saveFavoriteProduct(
-              newMaterial.name,
-              newMaterial.searchTerm,
-              {
-                productName: item.productName,
-                store: item.store || 'bunnings.com.au',
-                productUrl: item.productUrl,
-                itemNumber: item.itemNumber,
-                unit: newMaterial.unit,
-                price: newMaterial.price,
-                imageUrl: item.imageUrl,
-              }
-            );
-            addMaterialToQuote(newMaterial);
-          },
-        },
-      ]
+    // Ask if user wants to save as a favorite for future quotes
+    setSaveFavoriteDialog({ visible: true, material: newMaterial, item });
+  };
+
+  const handleConfirmSaveFavorite = async () => {
+    const { material, item } = saveFavoriteDialog;
+    if (!material || !item) return;
+
+    // Derive a human-readable supplier name from the store URL/field
+    const rawStore = (item.store || '').trim();
+    let storeName = rawStore;
+    if (rawStore.toLowerCase().includes('bunnings')) {
+      storeName = 'Bunnings';
+    } else if (rawStore.toLowerCase().includes('reece')) {
+      storeName = 'Reece';
+    } else if (rawStore && rawStore.includes('.')) {
+      // URL-like value — strip domain suffix for a cleaner label
+      storeName = rawStore.replace(/\.com\.au$|\.com$/, '').replace(/^www\./, '');
+      storeName = storeName.charAt(0).toUpperCase() + storeName.slice(1);
+    }
+
+    await saveFavoriteProduct(
+      material.name,
+      material.searchTerm,
+      {
+        productName: item.productName,
+        store: storeName || 'Other',
+        productUrl: item.productUrl,
+        itemNumber: item.itemNumber,
+        unit: material.unit,
+        price: material.price,
+        imageUrl: item.imageUrl,
+      }
     );
+    addMaterialToQuote(material);
+    setSaveFavoriteDialog({ visible: false, material: null, item: null });
+  };
+
+  const handleDismissSaveFavorite = () => {
+    const { material } = saveFavoriteDialog;
+    if (material) addMaterialToQuote(material);
+    setSaveFavoriteDialog({ visible: false, material: null, item: null });
   };
 
   // When called from the Save button (default), navigates back on success.
@@ -1785,7 +1807,7 @@ export function AddMaterialScreen() {
           <View style={styles.manualEntryDividerLine} />
         </View>
         <View style={styles.recentChipsContainer}>
-          {recentMaterials.map((material, index) => (
+          {recentMaterials.slice(0, 3).map((material, index) => (
             <TouchableOpacity
               key={`${material.name}-${index}`}
               style={styles.recentChip}
@@ -2047,6 +2069,9 @@ export function AddMaterialScreen() {
               manualPriceOverride: item.isPersonalRate === true,
               searchTerm: item.productName,
               imageUrl: item.imageUrl,
+              productUrl: item.productUrl,
+              description: item.notes || undefined,
+              brand: item.brand || undefined,
               bunningsItemNumber: item.isPersonalRate ? undefined : item.itemNumber,
               pricingSource: item.isPersonalRate ? 'manual' : 'scraper',
               favoriteProduct: item as FavoriteProductMapping,
@@ -2066,7 +2091,14 @@ export function AddMaterialScreen() {
                 <MaterialItemCard
                   material={synthetic}
                   readOnly
-                  onPress={() => handleSelectSavedItem(item)}
+                  isExpanded={expandedSavedItems.has(item.key)}
+                  onToggleExpand={() => setExpandedSavedItems(prev => {
+                    const next = new Set(prev);
+                    next.has(item.key) ? next.delete(item.key) : next.add(item.key);
+                    return next;
+                  })}
+                  onPress={supplierBookOnly ? undefined : () => handleSelectSavedItem(item)}
+                  onOpenInStore={item.productUrl ? () => Linking.openURL(item.productUrl) : undefined}
                   onEdit={() => (navigation as any).push(editRouteName, { savedItemKey: item.key })}
                   onDelete={() => handleDeleteSavedItem(item)}
                 />
@@ -2222,6 +2254,21 @@ export function AddMaterialScreen() {
         primaryButtonAction={confirmDeleteSupplier}
         secondaryButtonText="Cancel"
         secondaryButtonAction={() => setDeleteSupplierDialog({ visible: false, supplier: '', count: 0 })}
+        showConfetti={false}
+      />
+
+      {/* Save as favorite after selecting a search result */}
+      <AlertModal
+        visible={saveFavoriteDialog.visible}
+        onDismiss={handleDismissSaveFavorite}
+        type="info"
+        icon="bookmark-outline"
+        title="Material Added"
+        message="Save this product so it's used automatically next time?"
+        primaryButtonText="Save"
+        primaryButtonAction={handleConfirmSaveFavorite}
+        secondaryButtonText="Not Now"
+        secondaryButtonAction={handleDismissSaveFavorite}
         showConfetti={false}
       />
 

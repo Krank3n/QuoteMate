@@ -40,13 +40,13 @@ interface MaterialItemCardProps {
   onEdit?: () => void;
   onDelete?: () => void;
   /**
-   * Render a compact, non-interactive variant of the card — no qty stepper,
-   * no actions row, no expandable details panel. Used by the Saved Items tab
-   * to display saved favorites/personal-rate items consistently with the
-   * materials list.
+   * Render a compact variant of the card — no qty stepper or drag handle,
+   * but still supports expand/collapse for details. Used by the Saved Items
+   * tab to display saved favorites/personal-rate items consistently with the
+   * materials list. Tap the card body to expand; use the add arrow to add.
    */
   readOnly?: boolean;
-  /** Tap handler for the readOnly variant (e.g. add-to-quote). */
+  /** Add-to-quote handler for the readOnly variant. */
   onPress?: () => void;
 }
 
@@ -142,22 +142,51 @@ export function MaterialItemCard({
     </View>
   );
 
-  // Compact, non-interactive variant — Saved Items tab uses this. No qty
-  // stepper, no expandable details. The top row taps `onPress` (e.g.
-  // add-to-quote); a bottom action row mirrors the materials-list layout
-  // with pencil + delete on the right, leaving the full width above for
-  // the name and price/coverage details.
+  // Saved Items variant — mirrors the interactive card layout but without
+  // qty stepper or drag handle. Tapping the card body expands/collapses
+  // details (image, description, brand, etc.). An add-arrow on the right
+  // adds the item to the quote.
   if (readOnly) {
     return (
       <View style={[styles.listItem, styles.listItemReadOnly]}>
-        <TouchableOpacity onPress={onPress} activeOpacity={0.7} disabled={!onPress}>
-          {topRow}
-        </TouchableOpacity>
-        {(onEdit || onDelete) && (
-          <View style={styles.readOnlyActionsRow}>
+        <View style={styles.readOnlyTopArea}>
+          <TouchableOpacity
+            style={styles.readOnlyBodyTap}
+            onPress={() => hasDetails && onToggleExpand?.()}
+            disabled={!hasDetails}
+            activeOpacity={0.7}
+          >
+            {topRow}
+          </TouchableOpacity>
+          {onPress && (
+            <TouchableOpacity
+              style={styles.addArrowBtn}
+              onPress={onPress}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <MaterialCommunityIcons name="plus-circle-outline" size={24} color={colors.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
+        <View style={styles.readOnlyActionsRow}>
+          <View style={styles.readOnlyActionsLeft}>
+            {hasDetails && (
+              <MaterialCommunityIcons
+                name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                size={16}
+                color={colors.textMuted}
+              />
+            )}
+          </View>
+          <View style={styles.itemActions}>
+            {showLink && (
+              <TouchableOpacity style={styles.actionBtn} onPress={onOpenInStore}>
+                <MaterialCommunityIcons name="open-in-new" size={18} color={colors.primary} />
+              </TouchableOpacity>
+            )}
             {onEdit && (
               <TouchableOpacity
-                style={styles.readOnlyActionBtn}
+                style={styles.actionBtn}
                 onPress={onEdit}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
@@ -166,7 +195,7 @@ export function MaterialItemCard({
             )}
             {onDelete && (
               <TouchableOpacity
-                style={styles.readOnlyActionBtn}
+                style={styles.actionBtn}
                 onPress={onDelete}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
@@ -174,6 +203,37 @@ export function MaterialItemCard({
               </TouchableOpacity>
             )}
           </View>
+        </View>
+        {hasDetails && (
+          <CollapsibleSection expanded={isExpanded}>
+            <View style={styles.expandedContent}>
+              <View style={styles.detailsContainer}>
+                {material.imageUrl && (
+                  <Image source={{ uri: material.imageUrl }} style={styles.productImage} resizeMode="contain" />
+                )}
+                <View style={styles.detailsColumn}>
+                  {material.description && (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Description:</Text>
+                      <Text style={styles.detailValue}>{material.description}</Text>
+                    </View>
+                  )}
+                  {hasMeaningfulBrand && (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Brand:</Text>
+                      <Text style={styles.detailValue}>{material.brand}</Text>
+                    </View>
+                  )}
+                  {material.bunningsItemNumber && (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Item #:</Text>
+                      <Text style={styles.detailValue}>{material.bunningsItemNumber}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </View>
+          </CollapsibleSection>
         )}
       </View>
     );
@@ -305,20 +365,29 @@ const styles = StyleSheet.create({
   listItemReadOnly: {
     marginBottom: 8,
   },
+  readOnlyTopArea: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  readOnlyBodyTap: {
+    flex: 1,
+  },
+  addArrowBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   readOnlyActionsRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 8,
-    paddingTop: 4,
-    paddingBottom: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    marginTop: 8,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    paddingTop: 2,
   },
-  readOnlyActionBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    justifyContent: 'center',
+  readOnlyActionsLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
   itemTopRow: {
