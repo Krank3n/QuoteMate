@@ -24,6 +24,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Portal, Text } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { useSheetBackHandler } from '../utils/useSheetBackHandler';
 
@@ -59,6 +60,7 @@ export function BottomSheet({
   footer,
   overlay,
 }: BottomSheetProps) {
+  const safeInsets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
   // Tracks the soft-keyboard height so the sheet can shift up when an
@@ -181,8 +183,8 @@ export function BottomSheet({
 
           {overlay}
 
-          {/* Safe area padding */}
-          <View style={styles.bottomPadding} />
+          {/* Safe area padding — use actual inset so Android nav bar is respected */}
+          <View style={{ height: Math.max(safeInsets.bottom, 16) }} />
         </Animated.View>
       </View>
     </Portal>
@@ -293,8 +295,5 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingBottom: 8,
-  },
-  bottomPadding: {
-    height: 34,
   },
 });

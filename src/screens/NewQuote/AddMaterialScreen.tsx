@@ -15,6 +15,7 @@ import {
   Alert,
   Platform,
   Linking,
+  Keyboard,
 } from 'react-native';
 import {
   Text,
@@ -121,15 +122,18 @@ export function AddMaterialScreen() {
   const { pendingTemplateMaterial: templateEditMaterial } = useStore();
   const prefillMaterial = editingMaterial || (editingTemplate ? templateEditMaterial : null);
 
-  // Tab state — Saved Items is the primary tab and opens first.
+  // Tab state — Search & Add is the primary tab and opens first.
   // Edit modes (material edit / saved-item edit) flip to 'search' in their
   // own effects since they show the manual entry form.
-  const [activeTab, setActiveTab] = useState<TabValue>('saved');
+  const [activeTab, setActiveTab] = useState<TabValue>('search');
 
   // Search & Add tab state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [manualEntrySheetVisible, setManualEntrySheetVisible] = useState(false);
+  const searchCancelledRef = useRef(false);
 
   // Manual entry state - initialize with editing material if in edit mode
   const [manualName, setManualName] = useState(prefillMaterial?.name || '');
@@ -737,6 +741,12 @@ export function AddMaterialScreen() {
     { icon: 'file-pdf-box', label: 'Pick PDF', onPress: () => runImport('pdf') },
   ];
 
+  const cancelSearch = useCallback(() => {
+    searchCancelledRef.current = true;
+    setIsSearching(false);
+    setHasSearched(false);
+  }, []);
+
   const handleSearch = useCallback(async () => {
     if (!isPro) {
       navigation.navigate('Paywall' as never);
@@ -748,8 +758,10 @@ export function AddMaterialScreen() {
       return;
     }
 
+    searchCancelledRef.current = false;
     setIsSearching(true);
     setSearchResults([]);
+    setHasSearched(false);
 
     // Search order:
     //  1. Local sources — section templates + favorites scoped to the user's
@@ -783,6 +795,7 @@ export function AddMaterialScreen() {
         localResults = await searchLocalSources(searchQuery, supplierScope, {
           includeTemplates: !scopedToOne,
         });
+        if (searchCancelledRef.current) return;
         if (localResults.length > 0) {
           setSearchResults(localResults);
         }
@@ -790,21 +803,25 @@ export function AddMaterialScreen() {
         // Local search must never block the remote fallback chain.
         localResults = [];
       }
+      if (searchCancelledRef.current) return;
 
       // ── Step 2/3/4: remote fallback ──
       const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
       const fallbackStore = hardwareStores[0];
 
       // Bunnings scraper runs when:
-      //  - the user is scoped to a Bunnings supplier, OR
-      //  - the user has no chip selected AND Bunnings is in their hardware
-      //    stores setting, supplier list, or they have no suppliers at all.
+      //  - the user is scoped to a supplier whose name contains "bunnings", OR
+      //  - no chip is selected AND Bunnings is in their hardware stores or
+      //    they have no suppliers configured at all.
+      // When scoped to a non-Bunnings supplier, skip Bunnings entirely.
       const hasBunningsInHardwareStores = hardwareStores.some(s =>
         s.toLowerCase().includes('bunnings'));
-      // Hardware stores (like Bunnings) are big catalogues — always search
-      // them regardless of which supplier chip is selected. The chip only
-      // narrows the local supplier-book results.
-      const shouldTryBunnings = hasBunningsInHardwareStores || supplierGroups.length === 0;
+      const scopedToBunnings = scopedSupplier
+        ? scopedSupplier.name.toLowerCase().includes('bunnings')
+        : false;
+      const shouldTryBunnings = scopedToOne
+        ? scopedToBunnings
+        : (hasBunningsInHardwareStores || supplierGroups.length === 0);
 
       console.log('[search] shouldTryBunnings:', shouldTryBunnings,
         '| scopedToOne:', scopedToOne,
@@ -836,6 +853,7 @@ export function AddMaterialScreen() {
         } catch {
           scraperResponse = null;
         }
+        if (searchCancelledRef.current) return;
 
         if (scraperResponse && scraperResponse.success && scraperResponse.results.length > 0) {
           remoteResults = scraperResponse.results.map(product => ({
@@ -853,6 +871,7 @@ export function AddMaterialScreen() {
           }));
         }
       }
+      if (searchCancelledRef.current) return;
 
       // Web scraping only runs if we have stores to scrape against. When the
       // user is scoped to a non-Bunnings supplier with no searchUrl, this
@@ -865,6 +884,7 @@ export function AddMaterialScreen() {
           'each',
           storesToScrape
         );
+        if (searchCancelledRef.current) return;
 
         remoteResults = scraperResults.flatMap(r => r.matches).map(match => ({
           productName: match.productName,
@@ -878,11 +898,13 @@ export function AddMaterialScreen() {
           isScraperResult: true,
         }));
       }
+      if (searchCancelledRef.current) return;
 
       if (remoteResults.length === 0 && localResults.length === 0) {
         // Final fallback to AI estimation — only when we have nothing else.
         const aiStores = storesToScrape.length > 0 ? storesToScrape : [fallbackStore];
         const aiResult = await searchMaterialPrice(searchQuery, aiStores);
+        if (searchCancelledRef.current) return;
         if (aiResult.price) {
           remoteResults = [{
             productName: aiResult.productName || searchQuery,
@@ -898,12 +920,17 @@ export function AddMaterialScreen() {
           }];
         }
       }
+      if (searchCancelledRef.current) return;
 
       setSearchResults([...localResults, ...remoteResults]);
     } catch (error) {
+      if (searchCancelledRef.current) return;
       Alert.alert('Search Error', 'Failed to search products. Please try again.');
     } finally {
-      setIsSearching(false);
+      if (!searchCancelledRef.current) {
+        setIsSearching(false);
+        setHasSearched(true);
+      }
     }
   }, [searchQuery, businessSettings, isPro, navigation, supplierGroups, selectedSupplierGroup]);
 
@@ -1395,29 +1422,42 @@ export function AddMaterialScreen() {
           <Text style={styles.proSearchPromptCta}>Upgrade to Pro</Text>
         </TouchableOpacity>
       ) : (
-      <TextInput
-        label={selectedSupplierGroup ? `Search ${supplierGroups.find(g => g.id === selectedSupplierGroup)?.name || 'supplier'}` : "Search for materials"}
-        value={searchQuery}
-        onChangeText={setSearchQuery}
-        mode="outlined"
-        placeholder="e.g., treated pine 90x45"
-        style={styles.searchInput}
-        right={
-          <TextInput.Icon
-            icon="magnify"
-            onPress={handleSearch}
-            disabled={isSearching}
+      <View style={styles.searchBarContainer}>
+        <View style={styles.searchBarInputWrap}>
+          <MaterialCommunityIcons name="magnify" size={20} color={colors.textMuted} style={styles.searchBarIcon} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            mode="flat"
+            placeholder={selectedSupplierGroup ? `Search ${supplierGroups.find(g => g.id === selectedSupplierGroup)?.name || 'supplier'}` : "Search for materials..."}
+            placeholderTextColor={colors.textMuted}
+            style={styles.searchBarInput}
+            contentStyle={styles.searchBarInputContent}
+            underlineStyle={{ display: 'none' }}
+            onSubmitEditing={() => { Keyboard.dismiss(); handleSearch(); }}
+            returnKeyType="search"
+            editable={!isSearching}
           />
-        }
-        onSubmitEditing={handleSearch}
-      />
-      )}
-
-      {isPro && isSearching && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={styles.loadingText}>Searching...</Text>
         </View>
+        {isSearching ? (
+          <TouchableOpacity
+            style={[styles.searchBarButton, styles.searchBarButtonCancel]}
+            onPress={cancelSearch}
+            activeOpacity={0.7}
+          >
+            <ActivityIndicator size="small" color="#FFFFFF" />
+            <Text style={styles.searchBarButtonText}>Cancel</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.searchBarButton}
+            onPress={() => { Keyboard.dismiss(); handleSearch(); }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.searchBarButtonText}>Search</Text>
+          </TouchableOpacity>
+        )}
+      </View>
       )}
 
       {isPro && searchResults.length > 0 && (
@@ -1483,6 +1523,18 @@ export function AddMaterialScreen() {
             ItemSeparatorComponent={() => <Divider />}
           />
         </View>
+      )}
+
+      {/* "Can't find it?" prompt after a search yields zero results */}
+      {isPro && hasSearched && !isSearching && searchResults.length === 0 && (
+        <TouchableOpacity
+          style={styles.cantFindItPrompt}
+          onPress={() => setManualEntrySheetVisible(true)}
+          activeOpacity={0.7}
+        >
+          <MaterialCommunityIcons name="plus-circle-outline" size={20} color={colors.primary} />
+          <Text style={styles.cantFindItText}>Can't find it? Add manually</Text>
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -1828,7 +1880,7 @@ export function AddMaterialScreen() {
     );
   };
 
-  // Render Search & Add Tab - manual entry first for non-pro users
+  // Render Search & Add Tab - search first, recently used below, manual entry in bottom sheet
   const renderSearchTab = () => (
     <ScrollView
       style={styles.tabContent}
@@ -1836,20 +1888,21 @@ export function AddMaterialScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <WebContainer>
-      {renderRecentlyUsedSection()}
-      {recentMaterials.length > 0 && !isEditMode && !isSavedItemMode && <Divider style={styles.divider} />}
       {isEditMode || isSavedItemMode ? (
         renderManualEntrySection()
-      ) : isPro ? (
-        <>
-          {renderSearchSection()}
-          {renderManualEntrySection()}
-        </>
       ) : (
         <>
-          {renderManualEntrySection()}
-          <Divider style={styles.divider} />
           {renderSearchSection()}
+          {renderRecentlyUsedSection()}
+          {/* Persistent "Add manually" link at the bottom */}
+          <TouchableOpacity
+            style={styles.addManuallySearchLink}
+            onPress={() => setManualEntrySheetVisible(true)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="pencil-plus-outline" size={18} color={colors.primary} />
+            <Text style={styles.addManuallySearchLinkText}>Add manually</Text>
+          </TouchableOpacity>
         </>
       )}
       </WebContainer>
@@ -2152,21 +2205,6 @@ export function AddMaterialScreen() {
           <WebContainer>
             <View style={styles.pillToggleRow}>
               <TouchableOpacity
-                style={[styles.pillToggleBtn, activeTab === 'saved' && styles.pillToggleBtnActive]}
-                onPress={() => setActiveTab('saved')}
-                activeOpacity={0.7}
-              >
-                <MaterialCommunityIcons
-                  name="format-list-bulleted"
-                  size={16}
-                  color={activeTab === 'saved' ? '#FFFFFF' : colors.textMuted}
-                  style={styles.pillToggleIcon}
-                />
-                <Text style={[styles.pillToggleText, activeTab === 'saved' && styles.pillToggleTextActive]}>
-                  Supplier Book
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
                 style={[styles.pillToggleBtn, activeTab === 'search' && styles.pillToggleBtnActive]}
                 onPress={() => setActiveTab('search')}
                 activeOpacity={0.7}
@@ -2179,6 +2217,21 @@ export function AddMaterialScreen() {
                 />
                 <Text style={[styles.pillToggleText, activeTab === 'search' && styles.pillToggleTextActive]}>
                   Search & Add
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.pillToggleBtn, activeTab === 'saved' && styles.pillToggleBtnActive]}
+                onPress={() => setActiveTab('saved')}
+                activeOpacity={0.7}
+              >
+                <MaterialCommunityIcons
+                  name="format-list-bulleted"
+                  size={16}
+                  color={activeTab === 'saved' ? '#FFFFFF' : colors.textMuted}
+                  style={styles.pillToggleIcon}
+                />
+                <Text style={[styles.pillToggleText, activeTab === 'saved' && styles.pillToggleTextActive]}>
+                  Supplier Book
                 </Text>
               </TouchableOpacity>
             </View>
@@ -2195,20 +2248,45 @@ export function AddMaterialScreen() {
         ? renderSearchTab()
         : renderSavedTab()}
 
-      {/* Fixed Bottom Button — hidden in standalone supplier-book browse mode */}
-      {!supplierBookOnly && (isEditMode || isSavedItemMode || activeTab === 'search') && (
+      {/* Fixed Bottom Button — only for edit / saved-item modes */}
+      {!supplierBookOnly && (isEditMode || isSavedItemMode) && (
         <FixedBottomButton
           label={
             isSavedItemMode
               ? (isSavedItemEditMode ? 'Save Changes' : 'Add to Supplier Book')
-              : isEditMode
-              ? 'Update Material'
-              : 'Add to Quote'
+              : 'Update Material'
           }
           onPress={handleAddManually}
-          icon={isEditMode || isSavedItemMode ? 'check' : 'plus'}
+          icon="check"
         />
       )}
+
+      {/* Manual Entry Bottom Sheet */}
+      <BottomSheet
+        visible={manualEntrySheetVisible}
+        onDismiss={() => setManualEntrySheetVisible(false)}
+        title="Add Manually"
+        scrollable
+        maxHeightRatio={0.92}
+        footer={
+          <View style={styles.manualSheetFooter}>
+            <Button
+              mode="contained"
+              onPress={async () => {
+                const success = await handleAddManually();
+                if (success) setManualEntrySheetVisible(false);
+              }}
+              icon="plus"
+              style={styles.manualSheetButton}
+              contentStyle={styles.manualSheetButtonContent}
+            >
+              Add to Quote
+            </Button>
+          </View>
+        }
+      >
+        {renderManualEntrySection()}
+      </BottomSheet>
 
       {/* Bulk import action sheet (source picker) */}
       <ActionSheet
@@ -2564,6 +2642,47 @@ const styles = StyleSheet.create({
   searchInput: {
     marginBottom: 16,
   },
+  searchBarContainer: {
+    marginBottom: 16,
+    gap: 10,
+  },
+  searchBarInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingLeft: 12,
+  },
+  searchBarIcon: {
+    marginRight: 4,
+  },
+  searchBarInput: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    height: 48,
+  },
+  searchBarInputContent: {
+    paddingLeft: 0,
+  },
+  searchBarButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    gap: 8,
+  },
+  searchBarButtonCancel: {
+    backgroundColor: colors.textMuted,
+  },
+  searchBarButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   supplierChipsRow: {
     flexDirection: 'row',
     marginBottom: 12,
@@ -2894,5 +3013,44 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  cantFindItPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    marginTop: 8,
+  },
+  cantFindItText: {
+    marginLeft: 8,
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  addManuallySearchLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 12,
+    marginTop: 8,
+  },
+  addManuallySearchLinkText: {
+    marginLeft: 8,
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  manualSheetFooter: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  manualSheetButton: {
+    borderRadius: 12,
+  },
+  manualSheetButtonContent: {
+    paddingVertical: 6,
   },
 });
