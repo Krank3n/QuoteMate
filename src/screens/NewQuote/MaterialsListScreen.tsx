@@ -2089,11 +2089,11 @@ export function MaterialsListScreen() {
               </View>
               <View style={styles.emptyActionContent}>
                 <View style={styles.emptyActionTitleRow}>
-                  <Text style={styles.emptyActionTitle}>Build from description</Text>
+                  <Text style={styles.emptyActionTitle}>Get recommended gear list</Text>
                   {!isPro && <ProBadge size="small" />}
                 </View>
                 <Text style={styles.emptyActionDesc}>
-                  Create a full materials list from your job description
+                  We'll read your notes and pull the right gear, templates, and local suppliers.
                 </Text>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
@@ -2104,9 +2104,9 @@ export function MaterialsListScreen() {
                 <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
               </View>
               <View style={styles.emptyActionContent}>
-                <Text style={styles.emptyActionTitle}>Start empty</Text>
+                <Text style={styles.emptyActionTitle}>I'll build it myself</Text>
                 <Text style={styles.emptyActionDesc}>
-                  Search for products or enter materials by hand
+                  Start empty and pull from your templates and local suppliers by hand.
                 </Text>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
