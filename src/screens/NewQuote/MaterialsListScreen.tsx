@@ -2089,7 +2089,7 @@ export function MaterialsListScreen() {
               </View>
               <View style={styles.emptyActionContent}>
                 <View style={styles.emptyActionTitleRow}>
-                  <Text style={styles.emptyActionTitle}>Get recommended gear list</Text>
+                  <Text style={styles.emptyActionTitle}>Get recommended gear</Text>
                   {!isPro && <ProBadge size="small" />}
                 </View>
                 <Text style={styles.emptyActionDesc}>
