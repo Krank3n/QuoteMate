@@ -19,7 +19,7 @@ const FAVORITES_STORAGE_KEY = 'material_favorites';
  */
 function getMaterialKey(materialName: string, searchTerm?: string): string {
   const key = searchTerm || materialName;
-  return key.toLowerCase().trim().replace(/\s+/g, '_');
+  return key.toLowerCase().trim().replace(/\s+/g, '_').replace(/\//g, '-');
 }
 
 /**

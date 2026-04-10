@@ -77,7 +77,7 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { SwipeableCard } from '../../components/SwipeableCard';
 import { SupplierGroup } from '../../types';
-import { loadGroups, getSupplierGroupByName, saveGroup } from '../../services/supplierGroupService';
+import { loadGroups, getSupplierGroupByName, saveGroup, deleteGroup } from '../../services/supplierGroupService';
 import { searchLocalSources, type LocalSearchResult } from '../../services/localMaterialSearch';
 import { ContactActionsBar } from '../../components/document/ContactActionsBar';
 import { useTourRefs } from '../../components/tour/useTourRefs';
@@ -125,7 +125,8 @@ export function AddMaterialScreen() {
   // Tab state — Search & Add is the primary tab and opens first.
   // Edit modes (material edit / saved-item edit) flip to 'search' in their
   // own effects since they show the manual entry form.
-  const [activeTab, setActiveTab] = useState<TabValue>('search');
+  // Supplier-book-only mode skips the tab bar entirely and always shows saved.
+  const [activeTab, setActiveTab] = useState<TabValue>(supplierBookOnly ? 'saved' : 'search');
 
   // Search & Add tab state
   const [searchQuery, setSearchQuery] = useState('');
@@ -450,21 +451,22 @@ export function AddMaterialScreen() {
     }
   };
 
-  // Load saved items when switching to saved tab
+  // Load saved items when switching to saved tab (or on mount in supplier-book-only mode).
+  const shouldLoadSaved = activeTab === 'saved' || supplierBookOnly;
   useEffect(() => {
-    if (activeTab === 'saved') {
+    if (shouldLoadSaved) {
       loadSavedItems();
     }
-  }, [activeTab]);
+  }, [shouldLoadSaved]);
 
   // Re-fetch saved items whenever the screen regains focus, so changes made
   // in a child instance (saved-item edit/create) show up on return.
   useFocusEffect(
     React.useCallback(() => {
-      if (activeTab === 'saved') {
+      if (shouldLoadSaved) {
         loadSavedItems();
       }
-    }, [activeTab])
+    }, [shouldLoadSaved])
   );
 
   const loadSavedItems = async () => {
@@ -487,11 +489,16 @@ export function AddMaterialScreen() {
   // Bulk import from supplier price list (photos / PDF)
   // -------------------------------------------------------------------------
 
-  const openImportSheet = () => {
-    // Default to refresh mode when there are already imported items so the
-    // review modal shows a diff; otherwise treat as a fresh import.
-    const hasImported = savedItems.some((s: any) => s.source === 'imported');
+  const openImportSheet = (prefilledSupplier?: string) => {
+    // When scoped to a specific supplier, check if that supplier already has
+    // items — if so, default to refresh mode so the review modal shows a diff.
+    const hasImported = prefilledSupplier
+      ? savedItems.some((s: any) => s.store === prefilledSupplier)
+      : savedItems.some((s: any) => s.source === 'imported');
     setImportMode(hasImported ? 'refresh' : 'new');
+    if (prefilledSupplier) {
+      setExtractedSupplierName(prefilledSupplier);
+    }
     setImportSheetVisible(true);
   };
 
@@ -1104,7 +1111,7 @@ export function AddMaterialScreen() {
 
       // If the slug key changed (renamed), drop the old entry first so we
       // don't leave a stale duplicate behind.
-      const newSlug = trimmedName.toLowerCase().trim().replace(/\s+/g, '_');
+      const newSlug = trimmedName.toLowerCase().trim().replace(/\s+/g, '_').replace(/\//g, '-');
       if (isSavedItemEditMode && savedItemKey && savedItemKey !== newSlug) {
         try { await removeFavoriteProduct(savedItemKey); } catch { /* ignore */ }
       }
@@ -1139,8 +1146,8 @@ export function AddMaterialScreen() {
       const linkedFav = editingMaterial.favoriteProduct;
       if (linkedFav && isPersonalRate) {
         const newName = manualName.trim();
-        const oldSlug = (linkedFav.productName || '').toLowerCase().trim().replace(/\s+/g, '_');
-        const newSlug = newName.toLowerCase().trim().replace(/\s+/g, '_');
+        const oldSlug = (linkedFav.productName || '').toLowerCase().trim().replace(/\s+/g, '_').replace(/\//g, '-');
+        const newSlug = newName.toLowerCase().trim().replace(/\s+/g, '_').replace(/\//g, '-');
         const parsedKeywords = rateKeywords
           .split(',')
           .map(k => k.trim())
@@ -1314,6 +1321,17 @@ export function AddMaterialScreen() {
     if (!supplier) return;
     try {
       const removed = await deleteAllFavoritesByStore(supplier);
+
+      // Also remove the SupplierGroup record so the section doesn't
+      // reappear as an empty ghost after all items are deleted.
+      const group = supplierGroups.find(
+        g => g.name.trim().toLowerCase() === supplier.trim().toLowerCase()
+      );
+      if (group) {
+        await deleteGroup(group.id);
+        setSupplierGroups(prev => prev.filter(g => g.id !== group.id));
+      }
+
       await loadSavedItems();
       if (removed > 0) {
         setSnackbarMessage(`Removed ${removed} item${removed === 1 ? '' : 's'} from ${supplier}`);
@@ -1913,7 +1931,7 @@ export function AddMaterialScreen() {
   const renderImportBar = () => (
     <TouchableOpacity
       style={styles.importCard}
-      onPress={openImportSheet}
+      onPress={() => openImportSheet()}
       disabled={importLoading}
       activeOpacity={0.85}
     >
@@ -2073,6 +2091,13 @@ export function AddMaterialScreen() {
                   </TouchableOpacity>
                   {isEditable && (
                     <View style={styles.supplierHeaderActions}>
+                      <TouchableOpacity
+                        onPress={() => openImportSheet(title)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.supplierHeaderActionBtn}
+                      >
+                        <MaterialCommunityIcons name="camera-plus-outline" size={18} color={colors.textMuted} />
+                      </TouchableOpacity>
                       <TouchableOpacity
                         onPress={() =>
                           navigation.navigate(

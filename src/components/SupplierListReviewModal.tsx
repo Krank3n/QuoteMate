@@ -26,7 +26,6 @@ import {
   Text,
   Button,
   TextInput,
-  SegmentedButtons,
   Checkbox,
   Chip,
   IconButton,
@@ -81,7 +80,7 @@ const UNIT_OPTIONS = [
 ];
 
 function slugKey(name: string): string {
-  return name.toLowerCase().trim().replace(/\s+/g, '_');
+  return name.toLowerCase().trim().replace(/\s+/g, '_').replace(/\//g, '-');
 }
 
 function confidenceColor(c: ExtractedItem['confidence']): string {
@@ -332,24 +331,44 @@ export function SupplierListReviewModal({
                     />
                   </View>
 
-                  <SegmentedButtons
-                    value={row.unit}
-                    onValueChange={unit => updateRow(row.uiKey, { unit })}
-                    buttons={UNIT_OPTIONS}
-                    density="small"
-                    style={styles.unitPicker}
-                  />
+                  <View style={styles.unitPicker}>
+                    {UNIT_OPTIONS.map(opt => {
+                      const active = row.unit === opt.value;
+                      return (
+                        <TouchableOpacity
+                          key={opt.value}
+                          onPress={() => updateRow(row.uiKey, { unit: opt.value })}
+                          style={[
+                            styles.unitBtn,
+                            active && styles.unitBtnActive,
+                          ]}
+                          disabled={saving}
+                        >
+                          <Text
+                            style={[
+                              styles.unitBtnText,
+                              active && styles.unitBtnTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
 
                   <View style={styles.keywordsWrap}>
                     {row.keywords.map(kw => (
-                      <Chip
-                        key={kw}
-                        compact
-                        onClose={() => removeKeyword(row.uiKey, kw)}
-                        style={styles.keywordChip}
-                      >
-                        {kw}
-                      </Chip>
+                      <View key={kw} style={styles.keywordPill}>
+                        <Text style={styles.keywordPillText}>{kw}</Text>
+                        <TouchableOpacity
+                          onPress={() => removeKeyword(row.uiKey, kw)}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                          style={styles.keywordPillClose}
+                        >
+                          <Text style={styles.keywordPillCloseText}>✕</Text>
+                        </TouchableOpacity>
+                      </View>
                     ))}
                     <TextInput
                       value={keywordDraft[row.uiKey] || ''}
@@ -363,9 +382,11 @@ export function SupplierListReviewModal({
                   </View>
 
                   {row.rawLine && (
-                    <Text style={styles.rawLine} numberOfLines={2}>
-                      Raw line: {row.rawLine}
-                    </Text>
+                    <View style={styles.rawLineWrap}>
+                      <Text style={styles.rawLine} numberOfLines={2}>
+                        Raw: {row.rawLine}
+                      </Text>
+                    </View>
                   )}
                 </>
               )}
@@ -444,6 +465,9 @@ const styles = StyleSheet.create({
   },
   row: {
     marginBottom: 4,
+    backgroundColor: colors.surfaceDark,
+    borderRadius: 12,
+    padding: 12,
   },
   rowHeader: {
     flexDirection: 'row',
@@ -505,29 +529,84 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   unitPicker: {
-    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  unitBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.surfaceLight,
+  },
+  unitBtnActive: {
+    backgroundColor: colors.primaryBg,
+    borderColor: colors.primary,
+  },
+  unitBtnText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '500',
+  },
+  unitBtnTextActive: {
+    color: colors.primary,
+    fontWeight: '600',
   },
   keywordsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
-    rowGap: 8,
-    columnGap: 6,
+    gap: 6,
     marginTop: 10,
   },
-  keywordChip: {
-    // Let Paper compute the natural height — explicit height was clipping
-    // the chip content in flexWrap rows.
+  keywordPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    paddingLeft: 10,
+    paddingRight: 4,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: colors.surfaceLight,
+  },
+  keywordPillText: {
+    fontSize: 12,
+    color: colors.text,
+    marginRight: 4,
+  },
+  keywordPillClose: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  keywordPillCloseText: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontWeight: '700',
   },
   keywordInput: {
     flex: 1,
-    minWidth: 120,
+    minWidth: 100,
     backgroundColor: 'transparent',
+    fontSize: 13,
+  },
+  rawLineWrap: {
+    marginTop: 8,
+    backgroundColor: colors.surface,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
   },
   rawLine: {
     fontSize: 11,
     color: colors.textMuted,
-    marginTop: 6,
     fontStyle: 'italic',
   },
   removedHint: {
@@ -536,6 +615,8 @@ const styles = StyleSheet.create({
   },
   rowDivider: {
     marginTop: 12,
+    backgroundColor: 'transparent',
+    height: 8,
   },
   footer: {
     flexDirection: 'row',

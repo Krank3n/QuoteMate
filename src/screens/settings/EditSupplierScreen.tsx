@@ -139,13 +139,14 @@ export function EditSupplierScreen() {
 
       // If renaming an existing supplier, also rename any saved-items group
       // under the old name so the join key stays in sync.
-      if (original && original.name !== trimmedName) {
-        await renameStoreOnFavorites(original.name, trimmedName);
+      const oldName = original?.name || supplierNameParam;
+      if (oldName && oldName !== trimmedName) {
+        await renameStoreOnFavorites(oldName, trimmedName);
 
         // If a different SupplierGroup already exists under the new name,
         // delete the old record so we don't end up with two.
         const collision = await getSupplierGroupByName(trimmedName);
-        if (collision && collision.id !== original.id) {
+        if (original && collision && collision.id !== original.id) {
           await deleteGroup(original.id);
         }
       }
