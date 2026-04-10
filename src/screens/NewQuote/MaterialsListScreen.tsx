@@ -2174,10 +2174,8 @@ export function MaterialsListScreen() {
               const renderFlatItem = ({ item, drag, isActive }: RenderItemParams<FlatItem>) => {
                 if (item.type === 'header') {
                   const sd = currentQuote?.sections?.find(s => s.name === item.sectionName);
-                  // Show the multiplier stepper for any section with a record,
-                  // not just template-derived ones — non-template sections still
-                  // benefit from a visible multiplier (it scales labour).
-                  const showMultiplier = !!sd;
+                  const sectionMats = materials.filter(m => m.section === item.sectionName);
+                  const showMultiplier = sd && sd.multiplier > 0 && sectionMats.some(m => m.templateBaseQuantity);
                   const isCollapsed = collapsedSections.has(item.sectionName);
                   return (
                     <View collapsable={false}>
