@@ -2080,319 +2080,37 @@ export function MaterialsListScreen() {
           </View>
         ) : materials.length === 0 ? (
           <View style={styles.emptyState}>
-            {allTemplates.length > 0 && suggestedTemplateIds.size > 0 ? (
-              <>
-                {/* Templates matched — compact layout */}
-                <Text style={styles.suggestionsTitle}>Ready to load</Text>
-
-                {allTemplates
-                  .sort((a, b) => {
-                    const aMatch = suggestedTemplateIds.has(a.id) ? 0 : 1;
-                    const bMatch = suggestedTemplateIds.has(b.id) ? 0 : 1;
-                    return aMatch - bMatch;
-                  })
-                  .map(template => {
-                    const isChecked = checkedTemplateIds.has(template.id);
-                    const isSuggested = suggestedTemplateIds.has(template.id);
-                    const qty = templateQuantities[template.id] || 1;
-                    const materialsCost = template.materials.reduce((sum, m) => sum + (m.quantity * m.price), 0);
-                    const laborCost = template.laborHours * template.laborRate;
-                    const unitCost = materialsCost + laborCost;
-
-                    return (
-                      <Surface key={template.id} style={[styles.suggestionCard, isChecked && styles.suggestionCardChecked]}>
-                        <TouchableOpacity
-                          style={styles.suggestionCardInner}
-                          onPress={() => setCheckedTemplateIds(prev => {
-                            const next = new Set(prev);
-                            next.has(template.id) ? next.delete(template.id) : next.add(template.id);
-                            return next;
-                          })}
-                          activeOpacity={0.7}
-                        >
-                          <MaterialCommunityIcons
-                            name={isChecked ? 'checkbox-marked' : 'checkbox-blank-outline'}
-                            size={22}
-                            color={isChecked ? colors.primary : colors.textMuted}
-                          />
-                          <View style={styles.suggestionInfo}>
-                            <View style={styles.suggestionCompactRow}>
-                              <Text style={styles.suggestionName} numberOfLines={1}>{template.name}</Text>
-                              <Text style={styles.suggestionQtyBadge}>×{qty}</Text>
-                              <Text style={styles.suggestionUnitCost}>{formatCurrency(unitCost)}/unit</Text>
-                            </View>
-                            {isSuggested && (
-                              <Text style={styles.suggestionMatchHint}>
-                                {template.materials.length} material{template.materials.length !== 1 ? 's' : ''}
-                                {laborCost > 0 ? ` · ${template.laborHours}${template.laborUnit === 'days' ? 'd' : 'h'} labour` : ''}
-                              </Text>
-                            )}
-                          </View>
-                        </TouchableOpacity>
-                        {isChecked && (
-                          <View style={styles.suggestionQtyRow}>
-                            <Text style={styles.suggestionQtyLabel}>Qty:</Text>
-                            <View style={styles.suggestionStepper}>
-                              <Pressable
-                                style={({ pressed }) => [styles.suggestionStepperBtn, pressed && { opacity: 0.6 }]}
-                                onPress={() => setTemplateQuantities(prev => ({ ...prev, [template.id]: Math.max(1, qty - 1) }))}
-                              >
-                                <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
-                              </Pressable>
-                              <Text style={styles.suggestionStepperValue}>{qty}</Text>
-                              <Pressable
-                                style={({ pressed }) => [styles.suggestionStepperBtn, pressed && { opacity: 0.6 }]}
-                                onPress={() => setTemplateQuantities(prev => ({ ...prev, [template.id]: qty + 1 }))}
-                              >
-                                <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
-                              </Pressable>
-                            </View>
-                            <Text style={styles.suggestionQtyTotal}>
-                              {formatCurrency(unitCost * qty)}
-                            </Text>
-                          </View>
-                        )}
-                      </Surface>
-                    );
-                  })}
-
-                {/* Single load button */}
-                {checkedTemplateIds.size > 0 && (
-                  <View style={styles.suggestionActions}>
-                    <TouchableOpacity
-                      style={styles.loadAndFillBtn}
-                      onPress={() => {
-                        loadSelectedTemplatesIntoQuote();
-                        if (isLoadingWithGaps && isPro) {
-                          setTimeout(() => handleGenerateMaterialsList(), 300);
-                        }
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <MaterialCommunityIcons name="download" size={20} color="#FFFFFF" />
-                      <Text style={styles.loadAndFillBtnText}>Load Materials</Text>
-                    </TouchableOpacity>
-
-                    {/* Fill gaps toggle (Pro) */}
-                    {isPro && (
-                      <TouchableOpacity
-                        style={styles.fillGapsToggle}
-                        onPress={() => setIsLoadingWithGaps(prev => !prev)}
-                        activeOpacity={0.7}
-                      >
-                        <MaterialCommunityIcons
-                          name={isLoadingWithGaps ? 'checkbox-marked' : 'checkbox-blank-outline'}
-                          size={20}
-                          color={isLoadingWithGaps ? colors.primary : colors.textMuted}
-                        />
-                        <Text style={styles.fillGapsToggleText}>Fill remaining gaps</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                )}
-
-                {/* Secondary options */}
-                <View style={styles.orDivider}>
-                  <View style={styles.orDividerLine} />
-                  <Text style={styles.orDividerText}>or start differently</Text>
-                  <View style={styles.orDividerLine} />
+            <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
+              if (!isPro) { navigation.navigate('Paywall' as never); return; }
+              handleGenerateMaterialsList();
+            }} activeOpacity={0.7}>
+              <View style={styles.emptyActionIconWrap}>
+                <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
+              </View>
+              <View style={styles.emptyActionContent}>
+                <View style={styles.emptyActionTitleRow}>
+                  <Text style={styles.emptyActionTitle}>Build from description</Text>
+                  {!isPro && <ProBadge size="small" />}
                 </View>
-
-                <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
-                  if (!isPro) { navigation.navigate('Paywall' as never); return; }
-                  handleGenerateMaterialsList();
-                }} activeOpacity={0.7}>
-                  <View style={styles.emptyActionIconWrap}>
-                    <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
-                  </View>
-                  <View style={styles.emptyActionContent}>
-                    <View style={styles.emptyActionTitleRow}>
-                      <Text style={styles.emptyActionTitle}>Build from description</Text>
-                      {!isPro && <ProBadge size="small" />}
-                    </View>
-                    <Text style={styles.emptyActionDesc}>
-                      Create a full materials list from your job description
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-                </TouchableOpacity>
-
-                <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
-                  <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
-                    <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
-                  </View>
-                  <View style={styles.emptyActionContent}>
-                    <Text style={styles.emptyActionTitle}>Start empty</Text>
-                    <Text style={styles.emptyActionDesc}>
-                      Search for products or enter materials by hand
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-                </TouchableOpacity>
-              </>
-            ) : allTemplates.length > 0 ? (
-              <>
-                {/* Templates exist but none matched */}
-                <Text style={styles.suggestionsTitle}>Your Job Templates</Text>
-
-                {allTemplates.map(template => {
-                  const isChecked = checkedTemplateIds.has(template.id);
-                  const qty = templateQuantities[template.id] || 1;
-                  const materialsCost = template.materials.reduce((sum, m) => sum + (m.quantity * m.price), 0);
-                  const laborCost = template.laborHours * template.laborRate;
-                  const unitCost = materialsCost + laborCost;
-
-                  return (
-                    <Surface key={template.id} style={[styles.suggestionCard, isChecked && styles.suggestionCardChecked]}>
-                      <TouchableOpacity
-                        style={styles.suggestionCardInner}
-                        onPress={() => setCheckedTemplateIds(prev => {
-                          const next = new Set(prev);
-                          next.has(template.id) ? next.delete(template.id) : next.add(template.id);
-                          return next;
-                        })}
-                        activeOpacity={0.7}
-                      >
-                        <MaterialCommunityIcons
-                          name={isChecked ? 'checkbox-marked' : 'checkbox-blank-outline'}
-                          size={22}
-                          color={isChecked ? colors.primary : colors.textMuted}
-                        />
-                        <View style={styles.suggestionInfo}>
-                          <View style={styles.suggestionCompactRow}>
-                            <Text style={styles.suggestionName} numberOfLines={1}>{template.name}</Text>
-                            {isChecked && <Text style={styles.suggestionQtyBadge}>×{qty}</Text>}
-                            <Text style={styles.suggestionUnitCost}>{formatCurrency(unitCost)}/unit</Text>
-                          </View>
-                          <Text style={styles.suggestionMatchHint}>
-                            {template.materials.length} material{template.materials.length !== 1 ? 's' : ''}
-                            {laborCost > 0 ? ` · ${template.laborHours}${template.laborUnit === 'days' ? 'd' : 'h'} labour` : ''}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                      {isChecked && (
-                        <View style={styles.suggestionQtyRow}>
-                          <Text style={styles.suggestionQtyLabel}>Qty:</Text>
-                          <View style={styles.suggestionStepper}>
-                            <Pressable
-                              style={({ pressed }) => [styles.suggestionStepperBtn, pressed && { opacity: 0.6 }]}
-                              onPress={() => setTemplateQuantities(prev => ({ ...prev, [template.id]: Math.max(1, qty - 1) }))}
-                            >
-                              <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
-                            </Pressable>
-                            <Text style={styles.suggestionStepperValue}>{qty}</Text>
-                            <Pressable
-                              style={({ pressed }) => [styles.suggestionStepperBtn, pressed && { opacity: 0.6 }]}
-                              onPress={() => setTemplateQuantities(prev => ({ ...prev, [template.id]: qty + 1 }))}
-                            >
-                              <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
-                            </Pressable>
-                          </View>
-                          <Text style={styles.suggestionQtyTotal}>{formatCurrency(unitCost * qty)}</Text>
-                        </View>
-                      )}
-                    </Surface>
-                  );
-                })}
-
-                {checkedTemplateIds.size > 0 && (
-                  <View style={styles.suggestionActions}>
-                    <TouchableOpacity
-                      style={styles.loadAndFillBtn}
-                      onPress={() => loadSelectedTemplatesIntoQuote()}
-                      activeOpacity={0.7}
-                    >
-                      <MaterialCommunityIcons name="download" size={20} color="#FFFFFF" />
-                      <Text style={styles.loadAndFillBtnText}>Load Materials</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                <View style={styles.orDivider}>
-                  <View style={styles.orDividerLine} />
-                  <Text style={styles.orDividerText}>or start differently</Text>
-                  <View style={styles.orDividerLine} />
-                </View>
-
-                <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
-                  if (!isPro) { navigation.navigate('Paywall' as never); return; }
-                  handleGenerateMaterialsList();
-                }} activeOpacity={0.7}>
-                  <View style={styles.emptyActionIconWrap}>
-                    <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
-                  </View>
-                  <View style={styles.emptyActionContent}>
-                    <View style={styles.emptyActionTitleRow}>
-                      <Text style={styles.emptyActionTitle}>Build from description</Text>
-                      {!isPro && <ProBadge size="small" />}
-                    </View>
-                    <Text style={styles.emptyActionDesc}>
-                      Create a full materials list from your job description
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-                </TouchableOpacity>
-
-                <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
-                  <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
-                    <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
-                  </View>
-                  <View style={styles.emptyActionContent}>
-                    <Text style={styles.emptyActionTitle}>Start empty</Text>
-                    <Text style={styles.emptyActionDesc}>
-                      Search for products or enter materials by hand
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                {/* No templates at all */}
-                <View style={{ alignItems: 'center', marginBottom: 20 }}>
-                  <MaterialCommunityIcons name="puzzle-outline" size={40} color={colors.textMuted} style={{ marginBottom: 8 }} />
-                  <Text style={{ color: colors.textMuted, fontSize: 14, textAlign: 'center' }}>
-                    No saved templates yet
-                  </Text>
-                </View>
-
-                <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
-                  if (!isPro) { navigation.navigate('Paywall' as never); return; }
-                  handleGenerateMaterialsList();
-                }} activeOpacity={0.7}>
-                  <View style={styles.emptyActionIconWrap}>
-                    <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
-                  </View>
-                  <View style={styles.emptyActionContent}>
-                    <View style={styles.emptyActionTitleRow}>
-                      <Text style={styles.emptyActionTitle}>Build from description</Text>
-                      {!isPro && <ProBadge size="small" />}
-                    </View>
-                    <Text style={styles.emptyActionDesc}>
-                      Create a full materials list from your job description
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-                </TouchableOpacity>
-
-                <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
-                  <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
-                    <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
-                  </View>
-                  <View style={styles.emptyActionContent}>
-                    <Text style={styles.emptyActionTitle}>Start empty</Text>
-                    <Text style={styles.emptyActionDesc}>
-                      Search for products or enter materials by hand
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-                </TouchableOpacity>
-
-                <Text style={{ color: colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: 16 }}>
-                  Save sections as templates for faster quoting next time.
+                <Text style={styles.emptyActionDesc}>
+                  Create a full materials list from your job description
                 </Text>
-              </>
-            )}
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
+              <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
+                <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
+              </View>
+              <View style={styles.emptyActionContent}>
+                <Text style={styles.emptyActionTitle}>Start empty</Text>
+                <Text style={styles.emptyActionDesc}>
+                  Search for products or enter materials by hand
+                </Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+            </TouchableOpacity>
           </View>
         ) : (
           <List.Section style={styles.listView}>
