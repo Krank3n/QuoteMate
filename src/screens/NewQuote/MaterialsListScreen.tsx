@@ -3228,10 +3228,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   emptyState: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
+    paddingTop: '30%',
   },
   emptyText: {
     fontSize: 20,
