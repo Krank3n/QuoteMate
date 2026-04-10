@@ -41,6 +41,8 @@ import { auth } from './src/config/firebase';
 import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
 import { notificationService } from './src/services/notificationService';
+import { checkForUpdate, AppUpdateInfo } from './src/services/appUpdateService';
+import { AppUpdateSheet } from './src/components/AppUpdateSheet';
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -48,6 +50,8 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [userDataLoaded, setUserDataLoaded] = useState(false);
   const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, checkTourStatus, loadXeroConnection, loadContacts } = useStore();
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [showUpdateSheet, setShowUpdateSheet] = useState(false);
 
   const requiresAuth = true;
 
@@ -151,6 +155,13 @@ export default function App() {
 
         // Initialize subscription sync (syncs across all platforms)
         await subscriptionSyncService.initialize();
+
+        // Check for app updates (slight delay so dashboard renders first)
+        const update = await checkForUpdate();
+        if (update) {
+          setUpdateInfo(update);
+          setTimeout(() => setShowUpdateSheet(true), 800);
+        }
       } catch (error) {
       } finally {
         setIsLoading(false);
@@ -257,6 +268,13 @@ export default function App() {
             <StatusBar style="light" />
             {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
           </NavigationContainer>
+          {showUpdateSheet && updateInfo && (
+            <AppUpdateSheet
+              visible={showUpdateSheet}
+              onDismiss={() => setShowUpdateSheet(false)}
+              info={updateInfo}
+            />
+          )}
         </PaperProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

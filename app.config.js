@@ -10,7 +10,6 @@ export default {
     userInterfaceStyle: "dark",
     newArchEnabled: true,
     plugins: [
-      "expo-router",
       [
         "expo-build-properties",
         {

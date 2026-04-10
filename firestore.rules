@@ -20,6 +20,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // App config (version checks etc.) — public read, admin-only write
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // Default: deny all access
     match /{document=**} {
       allow read, write: if false;
