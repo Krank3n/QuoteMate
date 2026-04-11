@@ -16,7 +16,7 @@ const firebaseConfig = {
   apiKey: process.env.FIREBASE_API_KEY || Constants.expoConfig?.extra?.firebaseApiKey || 'AIzaSyBACasUs7AwAQt_5VcfnEjBRan7AvAM5lw',
   authDomain: process.env.FIREBASE_AUTH_DOMAIN || Constants.expoConfig?.extra?.firebaseAuthDomain || 'hansendev.firebaseapp.com',
   projectId: process.env.FIREBASE_PROJECT_ID || Constants.expoConfig?.extra?.firebaseProjectId || 'hansendev',
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || Constants.expoConfig?.extra?.firebaseStorageBucket || 'hansendev.appspot.com',
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || Constants.expoConfig?.extra?.firebaseStorageBucket || 'hansendev.firebasestorage.app',
   messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || Constants.expoConfig?.extra?.firebaseMessagingSenderId || '652758863537',
   appId: process.env.FIREBASE_APP_ID || Constants.expoConfig?.extra?.firebaseAppId || '1:652758863537:web:YOUR_APP_ID',
 };

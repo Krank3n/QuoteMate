@@ -38,6 +38,7 @@ import { SectionTemplatesScreen } from '../screens/settings/SectionTemplatesScre
 import { JobTemplateEditorScreen } from '../screens/settings/JobTemplateEditorScreen';
 import { EditSupplierScreen } from '../screens/settings/EditSupplierScreen';
 import { ContactsScreen } from '../screens/ContactsScreen';
+import { DiscoverSuppliersScreen } from '../screens/DiscoverSuppliersScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
 import { CustomerDetailsScreen } from '../screens/NewQuote/CustomerDetailsScreen';
@@ -713,6 +714,17 @@ export function RootNavigator() {
           headerStyle: { backgroundColor: colors.primary },
           headerTintColor: colors.white,
           title: 'Contacts',
+        }}
+      />
+      <RootStack.Screen
+        name="DiscoverSuppliers"
+        component={DiscoverSuppliersScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Supplier Partners',
         }}
       />
     </RootStack.Navigator>

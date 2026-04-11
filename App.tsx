@@ -11,7 +11,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 // Suppress known harmless warning from react-native-draggable-flatlist + reanimated v3
 LogBox.ignoreLogs(['ref.measureLayout must be called with a ref to a native component']);
-import { NavigationContainer, DarkTheme } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme, LinkingOptions, createNavigationContainerRef } from '@react-navigation/native';
+import * as Linking from 'expo-linking';
 import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -42,7 +43,19 @@ import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
 import { notificationService } from './src/services/notificationService';
 import { checkForUpdate, AppUpdateInfo } from './src/services/appUpdateService';
+import { checkDeferredLink } from './src/services/supplierDiscoveryService';
 import { AppUpdateSheet } from './src/components/AppUpdateSheet';
+
+const navigationRef = createNavigationContainerRef<any>();
+
+const linking: LinkingOptions<any> = {
+  prefixes: [Linking.createURL('/'), 'https://quotemateapp.au', 'quotemate://'],
+  config: {
+    screens: {
+      DiscoverSuppliers: 'join',
+    },
+  },
+};
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -76,6 +89,13 @@ export default function App() {
         ]);
 
         setUserDataLoaded(true); // Mark user data as loaded
+
+        // Check for deferred deep link (QR code scanned before app install)
+        checkDeferredLink().then((supplierId) => {
+          if (supplierId && navigationRef.isReady()) {
+            navigationRef.navigate('DiscoverSuppliers', { supplier: supplierId });
+          }
+        });
 
         // Register for push notifications
         if (Platform.OS !== 'web') {
@@ -264,7 +284,7 @@ export default function App() {
     <GestureHandlerRootView style={appStyles.flex}>
       <SafeAreaProvider>
         <PaperProvider theme={theme}>
-          <NavigationContainer key="main" theme={navigationTheme}>
+          <NavigationContainer key="main" theme={navigationTheme} linking={linking} ref={navigationRef}>
             <StatusBar style="light" />
             {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
           </NavigationContainer>

@@ -29,7 +29,9 @@ import ColorPicker, { Panel1, HueSlider, type ColorFormatsObject } from 'reanima
 import { useNavigation } from '@react-navigation/native';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useStore } from '../../store/useStore';
-import { auth, storage } from '../../config/firebase';
+import { auth, storage, db } from '../../config/firebase';
+import { doc, updateDoc } from 'firebase/firestore';
+import { geocodeAddress } from '../../utils/travelCalculator';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -228,6 +230,17 @@ export function BusinessProfileScreen() {
         defaultLaborMarkup: parseFloat(laborMarkup) || 0,
         transportMarkupEnabled,
       });
+
+      // Geocode address and store location for distance sorting in supplier discovery
+      if (address.trim() && auth.currentUser) {
+        geocodeAddress(address.trim()).then((loc) => {
+          if (loc) {
+            updateDoc(doc(db, `users/${auth.currentUser!.uid}`), {
+              location: { lat: loc.lat, lng: loc.lng },
+            }).catch(() => {});
+          }
+        });
+      }
 
       // Refresh snapshot so the form is no longer "dirty"
       initialSnapshotRef.current = JSON.stringify({
