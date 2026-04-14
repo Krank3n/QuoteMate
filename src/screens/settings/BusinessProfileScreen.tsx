@@ -237,7 +237,9 @@ export function BusinessProfileScreen() {
           if (loc) {
             updateDoc(doc(db, `users/${auth.currentUser!.uid}`), {
               location: { lat: loc.lat, lng: loc.lng },
-            }).catch(() => {});
+            }).catch((err) => {
+              console.warn('Failed to store geocoded location:', err.message);
+            });
           }
         });
       }

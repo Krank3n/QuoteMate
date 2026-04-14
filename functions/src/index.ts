@@ -8027,7 +8027,7 @@ export const extractSupplierPriceListPublic = functions
         return;
       }
 
-      // IP-based rate limiting: 3 requests per hour
+      // IP-based rate limiting: 10 requests per hour
       const clientIp = getClientIp(req);
       const allowed = await checkRateLimit(
         `ip:${clientIp}`,
@@ -8304,7 +8304,6 @@ export const createPendingLink = functions.https.onRequest((req, res) => {
       }
 
       const userAgent = req.headers['user-agent'] || '';
-      const crypto = await import('crypto');
       const fingerprint = crypto
         .createHash('sha256')
         .update(`${clientIp}:${userAgent}`)
@@ -8342,7 +8341,6 @@ export const checkPendingLink = functions.https.onRequest((req, res) => {
     try {
       const userAgent = req.headers['user-agent'] || '';
       const clientIp = getClientIp(req);
-      const crypto = await import('crypto');
       const fingerprint = crypto
         .createHash('sha256')
         .update(`${clientIp}:${userAgent}`)
@@ -8369,6 +8367,37 @@ export const checkPendingLink = functions.https.onRequest((req, res) => {
       await linkDoc.ref.update({ claimed: true });
 
       res.status(200).json({ supplierId: linkDoc.data().supplierId });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Public endpoint: get a supplier's display name by ID (no auth required).
+ * Used by the /join/ landing page since Firestore rules require auth for supplier reads.
+ */
+export const getSupplierName = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'GET') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const supplierId = req.query.id as string;
+    if (!supplierId || typeof supplierId !== 'string') {
+      res.status(400).json({ error: 'id query param is required' });
+      return;
+    }
+
+    try {
+      const firestore = admin.firestore();
+      const supplierDoc = await firestore.doc(`suppliers/${supplierId}`).get();
+      if (!supplierDoc.exists) {
+        res.status(404).json({ name: null });
+        return;
+      }
+      res.status(200).json({ name: supplierDoc.data()?.name || null });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

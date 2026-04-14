@@ -66,9 +66,20 @@ export async function loadGroups(): Promise<SupplierGroup[]> {
     const cloud = await loadGroupsFromCloud();
     if (cloud.length > 0) {
       const merged = new Map<string, SupplierGroup>();
-      cloud.forEach(g => merged.set(g.id, g));
+      const seenNames = new Set<string>();
+      cloud.forEach(g => {
+        const key = g.name.trim().toLowerCase();
+        if (!seenNames.has(key)) {
+          merged.set(g.id, g);
+          seenNames.add(key);
+        }
+      });
       local.forEach(g => {
-        if (!merged.has(g.id)) merged.set(g.id, g);
+        const key = g.name.trim().toLowerCase();
+        if (!merged.has(g.id) && !seenNames.has(key)) {
+          merged.set(g.id, g);
+          seenNames.add(key);
+        }
       });
 
       const result = Array.from(merged.values()).sort((a, b) => a.sortOrder - b.sortOrder);
@@ -79,7 +90,15 @@ export async function loadGroups(): Promise<SupplierGroup[]> {
     // Fall back to local
   }
 
-  return local;
+  // Deduplicate local-only results by name as well
+  const seen = new Set<string>();
+  const deduped = local.filter(g => {
+    const key = g.name.trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return deduped;
 }
 
 /**
@@ -88,8 +107,14 @@ export async function loadGroups(): Promise<SupplierGroup[]> {
 export async function saveGroup(group: SupplierGroup): Promise<void> {
   const groups = await loadGroupsFromLocal();
   const existingIdx = groups.findIndex(g => g.id === group.id);
-  if (existingIdx >= 0) {
-    groups[existingIdx] = group;
+  // Also check for an existing group with the same name but different ID
+  const nameKey = group.name.trim().toLowerCase();
+  const existingByName = existingIdx < 0
+    ? groups.findIndex(g => g.name.trim().toLowerCase() === nameKey)
+    : -1;
+  const targetIdx = existingIdx >= 0 ? existingIdx : existingByName;
+  if (targetIdx >= 0) {
+    groups[targetIdx] = { ...groups[targetIdx], ...group };
   } else {
     groups.push(group);
   }

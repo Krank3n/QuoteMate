@@ -114,14 +114,14 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ supplierId: supplierId })
-      }).catch(function() {});
+      }).catch(function(err) { console.warn('createPendingLink failed:', err); });
 
-      // Fetch supplier name from Firestore REST API
-      fetch('https://firestore.googleapis.com/v1/projects/hansendev/databases/(default)/documents/suppliers/' + supplierId)
+      // Fetch supplier name via Cloud Function (Firestore rules require auth)
+      fetch('/getSupplierName?id=' + encodeURIComponent(supplierId))
         .then(function(r) { return r.json(); })
-        .then(function(doc) {
-          if (doc.fields && doc.fields.name && doc.fields.name.stringValue) {
-            document.getElementById('supplierName').textContent = doc.fields.name.stringValue;
+        .then(function(data) {
+          if (data.name) {
+            document.getElementById('supplierName').textContent = data.name;
           } else {
             document.getElementById('supplierName').textContent = 'Your local supplier';
           }

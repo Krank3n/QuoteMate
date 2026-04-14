@@ -13,7 +13,7 @@ service firebase.storage {
     match /suppliers/{supplierId}/{fileName} {
       allow read: if true;
       allow write: if request.auth != null
-        && request.auth.uid == supplierId
+        && request.auth.uid == firestore.get(/databases/(default)/documents/suppliers/$(supplierId)).data.ownerUid
         && request.resource.size < 2 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }

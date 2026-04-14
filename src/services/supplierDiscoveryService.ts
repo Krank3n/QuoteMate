@@ -5,6 +5,7 @@ import {
   query,
   where,
   getDocs,
+  getDoc,
   doc,
   setDoc,
   deleteDoc,
@@ -18,6 +19,20 @@ import { deleteAllFavoritesByStore } from './materialFavorites';
 import { saveGroup, deleteGroup, loadGroupsFromLocal } from './supplierGroupService';
 
 const API_BASE = process.env.API_BASE_URL || 'https://us-central1-hansendev.cloudfunctions.net';
+
+/**
+ * Fetch the current user's subscribed supplier IDs from their user doc.
+ */
+export async function fetchSubscribedSupplierIds(): Promise<Set<string>> {
+  const auth = getAuth();
+  const uid = auth.currentUser?.uid;
+  if (!uid) return new Set();
+
+  const db = getFirestore();
+  const userDoc = await getDoc(doc(db, `users/${uid}`));
+  const subs = userDoc.data()?.supplierSubscriptions;
+  return new Set(Array.isArray(subs) ? subs : []);
+}
 
 /**
  * Fetch all active supplier partners from Firestore.
@@ -55,8 +70,8 @@ export async function subscribeToSupplier(supplierId: string, supplierName: stri
   // Update user doc with subscription reference
   await updateDoc(doc(db, `users/${uid}`), {
     supplierSubscriptions: arrayUnion(supplierId),
-  }).catch(() => {
-    // User doc may not exist yet — ignore
+  }).catch((err) => {
+    console.warn('Failed to update supplierSubscriptions on subscribe:', err.message);
   });
 
   // Create a supplier group so items appear grouped in the Saved tab
@@ -89,7 +104,9 @@ export async function unsubscribeFromSupplier(supplierId: string, supplierName: 
   // Remove from user doc
   await updateDoc(doc(db, `users/${uid}`), {
     supplierSubscriptions: arrayRemove(supplierId),
-  }).catch(() => {});
+  }).catch((err) => {
+    console.warn('Failed to update supplierSubscriptions on unsubscribe:', err.message);
+  });
 
   // Clean up local favorites and supplier group
   await deleteAllFavoritesByStore(supplierName);

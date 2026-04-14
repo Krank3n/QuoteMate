@@ -15,6 +15,7 @@ import { colors } from '../theme';
 import type { SupplierPartner } from '../types';
 import {
   fetchActiveSuppliers,
+  fetchSubscribedSupplierIds,
   subscribeToSupplier,
   unsubscribeFromSupplier,
 } from '../services/supplierDiscoveryService';
@@ -55,13 +56,14 @@ export function DiscoverSuppliersScreen() {
   const loadSuppliers = async () => {
     setLoading(true);
     try {
-      const active = await fetchActiveSuppliers();
+      const [active, subIds] = await Promise.all([
+        fetchActiveSuppliers(),
+        fetchSubscribedSupplierIds(),
+      ]);
       setSuppliers(active);
-
-      // TODO: load user's subscription list from user doc
-      // For now, subscribedIds starts empty and is managed locally
-    } catch {
-      // handle silently
+      setSubscribedIds(subIds);
+    } catch (err) {
+      console.warn('Failed to load suppliers:', err);
     } finally {
       setLoading(false);
     }

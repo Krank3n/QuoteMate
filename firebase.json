@@ -19,6 +19,10 @@
           { "key": "Content-Type", "value": "application/json" }
         ]
       }
+    ],
+    "rewrites": [
+      { "source": "/createPendingLink", "function": "createPendingLink" },
+      { "source": "/getSupplierName", "function": "getSupplierName" }
     ]
   },
   "functions": [
