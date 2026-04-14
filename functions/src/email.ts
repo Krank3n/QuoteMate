@@ -1054,6 +1054,7 @@ interface InvoiceEmailData {
   total: number;
   invoiceNumber?: string;
   dueDate: string; // ISO date string
+  payNowUrl?: string; // Square hosted payment link (only present when tradie has Square connected)
   business: {
     name: string;
     abn?: string;
@@ -1138,6 +1139,18 @@ export function buildInvoiceEmailHtml(data: InvoiceEmailData): string {
     </p>
 
     ${pricingRows}
+
+    ${data.payNowUrl ? `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 20px;">
+      <tr>
+        <td align="center">
+          <a href="${esc(data.payNowUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;background:${accent};color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;border-radius:8px;">
+            Pay Now
+          </a>
+          <p style="color:#6b7280;font-size:12px;margin:8px 0 0;">Secure card payment via Square</p>
+        </td>
+      </tr>
+    </table>` : ''}
 
     <p style="color:#6b7280;font-size:13px;font-style:italic;margin:0 0 4px;">
       A detailed PDF invoice is attached for your records.

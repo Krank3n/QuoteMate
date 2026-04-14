@@ -445,6 +445,12 @@ export interface Invoice {
   xeroSyncedAt?: Date;         // Last successful sync timestamp
   xeroSyncError?: string;      // Last sync error message
 
+  // Square online payment
+  squarePaymentLinkId?: string;   // Square Checkout API payment link id
+  squarePaymentLinkUrl?: string;  // Hosted checkout URL included in the invoice email
+  squarePaymentId?: string;       // Set by webhook when a payment is COMPLETED (idempotency key)
+  squarePaidAt?: Date;            // When the Square webhook reported payment completion
+
   // In-progress email body shown in the invoice email preview modal.
   // Generated (or typed) on first open and persisted so reopening doesn't
   // trigger a fresh AI generation. Regenerate overwrites it.
@@ -460,6 +466,22 @@ export interface XeroConnection {
   connectedAt: string;         // ISO date
   lastSyncAt?: string;         // ISO date
   syncEnabled: boolean;        // Auto-push on invoice send
+}
+
+// Square integration types
+export type SquareEnv = 'sandbox' | 'production';
+
+export interface SquareConnection {
+  merchantId: string;
+  merchantName?: string;       // Best-effort display name from Square merchant profile
+  locationId?: string;         // Default location used for payment links
+  locationName?: string;
+  env: SquareEnv;
+  connectedAt: string;         // ISO date
+  // Access/refresh tokens live server-side only — this type is mirrored by
+  // Firestore at users/{uid}/settings/squareConnection, but the mobile app
+  // only ever reads the non-sensitive subset via checkSquareConnection().
+  disconnectedReason?: string | null;
 }
 
 // Contact types

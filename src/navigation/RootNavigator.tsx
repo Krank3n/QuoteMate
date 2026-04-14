@@ -34,6 +34,7 @@ import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
 import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen';
+import { SquareIntegrationScreen } from '../screens/settings/SquareIntegrationScreen';
 import { SectionTemplatesScreen } from '../screens/settings/SectionTemplatesScreen';
 import { JobTemplateEditorScreen } from '../screens/settings/JobTemplateEditorScreen';
 import { EditSupplierScreen } from '../screens/settings/EditSupplierScreen';
@@ -681,6 +682,17 @@ export function RootNavigator() {
           headerStyle: { backgroundColor: colors.primary },
           headerTintColor: colors.white,
           title: 'Xero Integration',
+        }}
+      />
+      <RootStack.Screen
+        name="SquareIntegration"
+        component={SquareIntegrationScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Square Payments',
         }}
       />
       <RootStack.Screen

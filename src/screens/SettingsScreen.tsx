@@ -79,6 +79,13 @@ export function SettingsScreen() {
           icon: 'cloud-sync',
           screen: 'XeroIntegration',
         },
+        {
+          id: 'square',
+          title: 'Square Payments',
+          subtitle: 'Let customers pay invoices by card',
+          icon: 'credit-card-outline',
+          screen: 'SquareIntegration',
+        },
       ],
     },
     {

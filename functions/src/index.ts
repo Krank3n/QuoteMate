@@ -3197,6 +3197,30 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         await invoiceRef.set(invoiceUpdate, { merge: true });
       }
 
+      // If the tradie has Square connected, mint a fresh hosted payment link so
+      // the invoice email has a Pay Now button. Best-effort: if Square fails we
+      // still send the email without the button.
+      let payNowUrl: string | undefined;
+      if (!isTestSend) {
+        try {
+          const squareConnDoc = await firestore
+            .doc(`users/${userId}/settings/squareConnection`)
+            .get();
+          if (squareConnDoc.exists) {
+            const linkResult = await createSquarePaymentLinkInternal(userId, invoiceId);
+            if (linkResult) {
+              payNowUrl = linkResult.paymentLinkUrl;
+              // Reflect the link on the in-memory invoice so downstream (e.g.
+              // the PDF builder below) sees the freshly-written values.
+              invoice.squarePaymentLinkId = linkResult.paymentLinkId;
+              invoice.squarePaymentLinkUrl = linkResult.paymentLinkUrl;
+            }
+          }
+        } catch {
+          // Swallow — never block the email on a payment-link failure.
+        }
+      }
+
       // Resolve business logo URL
       let logoUrl = business.logoStorageUrl || '';
 
@@ -3231,6 +3255,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         total: invoice.total || 0,
         invoiceNumber: invoice.invoiceNumber,
         dueDate: invoice.dueDate || new Date().toISOString(),
+        payNowUrl,
         business: businessData,
       });
 
@@ -8402,4 +8427,644 @@ export const getSupplierName = functions.https.onRequest((req, res) => {
       res.status(500).json({ error: error.message });
     }
   });
+});
+
+// ============================================
+// Square Integration
+// OAuth for each tradie's Square account, pay-by-link on invoice emails,
+// webhook-driven invoice reconciliation.
+// Mirrors the Xero integration block above — see getXeroTokens / xeroCallback
+// for reference.
+// ============================================
+
+const SQUARE_APP_ID = process.env.SQUARE_APP_ID || '';
+const SQUARE_APP_SECRET = process.env.SQUARE_APP_SECRET || '';
+const SQUARE_ENV: 'sandbox' | 'production' =
+  (process.env.SQUARE_ENV as 'sandbox' | 'production') || 'sandbox';
+const SQUARE_REDIRECT_URI =
+  process.env.SQUARE_REDIRECT_URI || 'https://quotemateapp.au/square/callback';
+const SQUARE_WEBHOOK_SIGNATURE_KEY = process.env.SQUARE_WEBHOOK_SIGNATURE_KEY || '';
+const SQUARE_WEBHOOK_NOTIFICATION_URL =
+  process.env.SQUARE_WEBHOOK_NOTIFICATION_URL ||
+  'https://us-central1-hansendev.cloudfunctions.net/squareWebhook';
+// Platform fee in basis points (100 = 1%). Applied via app_fee_money on each payment link.
+const SQUARE_PLATFORM_FEE_BPS = parseInt(process.env.SQUARE_PLATFORM_FEE_BPS || '100', 10);
+// OAuth scopes required for pay-by-link and reading merchant/location info.
+const SQUARE_SCOPES = [
+  'MERCHANT_PROFILE_READ',
+  'PAYMENTS_READ',
+  'PAYMENTS_WRITE',
+  'ORDERS_READ',
+  'ORDERS_WRITE',
+];
+
+function squareApiBase(): string {
+  return SQUARE_ENV === 'production'
+    ? 'https://connect.squareup.com'
+    : 'https://connect.squareupsandbox.com';
+}
+
+function squareOAuthBase(): string {
+  // Square's OAuth endpoints live under the same host as the API.
+  return squareApiBase();
+}
+
+/**
+ * Fetch a user's Square tokens from Firestore. Refreshes if expired (with 60s buffer).
+ * Mirrors getXeroTokens above.
+ */
+async function getSquareTokens(
+  userId: string,
+): Promise<{ accessToken: string; merchantId: string; locationId?: string } | null> {
+  const firestore = admin.firestore();
+  const connRef = firestore.doc(`users/${userId}/settings/squareConnection`);
+  const connDoc = await connRef.get();
+  if (!connDoc.exists) return null;
+
+  const data = connDoc.data()!;
+  const { accessToken, refreshToken, tokenExpiresAt, merchantId, locationId } = data;
+  if (!accessToken || !refreshToken || !merchantId) return null;
+
+  if (tokenExpiresAt && tokenExpiresAt > Date.now() + 60_000) {
+    return { accessToken, merchantId, locationId };
+  }
+
+  try {
+    const tokenResponse = await fetch(`${squareOAuthBase()}/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Square-Version': '2024-10-17',
+      },
+      body: JSON.stringify({
+        client_id: SQUARE_APP_ID,
+        client_secret: SQUARE_APP_SECRET,
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      await tokenResponse.text();
+      await connRef.update({ disconnectedReason: 'token_refresh_failed' });
+      return null;
+    }
+
+    const tokenData: any = await tokenResponse.json();
+    const newAccessToken = tokenData.access_token;
+    const newRefreshToken = tokenData.refresh_token || refreshToken;
+    // Square returns expires_at as an ISO timestamp.
+    const expiresAtMs = tokenData.expires_at
+      ? new Date(tokenData.expires_at).getTime()
+      : Date.now() + 30 * 24 * 60 * 60 * 1000; // default 30 days
+
+    await connRef.update({
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+      tokenExpiresAt: expiresAtMs,
+    });
+
+    return { accessToken: newAccessToken, merchantId, locationId };
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Internal helper: record a payment against a Xero invoice without going
+ * through the HTTP handler. Used by the Square webhook when an invoice has
+ * already been synced to Xero.
+ */
+async function pushPaymentToXeroInternal(
+  userId: string,
+  xeroInvoiceId: string,
+  amount: number,
+  date: Date,
+  paymentMethod: string,
+): Promise<void> {
+  const tokens = await getXeroTokens(userId);
+  if (!tokens) return;
+
+  const { accessToken, tenantId } = tokens;
+  const accountCode = paymentMethod === 'cash' ? '800' : '090';
+  const dateStr = date.toISOString().split('T')[0];
+
+  try {
+    const response = await fetch('https://api.xero.com/api.xro/2.0/Payments', {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'xero-tenant-id': tenantId,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({
+        Payments: [
+          {
+            Invoice: { InvoiceID: xeroInvoiceId },
+            Account: { Code: accountCode },
+            Date: dateStr,
+            Amount: amount,
+            Reference: `QuoteMate payment (${paymentMethod})`,
+          },
+        ],
+      }),
+    });
+
+    if (response.ok) {
+      await admin.firestore()
+        .doc(`users/${userId}/settings/xeroConnection`)
+        .update({ lastSyncAt: new Date().toISOString() });
+    }
+  } catch {
+    // Best-effort: webhook succeeds even if Xero sync fails. Tradie can resync
+    // manually from the invoice if needed.
+  }
+}
+
+/**
+ * Start Square OAuth flow — returns the authorization URL for the hosted
+ * Square consent page. Mirrors getXeroAuthUrl above.
+ */
+export const getSquareAuthUrl = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    if (!SQUARE_APP_ID) {
+      res.status(500).json({ error: 'Square integration not configured' });
+      return;
+    }
+
+    const state = Buffer.from(
+      JSON.stringify({ uid: decodedToken.uid, ts: Date.now() }),
+    ).toString('base64url');
+
+    const params = new URLSearchParams({
+      client_id: SQUARE_APP_ID,
+      response_type: 'code',
+      scope: SQUARE_SCOPES.join(' '),
+      session: 'false', // force account selection
+      state,
+    });
+
+    const authUrl = `${squareOAuthBase()}/oauth2/authorize?${params.toString()}`;
+    res.status(200).json({ authUrl, state, env: SQUARE_ENV });
+  });
+});
+
+/**
+ * Square OAuth callback — exchanges the auth code for tokens. Called from
+ * the hosted callback page (public/square/callback/index.html).
+ */
+export const squareCallback = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const { code, state } = req.body;
+    if (!isNonEmptyString(code) || !isNonEmptyString(state)) {
+      res.status(400).json({ error: 'Missing code or state' });
+      return;
+    }
+
+    let stateData: { uid: string; ts: number };
+    try {
+      stateData = JSON.parse(Buffer.from(state, 'base64url').toString());
+    } catch {
+      res.status(400).json({ error: 'Invalid state parameter' });
+      return;
+    }
+
+    if (Date.now() - stateData.ts > 10 * 60 * 1000) {
+      res.status(400).json({ error: 'Authorization expired. Please try again.' });
+      return;
+    }
+
+    const userId = stateData.uid;
+
+    try {
+      const tokenResponse = await fetch(`${squareOAuthBase()}/oauth2/token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Square-Version': '2024-10-17',
+        },
+        body: JSON.stringify({
+          client_id: SQUARE_APP_ID,
+          client_secret: SQUARE_APP_SECRET,
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: SQUARE_REDIRECT_URI,
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        await tokenResponse.text();
+        res.status(400).json({ error: 'Failed to connect to Square. Please try again.' });
+        return;
+      }
+
+      const tokenData: any = await tokenResponse.json();
+      const accessToken = tokenData.access_token;
+      const refreshToken = tokenData.refresh_token;
+      const merchantId = tokenData.merchant_id;
+      const expiresAtMs = tokenData.expires_at
+        ? new Date(tokenData.expires_at).getTime()
+        : Date.now() + 30 * 24 * 60 * 60 * 1000;
+
+      if (!accessToken || !refreshToken || !merchantId) {
+        res.status(400).json({ error: 'Square did not return a complete token set' });
+        return;
+      }
+
+      // Fetch merchant profile + default location (best-effort; non-fatal).
+      let merchantName: string | undefined;
+      let locationId: string | undefined;
+      let locationName: string | undefined;
+
+      try {
+        const merchResp = await fetch(`${squareApiBase()}/v2/merchants/${merchantId}`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Square-Version': '2024-10-17',
+          },
+        });
+        if (merchResp.ok) {
+          const merchJson: any = await merchResp.json();
+          merchantName = merchJson?.merchant?.business_name;
+        }
+      } catch {}
+
+      try {
+        const locResp = await fetch(`${squareApiBase()}/v2/locations`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Square-Version': '2024-10-17',
+          },
+        });
+        if (locResp.ok) {
+          const locJson: any = await locResp.json();
+          const loc = locJson?.locations?.[0];
+          locationId = loc?.id;
+          locationName = loc?.name;
+        }
+      } catch {}
+
+      const firestore = admin.firestore();
+      await firestore.doc(`users/${userId}/settings/squareConnection`).set({
+        merchantId,
+        merchantName: merchantName || null,
+        locationId: locationId || null,
+        locationName: locationName || null,
+        accessToken,
+        refreshToken,
+        tokenExpiresAt: expiresAtMs,
+        env: SQUARE_ENV,
+        connectedAt: new Date().toISOString(),
+        disconnectedReason: null,
+      });
+
+      res.status(200).json({
+        success: true,
+        merchantName: merchantName || null,
+        locationName: locationName || null,
+        env: SQUARE_ENV,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Internal error connecting to Square' });
+    }
+  });
+});
+
+/**
+ * Check Square connection status. Returns only non-sensitive fields.
+ */
+export const checkSquareConnection = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'GET' && req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const firestore = admin.firestore();
+    const connDoc = await firestore
+      .doc(`users/${decodedToken.uid}/settings/squareConnection`)
+      .get();
+
+    if (!connDoc.exists) {
+      res.status(200).json({ connected: false });
+      return;
+    }
+
+    const data = connDoc.data()!;
+    res.status(200).json({
+      connected: true,
+      merchantId: data.merchantId || null,
+      merchantName: data.merchantName || null,
+      locationId: data.locationId || null,
+      locationName: data.locationName || null,
+      env: data.env || SQUARE_ENV,
+      connectedAt: data.connectedAt || null,
+      disconnectedReason: data.disconnectedReason || null,
+    });
+  });
+});
+
+/**
+ * Disconnect Square — revoke tokens at Square and delete the connection doc.
+ */
+export const squareDisconnect = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const firestore = admin.firestore();
+    const connRef = firestore.doc(`users/${decodedToken.uid}/settings/squareConnection`);
+    const connDoc = await connRef.get();
+
+    if (connDoc.exists) {
+      const data = connDoc.data()!;
+      if (data.accessToken) {
+        try {
+          await fetch(`${squareOAuthBase()}/oauth2/revoke`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Client ${SQUARE_APP_SECRET}`,
+              'Square-Version': '2024-10-17',
+            },
+            body: JSON.stringify({
+              client_id: SQUARE_APP_ID,
+              access_token: data.accessToken,
+              merchant_id: data.merchantId,
+            }),
+          });
+        } catch {
+          // Revoke is best-effort; we still clear the Firestore doc below.
+        }
+      }
+      await connRef.delete();
+    }
+
+    res.status(200).json({ success: true });
+  });
+});
+
+/**
+ * Create a Square hosted payment link for an invoice.
+ * Called server-side from sendInvoiceEmail when the tradie has Square connected.
+ * Also exposed as an HTTP endpoint so the client can regenerate on demand.
+ */
+async function createSquarePaymentLinkInternal(
+  userId: string,
+  invoiceId: string,
+): Promise<{ paymentLinkId: string; paymentLinkUrl: string } | null> {
+  const firestore = admin.firestore();
+  const invoiceRef = firestore.doc(`users/${userId}/invoices/${invoiceId}`);
+  const invoiceDoc = await invoiceRef.get();
+  if (!invoiceDoc.exists) return null;
+  const invoice = invoiceDoc.data()!;
+
+  const tokens = await getSquareTokens(userId);
+  if (!tokens) return null;
+
+  const total = Number(invoice.total) || 0;
+  if (total <= 0) return null;
+
+  const amountCents = Math.round(total * 100);
+  const jobName = invoice.job?.name || 'Job';
+  const invoiceNumber = invoice.invoiceNumber || invoiceId.slice(0, 8);
+  const idempotencyKey = `qm-invoice-${userId}-${invoiceId}-${Date.now()}`;
+
+  // v1: no platform fee. `app_fee_money` on Online Checkout requires a
+  // non-trivial order.service_charges setup with APP_FEE_PHASE and has
+  // region-specific support. Revisit when the AU platform-fee path is
+  // confirmed. SQUARE_PLATFORM_FEE_BPS is kept in config as a forward hook.
+  void SQUARE_PLATFORM_FEE_BPS;
+
+  const body: any = {
+    idempotency_key: idempotencyKey,
+    quick_pay: {
+      name: `Invoice ${invoiceNumber} — ${jobName}`.slice(0, 250),
+      price_money: { amount: amountCents, currency: 'AUD' },
+      location_id: tokens.locationId,
+    },
+    payment_note: `QuoteMate invoice ${invoiceNumber}`,
+    checkout_options: {
+      allow_tipping: false,
+    },
+  };
+
+  const resp = await fetch(`${squareApiBase()}/v2/online-checkout/payment-links`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${tokens.accessToken}`,
+      'Content-Type': 'application/json',
+      'Square-Version': '2024-10-17',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    await resp.text();
+    return null;
+  }
+
+  const json: any = await resp.json();
+  const paymentLink = json?.payment_link;
+  const paymentLinkId = paymentLink?.id;
+  const paymentLinkUrl = paymentLink?.url || paymentLink?.long_url;
+  const orderId: string | undefined = paymentLink?.order_id;
+  if (!paymentLinkId || !paymentLinkUrl) return null;
+
+  await invoiceRef.set(
+    {
+      squarePaymentLinkId: paymentLinkId,
+      squarePaymentLinkUrl: paymentLinkUrl,
+    },
+    { merge: true },
+  );
+
+  // Index by orderId — every payment webhook carries order_id, giving us an
+  // O(1) lookup without needing the merchant's access token. We also keep a
+  // secondary index by paymentLinkId in case Square's event ever includes it.
+  if (orderId) {
+    await firestore.doc(`squarePaymentOrders/${orderId}`).set({
+      userId,
+      invoiceId,
+      paymentLinkId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+  await firestore.doc(`squarePaymentLinks/${paymentLinkId}`).set({
+    userId,
+    invoiceId,
+    orderId: orderId || null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { paymentLinkId, paymentLinkUrl };
+}
+
+export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { invoiceId } = req.body;
+    if (!isNonEmptyString(invoiceId)) {
+      res.status(400).json({ error: 'Missing invoiceId' });
+      return;
+    }
+
+    const result = await createSquarePaymentLinkInternal(decodedToken.uid, invoiceId);
+    if (!result) {
+      res.status(400).json({ error: 'Failed to create Square payment link' });
+      return;
+    }
+    res.status(200).json({ success: true, ...result });
+  });
+});
+
+/**
+ * Square webhook — verifies HMAC-SHA256 signature, handles payment.updated
+ * with status COMPLETED, and flips the invoice to paid.
+ *
+ * NOTE: Firebase Functions v1 gives us req.rawBody; we use it directly so the
+ * signature over the exact received bytes stays valid.
+ */
+export const squareWebhook = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).send('Method Not Allowed');
+    return;
+  }
+
+  const signature =
+    (req.headers['x-square-hmacsha256-signature'] as string) ||
+    (req.headers['x-square-signature'] as string) ||
+    '';
+  const rawBody = (req.rawBody || Buffer.from('')).toString('utf8');
+
+  // HMAC-SHA256 over (notificationUrl + rawBody) using the signature key.
+  if (!SQUARE_WEBHOOK_SIGNATURE_KEY) {
+    res.status(500).send('Webhook not configured');
+    return;
+  }
+
+  const expected = crypto
+    .createHmac('sha256', SQUARE_WEBHOOK_SIGNATURE_KEY)
+    .update(SQUARE_WEBHOOK_NOTIFICATION_URL + rawBody)
+    .digest('base64');
+
+  const sigBuf = Buffer.from(signature, 'base64');
+  const expBuf = Buffer.from(expected, 'base64');
+  if (
+    sigBuf.length !== expBuf.length ||
+    !crypto.timingSafeEqual(sigBuf, expBuf)
+  ) {
+    res.status(401).send('Invalid signature');
+    return;
+  }
+
+  let event: any;
+  try {
+    event = JSON.parse(rawBody);
+  } catch {
+    res.status(400).send('Invalid JSON');
+    return;
+  }
+
+  // Respond 200 fast so Square doesn't retry on downstream failures — we've
+  // already verified the signature. Handler errors are swallowed server-side.
+  res.status(200).json({ received: true });
+
+  try {
+    const eventType = event?.type;
+    if (eventType !== 'payment.updated' && eventType !== 'payment.created') {
+      return;
+    }
+
+    const payment = event?.data?.object?.payment;
+    if (!payment) return;
+
+    const status = payment.status; // APPROVED | COMPLETED | CANCELED | FAILED
+    if (status !== 'COMPLETED') return;
+
+    const orderId = payment.order_id;
+    if (!orderId) return;
+
+    // Resolve (userId, invoiceId) via the orderId index populated at link creation.
+    // Every Square payment event carries order_id, so this is O(1) and doesn't
+    // require calling back into Square with the merchant's access token.
+    const firestore = admin.firestore();
+    const indexDoc = await firestore.doc(`squarePaymentOrders/${orderId}`).get();
+    if (!indexDoc.exists) return;
+    const idx = indexDoc.data()!;
+    const userId: string | null = idx.userId || null;
+    const invoiceId: string | null = idx.invoiceId || null;
+    if (!userId || !invoiceId) return;
+
+    const invoiceRef = firestore.doc(`users/${userId}/invoices/${invoiceId}`);
+    const invoiceDoc = await invoiceRef.get();
+    if (!invoiceDoc.exists) return;
+    const invoice = invoiceDoc.data()!;
+
+    // Idempotency: skip if we've already recorded this payment id.
+    if (invoice.squarePaymentId && invoice.squarePaymentId === payment.id) return;
+
+    const paidAmountDollars =
+      (Number(payment?.amount_money?.amount) || 0) / 100;
+    const total = Number(invoice.total) || 0;
+    const newPaidAmount = Math.max(Number(invoice.paidAmount) || 0, paidAmountDollars);
+    const newStatus = newPaidAmount + 0.005 >= total ? 'paid' : 'partial';
+
+    await invoiceRef.set(
+      {
+        status: newStatus,
+        paidAmount: newPaidAmount,
+        paidDate: admin.firestore.FieldValue.serverTimestamp(),
+        paymentMethod: 'card',
+        paymentNotes: `Square payment ${payment.id}`,
+        squarePaymentId: payment.id,
+        squarePaidAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    // If the invoice has already been pushed to Xero, record the payment
+    // there too. Best-effort; errors are swallowed inside the helper.
+    if (invoice.xeroInvoiceId) {
+      await pushPaymentToXeroInternal(
+        userId,
+        invoice.xeroInvoiceId,
+        paidAmountDollars,
+        new Date(),
+        'card',
+      );
+    }
+  } catch {
+    // Already responded 200; log silently.
+  }
 });
