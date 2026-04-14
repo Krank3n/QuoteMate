@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Get Live Prices — QuoteMate</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #f1f5f9;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      max-width: 400px;
+      padding: 32px 24px;
+      text-align: center;
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      border-radius: 18px;
+      margin-bottom: 24px;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .supplier-name {
+      color: #f97316;
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    p {
+      color: #94a3b8;
+      font-size: 16px;
+      line-height: 1.5;
+      margin-bottom: 32px;
+    }
+    .store-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .store-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 14px 24px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+    .store-btn:hover { opacity: 0.85; }
+    .store-btn.ios {
+      background: #fff;
+      color: #000;
+    }
+    .store-btn.android {
+      background: #34a853;
+      color: #fff;
+    }
+    .store-icon { width: 24px; height: 24px; }
+    .tagline {
+      color: #64748b;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <img src="/email-assets/logo-180.png" alt="QuoteMate" class="logo" />
+    <h1>Get Live Prices</h1>
+    <div class="supplier-name" id="supplierName">Loading...</div>
+    <p>Download QuoteMate to subscribe and get this supplier's latest prices synced straight into your quotes.</p>
+    <div class="store-buttons">
+      <a class="store-btn ios" href="https://apps.apple.com/au/app/quotemate/id6738030590" target="_blank">
+        <svg class="store-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+        App Store
+      </a>
+      <a class="store-btn android" href="https://play.google.com/store/apps/details?id=com.quotemate.app" target="_blank">
+        <svg class="store-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3.18 23.77L14.27 12.68 3.18.23C2.58.68 2.18 1.4 2.18 2.23v19.54c0 .83.4 1.55 1 2zM18.85 10.39l-3.18-1.84-3.69 3.69 3.69 3.69 3.18-1.84c.95-.55.95-1.96 0-2.5v-.02l-.01-.01.01-.01v-.16zM5.41 1.26L15.58 7.2l-2.84 2.84L5.41 1.26zM5.41 22.74l7.33-8.78 2.84 2.84-10.17 5.94z"/></svg>
+        Google Play
+      </a>
+    </div>
+    <div class="tagline">Quoting made easy for Australian tradies</div>
+  </div>
+
+  <script>
+    (function() {
+      var params = new URLSearchParams(window.location.search);
+      var supplierId = params.get('supplier');
+      if (!supplierId) {
+        document.getElementById('supplierName').textContent = 'Your local supplier';
+        return;
+      }
+
+      // Try to open the app directly via universal link
+      var appUrl = 'quotemate://join?supplier=' + encodeURIComponent(supplierId);
+      window.location.href = appUrl;
+
+      // Create a pending link for deferred deep link resolution
+      fetch('/createPendingLink', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplierId: supplierId })
+      }).catch(function(err) { console.warn('createPendingLink failed:', err); });
+
+      // Fetch supplier name via Cloud Function (Firestore rules require auth)
+      fetch('/getSupplierName?id=' + encodeURIComponent(supplierId))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.name) {
+            document.getElementById('supplierName').textContent = data.name;
+          } else {
+            document.getElementById('supplierName').textContent = 'Your local supplier';
+          }
+        })
+        .catch(function() {
+          document.getElementById('supplierName').textContent = 'Your local supplier';
+        });
+    })();
+  </script>
+</body>
+</html>

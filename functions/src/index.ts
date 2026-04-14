@@ -1657,9 +1657,20 @@ Return ONLY valid JSON, no other text.`;
 // Supplier Price List extraction — multimodal wrappers + endpoint
 // ----------------------------------------------------------------------------
 
+interface ImageInput {
+  data: string;
+  mimeType: string;
+}
+
 interface ExtractionInput {
   pdfBase64?: string;
-  imageBase64?: string[];
+  imageBase64?: (string | ImageInput)[];
+}
+
+/** Normalize an image entry to {data, mimeType}. Plain strings default to image/jpeg. */
+function normalizeImage(img: string | ImageInput): ImageInput {
+  if (typeof img === 'string') return { data: img, mimeType: 'image/jpeg' };
+  return { data: img.data, mimeType: img.mimeType || 'image/jpeg' };
 }
 
 async function callGeminiForExtraction(
@@ -1677,11 +1688,12 @@ async function callGeminiForExtraction(
     });
   }
   if (Array.isArray(input.imageBase64) && input.imageBase64.length > 0) {
-    for (const b64 of input.imageBase64) {
+    for (const raw of input.imageBase64) {
+      const img = normalizeImage(raw);
       parts.push({
         inline_data: {
-          mime_type: 'image/jpeg',
-          data: b64,
+          mime_type: img.mimeType,
+          data: img.data,
         },
       });
     }
@@ -1732,13 +1744,14 @@ async function callClaudeForExtraction(
     });
   }
   if (Array.isArray(input.imageBase64) && input.imageBase64.length > 0) {
-    for (const b64 of input.imageBase64) {
+    for (const raw of input.imageBase64) {
+      const img = normalizeImage(raw);
       messageContent.push({
         type: 'image',
         source: {
           type: 'base64',
-          media_type: 'image/jpeg',
-          data: b64,
+          media_type: img.mimeType,
+          data: img.data,
         },
       });
     }
@@ -1753,8 +1766,8 @@ async function callClaudeForExtraction(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-6',
-      max_tokens: 8000,
+      model: 'claude-sonnet-4-6',
+      max_tokens: 16000,
       temperature: 0.1,
       messages: [{ role: 'user', content: messageContent }],
     }),
@@ -7996,3 +8009,397 @@ Rules:
       }
     });
   });
+
+// ============================================
+// Supplier Portal Functions
+// ============================================
+
+/**
+ * Public endpoint for supplier price list extraction (no auth, IP rate-limited).
+ * Same extraction logic as extractSupplierPriceList but for the portal.
+ */
+export const extractSupplierPriceListPublic = functions
+  .runWith({ timeoutSeconds: 240, memory: '1GB' })
+  .https.onRequest((req, res) => {
+    corsHandler(req, res, async () => {
+      if (req.method !== 'POST') {
+        res.status(405).send('Method Not Allowed');
+        return;
+      }
+
+      // IP-based rate limiting: 10 requests per hour
+      const clientIp = getClientIp(req);
+      const allowed = await checkRateLimit(
+        `ip:${clientIp}`,
+        { maxRequests: 10, windowMs: 3_600_000 },
+        res
+      );
+      if (!allowed) return;
+
+      try {
+        const { pdfBase64, imageBase64, supplierName, defaultUnit } = req.body;
+
+        if (!pdfBase64 && (!Array.isArray(imageBase64) || imageBase64.length === 0)) {
+          res.status(400).json({ error: 'Provide either pdfBase64 or imageBase64[]' });
+          return;
+        }
+        if (Array.isArray(imageBase64) && imageBase64.length > 10) {
+          res.status(400).json({ error: 'Maximum 10 images per import' });
+          return;
+        }
+        if (typeof pdfBase64 === 'string' && pdfBase64.length > 14_000_000) {
+          res.status(400).json({ error: 'PDF too large (max 10 MB)' });
+          return;
+        }
+
+        const geminiApiKey = process.env.GEMINI_API_KEY;
+        const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+
+        if (!geminiApiKey && !anthropicApiKey) {
+          res.status(500).json({ error: 'No LLM API keys configured' });
+          return;
+        }
+
+        const prompt = buildExtractSupplierPrompt(supplierName, defaultUnit);
+        const input: ExtractionInput = { pdfBase64, imageBase64 };
+
+        let parsed: any | null = null;
+        let primaryError: Error | null = null;
+
+        if (geminiApiKey) {
+          try {
+            parsed = await callGeminiForExtraction(geminiApiKey, prompt, input);
+          } catch (err: any) {
+            primaryError = err;
+            console.warn('Gemini extraction failed, falling back to Claude:', err.message);
+          }
+        }
+
+        if (!parsed) {
+          if (!anthropicApiKey) {
+            throw primaryError || new Error('Gemini failed and no Anthropic fallback key configured');
+          }
+          try {
+            parsed = await callClaudeForExtraction(anthropicApiKey, prompt, input);
+          } catch (fallbackErr: any) {
+            throw new Error(
+              `Price list extraction failed — ${primaryError ? `Gemini: ${primaryError.message.slice(0, 80)}; ` : ''}Claude: ${fallbackErr.message.slice(0, 80)}`
+            );
+          }
+        }
+
+        res.status(200).json({
+          supplierName: parsed.supplierName || supplierName || '',
+          supplierContact: parsed.supplierContact && typeof parsed.supplierContact === 'object'
+            ? parsed.supplierContact
+            : null,
+          items: Array.isArray(parsed.items) ? parsed.items : [],
+        });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+  });
+
+/**
+ * Firestore trigger: when a tradie subscribes/unsubscribes from a supplier.
+ * On create: copies all supplier price items to the tradie's materialFavorites.
+ * On delete: removes all synced favorites from that supplier.
+ */
+export const onSubscriberWrite = functions.firestore
+  .document('suppliers/{supplierId}/subscribers/{tradieUid}')
+  .onWrite(async (change, context) => {
+    const { supplierId, tradieUid } = context.params;
+    const firestore = admin.firestore();
+
+    if (!change.before.exists && change.after.exists) {
+      // --- Subscribe: copy supplier's price items to tradie's favorites ---
+      const priceItemsSnap = await firestore
+        .collection(`suppliers/${supplierId}/priceItems`)
+        .get();
+
+      const batch = firestore.batch();
+      for (const itemDoc of priceItemsSnap.docs) {
+        const item = itemDoc.data();
+        const favRef = firestore.doc(
+          `users/${tradieUid}/materialFavorites/${supplierId}_${itemDoc.id}`
+        );
+        batch.set(favRef, {
+          productName: item.name || '',
+          store: item.supplierName || supplierId,
+          price: item.price ?? null,
+          unit: item.unit || 'each',
+          coveragePerUnit: item.coveragePerUnit ?? null,
+          coverageUnit: item.coverageUnit ?? null,
+          keywords: item.keywords || [],
+          isPersonalRate: true,
+          source: 'subscribed',
+          sourceRef: supplierId,
+          lastUpdatedAt: new Date().toISOString(),
+        });
+      }
+
+      // Increment subscriber count
+      batch.update(firestore.doc(`suppliers/${supplierId}`), {
+        subscriberCount: admin.firestore.FieldValue.increment(1),
+      });
+
+      await batch.commit();
+    } else if (change.before.exists && !change.after.exists) {
+      // --- Unsubscribe: remove synced favorites ---
+      const favoritesSnap = await firestore
+        .collection(`users/${tradieUid}/materialFavorites`)
+        .where('source', '==', 'subscribed')
+        .where('sourceRef', '==', supplierId)
+        .get();
+
+      const batch = firestore.batch();
+      for (const favDoc of favoritesSnap.docs) {
+        batch.delete(favDoc.ref);
+      }
+
+      // Decrement subscriber count
+      batch.update(firestore.doc(`suppliers/${supplierId}`), {
+        subscriberCount: admin.firestore.FieldValue.increment(-1),
+      });
+
+      await batch.commit();
+    }
+  });
+
+/**
+ * Firestore trigger: when a supplier creates/updates/deletes a price item.
+ * Propagates the change to all subscribers' materialFavorites.
+ */
+export const onSupplierPriceItemWrite = functions.firestore
+  .document('suppliers/{supplierId}/priceItems/{itemSlug}')
+  .onWrite(async (change, context) => {
+    const { supplierId, itemSlug } = context.params;
+    const firestore = admin.firestore();
+
+    // Get supplier doc for the name
+    const supplierDoc = await firestore.doc(`suppliers/${supplierId}`).get();
+    const supplierName = supplierDoc.data()?.name || supplierId;
+
+    // Get all subscriber UIDs
+    const subscribersSnap = await firestore
+      .collection(`suppliers/${supplierId}/subscribers`)
+      .get();
+
+    if (subscribersSnap.empty) {
+      // Update item count even with no subscribers
+      if (change.after.exists !== change.before.exists) {
+        const countSnap = await firestore
+          .collection(`suppliers/${supplierId}/priceItems`)
+          .count()
+          .get();
+        await firestore.doc(`suppliers/${supplierId}`).update({
+          itemCount: countSnap.data().count,
+        });
+      }
+      return;
+    }
+
+    const batch = firestore.batch();
+
+    if (change.after.exists) {
+      // Create or update — sync to all subscribers
+      const item = change.after.data()!;
+      for (const subDoc of subscribersSnap.docs) {
+        const tradieUid = subDoc.id;
+        const favRef = firestore.doc(
+          `users/${tradieUid}/materialFavorites/${supplierId}_${itemSlug}`
+        );
+        batch.set(favRef, {
+          productName: item.name || '',
+          store: supplierName,
+          price: item.price ?? null,
+          unit: item.unit || 'each',
+          coveragePerUnit: item.coveragePerUnit ?? null,
+          coverageUnit: item.coverageUnit ?? null,
+          keywords: item.keywords || [],
+          isPersonalRate: true,
+          source: 'subscribed',
+          sourceRef: supplierId,
+          lastUpdatedAt: new Date().toISOString(),
+        });
+      }
+    } else {
+      // Delete — remove from all subscribers
+      for (const subDoc of subscribersSnap.docs) {
+        const tradieUid = subDoc.id;
+        const favRef = firestore.doc(
+          `users/${tradieUid}/materialFavorites/${supplierId}_${itemSlug}`
+        );
+        batch.delete(favRef);
+      }
+    }
+
+    // Update item count
+    if (change.after.exists !== change.before.exists) {
+      const countSnap = await firestore
+        .collection(`suppliers/${supplierId}/priceItems`)
+        .count()
+        .get();
+      batch.update(firestore.doc(`suppliers/${supplierId}`), {
+        itemCount: countSnap.data().count,
+      });
+    }
+
+    await batch.commit();
+  });
+
+/**
+ * Callable: set custom claim { role: 'supplier', supplierId } on the caller.
+ */
+export const setSupplierClaim = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+
+  const { supplierId } = data;
+  if (!supplierId || typeof supplierId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'supplierId is required');
+  }
+
+  // Verify caller owns this supplier doc
+  const firestore = admin.firestore();
+  const supplierDoc = await firestore.doc(`suppliers/${supplierId}`).get();
+  if (!supplierDoc.exists || supplierDoc.data()?.ownerUid !== context.auth.uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not the supplier owner');
+  }
+
+  await admin.auth().setCustomUserClaims(context.auth.uid, {
+    role: 'supplier',
+    supplierId,
+  });
+
+  return { success: true };
+});
+
+/**
+ * HTTP endpoint: create a pending deep link (no auth, IP rate-limited).
+ * Called by the /join/ landing page when a non-app user scans the QR code.
+ */
+export const createPendingLink = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const clientIp = getClientIp(req);
+    const allowed = await checkRateLimit(
+      `ip:${clientIp}`,
+      { maxRequests: 10, windowMs: 3_600_000 },
+      res
+    );
+    if (!allowed) return;
+
+    try {
+      const { supplierId } = req.body;
+      if (!supplierId || typeof supplierId !== 'string') {
+        res.status(400).json({ error: 'supplierId is required' });
+        return;
+      }
+
+      const userAgent = req.headers['user-agent'] || '';
+      const fingerprint = crypto
+        .createHash('sha256')
+        .update(`${clientIp}:${userAgent}`)
+        .digest('hex');
+
+      const firestore = admin.firestore();
+      await firestore.collection('pendingLinks').add({
+        supplierId,
+        fingerprint,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        claimed: false,
+      });
+
+      res.status(200).json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * HTTP endpoint: check for a pending deep link (auth required).
+ * Called by the app after first sign-in to resolve deferred deep links.
+ */
+export const checkPendingLink = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+
+    try {
+      const userAgent = req.headers['user-agent'] || '';
+      const clientIp = getClientIp(req);
+      const fingerprint = crypto
+        .createHash('sha256')
+        .update(`${clientIp}:${userAgent}`)
+        .digest('hex');
+
+      const firestore = admin.firestore();
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      const pendingSnap = await firestore
+        .collection('pendingLinks')
+        .where('fingerprint', '==', fingerprint)
+        .where('claimed', '==', false)
+        .where('createdAt', '>=', twentyFourHoursAgo)
+        .orderBy('createdAt', 'desc')
+        .limit(1)
+        .get();
+
+      if (pendingSnap.empty) {
+        res.status(200).json({ supplierId: null });
+        return;
+      }
+
+      const linkDoc = pendingSnap.docs[0];
+      await linkDoc.ref.update({ claimed: true });
+
+      res.status(200).json({ supplierId: linkDoc.data().supplierId });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Public endpoint: get a supplier's display name by ID (no auth required).
+ * Used by the /join/ landing page since Firestore rules require auth for supplier reads.
+ */
+export const getSupplierName = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'GET') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const supplierId = req.query.id as string;
+    if (!supplierId || typeof supplierId !== 'string') {
+      res.status(400).json({ error: 'id query param is required' });
+      return;
+    }
+
+    try {
+      const firestore = admin.firestore();
+      const supplierDoc = await firestore.doc(`suppliers/${supplierId}`).get();
+      if (!supplierDoc.exists) {
+        res.status(404).json({ name: null });
+        return;
+      }
+      res.status(200).json({ name: supplierDoc.data()?.name || null });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+});

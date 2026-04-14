@@ -114,6 +114,21 @@ export interface SupplierGroup {
   notes?: string;
 }
 
+export interface SupplierPartner {
+  id: string;
+  name: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  website?: string;
+  logoUrl?: string;
+  location?: { lat: number; lng: number };
+  status: 'pending' | 'active' | 'suspended';
+  itemCount: number;
+  subscriberCount: number;
+}
+
 export interface Job {
   id: string;
   name: string;

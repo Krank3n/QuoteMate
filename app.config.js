@@ -77,7 +77,8 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
-      buildNumber: "17"
+      buildNumber: "17",
+      associatedDomains: ["applinks:quotemateapp.au"]
     },
     android: {
       adaptiveIcon: {
@@ -86,7 +87,15 @@ export default {
       },
       package: "com.quotemate.app",
       versionCode: 93,
-      permissions: ["android.permission.RECORD_AUDIO", "android.permission.CAMERA", "android.permission.READ_CONTACTS"]
+      permissions: ["android.permission.RECORD_AUDIO", "android.permission.CAMERA", "android.permission.READ_CONTACTS"],
+      intentFilters: [
+        {
+          action: "VIEW",
+          autoVerify: true,
+          data: [{ scheme: "https", host: "quotemateapp.au", pathPrefix: "/join" }],
+          category: ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     experiments: {
       ...(isWebExport ? { baseUrl: isWebExport } : {}),

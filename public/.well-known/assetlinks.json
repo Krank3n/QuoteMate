@@ -1,0 +1,11 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.quotemate.app",
+      "sha256_cert_fingerprints":
+        ["84:4C:D5:46:85:AE:1B:F5:E5:CD:73:63:DE:18:7F:C3:28:71:2C:AD:C3:45:BE:0B:1A:26:05:B8:1B:07:EE:25"]
+    }
+  }
+]

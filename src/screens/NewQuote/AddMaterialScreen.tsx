@@ -2038,6 +2038,15 @@ export function AddMaterialScreen() {
   const renderSavedTab = () => (
     <View style={styles.tabContent}>
       {renderImportBar()}
+      <TouchableOpacity
+        style={styles.discoverCard}
+        onPress={() => navigation.navigate('DiscoverSuppliers')}
+        activeOpacity={0.85}
+      >
+        <MaterialCommunityIcons name="store-search-outline" size={22} color={colors.primary} style={{ marginRight: 10 }} />
+        <Text style={styles.discoverCardText}>Discover Supplier Partners</Text>
+        <MaterialCommunityIcons name="chevron-right" size={20} color={colors.onSurface} />
+      </TouchableOpacity>
       {renderAddManuallyLink()}
       {isLoadingSaved ? (
         <View style={styles.loadingContainer}>
@@ -2088,6 +2097,12 @@ export function AddMaterialScreen() {
                     <Text style={styles.supplierHeaderCount}>
                       {count === 0 ? 'No saved items' : `${count} ${count === 1 ? 'item' : 'items'}`}
                     </Text>
+                    {sg?.id?.startsWith('partner_') && (
+                      <View style={styles.syncedBadge}>
+                        <MaterialCommunityIcons name="sync" size={11} color={colors.primary} />
+                        <Text style={styles.syncedBadgeText}>synced</Text>
+                      </View>
+                    )}
                   </TouchableOpacity>
                   {isEditable && (
                     <View style={styles.supplierHeaderActions}>
@@ -2436,6 +2451,37 @@ const styles = StyleSheet.create({
   },
   tabContent: {
     flex: 1,
+  },
+  syncedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.primary + '1A',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 6,
+  },
+  syncedBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  discoverCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginBottom: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+  },
+  discoverCardText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '500',
   },
   importCard: {
     flexDirection: 'row',
