@@ -79,6 +79,13 @@ export function SettingsScreen() {
           icon: 'cloud-sync',
           screen: 'XeroIntegration',
         },
+        {
+          id: 'square',
+          title: 'Square Payments',
+          subtitle: 'Take payment on site or share a pay link',
+          icon: 'credit-card-scan',
+          screen: 'SquareIntegration',
+        },
       ],
     },
     {

@@ -8403,3 +8403,735 @@ export const getSupplierName = functions.https.onRequest((req, res) => {
     }
   });
 });
+
+// ============================================
+// Square Payments integration
+// ============================================
+// OAuth + payment links (Phase 0/1), mobile-payments session codes (Phase 2a),
+// and a signature-verified webhook to reconcile invoice/quote status when
+// Square notifies us of a completed payment.
+//
+// Configure via env vars (firebase functions:secrets or functions:config):
+//   SQUARE_APPLICATION_ID        — OAuth application id
+//   SQUARE_APPLICATION_SECRET    — OAuth application secret
+//   SQUARE_MODE                  — "sandbox" (default) or "production"
+//   SQUARE_REDIRECT_URI          — OAuth redirect; defaults to hosted callback
+//   SQUARE_WEBHOOK_SIGNATURE_KEY — HMAC SHA-256 webhook signing key
+//   SQUARE_WEBHOOK_NOTIFICATION_URL — the full https URL of squareWebhook
+// ============================================
+
+const SQUARE_APPLICATION_ID = process.env.SQUARE_APPLICATION_ID || '';
+const SQUARE_APPLICATION_SECRET = process.env.SQUARE_APPLICATION_SECRET || '';
+const SQUARE_MODE = process.env.SQUARE_MODE === 'production' ? 'production' : 'sandbox';
+const SQUARE_REDIRECT_URI =
+  process.env.SQUARE_REDIRECT_URI || 'https://quotemateapp.au/square/callback';
+const SQUARE_WEBHOOK_SIGNATURE_KEY = process.env.SQUARE_WEBHOOK_SIGNATURE_KEY || '';
+const SQUARE_WEBHOOK_NOTIFICATION_URL =
+  process.env.SQUARE_WEBHOOK_NOTIFICATION_URL ||
+  'https://us-central1-hansendev.cloudfunctions.net/squareWebhook';
+// `PAYMENTS_WRITE` for mobile-payments SDK, `ORDERS_*` for payment-link minting,
+// `MERCHANT_PROFILE_READ` so we can surface merchant name in the UI.
+const SQUARE_SCOPES = [
+  'PAYMENTS_WRITE',
+  'PAYMENTS_READ',
+  'ORDERS_WRITE',
+  'ORDERS_READ',
+  'MERCHANT_PROFILE_READ',
+  'PAYMENTS_WRITE_IN_PERSON',
+].join(' ');
+
+const SQUARE_OAUTH_BASE =
+  SQUARE_MODE === 'production'
+    ? 'https://connect.squareup.com'
+    : 'https://connect.squareupsandbox.com';
+const SQUARE_API_BASE = SQUARE_OAUTH_BASE; // same host serves OAuth and API
+
+/**
+ * Get Square OAuth tokens for a user. Refreshes when within 60s of expiry.
+ * Returns null if disconnected or the refresh fails.
+ */
+async function getSquareTokens(userId: string): Promise<{
+  accessToken: string;
+  merchantId: string;
+  locationId: string | null;
+} | null> {
+  const firestore = admin.firestore();
+  const connRef = firestore.doc(`users/${userId}/settings/squareConnection`);
+  const connDoc = await connRef.get();
+  if (!connDoc.exists) return null;
+
+  const data = connDoc.data()!;
+  const { accessToken, refreshToken, tokenExpiresAt, merchantId, locationId } = data;
+  if (!accessToken || !refreshToken || !merchantId) return null;
+
+  if (tokenExpiresAt && tokenExpiresAt > Date.now() + 60_000) {
+    return { accessToken, merchantId, locationId: locationId || null };
+  }
+
+  try {
+    const tokenResponse = await fetch(`${SQUARE_OAUTH_BASE}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Square-Version': '2024-01-18' },
+      body: JSON.stringify({
+        client_id: SQUARE_APPLICATION_ID,
+        client_secret: SQUARE_APPLICATION_SECRET,
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      await connRef.update({ syncEnabled: false, disconnectedReason: 'token_refresh_failed' });
+      return null;
+    }
+
+    const tokenData: any = await tokenResponse.json();
+    const newAccessToken = tokenData.access_token;
+    const newRefreshToken = tokenData.refresh_token || refreshToken;
+    // Square returns RFC3339 timestamps for expires_at on success.
+    const expiresAt = tokenData.expires_at
+      ? new Date(tokenData.expires_at).getTime()
+      : Date.now() + 7 * 24 * 60 * 60 * 1000;
+    await connRef.update({
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+      tokenExpiresAt: expiresAt,
+    });
+    return { accessToken: newAccessToken, merchantId, locationId: locationId || null };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Start Square OAuth — returns the authorization URL and a signed state param.
+ */
+export const getSquareAuthUrl = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    if (!SQUARE_APPLICATION_ID) {
+      res.status(500).json({ error: 'Square integration not configured' });
+      return;
+    }
+
+    const state = Buffer.from(
+      JSON.stringify({ uid: decodedToken.uid, ts: Date.now() })
+    ).toString('base64url');
+
+    const params = new URLSearchParams({
+      client_id: SQUARE_APPLICATION_ID,
+      response_type: 'code',
+      scope: SQUARE_SCOPES,
+      session: 'false',
+      state,
+      redirect_uri: SQUARE_REDIRECT_URI,
+    });
+    const authUrl = `${SQUARE_OAUTH_BASE}/oauth2/authorize?${params.toString()}`;
+
+    res.status(200).json({ authUrl, state });
+  });
+});
+
+/**
+ * Square OAuth callback — exchanges the auth code for tokens and selects a
+ * default location. Called by the hosted page at /square/callback.
+ */
+export const squareCallback = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const { code, state } = req.body;
+    if (!isNonEmptyString(code) || !isNonEmptyString(state)) {
+      res.status(400).json({ error: 'Missing code or state' });
+      return;
+    }
+
+    let stateData: { uid: string; ts: number };
+    try {
+      stateData = JSON.parse(Buffer.from(state, 'base64url').toString());
+    } catch {
+      res.status(400).json({ error: 'Invalid state parameter' });
+      return;
+    }
+    if (Date.now() - stateData.ts > 10 * 60 * 1000) {
+      res.status(400).json({ error: 'Authorization expired. Please try again.' });
+      return;
+    }
+    const userId = stateData.uid;
+
+    try {
+      const tokenResponse = await fetch(`${SQUARE_OAUTH_BASE}/oauth2/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Square-Version': '2024-01-18' },
+        body: JSON.stringify({
+          client_id: SQUARE_APPLICATION_ID,
+          client_secret: SQUARE_APPLICATION_SECRET,
+          code,
+          grant_type: 'authorization_code',
+          redirect_uri: SQUARE_REDIRECT_URI,
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        await tokenResponse.text();
+        res.status(400).json({ error: 'Failed to connect to Square. Please try again.' });
+        return;
+      }
+
+      const tokenData: any = await tokenResponse.json();
+      const accessToken = tokenData.access_token;
+      const refreshToken = tokenData.refresh_token;
+      const merchantId = tokenData.merchant_id;
+      const expiresAt = tokenData.expires_at
+        ? new Date(tokenData.expires_at).getTime()
+        : Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+      // Pick the first location as the default — most tradies have one. The
+      // UI can expose a picker later if multi-location merchants need it.
+      let merchantName: string | null = null;
+      let locationId: string | null = null;
+      let locationName: string | null = null;
+      try {
+        const locationsRes = await fetch(`${SQUARE_API_BASE}/v2/locations`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Square-Version': '2024-01-18',
+          },
+        });
+        if (locationsRes.ok) {
+          const locationsData: any = await locationsRes.json();
+          const locations = locationsData.locations || [];
+          const active = locations.find((l: any) => l.status === 'ACTIVE') || locations[0];
+          if (active) {
+            locationId = active.id || null;
+            locationName = active.name || null;
+            merchantName = active.business_name || active.name || null;
+          }
+        }
+      } catch {
+        // Non-fatal — connection still valid, user just won't see a location name.
+      }
+
+      const firestore = admin.firestore();
+      await firestore.doc(`users/${userId}/settings/squareConnection`).set({
+        merchantId,
+        merchantName,
+        locationId,
+        locationName,
+        accessToken,
+        refreshToken,
+        tokenExpiresAt: expiresAt,
+        mode: SQUARE_MODE,
+        connectedAt: new Date().toISOString(),
+        syncEnabled: true,
+        disconnectedReason: null,
+      });
+
+      res.status(200).json({
+        success: true,
+        merchantName: merchantName || 'your Square account',
+        locationName,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Internal error connecting to Square' });
+    }
+  });
+});
+
+/**
+ * Check Square connection status — mirrors checkXeroConnection.
+ */
+export const checkSquareConnection = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'GET' && req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const firestore = admin.firestore();
+    const connDoc = await firestore
+      .doc(`users/${decodedToken.uid}/settings/squareConnection`)
+      .get();
+
+    if (!connDoc.exists) {
+      res.status(200).json({ connected: false });
+      return;
+    }
+    const data = connDoc.data()!;
+    res.status(200).json({
+      connected: true,
+      merchantId: data.merchantId || null,
+      merchantName: data.merchantName || null,
+      locationId: data.locationId || null,
+      locationName: data.locationName || null,
+      mode: data.mode || SQUARE_MODE,
+      connectedAt: data.connectedAt || null,
+      syncEnabled: data.syncEnabled ?? true,
+      disconnectedReason: data.disconnectedReason || null,
+    });
+  });
+});
+
+/**
+ * Disconnect Square — revokes the access token and deletes the connection doc.
+ */
+export const squareDisconnect = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const firestore = admin.firestore();
+    const connRef = firestore.doc(
+      `users/${decodedToken.uid}/settings/squareConnection`
+    );
+    const connDoc = await connRef.get();
+    if (connDoc.exists) {
+      const data = connDoc.data()!;
+      if (data.accessToken && SQUARE_APPLICATION_ID && SQUARE_APPLICATION_SECRET) {
+        try {
+          await fetch(`${SQUARE_OAUTH_BASE}/oauth2/revoke`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Client ${SQUARE_APPLICATION_SECRET}`,
+              'Square-Version': '2024-01-18',
+            },
+            body: JSON.stringify({
+              access_token: data.accessToken,
+              client_id: SQUARE_APPLICATION_ID,
+            }),
+          });
+        } catch {
+          // Best-effort — still remove locally even if revoke fails.
+        }
+      }
+      await connRef.delete();
+    }
+    res.status(200).json({ success: true });
+  });
+});
+
+/**
+ * Mint a Square payment link for an invoice or quote deposit.
+ *
+ * Idempotency: if a `squarePaymentLinkId` is already stored on the target doc
+ * and the amount hasn't changed, we return the existing URL. The webhook uses
+ * `squarePaymentOrders/{orderId}` to route `payment.updated` back to the right
+ * invoice or quote.
+ */
+export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { kind, targetId } = req.body || {};
+    if (
+      (kind !== 'invoice' && kind !== 'quote_deposit') ||
+      !isNonEmptyString(targetId)
+    ) {
+      res.status(400).json({ error: 'Invalid kind or targetId' });
+      return;
+    }
+
+    const tokens = await getSquareTokens(decodedToken.uid);
+    if (!tokens) {
+      res.status(401).json({ error: 'Square not connected. Please reconnect.' });
+      return;
+    }
+    if (!tokens.locationId) {
+      res.status(400).json({ error: 'No Square location configured for this merchant.' });
+      return;
+    }
+
+    const firestore = admin.firestore();
+    const targetPath =
+      kind === 'invoice'
+        ? `users/${decodedToken.uid}/invoices/${targetId}`
+        : `users/${decodedToken.uid}/quotes/${targetId}`;
+    const targetRef = firestore.doc(targetPath);
+    const targetDoc = await targetRef.get();
+    if (!targetDoc.exists) {
+      res.status(404).json({ error: `${kind} not found` });
+      return;
+    }
+    const target = targetDoc.data()!;
+
+    // Compute the amount owing in cents.
+    let amountCents: number;
+    let description: string;
+    if (kind === 'invoice') {
+      const total = Number(target.total || 0);
+      const paid = Number(target.paidAmount || 0);
+      const due = Math.max(0, total - paid);
+      if (due <= 0) {
+        res.status(400).json({ error: 'Invoice is already paid in full.' });
+        return;
+      }
+      amountCents = Math.round(due * 100);
+      description = `Invoice ${target.invoiceNumber || targetId.slice(-6)}${
+        target.job?.name ? ` — ${target.job.name}` : ''
+      }`;
+    } else {
+      const depositPercent = Number(target.depositPercent || 0);
+      if (depositPercent <= 0) {
+        res.status(400).json({ error: 'Quote has no deposit configured.' });
+        return;
+      }
+      const total = Number(target.total || 0);
+      const depositAmount = (total * depositPercent) / 100;
+      const depositPaid = Number(target.depositPaid || 0);
+      const due = Math.max(0, depositAmount - depositPaid);
+      if (due <= 0) {
+        res.status(400).json({ error: 'Deposit is already paid.' });
+        return;
+      }
+      amountCents = Math.round(due * 100);
+      description = `Deposit for ${target.job?.name || `quote ${targetId.slice(-6)}`}`;
+    }
+
+    // Re-use existing link if amount + kind match — Square doesn't let us mutate
+    // a payment link's amount, so a changed total requires a fresh link.
+    const existingLinkId: string | undefined = target.squarePaymentLinkId;
+    const existingAmount: number | undefined = target.squarePaymentLinkAmount;
+    const existingUrl: string | undefined = target.squarePaymentLinkUrl;
+    if (
+      existingLinkId &&
+      existingUrl &&
+      existingAmount === amountCents
+    ) {
+      res.status(200).json({
+        paymentLinkId: existingLinkId,
+        paymentLinkUrl: existingUrl,
+        reused: true,
+      });
+      return;
+    }
+
+    try {
+      const createRes = await fetch(`${SQUARE_API_BASE}/v2/online-checkout/payment-links`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tokens.accessToken}`,
+          'Content-Type': 'application/json',
+          'Square-Version': '2024-01-18',
+        },
+        body: JSON.stringify({
+          idempotency_key: `${targetId}:${amountCents}:${Date.now()}`,
+          quick_pay: {
+            name: description.slice(0, 255),
+            price_money: { amount: amountCents, currency: 'AUD' },
+            location_id: tokens.locationId,
+          },
+          checkout_options: {
+            redirect_url: 'https://quotemateapp.au/square/paid',
+            ask_for_shipping_address: false,
+          },
+        }),
+      });
+
+      if (!createRes.ok) {
+        const err = await createRes.text();
+        res.status(502).json({ error: `Square rejected the payment link: ${err}` });
+        return;
+      }
+      const created: any = await createRes.json();
+      const paymentLink = created.payment_link;
+      if (!paymentLink?.url || !paymentLink?.id) {
+        res.status(502).json({ error: 'Square did not return a payment link.' });
+        return;
+      }
+
+      await targetRef.update({
+        squarePaymentLinkId: paymentLink.id,
+        squarePaymentLinkUrl: paymentLink.url,
+        squarePaymentLinkAmount: amountCents,
+        squarePaymentLinkCreatedAt: new Date().toISOString(),
+      });
+
+      // Index the order so the webhook can reconcile the payment when it fires.
+      if (paymentLink.order_id) {
+        await firestore.doc(`squarePaymentOrders/${paymentLink.order_id}`).set({
+          kind,
+          targetId,
+          uid: decodedToken.uid,
+          paymentLinkId: paymentLink.id,
+          amountCents,
+          source: 'remote',
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      res.status(200).json({
+        paymentLinkId: paymentLink.id,
+        paymentLinkUrl: paymentLink.url,
+        reused: false,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Internal error creating payment link' });
+    }
+  });
+});
+
+/**
+ * Record an in-app (Mobile Payments SDK) payment so the webhook can reconcile
+ * status when `payment.updated` fires. Called right after the SDK returns a
+ * successful payment.
+ *
+ * Phase 2a. Until the SDK is wired up we still expose it — it's a pure write.
+ */
+export const recordInAppSquarePayment = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { kind, targetId, paymentId, orderId, amountCents } = req.body || {};
+    if (
+      (kind !== 'invoice' && kind !== 'quote_deposit') ||
+      !isNonEmptyString(targetId) ||
+      !isNonEmptyString(paymentId) ||
+      !isNonEmptyString(orderId) ||
+      typeof amountCents !== 'number'
+    ) {
+      res.status(400).json({ error: 'Missing fields' });
+      return;
+    }
+
+    const firestore = admin.firestore();
+    await firestore.doc(`squarePaymentOrders/${orderId}`).set(
+      {
+        kind,
+        targetId,
+        uid: decodedToken.uid,
+        paymentId,
+        amountCents,
+        source: 'in_app',
+        createdAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+    res.status(200).json({ success: true });
+  });
+});
+
+/**
+ * Get a Square Mobile Payments SDK authorization code for a client session.
+ * Wraps Square's /v2/mobile/authorization-code; the SDK exchanges the code for
+ * a session token. Phase 2a wiring.
+ */
+export const getSquareMobileAuthCode = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const tokens = await getSquareTokens(decodedToken.uid);
+    if (!tokens) {
+      res.status(401).json({ error: 'Square not connected.' });
+      return;
+    }
+    if (!tokens.locationId) {
+      res.status(400).json({ error: 'No Square location configured.' });
+      return;
+    }
+
+    try {
+      const authzRes = await fetch(`${SQUARE_API_BASE}/mobile/authorization-code`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tokens.accessToken}`,
+          'Content-Type': 'application/json',
+          'Square-Version': '2024-01-18',
+        },
+        body: JSON.stringify({ location_id: tokens.locationId }),
+      });
+      if (!authzRes.ok) {
+        const err = await authzRes.text();
+        res.status(502).json({ error: `Square rejected auth code request: ${err}` });
+        return;
+      }
+      const data: any = await authzRes.json();
+      res.status(200).json({
+        authorizationCode: data.authorization_code,
+        expiresAt: data.expires_at,
+        locationId: tokens.locationId,
+      });
+    } catch {
+      res.status(500).json({ error: 'Internal error fetching mobile auth code' });
+    }
+  });
+});
+
+/**
+ * Verify Square webhook signature.
+ * Square signs the request with `x-square-hmacsha256-signature` using the
+ * webhook signature key and `notification_url + raw_body` as the message.
+ */
+function verifySquareSignature(
+  rawBody: string,
+  signatureHeader: string | undefined
+): boolean {
+  if (!SQUARE_WEBHOOK_SIGNATURE_KEY || !signatureHeader) return false;
+  const crypto = require('crypto');
+  const payload = SQUARE_WEBHOOK_NOTIFICATION_URL + rawBody;
+  const hmac = crypto.createHmac('sha256', SQUARE_WEBHOOK_SIGNATURE_KEY);
+  hmac.update(payload);
+  const expected = hmac.digest('base64');
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(expected),
+      Buffer.from(signatureHeader)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Square webhook — reconciles invoice/quote status when a payment completes.
+ *
+ * We only act on `payment.updated` with `status === 'COMPLETED'`. The
+ * `squarePaymentOrders/{orderId}` index (written at mint-link time or via
+ * recordInAppSquarePayment) tells us which user + invoice/quote to update.
+ * Idempotent per `paymentId`.
+ */
+export const squareWebhook = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).send('Method Not Allowed');
+    return;
+  }
+
+  // Firebase Functions parses JSON by default; use rawBody for signature check.
+  const rawBody =
+    (req as any).rawBody?.toString('utf8') ?? JSON.stringify(req.body || {});
+  const sig = req.header('x-square-hmacsha256-signature');
+  if (!verifySquareSignature(rawBody, sig)) {
+    res.status(401).send('Invalid signature');
+    return;
+  }
+
+  const event = req.body as any;
+  if (!event?.type || !event?.data?.object) {
+    res.status(400).send('Malformed event');
+    return;
+  }
+
+  // Only care about completed payments for now.
+  if (event.type !== 'payment.updated' && event.type !== 'payment.created') {
+    res.status(200).json({ ignored: true });
+    return;
+  }
+
+  const payment = event.data.object.payment;
+  if (!payment || payment.status !== 'COMPLETED') {
+    res.status(200).json({ ignored: true });
+    return;
+  }
+
+  const orderId: string | undefined = payment.order_id;
+  const paymentId: string = payment.id;
+  const amountCents: number = payment.amount_money?.amount || 0;
+
+  if (!orderId) {
+    res.status(200).json({ ignored: true, reason: 'no order_id' });
+    return;
+  }
+
+  const firestore = admin.firestore();
+  const orderRef = firestore.doc(`squarePaymentOrders/${orderId}`);
+  const orderDoc = await orderRef.get();
+  if (!orderDoc.exists) {
+    // No matching QuoteMate record — could be a payment from Square outside
+    // the app. Ack so Square doesn't retry forever.
+    res.status(200).json({ ignored: true, reason: 'unknown order' });
+    return;
+  }
+
+  const order = orderDoc.data()!;
+  const { kind, targetId, uid } = order;
+  if (!kind || !targetId || !uid) {
+    res.status(200).json({ ignored: true, reason: 'malformed index' });
+    return;
+  }
+
+  // Idempotency: if we've already processed this paymentId, no-op.
+  if (order.processedPaymentId === paymentId) {
+    res.status(200).json({ idempotent: true });
+    return;
+  }
+
+  try {
+    if (kind === 'invoice') {
+      const invoiceRef = firestore.doc(`users/${uid}/invoices/${targetId}`);
+      const invoiceDoc = await invoiceRef.get();
+      if (!invoiceDoc.exists) {
+        res.status(200).json({ ignored: true, reason: 'invoice missing' });
+        return;
+      }
+      const invoice = invoiceDoc.data()!;
+      const amount = amountCents / 100;
+      const currentPaid = Number(invoice.paidAmount || 0);
+      const newPaid = currentPaid + amount;
+      const total = Number(invoice.total || 0);
+      const newStatus = newPaid >= total - 0.005 ? 'paid' : 'partial';
+      await invoiceRef.update({
+        paidAmount: newPaid,
+        paidDate: new Date().toISOString(),
+        paymentMethod: 'card',
+        paymentNotes: `Square payment ${paymentId}`,
+        status: newStatus,
+        updatedAt: new Date().toISOString(),
+      });
+    } else if (kind === 'quote_deposit') {
+      const quoteRef = firestore.doc(`users/${uid}/quotes/${targetId}`);
+      const quoteDoc = await quoteRef.get();
+      if (!quoteDoc.exists) {
+        res.status(200).json({ ignored: true, reason: 'quote missing' });
+        return;
+      }
+      const quote = quoteDoc.data()!;
+      const amount = amountCents / 100;
+      const currentDepositPaid = Number(quote.depositPaid || 0);
+      await quoteRef.update({
+        depositPaid: currentDepositPaid + amount,
+        depositPaidAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    await orderRef.update({
+      processedPaymentId: paymentId,
+      processedAt: new Date().toISOString(),
+    });
+    res.status(200).json({ success: true });
+  } catch (error: any) {
+    // Return 500 so Square retries.
+    res.status(500).json({ error: 'Failed to reconcile Square payment' });
+  }
+});
+

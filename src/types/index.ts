@@ -198,6 +198,16 @@ export interface Quote {
   // a fresh AI generation. The Regenerate button overwrites this. Distinct
   // from aiEmailBody, which is the canonical record of what was sent.
   draftEmailBody?: string;
+  // Deposit tracking for on-site Square deposit collection.
+  depositPercent?: number;      // 0-100. If set, "Take Payment" on the
+                                // quote offers to charge this % of total.
+  depositPaid?: number;         // AUD already paid toward the deposit.
+  depositPaidAt?: string;       // ISO timestamp of most recent deposit payment.
+  // Square payment-link cache, reused when amount + kind haven't changed.
+  squarePaymentLinkId?: string;
+  squarePaymentLinkUrl?: string;
+  squarePaymentLinkAmount?: number;   // Cents — guards against amount drift.
+  squarePaymentLinkCreatedAt?: string;
 }
 
 export interface JobTemplate {
@@ -449,6 +459,12 @@ export interface Invoice {
   // Generated (or typed) on first open and persisted so reopening doesn't
   // trigger a fresh AI generation. Regenerate overwrites it.
   draftEmailBody?: string;
+
+  // Square payment-link cache, reused when amount + kind haven't changed.
+  squarePaymentLinkId?: string;
+  squarePaymentLinkUrl?: string;
+  squarePaymentLinkAmount?: number;   // Cents — guards against amount drift.
+  squarePaymentLinkCreatedAt?: string;
 }
 
 // Xero integration types
@@ -460,6 +476,18 @@ export interface XeroConnection {
   connectedAt: string;         // ISO date
   lastSyncAt?: string;         // ISO date
   syncEnabled: boolean;        // Auto-push on invoice send
+}
+
+// Square Payments integration types
+export interface SquareConnection {
+  merchantId: string;              // Square merchant ID
+  merchantName?: string;           // Business name from Square (for UI)
+  locationId?: string;             // Default Square location
+  locationName?: string;
+  mode: 'sandbox' | 'production';  // Which Square environment we're connected to
+  connectedAt: string;             // ISO date
+  syncEnabled: boolean;
+  disconnectedReason?: string;
 }
 
 // Contact types

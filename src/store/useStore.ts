@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
-import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
+import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact, SquareConnection } from '../types';
 import { TourPhase } from '../components/tour/tourFlow';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
@@ -163,6 +163,11 @@ interface AppState {
   pushPaymentToXero: (invoiceId: string, xeroInvoiceId: string, amount: number, date: Date, method?: string) => Promise<void>;
   xeroBulkSync: (invoiceIds: string[]) => Promise<{ successCount: number; totalCount: number }>;
 
+  // Square integration
+  squareConnection: SquareConnection | null;
+  loadSquareConnection: () => Promise<void>;
+  setSquareConnection: (connection: SquareConnection | null) => void;
+
   // Cleanup
   clearAllData: () => Promise<void>;
 }
@@ -178,6 +183,7 @@ const STORAGE_KEYS = {
   NEXT_INVOICE_NUMBER: '@quotemate:next_invoice_number',
   TOUR_SEEN: '@quotemate:tour_seen',
   XERO_CONNECTION: '@quotemate:xero_connection',
+  SQUARE_CONNECTION: '@quotemate:square_connection',
   CONTACTS: '@quotemate:contacts',
   CONTACTS_MIGRATED: '@quotemate:contacts_migrated',
 };
@@ -1850,6 +1856,32 @@ export const useStore = create<AppState>((set, get) => ({
     await xeroService.pushPaymentToXero(invoiceId, xeroInvoiceId, amount, date, method);
   },
 
+  // Square integration
+  squareConnection: null,
+
+  loadSquareConnection: async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.SQUARE_CONNECTION);
+      if (stored) {
+        set({ squareConnection: JSON.parse(stored) });
+      }
+    } catch {
+      // silently ignore
+    }
+  },
+
+  setSquareConnection: (connection: SquareConnection | null) => {
+    set({ squareConnection: connection });
+    if (connection) {
+      AsyncStorage.setItem(
+        STORAGE_KEYS.SQUARE_CONNECTION,
+        JSON.stringify(connection)
+      ).catch(() => {});
+    } else {
+      AsyncStorage.removeItem(STORAGE_KEYS.SQUARE_CONNECTION).catch(() => {});
+    }
+  },
+
   xeroBulkSync: async (invoiceIds: string[]) => {
     set({ xeroLoading: true });
     try {
@@ -1880,6 +1912,7 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.NEXT_INVOICE_NUMBER,
         STORAGE_KEYS.TOUR_SEEN,
         STORAGE_KEYS.XERO_CONNECTION,
+        STORAGE_KEYS.SQUARE_CONNECTION,
         STORAGE_KEYS.CONTACTS,
         STORAGE_KEYS.CONTACTS_MIGRATED,
         '@quotemate:seen_screen_tours',
@@ -1900,6 +1933,7 @@ export const useStore = create<AppState>((set, get) => ({
         referralInfo: null,
         xeroConnection: null,
         xeroLoading: false,
+        squareConnection: null,
         contacts: [],
         contactsLoaded: false,
         xeroContacts: [],

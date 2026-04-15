@@ -53,6 +53,16 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Square payment order index — written by Cloud Functions only. The owner
+    // may read their own index entries (used for debugging / support), but all
+    // writes go through `createSquarePaymentLink` / `recordInAppSquarePayment`
+    // so the webhook can trust these entries.
+    match /squarePaymentOrders/{orderId} {
+      allow read: if request.auth != null
+        && request.auth.uid == resource.data.uid;
+      allow write: if false;
+    }
+
     // Default: deny all access
     match /{document=**} {
       allow read, write: if false;
