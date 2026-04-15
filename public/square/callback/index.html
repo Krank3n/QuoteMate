@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuoteMate - Connecting to Square</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+    }
+    .logo { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 22px; color: #1a1a1a; margin-bottom: 8px; }
+    p { font-size: 15px; color: #666; line-height: 1.5; margin-bottom: 20px; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 4px solid #e0e0e0;
+      border-top-color: #13855c;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .success { color: #13855c; }
+    .error { color: #d32f2f; }
+    .org-name { font-weight: 600; color: #1a1a1a; }
+    .hint { font-size: 13px; color: #999; margin-top: 16px; }
+    .btn {
+      margin-top: 12px;
+      padding: 12px 32px;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+    }
+    .btn-primary { background: #13855c; color: white; }
+    .btn-secondary { background: #334155; color: #e2e8f0; border: 1px solid #475569; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">&#128179;</div>
+
+    <div id="loading">
+      <h1>Connecting to Square...</h1>
+      <p>Hang tight while we set up your payment connection.</p>
+      <div class="spinner"></div>
+    </div>
+
+    <div id="success" class="hidden">
+      <h1 class="success">Connected!</h1>
+      <p>Your Square account <span id="org-name" class="org-name"></span> is now linked to QuoteMate.</p>
+      <button onclick="window.close()" class="btn btn-primary">Return to App</button>
+      <p class="hint">If the button doesn't work, just close this tab.</p>
+    </div>
+
+    <div id="error" class="hidden">
+      <h1 class="error">Connection Failed</h1>
+      <p id="error-message">Something went wrong. Please try again from the app.</p>
+      <button onclick="window.close()" class="btn btn-secondary">Close and Try Again</button>
+    </div>
+  </div>
+
+  <script>
+    (async function() {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+      const state = params.get('state');
+      const errorParam = params.get('error');
+
+      function showSuccess(orgName) {
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('org-name').textContent = orgName;
+        document.getElementById('success').classList.remove('hidden');
+      }
+
+      function showError(msg) {
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('error-message').textContent = msg;
+        document.getElementById('error').classList.remove('hidden');
+      }
+
+      if (errorParam) {
+        showError('Square authorisation was denied or cancelled. Please try again from the app.');
+        return;
+      }
+
+      if (!code || !state) {
+        showError('Invalid callback. Missing authorisation code.');
+        return;
+      }
+
+      try {
+        const response = await fetch('https://us-central1-hansendev.cloudfunctions.net/squareCallback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, state }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          showSuccess(data.merchantName || 'your Square account');
+        } else {
+          showError(data.error || 'Failed to connect to Square. Please try again.');
+        }
+      } catch (err) {
+        showError('Network error. Please check your connection and try again.');
+      }
+    })();
+  </script>
+</body>
+</html>
