@@ -190,7 +190,15 @@ export function SquareIntegrationScreen() {
                 />
               </View>
               <View style={styles.headerText}>
-                <Title style={styles.title}>Square Payments</Title>
+                <View style={styles.titleRow}>
+                  <Title style={styles.title}>Square Payments</Title>
+                  <View style={[styles.pill, styles.pillNew]}>
+                    <Text style={[styles.pillText, styles.pillTextNew]}>NEW</Text>
+                  </View>
+                  <View style={[styles.pill, styles.pillBeta]}>
+                    <Text style={[styles.pillText, styles.pillTextBeta]}>BETA</Text>
+                  </View>
+                </View>
                 <Text style={styles.subtitle}>
                   Add a Pay Now button to your invoice emails — customers pay by card, funds go straight to your Square account.
                 </Text>
@@ -405,6 +413,26 @@ const styles = StyleSheet.create({
   },
   headerText: { flex: 1 },
   title: { fontSize: 20, fontWeight: '700', color: colors.text },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  pill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  pillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  pillNew: { backgroundColor: colors.primaryBg },
+  pillTextNew: { color: colors.primary },
+  pillBeta: { backgroundColor: colors.warningBg },
+  pillTextBeta: { color: colors.warning },
   subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
   sectionTitle: {
     fontSize: 16,

@@ -85,6 +85,8 @@ export function SettingsScreen() {
           subtitle: 'Take payment on site or share a pay link',
           icon: 'credit-card-scan',
           screen: 'SquareIntegration',
+          badge: 'NEW',
+          badgeColor: colors.primary,
         },
       ],
     },
