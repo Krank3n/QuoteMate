@@ -43,8 +43,11 @@ export type TakePaymentTarget =
       quoteId: string;
       depositAmount: number;
       depositPaid: number;
+      total: number;            // Full quote total, for the "Full amount" mode.
       jobName?: string;
     };
+
+type QuotePaymentMode = 'deposit' | 'full';
 
 interface TakePaymentSheetProps {
   visible: boolean;
@@ -53,7 +56,10 @@ interface TakePaymentSheetProps {
   onError: (message: string) => void;
 }
 
-function describeAmounts(target: TakePaymentTarget): {
+function describeAmounts(
+  target: TakePaymentTarget,
+  quoteMode: QuotePaymentMode,
+): {
   alreadyPaid: number;
   remaining: number;
   label: string;
@@ -66,6 +72,14 @@ function describeAmounts(target: TakePaymentTarget): {
       label: target.invoiceNumber
         ? `Invoice ${target.invoiceNumber}`
         : 'Invoice',
+    };
+  }
+  if (quoteMode === 'full') {
+    const remaining = Math.max(0, target.total - target.depositPaid);
+    return {
+      alreadyPaid: target.depositPaid,
+      remaining,
+      label: target.jobName ? `Full quote — ${target.jobName}` : 'Full quote',
     };
   }
   const remaining = Math.max(0, target.depositAmount - target.depositPaid);
@@ -84,11 +98,18 @@ export function TakePaymentSheet({
 }: TakePaymentSheetProps) {
   const [sharing, setSharing] = useState(false);
   const [chargingCard, setChargingCard] = useState(false);
+  const [quoteMode, setQuoteMode] = useState<QuotePaymentMode>('deposit');
   const tapToPay = useTapToPayEnabled();
 
   if (!target) return null;
 
-  const amounts = describeAmounts(target);
+  // Show the deposit/full pill only when a quote has a deposit smaller than
+  // total — otherwise the toggle has nothing to toggle.
+  const showQuoteModePill =
+    target.kind === 'quote_deposit' &&
+    target.total > target.depositAmount;
+
+  const amounts = describeAmounts(target, quoteMode);
 
   const handleTakeCardPayment = async () => {
     if (chargingCard || amounts.remaining <= 0) return;
@@ -128,7 +149,9 @@ export function TakePaymentSheet({
       const result =
         target.kind === 'invoice'
           ? await squareService.mintInvoicePaymentLink(target.invoiceId)
-          : await squareService.mintQuoteDepositPaymentLink(target.quoteId);
+          : quoteMode === 'full'
+            ? await squareService.mintQuoteFullPaymentLink(target.quoteId)
+            : await squareService.mintQuoteDepositPaymentLink(target.quoteId);
 
       const jobPart = target.jobName ? ` for ${target.jobName}` : '';
       const message = `Pay ${formatCurrency(amounts.remaining)}${jobPart}: ${
@@ -167,6 +190,45 @@ export function TakePaymentSheet({
           <View style={styles.grabber} />
           <Text style={styles.title}>Take Payment</Text>
           <Text style={styles.subtitle}>{amounts.label}</Text>
+
+          {showQuoteModePill && (
+            <View style={styles.modeSwitcher}>
+              <TouchableOpacity
+                style={[
+                  styles.modePill,
+                  quoteMode === 'deposit' && styles.modePillActive,
+                ]}
+                onPress={() => setQuoteMode('deposit')}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.modePillText,
+                    quoteMode === 'deposit' && styles.modePillTextActive,
+                  ]}
+                >
+                  Deposit
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modePill,
+                  quoteMode === 'full' && styles.modePillActive,
+                ]}
+                onPress={() => setQuoteMode('full')}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.modePillText,
+                    quoteMode === 'full' && styles.modePillTextActive,
+                  ]}
+                >
+                  Full amount
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.amountsRow}>
             <View style={styles.amountBlock}>
@@ -314,6 +376,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
     marginBottom: 16,
+  },
+  modeSwitcher: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    backgroundColor: colors.background,
+    borderRadius: 999,
+    padding: 4,
+    marginBottom: 16,
+    gap: 2,
+  },
+  modePill: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+  },
+  modePillActive: {
+    backgroundColor: colors.primary,
+  },
+  modePillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  modePillTextActive: {
+    color: colors.onPrimary,
   },
   amountsRow: {
     flexDirection: 'row',

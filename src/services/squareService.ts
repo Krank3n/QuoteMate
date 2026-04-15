@@ -143,6 +143,25 @@ export async function mintQuoteDepositPaymentLink(
   };
 }
 
+/**
+ * Mint (or reuse) a Square payment link for the FULL outstanding balance of
+ * a quote (total − depositPaid). Used by TakePaymentSheet's "Full amount"
+ * mode so the tradie can share a link instead of using Tap to Pay.
+ */
+export async function mintQuoteFullPaymentLink(
+  quoteId: string,
+): Promise<{ paymentLinkId: string; paymentLinkUrl: string; reused: boolean }> {
+  const res = await squareFetch('createSquarePaymentLink', {
+    kind: 'quote_full',
+    targetId: quoteId,
+  });
+  return {
+    paymentLinkId: res.paymentLinkId,
+    paymentLinkUrl: res.paymentLinkUrl,
+    reused: !!res.reused,
+  };
+}
+
 // ============================================
 // Phase 2 — Mobile Payments SDK (Tap to Pay) wiring
 // ============================================

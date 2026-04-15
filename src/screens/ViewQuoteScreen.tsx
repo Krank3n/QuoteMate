@@ -304,7 +304,7 @@ export function ViewQuoteScreen() {
                 icon="credit-card-scan"
                 buttonColor={colors.primary}
               >
-                {compactLabels ? 'Deposit' : 'Take Deposit'}
+                {compactLabels ? 'Pay' : 'Take Payment'}
               </Button>
             );
           }
@@ -355,6 +355,7 @@ export function ViewQuoteScreen() {
             quoteId: quote.id,
             depositAmount: Number((quote as any).depositAmount) || 0,
             depositPaid: Number((quote as any).depositPaid) || 0,
+            total: Number(quote.total) || 0,
             jobName: quote.job?.name,
           } as TakePaymentTarget
         }

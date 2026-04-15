@@ -9175,6 +9175,20 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
       return;
     }
 
+    if (kind === 'quote_full') {
+      if (!isNonEmptyString(targetId)) {
+        res.status(400).json({ error: 'Missing targetId' });
+        return;
+      }
+      const result = await createSquareFullQuotePaymentLinkInternal(decodedToken.uid, targetId);
+      if (!result) {
+        res.status(400).json({ error: 'Failed to create Square full quote payment link' });
+        return;
+      }
+      res.status(200).json({ success: true, reused: false, ...result });
+      return;
+    }
+
     const id = isNonEmptyString(targetId) ? targetId : invoiceId;
     if (!isNonEmptyString(id)) {
       res.status(400).json({ error: 'Missing invoiceId' });
@@ -9318,6 +9332,126 @@ async function createSquareDepositPaymentLinkInternal(
 }
 
 /**
+ * Mint a Square hosted payment link for the FULL outstanding balance of a
+ * quote (total − depositPaid). Used when the tradie chooses "Full amount" in
+ * TakePaymentSheet and wants to share a pay link instead of using Tap to Pay.
+ *
+ * Writes to `fullPaymentLink*` fields to avoid colliding with deposit links.
+ * Tags the orderId index with kind: 'quote_full' so the webhook can treat the
+ * incoming payment as closing out the quote (currently: adds to depositPaid;
+ * tradie converts to invoice afterwards with full credit).
+ */
+async function createSquareFullQuotePaymentLinkInternal(
+  userId: string,
+  quoteId: string,
+): Promise<{ paymentLinkId: string; paymentLinkUrl: string; amount: number } | null> {
+  const firestore = admin.firestore();
+  const quoteRef = firestore.doc(`users/${userId}/quotes/${quoteId}`);
+  const quoteDoc = await quoteRef.get();
+  if (!quoteDoc.exists) return null;
+  const quote = quoteDoc.data()!;
+
+  const total = Number(quote.total) || 0;
+  if (total <= 0) return null;
+  const depositPaid = Number(quote.depositPaid) || 0;
+  const amount = Math.max(0, total - depositPaid);
+  if (amount <= 0) return null;
+
+  // Reuse a fresh existing link if total + depositPaid haven't changed.
+  const SQUARE_LINK_TTL_MS = 23 * 60 * 60 * 1000;
+  const linkCreatedAt: number | undefined = quote.fullPaymentLinkCreatedAt
+    ? (typeof quote.fullPaymentLinkCreatedAt === 'number'
+        ? quote.fullPaymentLinkCreatedAt
+        : quote.fullPaymentLinkCreatedAt?.toMillis?.() ?? Date.parse(String(quote.fullPaymentLinkCreatedAt)))
+    : undefined;
+  const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS;
+  const amountMatchesLink = Number(quote.fullPaymentLinkAmount) === amount;
+  if (quote.fullPaymentLinkId && quote.fullPaymentLinkUrl && linkFresh && amountMatchesLink) {
+    return {
+      paymentLinkId: quote.fullPaymentLinkId,
+      paymentLinkUrl: quote.fullPaymentLinkUrl,
+      amount,
+    };
+  }
+
+  const tokens = await getSquareTokens(userId);
+  if (!tokens) return null;
+
+  const amountCents = Math.round(amount * 100);
+  const jobName = quote.job?.name || 'Job';
+  const quoteNumber = quote.quoteNumber || quoteId.slice(0, 8);
+  const idempotencyKey = `qm-quote-full-${userId}-${quoteId}-${Date.now()}`;
+
+  const body: any = {
+    idempotency_key: idempotencyKey,
+    quick_pay: {
+      name: `Quote ${quoteNumber} — ${jobName}`.slice(0, 250),
+      price_money: { amount: amountCents, currency: 'AUD' },
+      location_id: tokens.locationId,
+    },
+    payment_note: `QuoteMate full payment on quote ${quoteNumber}`,
+    checkout_options: { allow_tipping: false },
+  };
+
+  const resp = await fetch(`${squareApiBase()}/v2/online-checkout/payment-links`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${tokens.accessToken}`,
+      'Content-Type': 'application/json',
+      'Square-Version': '2024-10-17',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const errBody = await resp.text().catch(() => '');
+    console.error('[square] createSquareFullQuotePaymentLinkInternal failed', {
+      userId, quoteId, status: resp.status, body: errBody.slice(0, 500),
+    });
+    return null;
+  }
+
+  const json: any = await resp.json();
+  const paymentLink = json?.payment_link;
+  const paymentLinkId = paymentLink?.id;
+  const paymentLinkUrl = paymentLink?.url || paymentLink?.long_url;
+  const orderId: string | undefined = paymentLink?.order_id;
+  if (!paymentLinkId || !paymentLinkUrl) {
+    console.error('[square] createSquareFullQuotePaymentLinkInternal missing link fields', { userId, quoteId });
+    return null;
+  }
+
+  await quoteRef.set(
+    {
+      fullPaymentLinkId: paymentLinkId,
+      fullPaymentLinkUrl: paymentLinkUrl,
+      fullPaymentLinkCreatedAt: Date.now(),
+      fullPaymentLinkAmount: amount,
+    },
+    { merge: true },
+  );
+
+  if (orderId) {
+    await firestore.doc(`squarePaymentOrders/${orderId}`).set({
+      userId,
+      quoteId,
+      paymentLinkId,
+      kind: 'quote_full',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+  await firestore.doc(`squarePaymentLinks/${paymentLinkId}`).set({
+    userId,
+    quoteId,
+    kind: 'quote_full',
+    orderId: orderId || null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { paymentLinkId, paymentLinkUrl, amount };
+}
+
+/**
  * Square webhook — verifies HMAC-SHA256 signature, handles payment.updated
  * with status COMPLETED, and flips the invoice to paid.
  *
@@ -9399,7 +9533,7 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
     // is created from the quote. If the quote isn't already accepted, paying the
     // deposit IS the acceptance — flip status and fire the same side-effects
     // (tradie email + push) that the Accept page would have.
-    if (idx.kind === 'quote_deposit') {
+    if (idx.kind === 'quote_deposit' || idx.kind === 'quote_full') {
       const quoteId: string | null = idx.quoteId || null;
       if (!quoteId) return;
       const quoteRef = firestore.doc(`users/${userId}/quotes/${quoteId}`);

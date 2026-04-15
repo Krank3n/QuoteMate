@@ -41,6 +41,7 @@ export function SquareIntegrationScreen() {
   const [loading, setLoading] = useState(false);
   const [checkingConnection, setCheckingConnection] = useState(true);
   const [disconnectModalVisible, setDisconnectModalVisible] = useState(false);
+  const [tapToPaySetupVisible, setTapToPaySetupVisible] = useState(false);
   const [primingTapToPay, setPrimingTapToPay] = useState(false);
   const [alertModal, setAlertModal] = useState<{
     visible: boolean;
@@ -117,6 +118,10 @@ export function SquareIntegrationScreen() {
       if (!connected) {
         // Final fallback — reflect whatever the backend reports now.
         await checkConnection();
+      } else {
+        // Surface the one-time Tap-to-Pay activation now, while the tradie
+        // is still in Settings, so it's done before the first real customer.
+        setTapToPaySetupVisible(true);
       }
     } catch (error: any) {
       showAlert(
@@ -130,6 +135,7 @@ export function SquareIntegrationScreen() {
   };
 
   const handlePrimeTapToPay = async () => {
+    setTapToPaySetupVisible(false);
     setPrimingTapToPay(true);
     try {
       await primeTapToPayOnDevice();
@@ -192,9 +198,6 @@ export function SquareIntegrationScreen() {
               <View style={styles.headerText}>
                 <View style={styles.titleRow}>
                   <Title style={styles.title}>Square Payments</Title>
-                  <View style={[styles.pill, styles.pillNew]}>
-                    <Text style={[styles.pillText, styles.pillTextNew]}>NEW</Text>
-                  </View>
                   <View style={[styles.pill, styles.pillBeta]}>
                     <Text style={[styles.pillText, styles.pillTextBeta]}>BETA</Text>
                   </View>
@@ -253,7 +256,7 @@ export function SquareIntegrationScreen() {
 
                 <Button
                   mode="contained"
-                  onPress={handlePrimeTapToPay}
+                  onPress={() => setTapToPaySetupVisible(true)}
                   loading={primingTapToPay}
                   disabled={primingTapToPay}
                   icon="cellphone-nfc"
@@ -364,7 +367,21 @@ export function SquareIntegrationScreen() {
         showConfetti={false}
       />
 
-<AlertModal
+      <AlertModal
+        visible={tapToPaySetupVisible}
+        onDismiss={() => setTapToPaySetupVisible(false)}
+        type="info"
+        icon="cellphone-nfc"
+        title="Set up Tap to Pay"
+        message="Square needs to pair Tap to Pay with this phone — one-time, about 30 seconds. Do it now so your first customer doesn't have to wait."
+        primaryButtonText="Set up now"
+        primaryButtonAction={handlePrimeTapToPay}
+        secondaryButtonText="Later"
+        secondaryButtonAction={() => setTapToPaySetupVisible(false)}
+        showConfetti={false}
+      />
+
+      <AlertModal
         visible={disconnectModalVisible}
         onDismiss={() => setDisconnectModalVisible(false)}
         type="error"
@@ -429,8 +446,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.6,
   },
-  pillNew: { backgroundColor: colors.primaryBg },
-  pillTextNew: { color: colors.primary },
   pillBeta: { backgroundColor: colors.warningBg },
   pillTextBeta: { color: colors.warning },
   subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
