@@ -31,6 +31,39 @@ import { getAussieMessage, AussieEvent } from './aussieNotifications';
 // Initialize Firebase Admin
 admin.initializeApp();
 
+// When markup is hidden from the customer, the visible line items must still
+// reconcile to the final total. Inflate materials and labor by their respective
+// markup so Materials + Labour + GST = Total.
+function applyHideMarkupForDisplay(q: any) {
+  const matMarkup = Number(q.markup) || 0;
+  const laborMarkup = Number(q.laborMarkup ?? q.markup) || 0;
+  const hideMarkup = q.showMarkup !== true && (matMarkup > 0 || laborMarkup > 0);
+  if (!hideMarkup) {
+    return {
+      materials: (q.materials || []).map((m: any) => ({ ...m })),
+      materialsSubtotal: q.materialsSubtotal || 0,
+      laborTotal: q.laborTotal || 0,
+      subtotal: q.subtotal || 0,
+      markupAmount: q.markupAmount || 0,
+    };
+  }
+  const matMult = 1 + matMarkup / 100;
+  const laborMult = 1 + laborMarkup / 100;
+  const materialsSubtotal = (q.materialsSubtotal || 0) * matMult;
+  const laborTotal = (q.laborTotal || 0) * laborMult;
+  return {
+    materials: (q.materials || []).map((m: any) => ({
+      ...m,
+      price: m.price ? m.price * matMult : m.price,
+      totalPrice: (m.totalPrice || 0) * matMult,
+    })),
+    materialsSubtotal,
+    laborTotal,
+    subtotal: materialsSubtotal + laborTotal,
+    markupAmount: 0,
+  };
+}
+
 // Initialize Stripe with mode toggle (test or live)
 const stripeMode = process.env.STRIPE_MODE || 'test';
 const isTestMode = stripeMode === 'test';
@@ -2993,7 +3026,8 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       let logoUrl = business.logoStorageUrl || '';
 
       // Build email HTML
-      const emailMaterials = (quote.materials || []).map((m: any) => ({
+      const displayQuote = applyHideMarkupForDisplay(quote);
+      const emailMaterials = displayQuote.materials.map((m: any) => ({
         name: m.name,
         quantity: m.quantity,
         unit: m.unit,
@@ -3011,18 +3045,56 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         brandColor: business.brandColor,
       };
 
+      // Compute the deposit amount fresh from current totals so the customer
+      // sees the right number even if the quote was edited after first save.
+      const depositRequired = quote.requireDeposit === true;
+      const depositPctForEmail = depositRequired ? (Number(quote.depositPercentage) || 0) : 0;
+      const depositAmountForEmail = depositPctForEmail > 0
+        ? Math.round((Number(quote.total) || 0) * (depositPctForEmail / 100) * 100) / 100
+        : 0;
+
+      // If the quote has a deposit and the tradie has Square connected, mint
+      // the hosted payment link now so the email's primary CTA can become
+      // "Accept & Pay Deposit" — paying = accepting (webhook handles both).
+      // Best-effort: if Square fails we fall back to the standard Accept flow.
+      let depositPayNowUrl: string | undefined;
+      if (!isTestSend && depositRequired && depositPctForEmail > 0 && depositAmountForEmail > 0) {
+        try {
+          // Snapshot deposit fields on the quote before minting so the helper
+          // sees the right amount when calculating Square's price_money.
+          await firestore.doc(`users/${userId}/quotes/${quoteId}`).set(
+            { depositAmount: depositAmountForEmail },
+            { merge: true },
+          );
+          const linkResult = await createSquareDepositPaymentLinkInternal(userId, quoteId);
+          if (linkResult) {
+            depositPayNowUrl = linkResult.paymentLinkUrl;
+          } else {
+            console.warn('[square] deposit link mint returned null in sendQuoteEmail', { userId, quoteId });
+          }
+        } catch (err: any) {
+          console.error('[square] deposit link mint threw in sendQuoteEmail', {
+            userId, quoteId, message: err?.message,
+          });
+          // Fall back to standard Accept button.
+        }
+      }
+
       const htmlContent = buildQuoteEmailHtml({
         customerName: quote.customerName || 'Client',
         emailBody,
         jobName: quote.job?.name || 'Job',
         materials: emailMaterials,
-        laborTotal: quote.laborTotal || 0,
-        materialsSubtotal: quote.materialsSubtotal || 0,
-        subtotal: quote.subtotal || 0,
+        laborTotal: displayQuote.laborTotal,
+        materialsSubtotal: displayQuote.materialsSubtotal,
+        subtotal: displayQuote.subtotal,
         gst: quote.gst || 0,
         total: quote.total || 0,
         acceptanceUrl,
         photoUrls,
+        depositAmount: depositAmountForEmail || undefined,
+        depositPercentage: depositPctForEmail || undefined,
+        depositPayNowUrl,
         business: businessData,
       });
 
@@ -3214,10 +3286,15 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
               // the PDF builder below) sees the freshly-written values.
               invoice.squarePaymentLinkId = linkResult.paymentLinkId;
               invoice.squarePaymentLinkUrl = linkResult.paymentLinkUrl;
+            } else {
+              console.warn('[square] invoice pay link mint returned null', { userId, invoiceId });
             }
           }
-        } catch {
-          // Swallow — never block the email on a payment-link failure.
+        } catch (err: any) {
+          console.error('[square] invoice pay link mint threw', {
+            userId, invoiceId, message: err?.message,
+          });
+          // Never block the email on a payment-link failure.
         }
       }
 
@@ -3256,6 +3333,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         invoiceNumber: invoice.invoiceNumber,
         dueDate: invoice.dueDate || new Date().toISOString(),
         payNowUrl,
+        depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
         business: businessData,
       });
 
@@ -3273,6 +3351,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
           dueDate: new Date(invoice.dueDate || Date.now()).toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' }),
           paymentTerms: invoice.paymentTerms,
           paidAmount: invoice.paidAmount || 0,
+          depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
           job: invoice.job || { name: 'Job', description: '' },
           materials: (invoice.materials || []).map((m: any) => ({
             name: m.name,
@@ -3554,9 +3633,9 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
         .map((p: any) => p.storageUrl)
         .filter(Boolean);
 
-      // When markup is hidden, roll it into material prices for the customer view
-      const hideMarkup = foundQuote.showMarkup !== true && (foundQuote.markup || 0) > 0;
-      const markupMultiplier = hideMarkup ? (1 + (foundQuote.markup || 0) / 100) : 1;
+      // When markup is hidden, roll it into materials AND labor for the
+      // customer view so the visible lines reconcile to the final total.
+      const display = applyHideMarkupForDisplay(foundQuote);
 
       res.status(200).json({
         success: true,
@@ -3566,16 +3645,16 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           customerName: foundQuote.customerName,
           jobName: foundQuote.job?.name,
           jobDescription: foundQuote.job?.description,
-          materials: foundQuote.materials?.map((m: any) => ({
+          materials: display.materials.map((m: any) => ({
             name: m.name,
             quantity: m.quantity,
             unit: m.unit,
-            totalPrice: (m.totalPrice || 0) * markupMultiplier,
+            totalPrice: m.totalPrice || 0,
           })),
-          laborTotal: foundQuote.laborTotal,
-          materialsSubtotal: (foundQuote.materialsSubtotal || 0) * markupMultiplier,
-          subtotal: foundQuote.subtotal,
-          markupAmount: hideMarkup ? 0 : (foundQuote.markupAmount || 0),
+          laborTotal: display.laborTotal,
+          materialsSubtotal: display.materialsSubtotal,
+          subtotal: display.subtotal,
+          markupAmount: display.markupAmount,
           travelAdjustmentAmount: foundQuote.travelAdjustmentAmount || 0,
           gst: foundQuote.gst,
           total: foundQuote.total,
@@ -3935,10 +4014,40 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
 
     // Show confirmation page
     if (responseType === 'accepted') {
+      // If the quote has a deposit configured and the tradie has Square
+      // connected, mint a hosted payment link and show a Pay Deposit button on
+      // the confirmation page. Best-effort: if anything fails we still show the
+      // standard "thank you" so the customer isn't blocked.
+      let depositPayment: { url: string; amount: number } | null = null;
+      const depositRequired = foundQuote.requireDeposit === true;
+      const depositPct = depositRequired ? (Number(foundQuote.depositPercentage) || 0) : 0;
+      if (depositRequired && depositPct > 0) {
+        try {
+          const linkResult = await createSquareDepositPaymentLinkInternal(foundUserId, foundQuote.id);
+          if (linkResult) {
+            depositPayment = { url: linkResult.paymentLinkUrl, amount: linkResult.depositAmount };
+          } else {
+            console.warn('[square] deposit link mint returned null on acceptance', {
+              userId: foundUserId, quoteId: foundQuote.id,
+            });
+          }
+        } catch (err: any) {
+          console.error('[square] deposit link mint threw on acceptance', {
+            userId: foundUserId, quoteId: foundQuote.id, message: err?.message,
+          });
+          // Show standard thank-you instead.
+        }
+      }
+
+      const acceptedMessage = depositPayment
+        ? `Thank you! To lock in your spot, please pay your deposit below. ${businessName} will start work once it clears.`
+        : `Thank you! ${businessName} has been notified and will be in touch soon.`;
+
       res.status(200).send(generateConfirmationPage(
         'accepted',
-        `Thank you! ${businessName} has been notified and will be in touch soon.`,
-        businessName, brandColor, logoUrl
+        acceptedMessage,
+        businessName, brandColor, logoUrl,
+        depositPayment,
       ));
     } else {
       res.status(200).send(generateConfirmationPage(
@@ -3960,7 +4069,8 @@ function generateConfirmationPage(
   message: string,
   businessName?: string,
   brandColor?: string | null,
-  logoUrl?: string | null
+  logoUrl?: string | null,
+  depositPayment?: { url: string; amount: number } | null
 ): string {
   const accent = brandColor || '#f97316';
   const icon = type === 'accepted' ? '&#10003;' : type === 'declined' ? '&#10005;' : type === 'already' ? '&#8505;' : '&#9888;';
@@ -4038,6 +4148,17 @@ function generateConfirmationPage(
     <div class="icon">${icon}</div>
     <h1>${heading}</h1>
     <p class="message">${message}</p>
+    ${
+      depositPayment && type === 'accepted'
+        ? `
+      <div style="margin-top:28px;padding:20px;background:#0f172a;border:1px solid #334155;border-radius:14px;">
+        <div style="color:#94a3b8;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Deposit due to start work</div>
+        <div style="color:#f8fafc;font-size:32px;font-weight:700;margin-bottom:16px;">$${depositPayment.amount.toFixed(2)}</div>
+        <a href="${depositPayment.url}" style="display:inline-block;background:${accent};color:#0f172a;padding:14px 32px;border-radius:10px;font-weight:700;text-decoration:none;font-size:16px;">Pay Deposit Securely</a>
+        <div style="color:#64748b;font-size:12px;margin-top:14px;">Secured by Square. ${businessName || 'The business'} will be notified once your deposit is received.</div>
+      </div>`
+        : ''
+    }
   </div>
 </body>
 </html>`;
@@ -8447,8 +8568,6 @@ const SQUARE_WEBHOOK_SIGNATURE_KEY = process.env.SQUARE_WEBHOOK_SIGNATURE_KEY ||
 const SQUARE_WEBHOOK_NOTIFICATION_URL =
   process.env.SQUARE_WEBHOOK_NOTIFICATION_URL ||
   'https://us-central1-hansendev.cloudfunctions.net/squareWebhook';
-// Platform fee in basis points (100 = 1%). Applied via app_fee_money on each payment link.
-const SQUARE_PLATFORM_FEE_BPS = parseInt(process.env.SQUARE_PLATFORM_FEE_BPS || '100', 10);
 // OAuth scopes required for pay-by-link and reading merchant/location info.
 const SQUARE_SCOPES = [
   'MERCHANT_PROFILE_READ',
@@ -8469,6 +8588,66 @@ function squareOAuthBase(): string {
   return squareApiBase();
 }
 
+// ---- Token-at-rest encryption --------------------------------------------
+// Square access & refresh tokens are stored encrypted in Firestore so a
+// database leak alone doesn't expose merchant payment credentials.
+// Format on disk: `enc:v1:base64(iv ‖ authTag ‖ ciphertext)` (AES-256-GCM).
+// Legacy plaintext values are tolerated by decryptSquareToken so existing
+// records keep working and get re-encrypted on the next token refresh.
+const SQUARE_TOKEN_ENC_PREFIX = 'enc:v1:';
+function getSquareEncKey(): Buffer | null {
+  const raw = process.env.SQUARE_TOKEN_ENC_KEY || '';
+  if (!raw) return null;
+  try {
+    const buf = Buffer.from(raw, 'base64');
+    if (buf.length !== 32) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+function encryptSquareToken(plaintext: string): string {
+  const key = getSquareEncKey();
+  if (!key) {
+    // No key configured → fall back to plaintext to avoid breaking connect.
+    // Production deploys must set SQUARE_TOKEN_ENC_KEY.
+    console.warn('[square] SQUARE_TOKEN_ENC_KEY not set — storing tokens in plaintext');
+    return plaintext;
+  }
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return SQUARE_TOKEN_ENC_PREFIX + Buffer.concat([iv, authTag, ciphertext]).toString('base64');
+}
+
+function decryptSquareToken(value: string | undefined | null): string | null {
+  if (!value) return null;
+  if (!value.startsWith(SQUARE_TOKEN_ENC_PREFIX)) {
+    // Legacy plaintext — return as-is. Next refresh will re-encrypt.
+    return value;
+  }
+  const key = getSquareEncKey();
+  if (!key) {
+    console.error('[square] SQUARE_TOKEN_ENC_KEY missing — cannot decrypt token');
+    return null;
+  }
+  try {
+    const packed = Buffer.from(value.slice(SQUARE_TOKEN_ENC_PREFIX.length), 'base64');
+    const iv = packed.subarray(0, 12);
+    const authTag = packed.subarray(12, 28);
+    const ciphertext = packed.subarray(28);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return plaintext.toString('utf8');
+  } catch (err: any) {
+    console.error('[square] token decrypt failed', { message: err?.message });
+    return null;
+  }
+}
+
 /**
  * Fetch a user's Square tokens from Firestore. Refreshes if expired (with 60s buffer).
  * Mirrors getXeroTokens above.
@@ -8482,10 +8661,24 @@ async function getSquareTokens(
   if (!connDoc.exists) return null;
 
   const data = connDoc.data()!;
-  const { accessToken, refreshToken, tokenExpiresAt, merchantId, locationId } = data;
-  if (!accessToken || !refreshToken || !merchantId) return null;
+  const { accessToken: storedAccess, refreshToken: storedRefresh, tokenExpiresAt, merchantId, locationId } = data;
+  if (!storedAccess || !storedRefresh || !merchantId) return null;
+
+  const accessToken = decryptSquareToken(storedAccess);
+  const refreshToken = decryptSquareToken(storedRefresh);
+  if (!accessToken || !refreshToken) return null;
 
   if (tokenExpiresAt && tokenExpiresAt > Date.now() + 60_000) {
+    // Legacy plaintext rows get lazily upgraded to encrypted on next refresh,
+    // but if we're returning a cached token we still want to migrate eagerly
+    // when we notice the stored value isn't in the encrypted format.
+    if (!String(storedAccess).startsWith(SQUARE_TOKEN_ENC_PREFIX) ||
+        !String(storedRefresh).startsWith(SQUARE_TOKEN_ENC_PREFIX)) {
+      await connRef.update({
+        accessToken: encryptSquareToken(accessToken),
+        refreshToken: encryptSquareToken(refreshToken),
+      });
+    }
     return { accessToken, merchantId, locationId };
   }
 
@@ -8505,7 +8698,8 @@ async function getSquareTokens(
     });
 
     if (!tokenResponse.ok) {
-      await tokenResponse.text();
+      const errBody = await tokenResponse.text().catch(() => '');
+      console.error('[square] token refresh failed', { userId, status: tokenResponse.status, body: errBody.slice(0, 300) });
       await connRef.update({ disconnectedReason: 'token_refresh_failed' });
       return null;
     }
@@ -8519,8 +8713,8 @@ async function getSquareTokens(
       : Date.now() + 30 * 24 * 60 * 60 * 1000; // default 30 days
 
     await connRef.update({
-      accessToken: newAccessToken,
-      refreshToken: newRefreshToken,
+      accessToken: encryptSquareToken(newAccessToken),
+      refreshToken: encryptSquareToken(newRefreshToken),
       tokenExpiresAt: expiresAtMs,
     });
 
@@ -8609,6 +8803,7 @@ export const getSquareAuthUrl = functions.https.onRequest((req, res) => {
       client_id: SQUARE_APP_ID,
       response_type: 'code',
       scope: SQUARE_SCOPES.join(' '),
+      redirect_uri: SQUARE_REDIRECT_URI,
       session: 'false', // force account selection
       state,
     });
@@ -8620,7 +8815,8 @@ export const getSquareAuthUrl = functions.https.onRequest((req, res) => {
 
 /**
  * Square OAuth callback — exchanges the auth code for tokens. Called from
- * the hosted callback page (public/square/callback/index.html).
+ * the Next.js route app/square/callback/page.tsx in the QuoteMateAppWebsite
+ * repo, which receives Square's redirect and POSTs { code, state } here.
  */
 export const squareCallback = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -8685,6 +8881,27 @@ export const squareCallback = functions.https.onRequest((req, res) => {
         return;
       }
 
+      // Verify Square granted every scope we actually need. Square's OAuth
+      // only returns the `scope` field when the granted set *differs* from the
+      // requested set — an absent or empty `scope` means Square granted what
+      // we asked for, not that it granted nothing. So we only enforce the
+      // scope check when Square explicitly reports scopes back to us.
+      const grantedScopes: string[] | null = typeof tokenData.scope === 'string' && tokenData.scope.trim()
+        ? tokenData.scope.split(/[\s,]+/).filter(Boolean)
+        : Array.isArray(tokenData.scope) && tokenData.scope.length > 0
+          ? tokenData.scope
+          : null;
+      if (grantedScopes) {
+        const missingScopes = SQUARE_SCOPES.filter((s) => !grantedScopes.includes(s));
+        if (missingScopes.length > 0) {
+          console.warn('[square] OAuth scope mismatch', { userId, requested: SQUARE_SCOPES, granted: grantedScopes, missing: missingScopes });
+          res.status(400).json({
+            error: `Square connection is missing required permissions: ${missingScopes.join(', ')}. Please reconnect and accept all requested permissions.`,
+          });
+          return;
+        }
+      }
+
       // Fetch merchant profile + default location (best-effort; non-fatal).
       let merchantName: string | undefined;
       let locationId: string | undefined;
@@ -8724,8 +8941,8 @@ export const squareCallback = functions.https.onRequest((req, res) => {
         merchantName: merchantName || null,
         locationId: locationId || null,
         locationName: locationName || null,
-        accessToken,
-        refreshToken,
+        accessToken: encryptSquareToken(accessToken),
+        refreshToken: encryptSquareToken(refreshToken),
         tokenExpiresAt: expiresAtMs,
         env: SQUARE_ENV,
         connectedAt: new Date().toISOString(),
@@ -8800,7 +9017,8 @@ export const squareDisconnect = functions.https.onRequest((req, res) => {
 
     if (connDoc.exists) {
       const data = connDoc.data()!;
-      if (data.accessToken) {
+      const plainAccessToken = decryptSquareToken(data.accessToken);
+      if (plainAccessToken) {
         try {
           await fetch(`${squareOAuthBase()}/oauth2/revoke`, {
             method: 'POST',
@@ -8811,7 +9029,7 @@ export const squareDisconnect = functions.https.onRequest((req, res) => {
             },
             body: JSON.stringify({
               client_id: SQUARE_APP_ID,
-              access_token: data.accessToken,
+              access_token: plainAccessToken,
               merchant_id: data.merchantId,
             }),
           });
@@ -8852,11 +9070,9 @@ async function createSquarePaymentLinkInternal(
   const invoiceNumber = invoice.invoiceNumber || invoiceId.slice(0, 8);
   const idempotencyKey = `qm-invoice-${userId}-${invoiceId}-${Date.now()}`;
 
-  // v1: no platform fee. `app_fee_money` on Online Checkout requires a
-  // non-trivial order.service_charges setup with APP_FEE_PHASE and has
-  // region-specific support. Revisit when the AU platform-fee path is
-  // confirmed. SQUARE_PLATFORM_FEE_BPS is kept in config as a forward hook.
-  void SQUARE_PLATFORM_FEE_BPS;
+  // v1: no platform fee. `app_fee_money` on Online Checkout requires
+  // order.service_charges with APP_FEE_PHASE and region-specific availability
+  // (AU path needs verification). Add back when ready to collect a cut.
 
   const body: any = {
     idempotency_key: idempotencyKey,
@@ -8882,7 +9098,10 @@ async function createSquarePaymentLinkInternal(
   });
 
   if (!resp.ok) {
-    await resp.text();
+    const errBody = await resp.text().catch(() => '');
+    console.error('[square] createSquarePaymentLinkInternal failed', {
+      userId, invoiceId, status: resp.status, body: errBody.slice(0, 500),
+    });
     return null;
   }
 
@@ -8891,7 +9110,10 @@ async function createSquarePaymentLinkInternal(
   const paymentLinkId = paymentLink?.id;
   const paymentLinkUrl = paymentLink?.url || paymentLink?.long_url;
   const orderId: string | undefined = paymentLink?.order_id;
-  if (!paymentLinkId || !paymentLinkUrl) return null;
+  if (!paymentLinkId || !paymentLinkUrl) {
+    console.error('[square] createSquarePaymentLinkInternal missing link fields', { userId, invoiceId });
+    return null;
+  }
 
   await invoiceRef.set(
     {
@@ -8946,6 +9168,133 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
     res.status(200).json({ success: true, ...result });
   });
 });
+
+/**
+ * Mint a Square hosted payment link for a quote's deposit. Called from the
+ * acceptance flow when a customer accepts a quote that has depositPercentage > 0
+ * and the tradie has Square connected. Idempotent-ish: if a deposit link already
+ * exists on the quote, we return it instead of minting a new one.
+ *
+ * Mirrors createSquarePaymentLinkInternal but writes to the quote (not invoice)
+ * and tags the squarePaymentOrders index entry with kind: 'quote_deposit' so the
+ * webhook routes payment confirmation back to the quote.
+ */
+async function createSquareDepositPaymentLinkInternal(
+  userId: string,
+  quoteId: string,
+): Promise<{ paymentLinkId: string; paymentLinkUrl: string; depositAmount: number } | null> {
+  const firestore = admin.firestore();
+  const quoteRef = firestore.doc(`users/${userId}/quotes/${quoteId}`);
+  const quoteDoc = await quoteRef.get();
+  if (!quoteDoc.exists) return null;
+  const quote = quoteDoc.data()!;
+
+  if (quote.requireDeposit !== true) return null;
+  const depositPct = Number(quote.depositPercentage) || 0;
+  if (depositPct <= 0) return null;
+  const total = Number(quote.total) || 0;
+  if (total <= 0) return null;
+  const depositAmount = Number(quote.depositAmount) || Math.round(total * (depositPct / 100) * 100) / 100;
+  if (depositAmount <= 0) return null;
+
+  // Reuse an existing link only while it's still fresh. Square payment links
+  // default to a 24-hour expiry; reusing after that serves the customer a
+  // 404. Treat anything >23h old as stale and mint a new one.
+  const SQUARE_LINK_TTL_MS = 23 * 60 * 60 * 1000;
+  const linkCreatedAt: number | undefined = quote.depositPaymentLinkCreatedAt
+    ? (typeof quote.depositPaymentLinkCreatedAt === 'number'
+        ? quote.depositPaymentLinkCreatedAt
+        : quote.depositPaymentLinkCreatedAt?.toMillis?.() ?? Date.parse(String(quote.depositPaymentLinkCreatedAt)))
+    : undefined;
+  const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS;
+  // Also re-mint if the deposit amount changed since the link was issued
+  // (e.g. tradie edited the quote total). The old link would charge the
+  // old amount, which would confuse both parties.
+  const amountMatchesLink = Number(quote.depositAmount) === depositAmount;
+  if (quote.depositPaymentLinkId && quote.depositPaymentLinkUrl && linkFresh && amountMatchesLink) {
+    return {
+      paymentLinkId: quote.depositPaymentLinkId,
+      paymentLinkUrl: quote.depositPaymentLinkUrl,
+      depositAmount,
+    };
+  }
+
+  const tokens = await getSquareTokens(userId);
+  if (!tokens) return null;
+
+  const amountCents = Math.round(depositAmount * 100);
+  const jobName = quote.job?.name || 'Job';
+  const quoteNumber = quote.quoteNumber || quoteId.slice(0, 8);
+  const idempotencyKey = `qm-quote-deposit-${userId}-${quoteId}-${Date.now()}`;
+
+  const body: any = {
+    idempotency_key: idempotencyKey,
+    quick_pay: {
+      name: `Deposit for Quote ${quoteNumber} — ${jobName}`.slice(0, 250),
+      price_money: { amount: amountCents, currency: 'AUD' },
+      location_id: tokens.locationId,
+    },
+    payment_note: `QuoteMate deposit on quote ${quoteNumber}`,
+    checkout_options: { allow_tipping: false },
+  };
+
+  const resp = await fetch(`${squareApiBase()}/v2/online-checkout/payment-links`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${tokens.accessToken}`,
+      'Content-Type': 'application/json',
+      'Square-Version': '2024-10-17',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const errBody = await resp.text().catch(() => '');
+    console.error('[square] createSquareDepositPaymentLinkInternal failed', {
+      userId, quoteId, status: resp.status, body: errBody.slice(0, 500),
+    });
+    return null;
+  }
+
+  const json: any = await resp.json();
+  const paymentLink = json?.payment_link;
+  const paymentLinkId = paymentLink?.id;
+  const paymentLinkUrl = paymentLink?.url || paymentLink?.long_url;
+  const orderId: string | undefined = paymentLink?.order_id;
+  if (!paymentLinkId || !paymentLinkUrl) {
+    console.error('[square] createSquareDepositPaymentLinkInternal missing link fields', { userId, quoteId });
+    return null;
+  }
+
+  await quoteRef.set(
+    {
+      depositPaymentLinkId: paymentLinkId,
+      depositPaymentLinkUrl: paymentLinkUrl,
+      depositPaymentLinkCreatedAt: Date.now(),
+      depositAmount,
+    },
+    { merge: true },
+  );
+
+  if (orderId) {
+    await firestore.doc(`squarePaymentOrders/${orderId}`).set({
+      userId,
+      quoteId,
+      paymentLinkId,
+      kind: 'quote_deposit',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+  await firestore.doc(`squarePaymentLinks/${paymentLinkId}`).set({
+    userId,
+    quoteId,
+    kind: 'quote_deposit',
+    orderId: orderId || null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { paymentLinkId, paymentLinkUrl, depositAmount };
+}
 
 /**
  * Square webhook — verifies HMAC-SHA256 signature, handles payment.updated
@@ -9022,8 +9371,83 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
     if (!indexDoc.exists) return;
     const idx = indexDoc.data()!;
     const userId: string | null = idx.userId || null;
+    if (!userId) return;
+
+    // Quote deposit payment — update the quote, not an invoice. The deposit is
+    // tracked as a credit on the quote and gets deducted when the final invoice
+    // is created from the quote. If the quote isn't already accepted, paying the
+    // deposit IS the acceptance — flip status and fire the same side-effects
+    // (tradie email + push) that the Accept page would have.
+    if (idx.kind === 'quote_deposit') {
+      const quoteId: string | null = idx.quoteId || null;
+      if (!quoteId) return;
+      const quoteRef = firestore.doc(`users/${userId}/quotes/${quoteId}`);
+      const quoteDoc = await quoteRef.get();
+      if (!quoteDoc.exists) return;
+      const quote = quoteDoc.data()!;
+      if (quote.depositSquarePaymentId && quote.depositSquarePaymentId === payment.id) return;
+
+      const paidAmountDollars = (Number(payment?.amount_money?.amount) || 0) / 100;
+      const newDepositPaid = Math.max(Number(quote.depositPaid) || 0, paidAmountDollars);
+      const wasAlreadyAccepted = quote.status === 'accepted' || !!quote.respondedAt;
+
+      const update: any = {
+        depositPaid: newDepositPaid,
+        depositPaidAt: admin.firestore.FieldValue.serverTimestamp(),
+        depositSquarePaymentId: payment.id,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (!wasAlreadyAccepted) {
+        update.status = 'accepted';
+        update.respondedAt = admin.firestore.FieldValue.serverTimestamp();
+        update.respondedBy = quote.customerName || 'Client';
+      }
+      await quoteRef.set(update, { merge: true });
+
+      // Fire acceptance side-effects exactly once, only when this payment is
+      // what flipped the quote (avoids double-firing if the customer accepted
+      // separately first).
+      if (!wasAlreadyAccepted) {
+        try {
+          const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
+          const businessSettings = settingsDoc.exists ? settingsDoc.data() : null;
+          if (businessSettings?.email) {
+            const quoteNumber = quote.quoteNumber || quote.id;
+            await sendQuoteAcceptedEmail(
+              businessSettings.email,
+              quote.customerName,
+              quoteNumber,
+              Number(quote.total) || 0,
+              null,
+              userId,
+            );
+          }
+        } catch {
+          // Swallow.
+        }
+        try {
+          const fcmSnap = await firestore.collection(`users/${userId}/fcmTokens`).get();
+          if (!fcmSnap.empty) {
+            const tokens = fcmSnap.docs.map((d) => d.data().token).filter(Boolean);
+            const aussieMsg = getAussieMessage('quote_accepted', {
+              customer: quote.customerName,
+              job: quote.job?.name || 'the job',
+            });
+            await admin.messaging().sendEachForMulticast({
+              notification: { title: aussieMsg.title, body: aussieMsg.body },
+              data: { quoteId: quote.id, type: 'quote_response', response: 'accepted' },
+              tokens,
+            });
+          }
+        } catch {
+          // Swallow.
+        }
+      }
+      return;
+    }
+
     const invoiceId: string | null = idx.invoiceId || null;
-    if (!userId || !invoiceId) return;
+    if (!invoiceId) return;
 
     const invoiceRef = firestore.doc(`users/${userId}/invoices/${invoiceId}`);
     const invoiceDoc = await invoiceRef.get();
@@ -9066,5 +9490,105 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
     }
   } catch {
     // Already responded 200; log silently.
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// NSW FuelCheck — daily average prices cached to Firestore /config/fuelPrices
+// ────────────────────────────────────────────────────────────────────────────
+
+const NSW_FUEL_BASE = 'https://api.onegov.nsw.gov.au';
+
+async function fetchNswFuelToken(): Promise<string> {
+  const key = process.env.NSW_FUELCHECK_API_KEY;
+  const secret = process.env.NSW_FUELCHECK_API_SECRET;
+  if (!key || !secret) throw new Error('NSW FuelCheck credentials missing');
+  const basic = Buffer.from(`${key}:${secret}`).toString('base64');
+  const res = await fetch(
+    `${NSW_FUEL_BASE}/oauth/client_credential/accesstoken?grant_type=client_credentials`,
+    { method: 'GET', headers: { Authorization: `Basic ${basic}` } },
+  );
+  if (!res.ok) throw new Error(`NSW token fetch failed: ${res.status}`);
+  const json = (await res.json()) as { access_token?: string };
+  if (!json.access_token) throw new Error('NSW token response missing access_token');
+  return json.access_token;
+}
+
+async function computeNswFuelAverages() {
+  const token = await fetchNswFuelToken();
+  const txId = crypto.randomUUID();
+  const res = await fetch(`${NSW_FUEL_BASE}/FuelPriceCheck/v2/fuel/prices`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: process.env.NSW_FUELCHECK_API_KEY || '',
+      transactionid: txId,
+      requesttimestamp: (() => {
+        const d = new Date();
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const hh24 = d.getHours();
+        const hh = hh24 % 12 || 12;
+        const ampm = hh24 < 12 ? 'AM' : 'PM';
+        return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(hh)}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${ampm}`;
+      })(),
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+  });
+  if (!res.ok) throw new Error(`NSW prices fetch failed: ${res.status}`);
+  const json = (await res.json()) as { prices?: Array<{ fueltype: string; price: number }> };
+  const sums: Record<string, { total: number; n: number }> = {};
+  for (const p of json.prices || []) {
+    if (typeof p.price !== 'number' || p.price <= 0) continue;
+    const key = String(p.fueltype || '').toUpperCase();
+    if (!key) continue;
+    sums[key] = sums[key] || { total: 0, n: 0 };
+    sums[key].total += p.price;
+    sums[key].n += 1;
+  }
+  const averages: Record<string, number> = {};
+  for (const [k, v] of Object.entries(sums)) {
+    if (v.n > 0) averages[k] = Math.round((v.total / v.n) * 10) / 10; // cents/L, 1dp
+  }
+  return averages;
+}
+
+async function writeFuelPrices(averages: Record<string, number>) {
+  const db = admin.firestore();
+  await db.doc('config/fuelPrices').set(
+    {
+      source: 'nsw-fuelcheck',
+      region: 'NSW',
+      currency: 'AUD',
+      unit: 'cents_per_litre',
+      averages,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export const refreshNswFuelPrices = functions.pubsub
+  .schedule('every day 06:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const averages = await computeNswFuelAverages();
+    await writeFuelPrices(averages);
+    return null;
+  });
+
+// Manual/admin trigger to populate the cache on demand (also used for the
+// initial seed before the first scheduled run).
+export const refreshNswFuelPricesNow = functions.https.onRequest(async (req, res) => {
+  try {
+    const adminKey = req.get('x-admin-key') || req.query.key;
+    if (!adminKey || adminKey !== process.env.ADMIN_DASHBOARD_KEY) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const averages = await computeNswFuelAverages();
+    await writeFuelPrices(averages);
+    res.json({ ok: true, averages });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'refresh failed' });
   }
 });

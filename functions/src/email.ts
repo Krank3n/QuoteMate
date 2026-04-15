@@ -819,6 +819,13 @@ interface QuoteEmailData {
   total: number;
   acceptanceUrl?: string;
   photoUrls?: string[];
+  // Deposit shown to the customer above the Accept button so they know what
+  // they'll be asked to pay up front.
+  depositAmount?: number;
+  depositPercentage?: number;
+  // When set, the primary CTA becomes "Accept & Pay Deposit" linking straight
+  // to Square's hosted checkout. Paying = accepting (webhook handles both).
+  depositPayNowUrl?: string;
   business: {
     name: string;
     abn?: string;
@@ -953,19 +960,45 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
       </tr>
     </table>`;
 
-  // Accept/Decline buttons with direct action URLs
+  // Deposit notice — shown above the CTA so the customer knows what they'll
+  // be asked to pay. Copy changes depending on whether we mint a Pay Now link
+  // up front (one-click Accept & Pay) or fall back to the two-step flow.
+  const depositNoticeSection = (data.depositAmount && data.depositAmount > 0)
+    ? `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 0;">
+        <tr>
+          <td style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;text-align:center;">
+            <div style="color:#92400e;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Deposit to lock it in</div>
+            <div style="color:#78350f;font-size:18px;font-weight:700;">$${data.depositAmount.toFixed(2)}${data.depositPercentage ? ` (${data.depositPercentage}%)` : ''}</div>
+            <div style="color:#92400e;font-size:13px;margin-top:4px;">${data.depositPayNowUrl
+              ? `Pay your deposit securely below to accept this quote. The remainder is invoiced when the job's done.`
+              : `You'll be asked to pay this after accepting. The remainder is invoiced when the job's done.`}</div>
+          </td>
+        </tr>
+      </table>`
+    : '';
+
+  // Primary CTA + decline link.
+  // - With a Square deposit link: primary is "Accept & Pay Deposit ($X)" → Square.
+  //   Paying = accepting (the Square webhook flips the quote to 'accepted' and
+  //   fires the same side-effects as the Accept page).
+  // - Without: today's behaviour, primary is "Accept Quote" → acceptance page.
   let ctaSection = '';
   if (data.acceptanceUrl) {
     const acceptUrl = data.acceptanceUrl + (data.acceptanceUrl.includes('?') ? '&' : '?') + 'action=accept';
     const declineUrl = data.acceptanceUrl + (data.acceptanceUrl.includes('?') ? '&' : '?') + 'action=decline';
-    ctaSection = `
+    const primaryHref = data.depositPayNowUrl ? data.depositPayNowUrl : acceptUrl;
+    const primaryLabel = data.depositPayNowUrl && data.depositAmount
+      ? `Accept &amp; Pay Deposit ($${data.depositAmount.toFixed(2)})`
+      : 'Accept Quote';
+    ctaSection = depositNoticeSection + `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
         <tr>
           <td align="center">
             <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
               <tr>
                 <td style="background:${accent};border-radius:10px;text-align:center;">
-                  <a href="${esc(acceptUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Accept Quote</a>
+                  <a href="${esc(primaryHref)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">${primaryLabel}</a>
                 </td>
               </tr>
               <tr>
@@ -1055,6 +1088,9 @@ interface InvoiceEmailData {
   invoiceNumber?: string;
   dueDate: string; // ISO date string
   payNowUrl?: string; // Square hosted payment link (only present when tradie has Square connected)
+  // Deposit credit carried over from a quote that had a deposit paid. Rendered
+  // as a "Deposit already paid" line above the total.
+  depositCredit?: number;
   business: {
     name: string;
     abn?: string;
@@ -1102,8 +1138,13 @@ export function buildInvoiceEmailHtml(data: InvoiceEmailData): string {
               <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">GST</td>
               <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.gst.toFixed(2)}</td>
             </tr>
+            ${(data.depositCredit && data.depositCredit > 0) ? `
             <tr>
-              <td style="padding:10px 0;color:#1f2937;font-size:16px;font-weight:700;">Total (inc GST)</td>
+              <td style="padding:8px 0;color:#059669;font-size:14px;border-bottom:1px solid #e5e7eb;">Deposit already paid</td>
+              <td style="padding:8px 0;color:#059669;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">−$${data.depositCredit.toFixed(2)}</td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding:10px 0;color:#1f2937;font-size:16px;font-weight:700;">${(data.depositCredit && data.depositCredit > 0) ? 'Balance due' : 'Total (inc GST)'}</td>
               <td style="padding:10px 0;color:${accent};font-size:18px;font-weight:700;text-align:right;">$${data.total.toFixed(2)}</td>
             </tr>
           </table>

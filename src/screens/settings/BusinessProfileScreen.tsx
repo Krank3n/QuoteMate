@@ -26,12 +26,13 @@ import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import ColorPicker, { Panel1, HueSlider, type ColorFormatsObject } from 'reanimated-color-picker';
 
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useStore } from '../../store/useStore';
 import { auth, storage, db } from '../../config/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { geocodeAddress } from '../../utils/travelCalculator';
+import { checkSquareConnection } from '../../services/squareService';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -56,6 +57,9 @@ export function BusinessProfileScreen() {
   const [laborRate, setLaborRate] = useState('85');
   const [markup, setMarkup] = useState('20');
   const [laborMarkup, setLaborMarkup] = useState('20');
+  const [defaultDepositPercentage, setDefaultDepositPercentage] = useState('0');
+  const [requireDepositByDefault, setRequireDepositByDefault] = useState(false);
+  const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
   const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -74,6 +78,8 @@ export function BusinessProfileScreen() {
       const lr = businessSettings.defaultLaborRate?.toString() || '85';
       const mk = businessSettings.defaultMarkup?.toString() || '20';
       const lm = (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup ?? 20).toString();
+      const dp = (businessSettings.defaultDepositPercentage ?? 0).toString();
+      const rd = businessSettings.requireDepositByDefault === true;
       const tm = businessSettings.transportMarkupEnabled !== false;
 
       setBusinessName(name);
@@ -86,13 +92,27 @@ export function BusinessProfileScreen() {
       setLaborRate(lr);
       setMarkup(mk);
       setLaborMarkup(lm);
+      setDefaultDepositPercentage(dp);
+      setRequireDepositByDefault(rd);
       setTransportMarkupEnabled(tm);
 
       initialSnapshotRef.current = JSON.stringify({
-        name, a, e, p, addr, logo, brand, lr, mk, lm, tm,
+        name, a, e, p, addr, logo, brand, lr, mk, lm, dp, rd, tm,
       });
     }
   }, [businessSettings]);
+
+  // Re-check Square connection every time this screen is focused so the toggle
+  // unlocks immediately after the user connects via the CTA and navigates back.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      checkSquareConnection()
+        .then((res) => { if (!cancelled) setSquareConnected(!!res.connected); })
+        .catch(() => { if (!cancelled) setSquareConnected(false); });
+      return () => { cancelled = true; };
+    }, []),
+  );
 
   const isDirty = React.useMemo(() => {
     if (!initialSnapshotRef.current) return false;
@@ -107,10 +127,12 @@ export function BusinessProfileScreen() {
       lr: laborRate,
       mk: markup,
       lm: laborMarkup,
+      dp: defaultDepositPercentage,
+      rd: requireDepositByDefault,
       tm: transportMarkupEnabled,
     });
     return current !== initialSnapshotRef.current;
-  }, [businessName, abn, email, phone, address, logoUri, brandColor, laborRate, markup, laborMarkup, transportMarkupEnabled]);
+  }, [businessName, abn, email, phone, address, logoUri, brandColor, laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault, transportMarkupEnabled]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
     isDirty,
@@ -228,6 +250,8 @@ export function BusinessProfileScreen() {
         defaultLaborRate: parseFloat(laborRate) || 85,
         defaultMarkup: parseFloat(markup) || 20,
         defaultLaborMarkup: parseFloat(laborMarkup) || 0,
+        defaultDepositPercentage: Math.max(0, Math.min(100, parseFloat(defaultDepositPercentage) || 0)),
+        requireDepositByDefault,
         transportMarkupEnabled,
       });
 
@@ -256,6 +280,8 @@ export function BusinessProfileScreen() {
         lr: laborRate,
         mk: markup,
         lm: laborMarkup,
+        dp: defaultDepositPercentage,
+        rd: requireDepositByDefault,
         tm: transportMarkupEnabled,
       });
 
@@ -408,6 +434,53 @@ export function BusinessProfileScreen() {
               keyboardType="decimal-pad"
               right={<TextInput.Affix text="%" />}
             />
+
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={[styles.toggleTitle, squareConnected === false && { color: colors.textSecondary }]}>Require Deposit by Default</Text>
+                <Text style={styles.toggleDescription}>
+                  {squareConnected === false
+                    ? 'Connect Square to collect deposits from customers when they accept.'
+                    : 'Customers are asked to pay a deposit when accepting. Can be overridden per quote.'}
+                </Text>
+              </View>
+              <Switch
+                value={requireDepositByDefault && squareConnected !== false}
+                onValueChange={setRequireDepositByDefault}
+                color={colors.primary}
+                disabled={squareConnected !== true}
+              />
+            </View>
+
+            {squareConnected === false && (
+              <TouchableOpacity
+                onPress={() => navigation.navigate('SquareIntegration' as never)}
+                style={{
+                  alignSelf: 'flex-start',
+                  paddingHorizontal: 14,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                  backgroundColor: colors.primary,
+                  marginTop: 4,
+                  marginBottom: 8,
+                }}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '600' }}>Connect Square</Text>
+              </TouchableOpacity>
+            )}
+
+            {requireDepositByDefault && squareConnected === true && (
+              <TextInput
+                label="Default Deposit"
+                value={defaultDepositPercentage}
+                onChangeText={setDefaultDepositPercentage}
+                mode="outlined"
+                style={styles.input}
+                keyboardType="decimal-pad"
+                right={<TextInput.Affix text="%" />}
+                placeholder="30"
+              />
+            )}
 
             <View style={styles.toggleRow}>
               <View style={styles.toggleLabel}>

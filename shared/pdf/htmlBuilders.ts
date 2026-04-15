@@ -269,7 +269,7 @@ function buildLaborHTML(data: QuotePdfData): string {
 /**
  * Build summary/totals HTML, with optional paid amount/balance for invoices
  */
-function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: number): string {
+function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: number, depositCredit?: number): string {
   // By default markup is rolled into the displayed line totals (combined).
   // When showMarkup is explicitly true, the markup is broken out as its own
   // line and the materials/labour rows show their raw (pre-markup) totals.
@@ -310,9 +310,15 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
           <span>GST (10%)</span>
           <span>${formatCurrency(data.gst)}</span>
         </div>
+        ${depositCredit && depositCredit > 0 ? `
+        <div class="summary-row" style="color: #28a745;">
+          <span>Deposit already paid</span>
+          <span>-${formatCurrency(depositCredit)}</span>
+        </div>
+        ` : ''}
         <hr>
         <div class="summary-row grand-total">
-          <span>TOTAL</span>
+          <span>${depositCredit && depositCredit > 0 ? 'BALANCE DUE' : 'TOTAL'}</span>
           <span>${formatCurrency(data.total)}</span>
         </div>
         ${paidAmount && paidAmount > 0 ? `
@@ -472,7 +478,7 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
 
       ${buildLaborHTML(invoice)}
 
-      ${buildSummaryHTML(invoice, paidAmount, amountDue)}
+      ${buildSummaryHTML(invoice, paidAmount, amountDue, invoice.depositCredit)}
 
       ${invoice.notes ? `<div class="info-section"><h3>Notes</h3><p>${invoice.notes}</p></div>` : ''}
 

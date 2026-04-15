@@ -198,6 +198,22 @@ export interface Quote {
   // a fresh AI generation. The Regenerate button overwrites this. Distinct
   // from aiEmailBody, which is the canonical record of what was sent.
   draftEmailBody?: string;
+
+  // Deposit / pre-payment (paid against the quote before work starts).
+  // requireDeposit is the authoritative toggle — when false, no deposit is
+  // asked for regardless of depositPercentage (which we preserve so toggling
+  // back on restores the previous value).
+  // depositAmount is the dollar amount snapshotted at quote-send time so it
+  // doesn't drift if totals are edited after sending.
+  requireDeposit?: boolean;
+  depositPercentage?: number;
+  depositAmount?: number;
+  depositPaid?: number;            // Dollars actually received (set by Square webhook).
+  depositPaidAt?: Date;
+  depositPaymentLinkId?: string;   // Square payment link id minted on quote send.
+  depositPaymentLinkUrl?: string;  // Hosted checkout URL surfaced on the acceptance page.
+  depositPaymentLinkCreatedAt?: number | Date; // When the link was minted (ms epoch). Used to detect >23h stale and re-mint.
+  depositSquarePaymentId?: string; // Set by webhook on COMPLETED (idempotency key).
 }
 
 export interface JobTemplate {
@@ -308,6 +324,13 @@ export interface BusinessSettings {
   groupMaterialsBySection?: boolean; // Group materials by work section on PDFs (default: false)
   // PDF template
   pdfTemplate?: PdfTemplateId;
+  // Whether new quotes should require a deposit by default. Separate from the
+  // amount so disabling doesn't wipe the percentage. Per-quote override on
+  // Quote.requireDeposit.
+  requireDepositByDefault?: boolean;
+  // Default deposit percentage applied to new quotes when requireDeposit is on.
+  // Per-quote override lives on Quote.depositPercentage.
+  defaultDepositPercentage?: number;
   // Legacy fields (kept for backwards compatibility)
   hardwareStores?: string[]; // DEPRECATED - use selectedStore instead
   customStores?: string[]; // DEPRECATED - Custom store URLs added by user
@@ -450,6 +473,12 @@ export interface Invoice {
   squarePaymentLinkUrl?: string;  // Hosted checkout URL included in the invoice email
   squarePaymentId?: string;       // Set by webhook when a payment is COMPLETED (idempotency key)
   squarePaidAt?: Date;            // When the Square webhook reported payment completion
+
+  // Deposit credit carried over from the source quote.
+  // depositCredit reduces the amount owing; the line is rendered as
+  // "Deposit of $X already paid" on the invoice/PDF/email.
+  depositCredit?: number;
+  depositCreditFromQuoteId?: string;
 
   // In-progress email body shown in the invoice email preview modal.
   // Generated (or typed) on first open and persisted so reopening doesn't

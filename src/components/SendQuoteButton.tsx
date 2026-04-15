@@ -32,11 +32,15 @@ export function SendQuoteButton({
   quote,
   businessSettings,
   buttonMode = 'contained',
-  buttonLabel = 'Send',
+  buttonLabel,
   buttonIcon = 'send',
   buttonStyle,
   onEmailDialogOpen,
 }: SendQuoteButtonProps) {
+  // Auto-swap label to "Resend" when the quote has already been sent so the
+  // tradie has a clear affordance to notify the customer of changes. Callers
+  // can still override by passing buttonLabel explicitly.
+  const resolvedLabel = buttonLabel ?? (quote.status === 'sent' ? 'Resend' : 'Send');
   const { subscriptionStatus, saveDraft } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
@@ -210,7 +214,7 @@ export function SendQuoteButton({
         contentStyle={styles.buttonContent}
         labelStyle={styles.buttonLabel}
       >
-        {buttonLabel}
+        {resolvedLabel}
       </Button>
 
       <ActionSheet

@@ -91,8 +91,31 @@ export function SquareIntegrationScreen() {
       await WebBrowser.openBrowserAsync(authUrl, {
         dismissButtonStyle: 'done',
       });
+      // openBrowserAsync resolves when the user closes the tab, but the OAuth
+      // code→token exchange is still in flight on squareCallback → Firestore
+      // write. A single check races and usually misses it. Poll for up to ~10s
+      // (1s intervals) and stop as soon as we see a connected state.
       setCheckingConnection(true);
-      await checkConnection();
+      const deadline = Date.now() + 10000;
+      let connected = false;
+      while (Date.now() < deadline) {
+        try {
+          const status = await squareService.checkSquareConnection();
+          if (status.connected) {
+            setConnection(status);
+            connected = true;
+            break;
+          }
+        } catch {
+          // Ignore transient errors and keep polling.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      setCheckingConnection(false);
+      if (!connected) {
+        // Final fallback — reflect whatever the backend reports now.
+        await checkConnection();
+      }
     } catch (error: any) {
       showAlert(
         'error',

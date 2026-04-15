@@ -21,6 +21,7 @@ import { colors } from '../../theme';
 import { generateQuotePDF } from '../../utils/pdfGenerator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SendQuoteButton } from '../../components/SendQuoteButton';
+import { QuoteSentBanner } from '../../components/QuoteSentBanner';
 import { successTap } from '../../utils/haptics';
 import { WebContainer } from '../../components/WebContainer';
 import {
@@ -307,6 +308,7 @@ export function QuotePreviewScreen() {
         contentContainerStyle={styles.scrollContent}
       >
         <WebContainer>
+        <QuoteSentBanner quote={currentQuote} />
         {/* Quote Number & Date */}
         <Surface style={styles.headerCard}>
           <View style={styles.headerRow}>

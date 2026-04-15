@@ -11,7 +11,7 @@ import {
   Surface,
   Divider,
 } from 'react-native-paper';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useStore } from '../../store/useStore';
@@ -21,6 +21,8 @@ import { LaborUnit } from '../../types';
 import { colors } from '../../theme';
 import { formatCurrency, calculateQuote } from '../../utils/quoteCalculator';
 import { estimateFuelCost, DEFAULT_FUEL_PRICE } from '../../utils/travelCalculator';
+import { checkSquareConnection } from '../../services/squareService';
+import { QuoteSentBanner } from '../../components/QuoteSentBanner';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
@@ -60,6 +62,28 @@ export function LaborMarkupScreen() {
     if (markupSectionRef.current) registerRef('markupSection', markupSectionRef.current);
   });
 
+  // Deposit collection goes through Square — gate the toggle on connection.
+  // Re-checked on every focus so returning from the Connect Square CTA flips
+  // the toggle's availability without needing a reload.
+  useFocusEffect(
+    React.useCallback(() => {
+      let cancelled = false;
+      checkSquareConnection()
+        .then((res) => {
+          if (cancelled) return;
+          setSquareConnected(!!res.connected);
+          if (!res.connected) setRequireDeposit(false);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSquareConnected(false);
+            setRequireDeposit(false);
+          }
+        });
+      return () => { cancelled = true; };
+    }, []),
+  );
+
   const [laborHours, setLaborHours] = useState('');
   const [laborRate, setLaborRate] = useState('');
   const [laborUnit, setLaborUnit] = useState<LaborUnit>('hours');
@@ -76,6 +100,9 @@ export function LaborMarkupScreen() {
   const [lastTravelValue, setLastTravelValue] = useState('0');
   const [showMarkup, setShowMarkup] = useState(false);
   const [showLaborBreakdown, setShowLaborBreakdown] = useState(true);
+  const [depositPercentage, setDepositPercentage] = useState('');
+  const [requireDeposit, setRequireDeposit] = useState(false);
+  const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
   const [warningDialogVisible, setWarningDialogVisible] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
 
@@ -142,6 +169,16 @@ export function LaborMarkupScreen() {
       setLaborMarkup(lm.toString());
       setShowMarkup(currentQuote.showMarkup === true);
       setShowLaborBreakdown(currentQuote.showLaborBreakdown !== false);
+      const dp = currentQuote.depositPercentage ?? businessSettings?.defaultDepositPercentage ?? 0;
+      setDepositPercentage(dp ? dp.toString() : '30');
+      // Require-deposit toggle: quote-level override if set, otherwise business
+      // default. Undefined on the quote means "inherit" — distinct from
+      // explicit false. Once Square status is known, we'll force-off below if
+      // disconnected so we never save requireDeposit=true without Square.
+      const rd = currentQuote.requireDeposit !== undefined
+        ? currentQuote.requireDeposit
+        : (businessSettings?.requireDepositByDefault === true);
+      setRequireDeposit(rd);
       const ta = (currentQuote.travelAdjustment || 0).toString();
       setTravelAdjustment(ta);
       setLastTravelValue(ta);
@@ -273,13 +310,20 @@ export function LaborMarkupScreen() {
         markupAmount: calculation.markupAmount,
         gst: calculation.gst,
         total: calculation.total,
+        requireDeposit,
+        depositPercentage: Math.max(0, Math.min(100, parseFloat(depositPercentage) || 0)),
+        depositAmount: (() => {
+          if (!requireDeposit) return 0;
+          const pct = Math.max(0, Math.min(100, parseFloat(depositPercentage) || 0));
+          return pct > 0 ? Math.round(calculation.total * (pct / 100) * 100) / 100 : 0;
+        })(),
       };
       updateQuote(updatedQuote);
       saveDraft(updatedQuote);
     });
 
     return unsubscribe;
-  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showMarkup, showLaborBreakdown, travelAdjustment, travelDismissed, updateQuote, saveDraft]);
+  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showMarkup, showLaborBreakdown, travelAdjustment, travelDismissed, depositPercentage, requireDeposit, updateQuote, saveDraft]);
 
   if (!currentQuote) {
     return null;
@@ -445,6 +489,7 @@ export function LaborMarkupScreen() {
           keyboardShouldPersistTaps="handled"
         >
         <WebContainer>
+        <QuoteSentBanner quote={currentQuote} />
         {/* Labor Section */}
         <View style={styles.sectionHeader}>
           <View style={styles.sectionLine} />
@@ -689,6 +734,75 @@ export function LaborMarkupScreen() {
             thumbColor={showMarkup ? colors.primary : '#F3F4F6'}
           />
         </View>
+      </View>
+
+      {/* Deposit Section */}
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionLine} />
+        <Text style={styles.sectionHeaderTitle}>DEPOSIT</Text>
+        <View style={styles.sectionLine} />
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.showMarkupToggle}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.showMarkupTitle, squareConnected === false && { color: colors.textSecondary }]}>Require deposit on acceptance</Text>
+            <Text style={styles.showMarkupSubtitle}>
+              {squareConnected === false
+                ? 'Connect Square to collect deposits from customers when they accept.'
+                : "Customer pays a deposit via Square to lock in the job. Remainder is invoiced when work's done."}
+            </Text>
+          </View>
+          <Switch
+            value={requireDeposit && squareConnected !== false}
+            onValueChange={setRequireDeposit}
+            trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
+            thumbColor={requireDeposit ? colors.primary : '#F3F4F6'}
+            disabled={squareConnected !== true}
+          />
+        </View>
+
+        {squareConnected === false && (
+          <TouchableOpacity
+            onPress={() => navigation.navigate('SquareIntegration' as never)}
+            style={{
+              alignSelf: 'flex-start',
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              borderRadius: 8,
+              backgroundColor: colors.primary,
+              marginTop: 8,
+            }}
+          >
+            <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '600' }}>Connect Square</Text>
+          </TouchableOpacity>
+        )}
+
+        {requireDeposit && squareConnected === true && (
+          <>
+            <TextInput
+              label="Deposit"
+              value={depositPercentage}
+              onChangeText={setDepositPercentage}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              placeholder="30"
+              right={<TextInput.Affix text="%" />}
+              style={styles.input}
+            />
+            {(() => {
+              const pct = Math.max(0, Math.min(100, parseFloat(depositPercentage) || 0));
+              if (pct <= 0) return null;
+              const amount = Math.round(calculation.total * (pct / 100) * 100) / 100;
+              return (
+                <Surface style={styles.calculationRow}>
+                  <Text style={styles.calculationLabel}>Deposit due on acceptance</Text>
+                  <Text style={styles.calculationValue}>{formatCurrency(amount)}</Text>
+                </Surface>
+              );
+            })()}
+          </>
+        )}
       </View>
 
       {/* Travel Adjustment Section */}

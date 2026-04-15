@@ -261,18 +261,26 @@ export const QuoteCard = React.memo(function QuoteCard({
               <View style={styles.quoteRight}>
                 <View style={styles.quotePrice}>
                   <Text style={styles.quoteTotal}>{formatCurrency(quote.total)}</Text>
-                  <AnimatedChip
-                    status={quote.status}
-                    style={[styles.statusChip, getStatusChipStyle(quote.status)]}
-                    textStyle={styles.statusText}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      selectionTap();
-                      onStatusChange?.(quote);
-                    }}
-                  >
-                    {quote.status}
-                  </AnimatedChip>
+                  {(() => {
+                    const awaitingDeposit =
+                      quote.status === 'accepted' &&
+                      (quote.depositAmount || 0) > 0 &&
+                      (quote.depositPaid || 0) < (quote.depositAmount || 0);
+                    return (
+                      <AnimatedChip
+                        status={quote.status}
+                        style={[styles.statusChip, getStatusChipStyle(quote.status)]}
+                        textStyle={styles.statusText}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          selectionTap();
+                          onStatusChange?.(quote);
+                        }}
+                      >
+                        {awaitingDeposit ? 'awaiting deposit' : quote.status}
+                      </AnimatedChip>
+                    );
+                  })()}
                 </View>
                 <IconButton
                   icon="dots-vertical"

@@ -72,6 +72,9 @@ export interface InvoicePdfData extends QuotePdfData {
   dueDate: string; // Pre-formatted date string
   paymentTerms?: string; // Pre-formatted payment terms string
   paidAmount?: number;
+  // Deposit credit carried over from the source quote. Rendered as a
+  // "Deposit already paid" row so the customer sees why the total differs.
+  depositCredit?: number;
 }
 
 export interface BusinessPdfData {

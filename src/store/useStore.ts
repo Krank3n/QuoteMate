@@ -1082,6 +1082,12 @@ export const useStore = create<AppState>((set, get) => ({
 
   createInvoiceFromQuote: (quote: Quote) => {
     const now = new Date();
+    // If the customer paid a deposit against this quote, deduct it from the
+    // invoice total. The deposit is rendered as a credit line on the PDF/email
+    // ("Deposit of $X already paid"). depositPaid wins over depositAmount —
+    // we only credit money actually received, not what was *supposed* to be paid.
+    const depositCredit = Math.max(0, Number(quote.depositPaid) || 0);
+    const adjustedTotal = Math.max(0, (quote.total || 0) - depositCredit);
     const newInvoice: Invoice = {
       id: generateId(),
       createdAt: now,
@@ -1112,11 +1118,14 @@ export const useStore = create<AppState>((set, get) => ({
       markupAmount: quote.markupAmount,
       subtotal: quote.subtotal,
       gst: quote.gst,
-      total: quote.total,
+      total: adjustedTotal,
       status: 'draft',
       paymentTerms: 'net_14',
       sourceQuoteId: quote.id,
       notes: quote.notes,
+      ...(depositCredit > 0
+        ? { depositCredit, depositCreditFromQuoteId: quote.id }
+        : {}),
     };
 
     set({ currentInvoice: newInvoice });
