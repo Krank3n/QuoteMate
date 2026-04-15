@@ -13,6 +13,7 @@
 import {
   authorize,
   getAuthorizationState,
+  showSettings,
   startPayment,
   AuthorizationState,
   AdditionalPaymentMethodType,
@@ -24,7 +25,8 @@ import {
   type PromptParameters,
   type Payment,
 } from 'mobile-payments-sdk-react-native';
-import { Platform } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
+import * as Crypto from 'expo-crypto';
 
 import * as squareService from './squareService';
 
@@ -36,6 +38,31 @@ interface TakeInAppPaymentArgs {
   target: InAppPaymentTarget;
   amountCents: number;       // cents
   note?: string;
+}
+
+/**
+ * Square's Android SDK refuses to pair a reader (even the virtual Tap to Pay
+ * one) without runtime-granted fine location permission. iOS handles this
+ * via the Info.plist usage string + system prompt on first use. Call this
+ * before `authorize()` on Android or the SDK throws `payment_no_permission_location`.
+ */
+async function ensureAndroidLocationPermission(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const granted = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+    {
+      title: 'Location permission required',
+      message:
+        'Square requires location access to process in-person card payments.',
+      buttonPositive: 'Allow',
+      buttonNegative: 'Cancel',
+    }
+  );
+  if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+    throw new Error(
+      'Location permission is required to take card payments. Enable it in system settings and try again.'
+    );
+  }
 }
 
 /**
@@ -71,19 +98,27 @@ export async function takeInAppPayment({
     throw new Error('Amount must be greater than zero.');
   }
 
+  await ensureAndroidLocationPermission();
   await ensureAuthorized();
 
-  const idempotencyKey = `qm-${target.kind}-${
-    target.kind === 'invoice' ? target.invoiceId : target.quoteId
-  }-${Date.now()}`;
+  const targetId =
+    target.kind === 'invoice' ? target.invoiceId : target.quoteId;
+  const idempotencyKey = `qm-${target.kind}-${targetId}-${Date.now()}`;
+  // Square's Android SDK rejects payments without a paymentAttemptId. It's
+  // marked optional in the TS types but required at runtime; use a UUID per
+  // attempt so retries get fresh IDs (idempotencyKey handles dedupe).
+  const paymentAttemptId = Crypto.randomUUID();
 
   const paymentParameters: PaymentParameters = {
     amountMoney: { amount: amountCents, currencyCode: CurrencyCode.AUD },
     processingMode: ProcessingMode.ONLINE_ONLY,
     idempotencyKey,
+    paymentAttemptId,
+    // Android-only: tells Square whether to offer card surcharge prompts.
+    // Set false since QuoteMate doesn't apply surcharges.
+    allowCardSurcharge: false,
     note,
-    referenceId:
-      target.kind === 'invoice' ? target.invoiceId : target.quoteId,
+    referenceId: targetId,
   };
 
   const promptParameters: PromptParameters = {
@@ -129,6 +164,21 @@ export async function isTapToPayCapable(): Promise<boolean> {
   // Android: Square's SDK checks NFC + reader capability internally at
   // startPayment time. Treat all Android devices as eligible at the UI layer.
   return Platform.OS === 'android';
+}
+
+/**
+ * Trigger Square's built-in reader-setup UI so the tradie can complete the
+ * one-time Tap-to-Pay activation during onboarding (instead of in front of
+ * a paying customer). Ensures location permission + SDK authorization first.
+ *
+ * The SDK's settings sheet shows a Tap-to-Pay reader that needs to be
+ * "paired" — for the phone's built-in NFC, this pair step is the one-time
+ * Google secure-element handshake. Unskippable per payment-network rules.
+ */
+export async function primeTapToPayOnDevice(): Promise<void> {
+  await ensureAndroidLocationPermission();
+  await ensureAuthorized();
+  await showSettings();
 }
 
 /**

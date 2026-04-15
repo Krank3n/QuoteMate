@@ -40,7 +40,7 @@ const {
 const fs = require('fs');
 const path = require('path');
 
-const SQUARE_ANDROID_SDK_VERSION = '2.0.2';
+const SQUARE_ANDROID_SDK_VERSION = '2.4.0';
 
 // ─── iOS ──────────────────────────────────────────────────────────────────
 

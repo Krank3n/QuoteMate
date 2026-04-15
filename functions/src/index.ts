@@ -9565,9 +9565,14 @@ export const recordInAppSquarePayment = functions.https.onRequest((req, res) => 
 });
 
 /**
- * Fetch a Square Mobile Payments SDK authorization code so the client SDK can
- * exchange it for a session token. Required by Tap to Pay on iPhone and the
- * in-app card-entry flow.
+ * Fetch a Square Mobile Payments SDK authorization for the client. The SDK's
+ * `authorize(accessToken, locationId)` expects the merchant's OAuth access
+ * token directly — we hand ours back decrypted. This is secure for QuoteMate
+ * because each tradie is the sole user of their own device, and the stored
+ * token is already scoped to that tradie's Firebase UID.
+ *
+ * The response field is called `authorizationCode` for legacy client
+ * compatibility; the value is the access token that the SDK expects.
  */
 export const getSquareMobileAuthCode = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -9588,34 +9593,13 @@ export const getSquareMobileAuthCode = functions.https.onRequest((req, res) => {
       return;
     }
 
-    try {
-      const authzRes = await fetch(`${squareApiBase()}/mobile/authorization-code`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${tokens.accessToken}`,
-          'Content-Type': 'application/json',
-          'Square-Version': '2024-10-17',
-        },
-        body: JSON.stringify({ location_id: tokens.locationId }),
-      });
-      if (!authzRes.ok) {
-        const err = await authzRes.text().catch(() => '');
-        console.error('[square] mobile auth code request failed', {
-          userId: decodedToken.uid, status: authzRes.status, body: err.slice(0, 300),
-        });
-        res.status(502).json({ error: 'Square rejected auth code request' });
-        return;
-      }
-      const data: any = await authzRes.json();
-      res.status(200).json({
-        authorizationCode: data.authorization_code,
-        expiresAt: data.expires_at,
-        locationId: tokens.locationId,
-      });
-    } catch (err: any) {
-      console.error('[square] mobile auth code error', { message: err?.message });
-      res.status(500).json({ error: 'Internal error fetching mobile auth code' });
-    }
+    // Return the access token directly. getSquareTokens already refreshes it
+    // lazily if it's within 60s of expiry, so the client gets a fresh value.
+    res.status(200).json({
+      authorizationCode: tokens.accessToken,
+      accessToken: tokens.accessToken,
+      locationId: tokens.locationId,
+    });
   });
 });
 
