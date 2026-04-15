@@ -20,6 +20,8 @@ import { colors } from '../theme';
 import { generateQuotePDF } from '../utils/pdfGenerator';
 import { SendQuoteButton } from '../components/SendQuoteButton';
 import { AlertModal } from '../components/AlertModal';
+import { TakePaymentSheet, TakePaymentTarget } from '../components/TakePaymentSheet';
+import * as squareService from '../services/squareService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebContainer } from '../components/WebContainer';
 import {
@@ -56,6 +58,22 @@ export function ViewQuoteScreen() {
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [isEditingNumber, setIsEditingNumber] = useState(false);
   const [quoteNumber, setQuoteNumber] = useState('');
+  const [squareConnected, setSquareConnected] = useState(false);
+  const [takePaymentVisible, setTakePaymentVisible] = useState(false);
+  const [takePaymentError, setTakePaymentError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    squareService
+      .checkSquareConnection()
+      .then((s) => {
+        if (!cancelled) setSquareConnected(!!s.connected);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Clear the in-progress edit sentinel when we re-focus this screen after
   // editing materials/labor. This MUST be in a focus effect (not a plain
@@ -269,6 +287,27 @@ export function ViewQuoteScreen() {
           { paddingBottom: Math.max(insets.bottom, 16) }
         ]}
       >
+        {(() => {
+          const requireDeposit = (quote as any).requireDeposit === true;
+          const depositAmount = Number((quote as any).depositAmount) || 0;
+          const depositPaid = Number((quote as any).depositPaid) || 0;
+          const depositOutstanding = requireDeposit && depositAmount > depositPaid;
+          if (depositOutstanding && squareConnected) {
+            return (
+              <Button
+                mode="contained"
+                onPress={() => setTakePaymentVisible(true)}
+                style={styles.outlinedButton}
+                contentStyle={styles.buttonContent}
+                icon="credit-card-scan"
+                buttonColor={colors.primary}
+              >
+                Take Deposit
+              </Button>
+            );
+          }
+          return null;
+        })()}
         {canConvertToInvoice ? (
           <>
             <Button
@@ -305,6 +344,35 @@ export function ViewQuoteScreen() {
           </>
         )}
       </View>
+
+      <TakePaymentSheet
+        visible={takePaymentVisible}
+        target={
+          {
+            kind: 'quote_deposit',
+            quoteId: quote.id,
+            depositAmount: Number((quote as any).depositAmount) || 0,
+            depositPaid: Number((quote as any).depositPaid) || 0,
+            jobName: quote.job?.name,
+          } as TakePaymentTarget
+        }
+        onDismiss={() => setTakePaymentVisible(false)}
+        onError={(message) => {
+          setTakePaymentVisible(false);
+          setTakePaymentError(message);
+        }}
+      />
+
+      <AlertModal
+        visible={!!takePaymentError}
+        onDismiss={() => setTakePaymentError(null)}
+        type="error"
+        title="Couldn't create deposit link"
+        message={takePaymentError || ''}
+        primaryButtonText="OK"
+        primaryButtonAction={() => setTakePaymentError(null)}
+        showConfetti={false}
+      />
     </View>
   );
 }

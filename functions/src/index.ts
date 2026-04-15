@@ -8568,11 +8568,13 @@ const SQUARE_WEBHOOK_SIGNATURE_KEY = process.env.SQUARE_WEBHOOK_SIGNATURE_KEY ||
 const SQUARE_WEBHOOK_NOTIFICATION_URL =
   process.env.SQUARE_WEBHOOK_NOTIFICATION_URL ||
   'https://us-central1-hansendev.cloudfunctions.net/squareWebhook';
-// OAuth scopes required for pay-by-link and reading merchant/location info.
+// OAuth scopes required for pay-by-link, reading merchant/location info, and
+// in-person Tap to Pay via the Mobile Payments SDK.
 const SQUARE_SCOPES = [
   'MERCHANT_PROFILE_READ',
   'PAYMENTS_READ',
   'PAYMENTS_WRITE',
+  'PAYMENTS_WRITE_IN_PERSON',
   'ORDERS_READ',
   'ORDERS_WRITE',
 ];
@@ -9154,18 +9156,37 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
     const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
 
-    const { invoiceId } = req.body;
-    if (!isNonEmptyString(invoiceId)) {
+    // Accept either:
+    //   legacy: { invoiceId }
+    //   new:    { kind: 'invoice' | 'quote_deposit', targetId }
+    const { invoiceId, kind, targetId } = req.body || {};
+
+    if (kind === 'quote_deposit') {
+      if (!isNonEmptyString(targetId)) {
+        res.status(400).json({ error: 'Missing targetId' });
+        return;
+      }
+      const result = await createSquareDepositPaymentLinkInternal(decodedToken.uid, targetId);
+      if (!result) {
+        res.status(400).json({ error: 'Failed to create Square deposit payment link' });
+        return;
+      }
+      res.status(200).json({ success: true, reused: false, ...result });
+      return;
+    }
+
+    const id = isNonEmptyString(targetId) ? targetId : invoiceId;
+    if (!isNonEmptyString(id)) {
       res.status(400).json({ error: 'Missing invoiceId' });
       return;
     }
 
-    const result = await createSquarePaymentLinkInternal(decodedToken.uid, invoiceId);
+    const result = await createSquarePaymentLinkInternal(decodedToken.uid, id);
     if (!result) {
       res.status(400).json({ error: 'Failed to create Square payment link' });
       return;
     }
-    res.status(200).json({ success: true, ...result });
+    res.status(200).json({ success: true, reused: false, ...result });
   });
 });
 
@@ -9491,6 +9512,111 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
   } catch {
     // Already responded 200; log silently.
   }
+});
+
+/**
+ * Record an in-app (Mobile Payments SDK / Tap to Pay) payment so the Square
+ * webhook can flip invoice/quote status when `payment.updated` fires. Writes
+ * into the same `squarePaymentOrders/{orderId}` index used by hosted
+ * payment-link mints, so the existing webhook handler reconciles both paths.
+ */
+export const recordInAppSquarePayment = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { kind, targetId, paymentId, orderId, amountCents } = req.body || {};
+    if (
+      (kind !== 'invoice' && kind !== 'quote_deposit') ||
+      !isNonEmptyString(targetId) ||
+      !isNonEmptyString(paymentId) ||
+      !isNonEmptyString(orderId) ||
+      typeof amountCents !== 'number'
+    ) {
+      res.status(400).json({ error: 'Missing fields' });
+      return;
+    }
+
+    // Match Donkw's index schema: webhook reads { userId, invoiceId } or
+    // { userId, quoteId, kind: 'quote_deposit' }.
+    const indexDoc: any = {
+      userId: decodedToken.uid,
+      paymentId,
+      amountCents,
+      source: 'in_app',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (kind === 'quote_deposit') {
+      indexDoc.quoteId = targetId;
+      indexDoc.kind = 'quote_deposit';
+    } else {
+      indexDoc.invoiceId = targetId;
+    }
+
+    await admin.firestore()
+      .doc(`squarePaymentOrders/${orderId}`)
+      .set(indexDoc, { merge: true });
+    res.status(200).json({ success: true });
+  });
+});
+
+/**
+ * Fetch a Square Mobile Payments SDK authorization code so the client SDK can
+ * exchange it for a session token. Required by Tap to Pay on iPhone and the
+ * in-app card-entry flow.
+ */
+export const getSquareMobileAuthCode = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const tokens = await getSquareTokens(decodedToken.uid);
+    if (!tokens) {
+      res.status(401).json({ error: 'Square not connected.' });
+      return;
+    }
+    if (!tokens.locationId) {
+      res.status(400).json({ error: 'No Square location configured.' });
+      return;
+    }
+
+    try {
+      const authzRes = await fetch(`${squareApiBase()}/v2/mobile/authorization-code`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${tokens.accessToken}`,
+          'Content-Type': 'application/json',
+          'Square-Version': '2024-10-17',
+        },
+        body: JSON.stringify({ location_id: tokens.locationId }),
+      });
+      if (!authzRes.ok) {
+        const err = await authzRes.text().catch(() => '');
+        console.error('[square] mobile auth code request failed', {
+          userId: decodedToken.uid, status: authzRes.status, body: err.slice(0, 300),
+        });
+        res.status(502).json({ error: 'Square rejected auth code request' });
+        return;
+      }
+      const data: any = await authzRes.json();
+      res.status(200).json({
+        authorizationCode: data.authorization_code,
+        expiresAt: data.expires_at,
+        locationId: tokens.locationId,
+      });
+    } catch (err: any) {
+      console.error('[square] mobile auth code error', { message: err?.message });
+      res.status(500).json({ error: 'Internal error fetching mobile auth code' });
+    }
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────

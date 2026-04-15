@@ -97,3 +97,69 @@ export async function createSquarePaymentLink(
   const res = await squareFetch('createSquarePaymentLink', { invoiceId });
   return { paymentLinkId: res.paymentLinkId, paymentLinkUrl: res.paymentLinkUrl };
 }
+
+/**
+ * Mint (or reuse) a Square payment link for an invoice's outstanding balance.
+ * Used by the in-app Take Payment sheet's "Share Pay Link" option.
+ */
+export async function mintInvoicePaymentLink(
+  invoiceId: string,
+): Promise<{ paymentLinkId: string; paymentLinkUrl: string; reused: boolean }> {
+  const res = await squareFetch('createSquarePaymentLink', {
+    kind: 'invoice',
+    targetId: invoiceId,
+  });
+  return {
+    paymentLinkId: res.paymentLinkId,
+    paymentLinkUrl: res.paymentLinkUrl,
+    reused: !!res.reused,
+  };
+}
+
+/**
+ * Mint (or reuse) a Square payment link for the outstanding deposit on a quote.
+ */
+export async function mintQuoteDepositPaymentLink(
+  quoteId: string,
+): Promise<{ paymentLinkId: string; paymentLinkUrl: string; reused: boolean }> {
+  const res = await squareFetch('createSquarePaymentLink', {
+    kind: 'quote_deposit',
+    targetId: quoteId,
+  });
+  return {
+    paymentLinkId: res.paymentLinkId,
+    paymentLinkUrl: res.paymentLinkUrl,
+    reused: !!res.reused,
+  };
+}
+
+// ============================================
+// Phase 2 — Mobile Payments SDK (Tap to Pay) wiring
+// ============================================
+
+/**
+ * Fetch a Square Mobile Payments SDK authorization code. The native SDK
+ * exchanges this for a session token before it can take a payment.
+ */
+export async function getMobileAuthCode(): Promise<{
+  authorizationCode: string;
+  expiresAt: string;
+  locationId: string;
+}> {
+  return squareFetch('getSquareMobileAuthCode');
+}
+
+/**
+ * After the Mobile Payments SDK returns a successful payment, record it
+ * server-side so the Square webhook can flip invoice / quote status when
+ * `payment.updated` arrives.
+ */
+export async function recordInAppPayment(args: {
+  kind: 'invoice' | 'quote_deposit';
+  targetId: string;
+  paymentId: string;
+  orderId: string;
+  amountCents: number;
+}): Promise<void> {
+  await squareFetch('recordInAppSquarePayment', args);
+}

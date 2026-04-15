@@ -82,8 +82,8 @@ export function SettingsScreen() {
         {
           id: 'square',
           title: 'Square Payments',
-          subtitle: 'Let customers pay invoices by card',
-          icon: 'credit-card-outline',
+          subtitle: 'Take payment on site or share a pay link',
+          icon: 'credit-card-scan',
           screen: 'SquareIntegration',
         },
       ],

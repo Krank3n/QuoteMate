@@ -53,6 +53,22 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Square payment-order index — written by Cloud Functions (link mint or
+    // in-app payment record). Owner can read for status display; only Cloud
+    // Functions write.
+    match /squarePaymentOrders/{orderId} {
+      allow read: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Square payment-link index — same access pattern.
+    match /squarePaymentLinks/{linkId} {
+      allow read: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
     // Default: deny all access
     match /{document=**} {
       allow read, write: if false;

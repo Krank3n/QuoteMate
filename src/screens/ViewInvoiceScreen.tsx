@@ -24,6 +24,9 @@ import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { generateInvoicePDF } from '../utils/pdfGenerator';
 import { SendInvoiceButton } from '../components/SendInvoiceButton';
+import { TakePaymentSheet, TakePaymentTarget } from '../components/TakePaymentSheet';
+import { AlertModal } from '../components/AlertModal';
+import * as squareService from '../services/squareService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   formatPaymentTerms,
@@ -81,6 +84,22 @@ export function ViewInvoiceScreen() {
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [statusSheetVisible, setStatusSheetVisible] = useState(false);
   const [isXeroPushing, setIsXeroPushing] = useState(false);
+  const [squareConnected, setSquareConnected] = useState(false);
+  const [takePaymentVisible, setTakePaymentVisible] = useState(false);
+  const [takePaymentError, setTakePaymentError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    squareService
+      .checkSquareConnection()
+      .then((s) => {
+        if (!cancelled) setSquareConnected(!!s.connected);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load invoice data
   useEffect(() => {
@@ -575,12 +594,54 @@ export function ViewInvoiceScreen() {
             Record Payment
           </Button>
         )}
+        {amountDue > 0 && invoice.status !== 'cancelled' && squareConnected && (
+          <Button
+            mode="contained"
+            onPress={() => setTakePaymentVisible(true)}
+            style={styles.button}
+            contentStyle={styles.buttonContent}
+            icon="credit-card-scan"
+            buttonColor={colors.primary}
+          >
+            Take Payment
+          </Button>
+        )}
         <SendInvoiceButton
           invoice={invoice}
           businessSettings={businessSettings}
           buttonStyle={styles.button}
         />
       </View>
+
+      <TakePaymentSheet
+        visible={takePaymentVisible}
+        target={
+          {
+            kind: 'invoice',
+            invoiceId: invoice.id,
+            total: invoice.total,
+            paidAmount: invoice.paidAmount || 0,
+            jobName: invoice.job?.name,
+            invoiceNumber: invoice.invoiceNumber,
+          } as TakePaymentTarget
+        }
+        onDismiss={() => setTakePaymentVisible(false)}
+        onError={(message) => {
+          setTakePaymentVisible(false);
+          setTakePaymentError(message);
+        }}
+      />
+
+      <AlertModal
+        visible={!!takePaymentError}
+        onDismiss={() => setTakePaymentError(null)}
+        type="error"
+        title="Couldn't create pay link"
+        message={takePaymentError || ''}
+        primaryButtonText="OK"
+        primaryButtonAction={() => setTakePaymentError(null)}
+        showConfetti={false}
+      />
 
       {/* Status Sheet */}
       <StatusSheet

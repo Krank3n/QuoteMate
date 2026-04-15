@@ -1,5 +1,10 @@
 const isWebExport = process.env.EXPO_WEB_BASE_URL;
 
+// Square Mobile Payments SDK requires the production application ID baked
+// into native init. Read from .env (loaded by Expo at config eval time).
+const SQUARE_APPLICATION_ID =
+  process.env.SQUARE_APP_ID_PRODUCTION || process.env.SQUARE_APP_ID || '';
+
 export default {
   expo: {
     name: "QuoteMate",
@@ -23,7 +28,7 @@ export default {
             kotlinVersion: "2.2.0"
           },
           ios: {
-            deploymentTarget: "15.2"
+            deploymentTarget: "16.0"
           }
         }
       ],
@@ -63,7 +68,14 @@ export default {
         }
       ],
       "expo-iap",
-      ["./plugins/withKotlinVersion", "2.2.0"]
+      ["./plugins/withKotlinVersion", "2.2.0"],
+      // Skip the Square plugin entirely if SQUARE_APP_ID_PRODUCTION is missing
+      // — keeps `npx expo config` (used by EAS env commands) working before
+      // the secret is registered. Builds without it will get a runtime error
+      // when takeInAppPayment is called, not a config-eval crash.
+      ...(SQUARE_APPLICATION_ID
+        ? [["./plugins/withSquareSDK", { applicationId: SQUARE_APPLICATION_ID }]]
+        : [])
     ],
     splash: {
       image: "./assets/splash.png",
@@ -107,7 +119,8 @@ export default {
     extra: {
       eas: {
         projectId: "b164d7f8-b04e-4960-a962-ebc74fe65bce"
-      }
+      },
+      squareApplicationId: SQUARE_APPLICATION_ID
     }
   }
 };
