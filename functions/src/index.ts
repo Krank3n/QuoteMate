@@ -9589,7 +9589,7 @@ export const getSquareMobileAuthCode = functions.https.onRequest((req, res) => {
     }
 
     try {
-      const authzRes = await fetch(`${squareApiBase()}/v2/mobile/authorization-code`, {
+      const authzRes = await fetch(`${squareApiBase()}/mobile/authorization-code`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${tokens.accessToken}`,

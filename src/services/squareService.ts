@@ -27,6 +27,16 @@ async function squareFetch(endpoint: string, body?: any): Promise<any> {
     body: body ? JSON.stringify(body) : undefined,
   });
 
+  // If the endpoint isn't deployed (404) or the gateway errors, Firebase
+  // Hosting returns an HTML error page. JSON-parsing that yields a cryptic
+  // "Unexpected character <" — surface a clearer message instead.
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error(
+      `Square service unavailable (HTTP ${response.status}). Please try again.`
+    );
+  }
+
   const data = await response.json();
   if (!response.ok) {
     throw new Error(data.error || `Request failed (${response.status})`);
