@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Platform, Alert, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, Alert, TouchableOpacity, useWindowDimensions } from 'react-native';
 import {
   Text,
   Button,
@@ -76,6 +76,8 @@ export function ViewInvoiceScreen() {
     pushInvoiceToXero,
   } = useStore();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const compactLabels = windowWidth < 400;
 
   const [displayInvoice, setDisplayInvoice] = useState<Invoice | null>(null);
   const [isEditing, setIsEditing] = useState(isNew || false);
@@ -591,7 +593,7 @@ export function ViewInvoiceScreen() {
             contentStyle={styles.buttonContent}
             icon="cash"
           >
-            Record Payment
+            {compactLabels ? 'Record' : 'Record Payment'}
           </Button>
         )}
         {amountDue > 0 && invoice.status !== 'cancelled' && squareConnected && (
@@ -603,7 +605,7 @@ export function ViewInvoiceScreen() {
             icon="credit-card-scan"
             buttonColor={colors.primary}
           >
-            Take Payment
+            {compactLabels ? 'Pay' : 'Take Payment'}
           </Button>
         )}
         <SendInvoiceButton

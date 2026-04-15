@@ -4,7 +4,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, ActivityIndicator, useWindowDimensions } from 'react-native';
 import {
   Text,
   Button,
@@ -42,6 +42,8 @@ export function ViewQuoteScreen() {
 
   const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote, createInvoiceFromQuote, saveInvoice, nextQuoteNumber } = useStore();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const compactLabels = windowWidth < 400;
 
   // displayQuote is derived directly from the store so edits made on
   // MaterialsListScreen / LaborMarkupScreen via saveDraft show up the moment
@@ -302,7 +304,7 @@ export function ViewQuoteScreen() {
                 icon="credit-card-scan"
                 buttonColor={colors.primary}
               >
-                Take Deposit
+                {compactLabels ? 'Deposit' : 'Take Deposit'}
               </Button>
             );
           }
