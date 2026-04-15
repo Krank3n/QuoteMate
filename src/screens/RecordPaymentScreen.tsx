@@ -66,17 +66,13 @@ export function RecordPaymentScreen() {
       return;
     }
 
-    if (paymentAmount > amountDue) {
+    // Hard-reject overpayment. Allow a 1c tolerance for rounding (e.g., when
+    // a Square webhook records $50.001 and the tradie tries to close the
+    // remaining cent via cash).
+    if (paymentAmount > amountDue + 0.01) {
       Alert.alert(
-        'Amount Exceeds Balance',
-        `The payment amount ($${paymentAmount.toFixed(2)}) exceeds the balance due ($${amountDue.toFixed(2)}). Do you want to continue?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Continue',
-            onPress: () => submitPayment(paymentAmount),
-          },
-        ]
+        'Amount exceeds balance',
+        `Enter up to ${formatCurrency(amountDue)}. This invoice doesn't owe more than that.`,
       );
       return;
     }
@@ -140,12 +136,29 @@ export function RecordPaymentScreen() {
           <Text style={styles.summaryValue}>{formatCurrency(invoice.total)}</Text>
         </View>
         {(invoice.paidAmount || 0) > 0 && (
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Already Paid</Text>
-            <Text style={[styles.summaryValue, { color: colors.success }]}>
-              {formatCurrency(invoice.paidAmount || 0)}
-            </Text>
-          </View>
+          <>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Already Paid</Text>
+              <Text style={[styles.summaryValue, { color: colors.success }]}>
+                {formatCurrency(invoice.paidAmount || 0)}
+              </Text>
+            </View>
+            {invoice.squarePaymentId && (
+              <View style={styles.squareNoteRow}>
+                <MaterialCommunityIcons
+                  name="credit-card-check-outline"
+                  size={14}
+                  color={colors.textMuted}
+                />
+                <Text style={styles.squareNoteText}>
+                  Paid via Square
+                  {invoice.squarePaidAt
+                    ? ` on ${format(new Date(invoice.squarePaidAt as any), 'd MMM yyyy')}`
+                    : ''}
+                </Text>
+              </View>
+            )}
+          </>
         )}
         <View style={[styles.summaryRow, styles.balanceRow]}>
           <Text style={styles.balanceLabel}>Balance Due</Text>
@@ -335,6 +348,19 @@ const styles = StyleSheet.create({
   summaryValue: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  squareNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: -4,
+    marginBottom: 8,
+    marginLeft: 2,
+  },
+  squareNoteText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: 'italic',
   },
   balanceRow: {
     marginTop: 8,
