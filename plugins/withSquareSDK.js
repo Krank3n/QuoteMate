@@ -23,14 +23,15 @@
  *   • MainApplication.kt — initialize MobilePaymentsSdk in onCreate
  *   • AndroidManifest.xml — NFC + location permissions
  *
- * iOS Tap to Pay capability + entitlement are NOT added here — they require
- * Apple approval and are added manually in Xcode once the entitlement lands.
+ * iOS Tap to Pay entitlement (proximity-reader.payment.acceptance) is added
+ * automatically — Apple approved the entitlement for this account.
  */
 
 const {
   withAppDelegate,
   withInfoPlist,
   withXcodeProject,
+  withEntitlementsPlist,
   withDangerousMod,
   withMainApplication,
   withAndroidManifest,
@@ -124,6 +125,13 @@ function withSquareIOSBuildPhase(config) {
         shellScript: SHELL_SCRIPT,
       }
     );
+    return config;
+  });
+}
+
+function withSquareIOSTapToPayEntitlement(config) {
+  return withEntitlementsPlist(config, (config) => {
+    config.modResults['com.apple.developer.proximity-reader.payment.acceptance'] = true;
     return config;
   });
 }
@@ -258,6 +266,7 @@ function withSquareSDK(config, props = {}) {
   config = withSquareIOSAppDelegate(config, applicationId);
   config = withSquareIOSInfoPlist(config);
   config = withSquareIOSBuildPhase(config);
+  config = withSquareIOSTapToPayEntitlement(config);
 
   config = withSquareAndroidRootGradle(config);
   config = withSquareAndroidAppGradle(config);

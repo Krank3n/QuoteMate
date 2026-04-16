@@ -22,13 +22,13 @@ async function main() {
   const db = admin.firestore();
   await db.doc('config/squareTapToPay').set(
     {
-      ios: false,
+      ios: true,
       android: true,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true },
   );
-  console.log('Set config/squareTapToPay → { ios: false, android: true }');
+  console.log('Set config/squareTapToPay → { ios: true, android: true }');
 }
 
 main()
