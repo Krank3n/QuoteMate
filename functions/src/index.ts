@@ -5286,6 +5286,41 @@ interface AnalyticsData {
   jobTypes: Array<{ name: string; count: number }>;
   quotesByMonth: Array<{ month: string; count: number }>;
   signupsByMonth: Array<{ month: string; count: number }>;
+  mrr: number;
+  cohortedFunnel: Array<{
+    month: string;
+    signups: number;
+    onboarded: number;
+    createdQuote: number;
+    created5Plus: number;
+    invoiced: number;
+    pro: number;
+  }>;
+  acquisition: {
+    platforms: Record<string, number>;
+    authMethods: Record<string, number>;
+  };
+  emailPipeline: {
+    welcome: number;
+    onboardingTip1: number;
+    onboardingTip2: number;
+    onboardingTip3: number;
+    reEngagement: number;
+    quoteFollowUp: number;
+  };
+  dropoffSegments: Array<{
+    name: string;
+    description: string;
+    count: number;
+    emails: string[];
+  }>;
+  tradeRetention: Array<{
+    trade: string;
+    total: number;
+    active: number;
+    churned: number;
+    retentionPct: number;
+  }>;
   users: Array<{
     email: string;
     businessName: string;
@@ -5295,9 +5330,18 @@ interface AnalyticsData {
     isPro: boolean;
     quotesThisMonth: number;
     platform: string;
+    authMethod: string;
+    stage: string;
     favorites: number;
     signupDate: string;
     lastLogin: string;
+    daysSinceLogin: number;
+    firstQuoteDate: string;
+    lastQuoteDate: string;
+    sentQuotes: number;
+    acceptedQuotes: number;
+    quoteJobs: string[];
+    avgQuoteValue: number;
   }>;
   recentQuotes: Array<{
     date: string;
@@ -5308,7 +5352,7 @@ interface AnalyticsData {
     customer: string;
     materialsCount: number;
   }>;
-  cancellations: Array<{ reason: string; date: string }>;
+  cancellations: Array<{ reason: string; feedback: string; date: string; email: string }>;
   acceptanceLinksGenerated: number;
   emailsSent: number;
   emailCategories: Record<string, number>;
@@ -5344,9 +5388,15 @@ interface AnalyticsData {
 async function getAdminAnalyticsData(): Promise<AnalyticsData> {
   const db = admin.firestore();
 
+  // Exclude internal/test accounts from all metrics
+  const EXCLUDED_EMAILS = new Set([
+    'thomas.andrew.hansen@gmail.com',
+    'deckreck@gmail.com',
+  ]);
+
   // Get auth users for signup/login data
   const authResult = await admin.auth().listUsers(1000);
-  const authUsers = authResult.users;
+  const authUsers = authResult.users.filter(au => !EXCLUDED_EMAILS.has(au.email || ''));
 
   let totalQuotes = 0;
   let totalInvoices = 0;
@@ -5367,6 +5417,9 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
   const laborRates: number[] = [];
   const recentQuotes: AnalyticsData['recentQuotes'] = [];
   const usersList: AnalyticsData['users'] = [];
+  const cohortMap = new Map<string, { signups: number; onboarded: number; createdQuote: number; created5Plus: number; invoiced: number; pro: number }>();
+  const platformCounts: Record<string, number> = {};
+  const authMethodCounts: Record<string, number> = {};
 
   // Build auth user lookup
   const authMap = new Map<string, { email: string; createdAt: string; lastLogin: string }>();
@@ -5404,13 +5457,14 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
       const authInfo = authMap.get(userId)!;
 
       try {
-        const [quotesSnap, invoicesSnap, settingsSnap, onbSnap, subSnap, favsSnap] = await Promise.all([
+        const [quotesSnap, invoicesSnap, settingsSnap, onbSnap, subSnap, favsSnap, regInfoSnap] = await Promise.all([
           db.collection(`users/${userId}/quotes`).get(),
           db.collection(`users/${userId}/invoices`).get(),
           db.doc(`users/${userId}/settings/business`).get(),
           db.doc(`users/${userId}/profile/onboarding`).get(),
           db.doc(`users/${userId}/profile/subscription`).get(),
           db.collection(`users/${userId}/materialFavorites`).get(),
+          db.doc(`users/${userId}/settings/registrationInfo`).get(),
         ]);
 
         const userQuotes = quotesSnap.size;
@@ -5419,26 +5473,39 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
         totalInvoices += userInvoices;
         favoritesCount += favsSnap.size;
 
-        // Process quotes
+        // Process quotes — also track per-user details
+        const userQuoteJobs: string[] = [];
+        const userQuoteTotals: number[] = [];
+        let userSentQuotes = 0;
+        let userAcceptedQuotes = 0;
+        let userFirstQuoteDate = '';
+        let userLastQuoteDate = '';
+
         for (const qDoc of quotesSnap.docs) {
           const q = qDoc.data();
           quoteStatuses[q.status || 'unknown'] = (quoteStatuses[q.status || 'unknown'] || 0) + 1;
-          if (q.total) allQuoteTotals.push(q.total);
+          if (q.total) { allQuoteTotals.push(q.total); userQuoteTotals.push(q.total); }
           if (q.materials) totalMaterials += q.materials.length;
           if (q.aiSkipped) quotesSkippedAI++; else quotesWithAI++;
           if (q.markup) markupValues.push(q.markup);
           if (q.laborRate) laborRates.push(q.laborRate);
           if (q.job?.name) {
             jobTypesMap[q.job.name] = (jobTypesMap[q.job.name] || 0) + 1;
+            if (!userQuoteJobs.includes(q.job.name)) userQuoteJobs.push(q.job.name);
           }
+          if (q.status === 'sent' || q.status === 'accepted' || q.status === 'completed') userSentQuotes++;
+          if (q.status === 'accepted' || q.status === 'completed') userAcceptedQuotes++;
           if (q.createdAt) {
             let date: Date;
             try { date = q.createdAt.toDate(); } catch { date = new Date(q.createdAt); }
             if (date && !isNaN(date.getTime())) {
-              const m = date.toISOString().substring(0, 7);
+              const iso = date.toISOString();
+              if (!userFirstQuoteDate || iso < userFirstQuoteDate) userFirstQuoteDate = iso;
+              if (!userLastQuoteDate || iso > userLastQuoteDate) userLastQuoteDate = iso;
+              const m = iso.substring(0, 7);
               quotesByMonthMap[m] = (quotesByMonthMap[m] || 0) + 1;
               recentQuotes.push({
-                date: date.toISOString(),
+                date: iso,
                 email: authInfo.email.substring(0, 25),
                 total: q.total || 0,
                 status: q.status || 'unknown',
@@ -5472,14 +5539,49 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
         // Subscription
         let isPro = false;
         let quotesThisMonth = 0;
-        let platform = '';
+        let subPlatform = '';
         if (subSnap.exists) {
           const sub = subSnap.data()!;
           isPro = sub.isPro || false;
           quotesThisMonth = sub.quotesThisMonth || 0;
-          platform = sub.platform || '';
+          subPlatform = sub.platform || '';
           if (isPro) proCount++;
         }
+
+        // Registration info (platform + auth method)
+        let regPlatform = '';
+        let authMethod = '';
+        if (regInfoSnap.exists) {
+          const reg = regInfoSnap.data()!;
+          regPlatform = reg.platform || '';
+          authMethod = reg.method || '';
+          if (regPlatform) platformCounts[regPlatform] = (platformCounts[regPlatform] || 0) + 1;
+          if (authMethod) authMethodCounts[authMethod] = (authMethodCounts[authMethod] || 0) + 1;
+        }
+
+        // Cohort data
+        const userIsOnboarded = onbSnap.exists && onbSnap.data()?.isOnboarded;
+        const signupMonthKey = new Date(authInfo.createdAt).toISOString().substring(0, 7);
+        if (!cohortMap.has(signupMonthKey)) {
+          cohortMap.set(signupMonthKey, { signups: 0, onboarded: 0, createdQuote: 0, created5Plus: 0, invoiced: 0, pro: 0 });
+        }
+        const cohort = cohortMap.get(signupMonthKey)!;
+        cohort.signups++;
+        if (userIsOnboarded) cohort.onboarded++;
+        if (userQuotes > 0) cohort.createdQuote++;
+        if (userQuotes >= 5) cohort.created5Plus++;
+        if (userInvoices > 0) cohort.invoiced++;
+        if (isPro) cohort.pro++;
+
+        // Lifecycle stage
+        const daysSinceSignup = (now - new Date(authInfo.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+        const daysSinceLogin = (now - new Date(authInfo.lastLogin).getTime()) / (1000 * 60 * 60 * 24);
+        let stage = 'new';
+        if (isPro) stage = 'pro';
+        else if (userQuotes > 0 && daysSinceLogin < 14) stage = 'active';
+        else if (userQuotes > 0 && daysSinceLogin >= 14) stage = 'at-risk';
+        else if (userIsOnboarded && userQuotes === 0 && daysSinceSignup > 7) stage = 'churned';
+        else if (userIsOnboarded && userQuotes === 0) stage = 'onboarding';
 
         usersList.push({
           email: authInfo.email,
@@ -5489,10 +5591,19 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
           invoices: userInvoices,
           isPro,
           quotesThisMonth,
-          platform,
+          platform: regPlatform || subPlatform,
+          authMethod,
+          stage,
           favorites: favsSnap.size,
           signupDate: new Date(authInfo.createdAt).toISOString().split('T')[0],
           lastLogin: new Date(authInfo.lastLogin).toISOString().split('T')[0],
+          daysSinceLogin: Math.round(daysSinceLogin),
+          firstQuoteDate: userFirstQuoteDate ? userFirstQuoteDate.split('T')[0] : '',
+          lastQuoteDate: userLastQuoteDate ? userLastQuoteDate.split('T')[0] : '',
+          sentQuotes: userSentQuotes,
+          acceptedQuotes: userAcceptedQuotes,
+          quoteJobs: userQuoteJobs.slice(0, 5),
+          avgQuoteValue: userQuoteTotals.length > 0 ? Math.round(userQuoteTotals.reduce((a, b) => a + b, 0) / userQuoteTotals.length) : 0,
         });
       } catch (e) {
         // Skip users with issues
@@ -5555,12 +5666,21 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
 
   let emailsSent = 0;
   const emailCategories: Record<string, number> = {};
+  const emailPipeline = { welcome: 0, onboardingTip1: 0, onboardingTip2: 0, onboardingTip3: 0, reEngagement: 0, quoteFollowUp: 0 };
   try {
     const emailSnap = await db.collection('emailLog').get();
     emailsSent = emailSnap.size;
     emailSnap.forEach(d => {
-      const cat = d.data().category || 'unknown';
+      const data = d.data();
+      const cat = data.category || 'unknown';
       emailCategories[cat] = (emailCategories[cat] || 0) + 1;
+      const tags: string[] = data.tags || [];
+      if (tags.includes('welcome')) emailPipeline.welcome++;
+      if (tags.includes('onboarding') && tags.includes('tip-1')) emailPipeline.onboardingTip1++;
+      if (tags.includes('onboarding') && tags.includes('tip-2')) emailPipeline.onboardingTip2++;
+      if (tags.includes('onboarding') && tags.includes('tip-3')) emailPipeline.onboardingTip3++;
+      if (tags.includes('re-engagement')) emailPipeline.reEngagement++;
+      if (tags.includes('quote-follow-up')) emailPipeline.quoteFollowUp++;
     });
   } catch { /* no email log */ }
 
@@ -5569,7 +5689,7 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
     const c = d.data();
     let dateStr = '';
     try { dateStr = c.canceledAt?.toDate?.().toISOString().split('T')[0] || ''; } catch { /* */ }
-    cancellations.push({ reason: c.reason || '(none)', date: dateStr });
+    cancellations.push({ reason: c.reason || '(none)', feedback: c.feedback || '', date: dateStr, email: c.userEmail || '' });
   });
 
   // Compute quote stats
@@ -5580,6 +5700,38 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
   // Sort users and quotes
   usersList.sort((a, b) => b.quotes - a.quotes);
   recentQuotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  // Build drop-off segments
+  const seg_neverOnboarded = usersList.filter(u => u.stage === 'new' && u.quotes === 0);
+  const seg_onboardedNoQuote = usersList.filter(u => (u.stage === 'onboarding' || u.stage === 'churned') && u.quotes === 0);
+  const seg_draftOnly = usersList.filter(u => u.quotes > 0 && u.sentQuotes === 0 && !u.isPro);
+  const seg_sentNoAccepted = usersList.filter(u => u.sentQuotes > 0 && u.acceptedQuotes === 0 && u.invoices === 0 && !u.isPro);
+  const seg_activeNotPaying = usersList.filter(u => u.quotes >= 3 && !u.isPro && u.daysSinceLogin < 30);
+  const seg_atRisk = usersList.filter(u => u.stage === 'at-risk');
+
+  const dropoffSegments: AnalyticsData['dropoffSegments'] = [
+    { name: 'Never Onboarded', description: 'Signed up but never completed setup', count: seg_neverOnboarded.length, emails: seg_neverOnboarded.map(u => u.email) },
+    { name: 'Onboarded, No Quote', description: 'Completed setup but never created a quote', count: seg_onboardedNoQuote.length, emails: seg_onboardedNoQuote.map(u => u.email) },
+    { name: 'Draft Only', description: 'Created quotes but never sent one to a customer', count: seg_draftOnly.length, emails: seg_draftOnly.map(u => u.email) },
+    { name: 'Sent, No Win', description: 'Sent quotes but none accepted yet', count: seg_sentNoAccepted.length, emails: seg_sentNoAccepted.map(u => u.email) },
+    { name: 'Active, Not Paying', description: '3+ quotes, active in last 30d, still on Free', count: seg_activeNotPaying.length, emails: seg_activeNotPaying.map(u => u.email) },
+    { name: 'At Risk', description: 'Previously active but inactive 14+ days', count: seg_atRisk.length, emails: seg_atRisk.map(u => u.email) },
+  ];
+
+  // Trade retention analysis
+  const tradeStats = new Map<string, { total: number; active: number; churned: number }>();
+  for (const u of usersList) {
+    const t = u.tradeType === '(not set)' ? 'Unknown' : u.tradeType;
+    if (!tradeStats.has(t)) tradeStats.set(t, { total: 0, active: 0, churned: 0 });
+    const ts = tradeStats.get(t)!;
+    ts.total++;
+    if (u.stage === 'active' || u.stage === 'pro') ts.active++;
+    if (u.stage === 'churned' || u.stage === 'at-risk') ts.churned++;
+  }
+  const tradeRetention: AnalyticsData['tradeRetention'] = Array.from(tradeStats.entries())
+    .filter(([, v]) => v.total >= 2)
+    .map(([trade, v]) => ({ trade, total: v.total, active: v.active, churned: v.churned, retentionPct: v.total > 0 ? Math.round(v.active / v.total * 100) : 0 }))
+    .sort((a, b) => b.total - a.total);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -5612,6 +5764,17 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
       statuses: invoiceStatuses,
       quoteToInvoiceRate: totalQuotes > 0 ? Math.round(totalInvoices / totalQuotes * 1000) / 10 : 0,
     },
+    mrr: proCount * 2900,
+    cohortedFunnel: Array.from(cohortMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, data]) => ({ month, ...data })),
+    acquisition: {
+      platforms: platformCounts,
+      authMethods: authMethodCounts,
+    },
+    emailPipeline,
+    dropoffSegments,
+    tradeRetention,
     tradeTypes,
     jobTypes: Object.entries(jobTypesMap)
       .sort((a, b) => b[1] - a[1])
@@ -5664,7 +5827,7 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
   }).join('');
 
   // Quote status badges
-  const statusColors: Record<string, string> = { draft: '#64748b', sent: '#3b82f6', accepted: '#22c55e', rejected: '#ef4444', unknown: '#94a3b8' };
+  const statusColors: Record<string, string> = { draft: '#64748b', sent: '#3b82f6', accepted: '#22c55e', completed: '#10b981', rejected: '#ef4444', cancelled: '#f59e0b', unknown: '#94a3b8' };
   const statusHtml = Object.entries(d.quotes.statuses).map(([s, c]) =>
     `<span class="badge" style="background:${statusColors[s] || '#64748b'}">${escapeHtml(s)}: ${c}</span>`
   ).join(' ');
@@ -5686,6 +5849,74 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
       <span class="trend-label">${m.substring(2)}</span>
     </div>`;
   }).join('');
+
+  // Cohorted funnel heatmap
+  const cohortColor = (pct: number): string => {
+    if (pct >= 60) return 'rgba(34,197,94,0.35)';
+    if (pct >= 40) return 'rgba(34,197,94,0.2)';
+    if (pct >= 25) return 'rgba(234,179,8,0.25)';
+    if (pct >= 10) return 'rgba(251,146,60,0.2)';
+    return pct > 0 ? 'rgba(239,68,68,0.15)' : 'transparent';
+  };
+  const cohortCell = (count: number, total: number): string => {
+    if (total === 0) return '<td class="cohort-cell">-</td>';
+    const pct = Math.round(count / total * 100);
+    return `<td class="cohort-cell" style="background:${cohortColor(pct)}"><span class="cohort-count">${count}</span> <span class="cohort-pct">${pct}%</span></td>`;
+  };
+  const cohortRowsHtml = d.cohortedFunnel.map(c => {
+    const monthLabel = c.month.substring(2); // e.g. "25-10"
+    return `<tr>
+      <td style="color:#94a3b8;font-weight:500">${monthLabel}</td>
+      <td class="cohort-cell" style="background:rgba(59,130,246,0.2)"><span class="cohort-count">${c.signups}</span></td>
+      ${cohortCell(c.onboarded, c.signups)}
+      ${cohortCell(c.createdQuote, c.signups)}
+      ${cohortCell(c.created5Plus, c.signups)}
+      ${cohortCell(c.invoiced, c.signups)}
+      ${cohortCell(c.pro, c.signups)}
+    </tr>`;
+  }).join('');
+
+  // Acquisition bars
+  const platformTotal = Object.values(d.acquisition.platforms).reduce((a, b) => a + b, 0) || 1;
+  const platformColors: Record<string, string> = { ios: '#007AFF', android: '#3DDC84', web: '#f97316' };
+  const platformBarsHtml = Object.entries(d.acquisition.platforms)
+    .sort((a, b) => b[1] - a[1])
+    .map(([p, c]) => {
+      const pct = Math.max((c / platformTotal) * 100, 3);
+      return `<div class="acq-row">
+        <span class="acq-label">${escapeHtml(p.charAt(0).toUpperCase() + p.slice(1))}</span>
+        <div class="acq-bar-wrap"><div class="acq-bar" style="width:${pct}%;background:${platformColors[p] || '#64748b'}">${c} (${Math.round(c / platformTotal * 100)}%)</div></div>
+      </div>`;
+    }).join('');
+
+  const authTotal = Object.values(d.acquisition.authMethods).reduce((a, b) => a + b, 0) || 1;
+  const authColors: Record<string, string> = { email: '#64748b', google: '#4285F4', apple: '#f8fafc' };
+  const authBarsHtml = Object.entries(d.acquisition.authMethods)
+    .sort((a, b) => b[1] - a[1])
+    .map(([m, c]) => {
+      const pct = Math.max((c / authTotal) * 100, 3);
+      return `<div class="acq-row">
+        <span class="acq-label">${escapeHtml(m.charAt(0).toUpperCase() + m.slice(1))}</span>
+        <div class="acq-bar-wrap"><div class="acq-bar" style="width:${pct}%;background:${authColors[m] || '#64748b'}">${c} (${Math.round(c / authTotal * 100)}%)</div></div>
+      </div>`;
+    }).join('');
+
+  // Email pipeline
+  const ep = d.emailPipeline;
+  const pipelineSteps = [
+    { label: 'Welcome', count: ep.welcome, color: '#3b82f6' },
+    { label: 'Tip 1', count: ep.onboardingTip1, color: '#8b5cf6' },
+    { label: 'Tip 2', count: ep.onboardingTip2, color: '#a855f7' },
+    { label: 'Tip 3', count: ep.onboardingTip3, color: '#c084fc' },
+    { label: 'Re-engage', count: ep.reEngagement, color: '#f59e0b' },
+    { label: 'Follow-up', count: ep.quoteFollowUp, color: '#22c55e' },
+  ];
+  const pipelineHtml = pipelineSteps.map((s, i) =>
+    `<div class="pipe-step">
+      <div class="pipe-box" style="border-color:${s.color}"><div class="pipe-count" style="color:${s.color}">${s.count}</div><div class="pipe-label">${s.label}</div></div>
+      ${i < pipelineSteps.length - 1 ? '<div class="pipe-arrow">&#8594;</div>' : ''}
+    </div>`
+  ).join('');
 
   // Referrals section
   const referralsKpiHtml = `
@@ -5719,20 +5950,80 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
       </tr>`).join('')
     : '<tr><td colspan="4" class="muted" style="text-align:center">No referrals yet</td></tr>';
 
-  // Users table
-  const usersRowsHtml = d.users.map(u => {
-    const proTag = u.isPro ? '<span class="badge pro">PRO</span>' : '<span class="badge free">Free</span>';
+  // Stage colors
+  const stageColors: Record<string, string> = { new: '#3b82f6', onboarding: '#a855f7', active: '#22c55e', pro: '#f97316', 'at-risk': '#eab308', churned: '#ef4444' };
+
+  // Drop-off segments
+  const segmentColors = ['#3b82f6', '#a855f7', '#f59e0b', '#ef4444', '#22c55e', '#eab308'];
+  const dropoffHtml = d.dropoffSegments.map((seg, i) => {
+    const color = segmentColors[i % segmentColors.length];
+    const emailList = seg.emails.join(', ');
+    return `<div class="segment-card" style="border-left:3px solid ${color}">
+      <div class="seg-header">
+        <div>
+          <div class="seg-name">${escapeHtml(seg.name)} <span class="seg-count">${seg.count}</span></div>
+          <div class="seg-desc">${escapeHtml(seg.description)}</div>
+        </div>
+        <button class="copy-btn" onclick="copyEmails(this, '${escapeHtml(emailList).replace(/'/g, '\\&#39;')}')" title="Copy emails">Copy Emails</button>
+      </div>
+      ${seg.count > 0 ? `<div class="seg-emails">${seg.emails.map(e => `<span class="seg-email">${escapeHtml(e)}</span>`).join('')}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  // Trade retention
+  const tradeRetHtml = d.tradeRetention.map(t => {
+    const retColor = t.retentionPct >= 30 ? '#22c55e' : t.retentionPct >= 15 ? '#eab308' : '#ef4444';
     return `<tr>
+      <td>${escapeHtml(t.trade)}</td>
+      <td class="num">${t.total}</td>
+      <td class="num" style="color:#22c55e">${t.active}</td>
+      <td class="num" style="color:#ef4444">${t.churned}</td>
+      <td class="num"><span style="color:${retColor};font-weight:600">${t.retentionPct}%</span></td>
+    </tr>`;
+  }).join('');
+
+  // Users table — expandable rows with quote detail
+  const usersRowsHtml = d.users.map((u, idx) => {
+    const stageColor = stageColors[u.stage] || '#64748b';
+    const jobsList = u.quoteJobs.length > 0 ? u.quoteJobs.map(j => `<span class="job-tag">${escapeHtml(j)}</span>`).join('') : '<span class="muted">-</span>';
+    const daysAgo = u.daysSinceLogin;
+    const daysColor = daysAgo <= 7 ? '#22c55e' : daysAgo <= 30 ? '#eab308' : '#ef4444';
+    return `<tr class="user-row" data-stage="${escapeHtml(u.stage)}" data-idx="${idx}" onclick="toggleDetail(${idx})">
       <td>${escapeHtml(u.email)}</td>
       <td>${escapeHtml(u.businessName)}</td>
       <td>${escapeHtml(u.tradeType)}</td>
       <td class="num">${u.quotes}</td>
-      <td class="num">${u.invoices}</td>
-      <td>${proTag}</td>
+      <td class="num">${u.sentQuotes}/${u.acceptedQuotes}</td>
+      <td><span class="badge" style="background:${stageColor}">${escapeHtml(u.stage)}</span></td>
+      <td style="color:${daysColor}">${daysAgo}d ago</td>
       <td>${u.signupDate}</td>
-      <td>${u.lastLogin}</td>
+    </tr>
+    <tr class="detail-row" id="detail-${idx}" style="display:none">
+      <td colspan="8" style="padding:12px 16px;background:#0f172a;border-left:3px solid ${stageColor}">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;font-size:12px">
+          <div>
+            <div class="muted" style="margin-bottom:4px">PLATFORM / AUTH</div>
+            <div>${escapeHtml(u.platform || 'unknown')} / ${escapeHtml(u.authMethod || 'unknown')}</div>
+          </div>
+          <div>
+            <div class="muted" style="margin-bottom:4px">QUOTE TIMELINE</div>
+            <div>First: ${u.firstQuoteDate || 'never'} | Last: ${u.lastQuoteDate || 'never'}</div>
+          </div>
+          <div>
+            <div class="muted" style="margin-bottom:4px">AVG QUOTE VALUE</div>
+            <div>${u.avgQuoteValue > 0 ? '$' + u.avgQuoteValue.toLocaleString() : '-'}</div>
+          </div>
+        </div>
+        <div style="margin-top:8px;font-size:12px">
+          <span class="muted">JOBS QUOTED:</span> ${jobsList}
+        </div>
+      </td>
     </tr>`;
   }).join('');
+
+  // Stage counts for filter buttons
+  const stageCounts: Record<string, number> = {};
+  d.users.forEach(u => { stageCounts[u.stage] = (stageCounts[u.stage] || 0) + 1; });
 
   // Recent quotes table
   const recentRowsHtml = d.recentQuotes.slice(0, 20).map(q => {
@@ -5752,10 +6043,25 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
     `<div class="job-row"><span class="job-name">${escapeHtml(j.name)}</span><span class="job-count">${j.count}x</span></div>`
   ).join('');
 
-  // Cancellation reasons
-  const cancelHtml = d.cancellations.length > 0
-    ? d.cancellations.map(c => `<div class="cancel-row">${escapeHtml(c.reason)}${c.date ? ' <span class="muted">(' + c.date + ')</span>' : ''}</div>`).join('')
+  // Cancellation table
+  const cancelTableHtml = d.cancellations.length > 0
+    ? `<div class="table-wrap"><table>
+        <thead><tr><th>Date</th><th>Email</th><th>Reason</th><th>Feedback</th></tr></thead>
+        <tbody>${d.cancellations.map(c => `<tr>
+          <td>${c.date || '-'}</td>
+          <td>${escapeHtml(c.email || '-')}</td>
+          <td><span class="badge" style="background:#ef4444">${escapeHtml(c.reason)}</span></td>
+          <td style="white-space:normal;max-width:300px;color:#94a3b8">${escapeHtml(c.feedback) || '<span class="muted">-</span>'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`
     : '<div class="muted">No cancellations</div>';
+
+  // Stage filter buttons HTML
+  const stageFilterHtml = ['all', 'new', 'onboarding', 'active', 'pro', 'at-risk', 'churned'].map(s => {
+    const count = s === 'all' ? d.users.length : (stageCounts[s] || 0);
+    const color = s === 'all' ? '#64748b' : (stageColors[s] || '#64748b');
+    return `<button class="stage-btn${s === 'all' ? ' active' : ''}" data-filter="${s}" style="--btn-color:${color}">${s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)} (${count})</button>`;
+  }).join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -5770,49 +6076,47 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
       background: #0f172a;
       color: #f8fafc;
       padding: 20px;
+      padding-top: 60px;
       line-height: 1.5;
     }
+
+    /* Sticky nav */
+    .topnav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+      background: #0f172a; border-bottom: 1px solid #334155;
+      padding: 10px 20px; display: flex; gap: 16px; overflow-x: auto;
+      font-size: 12px; -webkit-overflow-scrolling: touch;
+    }
+    .topnav a { color: #94a3b8; text-decoration: none; white-space: nowrap; padding: 4px 0; }
+    .topnav a:hover { color: #f97316; }
+
     .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-      flex-wrap: wrap;
-      gap: 12px;
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
     }
     .header h1 { font-size: 24px; color: #f97316; }
     .header .meta { color: #64748b; font-size: 13px; }
     .refresh-btn {
-      background: #1e293b;
-      border: 1px solid #334155;
-      color: #f8fafc;
-      padding: 8px 16px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 13px;
+      background: #1e293b; border: 1px solid #334155; color: #f8fafc;
+      padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
     }
     .refresh-btn:hover { border-color: #f97316; }
+
     .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 12px;
-      margin-bottom: 24px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px; margin-bottom: 24px;
     }
     .kpi {
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 12px;
-      padding: 16px;
-      text-align: center;
+      background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+      padding: 16px; text-align: center;
     }
     .kpi .value { font-size: 28px; font-weight: 700; color: #f97316; }
     .kpi .label { font-size: 12px; color: #94a3b8; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .kpi.highlight { border-color: #f97316; }
+
     .card {
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 20px;
+      background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+      padding: 20px; margin-bottom: 20px;
     }
     .card h2 { font-size: 16px; color: #f97316; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -5825,10 +6129,45 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
     .funnel-bar { background: linear-gradient(90deg, #f97316, #fb923c); height: 100%; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; min-width: 28px; color: #fff; }
     .funnel-pct { width: 40px; font-size: 13px; color: #64748b; }
 
+    /* Cohort heatmap */
+    .cohort-cell { padding: 6px 10px; text-align: center; border: 1px solid #334155; }
+    .cohort-count { font-weight: 600; color: #f8fafc; }
+    .cohort-pct { font-size: 10px; color: #94a3b8; margin-left: 2px; }
+
     /* Badges */
     .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; color: #fff; }
     .badge.pro { background: #f97316; }
     .badge.free { background: #334155; color: #94a3b8; }
+
+    /* Acquisition bars */
+    .acq-row { display: flex; align-items: center; margin-bottom: 8px; gap: 8px; }
+    .acq-label { width: 70px; font-size: 13px; color: #94a3b8; text-align: right; }
+    .acq-bar-wrap { flex: 1; background: #0f172a; border-radius: 6px; height: 28px; overflow: hidden; }
+    .acq-bar { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 10px; font-size: 12px; font-weight: 600; min-width: 40px; color: #fff; }
+
+    /* Email pipeline */
+    .pipeline { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding: 8px 0; }
+    .pipe-step { display: flex; align-items: center; gap: 4px; }
+    .pipe-box { border: 2px solid; border-radius: 10px; padding: 12px 16px; text-align: center; min-width: 80px; background: #0f172a; }
+    .pipe-count { font-size: 22px; font-weight: 700; }
+    .pipe-label { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    .pipe-arrow { color: #334155; font-size: 18px; }
+
+    /* Stage filter buttons */
+    .stage-filters { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+    .stage-btn {
+      background: #0f172a; border: 1px solid #334155; color: #94a3b8;
+      padding: 4px 12px; border-radius: 16px; cursor: pointer; font-size: 12px;
+      transition: all 0.15s;
+    }
+    .stage-btn:hover, .stage-btn.active { border-color: var(--btn-color); color: #f8fafc; background: color-mix(in srgb, var(--btn-color) 15%, #0f172a); }
+
+    /* Search */
+    .search-input {
+      width: 100%; padding: 8px 12px; background: #0f172a; border: 1px solid #334155;
+      border-radius: 8px; color: #f8fafc; font-size: 13px; margin-bottom: 12px; outline: none;
+    }
+    .search-input:focus { border-color: #f97316; }
 
     /* Trends */
     .trends-container { display: flex; gap: 4px; align-items: flex-end; height: 140px; padding-top: 10px; }
@@ -5853,15 +6192,62 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
     .job-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #0f172a; font-size: 13px; }
     .job-name { color: #cbd5e1; }
     .job-count { color: #f97316; font-weight: 600; }
-    .cancel-row { padding: 6px 0; border-bottom: 1px solid #0f172a; font-size: 13px; color: #cbd5e1; }
 
     .muted { color: #64748b; }
     .stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #0f172a; font-size: 13px; }
     .stat-label { color: #94a3b8; }
     .stat-value { color: #f8fafc; font-weight: 500; }
+
+    /* Platform badges */
+    .plat-badges { display: flex; gap: 8px; justify-content: center; margin-top: -12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .plat-badge { font-size: 11px; padding: 3px 10px; border-radius: 10px; font-weight: 500; }
+
+    /* Drop-off segments */
+    .segment-card {
+      background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+      padding: 14px 16px; margin-bottom: 10px;
+    }
+    .seg-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .seg-name { font-size: 14px; font-weight: 600; color: #f8fafc; }
+    .seg-count { font-size: 20px; font-weight: 700; color: #f97316; margin-left: 6px; }
+    .seg-desc { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .seg-emails { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+    .seg-email { font-size: 11px; padding: 2px 8px; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #94a3b8; }
+    .copy-btn {
+      background: #1e293b; border: 1px solid #334155; color: #94a3b8;
+      padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 11px;
+      white-space: nowrap; transition: all 0.15s;
+    }
+    .copy-btn:hover { border-color: #f97316; color: #f8fafc; }
+    .copy-btn.copied { background: #22c55e; border-color: #22c55e; color: #fff; }
+
+    /* Job tags */
+    .job-tag { display: inline-block; font-size: 11px; padding: 1px 8px; background: #334155; border-radius: 4px; color: #cbd5e1; margin: 1px 2px; }
+
+    /* Expandable user rows */
+    .user-row { cursor: pointer; }
+    .user-row:hover td { background: #0f172a; }
+    .detail-row td { border-bottom: 2px solid #334155; }
   </style>
 </head>
 <body>
+  <!-- Sticky Nav -->
+  <nav class="topnav">
+    <a href="#kpis">KPIs</a>
+    <a href="#cohorts">Cohorts</a>
+    <a href="#dropoff">Drop-off</a>
+    <a href="#trades">Trades</a>
+    <a href="#funnel">Funnel</a>
+    <a href="#acquisition">Acquisition</a>
+    <a href="#emails">Emails</a>
+    <a href="#trends">Trends</a>
+    <a href="#users">Users</a>
+    <a href="#quotes">Quotes</a>
+    <a href="#jobs">Jobs</a>
+    <a href="#cancellations">Cancellations</a>
+    <a href="#referrals">Referrals</a>
+  </nav>
+
   <div class="header">
     <div>
       <h1>QuoteMate Dashboard</h1>
@@ -5871,21 +6257,68 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
   </div>
 
   <!-- KPI Cards -->
-  <div class="kpi-grid">
+  <div id="kpis" class="kpi-grid">
     <div class="kpi"><div class="value">${d.funnel.totalSignups}</div><div class="label">Total Users</div></div>
     <div class="kpi"><div class="value">${d.retention.activeLastWeek}</div><div class="label">Active (7d)</div></div>
     <div class="kpi"><div class="value">${d.retention.activeLastMonth}</div><div class="label">Active (30d)</div></div>
     <div class="kpi"><div class="value">${d.quotes.total}</div><div class="label">Total Quotes</div></div>
     <div class="kpi"><div class="value">$${Math.round(d.quotes.totalValue).toLocaleString()}</div><div class="label">Total Quoted</div></div>
-    <div class="kpi"><div class="value">${d.funnel.proSubscribers}</div><div class="label">Pro Subs</div></div>
+    <div class="kpi highlight"><div class="value">${d.funnel.proSubscribers}</div><div class="label">Pro Subs</div></div>
+    <div class="kpi highlight"><div class="value">$${(d.mrr / 100).toFixed(0)}</div><div class="label">MRR</div></div>
     <div class="kpi"><div class="value">${d.invoices.total}</div><div class="label">Invoices</div></div>
     <div class="kpi"><div class="value">${d.retention.neverReturned}</div><div class="label">Never Returned</div></div>
   </div>
 
-  <!-- Funnel + Quote Stats -->
-  <div class="two-col">
+  <!-- Platform badges -->
+  <div class="plat-badges">
+    ${Object.entries(d.acquisition.platforms).sort((a, b) => b[1] - a[1]).map(([p, c]) =>
+      `<span class="plat-badge" style="background:${platformColors[p] || '#64748b'}30;color:${platformColors[p] || '#94a3b8'}">${p.toUpperCase()}: ${c}</span>`
+    ).join('')}
+    <span class="plat-badge" style="background:#33415530;color:#94a3b8">Emails: ${d.emailsSent}</span>
+    <span class="plat-badge" style="background:#33415530;color:#94a3b8">Acceptance Links: ${d.acceptanceLinksGenerated}</span>
+    <span class="plat-badge" style="background:#33415530;color:#94a3b8">Material Favs: ${d.quotes.favoritesSaved}</span>
+  </div>
+
+  <!-- Cohorted Funnel Heatmap -->
+  <div id="cohorts" class="card">
+    <h2>Conversion by Signup Month</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Month</th><th>Signups</th><th>Onboarded</th><th>1+ Quotes</th><th>5+ Quotes</th><th>Invoiced</th><th>Pro</th>
+        </tr></thead>
+        <tbody>${cohortRowsHtml}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Drop-off Analysis -->
+  <div id="dropoff" class="card">
+    <h2>Where Users Drop Off</h2>
+    ${dropoffHtml}
+  </div>
+
+  <!-- Trade Retention -->
+  <div id="trades" class="two-col">
     <div class="card">
-      <h2>Conversion Funnel</h2>
+      <h2>Retention by Trade</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Trade</th><th>Total</th><th>Active</th><th>Churned</th><th>Retention</th></tr></thead>
+          <tbody>${tradeRetHtml || '<tr><td colspan="5" class="muted" style="text-align:center">Not enough data</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Top Job Types</h2>
+      ${jobTypesHtml}
+    </div>
+  </div>
+
+  <!-- Funnel + Quote Stats -->
+  <div id="funnel" class="two-col">
+    <div class="card">
+      <h2>Overall Funnel</h2>
       ${funnelHtml}
     </div>
     <div class="card">
@@ -5902,8 +6335,32 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
     </div>
   </div>
 
+  <!-- Acquisition -->
+  <div id="acquisition" class="two-col">
+    <div class="card">
+      <h2>Platform Split</h2>
+      ${platformBarsHtml || '<div class="muted">No platform data yet</div>'}
+    </div>
+    <div class="card">
+      <h2>Auth Method</h2>
+      ${authBarsHtml || '<div class="muted">No auth data yet</div>'}
+    </div>
+  </div>
+
+  <!-- Email Pipeline -->
+  <div id="emails" class="card">
+    <h2>Automated Email Pipeline</h2>
+    <div class="pipeline">${pipelineHtml}</div>
+    <div style="margin-top:12px;display:flex;gap:12px;font-size:12px;color:#94a3b8">
+      <span>Total sent: <strong style="color:#f8fafc">${d.emailsSent}</strong></span>
+      ${Object.entries(d.emailCategories).map(([cat, count]) =>
+        `<span>${escapeHtml(cat)}: <strong style="color:#f8fafc">${count}</strong></span>`
+      ).join('')}
+    </div>
+  </div>
+
   <!-- Trends -->
-  <div class="card">
+  <div id="trends" class="card">
     <h2>Monthly Trends</h2>
     <div class="legend">
       <span><span class="legend-dot" style="background:#3b82f6"></span> Signups</span>
@@ -5912,8 +6369,41 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
     <div class="trends-container">${trendsHtml}</div>
   </div>
 
+  <!-- Users Table -->
+  <div id="users" class="card">
+    <h2>Users (${d.users.length})</h2>
+    <input type="text" id="userSearch" class="search-input" placeholder="Search by email, business, trade...">
+    <div class="stage-filters">${stageFilterHtml}</div>
+    <div class="table-wrap">
+      <table id="usersTable">
+        <thead><tr>
+          <th>Email</th><th>Business</th><th>Trade</th><th>Quotes</th><th>Sent/Won</th><th>Stage</th><th>Last Active</th><th>Signed Up</th>
+        </tr></thead>
+        <tbody>${usersRowsHtml}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Recent Quotes -->
+  <div id="quotes" class="card">
+    <h2>Recent Quotes</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Date</th><th>User</th><th>Total</th><th>Status</th><th>Job</th><th>Customer</th>
+        </tr></thead>
+        <tbody>${recentRowsHtml}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="cancellations" class="card">
+    <h2>Cancellations (${d.cancellations.length})</h2>
+    ${cancelTableHtml}
+  </div>
+
   <!-- Referrals & Affiliates -->
-  <div class="card">
+  <div id="referrals" class="card">
     <h2>Referrals & Affiliates</h2>
     ${referralsKpiHtml}
   </div>
@@ -5943,52 +6433,61 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
     </div>
   </div>
 
-  <!-- Users Table -->
-  <div class="card">
-    <h2>Users (${d.users.length})</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>Email</th><th>Business</th><th>Trade</th><th>Quotes</th><th>Invoices</th><th>Plan</th><th>Signed Up</th><th>Last Login</th>
-        </tr></thead>
-        <tbody>${usersRowsHtml}</tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Recent Quotes -->
-  <div class="card">
-    <h2>Recent Quotes</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>Date</th><th>User</th><th>Total</th><th>Status</th><th>Job</th><th>Customer</th>
-        </tr></thead>
-        <tbody>${recentRowsHtml}</tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="two-col">
-    <div class="card">
-      <h2>Top Job Types</h2>
-      ${jobTypesHtml}
-    </div>
-    <div class="card">
-      <h2>Cancellations (${d.cancellations.length})</h2>
-      ${cancelHtml}
-      <div style="margin-top: 16px">
-        <h2>Other Metrics</h2>
-        <div class="stat-row"><span class="stat-label">Acceptance Links</span><span class="stat-value">${d.acceptanceLinksGenerated}</span></div>
-        <div class="stat-row"><span class="stat-label">Emails Sent</span><span class="stat-value">${d.emailsSent}</span></div>
-        <div class="stat-row"><span class="stat-label">Material Favorites</span><span class="stat-value">${d.quotes.favoritesSaved}</span></div>
-      </div>
-    </div>
-  </div>
-
   <script>
     // Auto-refresh every 5 minutes
     setInterval(function() { location.reload(); }, 5 * 60 * 1000);
+
+    // Toggle user detail row
+    function toggleDetail(idx) {
+      var row = document.getElementById('detail-' + idx);
+      if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
+    }
+
+    // Copy emails to clipboard
+    function copyEmails(btn, emails) {
+      navigator.clipboard.writeText(emails).then(function() {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() { btn.textContent = 'Copy Emails'; btn.classList.remove('copied'); }, 2000);
+      });
+    }
+
+    // Filter user rows (handles user-row + detail-row pairs)
+    function filterUsers() {
+      var q = document.getElementById('userSearch').value.toLowerCase();
+      var activeFilter = document.querySelector('.stage-btn.active');
+      var stage = activeFilter ? activeFilter.getAttribute('data-filter') : 'all';
+      document.querySelectorAll('#usersTable tbody tr.user-row').forEach(function(row) {
+        var matchesSearch = !q || row.textContent.toLowerCase().includes(q);
+        var matchesStage = stage === 'all' || row.getAttribute('data-stage') === stage;
+        var show = matchesSearch && matchesStage;
+        row.style.display = show ? '' : 'none';
+        var idx = row.getAttribute('data-idx');
+        var detail = document.getElementById('detail-' + idx);
+        if (detail && !show) detail.style.display = 'none';
+      });
+    }
+
+    // User table search
+    document.getElementById('userSearch').addEventListener('input', filterUsers);
+
+    // Stage filter buttons
+    document.querySelectorAll('.stage-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.stage-btn').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        filterUsers();
+      });
+    });
+
+    // Smooth scroll for nav
+    document.querySelectorAll('.topnav a').forEach(function(a) {
+      a.addEventListener('click', function(e) {
+        e.preventDefault();
+        var target = document.querySelector(a.getAttribute('href'));
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
   </script>
 </body>
 </html>`;
