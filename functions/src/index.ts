@@ -4835,107 +4835,131 @@ export const unsubscribeEmail = functions.https.onRequest(async (req, res) => {
 
 /**
  * Scheduled: Onboarding drip emails
- * Runs daily, sends tips on day 1, 3, and 7 after signup
+ * Runs daily, sends tips on day 1, 2, 5, 10, and 14 after signup
  */
 export const sendOnboardingDrip = functions.pubsub
   .schedule('every day 09:00')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
-    const db = admin.firestore();
     const now = new Date();
+    const usersSnapshot = await db.collection('users').get();
+    let totalProcessed = 0;
+    let totalEligible = 0;
+    let totalSent = 0;
+    let totalErrors = 0;
 
-    // Get all users with email state
-    const emailStatesSnapshot = await db.collectionGroup('settings')
-      .where('signupAt', '!=', null)
-      .get();
-
-    for (const doc of emailStatesSnapshot.docs) {
-      // Only process emailState documents
-      if (doc.id !== 'emailState') continue;
-
-      const data = doc.data();
-      const signupAt = data.signupAt?.toDate?.() || new Date(data.signupAt);
-      const lastTip = data.lastOnboardingTip || 0;
-      const userId = doc.ref.parent.parent?.id;
-
-      if (!userId || lastTip >= 3) continue; // All tips sent
-
-      const daysSinceSignup = Math.floor((now.getTime() - signupAt.getTime()) / (1000 * 60 * 60 * 24));
-
-      let tipToSend = 0;
-      if (daysSinceSignup >= 7 && lastTip < 3) tipToSend = 3;
-      else if (daysSinceSignup >= 3 && lastTip < 2) tipToSend = 2;
-      else if (daysSinceSignup >= 1 && lastTip < 1) tipToSend = 1;
-
-      if (tipToSend === 0) continue;
-
-      const email = await getUserEmail(userId);
-      if (!email) continue;
-
-      let businessName = '';
+    for (const userDoc of usersSnapshot.docs) {
       try {
-        const settingsDoc = await db.doc(`users/${userId}/settings/business`).get();
-        businessName = settingsDoc.data()?.businessName || '';
-      } catch {}
+        const emailStateDoc = await userDoc.ref.collection('settings').doc('emailState').get();
+        const data = emailStateDoc.data();
+        if (!data?.signupAt) continue;
 
-      const sent = await sendOnboardingTipEmail(email, businessName, tipToSend, userId);
-      if (sent) {
-        await doc.ref.update({ lastOnboardingTip: tipToSend });
+        totalProcessed++;
+
+        const signupAt = data.signupAt?.toDate?.() || new Date(data.signupAt);
+        const lastTip = data.lastOnboardingTip || 0;
+        const userId = userDoc.id;
+
+        if (lastTip >= 5) continue; // All tips sent
+
+        const daysSinceSignup = Math.floor((now.getTime() - signupAt.getTime()) / (1000 * 60 * 60 * 24));
+
+        let tipToSend = 0;
+        if (daysSinceSignup >= 14 && lastTip < 5) tipToSend = 5;
+        else if (daysSinceSignup >= 10 && lastTip < 4) tipToSend = 4;
+        else if (daysSinceSignup >= 5 && lastTip < 3) tipToSend = 3;
+        else if (daysSinceSignup >= 2 && lastTip < 2) tipToSend = 2;
+        else if (daysSinceSignup >= 1 && lastTip < 1) tipToSend = 1;
+
+        if (tipToSend === 0) continue;
+
+        totalEligible++;
+
+        const email = await getUserEmail(userId);
+        if (!email) continue;
+
+        let businessName = '';
+        try {
+          const settingsDoc = await db.doc(`users/${userId}/settings/business`).get();
+          businessName = settingsDoc.data()?.businessName || '';
+        } catch {}
+
+        const sent = await sendOnboardingTipEmail(email, businessName, tipToSend, userId);
+        if (sent) {
+          await emailStateDoc.ref.set({ lastOnboardingTip: tipToSend }, { merge: true });
+          totalSent++;
+        }
+      } catch (error: any) {
+        totalErrors++;
+        functions.logger.error(`sendOnboardingDrip: error processing user ${userDoc.id}`, error?.message);
       }
     }
 
+    functions.logger.info(`sendOnboardingDrip: processed=${totalProcessed}, eligible=${totalEligible}, sent=${totalSent}, errors=${totalErrors}`);
   });
 
 /**
  * Scheduled: Re-engagement emails
- * Runs daily, targets users inactive for 14+ days
+ * Runs daily, targets users inactive for 7+ days
  */
 export const sendReEngagement = functions.pubsub
   .schedule('every day 10:00')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
-    const db = admin.firestore();
     const now = new Date();
-    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const twentyOneDaysAgo = new Date(now.getTime() - 21 * 24 * 60 * 60 * 1000);
+    const usersSnapshot = await db.collection('users').get();
+    let totalProcessed = 0;
+    let totalEligible = 0;
+    let totalSent = 0;
+    let totalErrors = 0;
 
-    // Get users who haven't been active in 14+ days
-    const emailStatesSnapshot = await db.collectionGroup('settings')
-      .where('lastActivityAt', '<', fourteenDaysAgo)
-      .get();
-
-    for (const doc of emailStatesSnapshot.docs) {
-      if (doc.id !== 'emailState') continue;
-
-      const data = doc.data();
-      const lastActivityAt = data.lastActivityAt?.toDate?.() || new Date(data.lastActivityAt);
-      const lastReEngagementAt = data.lastReEngagementAt?.toDate?.();
-      const userId = doc.ref.parent.parent?.id;
-
-      if (!userId) continue;
-
-      // Don't send if we already sent a re-engagement email in the last 30 days
-      if (lastReEngagementAt && lastReEngagementAt > thirtyDaysAgo) continue;
-
-      const daysSinceActive = Math.floor((now.getTime() - lastActivityAt.getTime()) / (1000 * 60 * 60 * 24));
-
-      const email = await getUserEmail(userId);
-      if (!email) continue;
-
-      let businessName = '';
+    for (const userDoc of usersSnapshot.docs) {
       try {
-        const settingsDoc = await db.doc(`users/${userId}/settings/business`).get();
-        businessName = settingsDoc.data()?.businessName || '';
-      } catch {}
+        const emailStateDoc = await userDoc.ref.collection('settings').doc('emailState').get();
+        const data = emailStateDoc.data();
+        if (!data?.lastActivityAt) continue;
 
-      const sent = await sendReEngagementEmail(email, businessName, daysSinceActive, userId);
-      if (sent) {
-        await doc.ref.update({
-          lastReEngagementAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        totalProcessed++;
+
+        const lastActivityAt = data.lastActivityAt?.toDate?.() || new Date(data.lastActivityAt);
+        const lastReEngagementAt = data.lastReEngagementAt?.toDate?.();
+        const userId = userDoc.id;
+
+        // Skip if active within the last 7 days
+        if (lastActivityAt >= sevenDaysAgo) continue;
+
+        // Don't send if we already sent a re-engagement email in the last 21 days
+        if (lastReEngagementAt && lastReEngagementAt > twentyOneDaysAgo) continue;
+
+        totalEligible++;
+
+        const daysSinceActive = Math.floor((now.getTime() - lastActivityAt.getTime()) / (1000 * 60 * 60 * 24));
+
+        const email = await getUserEmail(userId);
+        if (!email) continue;
+
+        let businessName = '';
+        try {
+          const settingsDoc = await db.doc(`users/${userId}/settings/business`).get();
+          businessName = settingsDoc.data()?.businessName || '';
+        } catch {}
+
+        const sent = await sendReEngagementEmail(email, businessName, daysSinceActive, userId);
+        if (sent) {
+          await emailStateDoc.ref.set({
+            lastReEngagementAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          totalSent++;
+        }
+      } catch (error: any) {
+        totalErrors++;
+        functions.logger.error(`sendReEngagement: error processing user ${userDoc.id}`, error?.message);
       }
     }
 
+    functions.logger.info(`sendReEngagement: processed=${totalProcessed}, eligible=${totalEligible}, sent=${totalSent}, errors=${totalErrors}`);
   });
 
 /**
@@ -5026,7 +5050,7 @@ export const quickFeedback = functions.https.onRequest(async (req, res) => {
   }
 
   // GET = initial one-tap rating click
-  const { userId, rating } = req.query as { userId?: string; rating?: string };
+  const { userId, rating, category: feedbackCategory } = req.query as { userId?: string; rating?: string; category?: string };
 
   const validRatings = ['great', 'okay', 'bad'];
   if (!userId || !rating || !validRatings.includes(rating)) {
@@ -5034,11 +5058,13 @@ export const quickFeedback = functions.https.onRequest(async (req, res) => {
     return;
   }
 
+  const categoryLabel = feedbackCategory === 're-engagement' ? 'Re-engagement' : 'First Quote Follow-Up';
+
   try {
     // Store the feedback and get the doc ID for the follow-up form
     const feedbackRef = await admin.firestore().collection('feedback').add({
       userId,
-      category: 'First Quote Follow-Up',
+      category: categoryLabel,
       feedback: `Quick rating: ${rating}`,
       rating,
       source: 'email-quick-feedback',

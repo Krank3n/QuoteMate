@@ -187,10 +187,12 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
   const apiKey = getBrevoApiKey();
 
   if (!apiKey) {
+    console.error('sendEmail: BREVO_API_KEY not configured');
     return false;
   }
 
   if (!to) {
+    console.warn('sendEmail: no recipient address provided');
     return false;
   }
 
@@ -198,6 +200,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
   if (userId && userId !== 'test') {
     const allowed = await canSendEmail(userId, category);
     if (!allowed) {
+      console.info(`sendEmail: user ${userId} opted out of ${category}`);
       return false;
     }
   }
@@ -212,6 +215,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
       },
       body: JSON.stringify({
         sender: SENDER,
+        replyTo: { email: 'thomas.andrew.hansen@gmail.com' },
         to: [{ email: to }],
         subject,
         htmlContent,
@@ -221,7 +225,8 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
     });
 
     if (!response.ok) {
-      await response.text();
+      const errorBody = await response.text();
+      console.error(`sendEmail: Brevo API error ${response.status} for "${subject}" to ${to}: ${errorBody}`);
       return false;
     }
 
@@ -232,6 +237,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
 
     return true;
   } catch (error: any) {
+    console.error(`sendEmail: unexpected error for "${subject}" to ${to}:`, error?.message);
     return false;
   }
 }
@@ -256,6 +262,7 @@ async function logEmail(
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
       });
   } catch (error) {
+    console.error('logEmail: failed to write email log', error);
   }
 }
 
@@ -623,6 +630,39 @@ export function sendReEngagementEmail(
     `)}
 
     ${ctaButton('Create a Quote')}
+
+    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 8px;text-align:center;">
+      Or let us know how you're going &mdash; one tap:
+    </p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:12px 0 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:0 6px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=great&category=re-engagement" target="_blank" style="display:inline-block;background:#064e3b;border:2px solid #00c897;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                  <span style="font-size:28px;display:block;margin:0 0 4px;">&#128170;</span>
+                  <span style="color:#00c897;font-size:12px;font-weight:700;">Still keen</span>
+                </a>
+              </td>
+              <td style="padding:0 6px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=okay&category=re-engagement" target="_blank" style="display:inline-block;background:#1e293b;border:2px solid #f59e0b;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                  <span style="font-size:28px;display:block;margin:0 0 4px;">&#128528;</span>
+                  <span style="color:#f59e0b;font-size:12px;font-weight:700;">Hit a snag</span>
+                </a>
+              </td>
+              <td style="padding:0 6px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=bad&category=re-engagement" target="_blank" style="display:inline-block;background:#1e293b;border:2px solid #ef4444;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                  <span style="font-size:28px;display:block;margin:0 0 4px;">&#128075;</span>
+                  <span style="color:#ef4444;font-size:12px;font-weight:700;">Not for me</span>
+                </a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
   `, { unsubscribeUrl, preheader: `It's been ${daysSinceLastActive} days. Your next job is just a tap away.` });
 
   return sendEmail({
@@ -687,6 +727,52 @@ export function sendOnboardingTipEmail(
         </p>
       `,
     },
+    4: {
+      subject: 'Pro tip: Send your quote to a client in one tap',
+      emoji: '&#128232;',
+      heading: 'Send it to win it',
+      preheader: 'Your quotes look professional. Send one to a client and see how easy it is.',
+      body: `
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
+          A quote sitting in drafts doesn't win jobs. Sending one takes <strong style="color:#f8fafc;">10 seconds</strong>:
+        </p>
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
+          &#9312; Open your quote and tap <strong style="color:#f8fafc;">Send</strong>
+        </p>
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
+          &#9313; Enter your client's email or mobile
+        </p>
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
+          &#9314; They get a <strong style="color:#f8fafc;">professional acceptance link</strong>
+        </p>
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+          &#9315; You get an <strong style="color:#f8fafc;">instant notification</strong> when they respond
+        </p>
+      `,
+    },
+    5: {
+      subject: "You've got the hang of it — here's what Pro unlocks",
+      emoji: '&#11088;',
+      heading: 'Ready to go Pro?',
+      preheader: 'Invoicing, unlimited quotes, custom branding, and payment tracking — all yours with Pro.',
+      body: `
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+          You've been using QuoteMate like a pro already. Here's what upgrading unlocks:
+        </p>
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
+          &#128462; <strong style="color:#f8fafc;">Invoicing</strong> &mdash; turn accepted quotes into invoices in one tap
+        </p>
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
+          &#9854; <strong style="color:#f8fafc;">Unlimited quotes</strong> &mdash; no monthly cap holding you back
+        </p>
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
+          &#127912; <strong style="color:#f8fafc;">Custom branding</strong> &mdash; your logo on every quote and invoice
+        </p>
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+          &#128179; <strong style="color:#f8fafc;">Payment tracking</strong> &mdash; know who's paid and who hasn't
+        </p>
+      `,
+    },
   };
 
   const tip = tips[tipNumber];
@@ -697,7 +783,7 @@ export function sendOnboardingTipEmail(
       <div style="background:#1e293b;border:2px solid #334155;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 12px;">
         ${tip.emoji}
       </div>
-      ${badge(`TIP ${tipNumber} OF 3`, '#1e293b', '#94a3b8')}
+      ${badge(`TIP ${tipNumber} OF 5`, '#1e293b', '#94a3b8')}
     </div>
     <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 20px;text-align:center;line-height:1.3;">
       ${tip.heading}
