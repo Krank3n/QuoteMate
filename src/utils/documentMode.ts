@@ -39,6 +39,9 @@ export type UnifiedDocument = (Quote | Invoice) & {
   gst: number;
   total: number;
   notes?: string;
+  // Quote-only fields accessed by shared screens (e.g. LaborMarkupScreen)
+  depositPercentage?: number;
+  requireDeposit?: boolean;
 };
 
 /**

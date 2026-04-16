@@ -29,6 +29,7 @@ export const theme = {
     // Text colors - Light for dark backgrounds
     text: '#E2E8F0',
     textDark: '#F1F5F9',
+    textSecondary: '#94A3B8',
     textMuted: '#94A3B8',
     onSurface: '#CBD5E1',
 
