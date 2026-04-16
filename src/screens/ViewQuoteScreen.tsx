@@ -62,8 +62,9 @@ export function ViewQuoteScreen() {
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [isEditingNumber, setIsEditingNumber] = useState(false);
   const [quoteNumber, setQuoteNumber] = useState('');
-  const [squareConnected, setSquareConnected] = useState(false);
+  const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
   const [squareDisconnectedReason, setSquareDisconnectedReason] = useState<string | null>(null);
+  const [showConnectSquareModal, setShowConnectSquareModal] = useState(false);
   const [takePaymentVisible, setTakePaymentVisible] = useState(false);
   const [takePaymentError, setTakePaymentError] = useState<string | null>(null);
 
@@ -309,25 +310,26 @@ export function ViewQuoteScreen() {
         ]}
       >
         {(() => {
-          const requireDeposit = (quote as any).requireDeposit === true;
-          const depositAmount = Number((quote as any).depositAmount) || 0;
           const depositPaid = Number((quote as any).depositPaid) || 0;
-          const depositOutstanding = requireDeposit && depositAmount > depositPaid;
-          if (depositOutstanding && squareConnected) {
-            return (
-              <Button
-                mode="contained"
-                onPress={() => setTakePaymentVisible(true)}
-                style={styles.outlinedButton}
-                contentStyle={styles.buttonContent}
-                icon="credit-card-scan"
-                buttonColor={colors.primary}
-              >
-                {compactLabels ? 'Pay' : 'Take Payment'}
-              </Button>
-            );
-          }
-          return null;
+          if (depositPaid >= quote.total) return null;
+          return (
+            <Button
+              mode="contained"
+              onPress={() => {
+                if (squareConnected === false) {
+                  setShowConnectSquareModal(true);
+                } else {
+                  setTakePaymentVisible(true);
+                }
+              }}
+              style={styles.outlinedButton}
+              contentStyle={styles.buttonContent}
+              icon="credit-card-scan"
+              buttonColor={colors.primary}
+            >
+              {compactLabels ? 'Pay' : 'Take Payment'}
+            </Button>
+          );
         })()}
         {canConvertToInvoice ? (
           <>
@@ -394,6 +396,23 @@ export function ViewQuoteScreen() {
         message={takePaymentError || ''}
         primaryButtonText="OK"
         primaryButtonAction={() => setTakePaymentError(null)}
+        showConfetti={false}
+      />
+
+      <AlertModal
+        visible={showConnectSquareModal}
+        onDismiss={() => setShowConnectSquareModal(false)}
+        type="info"
+        icon="credit-card-outline"
+        title="Connect Square"
+        message="Connect your Square account to accept card payments on-site."
+        primaryButtonText="Connect Square"
+        primaryButtonAction={() => {
+          setShowConnectSquareModal(false);
+          navigation.navigate('SquareIntegration' as never);
+        }}
+        secondaryButtonText="Not now"
+        secondaryButtonAction={() => setShowConnectSquareModal(false)}
         showConfetti={false}
       />
     </View>

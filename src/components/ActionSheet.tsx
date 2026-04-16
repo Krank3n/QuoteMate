@@ -69,7 +69,7 @@ export function ActionSheet({
   const handleSelect = (option: ActionSheetOption) => {
     selectionTap();
     onDismiss();
-    setTimeout(() => option.onPress(), 100);
+    setTimeout(() => option.onPress(), 300);
   };
 
   const footer = (

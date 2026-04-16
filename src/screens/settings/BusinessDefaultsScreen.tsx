@@ -202,11 +202,11 @@ export function BusinessDefaultsScreen() {
           </Surface>
 
           <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Deposits &amp; Card Fees</Title>
+            <Title style={styles.sectionTitle}>Deposits &amp; Card Fees (Square)</Title>
             <Text style={styles.helperText}>
               {squareConnected === false
-                ? 'Connect Square to use deposits and card surcharges.'
-                : 'Requires Square. Both can be overridden per quote.'}
+                ? 'Connect Square to accept card payments, deposits, and surcharges.'
+                : 'Powered by Square. Both can be overridden per quote.'}
             </Text>
 
             <View style={styles.toggleRow}>
