@@ -4843,15 +4843,16 @@ export const sendOnboardingDrip = functions.pubsub
   .timeZone('Australia/Sydney')
   .onRun(async () => {
     const now = new Date();
-    const usersSnapshot = await db.collection('users').get();
+    const authResult = await admin.auth().listUsers(1000);
     let totalProcessed = 0;
     let totalEligible = 0;
     let totalSent = 0;
     let totalErrors = 0;
 
-    for (const userDoc of usersSnapshot.docs) {
+    for (const userRecord of authResult.users) {
       try {
-        const emailStateDoc = await userDoc.ref.collection('settings').doc('emailState').get();
+        const userId = userRecord.uid;
+        const emailStateDoc = await db.doc(`users/${userId}/settings/emailState`).get();
         const data = emailStateDoc.data();
         if (!data?.signupAt) continue;
 
@@ -4859,7 +4860,6 @@ export const sendOnboardingDrip = functions.pubsub
 
         const signupAt = data.signupAt?.toDate?.() || new Date(data.signupAt);
         const lastTip = data.lastOnboardingTip || 0;
-        const userId = userDoc.id;
 
         if (lastTip >= 5) continue; // All tips sent
 
@@ -4876,7 +4876,7 @@ export const sendOnboardingDrip = functions.pubsub
 
         totalEligible++;
 
-        const email = await getUserEmail(userId);
+        const email = userRecord.email;
         if (!email) continue;
 
         let businessName = '';
@@ -4892,7 +4892,7 @@ export const sendOnboardingDrip = functions.pubsub
         }
       } catch (error: any) {
         totalErrors++;
-        functions.logger.error(`sendOnboardingDrip: error processing user ${userDoc.id}`, error?.message);
+        functions.logger.error(`sendOnboardingDrip: error processing user ${userRecord.uid}`, error?.message);
       }
     }
 
@@ -4910,15 +4910,16 @@ export const sendReEngagement = functions.pubsub
     const now = new Date();
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const twentyOneDaysAgo = new Date(now.getTime() - 21 * 24 * 60 * 60 * 1000);
-    const usersSnapshot = await db.collection('users').get();
+    const authResult = await admin.auth().listUsers(1000);
     let totalProcessed = 0;
     let totalEligible = 0;
     let totalSent = 0;
     let totalErrors = 0;
 
-    for (const userDoc of usersSnapshot.docs) {
+    for (const userRecord of authResult.users) {
       try {
-        const emailStateDoc = await userDoc.ref.collection('settings').doc('emailState').get();
+        const userId = userRecord.uid;
+        const emailStateDoc = await db.doc(`users/${userId}/settings/emailState`).get();
         const data = emailStateDoc.data();
         if (!data?.lastActivityAt) continue;
 
@@ -4926,7 +4927,6 @@ export const sendReEngagement = functions.pubsub
 
         const lastActivityAt = data.lastActivityAt?.toDate?.() || new Date(data.lastActivityAt);
         const lastReEngagementAt = data.lastReEngagementAt?.toDate?.();
-        const userId = userDoc.id;
 
         // Skip if active within the last 7 days
         if (lastActivityAt >= sevenDaysAgo) continue;
@@ -4938,7 +4938,7 @@ export const sendReEngagement = functions.pubsub
 
         const daysSinceActive = Math.floor((now.getTime() - lastActivityAt.getTime()) / (1000 * 60 * 60 * 24));
 
-        const email = await getUserEmail(userId);
+        const email = userRecord.email;
         if (!email) continue;
 
         let businessName = '';
@@ -4956,7 +4956,7 @@ export const sendReEngagement = functions.pubsub
         }
       } catch (error: any) {
         totalErrors++;
-        functions.logger.error(`sendReEngagement: error processing user ${userDoc.id}`, error?.message);
+        functions.logger.error(`sendReEngagement: error processing user ${userRecord.uid}`, error?.message);
       }
     }
 
@@ -5179,6 +5179,67 @@ export const testQuoteFollowUpEmail = functions.https.onRequest(async (req, res)
       'test'
     );
     res.json({ success: sent });
+  });
+});
+
+/**
+ * Test endpoint: send all new email types to admin for review
+ */
+export const testAllEmails = functions.https.onRequest(async (req, res) => {
+  corsHandler(req, res, async () => {
+    const to = 'thomas.andrew.hansen@gmail.com';
+    const results: Record<string, boolean> = {};
+
+    results.tip1 = await sendOnboardingTipEmail(to, 'HansenDev', 1, 'test');
+    results.tip2 = await sendOnboardingTipEmail(to, 'HansenDev', 2, 'test');
+    results.tip3 = await sendOnboardingTipEmail(to, 'HansenDev', 3, 'test');
+    results.tip4 = await sendOnboardingTipEmail(to, 'HansenDev', 4, 'test');
+    results.tip5 = await sendOnboardingTipEmail(to, 'HansenDev', 5, 'test');
+    results.reEngagement = await sendReEngagementEmail(to, 'HansenDev', 12, 'test');
+    results.draftNudge = await sendDraftNudgeEmail(to, 'HansenDev', [
+      { customerName: 'Matt Jellicoe', jobName: 'Fence Installation', total: 1632, daysOld: 4 },
+      { customerName: 'Dawn', jobName: 'Driveway Concreting', total: 7506, daysOld: 2 },
+    ], 2, 'test');
+
+    res.json({ results });
+  });
+});
+
+/**
+ * One-off: backfill emailState for existing users missing it
+ */
+export const backfillEmailState = functions.https.onRequest(async (req, res) => {
+  corsHandler(req, res, async () => {
+    const firestore = admin.firestore();
+    const authResult = await admin.auth().listUsers(1000);
+    let created = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    for (const userRecord of authResult.users) {
+      try {
+        const emailStateRef = firestore.doc(`users/${userRecord.uid}/settings/emailState`);
+        const emailStateDoc = await emailStateRef.get();
+        if (emailStateDoc.exists && emailStateDoc.data()?.signupAt) {
+          skipped++;
+          continue;
+        }
+
+        const signupAt = new Date(userRecord.metadata.creationTime);
+
+        await emailStateRef.set({
+          signupAt: admin.firestore.Timestamp.fromDate(signupAt),
+          lastOnboardingTip: 0,
+          lastActivityAt: admin.firestore.Timestamp.fromDate(signupAt),
+        }, { merge: true });
+        created++;
+      } catch (err: any) {
+        errors++;
+        functions.logger.error(`backfillEmailState error for ${userRecord.uid}`, err?.message);
+      }
+    }
+
+    res.json({ created, skipped, errors, total: authResult.users.length });
   });
 });
 

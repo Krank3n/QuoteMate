@@ -623,7 +623,7 @@ export function sendReEngagementEmail(
         <td style="padding:12px 0;">
           <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">Here's what you can do in 60 seconds:</p>
           ${featureBullet('&#127908;', 'Describe a job with <strong style="color:#f8fafc;">voice</strong> &mdash; no typing needed')}
-          ${featureBullet('&#128176;', 'Get <strong style="color:#f8fafc;">real-time prices</strong> from Bunnings and more')}
+          ${featureBullet('&#128176;', 'Get <strong style="color:#f8fafc;">real-time prices</strong> from major hardware stores')}
           ${featureBullet('&#128232;', 'Send quotes clients can <strong style="color:#f8fafc;">accept with one click</strong>')}
         </td>
       </tr>
@@ -703,10 +703,10 @@ export function sendOnboardingTipEmail(
       subject: 'Pro tip: Real material prices, automatically',
       emoji: '&#128178;',
       heading: 'No more guessing material costs',
-      preheader: 'QuoteMate pulls real prices from Bunnings and other stores automatically.',
+      preheader: 'QuoteMate pulls real prices from major hardware stores automatically.',
       body: `
         <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-          QuoteMate automatically looks up <strong style="color:#f8fafc;">real prices</strong> from Bunnings and other major hardware stores. No more manual price checks.
+          QuoteMate automatically looks up <strong style="color:#f8fafc;">real prices</strong> from major hardware stores. No more manual price checks.
         </p>
         <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
           Head to <strong style="color:#f8fafc;">Settings &rarr; Trade & Pricing</strong> and enable your preferred stores for the most accurate pricing in your area.

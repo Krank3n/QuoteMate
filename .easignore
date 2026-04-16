@@ -1,9 +1,9 @@
-# Exclude local build artifacts from EAS uploads
-android/app/build/
-android/build/
-android/.gradle/
-ios/build/
-ios/Pods/
+# Exclude native directories — forces EAS to run a clean expo prebuild
+/ios/
+/android/
+
+# Firebase functions not needed for mobile builds
+/functions/
 
 # Exclude large local files
 *.aab
