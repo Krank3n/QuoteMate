@@ -720,7 +720,7 @@ export function MaterialsListScreen() {
       const jobDescription = currentQuote.job.description;
 
       // Prepare trade context from business settings (supports multi-select)
-      const tradeContext = businessSettings ? (() => {
+      let tradeContext = businessSettings ? (() => {
         let categoryNames: string[] = [];
         let nicheNames: string[] = [];
         let allSuggestedMaterials: string[] = [];
@@ -774,6 +774,26 @@ export function MaterialsListScreen() {
           selectedStore: businessSettings.selectedStore || 'bunnings',
         };
       })() : undefined;
+
+      // Merge template context into tradeContext when available (from AI-guided templates)
+      const templateCtx = (currentQuote as any).templateContext as {
+        templateName?: string;
+        promptQuestions?: string[];
+        aiContext?: string;
+        estimatedHoursRange?: { min: number; max: number };
+        suggestedMaterials?: string[];
+      } | undefined;
+      if (templateCtx) {
+        tradeContext = {
+          ...tradeContext,
+          templateName: templateCtx.templateName,
+          promptQuestions: templateCtx.promptQuestions,
+          aiContext: templateCtx.aiContext,
+          estimatedHoursRange: templateCtx.estimatedHoursRange,
+          suggestedMaterials: templateCtx.suggestedMaterials || tradeContext?.suggestedMaterials,
+          selectedStore: tradeContext?.selectedStore || 'bunnings',
+        };
+      }
 
       // Pass photo URLs for vision analysis if available (Pro feature)
       const quotePhotos = (currentQuote as any).photos;
