@@ -22,6 +22,7 @@ import {
 } from './tourDummyData';
 import { TourSkipModal } from './TourSkipModal';
 import { colors } from '../../theme';
+import { trackTourComplete } from '../../services/analyticsService';
 
 // ─── Shared refs for screens to call back into the controller ───
 // Using module-level refs avoids prop drilling through navigation
@@ -70,6 +71,7 @@ export function UnifiedTourController() {
 
     // Clean up in background
     await skipUnifiedTour();
+    trackTourComplete(true);
 
     // Brief pause so the message is readable
     setTimeout(() => {
@@ -87,6 +89,7 @@ export function UnifiedTourController() {
     setShowExitModal(true);
 
     await endUnifiedTour();
+    trackTourComplete(false);
 
     setTimeout(() => {
       setShowExitModal(false);

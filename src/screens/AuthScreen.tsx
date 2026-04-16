@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, Animated } from 'react-native';
 import { Text, TextInput, Button, Surface, Title, ActivityIndicator } from 'react-native-paper';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider, getAdditionalUserInfo } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -16,6 +16,7 @@ import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
+import { trackSignup } from '../services/analyticsService';
 
 // Needed for expo-auth-session to work properly
 WebBrowser.maybeCompleteAuthSession();
@@ -120,6 +121,7 @@ export function AuthScreen() {
       signInWithCredential(auth, credential)
         .then((result) => {
           saveRegistrationPlatform(result.user.uid, 'google');
+          if (getAdditionalUserInfo(result)?.isNewUser) trackSignup('google');
           // Keep loading state - App.tsx will handle navigation
         })
         .catch((error) => {
@@ -170,6 +172,7 @@ export function AuthScreen() {
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
       await saveRegistrationPlatform(result.user.uid, 'email');
+      trackSignup('email');
       // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       setError(getErrorMessage(err.code));
@@ -195,6 +198,7 @@ export function AuthScreen() {
         setIsProcessingOAuth(true);
         const result = await signInWithPopup(auth, provider);
         await saveRegistrationPlatform(result.user.uid, 'google');
+        if (getAdditionalUserInfo(result)?.isNewUser) trackSignup('google');
         // Keep loading state - App.tsx will handle navigation
       } else {
         // Mobile: Use expo-auth-session
@@ -256,6 +260,7 @@ export function AuthScreen() {
         });
         const appleResult = await signInWithCredential(auth, firebaseCredential);
         await saveRegistrationPlatform(appleResult.user.uid, 'apple');
+        if (getAdditionalUserInfo(appleResult)?.isNewUser) trackSignup('apple');
         // Keep loading state - App.tsx will handle navigation
       } else {
         throw new Error('No identity token returned from Apple');

@@ -37,6 +37,7 @@ import { BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { OnboardingProgress, OnboardingStep } from '../components/OnboardingProgress';
 import { CelebrationAnimation } from '../components/CelebrationAnimation';
+import { trackOnboardingComplete } from '../services/analyticsService';
 import {
   TRADE_CATEGORIES,
   getTradeCategoryById,
@@ -167,6 +168,7 @@ export function NewOnboardingScreen() {
       setIsLoading(true);
       await setBusinessSettings(settings);
       setIsLoading(false);
+      trackOnboardingComplete(currentStep);
 
       // Show success animation
       setShowSuccess(true);
@@ -368,6 +370,11 @@ export function NewOnboardingScreen() {
         )}
 
         <View style={styles.navigationRight}>
+          {currentStep === 1 && businessName.trim().length > 0 && (
+            <Button mode="text" onPress={handleComplete} style={styles.skipButton}>
+              Skip to first quote
+            </Button>
+          )}
           {currentStep === 3 && (
             <Button mode="text" onPress={handleSkip} style={styles.skipButton}>
               Skip

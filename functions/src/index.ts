@@ -4208,6 +4208,9 @@ function generateConfirmationPage(
       </div>`
         : ''
     }
+    <div style="margin-top:32px;padding-top:20px;border-top:1px solid #334155;">
+      <a href="https://quotemateapp.au" style="color:#64748b;font-size:12px;text-decoration:none;">Powered by <span style="color:#94a3b8;font-weight:600;">QuoteMate</span> &mdash; the fastest quoting app for tradies</a>
+    </div>
   </div>
 </body>
 </html>`;
@@ -4430,6 +4433,9 @@ function generateAcceptancePage(token: string): string {
           <p>Loading quote...</p>
         </div>
       </div>
+    </div>
+    <div style="text-align:center;margin-top:24px;">
+      <a href="https://quotemateapp.au" style="color:#64748b;font-size:12px;text-decoration:none;">Powered by <span style="color:#94a3b8;font-weight:600;">QuoteMate</span> &mdash; the fastest quoting app for tradies</a>
     </div>
   </div>
 

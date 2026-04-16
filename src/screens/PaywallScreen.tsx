@@ -24,6 +24,7 @@ import { auth } from '../config/firebase';
 import { WebContainer } from '../components/WebContainer';
 import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
 import { CancellationReasonModal } from '../components/CancellationReasonModal';
+import { trackPaywallShown, trackPaywallDismissed, trackPurchaseStarted, trackPurchaseComplete } from '../services/analyticsService';
 
 const PRO_NUDGES = [
   "Your quotes deserve the VIP treatment",
@@ -77,6 +78,8 @@ export function PaywallScreen() {
   const trialDaysRemaining = getTrialDaysRemaining();
 
   useEffect(() => {
+    trackPaywallShown();
+
     // Safety timeout: if loading takes more than 30s, stop the spinner
     const safetyTimeout = setTimeout(() => {
       setLoading(false);
@@ -207,6 +210,7 @@ export function PaywallScreen() {
                 new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
               );
               await billingService.finishTransaction(purchase);
+              trackPurchaseComplete(purchase.productId || selectedPlan);
               Alert.alert(
                 'Success!',
                 'Welcome to QuoteMate Pro! You now have unlimited quotes.',
@@ -246,7 +250,7 @@ export function PaywallScreen() {
   };
 
   const handleUpgrade = async () => {
-
+    trackPurchaseStarted(selectedPlan);
     setIsUpgrading(true);
     try {
       if (Platform.OS === 'ios') {
@@ -499,6 +503,7 @@ export function PaywallScreen() {
       const status = await stripeService.checkSubscriptionStatus(currentUser.uid);
 
       if (status.isPremium) {
+        trackPurchaseComplete(selectedPlan);
         // Update subscription status in Firestore and local storage
         const subscriptionStatus = {
           isPro: true,
@@ -757,7 +762,7 @@ export function PaywallScreen() {
           <Text style={styles.maybeLaterQuip}>{maybeLaterQuip}</Text>
           <Button
             mode="text"
-            onPress={() => navigation.goBack()}
+            onPress={() => { trackPaywallDismissed(); navigation.goBack(); }}
             style={styles.backButton}
             textColor={colors.textMuted}
           >

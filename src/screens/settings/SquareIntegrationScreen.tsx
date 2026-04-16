@@ -32,6 +32,7 @@ import { SquareReconnectBanner } from '../../components/SquareReconnectBanner';
 import * as squareService from '../../services/squareService';
 import type { SquareConnectionStatus } from '../../services/squareService';
 import { primeTapToPayOnDevice } from '../../services/squarePayments';
+import { trackSquareConnected } from '../../services/analyticsService';
 
 export function SquareIntegrationScreen() {
   const { subscriptionStatus } = useStore();
@@ -108,6 +109,7 @@ export function SquareIntegrationScreen() {
           if (status.connected) {
             setConnection(status);
             connected = true;
+            trackSquareConnected();
             break;
           }
         } catch {

@@ -293,9 +293,9 @@ export function DashboardScreen() {
   const [duplicateSuccessVisible, setDuplicateSuccessVisible] = useState(false);
   const [deleteDraftModalVisible, setDeleteDraftModalVisible] = useState(false);
 
-  // Auto-trigger unified tour for first-time users
+  // Auto-trigger unified tour for first-time users (skip if they already have quotes)
   useEffect(() => {
-    if (!hasSeenTour && !unifiedTourActive) {
+    if (!hasSeenTour && !unifiedTourActive && quotes.length === 0) {
       const timer = setTimeout(() => {
         startUnifiedTour();
         setTourActive(true);

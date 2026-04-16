@@ -12,6 +12,7 @@ import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quot
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { firestoreService } from '../services/firestoreService';
 import { auth } from '../config/firebase';
+import { trackFirstQuoteCreated, trackFirstQuoteSent } from '../services/analyticsService';
 
 /**
  * A user-visible record of the last sync failure. Populated by the saveDraft /
@@ -347,6 +348,7 @@ export const useStore = create<AppState>((set, get) => ({
       });
 
       const existingIndex = quotes.findIndex((q) => q.id === quote.id);
+      const isFirstQuote = existingIndex < 0 && quotes.length === 0;
       let updatedQuotes: Quote[];
       if (existingIndex >= 0) {
         updatedQuotes = [...quotes];
@@ -354,6 +356,7 @@ export const useStore = create<AppState>((set, get) => ({
       } else {
         updatedQuotes = [...quotes, calculatedQuote];
       }
+      if (isFirstQuote) trackFirstQuoteCreated();
 
       // Save to AsyncStorage
       await AsyncStorage.setItem(
@@ -515,6 +518,11 @@ export const useStore = create<AppState>((set, get) => ({
 
       // Update quotes in state but keep currentQuote (will be cleared on navigation)
       set({ quotes: updatedQuotes });
+
+      // Track first quote sent
+      if (calculatedQuote.status === 'sent' && !quotes.some(q => q.status === 'sent')) {
+        trackFirstQuoteSent();
+      }
 
       // Sync to Firestore if user is signed in (non-blocking — local save already succeeded)
       if (auth.currentUser) {
