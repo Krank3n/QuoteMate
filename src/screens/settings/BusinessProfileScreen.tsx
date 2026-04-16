@@ -39,7 +39,6 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
-import { DEFAULT_AU_TRADIE_TERMS, hashTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 
 export function BusinessProfileScreen() {
   const navigation = useNavigation<any>();
@@ -51,18 +50,11 @@ export function BusinessProfileScreen() {
   const [abn, setAbn] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [website, setWebsite] = useState('');
   const [address, setAddress] = useState('');
   const [logoUri, setLogoUri] = useState<string | undefined>(undefined);
   const [brandColor, setBrandColor] = useState<string | undefined>(undefined);
   const [hexInput, setHexInput] = useState('');
-  const [laborRate, setLaborRate] = useState('85');
-  const [markup, setMarkup] = useState('20');
-  const [laborMarkup, setLaborMarkup] = useState('20');
-  const [defaultDepositPercentage, setDefaultDepositPercentage] = useState('0');
-  const [requireDepositByDefault, setRequireDepositByDefault] = useState(false);
-  const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
-  const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
-  const [termsAndConditions, setTermsAndConditions] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -74,51 +66,23 @@ export function BusinessProfileScreen() {
       const a = businessSettings.abn || '';
       const e = businessSettings.email || '';
       const p = businessSettings.phone || '';
+      const w = businessSettings.website || '';
       const addr = businessSettings.address || '';
       const logo = businessSettings.logoUri;
       const brand = businessSettings.brandColor;
-      const lr = businessSettings.defaultLaborRate?.toString() || '85';
-      const mk = businessSettings.defaultMarkup?.toString() || '20';
-      const lm = (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup ?? 20).toString();
-      const dp = (businessSettings.defaultDepositPercentage ?? 0).toString();
-      const rd = businessSettings.requireDepositByDefault === true;
-      const tm = businessSettings.transportMarkupEnabled !== false;
-      // New users default to the built-in AU tradie template so they can ship
-      // quotes with terms from day one. Stored blank-as-null so save is stable.
-      const tc = businessSettings.termsAndConditions ?? DEFAULT_AU_TRADIE_TERMS;
 
       setBusinessName(name);
       setAbn(a);
       setEmail(e);
       setPhone(p);
+      setWebsite(w);
       setAddress(addr);
       setLogoUri(logo);
       setBrandColor(brand);
-      setLaborRate(lr);
-      setMarkup(mk);
-      setLaborMarkup(lm);
-      setDefaultDepositPercentage(dp);
-      setRequireDepositByDefault(rd);
-      setTransportMarkupEnabled(tm);
-      setTermsAndConditions(tc);
 
-      initialSnapshotRef.current = JSON.stringify({
-        name, a, e, p, addr, logo, brand, lr, mk, lm, dp, rd, tm, tc,
-      });
+      initialSnapshotRef.current = JSON.stringify({ name, a, e, p, w, addr, logo, brand });
     }
   }, [businessSettings]);
-
-  // Re-check Square connection every time this screen is focused so the toggle
-  // unlocks immediately after the user connects via the CTA and navigates back.
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      checkSquareConnection()
-        .then((res) => { if (!cancelled) setSquareConnected(!!res.connected); })
-        .catch(() => { if (!cancelled) setSquareConnected(false); });
-      return () => { cancelled = true; };
-    }, []),
-  );
 
   const isDirty = React.useMemo(() => {
     if (!initialSnapshotRef.current) return false;
@@ -127,19 +91,13 @@ export function BusinessProfileScreen() {
       a: abn,
       e: email,
       p: phone,
+      w: website,
       addr: address,
       logo: logoUri,
       brand: brandColor,
-      lr: laborRate,
-      mk: markup,
-      lm: laborMarkup,
-      dp: defaultDepositPercentage,
-      rd: requireDepositByDefault,
-      tm: transportMarkupEnabled,
-      tc: termsAndConditions,
     });
     return current !== initialSnapshotRef.current;
-  }, [businessName, abn, email, phone, address, logoUri, brandColor, laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault, transportMarkupEnabled, termsAndConditions]);
+  }, [businessName, abn, email, phone, website, address, logoUri, brandColor]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
     isDirty,
@@ -251,20 +209,10 @@ export function BusinessProfileScreen() {
         abn: abn.trim() || undefined,
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
+        website: website.trim() || undefined,
         address: address.trim() || undefined,
         logoUri: savedLogoUri,
         brandColor: brandColor,
-        defaultLaborRate: parseFloat(laborRate) || 85,
-        defaultMarkup: parseFloat(markup) || 20,
-        defaultLaborMarkup: parseFloat(laborMarkup) || 0,
-        defaultDepositPercentage: Math.max(0, Math.min(100, parseFloat(defaultDepositPercentage) || 0)),
-        requireDepositByDefault,
-        transportMarkupEnabled,
-        termsAndConditions: termsAndConditions.trim() || undefined,
-        termsUpdatedAt:
-          termsAndConditions !== (businessSettings?.termsAndConditions ?? DEFAULT_AU_TRADIE_TERMS)
-            ? new Date().toISOString()
-            : businessSettings?.termsUpdatedAt,
       });
 
       // Geocode address and store location for distance sorting in supplier discovery
@@ -280,23 +228,10 @@ export function BusinessProfileScreen() {
         });
       }
 
-      // Refresh snapshot so the form is no longer "dirty"
-      initialSnapshotRef.current = JSON.stringify({
-        name: businessName.trim(),
-        a: abn,
-        e: email,
-        p: phone,
-        addr: address,
-        logo: savedLogoUri,
-        brand: brandColor,
-        lr: laborRate,
-        mk: markup,
-        lm: laborMarkup,
-        dp: defaultDepositPercentage,
-        rd: requireDepositByDefault,
-        tm: transportMarkupEnabled,
-        tc: termsAndConditions,
-      });
+      // The store update triggers the hydration useEffect to re-derive form
+      // state from the new businessSettings and refresh initialSnapshotRef.
+      // Refreshing the snapshot here with closure values would race with the
+      // useEffect's normalized re-derive and leave isDirty stuck true.
 
       if (!opts?.silent) {
         setShowSuccessModal(true);
@@ -358,6 +293,17 @@ export function BusinessProfileScreen() {
             />
 
             <TextInput
+              label="Website"
+              value={website}
+              onChangeText={setWebsite}
+              mode="outlined"
+              style={styles.input}
+              keyboardType="url"
+              autoCapitalize="none"
+              placeholder="https://"
+            />
+
+            <TextInput
               label="Business Address"
               value={address}
               onChangeText={setAddress}
@@ -409,155 +355,6 @@ export function BusinessProfileScreen() {
                 <Text style={styles.logoUploadHint}>Recommended: 500x500px (Square)</Text>
               </TouchableOpacity>
             )}
-          </Surface>
-
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Default Rates</Title>
-            <Text style={styles.helperText}>
-              These will be used as defaults for new quotes
-            </Text>
-
-            <TextInput
-              label="Hourly Labor Rate"
-              value={laborRate}
-              onChangeText={setLaborRate}
-              mode="outlined"
-              style={styles.input}
-              keyboardType="decimal-pad"
-              left={<TextInput.Affix text="$" />}
-              right={<TextInput.Affix text="/hr" />}
-            />
-
-            <TextInput
-              label="Material Markup"
-              value={markup}
-              onChangeText={setMarkup}
-              mode="outlined"
-              style={styles.input}
-              keyboardType="decimal-pad"
-              right={<TextInput.Affix text="%" />}
-            />
-
-            <TextInput
-              label="Labour Markup"
-              value={laborMarkup}
-              onChangeText={setLaborMarkup}
-              mode="outlined"
-              style={styles.input}
-              keyboardType="decimal-pad"
-              right={<TextInput.Affix text="%" />}
-            />
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={[styles.toggleTitle, squareConnected === false && { color: colors.textSecondary }]}>Require Deposit by Default</Text>
-                <Text style={styles.toggleDescription}>
-                  {squareConnected === false
-                    ? 'Connect Square to collect deposits from customers when they accept.'
-                    : 'Customers are asked to pay a deposit when accepting. Can be overridden per quote.'}
-                </Text>
-              </View>
-              <Switch
-                value={requireDepositByDefault && squareConnected !== false}
-                onValueChange={setRequireDepositByDefault}
-                color={colors.primary}
-                disabled={squareConnected !== true}
-              />
-            </View>
-
-            {squareConnected === false && (
-              <TouchableOpacity
-                onPress={() => navigation.navigate('SquareIntegration' as never)}
-                style={{
-                  alignSelf: 'flex-start',
-                  paddingHorizontal: 14,
-                  paddingVertical: 8,
-                  borderRadius: 8,
-                  backgroundColor: colors.primary,
-                  marginTop: 4,
-                  marginBottom: 8,
-                }}
-              >
-                <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '600' }}>Connect Square</Text>
-              </TouchableOpacity>
-            )}
-
-            {requireDepositByDefault && squareConnected === true && (
-              <TextInput
-                label="Default Deposit"
-                value={defaultDepositPercentage}
-                onChangeText={setDefaultDepositPercentage}
-                mode="outlined"
-                style={styles.input}
-                keyboardType="decimal-pad"
-                right={<TextInput.Affix text="%" />}
-                placeholder="30"
-              />
-            )}
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Transport / Logistics Markup</Text>
-                <Text style={styles.toggleDescription}>
-                  Auto-calculate travel markup based on job distance
-                </Text>
-              </View>
-              <Switch
-                value={transportMarkupEnabled}
-                onValueChange={setTransportMarkupEnabled}
-                color={colors.primary}
-              />
-            </View>
-          </Surface>
-
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Terms &amp; Conditions</Title>
-            <Text style={styles.helperText}>
-              Appears at the bottom of every quote and invoice PDF. Customers
-              accept these terms when they pay a deposit or invoice.
-            </Text>
-
-            <TextInput
-              value={termsAndConditions}
-              onChangeText={setTermsAndConditions}
-              mode="outlined"
-              style={[styles.input, { minHeight: 180 }]}
-              multiline
-              numberOfLines={12}
-              placeholder="Your terms and conditions…"
-            />
-
-            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-              <Button
-                mode="text"
-                compact
-                onPress={() => {
-                  Alert.alert(
-                    'Restore default terms?',
-                    'This replaces your current T&Cs with the built-in Australian tradie template. You can edit it afterwards.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      {
-                        text: 'Restore',
-                        onPress: () => setTermsAndConditions(DEFAULT_AU_TRADIE_TERMS),
-                      },
-                    ],
-                  );
-                }}
-              >
-                Restore default template
-              </Button>
-              {termsAndConditions ? (
-                <Text style={[styles.helperText, { alignSelf: 'center' }]}>
-                  Version {hashTerms(termsAndConditions).slice(0, 6)}
-                </Text>
-              ) : null}
-            </View>
-
-            <Text style={[styles.helperText, { marginTop: 8, fontStyle: 'italic' }]}>
-              Tip: Have a solicitor review these terms for your trade. The
-              default is a sensible starting point, not legal advice.
-            </Text>
           </Surface>
 
           <Surface style={styles.card}>

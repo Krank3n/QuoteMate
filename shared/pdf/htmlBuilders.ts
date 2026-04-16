@@ -385,7 +385,8 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
               ${business.abn ? `ABN: ${business.abn}<br>` : ''}
               ${business.address ? `${business.address.replace(/\n/g, '<br>')}<br>` : ''}
               ${business.email ? `Email: ${business.email}<br>` : ''}
-              ${business.phone ? `Phone: ${business.phone}` : ''}
+              ${business.phone ? `Phone: ${business.phone}${business.website ? '<br>' : ''}` : ''}
+              ${business.website ? `Web: ${business.website}` : ''}
             </p>
           </div>
         </div>
@@ -467,7 +468,8 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
               ${business.abn ? `ABN: ${business.abn}<br>` : ''}
               ${business.address ? `${business.address.replace(/\n/g, '<br>')}<br>` : ''}
               ${business.email ? `Email: ${business.email}<br>` : ''}
-              ${business.phone ? `Phone: ${business.phone}` : ''}
+              ${business.phone ? `Phone: ${business.phone}${business.website ? '<br>' : ''}` : ''}
+              ${business.website ? `Web: ${business.website}` : ''}
             </p>
           </div>
         </div>

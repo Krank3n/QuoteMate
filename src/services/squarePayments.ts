@@ -36,8 +36,21 @@ export type InAppPaymentTarget =
 
 interface TakeInAppPaymentArgs {
   target: InAppPaymentTarget;
-  amountCents: number;       // cents
+  amountCents: number;       // cents — final amount charged to the customer (incl. any passthrough surcharge)
+  /**
+   * QuoteMate platform fee in cents, deducted from the tradie's payout via
+   * Square's appFeeMoney mechanism. Callers should compute this from the
+   * charged amount using QM_APP_FEE_PCT_IN_PERSON in shared/pdf/squareFees.ts
+   * so server + client stay in lockstep.
+   */
+  appFeeCents: number;
   note?: string;
+  /**
+   * Forwarded to the server. Used only when the target doc has no terms of
+   * its own — the server snapshots these onto the doc so the webhook can
+   * stamp a proper acceptance record. See recordInAppPayment.fallbackTerms.
+   */
+  fallbackTerms?: string;
 }
 
 /**
@@ -92,10 +105,16 @@ async function ensureAuthorized(): Promise<void> {
 export async function takeInAppPayment({
   target,
   amountCents,
+  appFeeCents,
   note,
+  fallbackTerms,
 }: TakeInAppPaymentArgs): Promise<Payment> {
   if (amountCents <= 0) {
     throw new Error('Amount must be greater than zero.');
+  }
+  if (appFeeCents < 0 || appFeeCents >= amountCents) {
+    // Defence in depth — Square rejects these anyway, surface a clear error.
+    throw new Error('Invalid app fee amount.');
   }
 
   await ensureAndroidLocationPermission();
@@ -111,11 +130,13 @@ export async function takeInAppPayment({
 
   const paymentParameters: PaymentParameters = {
     amountMoney: { amount: amountCents, currencyCode: CurrencyCode.AUD },
+    // QuoteMate platform fee routed to our Square developer account. The
+    // passthrough surcharge (if any) is baked into amountCents upstream, so
+    // Square's own allowCardSurcharge prompt stays off.
+    appFeeMoney: { amount: appFeeCents, currencyCode: CurrencyCode.AUD },
     processingMode: ProcessingMode.ONLINE_ONLY,
     idempotencyKey,
     paymentAttemptId,
-    // Android-only: tells Square whether to offer card surcharge prompts.
-    // Set false since QuoteMate doesn't apply surcharges.
     allowCardSurcharge: false,
     note,
     referenceId: targetId,
@@ -138,6 +159,7 @@ export async function takeInAppPayment({
       paymentId: String(payment.id),
       orderId: String(payment.orderId),
       amountCents: Number(payment.totalMoney?.amount) || amountCents,
+      fallbackTerms,
     });
   } catch (err) {
     console.warn('[squarePayments] recordInAppPayment failed', err);

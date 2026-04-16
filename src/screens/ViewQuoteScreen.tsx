@@ -22,6 +22,7 @@ import { SendQuoteButton } from '../components/SendQuoteButton';
 import { AlertModal } from '../components/AlertModal';
 import { TakePaymentSheet, TakePaymentTarget } from '../components/TakePaymentSheet';
 import { SquareReconnectBanner } from '../components/SquareReconnectBanner';
+import { PaymentSyncErrorBanner, DisputeBanner } from '../components/PaymentAlertBanners';
 import * as squareService from '../services/squareService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebContainer } from '../components/WebContainer';
@@ -207,6 +208,11 @@ export function ViewQuoteScreen() {
             contextMessage="Deposit link is paused"
           />
         ) : null}
+        <PaymentSyncErrorBanner error={(quote as any)?.paymentSyncError} />
+        <DisputeBanner
+          status={(quote as any)?.disputeStatus}
+          disputeId={(quote as any)?.disputeId}
+        />
         {/* Editable Quote Number */}
         <View style={styles.quoteNumberRow}>
           {isEditingNumber ? (
@@ -370,6 +376,7 @@ export function ViewQuoteScreen() {
             depositPaid: Number((quote as any).depositPaid) || 0,
             total: Number(quote.total) || 0,
             jobName: quote.job?.name,
+            terms: (quote as any)?.termsSnapshot || null,
           } as TakePaymentTarget
         }
         onDismiss={() => setTakePaymentVisible(false)}

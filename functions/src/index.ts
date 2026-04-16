@@ -27,9 +27,14 @@ import {
 } from './email';
 import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from './pdfGenerator';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
-import { DEFAULT_AU_TRADIE_TERMS, hashTerms } from './shared/terms/defaultAuTradie';
+import { hashTerms } from './shared/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/money';
-// (Both resolve via the functions/src/shared symlink → shared/pdf)
+import {
+  QM_APP_FEE_PCT_ONLINE,
+  QM_APP_FEE_PCT_IN_PERSON,
+  PASSTHROUGH_SURCHARGE_PCT,
+} from './shared/squareFees';
+// (All resolve via the functions/src/shared symlink → shared/pdf)
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -3026,7 +3031,9 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       const photoUrls = (quote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
 
       // Resolve business logo URL (may be a local URI - use logoUrl if available from storage)
-      let logoUrl = business.logoStorageUrl || '';
+      // Support both logoStorageUrl (legacy field) and logoUri (client saves
+       // the Firebase Storage download URL here after upload).
+       let logoUrl = business.logoStorageUrl || business.logoUri || '';
 
       // Build email HTML
       const displayQuote = applyHideMarkupForDisplay(quote);
@@ -3057,14 +3064,15 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         : 0;
 
       // Snapshot the current T&Cs onto the quote so later edits to the
-      // business's terms don't rewrite what the customer saw. Version hash
-      // stays stable across identical text — lets us detect genuine changes.
-      const termsToSend: string =
-        (typeof business.termsAndConditions === 'string' && business.termsAndConditions.trim())
-          ? business.termsAndConditions
-          : DEFAULT_AU_TRADIE_TERMS;
-      const termsVersionHash = hashTerms(termsToSend);
-      if (!isTestSend) {
+      // business's terms don't rewrite what the customer saw. T&Cs are
+      // opt-in — if the tradie hasn't set any, nothing gets snapshotted and
+      // the PDF/email skip the terms section entirely.
+      const termsRaw = typeof business.termsAndConditions === 'string'
+        ? business.termsAndConditions.trim()
+        : '';
+      const termsToSend: string | null = termsRaw || null;
+      const termsVersionHash = termsToSend ? hashTerms(termsToSend) : null;
+      if (!isTestSend && termsToSend) {
         await firestore.doc(`users/${userId}/quotes/${quoteId}`).set(
           { termsSnapshot: termsToSend, termsVersionHash },
           { merge: true },
@@ -3113,6 +3121,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         depositAmount: depositAmountForEmail || undefined,
         depositPercentage: depositPctForEmail || undefined,
         depositPayNowUrl,
+        hasTerms: !!termsToSend,
         business: businessData,
       });
 
@@ -3160,15 +3169,16 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           showLaborBreakdown: quote.showLaborBreakdown !== false,
           groupMaterialsBySection: business.groupMaterialsBySection,
           paymentMethods: business.paymentMethods,
-          terms: termsToSend,
+          terms: termsToSend || undefined,
         },
         {
           businessName: business.businessName || 'Business',
           email: business.email,
           phone: business.phone,
+          website: business.website,
           abn: business.abn,
           address: business.address,
-          logoHtml: business.logoStorageUrl ? `<img src="${business.logoStorageUrl}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
+          logoHtml: (business.logoStorageUrl || business.logoUri) ? `<img src="${business.logoStorageUrl || business.logoUri}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
           brandColor: business.brandColor,
           pdfTemplate: business.pdfTemplate,
         }
@@ -3285,13 +3295,16 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         invoiceUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
       }
       // Snapshot the current T&Cs onto the invoice so later edits don't
-      // rewrite what the customer saw.
-      const invoiceTermsToSend: string =
-        (typeof business.termsAndConditions === 'string' && business.termsAndConditions.trim())
-          ? business.termsAndConditions
-          : DEFAULT_AU_TRADIE_TERMS;
-      const invoiceTermsVersionHash = hashTerms(invoiceTermsToSend);
-      if (!isTestSend) {
+      // rewrite what the customer saw. Opt-in: no terms set → no snapshot
+      // and no terms section in the PDF/email.
+      const invoiceTermsRaw = typeof business.termsAndConditions === 'string'
+        ? business.termsAndConditions.trim()
+        : '';
+      const invoiceTermsToSend: string | null = invoiceTermsRaw || null;
+      const invoiceTermsVersionHash = invoiceTermsToSend
+        ? hashTerms(invoiceTermsToSend)
+        : null;
+      if (!isTestSend && invoiceTermsToSend) {
         invoiceUpdate.termsSnapshot = invoiceTermsToSend;
         invoiceUpdate.termsVersionHash = invoiceTermsVersionHash;
       }
@@ -3329,7 +3342,9 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
       }
 
       // Resolve business logo URL
-      let logoUrl = business.logoStorageUrl || '';
+      // Support both logoStorageUrl (legacy field) and logoUri (client saves
+       // the Firebase Storage download URL here after upload).
+       let logoUrl = business.logoStorageUrl || business.logoUri || '';
 
       // Build email HTML
       const emailMaterials = (invoice.materials || []).map((m: any) => ({
@@ -3364,6 +3379,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         dueDate: invoice.dueDate || new Date().toISOString(),
         payNowUrl,
         depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
+        hasTerms: !!invoiceTermsToSend,
         business: businessData,
       });
 
@@ -3417,15 +3433,16 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
           showLaborBreakdown: invoice.showLaborBreakdown !== false,
           groupMaterialsBySection: business.groupMaterialsBySection,
           paymentMethods: business.paymentMethods,
-          terms: invoiceTermsToSend,
+          terms: invoiceTermsToSend || undefined,
         },
         {
           businessName: business.businessName || 'Business',
           email: business.email,
           phone: business.phone,
+          website: business.website,
           abn: business.abn,
           address: business.address,
-          logoHtml: business.logoStorageUrl ? `<img src="${business.logoStorageUrl}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
+          logoHtml: (business.logoStorageUrl || business.logoUri) ? `<img src="${business.logoStorageUrl || business.logoUri}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
           brandColor: business.brandColor,
           pdfTemplate: business.pdfTemplate,
         }
@@ -3698,7 +3715,7 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           name: businessSettings?.businessName || 'Your Trade Business',
           email: businessSettings?.email,
           phone: businessSettings?.phone,
-          logoUrl: businessSettings?.logoStorageUrl || null,
+          logoUrl: businessSettings?.logoStorageUrl || businessSettings?.logoUri || null,
           brandColor: businessSettings?.brandColor || null,
         },
       });
@@ -3978,7 +3995,7 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
     const businessSettings = settingsDoc.exists ? settingsDoc.data() : null;
     const businessName = businessSettings?.businessName || 'Your Trade Business';
     const brandColor = businessSettings?.brandColor || null;
-    const logoUrl = businessSettings?.logoStorageUrl || null;
+    const logoUrl = businessSettings?.logoStorageUrl || businessSettings?.logoUri || null;
 
     // Check if already responded
     if (foundQuote.respondedAt) {
@@ -9078,6 +9095,49 @@ export const squareDisconnect = functions.https.onRequest((req, res) => {
 });
 
 /**
+ * Compute Square pricing for a payment: the amount charged to the customer
+ * (incl. optional passthrough surcharge), the QuoteMate app fee we take via
+ * Square's app_fee_money mechanism, and the surcharge portion for display.
+ *
+ * All percentages are hardcoded in shared/pdf/squareFees.ts — not editable
+ * per-tradie because the passthrough is bounded by ACCC cost-of-acceptance
+ * rules and our platform cut is a business decision, not a setting.
+ */
+function computeSquarePricing(
+  baseDollars: number,
+  business: any,
+  channel: 'online' | 'in_person',
+): {
+  chargedDollars: number;
+  surchargeDollars: number;
+  appFeeCents: number;
+  surchargeSuffix: string;
+} {
+  const surchargeOn = business?.surchargePaymentFees === true;
+  const surchargePct = surchargeOn ? PASSTHROUGH_SURCHARGE_PCT : 0;
+  const surchargeCents = surchargePct > 0
+    ? dollarsToCents(baseDollars * (surchargePct / 100))
+    : 0;
+  const chargedCents = dollarsToCents(baseDollars) + surchargeCents;
+
+  // App fee is computed off the CHARGED amount so we get our cut on the
+  // surcharge portion too (which otherwise would only benefit Square).
+  const appFeePct = channel === 'in_person'
+    ? QM_APP_FEE_PCT_IN_PERSON
+    : QM_APP_FEE_PCT_ONLINE;
+  const appFeeCents = Math.max(0, dollarsToCents(
+    centsToDollars(chargedCents) * (appFeePct / 100),
+  ));
+
+  return {
+    chargedDollars: centsToDollars(chargedCents),
+    surchargeDollars: centsToDollars(surchargeCents),
+    appFeeCents,
+    surchargeSuffix: surchargeOn ? ` (incl. ${PASSTHROUGH_SURCHARGE_PCT}% card surcharge)` : '',
+  };
+}
+
+/**
  * Create a Square hosted payment link for an invoice.
  * Called server-side from sendInvoiceEmail when the tradie has Square connected.
  * Also exposed as an HTTP endpoint so the client can regenerate on demand.
@@ -9098,23 +9158,29 @@ async function createSquarePaymentLinkInternal(
   const total = Number(invoice.total) || 0;
   if (total <= 0) return null;
 
-  const amountCents = dollarsToCents(total);
+  // Apply the business's card surcharge (if any) so the customer pays
+  // total + surcharge and Square's fee doesn't eat the tradie's margin.
+  const businessDoc = await firestore.doc(`users/${userId}/settings/business`).get();
+  const businessSettings = businessDoc.exists ? businessDoc.data() : {};
+  const { chargedDollars, appFeeCents, surchargeSuffix } =
+    computeSquarePricing(total, businessSettings, 'online');
+
+  const amountCents = dollarsToCents(chargedDollars);
   const jobName = invoice.job?.name || 'Job';
   const invoiceNumber = invoice.invoiceNumber || invoiceId.slice(0, 8);
   const idempotencyKey = `qm-invoice-${userId}-${invoiceId}-${Date.now()}`;
 
-  // v1: no platform fee. `app_fee_money` on Online Checkout requires
-  // order.service_charges with APP_FEE_PHASE and region-specific availability
-  // (AU path needs verification). Add back when ready to collect a cut.
-
   const body: any = {
     idempotency_key: idempotencyKey,
     quick_pay: {
-      name: `Invoice ${invoiceNumber} — ${jobName}`.slice(0, 250),
+      name: `Invoice ${invoiceNumber} — ${jobName}${surchargeSuffix}`.slice(0, 250),
       price_money: { amount: amountCents, currency: 'AUD' },
       location_id: tokens.locationId,
+      // QuoteMate platform fee — deducted from the tradie's payout and sent
+      // to our Square developer account automatically.
+      app_fee_money: { amount: appFeeCents, currency: 'AUD' },
     },
-    payment_note: `QuoteMate invoice ${invoiceNumber}`,
+    payment_note: `QuoteMate invoice ${invoiceNumber}${surchargeSuffix}`,
     checkout_options: {
       allow_tipping: false,
     },
@@ -9288,7 +9354,12 @@ async function createSquareDepositPaymentLinkInternal(
   const tokens = await getSquareTokens(userId);
   if (!tokens) return null;
 
-  const amountCents = dollarsToCents(depositAmount);
+  const businessDoc = await firestore.doc(`users/${userId}/settings/business`).get();
+  const businessSettings = businessDoc.exists ? businessDoc.data() : {};
+  const { chargedDollars, appFeeCents, surchargeSuffix } =
+    computeSquarePricing(depositAmount, businessSettings, 'online');
+
+  const amountCents = dollarsToCents(chargedDollars);
   const jobName = quote.job?.name || 'Job';
   const quoteNumber = quote.quoteNumber || quoteId.slice(0, 8);
   const idempotencyKey = `qm-quote-deposit-${userId}-${quoteId}-${Date.now()}`;
@@ -9296,11 +9367,12 @@ async function createSquareDepositPaymentLinkInternal(
   const body: any = {
     idempotency_key: idempotencyKey,
     quick_pay: {
-      name: `Deposit for Quote ${quoteNumber} — ${jobName}`.slice(0, 250),
+      name: `Deposit for Quote ${quoteNumber} — ${jobName}${surchargeSuffix}`.slice(0, 250),
       price_money: { amount: amountCents, currency: 'AUD' },
       location_id: tokens.locationId,
+      app_fee_money: { amount: appFeeCents, currency: 'AUD' },
     },
-    payment_note: `QuoteMate deposit on quote ${quoteNumber}`,
+    payment_note: `QuoteMate deposit on quote ${quoteNumber}${surchargeSuffix}`,
     checkout_options: { allow_tipping: false },
   };
 
@@ -9408,7 +9480,12 @@ async function createSquareFullQuotePaymentLinkInternal(
   const tokens = await getSquareTokens(userId);
   if (!tokens) return null;
 
-  const amountCents = dollarsToCents(amount);
+  const businessDoc = await firestore.doc(`users/${userId}/settings/business`).get();
+  const businessSettings = businessDoc.exists ? businessDoc.data() : {};
+  const { chargedDollars, appFeeCents, surchargeSuffix } =
+    computeSquarePricing(amount, businessSettings, 'online');
+
+  const amountCents = dollarsToCents(chargedDollars);
   const jobName = quote.job?.name || 'Job';
   const quoteNumber = quote.quoteNumber || quoteId.slice(0, 8);
   const idempotencyKey = `qm-quote-full-${userId}-${quoteId}-${Date.now()}`;
@@ -9416,11 +9493,12 @@ async function createSquareFullQuotePaymentLinkInternal(
   const body: any = {
     idempotency_key: idempotencyKey,
     quick_pay: {
-      name: `Quote ${quoteNumber} — ${jobName}`.slice(0, 250),
+      name: `Quote ${quoteNumber} — ${jobName}${surchargeSuffix}`.slice(0, 250),
       price_money: { amount: amountCents, currency: 'AUD' },
       location_id: tokens.locationId,
+      app_fee_money: { amount: appFeeCents, currency: 'AUD' },
     },
-    payment_note: `QuoteMate full payment on quote ${quoteNumber}`,
+    payment_note: `QuoteMate full payment on quote ${quoteNumber}${surchargeSuffix}`,
     checkout_options: { allow_tipping: false },
   };
 
@@ -9536,6 +9614,22 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
 
   try {
     const eventType = event?.type;
+
+    // Dispute events (chargebacks + inquiries) route to a separate handler.
+    // Square keeps these on their own lifecycle rather than piggybacking on
+    // the payment events, so a paid invoice can silently flip to "disputed"
+    // without the tradie noticing unless we surface it here.
+    if (
+      eventType === 'dispute.created' ||
+      eventType === 'dispute.state.updated' ||
+      eventType === 'dispute.evidence_added'
+    ) {
+      await handleSquareDisputeEvent(event).catch((err) => {
+        console.error('[square] dispute handler failed', { message: err?.message });
+      });
+      return;
+    }
+
     if (eventType !== 'payment.updated' && eventType !== 'payment.created') {
       return;
     }
@@ -9574,7 +9668,20 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
       if (quote.depositSquarePaymentId && quote.depositSquarePaymentId === payment.id) return;
 
       const paidAmountDollars = centsToDollars(Number(payment?.amount_money?.amount) || 0);
-      const newDepositPaid = Math.max(Number(quote.depositPaid) || 0, paidAmountDollars);
+      // For deposits: cap at the expected depositAmount; for full-quote
+      // payments: cap at the quote total. Keeps surcharge from inflating
+      // the "paid" bucket beyond what the quote line says.
+      const expectedCap = idx.kind === 'quote_full'
+        ? Number(quote.total) || 0
+        : Number(quote.depositAmount) || paidAmountDollars;
+      const paidAgainstQuote = expectedCap > 0
+        ? Math.min(paidAmountDollars, expectedCap)
+        : paidAmountDollars;
+      const newDepositPaid = Math.max(Number(quote.depositPaid) || 0, paidAgainstQuote);
+      const quoteTotal = Number(quote.total) || 0;
+      const newPaidTotal = idx.kind === 'quote_full'
+        ? Math.max(Number(quote.paidTotal) || 0, paidAgainstQuote)
+        : newDepositPaid;
       const wasAlreadyAccepted = quote.status === 'accepted' || !!quote.respondedAt;
 
       // Record T&C acceptance against the snapshot taken at send time.
@@ -9594,6 +9701,10 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         depositPaid: newDepositPaid,
         depositPaidAt: admin.firestore.FieldValue.serverTimestamp(),
         depositSquarePaymentId: payment.id,
+        paidTotal: newPaidTotal,
+        balanceDue: Math.max(0, quoteTotal - newPaidTotal),
+        // Payment reconciled; clear any previous sync-error banner.
+        paymentSyncError: admin.firestore.FieldValue.delete(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
       if (tcAcceptance) {
@@ -9603,6 +9714,15 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
           update.depositTcAccepted = tcAcceptance;
         }
       }
+      // Reverse-lookup index so dispute events (which don't carry order_id)
+      // can resolve back to this quote via payment.id.
+      await firestore.doc(`squarePayments/${payment.id}`).set({
+        userId,
+        quoteId,
+        kind: idx.kind,
+        orderId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
       if (!wasAlreadyAccepted) {
         update.status = 'accepted';
         update.respondedAt = admin.firestore.FieldValue.serverTimestamp();
@@ -9665,7 +9785,11 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
 
     const paidAmountDollars = centsToDollars(Number(payment?.amount_money?.amount) || 0);
     const total = Number(invoice.total) || 0;
-    const newPaidAmount = Math.max(Number(invoice.paidAmount) || 0, paidAmountDollars);
+    // Cap at invoice total so a surcharged payment (total + 1.9%) doesn't
+    // report the invoice as "overpaid". The actual received amount is on
+    // Square's side for reconciliation/payout reports.
+    const paidAgainstInvoice = Math.min(paidAmountDollars, total);
+    const newPaidAmount = Math.max(Number(invoice.paidAmount) || 0, paidAgainstInvoice);
     const newStatus = newPaidAmount + 0.005 >= total ? 'paid' : 'partial';
 
     const invoiceTcSource: 'pay_link' | 'tap_to_pay' =
@@ -9682,16 +9806,28 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
       {
         status: newStatus,
         paidAmount: newPaidAmount,
+        paidTotal: newPaidAmount,
+        balanceDue: Math.max(0, total - newPaidAmount),
         paidDate: admin.firestore.FieldValue.serverTimestamp(),
         paymentMethod: 'card',
         paymentNotes: `Square payment ${payment.id}`,
         squarePaymentId: payment.id,
         squarePaidAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        // Reconciled successfully — drop any stale error banner.
+        paymentSyncError: admin.firestore.FieldValue.delete(),
         ...(invoiceTcAcceptance ? { tcAccepted: invoiceTcAcceptance } : {}),
       },
       { merge: true },
     );
+    // Reverse-lookup index so dispute events (which carry disputed payment
+    // id but not order id) can resolve back to this invoice.
+    await firestore.doc(`squarePayments/${payment.id}`).set({
+      userId,
+      invoiceId,
+      orderId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
 
     // If the invoice has already been pushed to Xero, record the payment
     // there too. Best-effort; errors are swallowed inside the helper.
@@ -9704,10 +9840,164 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         'card',
       );
     }
-  } catch {
-    // Already responded 200; log silently.
+  } catch (err: any) {
+    // Already responded 200 so Square doesn't retry. But we MUST NOT lose the
+    // event — stamp a paymentSyncError onto the affected doc so the tradie
+    // sees a banner and can manually reconcile instead of the payment
+    // vanishing into the logs.
+    console.error('[square] webhook reconciliation failed', {
+      eventType: event?.type, message: err?.message,
+    });
+    try {
+      await recordPaymentSyncError(event, err?.message || 'Unknown error');
+    } catch (recErr: any) {
+      console.error('[square] recordPaymentSyncError threw', { message: recErr?.message });
+    }
   }
 });
+
+/**
+ * Stamp `paymentSyncError` onto the invoice/quote associated with a failed
+ * Square webhook reconciliation. Best-effort: if we can't resolve the doc
+ * we at least logged above. Called from the webhook catch block only.
+ */
+async function recordPaymentSyncError(event: any, message: string): Promise<void> {
+  const firestore = admin.firestore();
+  const payment = event?.data?.object?.payment;
+  const orderId: string | undefined = payment?.order_id;
+  if (!orderId) return;
+  const indexDoc = await firestore.doc(`squarePaymentOrders/${orderId}`).get();
+  if (!indexDoc.exists) return;
+  const idx = indexDoc.data()!;
+  if (!idx.userId) return;
+  const err = {
+    at: admin.firestore.FieldValue.serverTimestamp(),
+    code: 'webhook_reconcile_failed',
+    message: message.slice(0, 500),
+    paymentId: payment?.id || null,
+  };
+  if (idx.kind === 'quote_deposit' || idx.kind === 'quote_full') {
+    if (idx.quoteId) {
+      await firestore.doc(`users/${idx.userId}/quotes/${idx.quoteId}`).set(
+        { paymentSyncError: err },
+        { merge: true },
+      );
+    }
+  } else if (idx.invoiceId) {
+    await firestore.doc(`users/${idx.userId}/invoices/${idx.invoiceId}`).set(
+      { paymentSyncError: err },
+      { merge: true },
+    );
+  }
+}
+
+/**
+ * Handle a Square dispute webhook. Routes via the squarePayments reverse
+ * index populated when payments are reconciled, writes the dispute to a
+ * per-user subcollection for history, stamps disputeStatus on the affected
+ * invoice/quote, and emails the tradie so they can respond in time — Square
+ * gives merchants a short window to submit evidence before the chargeback is
+ * finalised.
+ */
+async function handleSquareDisputeEvent(event: any): Promise<void> {
+  const firestore = admin.firestore();
+  const dispute = event?.data?.object?.dispute;
+  if (!dispute) return;
+  const disputeId: string | undefined = dispute.id;
+  const paymentId: string | undefined = dispute.disputed_payment?.payment_id;
+  if (!disputeId || !paymentId) return;
+
+  const lookupDoc = await firestore.doc(`squarePayments/${paymentId}`).get();
+  if (!lookupDoc.exists) {
+    console.warn('[square] dispute event without matching payment index', { disputeId, paymentId });
+    return;
+  }
+  const lookup = lookupDoc.data()!;
+  const userId: string | null = lookup.userId || null;
+  if (!userId) return;
+
+  const disputeState: string = dispute.state || 'UNKNOWN';
+  const disputeRef = firestore.doc(`users/${userId}/squareDisputes/${disputeId}`);
+  await disputeRef.set(
+    {
+      disputeId,
+      paymentId,
+      state: disputeState,
+      reason: dispute.reason || null,
+      amountCents: Number(dispute.amount_money?.amount) || 0,
+      currency: dispute.amount_money?.currency || 'AUD',
+      dueAt: dispute.evidence_deadline || null,
+      orderId: lookup.orderId || null,
+      invoiceId: lookup.invoiceId || null,
+      quoteId: lookup.quoteId || null,
+      eventType: event?.type || null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  // Stamp on the parent invoice/quote so the ViewInvoice/ViewQuote screen
+  // can surface a banner. Only overwrite if the new state is newer or the
+  // doc has no disputeId yet (multiple events for the same dispute).
+  const parentUpdate = {
+    disputeStatus: disputeState,
+    disputeId,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  if (lookup.invoiceId) {
+    await firestore.doc(`users/${userId}/invoices/${lookup.invoiceId}`).set(
+      parentUpdate,
+      { merge: true },
+    );
+  } else if (lookup.quoteId) {
+    await firestore.doc(`users/${userId}/quotes/${lookup.quoteId}`).set(
+      parentUpdate,
+      { merge: true },
+    );
+  }
+
+  // Notify the tradie on dispute.created + state changes that require action.
+  // dispute.state.updated fires on every state transition, so we filter to the
+  // states where the tradie needs to do something.
+  const actionableStates = new Set([
+    'INQUIRY_EVIDENCE_REQUIRED',
+    'EVIDENCE_REQUIRED',
+    'LOST',
+  ]);
+  const isNewDispute = event?.type === 'dispute.created';
+  if (isNewDispute || actionableStates.has(disputeState)) {
+    try {
+      const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
+      const businessEmail: string | null = settingsDoc.data()?.email || null;
+      if (businessEmail) {
+        const amount = centsToDollars(Number(dispute.amount_money?.amount) || 0);
+        const subject = isNewDispute
+          ? `Chargeback opened — respond within Square deadline`
+          : `Dispute update: ${disputeState.replace(/_/g, ' ').toLowerCase()}`;
+        const bodyHtml = `
+          <p>A customer has ${isNewDispute ? 'opened a chargeback dispute' : 'updated the dispute'} against a Square payment.</p>
+          <ul>
+            <li><strong>Amount:</strong> $${amount.toFixed(2)} AUD</li>
+            <li><strong>Reason:</strong> ${dispute.reason || 'Not provided'}</li>
+            <li><strong>State:</strong> ${disputeState}</li>
+            ${dispute.evidence_deadline ? `<li><strong>Evidence due:</strong> ${dispute.evidence_deadline}</li>` : ''}
+          </ul>
+          <p>Respond in the Square dashboard. Don't miss the deadline or you'll lose the dispute by default.</p>
+        `;
+        await sendEmail({
+          to: businessEmail,
+          subject,
+          htmlContent: bodyHtml,
+          category: 'transactional',
+          userId,
+          tags: ['square', 'dispute'],
+        }).catch(() => {/* best effort */});
+      }
+    } catch (err: any) {
+      console.warn('[square] dispute notification email failed', { disputeId, message: err?.message });
+    }
+  }
+}
 
 /**
  * Record an in-app (Mobile Payments SDK / Tap to Pay) payment so the Square
@@ -9724,7 +10014,7 @@ export const recordInAppSquarePayment = functions.https.onRequest((req, res) => 
     const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
 
-    const { kind, targetId, paymentId, orderId, amountCents } = req.body || {};
+    const { kind, targetId, paymentId, orderId, amountCents, fallbackTerms } = req.body || {};
     if (
       (kind !== 'invoice' && kind !== 'quote_deposit') ||
       !isNonEmptyString(targetId) ||
@@ -9736,10 +10026,13 @@ export const recordInAppSquarePayment = functions.https.onRequest((req, res) => 
       return;
     }
 
+    const firestore = admin.firestore();
+    const userId = decodedToken.uid;
+
     // Match Donkw's index schema: webhook reads { userId, invoiceId } or
     // { userId, quoteId, kind: 'quote_deposit' }.
     const indexDoc: any = {
-      userId: decodedToken.uid,
+      userId,
       paymentId,
       amountCents,
       source: 'in_app',
@@ -9752,9 +10045,41 @@ export const recordInAppSquarePayment = functions.https.onRequest((req, res) => 
       indexDoc.invoiceId = targetId;
     }
 
-    await admin.firestore()
+    await firestore
       .doc(`squarePaymentOrders/${orderId}`)
       .set(indexDoc, { merge: true });
+
+    // Fallback terms: if the client passed terms AND the target doc has no
+    // snapshot of its own, write them now so the webhook can stamp a real
+    // acceptance record. We do NOT overwrite an existing snapshot — the
+    // per-quote record of what the customer saw at send time is load-bearing.
+    if (isNonEmptyString(fallbackTerms)) {
+      const trimmed = String(fallbackTerms).trim();
+      if (trimmed) {
+        const targetPath = kind === 'quote_deposit'
+          ? `users/${userId}/quotes/${targetId}`
+          : `users/${userId}/invoices/${targetId}`;
+        const targetRef = firestore.doc(targetPath);
+        try {
+          const snap = await targetRef.get();
+          const existing = snap.exists ? snap.data() : null;
+          if (!existing?.termsVersionHash) {
+            await targetRef.set(
+              {
+                termsSnapshot: trimmed,
+                termsVersionHash: hashTerms(trimmed),
+              },
+              { merge: true },
+            );
+          }
+        } catch (err: any) {
+          console.warn('[square] fallback-terms snapshot failed', {
+            userId, targetId, message: err?.message,
+          });
+        }
+      }
+    }
+
     res.status(200).json({ success: true });
   });
 });

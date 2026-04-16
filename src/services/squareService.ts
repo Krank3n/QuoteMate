@@ -189,6 +189,14 @@ export async function recordInAppPayment(args: {
   paymentId: string;
   orderId: string;
   amountCents: number;
+  /**
+   * When the quote/invoice has no `termsSnapshot` of its own (e.g. it was
+   * sent before the tradie added terms), the client passes the current
+   * business-profile terms here. The server writes them onto the doc so the
+   * webhook can stamp tcAccepted with a real versionHash. Leave undefined if
+   * the doc already carries its own snapshot.
+   */
+  fallbackTerms?: string;
 }): Promise<void> {
   await squareFetch('recordInAppSquarePayment', args);
 }

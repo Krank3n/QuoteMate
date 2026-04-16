@@ -24,6 +24,7 @@ import { InsightsScreen } from '../screens/InsightsScreen';
 
 // Settings sub-screens
 import { BusinessProfileScreen } from '../screens/settings/BusinessProfileScreen';
+import { BusinessDefaultsScreen } from '../screens/settings/BusinessDefaultsScreen';
 import { PaymentMethodsScreen } from '../screens/settings/PaymentMethodsScreen';
 import { TradePricingScreen } from '../screens/settings/TradePricingScreen';
 import { SubscriptionSettingsScreen } from '../screens/settings/SubscriptionSettingsScreen';
@@ -550,6 +551,17 @@ export function RootNavigator() {
           headerStyle: { backgroundColor: colors.primary },
           headerTintColor: colors.white,
           title: 'Business Details',
+        }}
+      />
+      <RootStack.Screen
+        name="BusinessDefaults"
+        component={BusinessDefaultsScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Business Defaults',
         }}
       />
 <RootStack.Screen

@@ -233,6 +233,49 @@ export interface Quote {
   // and completing payment = accepting those terms.
   depositTcAccepted?: TcAcceptance;
   fullTcAccepted?: TcAcceptance;
+
+  // Forward-compat: once we introduce a Jobs collection, accepted quotes with
+  // a paid deposit auto-create a Job linked here. Pre-wiring now so existing
+  // quotes gain the field without a migration later.
+  jobId?: string;
+  // Computed server-side by the webhook: total money received against this
+  // quote (deposit + any extra payments) and the outstanding balance.
+  // Redundant with depositPaid for now, but collapses to a single "how much
+  // has this customer paid" field once multi-payment lands.
+  paidTotal?: number;
+  balanceDue?: number;
+
+  // Non-null when the last Square webhook attempt against this quote failed
+  // to reconcile — surfaced as a red banner so the tradie can investigate
+  // instead of silently losing the payment event. Cleared on next success.
+  paymentSyncError?: PaymentSyncError;
+
+  // Chargeback / dispute state as reported by Square. Null unless a dispute
+  // has been opened against a payment linked to this quote.
+  disputeStatus?: SquareDisputeStatus;
+  disputeId?: string;
+}
+
+export type SquareDisputeStatus =
+  | 'INQUIRY_EVIDENCE_REQUIRED'
+  | 'INQUIRY_PROCESSING'
+  | 'INQUIRY_CLOSED'
+  | 'EVIDENCE_REQUIRED'
+  | 'PROCESSING'
+  | 'WON'
+  | 'LOST'
+  | 'ACCEPTED';
+
+// Recorded when the Square webhook fails mid-reconcile. Surfaces in-app so
+// the tradie knows something needs manual attention (instead of us swallowing
+// the error silently, which is the default for webhook handlers).
+export interface PaymentSyncError {
+  at: Date;
+  // Short machine-readable identifier — e.g. 'index_lookup_failed',
+  // 'firestore_write_failed', 'xero_sync_failed'. Used for conditional UI.
+  code: string;
+  message: string;        // One-line human explanation for the banner.
+  paymentId?: string;     // Square payment id if known.
 }
 
 export interface JobTemplate {
@@ -316,6 +359,7 @@ export interface BusinessSettings {
   email?: string;
   phone?: string;
   address?: string;
+  website?: string; // Shown on PDFs/emails alongside other contact details
   logoUri?: string; // Local file URI for company logo
   defaultLaborRate: number;
   defaultMarkup: number;
@@ -358,6 +402,14 @@ export interface BusinessSettings {
   // ISO timestamp of the last edit; used to prompt re-review if the business
   // hasn't touched their terms in >12 months.
   termsUpdatedAt?: string;
+  // When true, bump the Square pay-link amount by the standard passthrough
+  // percentage (see shared/pdf/squareFees.ts → PASSTHROUGH_SURCHARGE_PCT) so
+  // the customer covers both Square's processing fee and QuoteMate's platform
+  // fee rather than the tradie eating them. Legal in AU with disclosure; the
+  // email + hosted checkout surface the surcharge line. Default false.
+  // The percentage is NOT tradie-editable — ACCC rules require surcharges to
+  // stay at or under the actual cost of acceptance.
+  surchargePaymentFees?: boolean;
   // Legacy fields (kept for backwards compatibility)
   hardwareStores?: string[]; // DEPRECATED - use selectedStore instead
   customStores?: string[]; // DEPRECATED - Custom store URLs added by user
@@ -512,6 +564,18 @@ export interface Invoice {
   termsVersionHash?: string;
   // Stamped by the Square webhook when the invoice payment completes.
   tcAccepted?: TcAcceptance;
+
+  // Forward-compat job linkage — mirrors Quote.jobId.
+  jobId?: string;
+  // Total dollars received against this invoice. paidAmount is the legacy
+  // single-payment field we keep in sync.
+  paidTotal?: number;
+  balanceDue?: number;
+
+  // Failed-webhook surface + dispute tracking, mirrors Quote.
+  paymentSyncError?: PaymentSyncError;
+  disputeStatus?: SquareDisputeStatus;
+  disputeId?: string;
 
   // In-progress email body shown in the invoice email preview modal.
   // Generated (or typed) on first open and persisted so reopening doesn't

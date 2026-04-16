@@ -19,6 +19,7 @@ import {
   Share,
   ActivityIndicator,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { Text, Button } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -28,7 +29,12 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import * as squareService from '../services/squareService';
 import { takeInAppPayment } from '../services/squarePayments';
 import { useTapToPayEnabled } from '../hooks/useTapToPayEnabled';
-import { dollarsToCents } from '../../shared/pdf/money';
+import { dollarsToCents, centsToDollars } from '../../shared/pdf/money';
+import {
+  QM_APP_FEE_PCT_IN_PERSON,
+  PASSTHROUGH_SURCHARGE_PCT,
+} from '../../shared/pdf/squareFees';
+import { useStore } from '../store/useStore';
 
 export type TakePaymentTarget =
   | {
@@ -38,6 +44,13 @@ export type TakePaymentTarget =
       paidAmount: number;
       jobName?: string;
       invoiceNumber?: string;
+      /**
+       * Snapshot of the T&Cs attached to this invoice at send time. When
+       * present, the sheet shows a "View terms" row and requires the tradie
+       * to tick an acknowledgement before charging in person. When absent,
+       * the terms section is hidden entirely.
+       */
+      terms?: string | null;
     }
   | {
       kind: 'quote_deposit';
@@ -46,6 +59,7 @@ export type TakePaymentTarget =
       depositPaid: number;
       total: number;            // Full quote total, for the "Full amount" mode.
       jobName?: string;
+      terms?: string | null;
     };
 
 type QuotePaymentMode = 'deposit' | 'full';
@@ -104,7 +118,31 @@ export function TakePaymentSheet({
   // before we charge in person. The server stamps the actual acceptance record
   // (with version hash + timestamp) from the quote/invoice snapshot.
   const [termsAcknowledged, setTermsAcknowledged] = useState(false);
+  const [termsModalVisible, setTermsModalVisible] = useState(false);
   const tapToPay = useTapToPayEnabled();
+  const { businessSettings } = useStore();
+  const surchargeOn = businessSettings?.surchargePaymentFees === true;
+
+  // Reset the acknowledgement + modal state whenever the sheet opens for a
+  // new target so previous ticks don't carry over.
+  React.useEffect(() => {
+    if (!visible) {
+      setTermsAcknowledged(false);
+      setTermsModalVisible(false);
+    }
+  }, [visible]);
+
+  // Prefer the terms snapshotted onto the quote/invoice at send time — that's
+  // what the customer received in the emailed PDF. Fall back to the tradie's
+  // current business-profile terms if no snapshot exists (e.g. quote was sent
+  // before the tradie added terms, or never emailed — just taking payment
+  // on-site). Server still stamps acceptance against whatever's on the doc.
+  const snapshotTerms = target?.terms?.trim() || '';
+  const liveTerms = (businessSettings?.termsAndConditions || '').trim();
+  const effectiveTerms = snapshotTerms || liveTerms;
+  const hasTerms = !!effectiveTerms;
+  // If no terms are attached, skip the ack gate entirely — nothing to confirm.
+  const termsGatePassed = !hasTerms || termsAcknowledged;
 
   if (!target) return null;
 
@@ -120,17 +158,34 @@ export function TakePaymentSheet({
     if (chargingCard || amounts.remaining <= 0) return;
     setChargingCard(true);
     try {
-      const amountCents = dollarsToCents(amounts.remaining);
+      // Bake the passthrough surcharge (if opted in) into the charged amount
+      // so the customer sees/pays the inflated total. The app fee (our cut)
+      // is computed off the CHARGED amount so we also earn on the surcharge.
+      const baseCents = dollarsToCents(amounts.remaining);
+      const surchargeCents = surchargeOn
+        ? dollarsToCents(
+            centsToDollars(baseCents) * (PASSTHROUGH_SURCHARGE_PCT / 100),
+          )
+        : 0;
+      const amountCents = baseCents + surchargeCents;
+      const appFeeCents = dollarsToCents(
+        centsToDollars(amountCents) * (QM_APP_FEE_PCT_IN_PERSON / 100),
+      );
       await takeInAppPayment({
         target:
           target.kind === 'invoice'
             ? { kind: 'invoice', invoiceId: target.invoiceId }
             : { kind: 'quote_deposit', quoteId: target.quoteId },
         amountCents,
+        appFeeCents,
         note:
           target.kind === 'invoice'
             ? `Invoice ${target.invoiceNumber || ''}`.trim()
             : `Deposit — ${target.jobName || 'job'}`,
+        // Only send fallback when the doc lacks its own snapshot — the server
+        // won't overwrite an existing one. Keeps the per-quote record of
+        // exactly what the customer saw at send time intact.
+        fallbackTerms: !snapshotTerms && liveTerms ? liveTerms : undefined,
       });
       onDismiss();
     } catch (error: any) {
@@ -251,34 +306,57 @@ export function TakePaymentSheet({
             </View>
           </View>
 
-          {/* T&C acknowledgment — required for in-person Tap to Pay. The
-              customer should have the quote/invoice PDF with terms visible
-              before the tradie taps their card. */}
-          {tapToPay.enabled && (
-            <TouchableOpacity
-              style={styles.ackRow}
-              activeOpacity={0.7}
-              onPress={() => setTermsAcknowledged((v) => !v)}
-            >
-              <View
-                style={[
-                  styles.ackCheckbox,
-                  termsAcknowledged && styles.ackCheckboxActive,
-                ]}
+          {surchargeOn && amounts.remaining > 0 && (
+            <Text style={styles.surchargeNote}>
+              Customer pays {formatCurrency(amounts.remaining * (1 + PASSTHROUGH_SURCHARGE_PCT / 100))} on card (incl. {PASSTHROUGH_SURCHARGE_PCT}% surcharge).
+            </Text>
+          )}
+
+          {/* Terms row — only surfaced when this quote/invoice carries a
+              T&Cs snapshot. Two-in-one: tap to review the full text in a
+              modal, checkbox to attest the customer has read them. Keeps the
+              sheet tidy instead of a wall of tiny print. */}
+          {tapToPay.enabled && hasTerms && (
+            <View style={styles.termsCard}>
+              <TouchableOpacity
+                style={styles.termsHeader}
+                onPress={() => setTermsModalVisible(true)}
+                activeOpacity={0.7}
               >
-                {termsAcknowledged && (
-                  <MaterialCommunityIcons
-                    name="check"
-                    size={14}
-                    color={colors.onPrimary}
-                  />
-                )}
-              </View>
-              <Text style={styles.ackText}>
-                Customer has read the terms on this{' '}
-                {target.kind === 'invoice' ? 'invoice' : 'quote'}.
-              </Text>
-            </TouchableOpacity>
+                <MaterialCommunityIcons
+                  name="file-document-outline"
+                  size={18}
+                  color={colors.primary}
+                />
+                <Text style={styles.termsHeaderText}>
+                  Terms for this {target.kind === 'invoice' ? 'invoice' : 'quote'}
+                </Text>
+                <Text style={styles.termsViewLink}>View</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.ackRow}
+                activeOpacity={0.7}
+                onPress={() => setTermsAcknowledged((v) => !v)}
+              >
+                <View
+                  style={[
+                    styles.ackCheckbox,
+                    termsAcknowledged && styles.ackCheckboxActive,
+                  ]}
+                >
+                  {termsAcknowledged && (
+                    <MaterialCommunityIcons
+                      name="check"
+                      size={14}
+                      color={colors.onPrimary}
+                    />
+                  )}
+                </View>
+                <Text style={styles.ackText}>
+                  Customer has read and agrees to the terms.
+                </Text>
+              </TouchableOpacity>
+            </View>
           )}
 
           {/* Tap to Pay / Card Entry — gated on remote flag + device capability */}
@@ -287,7 +365,7 @@ export function TakePaymentSheet({
             title="Tap to Pay / Card Entry"
             subtitle={
               tapToPay.enabled
-                ? termsAcknowledged
+                ? termsGatePassed
                   ? 'Tap a card or phone, or key in details.'
                   : 'Confirm customer has read terms above.'
                 : tapToPay.reason === 'pending_apple'
@@ -299,11 +377,11 @@ export function TakePaymentSheet({
                       : 'Not enabled for your account yet.'
             }
             onPress={
-              tapToPay.enabled && termsAcknowledged
+              tapToPay.enabled && termsGatePassed
                 ? handleTakeCardPayment
                 : undefined
             }
-            disabled={!tapToPay.enabled || !termsAcknowledged}
+            disabled={!tapToPay.enabled || !termsGatePassed}
             loading={chargingCard}
           />
 
@@ -326,6 +404,86 @@ export function TakePaymentSheet({
           </Button>
         </TouchableOpacity>
       </TouchableOpacity>
+
+      {/* Terms preview modal. Rendered inside the parent Modal so it layers
+          above the sheet without fighting its backdrop. */}
+      {hasTerms && (
+        <TermsPreviewModal
+          visible={termsModalVisible}
+          terms={effectiveTerms}
+          docLabel={target.kind === 'invoice' ? 'Invoice' : 'Quote'}
+          onClose={() => setTermsModalVisible(false)}
+          onAccept={() => {
+            setTermsAcknowledged(true);
+            setTermsModalVisible(false);
+          }}
+          alreadyAccepted={termsAcknowledged}
+        />
+      )}
+    </Modal>
+  );
+}
+
+interface TermsPreviewModalProps {
+  visible: boolean;
+  terms: string;
+  docLabel: string;
+  onClose: () => void;
+  onAccept: () => void;
+  alreadyAccepted: boolean;
+}
+
+function TermsPreviewModal({
+  visible,
+  terms,
+  docLabel,
+  onClose,
+  onAccept,
+  alreadyAccepted,
+}: TermsPreviewModalProps) {
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.termsBackdrop}>
+        <View style={styles.termsModal}>
+          <View style={styles.termsModalHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.termsModalTitle}>Terms &amp; Conditions</Text>
+              <Text style={styles.termsModalSubtitle}>{docLabel}</Text>
+            </View>
+            <TouchableOpacity
+              onPress={onClose}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <MaterialCommunityIcons name="close" size={22} color={colors.onSurface} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView
+            style={styles.termsModalBody}
+            contentContainerStyle={styles.termsModalBodyContent}
+          >
+            <Text style={styles.termsModalText}>{terms}</Text>
+          </ScrollView>
+          <View style={styles.termsModalFooter}>
+            <Button mode="text" onPress={onClose} compact>
+              Close
+            </Button>
+            <Button
+              mode="contained"
+              onPress={onAccept}
+              disabled={alreadyAccepted}
+              icon={alreadyAccepted ? 'check' : undefined}
+              style={{ marginLeft: 8 }}
+            >
+              {alreadyAccepted ? 'Confirmed' : 'Customer agrees'}
+            </Button>
+          </View>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -540,5 +698,92 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textMuted,
     lineHeight: 18,
+  },
+  surchargeNote: {
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: -8,
+    marginBottom: 12,
+    fontStyle: 'italic',
+  },
+  termsCard: {
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    marginBottom: 10,
+  },
+  termsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  termsHeaderText: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  termsViewLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  termsBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  termsModal: {
+    width: '100%',
+    maxWidth: 480,
+    maxHeight: '85%',
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  termsModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  termsModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  termsModalSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  termsModalBody: {
+    paddingHorizontal: 20,
+  },
+  termsModalBodyContent: {
+    paddingTop: 14,
+    paddingBottom: 18,
+  },
+  termsModalText: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: colors.text,
+  },
+  termsModalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
 });

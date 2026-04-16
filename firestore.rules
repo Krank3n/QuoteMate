@@ -69,6 +69,17 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Square reverse-lookup: paymentId → {userId, invoiceId|quoteId}.
+    // Written by the webhook after successful reconciliation so dispute
+    // events (which carry disputed payment id but not order id) can route
+    // back to the invoice/quote. Read allowed for the owning tradie so the
+    // client can resolve disputes linked in the UI.
+    match /squarePayments/{paymentId} {
+      allow read: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
     // Default: deny all access
     match /{document=**} {
       allow read, write: if false;

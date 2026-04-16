@@ -826,6 +826,9 @@ interface QuoteEmailData {
   // When set, the primary CTA becomes "Accept & Pay Deposit" linking straight
   // to Square's hosted checkout. Paying = accepting (webhook handles both).
   depositPayNowUrl?: string;
+  // True when the attached PDF carries a T&Cs section — drives whether the
+  // CTA renders the "By paying you accept the terms…" footnote.
+  hasTerms?: boolean;
   business: {
     name: string;
     abn?: string;
@@ -905,12 +908,27 @@ function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string;
 </html>`;
 }
 
+/**
+ * Strip any standalone "ABN: 12 345 678 901" line from the email body. We
+ * render the tradie's ABN in the footer already, so leaving it in the body
+ * (whether typed by the tradie or produced by the AI email generator) makes
+ * the email look duplicated.
+ */
+function stripAbnFromBody(body: string): string {
+  return body
+    .replace(/^[ \t]*ABN[:\s][^\n]*\n?/gim, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function buildQuoteEmailHtml(data: QuoteEmailData): string {
   const accent = data.business.brandColor || '#059669';
   const esc = escapeHtml;
 
   // Email body paragraphs
-  const bodyHtml = esc(data.emailBody).replace(/\n\n/g, '</p><p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">').replace(/\n/g, '<br/>');
+  const bodyHtml = esc(stripAbnFromBody(data.emailBody))
+    .replace(/\n\n/g, '</p><p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">')
+    .replace(/\n/g, '<br/>');
 
   // Photos section — only embed http(s) URLs; legacy quotes may hold local
   // file:// or blob: URIs that the recipient's mail client cannot resolve.
@@ -988,8 +1006,10 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
     const acceptUrl = data.acceptanceUrl + (data.acceptanceUrl.includes('?') ? '&' : '?') + 'action=accept';
     const declineUrl = data.acceptanceUrl + (data.acceptanceUrl.includes('?') ? '&' : '?') + 'action=decline';
     const primaryHref = data.depositPayNowUrl ? data.depositPayNowUrl : acceptUrl;
+    // Amount + percentage are already surfaced in the deposit notice block
+    // above — keep the button label clean so the hero number doesn't repeat.
     const primaryLabel = data.depositPayNowUrl && data.depositAmount
-      ? `Accept &amp; Pay Deposit ($${data.depositAmount.toFixed(2)})`
+      ? 'Accept &amp; Pay Deposit'
       : 'Accept Quote';
     ctaSection = depositNoticeSection + `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
@@ -1001,7 +1021,7 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
                   <a href="${esc(primaryHref)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">${primaryLabel}</a>
                 </td>
               </tr>
-              ${data.depositPayNowUrl ? `<tr>
+              ${data.depositPayNowUrl && data.hasTerms ? `<tr>
                 <td style="text-align:center;padding-top:6px;">
                   <span style="color:#6b7280;font-size:11px;">By paying you accept the Terms &amp; Conditions in the attached quote.</span>
                 </td>
@@ -1093,6 +1113,9 @@ interface InvoiceEmailData {
   invoiceNumber?: string;
   dueDate: string; // ISO date string
   payNowUrl?: string; // Square hosted payment link (only present when tradie has Square connected)
+  // True when the attached PDF carries a T&Cs section — drives whether the
+  // Pay Now button renders the "By paying you accept the terms…" footnote.
+  hasTerms?: boolean;
   // Deposit credit carried over from a quote that had a deposit paid. Rendered
   // as a "Deposit already paid" line above the total.
   depositCredit?: number;
@@ -1111,8 +1134,11 @@ export function buildInvoiceEmailHtml(data: InvoiceEmailData): string {
   const accent = data.business.brandColor || '#059669';
   const esc = escapeHtml;
 
-  // Email body paragraphs
-  const bodyHtml = esc(data.emailBody).replace(/\n\n/g, '</p><p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">').replace(/\n/g, '<br/>');
+  // Email body paragraphs — strip any standalone ABN line so it doesn't
+  // duplicate the footer render.
+  const bodyHtml = esc(stripAbnFromBody(data.emailBody))
+    .replace(/\n\n/g, '</p><p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">')
+    .replace(/\n/g, '<br/>');
 
   // Format due date
   const dueDateFormatted = new Date(data.dueDate).toLocaleDateString('en-AU', {
@@ -1194,7 +1220,7 @@ export function buildInvoiceEmailHtml(data: InvoiceEmailData): string {
             Pay Now
           </a>
           <p style="color:#6b7280;font-size:12px;margin:8px 0 0;">Secure card payment via Square</p>
-          <p style="color:#6b7280;font-size:11px;margin:6px 0 0;">By paying you accept the Terms &amp; Conditions in the attached invoice.</p>
+          ${data.hasTerms ? `<p style="color:#6b7280;font-size:11px;margin:6px 0 0;">By paying you accept the Terms &amp; Conditions in the attached invoice.</p>` : ''}
         </td>
       </tr>
     </table>` : ''}

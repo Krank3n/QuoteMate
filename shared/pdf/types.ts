@@ -85,6 +85,7 @@ export interface BusinessPdfData {
   businessName: string;
   email?: string;
   phone?: string;
+  website?: string;
   abn?: string;
   address?: string;
   logoHtml?: string; // Pre-built <img> tag or empty string

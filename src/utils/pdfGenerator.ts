@@ -27,18 +27,22 @@ async function prepareLogoHtml(businessSettings: BusinessSettings | null, isPro?
   const showLogo = isPro !== false;
   if (!showLogo || !businessSettings?.logoUri) return '';
 
-  if (Platform.OS !== 'web') {
-    try {
-      const base64 = await FileSystem.readAsStringAsync(businessSettings.logoUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      return `<img src="data:image/png;base64,${base64}" alt="${businessSettings.businessName || ''}" class="logo" />`;
-    } catch (error) {
-      return '';
-    }
-  } else {
-    // On web, the logoUri is already a URL that can be used directly
-    return `<img src="${businessSettings.logoUri}" alt="${businessSettings.businessName || ''}" class="logo" />`;
+  const uri = businessSettings.logoUri;
+  const alt = businessSettings.businessName || '';
+
+  // Remote URLs (Firebase Storage) can be used directly as src
+  if (uri.startsWith('https://') || uri.startsWith('http://') || Platform.OS === 'web') {
+    return `<img src="${uri}" alt="${alt}" class="logo" />`;
+  }
+
+  // Local file URIs need to be converted to base64 for the PDF renderer
+  try {
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return `<img src="data:image/png;base64,${base64}" alt="${alt}" class="logo" />`;
+  } catch (error) {
+    return '';
   }
 }
 
@@ -56,6 +60,7 @@ function mapBusinessData(businessSettings: BusinessSettings | null, logoHtml: st
     businessName: business.businessName,
     email: business.email,
     phone: business.phone,
+    website: businessSettings?.website,
     abn: business.abn,
     address: businessSettings?.address,
     logoHtml,
@@ -136,6 +141,7 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
     showLaborBreakdown: quote.showLaborBreakdown !== false,
     groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
     paymentMethods: businessSettings?.paymentMethods,
+    terms: quote.termsSnapshot || businessSettings?.termsAndConditions,
   };
 
   return buildQuotePdfHtml(pdfData, mapBusinessData(businessSettings, logoHtml));
@@ -303,6 +309,7 @@ export async function generateInvoicePDF(invoice: Invoice, businessSettings: Bus
     showLaborBreakdown: invoice.showLaborBreakdown !== false,
     groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
     paymentMethods: businessSettings?.paymentMethods,
+    terms: invoice.termsSnapshot || businessSettings?.termsAndConditions,
   };
 
   return buildInvoicePdfHtml(pdfData, mapBusinessData(businessSettings, logoHtml));

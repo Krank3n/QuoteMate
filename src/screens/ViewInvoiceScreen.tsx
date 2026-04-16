@@ -26,6 +26,7 @@ import { generateInvoicePDF } from '../utils/pdfGenerator';
 import { SendInvoiceButton } from '../components/SendInvoiceButton';
 import { TakePaymentSheet, TakePaymentTarget } from '../components/TakePaymentSheet';
 import { SquareReconnectBanner } from '../components/SquareReconnectBanner';
+import { PaymentSyncErrorBanner, DisputeBanner } from '../components/PaymentAlertBanners';
 import { AlertModal } from '../components/AlertModal';
 import * as squareService from '../services/squareService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -272,6 +273,11 @@ export function ViewInvoiceScreen() {
             contextMessage="Card payments are paused"
           />
         ) : null}
+        <PaymentSyncErrorBanner error={(invoice as any)?.paymentSyncError} />
+        <DisputeBanner
+          status={(invoice as any)?.disputeStatus}
+          disputeId={(invoice as any)?.disputeId}
+        />
         {/* Status Section */}
         <TouchableOpacity onPress={() => setStatusSheetVisible(true)} activeOpacity={0.7}>
         <Surface style={documentStyles.section}>
@@ -638,6 +644,7 @@ export function ViewInvoiceScreen() {
             paidAmount: invoice.paidAmount || 0,
             jobName: invoice.job?.name,
             invoiceNumber: invoice.invoiceNumber,
+            terms: (invoice as any)?.termsSnapshot || null,
           } as TakePaymentTarget
         }
         onDismiss={() => setTakePaymentVisible(false)}

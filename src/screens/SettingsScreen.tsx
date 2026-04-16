@@ -53,6 +53,13 @@ export function SettingsScreen() {
           icon: 'domain',
           screen: 'BusinessProfile',
         },
+        {
+          id: 'businessDefaults',
+          title: 'Business Defaults',
+          subtitle: 'Rates, deposits, card fees, terms',
+          icon: 'tune',
+          screen: 'BusinessDefaults',
+        },
 {
           id: 'payment',
           title: 'Payment Methods',
