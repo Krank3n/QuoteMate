@@ -12,7 +12,8 @@ export type AussieEvent =
   | 'invoice_overdue'
   | 'daily_motivation'
   | 'milestone'
-  | 'inactivity';
+  | 'inactivity'
+  | 'draft_nudge';
 
 interface MessageVariant {
   title: string;
@@ -130,6 +131,20 @@ const MESSAGE_POOL: Record<AussieEvent, MessageVariant[]> = {
     {
       title: 'What a Ripper! 🏆',
       body: "{n} quotes sent! You're smashing it harder than a snag on the barbie!",
+    },
+  ],
+  draft_nudge: [
+    {
+      title: '📝 Draft Sitting There',
+      body: "Oi, your quote for {customer} is just sitting there! Send it off, legend!",
+    },
+    {
+      title: '📝 Quote Ready to Go',
+      body: "Your quote for {customer} is gathering dust, mate. Hit send!",
+    },
+    {
+      title: "📝 Don't Leave 'Em Hanging",
+      body: "{customer}'s waiting on that quote! Flick it over before they find someone else.",
     },
   ],
   inactivity: [

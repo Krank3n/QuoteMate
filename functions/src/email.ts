@@ -1769,3 +1769,77 @@ export function sendMaterialListErrorEmail(
     tags: ['admin-notification', 'material-list-error'],
   });
 }
+
+export function sendDraftNudgeEmail(
+  to: string,
+  businessName: string,
+  drafts: Array<{ customerName: string; jobName: string; total: number; daysOld: number }>,
+  tier: number,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = businessName || 'mate';
+  const draftCount = drafts.length;
+  const totalValue = drafts.reduce((sum, d) => sum + d.total, 0);
+  const formattedValue = `$${totalValue.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
+  const draftRows = drafts.slice(0, 5).map(d => `
+    <tr>
+      <td style="padding:10px 0;border-bottom:1px solid #334155;">
+        <span style="color:#f8fafc;font-size:14px;font-weight:600;">${d.customerName}</span><br/>
+        <span style="color:#94a3b8;font-size:13px;">${d.jobName} &mdash; $${d.total.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+        <span style="color:#64748b;font-size:12px;float:right;">${d.daysOld}d ago</span>
+      </td>
+    </tr>
+  `).join('');
+
+  const moreText = drafts.length > 5
+    ? `<p style="color:#64748b;font-size:13px;margin:8px 0 0;">+ ${drafts.length - 5} more draft${drafts.length - 5 > 1 ? 's' : ''}</p>`
+    : '';
+
+  const heading = tier === 3
+    ? `${greeting}, last nudge on these drafts`
+    : `${greeting}, you've got ${draftCount} unsent quote${draftCount > 1 ? 's' : ''}`;
+
+  const subtext = tier === 3
+    ? `These quotes have been sitting for over a week. Send them off or they might go cold.`
+    : `That's <strong style="color:#f8fafc;">${formattedValue}</strong> worth of work waiting to land in your customer's inbox.`;
+
+  const content = wrapEmailTemplate(`
+    <div style="text-align:center;margin:0 0 24px;">
+      ${badge(`${draftCount} UNSENT`, '#78350f', '#e6b872')}
+    </div>
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;text-align:center;line-height:1.3;">
+      ${heading}
+    </h1>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;text-align:center;">
+      ${subtext}
+    </p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border-radius:12px;border:1px solid #334155;">
+      <tr>
+        <td style="padding:16px 20px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${draftRows}
+          </table>
+          ${moreText}
+        </td>
+      </tr>
+    </table>
+
+    ${ctaButton('Review & Send Quotes')}
+
+    <p style="color:#64748b;font-size:13px;line-height:1.5;margin:24px 0 0;text-align:center;">
+      Quotes sent sooner get accepted more often. Don't let these go cold!
+    </p>
+  `, { unsubscribeUrl, preheader: `You have ${draftCount} unsent quote${draftCount > 1 ? 's' : ''} worth ${formattedValue}. Send them before they go cold.` });
+
+  return sendEmail({
+    to,
+    subject: `${greeting}, you have ${draftCount} unsent quote${draftCount > 1 ? 's' : ''} (${formattedValue})`,
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['draft-nudge', `tier-${tier}`],
+  });
+}

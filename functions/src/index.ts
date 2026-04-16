@@ -24,6 +24,7 @@ import {
   sendAffiliateInviteEmail,
   sendNewProSubscriptionEmail,
   sendMaterialListErrorEmail,
+  sendDraftNudgeEmail,
 } from './email';
 import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from './pdfGenerator';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
@@ -6996,6 +6997,7 @@ async function sendAussiePush(
     daily_motivation: 'dailyMotivation',
     milestone: 'milestoneCelebrations',
     inactivity: 'inactivityNudges',
+    draft_nudge: 'inactivityNudges',
   };
 
   const prefKey = prefMap[event];
@@ -7344,6 +7346,110 @@ export const inactivityNudge = functions.pubsub
       }, { merge: true });
     }
 
+  });
+
+// -----------------------------------------------------------
+// draftNudge — Scheduled daily: nudge users about aging draft quotes
+// Tier 1 (24hrs): push only
+// Tier 2 (3 days): push + email
+// Tier 3 (7 days): email only (final nudge)
+// -----------------------------------------------------------
+export const draftNudge = functions.pubsub
+  .schedule('every day 11:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const now = new Date();
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    const usersSnapshot = await db.collection('users').get();
+    let processed = 0;
+    let nudgesSent = 0;
+    let errors = 0;
+
+    for (const userDoc of usersSnapshot.docs) {
+      const draftsSnapshot = await userDoc.ref
+        .collection('quotes')
+        .where('status', '==', 'draft')
+        .get();
+
+      if (draftsSnapshot.empty) continue;
+
+      const draftsToPush: Array<{ doc: FirebaseFirestore.QueryDocumentSnapshot; tier: number; daysOld: number }> = [];
+      const draftsForEmail: Array<{ customerName: string; jobName: string; total: number; daysOld: number }> = [];
+      let emailTier = 0;
+
+      for (const quoteDoc of draftsSnapshot.docs) {
+        const quote = quoteDoc.data();
+
+        // Skip incomplete drafts (no customer = probably just started)
+        if (!quote.customerName) continue;
+
+        const updatedAt = quote.updatedAt?.toDate ? quote.updatedAt.toDate() : (quote.createdAt?.toDate ? quote.createdAt.toDate() : null);
+        if (!updatedAt) continue;
+
+        const daysOld = Math.floor((now.getTime() - updatedAt.getTime()) / oneDayMs);
+        const currentTier = quote.draftNudgeTier || 0;
+
+        let targetTier = 0;
+        if (daysOld >= 7 && currentTier < 3) targetTier = 3;
+        else if (daysOld >= 3 && currentTier < 2) targetTier = 2;
+        else if (daysOld >= 1 && currentTier < 1) targetTier = 1;
+
+        if (targetTier === 0) continue;
+
+        draftsToPush.push({ doc: quoteDoc, tier: targetTier, daysOld });
+
+        // Collect for email (tier 2 and 3 get emails)
+        if (targetTier >= 2) {
+          draftsForEmail.push({
+            customerName: quote.customerName || 'Unknown',
+            jobName: quote.job?.name || 'Custom Job',
+            total: quote.total || 0,
+            daysOld,
+          });
+          emailTier = Math.max(emailTier, targetTier);
+        }
+      }
+
+      if (draftsToPush.length === 0) continue;
+      processed++;
+
+      try {
+        // Send push for each draft (tier 1, 2, 3)
+        for (const draft of draftsToPush) {
+          const quote = draft.doc.data();
+          await sendAussiePush(userDoc.id, 'draft_nudge', {
+            customer: quote.customerName || 'A customer',
+            job: quote.job?.name || 'the job',
+          }, { quoteId: draft.doc.id });
+
+          // Mark tier on the quote doc
+          await draft.doc.ref.update({
+            draftNudgeTier: draft.tier,
+            lastDraftNudgeAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          nudgesSent++;
+        }
+
+        // Send email summary (tier 2 and 3 only)
+        if (draftsForEmail.length > 0) {
+          const email = await getUserEmail(userDoc.id);
+          if (email) {
+            let businessName = '';
+            try {
+              const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
+              businessName = settingsDoc.data()?.businessName || '';
+            } catch {}
+
+            await sendDraftNudgeEmail(email, businessName, draftsForEmail, emailTier, userDoc.id);
+          }
+        }
+      } catch (err: any) {
+        functions.logger.error(`draftNudge error for user ${userDoc.id}`, err?.message);
+        errors++;
+      }
+    }
+
+    functions.logger.info(`draftNudge complete`, { processed, nudgesSent, errors });
   });
 
 /**
