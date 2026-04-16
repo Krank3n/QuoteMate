@@ -25,6 +25,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { generateInvoicePDF } from '../utils/pdfGenerator';
 import { SendInvoiceButton } from '../components/SendInvoiceButton';
 import { TakePaymentSheet, TakePaymentTarget } from '../components/TakePaymentSheet';
+import { SquareReconnectBanner } from '../components/SquareReconnectBanner';
 import { AlertModal } from '../components/AlertModal';
 import * as squareService from '../services/squareService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -87,6 +88,7 @@ export function ViewInvoiceScreen() {
   const [statusSheetVisible, setStatusSheetVisible] = useState(false);
   const [isXeroPushing, setIsXeroPushing] = useState(false);
   const [squareConnected, setSquareConnected] = useState(false);
+  const [squareDisconnectedReason, setSquareDisconnectedReason] = useState<string | null>(null);
   const [takePaymentVisible, setTakePaymentVisible] = useState(false);
   const [takePaymentError, setTakePaymentError] = useState<string | null>(null);
 
@@ -95,7 +97,9 @@ export function ViewInvoiceScreen() {
     squareService
       .checkSquareConnection()
       .then((s) => {
-        if (!cancelled) setSquareConnected(!!s.connected);
+        if (cancelled) return;
+        setSquareConnected(!!s.connected);
+        setSquareDisconnectedReason(s.disconnectedReason || null);
       })
       .catch(() => {});
     return () => {
@@ -259,6 +263,15 @@ export function ViewInvoiceScreen() {
 
       <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
+        {/* Square reconnect prompt — only visible if this invoice has a
+            pay-link AND the token has been revoked/expired. Without it the
+            tradie would silently lose card-payment capability. */}
+        {invoice?.squarePaymentLinkId && squareDisconnectedReason ? (
+          <SquareReconnectBanner
+            reason={squareDisconnectedReason}
+            contextMessage="Card payments are paused"
+          />
+        ) : null}
         {/* Status Section */}
         <TouchableOpacity onPress={() => setStatusSheetVisible(true)} activeOpacity={0.7}>
         <Surface style={documentStyles.section}>

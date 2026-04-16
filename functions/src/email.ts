@@ -1001,6 +1001,11 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
                   <a href="${esc(primaryHref)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">${primaryLabel}</a>
                 </td>
               </tr>
+              ${data.depositPayNowUrl ? `<tr>
+                <td style="text-align:center;padding-top:6px;">
+                  <span style="color:#6b7280;font-size:11px;">By paying you accept the Terms &amp; Conditions in the attached quote.</span>
+                </td>
+              </tr>` : ''}
               <tr>
                 <td height="12" style="font-size:12px;line-height:12px;">&nbsp;</td>
               </tr>
@@ -1189,6 +1194,7 @@ export function buildInvoiceEmailHtml(data: InvoiceEmailData): string {
             Pay Now
           </a>
           <p style="color:#6b7280;font-size:12px;margin:8px 0 0;">Secure card payment via Square</p>
+          <p style="color:#6b7280;font-size:11px;margin:6px 0 0;">By paying you accept the Terms &amp; Conditions in the attached invoice.</p>
         </td>
       </tr>
     </table>` : ''}

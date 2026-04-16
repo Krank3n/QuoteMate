@@ -39,6 +39,7 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
+import { DEFAULT_AU_TRADIE_TERMS, hashTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 
 export function BusinessProfileScreen() {
   const navigation = useNavigation<any>();
@@ -61,6 +62,7 @@ export function BusinessProfileScreen() {
   const [requireDepositByDefault, setRequireDepositByDefault] = useState(false);
   const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
   const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
+  const [termsAndConditions, setTermsAndConditions] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -81,6 +83,9 @@ export function BusinessProfileScreen() {
       const dp = (businessSettings.defaultDepositPercentage ?? 0).toString();
       const rd = businessSettings.requireDepositByDefault === true;
       const tm = businessSettings.transportMarkupEnabled !== false;
+      // New users default to the built-in AU tradie template so they can ship
+      // quotes with terms from day one. Stored blank-as-null so save is stable.
+      const tc = businessSettings.termsAndConditions ?? DEFAULT_AU_TRADIE_TERMS;
 
       setBusinessName(name);
       setAbn(a);
@@ -95,9 +100,10 @@ export function BusinessProfileScreen() {
       setDefaultDepositPercentage(dp);
       setRequireDepositByDefault(rd);
       setTransportMarkupEnabled(tm);
+      setTermsAndConditions(tc);
 
       initialSnapshotRef.current = JSON.stringify({
-        name, a, e, p, addr, logo, brand, lr, mk, lm, dp, rd, tm,
+        name, a, e, p, addr, logo, brand, lr, mk, lm, dp, rd, tm, tc,
       });
     }
   }, [businessSettings]);
@@ -130,9 +136,10 @@ export function BusinessProfileScreen() {
       dp: defaultDepositPercentage,
       rd: requireDepositByDefault,
       tm: transportMarkupEnabled,
+      tc: termsAndConditions,
     });
     return current !== initialSnapshotRef.current;
-  }, [businessName, abn, email, phone, address, logoUri, brandColor, laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault, transportMarkupEnabled]);
+  }, [businessName, abn, email, phone, address, logoUri, brandColor, laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault, transportMarkupEnabled, termsAndConditions]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
     isDirty,
@@ -253,6 +260,11 @@ export function BusinessProfileScreen() {
         defaultDepositPercentage: Math.max(0, Math.min(100, parseFloat(defaultDepositPercentage) || 0)),
         requireDepositByDefault,
         transportMarkupEnabled,
+        termsAndConditions: termsAndConditions.trim() || undefined,
+        termsUpdatedAt:
+          termsAndConditions !== (businessSettings?.termsAndConditions ?? DEFAULT_AU_TRADIE_TERMS)
+            ? new Date().toISOString()
+            : businessSettings?.termsUpdatedAt,
       });
 
       // Geocode address and store location for distance sorting in supplier discovery
@@ -283,6 +295,7 @@ export function BusinessProfileScreen() {
         dp: defaultDepositPercentage,
         rd: requireDepositByDefault,
         tm: transportMarkupEnabled,
+        tc: termsAndConditions,
       });
 
       if (!opts?.silent) {
@@ -495,6 +508,56 @@ export function BusinessProfileScreen() {
                 color={colors.primary}
               />
             </View>
+          </Surface>
+
+          <Surface style={styles.card}>
+            <Title style={styles.sectionTitle}>Terms &amp; Conditions</Title>
+            <Text style={styles.helperText}>
+              Appears at the bottom of every quote and invoice PDF. Customers
+              accept these terms when they pay a deposit or invoice.
+            </Text>
+
+            <TextInput
+              value={termsAndConditions}
+              onChangeText={setTermsAndConditions}
+              mode="outlined"
+              style={[styles.input, { minHeight: 180 }]}
+              multiline
+              numberOfLines={12}
+              placeholder="Your terms and conditions…"
+            />
+
+            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              <Button
+                mode="text"
+                compact
+                onPress={() => {
+                  Alert.alert(
+                    'Restore default terms?',
+                    'This replaces your current T&Cs with the built-in Australian tradie template. You can edit it afterwards.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Restore',
+                        onPress: () => setTermsAndConditions(DEFAULT_AU_TRADIE_TERMS),
+                      },
+                    ],
+                  );
+                }}
+              >
+                Restore default template
+              </Button>
+              {termsAndConditions ? (
+                <Text style={[styles.helperText, { alignSelf: 'center' }]}>
+                  Version {hashTerms(termsAndConditions).slice(0, 6)}
+                </Text>
+              ) : null}
+            </View>
+
+            <Text style={[styles.helperText, { marginTop: 8, fontStyle: 'italic' }]}>
+              Tip: Have a solicitor review these terms for your trade. The
+              default is a sensible starting point, not legal advice.
+            </Text>
           </Surface>
 
           <Surface style={styles.card}>

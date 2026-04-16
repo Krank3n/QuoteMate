@@ -64,6 +64,10 @@ export interface QuotePdfData {
   showLaborBreakdown?: boolean;
   groupMaterialsBySection?: boolean;
   paymentMethods?: any;
+  // Terms & Conditions text. Rendered as its own section at the end of the
+  // document. The business's current T&Cs are snapshotted to the quote/invoice
+  // at send time and passed through here so later edits don't rewrite history.
+  terms?: string;
 }
 
 export interface InvoicePdfData extends QuotePdfData {

@@ -4,6 +4,14 @@
 import type { PdfTemplateId, PdfTemplateInfo } from '../../shared/pdf/types';
 export type { PdfTemplateId, PdfTemplateInfo };
 
+// Record of a customer accepting the business's T&Cs at payment time.
+// Stamped on the quote/invoice doc so the version they paid under is auditable.
+export interface TcAcceptance {
+  versionHash: string;          // hash of the T&Cs text snapshot at send time
+  at: Date;                     // when the acceptance was recorded
+  source: 'pay_link' | 'tap_to_pay' | 'manual';
+}
+
 export interface Material {
   id: string;
   name: string;
@@ -214,6 +222,17 @@ export interface Quote {
   depositPaymentLinkUrl?: string;  // Hosted checkout URL surfaced on the acceptance page.
   depositPaymentLinkCreatedAt?: number | Date; // When the link was minted (ms epoch). Used to detect >23h stale and re-mint.
   depositSquarePaymentId?: string; // Set by webhook on COMPLETED (idempotency key).
+
+  // T&Cs snapshot taken at send-time so later edits to the BusinessProfile
+  // T&Cs don't rewrite history. The hash identifies the exact version the
+  // customer saw when they paid.
+  termsSnapshot?: string;
+  termsVersionHash?: string;
+  // Stamped by the Square webhook when the deposit/full payment completes.
+  // Legally: the customer received the PDF containing the terms (hash match)
+  // and completing payment = accepting those terms.
+  depositTcAccepted?: TcAcceptance;
+  fullTcAccepted?: TcAcceptance;
 }
 
 export interface JobTemplate {
@@ -331,6 +350,14 @@ export interface BusinessSettings {
   // Default deposit percentage applied to new quotes when requireDeposit is on.
   // Per-quote override lives on Quote.depositPercentage.
   defaultDepositPercentage?: number;
+  // Terms & Conditions shown on the quote/invoice PDF and recorded as
+  // accepted when the customer pays. Editable in Settings → Business Profile.
+  // When blank, the PDF falls back to the built-in AU tradie default so new
+  // users have something sensible out of the box.
+  termsAndConditions?: string;
+  // ISO timestamp of the last edit; used to prompt re-review if the business
+  // hasn't touched their terms in >12 months.
+  termsUpdatedAt?: string;
   // Legacy fields (kept for backwards compatibility)
   hardwareStores?: string[]; // DEPRECATED - use selectedStore instead
   customStores?: string[]; // DEPRECATED - Custom store URLs added by user
@@ -479,6 +506,12 @@ export interface Invoice {
   // "Deposit of $X already paid" on the invoice/PDF/email.
   depositCredit?: number;
   depositCreditFromQuoteId?: string;
+
+  // T&Cs snapshot taken at send-time — see Quote.termsSnapshot.
+  termsSnapshot?: string;
+  termsVersionHash?: string;
+  // Stamped by the Square webhook when the invoice payment completes.
+  tcAccepted?: TcAcceptance;
 
   // In-progress email body shown in the invoice email preview modal.
   // Generated (or typed) on first open and persisted so reopening doesn't

@@ -28,6 +28,7 @@ import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
+import { SquareReconnectBanner } from '../../components/SquareReconnectBanner';
 import * as squareService from '../../services/squareService';
 import type { SquareConnectionStatus } from '../../services/squareService';
 import { primeTapToPayOnDevice } from '../../services/squarePayments';
@@ -185,6 +186,12 @@ export function SquareIntegrationScreen() {
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <WebContainer>
+          {/* Banner shown only when the backend has flagged this connection
+              as disconnected (e.g. token refresh failed). Tapping re-runs the
+              OAuth flow via the Connect button further down the screen. */}
+          {connection?.connected && connection?.disconnectedReason ? (
+            <SquareReconnectBanner reason={connection.disconnectedReason} />
+          ) : null}
           {/* Header */}
           <Surface style={styles.card}>
             <View style={styles.headerRow}>

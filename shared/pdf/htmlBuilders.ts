@@ -8,6 +8,28 @@ import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 
 /**
+ * Render the T&Cs section at the end of a quote/invoice PDF. Preserves
+ * paragraph breaks by splitting on blank lines and wrapping each in <p>.
+ * Escapes HTML so hand-edited terms can't break the document.
+ */
+function buildTermsHTML(terms: string | undefined): string {
+  if (!terms || !terms.trim()) return '';
+  const escape = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const paras = terms
+    .split(/\n\s*\n/)
+    .map((p) => escape(p.trim()).replace(/\n/g, '<br>'))
+    .filter(Boolean)
+    .map((p) => `<p style="margin: 0 0 8px 0;">${p}</p>`)
+    .join('');
+  return `
+      <div class="terms-section" style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; page-break-inside: avoid;">
+        <h3 style="margin: 0 0 12px 0;">Terms &amp; Conditions</h3>
+        <div style="font-size: 11px; color: #4b5563; line-height: 1.5;">${paras}</div>
+      </div>`;
+}
+
+/**
  * Generate materials table HTML, optionally grouped by work section
  * When markupPercent > 0, material prices are inflated by the markup percentage
  */
@@ -401,6 +423,8 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
       <div style="margin-top: 40px; font-size: 12px; color: #666666;">
         <p>This quote is valid for 30 days from the date of issue.</p>
       </div>
+
+      ${buildTermsHTML(quote.terms)}
       </div>
 
       <div class="pdf-footer">
@@ -495,6 +519,8 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
         <p>Payment is due by ${invoice.dueDate}.</p>
         <p>Thank you for your business!</p>
       </div>
+
+      ${buildTermsHTML(invoice.terms)}
       </div>
 
       <div class="pdf-footer">

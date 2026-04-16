@@ -27,6 +27,9 @@ import {
 } from './email';
 import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from './pdfGenerator';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
+import { DEFAULT_AU_TRADIE_TERMS, hashTerms } from './shared/terms/defaultAuTradie';
+import { dollarsToCents, centsToDollars } from './shared/money';
+// (Both resolve via the functions/src/shared symlink → shared/pdf)
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -3050,8 +3053,23 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       const depositRequired = quote.requireDeposit === true;
       const depositPctForEmail = depositRequired ? (Number(quote.depositPercentage) || 0) : 0;
       const depositAmountForEmail = depositPctForEmail > 0
-        ? Math.round((Number(quote.total) || 0) * (depositPctForEmail / 100) * 100) / 100
+        ? centsToDollars(dollarsToCents((Number(quote.total) || 0) * (depositPctForEmail / 100)))
         : 0;
+
+      // Snapshot the current T&Cs onto the quote so later edits to the
+      // business's terms don't rewrite what the customer saw. Version hash
+      // stays stable across identical text — lets us detect genuine changes.
+      const termsToSend: string =
+        (typeof business.termsAndConditions === 'string' && business.termsAndConditions.trim())
+          ? business.termsAndConditions
+          : DEFAULT_AU_TRADIE_TERMS;
+      const termsVersionHash = hashTerms(termsToSend);
+      if (!isTestSend) {
+        await firestore.doc(`users/${userId}/quotes/${quoteId}`).set(
+          { termsSnapshot: termsToSend, termsVersionHash },
+          { merge: true },
+        );
+      }
 
       // If the quote has a deposit and the tradie has Square connected, mint
       // the hosted payment link now so the email's primary CTA can become
@@ -3142,6 +3160,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           showLaborBreakdown: quote.showLaborBreakdown !== false,
           groupMaterialsBySection: business.groupMaterialsBySection,
           paymentMethods: business.paymentMethods,
+          terms: termsToSend,
         },
         {
           businessName: business.businessName || 'Business',
@@ -3265,6 +3284,17 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         invoiceUpdate.aiEmailBody = emailBody;
         invoiceUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
       }
+      // Snapshot the current T&Cs onto the invoice so later edits don't
+      // rewrite what the customer saw.
+      const invoiceTermsToSend: string =
+        (typeof business.termsAndConditions === 'string' && business.termsAndConditions.trim())
+          ? business.termsAndConditions
+          : DEFAULT_AU_TRADIE_TERMS;
+      const invoiceTermsVersionHash = hashTerms(invoiceTermsToSend);
+      if (!isTestSend) {
+        invoiceUpdate.termsSnapshot = invoiceTermsToSend;
+        invoiceUpdate.termsVersionHash = invoiceTermsVersionHash;
+      }
       if (Object.keys(invoiceUpdate).length > 0) {
         await invoiceRef.set(invoiceUpdate, { merge: true });
       }
@@ -3387,6 +3417,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
           showLaborBreakdown: invoice.showLaborBreakdown !== false,
           groupMaterialsBySection: business.groupMaterialsBySection,
           paymentMethods: business.paymentMethods,
+          terms: invoiceTermsToSend,
         },
         {
           businessName: business.businessName || 'Business',
@@ -9067,7 +9098,7 @@ async function createSquarePaymentLinkInternal(
   const total = Number(invoice.total) || 0;
   if (total <= 0) return null;
 
-  const amountCents = Math.round(total * 100);
+  const amountCents = dollarsToCents(total);
   const jobName = invoice.job?.name || 'Job';
   const invoiceNumber = invoice.invoiceNumber || invoiceId.slice(0, 8);
   const idempotencyKey = `qm-invoice-${userId}-${invoiceId}-${Date.now()}`;
@@ -9229,7 +9260,7 @@ async function createSquareDepositPaymentLinkInternal(
   if (depositPct <= 0) return null;
   const total = Number(quote.total) || 0;
   if (total <= 0) return null;
-  const depositAmount = Number(quote.depositAmount) || Math.round(total * (depositPct / 100) * 100) / 100;
+  const depositAmount = Number(quote.depositAmount) || centsToDollars(dollarsToCents(total * (depositPct / 100)));
   if (depositAmount <= 0) return null;
 
   // Reuse an existing link only while it's still fresh. Square payment links
@@ -9257,7 +9288,7 @@ async function createSquareDepositPaymentLinkInternal(
   const tokens = await getSquareTokens(userId);
   if (!tokens) return null;
 
-  const amountCents = Math.round(depositAmount * 100);
+  const amountCents = dollarsToCents(depositAmount);
   const jobName = quote.job?.name || 'Job';
   const quoteNumber = quote.quoteNumber || quoteId.slice(0, 8);
   const idempotencyKey = `qm-quote-deposit-${userId}-${quoteId}-${Date.now()}`;
@@ -9377,7 +9408,7 @@ async function createSquareFullQuotePaymentLinkInternal(
   const tokens = await getSquareTokens(userId);
   if (!tokens) return null;
 
-  const amountCents = Math.round(amount * 100);
+  const amountCents = dollarsToCents(amount);
   const jobName = quote.job?.name || 'Job';
   const quoteNumber = quote.quoteNumber || quoteId.slice(0, 8);
   const idempotencyKey = `qm-quote-full-${userId}-${quoteId}-${Date.now()}`;
@@ -9542,9 +9573,22 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
       const quote = quoteDoc.data()!;
       if (quote.depositSquarePaymentId && quote.depositSquarePaymentId === payment.id) return;
 
-      const paidAmountDollars = (Number(payment?.amount_money?.amount) || 0) / 100;
+      const paidAmountDollars = centsToDollars(Number(payment?.amount_money?.amount) || 0);
       const newDepositPaid = Math.max(Number(quote.depositPaid) || 0, paidAmountDollars);
       const wasAlreadyAccepted = quote.status === 'accepted' || !!quote.respondedAt;
+
+      // Record T&C acceptance against the snapshot taken at send time.
+      // Legal basis: the customer received the PDF containing these terms
+      // and completing payment = accepting them (flagged in the email copy).
+      const tcSource: 'pay_link' | 'tap_to_pay' =
+        idx.source === 'in_app' ? 'tap_to_pay' : 'pay_link';
+      const tcAcceptance = quote.termsVersionHash
+        ? {
+            versionHash: quote.termsVersionHash,
+            at: admin.firestore.FieldValue.serverTimestamp(),
+            source: tcSource,
+          }
+        : null;
 
       const update: any = {
         depositPaid: newDepositPaid,
@@ -9552,6 +9596,13 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         depositSquarePaymentId: payment.id,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
+      if (tcAcceptance) {
+        if (idx.kind === 'quote_full') {
+          update.fullTcAccepted = tcAcceptance;
+        } else {
+          update.depositTcAccepted = tcAcceptance;
+        }
+      }
       if (!wasAlreadyAccepted) {
         update.status = 'accepted';
         update.respondedAt = admin.firestore.FieldValue.serverTimestamp();
@@ -9612,11 +9663,20 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
     // Idempotency: skip if we've already recorded this payment id.
     if (invoice.squarePaymentId && invoice.squarePaymentId === payment.id) return;
 
-    const paidAmountDollars =
-      (Number(payment?.amount_money?.amount) || 0) / 100;
+    const paidAmountDollars = centsToDollars(Number(payment?.amount_money?.amount) || 0);
     const total = Number(invoice.total) || 0;
     const newPaidAmount = Math.max(Number(invoice.paidAmount) || 0, paidAmountDollars);
     const newStatus = newPaidAmount + 0.005 >= total ? 'paid' : 'partial';
+
+    const invoiceTcSource: 'pay_link' | 'tap_to_pay' =
+      idx.source === 'in_app' ? 'tap_to_pay' : 'pay_link';
+    const invoiceTcAcceptance = invoice.termsVersionHash
+      ? {
+          versionHash: invoice.termsVersionHash,
+          at: admin.firestore.FieldValue.serverTimestamp(),
+          source: invoiceTcSource,
+        }
+      : null;
 
     await invoiceRef.set(
       {
@@ -9628,6 +9688,7 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         squarePaymentId: payment.id,
         squarePaidAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...(invoiceTcAcceptance ? { tcAccepted: invoiceTcAcceptance } : {}),
       },
       { merge: true },
     );

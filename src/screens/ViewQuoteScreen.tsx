@@ -21,6 +21,7 @@ import { generateQuotePDF } from '../utils/pdfGenerator';
 import { SendQuoteButton } from '../components/SendQuoteButton';
 import { AlertModal } from '../components/AlertModal';
 import { TakePaymentSheet, TakePaymentTarget } from '../components/TakePaymentSheet';
+import { SquareReconnectBanner } from '../components/SquareReconnectBanner';
 import * as squareService from '../services/squareService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebContainer } from '../components/WebContainer';
@@ -61,6 +62,7 @@ export function ViewQuoteScreen() {
   const [isEditingNumber, setIsEditingNumber] = useState(false);
   const [quoteNumber, setQuoteNumber] = useState('');
   const [squareConnected, setSquareConnected] = useState(false);
+  const [squareDisconnectedReason, setSquareDisconnectedReason] = useState<string | null>(null);
   const [takePaymentVisible, setTakePaymentVisible] = useState(false);
   const [takePaymentError, setTakePaymentError] = useState<string | null>(null);
 
@@ -69,7 +71,9 @@ export function ViewQuoteScreen() {
     squareService
       .checkSquareConnection()
       .then((s) => {
-        if (!cancelled) setSquareConnected(!!s.connected);
+        if (cancelled) return;
+        setSquareConnected(!!s.connected);
+        setSquareDisconnectedReason(s.disconnectedReason || null);
       })
       .catch(() => {});
     return () => {
@@ -194,6 +198,15 @@ export function ViewQuoteScreen() {
         contentContainerStyle={styles.scrollContent}
       >
         <WebContainer>
+        {/* Surface revoked-Square state for quotes that rely on a deposit
+            pay-link, so the tradie can reconnect before the customer tries
+            to pay and hits a dead link. */}
+        {(quote as any).depositPaymentLinkId && squareDisconnectedReason ? (
+          <SquareReconnectBanner
+            reason={squareDisconnectedReason}
+            contextMessage="Deposit link is paused"
+          />
+        ) : null}
         {/* Editable Quote Number */}
         <View style={styles.quoteNumberRow}>
           {isEditingNumber ? (

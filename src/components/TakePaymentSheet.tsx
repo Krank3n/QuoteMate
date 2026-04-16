@@ -28,6 +28,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import * as squareService from '../services/squareService';
 import { takeInAppPayment } from '../services/squarePayments';
 import { useTapToPayEnabled } from '../hooks/useTapToPayEnabled';
+import { dollarsToCents } from '../../shared/pdf/money';
 
 export type TakePaymentTarget =
   | {
@@ -99,6 +100,10 @@ export function TakePaymentSheet({
   const [sharing, setSharing] = useState(false);
   const [chargingCard, setChargingCard] = useState(false);
   const [quoteMode, setQuoteMode] = useState<QuotePaymentMode>('deposit');
+  // Tradie attests the customer has been shown the terms on the quote/invoice
+  // before we charge in person. The server stamps the actual acceptance record
+  // (with version hash + timestamp) from the quote/invoice snapshot.
+  const [termsAcknowledged, setTermsAcknowledged] = useState(false);
   const tapToPay = useTapToPayEnabled();
 
   if (!target) return null;
@@ -115,7 +120,7 @@ export function TakePaymentSheet({
     if (chargingCard || amounts.remaining <= 0) return;
     setChargingCard(true);
     try {
-      const amountCents = Math.round(amounts.remaining * 100);
+      const amountCents = dollarsToCents(amounts.remaining);
       await takeInAppPayment({
         target:
           target.kind === 'invoice'
@@ -246,13 +251,45 @@ export function TakePaymentSheet({
             </View>
           </View>
 
+          {/* T&C acknowledgment — required for in-person Tap to Pay. The
+              customer should have the quote/invoice PDF with terms visible
+              before the tradie taps their card. */}
+          {tapToPay.enabled && (
+            <TouchableOpacity
+              style={styles.ackRow}
+              activeOpacity={0.7}
+              onPress={() => setTermsAcknowledged((v) => !v)}
+            >
+              <View
+                style={[
+                  styles.ackCheckbox,
+                  termsAcknowledged && styles.ackCheckboxActive,
+                ]}
+              >
+                {termsAcknowledged && (
+                  <MaterialCommunityIcons
+                    name="check"
+                    size={14}
+                    color={colors.onPrimary}
+                  />
+                )}
+              </View>
+              <Text style={styles.ackText}>
+                Customer has read the terms on this{' '}
+                {target.kind === 'invoice' ? 'invoice' : 'quote'}.
+              </Text>
+            </TouchableOpacity>
+          )}
+
           {/* Tap to Pay / Card Entry — gated on remote flag + device capability */}
           <MethodRow
             icon="cellphone-nfc"
             title="Tap to Pay / Card Entry"
             subtitle={
               tapToPay.enabled
-                ? 'Tap a card or phone, or key in details.'
+                ? termsAcknowledged
+                  ? 'Tap a card or phone, or key in details.'
+                  : 'Confirm customer has read terms above.'
                 : tapToPay.reason === 'pending_apple'
                   ? 'Coming soon on iPhone — pending Apple approval.'
                   : tapToPay.reason === 'unsupported_device'
@@ -261,8 +298,12 @@ export function TakePaymentSheet({
                       ? 'Checking device…'
                       : 'Not enabled for your account yet.'
             }
-            onPress={tapToPay.enabled ? handleTakeCardPayment : undefined}
-            disabled={!tapToPay.enabled}
+            onPress={
+              tapToPay.enabled && termsAcknowledged
+                ? handleTakeCardPayment
+                : undefined
+            }
+            disabled={!tapToPay.enabled || !termsAcknowledged}
             loading={chargingCard}
           />
 
@@ -471,5 +512,33 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     marginTop: 8,
+  },
+  ackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginBottom: 6,
+  },
+  ackCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  ackCheckboxActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  ackText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 18,
   },
 });
