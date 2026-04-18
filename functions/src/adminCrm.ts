@@ -483,13 +483,21 @@ export const adminSendUserEmail = functions.https.onCall(async (data, context) =
   const to = await getUserEmail(uid);
   if (!to) throw new functions.https.HttpsError('not-found', 'No email address on file for this user');
 
-  // Wrap body in our standard email template for consistency
-  const htmlContent = adminEmailTemplate({ subject, bodyHtml: body });
+  const category = bypassPrefs ? 'transactional' : 'marketing';
+  const emailLogId = await createAdminEmailLog({
+    userId: uid,
+    to,
+    subject,
+    category,
+    tags: ['admin_manual'],
+    source: 'admin_manual',
+  });
+  const htmlContent = adminEmailTemplate({ subject, bodyHtml: body, emailLogId });
   const sent = await sendEmail({
     to,
     subject,
     htmlContent,
-    category: bypassPrefs ? 'transactional' : 'marketing',
+    category,
     userId: uid,
     tags: ['admin_manual'],
   });
@@ -499,12 +507,20 @@ export const adminSendUserEmail = functions.https.onCall(async (data, context) =
     action: 'send_email',
     targetType: 'user',
     targetId: uid,
-    payload: { subject, to, sent },
+    payload: { subject, to, sent, emailLogId },
   });
-  return { ok: sent };
+  return { ok: sent, emailLogId };
 });
 
-function adminEmailTemplate(params: { subject: string; bodyHtml: string }) {
+function pixelUrl(emailLogId: string): string {
+  // Project-agnostic resolution from function region/project — matches the rest of the codebase.
+  return `https://us-central1-hansendev.cloudfunctions.net/emailOpenPixel?id=${encodeURIComponent(emailLogId)}`;
+}
+
+function adminEmailTemplate(params: { subject: string; bodyHtml: string; emailLogId?: string }) {
+  const pixel = params.emailLogId
+    ? `<img src="${pixelUrl(params.emailLogId)}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px;" />`
+    : '';
   return `<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <div style="max-width:600px;margin:0 auto;background:#ffffff;">
@@ -517,7 +533,32 @@ function adminEmailTemplate(params: { subject: string; bodyHtml: string }) {
   <div style="padding:24px 32px;background:#0F172A;color:#94A3B8;font-size:13px;">
     Tom at QuoteMate · <a href="mailto:tom@hansendev.com.au" style="color:#fb923c;">tom@hansendev.com.au</a>
   </div>
+  ${pixel}
 </div></body></html>`;
+}
+
+// Create a pre-send emailLog doc so the outgoing HTML can embed the tracking
+// pixel that points back to this exact doc.
+async function createAdminEmailLog(params: {
+  userId?: string;
+  to: string;
+  subject: string;
+  category: string;
+  tags?: string[];
+  source: 'admin_manual' | 'admin_broadcast' | 'supplier' | 'feedback_reply';
+}): Promise<string> {
+  const ref = await db().collection('emailLog').add({
+    userId: params.userId || null,
+    to: params.to,
+    subject: params.subject,
+    category: params.category,
+    tags: params.tags || [],
+    source: params.source,
+    sentAt: admin.firestore.FieldValue.serverTimestamp(),
+    openedAt: null,
+    openCount: 0,
+  });
+  return ref.id;
 }
 
 // ============================================================
@@ -677,7 +718,15 @@ export const adminSendSupplierEmail = functions.https.onCall(async (data, contex
   const to = await getUserEmail(ownerUid);
   if (!to) throw new functions.https.HttpsError('not-found', 'No email on file for supplier owner');
 
-  const htmlContent = adminEmailTemplate({ subject, bodyHtml: body });
+  const emailLogId = await createAdminEmailLog({
+    userId: ownerUid,
+    to,
+    subject,
+    category: 'transactional',
+    tags: ['admin_manual', 'supplier'],
+    source: 'supplier',
+  });
+  const htmlContent = adminEmailTemplate({ subject, bodyHtml: body, emailLogId });
   const sent = await sendEmail({
     to,
     subject,
@@ -691,9 +740,9 @@ export const adminSendSupplierEmail = functions.https.onCall(async (data, contex
     action: 'send_email',
     targetType: 'supplier',
     targetId: id,
-    payload: { to, subject, sent, ownerUid },
+    payload: { to, subject, sent, ownerUid, emailLogId },
   });
-  return { ok: sent };
+  return { ok: sent, emailLogId };
 });
 
 // ============================================================
@@ -783,7 +832,15 @@ export const adminBroadcast = functions
         failed++;
         continue;
       }
-      const html = adminEmailTemplate({ subject, bodyHtml: body });
+      const emailLogId = await createAdminEmailLog({
+        userId: uid,
+        to,
+        subject,
+        category: 'marketing',
+        tags: ['admin_broadcast', segment],
+        source: 'admin_broadcast',
+      });
+      const html = adminEmailTemplate({ subject, bodyHtml: body, emailLogId });
       const ok = await sendEmail({
         to,
         subject,
@@ -822,7 +879,15 @@ export const adminReplyToFeedback = functions.https.onCall(async (data, context)
   const to = uid ? await getUserEmail(uid) : fb.email;
   if (!to) throw new functions.https.HttpsError('failed-precondition', 'no email on record');
 
-  const html = adminEmailTemplate({ subject, bodyHtml: body });
+  const emailLogId = await createAdminEmailLog({
+    userId: uid,
+    to,
+    subject,
+    category: 'transactional',
+    tags: ['feedback_reply'],
+    source: 'feedback_reply',
+  });
+  const html = adminEmailTemplate({ subject, bodyHtml: body, emailLogId });
   const sent = await sendEmail({
     to,
     subject,
@@ -849,6 +914,262 @@ export const adminReplyToFeedback = functions.https.onCall(async (data, context)
     payload: { to, subject, sent },
   });
   return { ok: sent };
+});
+
+// ============================================================
+// CSV EXPORT
+// ============================================================
+
+function csvEscape(v: any): string {
+  if (v === null || v === undefined) return '';
+  const s = String(v);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function rowsToCsv(headers: string[], rows: Array<Record<string, any>>): string {
+  const out = [headers.join(',')];
+  for (const r of rows) out.push(headers.map((h) => csvEscape(r[h])).join(','));
+  return out.join('\n');
+}
+
+export const adminExportCsv = functions
+  .runWith({ memory: '1GB', timeoutSeconds: 120 })
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const entity = (data?.entity || 'users').toString();
+    const firestore = db();
+
+    if (entity === 'users') {
+      const authUsers = await listAllAuthUsers();
+      const rows: Record<string, any>[] = [];
+      for (const auth of authUsers) {
+        const [biz, es, sub] = await Promise.all([
+          firestore.doc(`users/${auth.uid}/settings/business`).get(),
+          firestore.doc(`users/${auth.uid}/settings/emailState`).get(),
+          firestore.doc(`subscriptions/${auth.uid}`).get(),
+        ]);
+        const b = biz.data() || {};
+        const e = es.data() || {};
+        const s = sub.data() || {};
+        rows.push({
+          uid: auth.uid,
+          email: auth.email || '',
+          displayName: auth.displayName || '',
+          businessName: b.businessName || '',
+          phone: b.phone || auth.phoneNumber || '',
+          abn: b.abn || '',
+          plan: s.status || 'free',
+          tier: s.tier || '',
+          lastActivityAt: e.lastActivityAt?.toDate?.()?.toISOString?.() || '',
+          signupAt: e.signupAt?.toDate?.()?.toISOString?.() || auth.metadata.creationTime || '',
+          marketingOptIn: (await firestore.doc(`users/${auth.uid}/settings/emailPreferences`).get()).data()?.marketing !== false,
+        });
+      }
+      return {
+        filename: `quotemate-users-${Date.now()}.csv`,
+        csv: rowsToCsv(['uid', 'email', 'displayName', 'businessName', 'phone', 'abn', 'plan', 'tier', 'lastActivityAt', 'signupAt', 'marketingOptIn'], rows),
+      };
+    }
+
+    if (entity === 'suppliers') {
+      const snap = await firestore.collection('suppliers').get();
+      const rows = await Promise.all(
+        snap.docs.map(async (d) => {
+          const data = d.data() as any;
+          const [subs, items] = await Promise.all([
+            firestore.collection(`suppliers/${d.id}/subscribers`).select().get(),
+            firestore.collection(`suppliers/${d.id}/priceItems`).select().get(),
+          ]);
+          let ownerEmail = '';
+          if (data.ownerUid) {
+            try { ownerEmail = (await admin.auth().getUser(data.ownerUid)).email || ''; } catch {}
+          }
+          return {
+            id: d.id,
+            name: data.name || '',
+            kind: data.kind || 'custom',
+            ownerUid: data.ownerUid || '',
+            ownerEmail,
+            subscriberCount: subs.size,
+            priceItemCount: items.size,
+            lastPriceUpdate: data.lastPriceUpdate?.toDate?.()?.toISOString?.() || '',
+          };
+        })
+      );
+      return {
+        filename: `quotemate-suppliers-${Date.now()}.csv`,
+        csv: rowsToCsv(['id', 'name', 'kind', 'ownerUid', 'ownerEmail', 'subscriberCount', 'priceItemCount', 'lastPriceUpdate'], rows),
+      };
+    }
+
+    if (entity === 'subscriptions') {
+      const snap = await firestore.collection('subscriptions').get();
+      const rows = await Promise.all(
+        snap.docs.map(async (d) => {
+          const s = d.data() as any;
+          const [biz, auth] = await Promise.all([
+            firestore.doc(`users/${d.id}/settings/business`).get(),
+            admin.auth().getUser(d.id).catch(() => null),
+          ]);
+          const b = biz.data() || {};
+          return {
+            uid: d.id,
+            email: auth?.email || b.email || '',
+            businessName: b.businessName || '',
+            status: s.status || '',
+            tier: s.tier || '',
+            platform: s.platform || '',
+            createdAt: s.createdAt?.toDate?.()?.toISOString?.() || '',
+            currentPeriodEnd: s.currentPeriodEnd?.toDate?.()?.toISOString?.() || '',
+            canceledAt: s.canceledAt?.toDate?.()?.toISOString?.() || '',
+            lastPaymentAt: s.lastPaymentAt?.toDate?.()?.toISOString?.() || '',
+          };
+        })
+      );
+      return {
+        filename: `quotemate-subscriptions-${Date.now()}.csv`,
+        csv: rowsToCsv(['uid', 'email', 'businessName', 'status', 'tier', 'platform', 'createdAt', 'currentPeriodEnd', 'canceledAt', 'lastPaymentAt'], rows),
+      };
+    }
+
+    if (entity === 'affiliates') {
+      const snap = await firestore.collectionGroup('profile').get();
+      const rows: Record<string, any>[] = [];
+      for (const d of snap.docs) {
+        if (d.id !== 'referral') continue;
+        const data = d.data() as any;
+        if (!data?.isAffiliate) continue;
+        const uid = d.ref.parent.parent?.id;
+        if (!uid) continue;
+        const [biz, auth] = await Promise.all([
+          firestore.doc(`users/${uid}/settings/business`).get(),
+          admin.auth().getUser(uid).catch(() => null),
+        ]);
+        const b = biz.data() || {};
+        rows.push({
+          uid,
+          email: auth?.email || '',
+          businessName: b.businessName || '',
+          referralCode: data.referralCode || '',
+          commissionRate: data.commissionRate || 0,
+          totalReferrals: data.totalReferrals || 0,
+          convertedReferrals: data.convertedReferrals || 0,
+          totalEarnings: data.totalEarnings || 0,
+          pendingEarnings: data.pendingEarnings || 0,
+          paidEarnings: data.paidEarnings || 0,
+        });
+      }
+      return {
+        filename: `quotemate-affiliates-${Date.now()}.csv`,
+        csv: rowsToCsv(['uid', 'email', 'businessName', 'referralCode', 'commissionRate', 'totalReferrals', 'convertedReferrals', 'totalEarnings', 'pendingEarnings', 'paidEarnings'], rows),
+      };
+    }
+
+    throw new functions.https.HttpsError('invalid-argument', `Unknown entity: ${entity}`);
+  });
+
+// ============================================================
+// EMAIL OPEN TRACKING — 1px pixel
+// ============================================================
+
+// Transparent 1x1 GIF
+const PIXEL_GIF = Buffer.from(
+  'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+  'base64'
+);
+
+export const emailOpenPixel = functions.https.onRequest(async (req, res) => {
+  const id = (req.query.id as string) || '';
+  if (id) {
+    try {
+      await db().doc(`emailLog/${id}`).set(
+        {
+          openedAt: admin.firestore.FieldValue.serverTimestamp(),
+          openCount: admin.firestore.FieldValue.increment(1),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.error('emailOpenPixel: write failed', err);
+    }
+  }
+  res.set('Content-Type', 'image/gif');
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.status(200).send(PIXEL_GIF);
+});
+
+// ============================================================
+// SAVED SEGMENTS — reusable broadcast combos
+// ============================================================
+
+export const adminListSegments = functions.https.onCall(async (_data, context) => {
+  requireAdmin(context);
+  const snap = await db().collection('adminSegments').orderBy('updatedAt', 'desc').get();
+  return {
+    segments: snap.docs.map((d) => {
+      const data = d.data() as any;
+      return {
+        id: d.id,
+        name: data.name,
+        segment: data.segment,
+        segmentParams: data.segmentParams || {},
+        subject: data.subject || '',
+        body: data.body || '',
+        createdAt: data.createdAt?.toMillis?.() || null,
+        updatedAt: data.updatedAt?.toMillis?.() || null,
+      };
+    }),
+  };
+});
+
+export const adminSaveSegment = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const name = (data?.name || '').toString().trim();
+  const segment = (data?.segment || 'all').toString();
+  const segmentParams = data?.segmentParams || {};
+  const subject = (data?.subject || '').toString();
+  const body = (data?.body || '').toString();
+  if (!name) throw new functions.https.HttpsError('invalid-argument', 'name required');
+
+  const id = data?.id || db().collection('adminSegments').doc().id;
+  await db().doc(`adminSegments/${id}`).set(
+    {
+      name,
+      segment,
+      segmentParams,
+      subject,
+      body,
+      savedBy: adminUid,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+  await logAdminAction({
+    adminUid,
+    action: 'save_segment',
+    targetType: 'system',
+    targetId: id,
+    payload: { name, segment },
+  });
+  return { ok: true, id };
+});
+
+export const adminDeleteSegment = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const id = (data?.id || '').toString();
+  if (!id) throw new functions.https.HttpsError('invalid-argument', 'id required');
+  await db().doc(`adminSegments/${id}`).delete();
+  await logAdminAction({
+    adminUid,
+    action: 'delete_segment',
+    targetType: 'system',
+    targetId: id,
+  });
+  return { ok: true };
 });
 
 // ============================================================
