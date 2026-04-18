@@ -740,13 +740,17 @@ export function NewOnboardingScreen() {
     </View>
   );
 
-  const skipLabel = currentStep === TOTAL_STEPS ? 'Skip for now' : 'Skip';
+  const skipLabel = 'Skip';
   const isFinalStep = currentStep === TOTAL_STEPS;
   const nextLabel = isFinalStep ? 'Finish' : 'Next';
   const nextIcon = isFinalStep ? 'check' : 'arrow-right';
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+    >
       {/* Progress Indicator */}
       <OnboardingProgress
         currentStep={currentStep}
@@ -759,6 +763,7 @@ export function NewOnboardingScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
       >
         {renderStepContent()}
       </ScrollView>
@@ -766,7 +771,7 @@ export function NewOnboardingScreen() {
       {/* Navigation Buttons - Fixed to Bottom */}
       <View style={[
         styles.navigationContainer,
-        { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 32 : 16) }
+        { paddingBottom: Math.max(insets.bottom, 12) }
       ]}>
         {currentStep > 1 && (
           <Button
@@ -805,7 +810,7 @@ export function NewOnboardingScreen() {
         onComplete={handleSuccessComplete}
         message="Welcome to QuoteMate!"
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -818,7 +823,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 140,
     flexGrow: 1,
   },
   stepContainer: {
