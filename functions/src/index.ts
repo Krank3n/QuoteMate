@@ -27,6 +27,7 @@ import {
   sendDraftNudgeEmail,
 } from './email';
 import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from './pdfGenerator';
+export * from './adminCrm';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { hashTerms } from './shared/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/money';

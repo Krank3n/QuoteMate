@@ -80,6 +80,19 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Admin audit log — Cloud Functions only
+    match /adminAuditLog/{entryId} {
+      allow read, write: if false;
+    }
+
+    // Admin notes + CRM events on user docs — already covered by /users/{userId}/{document=**}
+    // but explicit deny-client-read-across-users is enforced by the default match below.
+
+    // Admin notes on supplier docs — Cloud Functions only
+    match /suppliers/{supplierId}/adminNotes/{noteId} {
+      allow read, write: if false;
+    }
+
     // Default: deny all access
     match /{document=**} {
       allow read, write: if false;
