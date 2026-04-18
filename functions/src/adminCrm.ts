@@ -26,6 +26,65 @@ function requireAdmin(context: functions.https.CallableContext): string {
   return uid;
 }
 
+// Subscription data lives at users/{uid}/profile/subscription — NOT at top-level
+// subscriptions/{uid} (which is empty in this app). Field shape:
+//   { isPro: boolean, platform: 'web'|'ios'|'android', cancelAtPeriodEnd?: boolean,
+//     currentPeriodStart?: Timestamp, currentPeriodEnd?: Timestamp, validatedAt?: Timestamp,
+//     productId?: string, subscriptionId?: string, customerId?: string, quotesThisMonth?: number }
+interface SubFields {
+  isPro: boolean;
+  canceling: boolean;
+  platform: string | null;
+  tier: 'pro' | 'pro_canceling' | 'free';
+  status: 'active' | 'canceling' | 'canceled' | 'free';
+  productId: string | null;
+  currentPeriodStart: number | null;
+  currentPeriodEnd: number | null;
+  validatedAt: number | null;
+  cancelAt: number | null;
+}
+
+function ts(v: any): number | null {
+  if (!v) return null;
+  if (typeof v === 'number') return v;
+  if (v._seconds) return v._seconds * 1000;
+  if (v.toMillis) return v.toMillis();
+  if (v instanceof Date) return v.getTime();
+  return null;
+}
+
+function deriveSubFields(sub: any | undefined | null): SubFields {
+  const isPro = !!sub?.isPro;
+  const canceling = isPro && !!sub?.cancelAtPeriodEnd;
+  const exists = !!sub;
+  return {
+    isPro,
+    canceling,
+    platform: sub?.platform || null,
+    tier: isPro ? (canceling ? 'pro_canceling' : 'pro') : 'free',
+    status: isPro ? (canceling ? 'canceling' : 'active') : exists ? 'canceled' : 'free',
+    productId: sub?.productId || null,
+    currentPeriodStart: ts(sub?.currentPeriodStart),
+    currentPeriodEnd: ts(sub?.currentPeriodEnd),
+    validatedAt: ts(sub?.validatedAt),
+    cancelAt: sub?.cancelAtPeriodEnd ? ts(sub?.currentPeriodEnd) : null,
+  };
+}
+
+// Returns a map of uid → raw sub data for every user with a subscription doc.
+// Uses collectionGroup on 'profile' and filters in memory for doc.id === 'subscription'.
+async function fetchAllSubscriptions(): Promise<Map<string, any>> {
+  const snap = await db().collectionGroup('profile').get();
+  const map = new Map<string, any>();
+  for (const d of snap.docs) {
+    if (d.id !== 'subscription') continue;
+    const uid = d.ref.parent.parent?.id;
+    if (!uid) continue;
+    map.set(uid, d.data());
+  }
+  return map;
+}
+
 async function listAllAuthUsers(): Promise<admin.auth.UserRecord[]> {
   const all: admin.auth.UserRecord[] = [];
   let nextPageToken: string | undefined;
@@ -123,13 +182,13 @@ export const adminDashboardStats = functions.https.onCall(async (_data, context)
   const [
     allAuthUsers,
     suppliers,
-    subs,
+    subscriptions,
     feedback,
     recentActivity,
   ] = await Promise.all([
     listAllAuthUsers(),
     firestore.collection('suppliers').select('ownerUid', 'subscriberCount', 'name').get(),
-    firestore.collection('subscriptions').get(),
+    fetchAllSubscriptions(),
     firestore.collection('feedback').orderBy('createdAt', 'desc').limit(10).get(),
     firestore
       .collectionGroup('emailState')
@@ -140,15 +199,13 @@ export const adminDashboardStats = functions.https.onCall(async (_data, context)
   const allUsers = { size: allAuthUsers.length };
 
   let activeSubs = 0;
+  let cancelingSubs = 0;
   let canceledSubs = 0;
-  let pastDueSubs = 0;
-  let trialSubs = 0;
-  for (const d of subs.docs) {
-    const s = d.data() as any;
-    if (s.status === 'active') activeSubs++;
-    else if (s.status === 'canceled' || s.status === 'cancelled') canceledSubs++;
-    else if (s.status === 'past_due' || s.status === 'unpaid') pastDueSubs++;
-    else if (s.status === 'trialing') trialSubs++;
+  for (const [, raw] of subscriptions) {
+    const f = deriveSubFields(raw);
+    if (f.status === 'active') activeSubs++;
+    else if (f.status === 'canceling') cancelingSubs++;
+    else if (f.status === 'canceled') canceledSubs++;
   }
 
   // Signups this week — fall back to Auth user metadata since users doc may not carry createdAt.
@@ -192,9 +249,8 @@ export const adminDashboardStats = functions.https.onCall(async (_data, context)
     },
     subscriptions: {
       active: activeSubs,
-      trialing: trialSubs,
+      canceling: cancelingSubs,
       canceled: canceledSubs,
-      pastDue: pastDueSubs,
     },
     suppliers: {
       total: suppliers.size,
@@ -228,6 +284,7 @@ interface UserListRow {
   supplierBookCount: number;
   tags: string[];
   marketingOptIn: boolean;
+  healthScore: number;
 }
 
 export const adminListUsers = functions
@@ -249,26 +306,24 @@ export const adminListUsers = functions
     const userDocMap = new Map<string, any>();
     for (const d of userDocsSnap.docs) userDocMap.set(d.id, d.data());
 
+    // Prefetch subscriptions in one collection-group pass instead of N reads
+    const subsMap = await fetchAllSubscriptions();
+
     const rows: UserListRow[] = await Promise.all(
       authUsers.map(async (auth) => {
         const uid = auth.uid;
         const userData = userDocMap.get(uid) || {};
-        const [emailStateSnap, businessSnap, subSnap, emailPrefsSnap] = await Promise.all([
+        const [emailStateSnap, businessSnap, emailPrefsSnap] = await Promise.all([
           firestore.doc(`users/${uid}/settings/emailState`).get(),
           firestore.doc(`users/${uid}/settings/business`).get(),
-          firestore.doc(`subscriptions/${uid}`).get(),
           firestore.doc(`users/${uid}/settings/emailPreferences`).get(),
         ]);
         const emailState = emailStateSnap.data() || {};
         const business = businessSnap.data() || {};
-        const sub = subSnap.data() || {};
+        const subFields = deriveSubFields(subsMap.get(uid));
         const emailPrefs = emailPrefsSnap.data() || {};
 
-        const planTier = (() => {
-          if (sub.status === 'active' || sub.status === 'trialing') return sub.tier || 'pro';
-          if (sub.status === 'canceled' || sub.status === 'cancelled') return 'canceled';
-          return 'free';
-        })();
+        const planTier = subFields.tier;
 
         return {
           uid,
@@ -286,6 +341,15 @@ export const adminListUsers = functions
           supplierBookCount: userData.supplierBookCount || 0,
           tags: userData.crmTags || [],
           marketingOptIn: emailPrefs.marketing !== false,
+          healthScore: typeof userData.healthScore === 'number'
+            ? userData.healthScore
+            : computeHealthScore({
+                lastActivityAt: emailState.lastActivityAt?.toMillis?.() || null,
+                quoteCount: userData.quoteCount || 0,
+                invoiceCount: userData.invoiceCount || 0,
+                supplierBookCount: userData.supplierBookCount || 0,
+                tier: subFields.tier,
+              }),
         };
       })
     );
@@ -335,7 +399,7 @@ export const adminGetUser = functions.https.onCall(async (data, context) => {
     firestore.doc(`users/${uid}/settings/emailPreferences`).get(),
     firestore.doc(`users/${uid}/settings/registrationInfo`).get(),
     firestore.doc(`users/${uid}/profile/referral`).get(),
-    firestore.doc(`subscriptions/${uid}`).get(),
+    firestore.doc(`users/${uid}/profile/subscription`).get(),
     firestore.collection(`users/${uid}/quotes`).orderBy('createdAt', 'desc').limit(25).get().catch(() => ({ docs: [] as any[] })),
     firestore.collection(`users/${uid}/invoices`).orderBy('createdAt', 'desc').limit(25).get().catch(() => ({ docs: [] as any[] })),
     firestore.collection(`users/${uid}/adminNotes`).orderBy('createdAt', 'desc').limit(50).get().catch(() => ({ docs: [] as any[] })),
@@ -392,7 +456,7 @@ export const adminGetUser = functions.https.onCall(async (data, context) => {
     emailPreferences: emailPrefsSnap.data() || {},
     registration: regSnap.data() || {},
     referral: referralSnap.data() || {},
-    subscription: subSnap.data() || {},
+    subscription: { ...(subSnap.data() || {}), ...deriveSubFields(subSnap.data()) },
     quotes: (quotesSnap as any).docs.map(docToJson),
     invoices: (invoicesSnap as any).docs.map(docToJson),
     notes: (notesSnap as any).docs.map(docToJson),
@@ -767,20 +831,20 @@ async function resolveSegment(
   const dayMs = 24 * 60 * 60 * 1000;
 
   if (segment === 'all') {
-    const snap = await firestore.collection('users').select().get();
-    return snap.docs.map((d) => d.id);
+    const authUsers = await listAllAuthUsers();
+    return authUsers.map((u) => u.uid);
   }
   if (segment === 'pro') {
-    const snap = await firestore.collection('subscriptions').where('status', 'in', ['active', 'trialing']).get();
-    return snap.docs.map((d) => d.id);
+    const subs = await fetchAllSubscriptions();
+    const out: string[] = [];
+    for (const [uid, raw] of subs) if (deriveSubFields(raw).isPro) out.push(uid);
+    return out;
   }
   if (segment === 'free') {
-    const [usersSnap, subsSnap] = await Promise.all([
-      firestore.collection('users').select().get(),
-      firestore.collection('subscriptions').where('status', 'in', ['active', 'trialing']).get(),
-    ]);
-    const paid = new Set(subsSnap.docs.map((d) => d.id));
-    return usersSnap.docs.map((d) => d.id).filter((u) => !paid.has(u));
+    const [authUsers, subs] = await Promise.all([listAllAuthUsers(), fetchAllSubscriptions()]);
+    const paid = new Set<string>();
+    for (const [uid, raw] of subs) if (deriveSubFields(raw).isPro) paid.add(uid);
+    return authUsers.map((u) => u.uid).filter((u) => !paid.has(u));
   }
   if (segment === 'inactive_7d' || segment === 'inactive_30d') {
     const days = segment === 'inactive_7d' ? 7 : 30;
@@ -917,6 +981,259 @@ export const adminReplyToFeedback = functions.https.onCall(async (data, context)
 });
 
 // ============================================================
+// HEALTH SCORE — 0-100 engagement score per user
+// ============================================================
+
+/**
+ * Health score components (all 0-1, weighted):
+ *   - activity recency (30%): fresh activity in last 7d = 1.0, decaying to 0 at 60d+
+ *   - quote volume (25%): 0 quotes = 0, 5+ = 1.0
+ *   - supplier book (15%): 0 = 0, 3+ = 1.0
+ *   - paid tier (20%): pro = 1.0, pro_canceling = 0.3, free = 0.3
+ *   - invoice activity (10%): 0 = 0, 3+ = 1.0
+ * Output: 0-100 integer
+ */
+interface HealthInputs {
+  lastActivityAt: number | null;
+  quoteCount: number;
+  invoiceCount: number;
+  supplierBookCount: number;
+  tier: string;
+}
+
+function computeHealthScore(x: HealthInputs): number {
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  const daysSinceActivity = x.lastActivityAt ? (now - x.lastActivityAt) / day : 999;
+  const recencyScore = daysSinceActivity <= 7 ? 1 : daysSinceActivity >= 60 ? 0 : 1 - (daysSinceActivity - 7) / 53;
+  const quoteScore = Math.min(1, (x.quoteCount || 0) / 5);
+  const supplierScore = Math.min(1, (x.supplierBookCount || 0) / 3);
+  const tierScore = x.tier === 'pro' ? 1 : x.tier === 'pro_canceling' ? 0.3 : 0.3;
+  const invoiceScore = Math.min(1, (x.invoiceCount || 0) / 3);
+  const raw = recencyScore * 0.3 + quoteScore * 0.25 + supplierScore * 0.15 + tierScore * 0.2 + invoiceScore * 0.1;
+  return Math.round(Math.max(0, Math.min(1, raw)) * 100);
+}
+
+/**
+ * Auto-apply the "pipeline:at-risk" tag when score drops below 30. Never
+ * overwrites a manually-assigned pipeline stage (only toggles at-risk based
+ * on score). Used by both listing and the stats backfill.
+ */
+function maybeAutoAtRisk(currentTags: string[], score: number): { tags: string[]; changed: boolean } {
+  const hasManualPipeline = currentTags.some(
+    (t) => t.startsWith('pipeline:') && t !== 'pipeline:at-risk' && t !== 'pipeline:auto-at-risk'
+  );
+  const isAutoAtRisk = currentTags.includes('pipeline:auto-at-risk');
+  if (hasManualPipeline) return { tags: currentTags, changed: false };
+  if (score < 30 && !isAutoAtRisk) {
+    return {
+      tags: [...currentTags.filter((t) => !t.startsWith('pipeline:')), 'pipeline:auto-at-risk'],
+      changed: true,
+    };
+  }
+  if (score >= 30 && isAutoAtRisk) {
+    return { tags: currentTags.filter((t) => t !== 'pipeline:auto-at-risk'), changed: true };
+  }
+  return { tags: currentTags, changed: false };
+}
+
+// Scheduled daily refresh of health scores + auto at-risk flagging
+export const recomputeAllHealthScores = functions.pubsub
+  .schedule('0 2 * * *')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const firestore = db();
+    const [authUsers, subsMap] = await Promise.all([listAllAuthUsers(), fetchAllSubscriptions()]);
+    let updated = 0;
+    for (const u of authUsers) {
+      const uid = u.uid;
+      const [userDocSnap, esSnap] = await Promise.all([
+        firestore.doc(`users/${uid}`).get(),
+        firestore.doc(`users/${uid}/settings/emailState`).get(),
+      ]);
+      const userData = (userDocSnap.data() || {}) as any;
+      const emailState = (esSnap.data() || {}) as any;
+      const subFields = deriveSubFields(subsMap.get(uid));
+      const score = computeHealthScore({
+        lastActivityAt: emailState.lastActivityAt?.toMillis?.() || null,
+        quoteCount: userData.quoteCount || 0,
+        invoiceCount: userData.invoiceCount || 0,
+        supplierBookCount: userData.supplierBookCount || 0,
+        tier: subFields.tier,
+      });
+      const currentTags: string[] = userData.crmTags || [];
+      const { tags, changed } = maybeAutoAtRisk(currentTags, score);
+      const update: any = { healthScore: score, healthScoreAt: admin.firestore.FieldValue.serverTimestamp() };
+      if (changed) update.crmTags = tags;
+      await firestore.doc(`users/${uid}`).set(update, { merge: true });
+      updated++;
+    }
+    console.log(`recomputeAllHealthScores: updated ${updated} users`);
+    return null;
+  });
+
+// Manual trigger for health score recompute — same body as the scheduled one.
+export const recomputeAllHealthScoresNow = functions
+  .runWith({ timeoutSeconds: 540, memory: '1GB' })
+  .https.onRequest(async (req, res) => {
+    const key = req.get('x-admin-key') || (req.query.key as string | undefined);
+    if (!key || key !== process.env.ADMIN_DASHBOARD_KEY) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const firestore = db();
+    const [authUsers, subsMap] = await Promise.all([listAllAuthUsers(), fetchAllSubscriptions()]);
+    let updated = 0;
+    for (const u of authUsers) {
+      const uid = u.uid;
+      const [userDocSnap, esSnap] = await Promise.all([
+        firestore.doc(`users/${uid}`).get(),
+        firestore.doc(`users/${uid}/settings/emailState`).get(),
+      ]);
+      const userData = (userDocSnap.data() || {}) as any;
+      const emailState = (esSnap.data() || {}) as any;
+      const subFields = deriveSubFields(subsMap.get(uid));
+      const score = computeHealthScore({
+        lastActivityAt: emailState.lastActivityAt?.toMillis?.() || null,
+        quoteCount: userData.quoteCount || 0,
+        invoiceCount: userData.invoiceCount || 0,
+        supplierBookCount: userData.supplierBookCount || 0,
+        tier: subFields.tier,
+      });
+      const currentTags: string[] = userData.crmTags || [];
+      const { tags, changed } = maybeAutoAtRisk(currentTags, score);
+      const update: any = { healthScore: score, healthScoreAt: admin.firestore.FieldValue.serverTimestamp() };
+      if (changed) update.crmTags = tags;
+      await firestore.doc(`users/${uid}`).set(update, { merge: true });
+      updated++;
+    }
+    res.json({ ok: true, updated });
+  });
+
+// ============================================================
+// METRICS SNAPSHOTS — daily writes at 01:00 Australia/Sydney
+// ============================================================
+
+async function computeDailySnapshot(): Promise<Record<string, any>> {
+  const firestore = db();
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  const [authUsers, subs, suppliersSnap] = await Promise.all([
+    listAllAuthUsers(),
+    fetchAllSubscriptions(),
+    firestore.collection('suppliers').select('subscriberCount', 'priceItemCount').get(),
+  ]);
+  let active = 0;
+  let canceling = 0;
+  let canceled = 0;
+  for (const [, raw] of subs) {
+    const f = deriveSubFields(raw);
+    if (f.status === 'active') active++;
+    else if (f.status === 'canceling') canceling++;
+    else if (f.status === 'canceled') canceled++;
+  }
+  // Signups in last 24h — use emailState.signupAt where present, fall back to Auth creationTime
+  let signupsToday = 0;
+  for (const u of authUsers) {
+    const created = new Date(u.metadata.creationTime).getTime();
+    if (created >= now - day) signupsToday++;
+  }
+  // Active 7d from collection group
+  const sevenDaysAgoTs = admin.firestore.Timestamp.fromMillis(now - 7 * day);
+  let active7d = 0;
+  try {
+    const snap = await firestore.collectionGroup('emailState').where('lastActivityAt', '>=', sevenDaysAgoTs).get();
+    active7d = snap.size;
+  } catch {}
+
+  // Supplier totals
+  let supplierSubscriberSum = 0;
+  let supplierItemSum = 0;
+  for (const d of suppliersSnap.docs) {
+    const data = d.data() as any;
+    supplierSubscriberSum += data.subscriberCount || 0;
+    supplierItemSum += data.priceItemCount || 0;
+  }
+
+  return {
+    usersTotal: authUsers.length,
+    signupsToday,
+    active7d,
+    subscriptionsActive: active,
+    subscriptionsCanceling: canceling,
+    subscriptionsCanceled: canceled,
+    subscriptionsPro: active + canceling,
+    suppliersTotal: suppliersSnap.size,
+    supplierSubscriberSum,
+    supplierItemSum,
+    at: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
+export const writeDailyMetricsSnapshot = functions.pubsub
+  .schedule('0 1 * * *')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const snapshot = await computeDailySnapshot();
+    const date = new Date().toISOString().slice(0, 10);
+    await db().doc(`adminMetricsSnapshots/${date}`).set(snapshot, { merge: true });
+    return null;
+  });
+
+// Manual trigger for the scheduled function — also used to seed historical days.
+export const writeDailyMetricsSnapshotNow = functions.https.onRequest(async (req, res) => {
+  const key = req.get('x-admin-key') || (req.query.key as string | undefined);
+  if (!key || key !== process.env.ADMIN_DASHBOARD_KEY) {
+    res.status(401).json({ error: 'unauthorized' });
+    return;
+  }
+  const snapshot = await computeDailySnapshot();
+  const dateOverride = (req.query.date as string | undefined) || new Date().toISOString().slice(0, 10);
+  await db().doc(`adminMetricsSnapshots/${dateOverride}`).set(snapshot, { merge: true });
+  res.json({ ok: true, date: dateOverride, snapshot });
+});
+
+export const adminMetricsSeries = functions.https.onCall(async (data, context) => {
+  requireAdmin(context);
+  const days = Math.min(Math.max(Number(data?.days) || 30, 7), 180);
+  const snap = await db()
+    .collection('adminMetricsSnapshots')
+    .orderBy(admin.firestore.FieldPath.documentId(), 'desc')
+    .limit(days)
+    .get();
+  const series = snap.docs
+    .map((d) => ({ date: d.id, ...(d.data() as any) }))
+    .reverse();
+  return { series };
+});
+
+// ============================================================
+// IMPERSONATION — mint a custom auth token for the target user
+// ============================================================
+
+export const adminImpersonate = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const uid = (data?.uid || '').toString();
+  if (!uid) throw new functions.https.HttpsError('invalid-argument', 'uid required');
+  const target = await admin.auth().getUser(uid).catch(() => null);
+  if (!target) throw new functions.https.HttpsError('not-found', 'user not found');
+  // Custom token includes a claim identifying this as an admin impersonation
+  // session — the app can surface a banner if it wants to.
+  const token = await admin.auth().createCustomToken(uid, {
+    impersonatedBy: adminUid,
+    impersonatedAt: Date.now(),
+  });
+  await logAdminAction({
+    adminUid,
+    action: 'impersonate',
+    targetType: 'user',
+    targetId: uid,
+    payload: { targetEmail: target.email || null },
+  });
+  return { token, targetUid: uid, email: target.email || null };
+});
+
+// ============================================================
 // CSV EXPORT
 // ============================================================
 
@@ -941,17 +1258,16 @@ export const adminExportCsv = functions
     const firestore = db();
 
     if (entity === 'users') {
-      const authUsers = await listAllAuthUsers();
+      const [authUsers, subsMap] = await Promise.all([listAllAuthUsers(), fetchAllSubscriptions()]);
       const rows: Record<string, any>[] = [];
       for (const auth of authUsers) {
-        const [biz, es, sub] = await Promise.all([
+        const [biz, es] = await Promise.all([
           firestore.doc(`users/${auth.uid}/settings/business`).get(),
           firestore.doc(`users/${auth.uid}/settings/emailState`).get(),
-          firestore.doc(`subscriptions/${auth.uid}`).get(),
         ]);
         const b = biz.data() || {};
         const e = es.data() || {};
-        const s = sub.data() || {};
+        const f = deriveSubFields(subsMap.get(auth.uid));
         rows.push({
           uid: auth.uid,
           email: auth.email || '',
@@ -959,8 +1275,9 @@ export const adminExportCsv = functions
           businessName: b.businessName || '',
           phone: b.phone || auth.phoneNumber || '',
           abn: b.abn || '',
-          plan: s.status || 'free',
-          tier: s.tier || '',
+          plan: f.tier,
+          platform: f.platform || '',
+          currentPeriodEnd: f.currentPeriodEnd ? new Date(f.currentPeriodEnd).toISOString() : '',
           lastActivityAt: e.lastActivityAt?.toDate?.()?.toISOString?.() || '',
           signupAt: e.signupAt?.toDate?.()?.toISOString?.() || auth.metadata.creationTime || '',
           marketingOptIn: (await firestore.doc(`users/${auth.uid}/settings/emailPreferences`).get()).data()?.marketing !== false,
@@ -968,7 +1285,7 @@ export const adminExportCsv = functions
       }
       return {
         filename: `quotemate-users-${Date.now()}.csv`,
-        csv: rowsToCsv(['uid', 'email', 'displayName', 'businessName', 'phone', 'abn', 'plan', 'tier', 'lastActivityAt', 'signupAt', 'marketingOptIn'], rows),
+        csv: rowsToCsv(['uid', 'email', 'displayName', 'businessName', 'phone', 'abn', 'plan', 'platform', 'currentPeriodEnd', 'lastActivityAt', 'signupAt', 'marketingOptIn'], rows),
       };
     }
 
@@ -1004,32 +1321,33 @@ export const adminExportCsv = functions
     }
 
     if (entity === 'subscriptions') {
-      const snap = await firestore.collection('subscriptions').get();
+      const subsMap = await fetchAllSubscriptions();
       const rows = await Promise.all(
-        snap.docs.map(async (d) => {
-          const s = d.data() as any;
+        Array.from(subsMap.entries()).map(async ([uid, sub]) => {
           const [biz, auth] = await Promise.all([
-            firestore.doc(`users/${d.id}/settings/business`).get(),
-            admin.auth().getUser(d.id).catch(() => null),
+            firestore.doc(`users/${uid}/settings/business`).get(),
+            admin.auth().getUser(uid).catch(() => null),
           ]);
           const b = biz.data() || {};
+          const f = deriveSubFields(sub);
           return {
-            uid: d.id,
+            uid,
             email: auth?.email || b.email || '',
             businessName: b.businessName || '',
-            status: s.status || '',
-            tier: s.tier || '',
-            platform: s.platform || '',
-            createdAt: s.createdAt?.toDate?.()?.toISOString?.() || '',
-            currentPeriodEnd: s.currentPeriodEnd?.toDate?.()?.toISOString?.() || '',
-            canceledAt: s.canceledAt?.toDate?.()?.toISOString?.() || '',
-            lastPaymentAt: s.lastPaymentAt?.toDate?.()?.toISOString?.() || '',
+            status: f.status,
+            tier: f.tier,
+            platform: f.platform || '',
+            productId: f.productId || '',
+            currentPeriodStart: f.currentPeriodStart ? new Date(f.currentPeriodStart).toISOString() : '',
+            currentPeriodEnd: f.currentPeriodEnd ? new Date(f.currentPeriodEnd).toISOString() : '',
+            cancelAtPeriodEnd: sub.cancelAtPeriodEnd === true,
+            validatedAt: f.validatedAt ? new Date(f.validatedAt).toISOString() : '',
           };
         })
       );
       return {
         filename: `quotemate-subscriptions-${Date.now()}.csv`,
-        csv: rowsToCsv(['uid', 'email', 'businessName', 'status', 'tier', 'platform', 'createdAt', 'currentPeriodEnd', 'canceledAt', 'lastPaymentAt'], rows),
+        csv: rowsToCsv(['uid', 'email', 'businessName', 'status', 'tier', 'platform', 'productId', 'currentPeriodStart', 'currentPeriodEnd', 'cancelAtPeriodEnd', 'validatedAt'], rows),
       };
     }
 
@@ -1181,44 +1499,40 @@ export const adminListSubscriptions = functions
   .https.onCall(async (_data, context) => {
     requireAdmin(context);
     const firestore = db();
-    const subsSnap = await firestore.collection('subscriptions').get();
+    const subsMap = await fetchAllSubscriptions();
 
     const rows = await Promise.all(
-      subsSnap.docs.map(async (d) => {
-        const uid = d.id;
-        const sub = d.data() as any;
+      Array.from(subsMap.entries()).map(async ([uid, sub]) => {
         const [businessSnap, authRec] = await Promise.all([
           firestore.doc(`users/${uid}/settings/business`).get(),
           admin.auth().getUser(uid).catch(() => null),
         ]);
         const business = businessSnap.data() || {};
-        const ts = (v: any) => v?.toMillis?.() || (v?._seconds ? v._seconds * 1000 : null);
+        const f = deriveSubFields(sub);
         return {
           uid,
           email: authRec?.email || business.email || null,
           businessName: business.businessName || null,
-          status: sub.status || 'unknown',
-          tier: sub.tier || null,
-          platform: sub.platform || null,
-          currentPeriodEnd: ts(sub.currentPeriodEnd),
-          cancelAt: ts(sub.cancelAt),
-          canceledAt: ts(sub.canceledAt),
-          trialEnd: ts(sub.trialEnd),
-          createdAt: ts(sub.createdAt),
-          updatedAt: ts(sub.updatedAt),
-          lastPaymentAt: ts(sub.lastPaymentAt),
-          amount: sub.amount || null,
-          currency: sub.currency || 'AUD',
+          status: f.status,
+          tier: f.tier,
+          platform: f.platform,
+          isPro: f.isPro,
+          canceling: f.canceling,
+          productId: f.productId,
+          currentPeriodStart: f.currentPeriodStart,
+          currentPeriodEnd: f.currentPeriodEnd,
+          cancelAt: f.cancelAt,
+          validatedAt: f.validatedAt,
+          quotesThisMonth: sub.quotesThisMonth || 0,
         };
       })
     );
 
     const active = rows.filter((r) => r.status === 'active').length;
-    const trialing = rows.filter((r) => r.status === 'trialing').length;
-    const canceled = rows.filter((r) => r.status === 'canceled' || r.status === 'cancelled').length;
-    const pastDue = rows.filter((r) => r.status === 'past_due' || r.status === 'unpaid').length;
+    const canceling = rows.filter((r) => r.status === 'canceling').length;
+    const canceled = rows.filter((r) => r.status === 'canceled').length;
 
-    return { subscriptions: rows, totals: { active, trialing, canceled, pastDue, all: rows.length } };
+    return { subscriptions: rows, totals: { active, canceling, canceled, all: rows.length } };
   });
 
 // ============================================================
