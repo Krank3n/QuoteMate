@@ -1225,6 +1225,131 @@ export const adminMetricsSeries = functions.https.onCall(async (data, context) =
 });
 
 // ============================================================
+// USER STATUS — grant/revoke Pro, disable, enable, delete
+// ============================================================
+
+export const adminGrantPro = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const uid = (data?.uid || '').toString();
+  const months = Math.max(1, Math.min(Number(data?.months) || 1, 24));
+  if (!uid) throw new functions.https.HttpsError('invalid-argument', 'uid required');
+
+  const now = new Date();
+  const expiry = new Date(now.getTime() + months * 30 * 24 * 60 * 60 * 1000);
+  await db().doc(`users/${uid}/profile/subscription`).set(
+    {
+      isPro: true,
+      platform: 'admin_grant',
+      grantedBy: adminUid,
+      grantedAt: admin.firestore.FieldValue.serverTimestamp(),
+      currentPeriodStart: now,
+      currentPeriodEnd: expiry,
+      cancelAtPeriodEnd: false,
+      validatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+  await logAdminAction({
+    adminUid,
+    action: 'grant_pro',
+    targetType: 'user',
+    targetId: uid,
+    payload: { months, expiresAt: expiry.toISOString() },
+  });
+  return { ok: true, expiresAt: expiry.toISOString() };
+});
+
+export const adminRevokePro = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const uid = (data?.uid || '').toString();
+  if (!uid) throw new functions.https.HttpsError('invalid-argument', 'uid required');
+
+  await db().doc(`users/${uid}/profile/subscription`).set(
+    {
+      isPro: false,
+      revokedBy: adminUid,
+      revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+      expiredReason: 'admin_revoke',
+    },
+    { merge: true }
+  );
+  await logAdminAction({
+    adminUid,
+    action: 'revoke_pro',
+    targetType: 'user',
+    targetId: uid,
+  });
+  return { ok: true };
+});
+
+export const adminSetUserDisabled = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const uid = (data?.uid || '').toString();
+  const disabled = data?.disabled === true;
+  if (!uid) throw new functions.https.HttpsError('invalid-argument', 'uid required');
+
+  await admin.auth().updateUser(uid, { disabled });
+  await logAdminAction({
+    adminUid,
+    action: disabled ? 'disable_user' : 'enable_user',
+    targetType: 'user',
+    targetId: uid,
+  });
+  return { ok: true, disabled };
+});
+
+export const adminDeleteUser = functions
+  .runWith({ timeoutSeconds: 120 })
+  .https.onCall(async (data, context) => {
+    const adminUid = requireAdmin(context);
+    const uid = (data?.uid || '').toString();
+    const wipeData = data?.wipeData === true;
+    const confirm = (data?.confirmEmail || '').toString().trim().toLowerCase();
+    if (!uid) throw new functions.https.HttpsError('invalid-argument', 'uid required');
+
+    const user = await admin.auth().getUser(uid).catch(() => null);
+    if (!user) throw new functions.https.HttpsError('not-found', 'user not found');
+
+    // Defence in depth: require the admin to re-type the target email to confirm.
+    if (user.email && confirm !== user.email.toLowerCase()) {
+      throw new functions.https.HttpsError('failed-precondition', 'Email confirmation mismatch');
+    }
+
+    // Optionally delete the user's Firestore subtree (quotes, invoices, settings, etc).
+    let wipedDocs = 0;
+    if (wipeData) {
+      const firestore = db();
+      const collectionsToWipe = [
+        `users/${uid}/quotes`,
+        `users/${uid}/invoices`,
+        `users/${uid}/settings`,
+        `users/${uid}/profile`,
+        `users/${uid}/adminNotes`,
+        `users/${uid}/crmEvents`,
+        `users/${uid}/affiliateEarnings`,
+      ];
+      for (const path of collectionsToWipe) {
+        const snap = await firestore.collection(path).get().catch(() => ({ docs: [] as any[] }));
+        for (const d of (snap as any).docs) {
+          await d.ref.delete();
+          wipedDocs++;
+        }
+      }
+      await firestore.doc(`users/${uid}`).delete().catch(() => null);
+    }
+
+    await admin.auth().deleteUser(uid);
+    await logAdminAction({
+      adminUid,
+      action: 'delete_user',
+      targetType: 'user',
+      targetId: uid,
+      payload: { email: user.email || null, wipeData, wipedDocs },
+    });
+    return { ok: true, wipedDocs };
+  });
+
+// ============================================================
 // IMPERSONATION — mint a custom auth token for the target user
 // ============================================================
 
