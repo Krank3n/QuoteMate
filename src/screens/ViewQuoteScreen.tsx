@@ -146,7 +146,10 @@ export function ViewQuoteScreen() {
   const handleConfirmConvert = async () => {
     setIsConverting(true);
     try {
-      const invoice = createInvoiceFromQuote(quote);
+      const invoice = await createInvoiceFromQuote(quote);
+      // If the quote was already invoiced, createInvoiceFromQuote returned
+      // the existing invoice — saveInvoice is still safe (it merges) but a
+      // no-op-ish write is fine and keeps the success path uniform.
       await saveInvoice(invoice);
       setShowConvertModal(false);
       navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);

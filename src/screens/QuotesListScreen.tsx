@@ -182,7 +182,7 @@ export function QuotesListScreen() {
     if (!quoteToConvert) return;
     setIsConverting(true);
     try {
-      const invoice = createInvoiceFromQuote(quoteToConvert);
+      const invoice = await createInvoiceFromQuote(quoteToConvert);
       await saveInvoice(invoice);
       setConvertModalVisible(false);
       setQuoteToConvert(null);

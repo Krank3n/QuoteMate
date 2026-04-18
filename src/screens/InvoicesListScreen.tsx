@@ -156,7 +156,7 @@ export function InvoicesListScreen() {
 
   const handleSelectQuote = async (quote: Quote) => {
     setQuoteDialogVisible(false);
-    const invoice = createInvoiceFromQuote(quote);
+    const invoice = await createInvoiceFromQuote(quote);
     await saveInvoice(invoice);
     navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
   };

@@ -107,7 +107,7 @@ interface AppState {
 
   // Invoice operations
   createNewInvoice: () => void;
-  createInvoiceFromQuote: (quote: Quote) => Invoice;
+  createInvoiceFromQuote: (quote: Quote) => Promise<Invoice>;
   setCurrentInvoice: (invoice: Invoice | null) => void;
   updateInvoice: (invoice: Invoice) => void;
   saveInvoice: (invoice: Invoice) => Promise<void>;
@@ -1080,7 +1080,22 @@ export const useStore = create<AppState>((set, get) => ({
     set({ currentInvoice: newInvoice });
   },
 
-  createInvoiceFromQuote: (quote: Quote) => {
+  createInvoiceFromQuote: async (quote: Quote) => {
+    // Idempotency: if this quote has already been invoiced, return the
+    // existing invoice instead of minting a duplicate. Tapping Convert twice
+    // (or doing it on two devices) used to spawn two invoices and the
+    // customer would receive two payment links for the same job.
+    if (quote.invoiceId) {
+      const { invoices } = get();
+      const existing = invoices.find((i) => i.id === quote.invoiceId);
+      if (existing) {
+        set({ currentInvoice: existing });
+        return existing;
+      }
+      // invoiceId set but the invoice is gone (deleted) — fall through and
+      // mint a fresh one. The back-reference will be overwritten below.
+    }
+
     const now = new Date();
     // If the customer paid a deposit against this quote, deduct it from the
     // invoice total. The deposit is rendered as a credit line on the PDF/email
@@ -1129,6 +1144,27 @@ export const useStore = create<AppState>((set, get) => ({
     };
 
     set({ currentInvoice: newInvoice });
+
+    // Stamp the back-reference on the source quote so subsequent convert
+    // taps short-circuit. Use the existing saveQuote so AsyncStorage +
+    // Firestore + the realtime listener stay consistent.
+    const { saveQuote } = get();
+    const sourceQuote = get().quotes.find((q) => q.id === quote.id);
+    if (sourceQuote) {
+      try {
+        await saveQuote({
+          ...sourceQuote,
+          invoiceId: newInvoice.id,
+          invoicedAt: now,
+          updatedAt: now,
+        });
+      } catch {
+        // Non-fatal — the invoice is still created locally; the back-ref
+        // can re-stamp on the next save. Re-converting before the back-ref
+        // lands will create a duplicate, but that's the existing behaviour.
+      }
+    }
+
     return newInvoice;
   },
 
