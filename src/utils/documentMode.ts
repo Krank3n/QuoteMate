@@ -18,9 +18,16 @@ export function useDocumentMode(): DocumentMode {
 }
 
 /**
- * Unified document type that works for both quotes and invoices
+ * Unified document type that works for both quotes and invoices.
+ *
+ * Quote.status and Invoice.status no longer overlap (quote payment statuses
+ * were stripped — paid/partial/overdue belong on the invoice). Shared screens
+ * pass spreads of currentDocument to saveDraft (typed as Quote), so we widen
+ * status to Quote['status']. At runtime the mode gate ensures only Quotes go
+ * through quote-shaped branches.
  */
 export type UnifiedDocument = (Quote | Invoice) & {
+  status: Quote['status'];
   // Common fields that exist on both
   id: string;
   customerName: string;

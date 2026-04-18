@@ -175,7 +175,7 @@ export interface Quote {
   total: number;
   // Sections — optional, for quotes with multiple work sections
   sections?: QuoteSection[];
-  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'completed' | 'cancelled' | 'paid' | 'partial' | 'overdue';
+  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'completed' | 'cancelled';
   draftStep?: string; // Screen name where user left off during quote flow (e.g., 'CustomerDetails')
   notes?: string;
   aiSkipped?: boolean; // Flag to indicate AI analysis was intentionally skipped
@@ -254,6 +254,11 @@ export interface Quote {
   // has been opened against a payment linked to this quote.
   disputeStatus?: SquareDisputeStatus;
   disputeId?: string;
+
+  // Set when this quote has been converted to an invoice. Used for idempotency
+  // — re-tapping Convert returns the existing invoice instead of duplicating.
+  invoiceId?: string;
+  invoicedAt?: Date;
 }
 
 export type SquareDisputeStatus =
