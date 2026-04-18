@@ -831,7 +831,8 @@ type Segment =
   | 'inactive_7d'
   | 'inactive_30d'
   | 'signed_up_this_week'
-  | 'supplier_subscribers';
+  | 'supplier_subscribers'
+  | 'custom_uids';
 
 async function resolveSegment(
   segment: Segment,
@@ -886,6 +887,10 @@ async function resolveSegment(
     if (!supplierId) return [];
     const snap = await firestore.collection(`suppliers/${supplierId}/subscribers`).get();
     return snap.docs.map((d) => d.id);
+  }
+  if (segment === 'custom_uids') {
+    const uids = Array.isArray(params.uids) ? (params.uids as string[]).map(String) : [];
+    return uids;
   }
   return [];
 }
