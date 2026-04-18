@@ -22,7 +22,7 @@ import { SendQuoteButton } from '../components/SendQuoteButton';
 import { AlertModal } from '../components/AlertModal';
 import { TakePaymentSheet, TakePaymentTarget } from '../components/TakePaymentSheet';
 import { SquareReconnectBanner } from '../components/SquareReconnectBanner';
-import { PaymentSyncErrorBanner, DisputeBanner } from '../components/PaymentAlertBanners';
+import { PaymentSyncErrorBanner, DisputeBanner, InvoicedBanner } from '../components/PaymentAlertBanners';
 import * as squareService from '../services/squareService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebContainer } from '../components/WebContainer';
@@ -217,6 +217,14 @@ export function ViewQuoteScreen() {
           status={(quote as any)?.disputeStatus}
           disputeId={(quote as any)?.disputeId}
         />
+        {quote.invoiceId ? (
+          <InvoicedBanner
+            invoicedAt={quote.invoicedAt}
+            onPress={() =>
+              navigation.navigate('ViewInvoice' as never, { invoiceId: quote.invoiceId } as never)
+            }
+          />
+        ) : null}
         {/* Editable Quote Number */}
         <View style={styles.quoteNumberRow}>
           {isEditingNumber ? (
