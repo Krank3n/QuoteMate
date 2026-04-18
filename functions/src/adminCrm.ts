@@ -26,6 +26,17 @@ function requireAdmin(context: functions.https.CallableContext): string {
   return uid;
 }
 
+async function listAllAuthUsers(): Promise<admin.auth.UserRecord[]> {
+  const all: admin.auth.UserRecord[] = [];
+  let nextPageToken: string | undefined;
+  do {
+    const page = await admin.auth().listUsers(1000, nextPageToken);
+    all.push(...page.users);
+    nextPageToken = page.pageToken;
+  } while (nextPageToken);
+  return all;
+}
+
 async function logAdminAction(params: {
   adminUid: string;
   action: string;
@@ -107,16 +118,16 @@ export const adminDashboardStats = functions.https.onCall(async (_data, context)
   const thirtyDaysAgo = admin.firestore.Timestamp.fromMillis(now - 30 * dayMs);
   const oneDayAgo = admin.firestore.Timestamp.fromMillis(now - dayMs);
 
-  // These queries all read small slices — they won't scale past ~100k users without
-  // aggregation, but for now direct Firestore counts are fine.
+  // Users live as Auth accounts; there may or may not be a root users/{uid} doc.
+  // Firebase Auth listUsers is the source of truth for user count.
   const [
-    allUsers,
+    allAuthUsers,
     suppliers,
     subs,
     feedback,
     recentActivity,
   ] = await Promise.all([
-    firestore.collection('users').select().get(),
+    listAllAuthUsers(),
     firestore.collection('suppliers').select('ownerUid', 'subscriberCount', 'name').get(),
     firestore.collection('subscriptions').get(),
     firestore.collection('feedback').orderBy('createdAt', 'desc').limit(10).get(),
@@ -126,6 +137,7 @@ export const adminDashboardStats = functions.https.onCall(async (_data, context)
       .get()
       .catch(() => ({ size: 0, docs: [] as any[] })),
   ]);
+  const allUsers = { size: allAuthUsers.length };
 
   let activeSubs = 0;
   let canceledSubs = 0;
@@ -226,26 +238,21 @@ export const adminListUsers = functions
     const search = (data?.search || '').toString().toLowerCase().trim();
     const limit = Math.min(Math.max(Number(data?.limit) || 100, 1), 500);
 
-    // Pull all users — cheap at small scale. When this grows we'll paginate.
-    const usersSnap = await firestore.collection('users').get();
-
-    // Pull auth records in parallel for email/displayName (Firebase Admin supports batch getUsers up to 100).
-    const uids = usersSnap.docs.map((d) => d.id);
+    // Enumerate users from Firebase Auth (source of truth) — a root users/{uid}
+    // doc may or may not exist.
+    const authUsers = await listAllAuthUsers();
     const authRecords = new Map<string, admin.auth.UserRecord>();
-    for (let i = 0; i < uids.length; i += 100) {
-      const chunk = uids.slice(i, i + 100);
-      if (!chunk.length) continue;
-      const result = await admin.auth().getUsers(chunk.map((uid) => ({ uid })));
-      for (const u of result.users) authRecords.set(u.uid, u);
-    }
+    for (const u of authUsers) authRecords.set(u.uid, u);
 
-    // Pull settings + subscriptions in parallel — one doc read per user for
-    // emailState, business, and subscription. Cheap for the current scale.
+    // Fetch any existing user docs for stats.
+    const userDocsSnap = await firestore.collection('users').get();
+    const userDocMap = new Map<string, any>();
+    for (const d of userDocsSnap.docs) userDocMap.set(d.id, d.data());
+
     const rows: UserListRow[] = await Promise.all(
-      usersSnap.docs.map(async (userDoc) => {
-        const uid = userDoc.id;
-        const userData = userDoc.data() as any;
-        const auth = authRecords.get(uid);
+      authUsers.map(async (auth) => {
+        const uid = auth.uid;
+        const userData = userDocMap.get(uid) || {};
         const [emailStateSnap, businessSnap, subSnap, emailPrefsSnap] = await Promise.all([
           firestore.doc(`users/${uid}/settings/emailState`).get(),
           firestore.doc(`users/${uid}/settings/business`).get(),
@@ -270,9 +277,9 @@ export const adminListUsers = functions
           businessName: business.businessName || null,
           phone: business.phone || auth?.phoneNumber || null,
           lastActivityAt: emailState.lastActivityAt?.toMillis?.() || null,
-          signupAt: emailState.signupAt?.toMillis?.() || auth?.metadata?.creationTime
-            ? new Date(auth!.metadata.creationTime).getTime()
-            : null,
+          signupAt:
+            emailState.signupAt?.toMillis?.() ||
+            (auth?.metadata?.creationTime ? new Date(auth.metadata.creationTime).getTime() : null),
           planTier,
           quoteCount: userData.quoteCount || 0,
           invoiceCount: userData.invoiceCount || 0,
@@ -334,29 +341,24 @@ export const adminGetUser = functions.https.onCall(async (data, context) => {
     firestore.collection(`users/${uid}/adminNotes`).orderBy('createdAt', 'desc').limit(50).get().catch(() => ({ docs: [] as any[] })),
     firestore.collection(`users/${uid}/crmEvents`).orderBy('at', 'desc').limit(50).get().catch(() => ({ docs: [] as any[] })),
     firestore.collection('emailLog').where('userId', '==', uid).orderBy('sentAt', 'desc').limit(50).get().catch(() => ({ docs: [] as any[] })),
-    firestore.collectionGroup('subscribers').where(admin.firestore.FieldPath.documentId(), '>=', '').get().catch(() => ({ docs: [] as any[] })),
+    firestore.collection('suppliers').get().catch(() => ({ docs: [] as any[] })),
     firestore.collection('feedback').where('userId', '==', uid).orderBy('createdAt', 'desc').limit(20).get().catch(() => ({ docs: [] as any[] })),
   ]);
 
-  // Supplier book: filter subscribers where doc id = uid
-  const supplierBook: Array<{ supplierId: string; name?: string; subscribedAt?: number }> = [];
-  for (const d of (supplierBookSnap as any).docs) {
-    if (d.id !== uid) continue;
-    const supplierId = d.ref.parent.parent?.id;
-    if (!supplierId) continue;
-    supplierBook.push({
-      supplierId,
-      subscribedAt: (d.data() as any).subscribedAt?.toMillis?.() || null,
-    });
-  }
-  // Resolve supplier names in one pass
-  if (supplierBook.length) {
-    const names = await Promise.all(
-      supplierBook.map((b) =>
-        firestore.doc(`suppliers/${b.supplierId}`).get().then((s) => (s.data() as any)?.name || b.supplierId)
-      )
-    );
-    supplierBook.forEach((b, i) => (b.name = names[i]));
+  // Supplier book: check each supplier for a subscribers/{uid} doc
+  const supplierBook: Array<{ supplierId: string; name?: string; subscribedAt?: number | null }> = [];
+  const supplierChecks = await Promise.all(
+    (supplierBookSnap as any).docs.map((sd: any) =>
+      firestore.doc(`suppliers/${sd.id}/subscribers/${uid}`).get().then((snap) => ({
+        supplierId: sd.id,
+        name: (sd.data() as any)?.name || sd.id,
+        subscribedAt: snap.exists ? (snap.data() as any)?.subscribedAt?.toMillis?.() || null : null,
+        exists: snap.exists,
+      })).catch(() => null)
+    )
+  );
+  for (const c of supplierChecks) {
+    if (c && c.exists) supplierBook.push({ supplierId: c.supplierId, name: c.name, subscribedAt: c.subscribedAt });
   }
 
   const docToJson = (d: any) => ({ id: d.id, ...d.data() });
@@ -855,19 +857,20 @@ export const adminReplyToFeedback = functions.https.onCall(async (data, context)
 
 async function recomputeUserStats(uid: string): Promise<void> {
   const firestore = db();
-  const [quotesSnap, invoicesSnap, supplierBookSnap] = await Promise.all([
+  const [quotesSnap, invoicesSnap, suppliersSnap] = await Promise.all([
     firestore.collection(`users/${uid}/quotes`).select().get().catch(() => ({ size: 0, docs: [] as any[] })),
     firestore.collection(`users/${uid}/invoices`).select().get().catch(() => ({ size: 0, docs: [] as any[] })),
-    firestore
-      .collectionGroup('subscribers')
-      .where(admin.firestore.FieldPath.documentId(), '>=', '')
-      .get()
-      .catch(() => ({ docs: [] as any[] })),
+    firestore.collection('suppliers').select().get().catch(() => ({ docs: [] as any[] })),
   ]);
-  const supplierIds: string[] = [];
-  for (const d of (supplierBookSnap as any).docs) {
-    if (d.id === uid && d.ref.parent.parent?.id) supplierIds.push(d.ref.parent.parent.id);
-  }
+  // For supplier book, check each supplier for a subscribers/{uid} doc.
+  const supplierChecks = await Promise.all(
+    (suppliersSnap as any).docs.map((sd: any) =>
+      firestore.doc(`suppliers/${sd.id}/subscribers/${uid}`).get().then(
+        (snap) => (snap.exists ? sd.id : null)
+      ).catch(() => null)
+    )
+  );
+  const supplierIds: string[] = supplierChecks.filter((x: string | null): x is string => !!x);
   await firestore.doc(`users/${uid}`).set(
     {
       quoteCount: (quotesSnap as any).size,
@@ -934,10 +937,10 @@ export const adminBackfillStats = functions
       return;
     }
     const firestore = db();
-    const usersSnap = await firestore.collection('users').select().get();
+    const authUsers = await listAllAuthUsers();
     let processed = 0;
-    for (const doc of usersSnap.docs) {
-      await recomputeUserStats(doc.id);
+    for (const u of authUsers) {
+      await recomputeUserStats(u.uid);
       processed++;
     }
     // Supplier counts
