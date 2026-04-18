@@ -23,7 +23,7 @@ import {
 /**
  * Prepare the logo HTML tag from business settings (platform-specific)
  */
-async function prepareLogoHtml(businessSettings: BusinessSettings | null, isPro?: boolean): Promise<string> {
+export async function prepareLogoHtml(businessSettings: BusinessSettings | null, isPro?: boolean): Promise<string> {
   const showLogo = isPro !== false;
   if (!showLogo || !businessSettings?.logoUri) return '';
 

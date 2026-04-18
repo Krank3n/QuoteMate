@@ -25,6 +25,7 @@ interface SendEmailOptions {
   userId?: string; // For logging and preference checking
   tags?: string[];
   attachment?: Array<{ name: string; content: string }>; // base64 encoded
+  unsubscribeUrl?: string; // If set, adds List-Unsubscribe headers (required by Gmail bulk-sender rules)
 }
 
 // Shared email wrapper (base layout for all emails)
@@ -183,7 +184,7 @@ async function canSendEmail(userId: string, category: EmailCategory): Promise<bo
 
 // Core send function via Brevo API
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to, subject, htmlContent, category, userId, tags, attachment } = options;
+  const { to, subject, htmlContent, category, userId, tags, attachment, unsubscribeUrl } = options;
   const apiKey = getBrevoApiKey();
 
   if (!apiKey) {
@@ -215,12 +216,18 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
       },
       body: JSON.stringify({
         sender: SENDER,
-        replyTo: { email: 'thomas.andrew.hansen@gmail.com' },
+        replyTo: { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
         to: [{ email: to }],
         subject,
         htmlContent,
         tags: tags || [],
         ...(attachment?.length ? { attachment } : {}),
+        ...(unsubscribeUrl ? {
+          headers: {
+            'List-Unsubscribe': `<${unsubscribeUrl}>`,
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          },
+        } : {}),
       }),
     });
 
@@ -672,6 +679,7 @@ export function sendReEngagementEmail(
     category: 'marketing',
     userId,
     tags: ['re-engagement', `inactive-${daysSinceLastActive}d`],
+    unsubscribeUrl,
   });
 }
 
@@ -801,6 +809,7 @@ export function sendOnboardingTipEmail(
     category: 'marketing',
     userId,
     tags: ['onboarding', `tip-${tipNumber}`],
+    unsubscribeUrl,
   });
 }
 
@@ -886,6 +895,7 @@ export function sendUpdateAnnouncementEmail(
     category: 'marketing',
     userId,
     tags: ['product-update', 'v1.0.61'],
+    unsubscribeUrl,
   });
 }
 
@@ -1460,6 +1470,7 @@ export function sendQuoteFollowUpEmail(
     category: 'marketing',
     userId,
     tags: ['quote-follow-up'],
+    unsubscribeUrl,
   });
 }
 
@@ -1836,10 +1847,11 @@ export function sendDraftNudgeEmail(
 
   return sendEmail({
     to,
-    subject: `${greeting}, you have ${draftCount} unsent quote${draftCount > 1 ? 's' : ''} (${formattedValue})`,
+    subject: `You've got ${draftCount} draft quote${draftCount > 1 ? 's' : ''} in QuoteMate`,
     htmlContent: content,
     category: 'marketing',
     userId,
     tags: ['draft-nudge', `tier-${tier}`],
+    unsubscribeUrl,
   });
 }

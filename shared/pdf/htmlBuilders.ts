@@ -12,7 +12,7 @@ import { printMediaCSS, getTemplateCSS } from './templates';
  * paragraph breaks by splitting on blank lines and wrapping each in <p>.
  * Escapes HTML so hand-edited terms can't break the document.
  */
-function buildTermsHTML(terms: string | undefined): string {
+export function buildTermsHTML(terms: string | undefined): string {
   if (!terms || !terms.trim()) return '';
   const escape = (s: string) =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

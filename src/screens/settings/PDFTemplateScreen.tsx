@@ -29,7 +29,8 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
-import { PDF_TEMPLATES, printMediaCSS, getTemplateCSS, PdfTemplateId } from '../../../shared/pdf';
+import { PDF_TEMPLATES, printMediaCSS, getTemplateCSS, PdfTemplateId, buildTermsHTML } from '../../../shared/pdf';
+import { prepareLogoHtml } from '../../utils/pdfGenerator';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PREVIEW_WIDTH = Math.min(SCREEN_WIDTH - 64, 340);
@@ -88,12 +89,12 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor 
     clean: {
       pageBg: '#FFFFFF',
       headerBg: 'transparent',
-      headerTextColor: '#1F2937',
+      headerTextColor: '#111827',
       accentColor: '#6B7280',
-      bodyTextColor: '#4B5563',
+      bodyTextColor: '#1F2937',
       subtleTextColor: '#9CA3AF',
-      tableHeaderBg: '#F9FAFB',
-      tableHeaderText: '#6B7280',
+      tableHeaderBg: 'transparent',
+      tableHeaderText: '#9CA3AF',
       alternateRowBg: null,
       summaryBg: 'transparent',
       summaryBorder: null,
@@ -101,20 +102,20 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor 
       borderStyle: 'none',
       fontLabel: 'System Sans',
       fontFamily: undefined,
-      headerBorderColor: 'transparent',
-      tableBorderStyle: 'filled',
+      headerBorderColor: '#E5E7EB',
+      tableBorderStyle: 'ruled',
     },
     bold: {
       pageBg: '#FFFFFF',
       headerBg: '#1F2937',
       headerTextColor: '#FFFFFF',
       accentColor: '#1F2937',
-      bodyTextColor: '#374151',
+      bodyTextColor: '#1F2937',
       subtleTextColor: '#6B7280',
       tableHeaderBg: '#1F2937',
       tableHeaderText: '#FFFFFF',
       alternateRowBg: '#F9FAFB',
-      summaryBg: '#F3F4F6',
+      summaryBg: '#FFFFFF',
       summaryBorder: '#1F2937',
       summaryRadius: 0,
       borderStyle: 'dark-band',
@@ -124,16 +125,16 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor 
       tableBorderStyle: 'filled',
     },
     tradesman: {
-      pageBg: '#FFFFFF',
+      pageBg: '#FDFCF8',
       headerBg: 'transparent',
-      headerTextColor: '#374151',
+      headerTextColor: '#1C1917',
       accentColor: '#374151',
-      bodyTextColor: '#4B5563',
-      subtleTextColor: '#9CA3AF',
+      bodyTextColor: '#1C1917',
+      subtleTextColor: '#44403C',
       tableHeaderBg: 'transparent',
-      tableHeaderText: '#374151',
+      tableHeaderText: '#1C1917',
       alternateRowBg: null,
-      summaryBg: 'transparent',
+      summaryBg: '#FAF7EE',
       summaryBorder: null,
       summaryRadius: 0,
       borderStyle: 'ruled',
@@ -489,6 +490,7 @@ export function PDFTemplateScreen() {
       };
 
       const css = getTemplateCSS(templateId, businessSettings?.brandColor);
+      const logoHtml = await prepareLogoHtml(businessSettings, isPro);
       const html = `
         <!DOCTYPE html>
         <html>
@@ -500,6 +502,7 @@ export function PDFTemplateScreen() {
           <div class="content-wrapper">
           <div class="header">
             <div class="header-content">
+              ${logoHtml}
               <div class="header-text">
                 <h1>${business.businessName || 'Your Business'}</h1>
                 <p>
@@ -630,6 +633,8 @@ export function PDFTemplateScreen() {
           <div style="margin-top: 40px; font-size: 12px; color: #666666;">
             <p>This quote is valid for 30 days from the date of issue.</p>
           </div>
+
+          ${buildTermsHTML(businessSettings?.termsAndConditions)}
           </div>
 
           <div class="pdf-footer">
@@ -639,12 +644,25 @@ export function PDFTemplateScreen() {
         </html>
       `;
 
-      await Print.printAsync({ html });
+      if (Platform.OS === 'web') {
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.document.title = 'PDF Preview';
+          printWindow.onload = () => {
+            printWindow.focus();
+            printWindow.print();
+          };
+        }
+      } else {
+        await Print.printAsync({ html });
+      }
     } catch (error) {
     } finally {
       setPreviewLoading(null);
     }
-  }, [businessSettings, showLaborHours, showMarkup, groupMaterialsBySection]);
+  }, [businessSettings, showLaborHours, showMarkup, groupMaterialsBySection, isPro]);
 
   const businessName = businessSettings?.businessName || 'Your Business';
 
