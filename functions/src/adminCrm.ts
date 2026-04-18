@@ -852,6 +852,113 @@ export const adminReplyToFeedback = functions.https.onCall(async (data, context)
 });
 
 // ============================================================
+// SUBSCRIPTIONS — revenue view
+// ============================================================
+
+export const adminListSubscriptions = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .https.onCall(async (_data, context) => {
+    requireAdmin(context);
+    const firestore = db();
+    const subsSnap = await firestore.collection('subscriptions').get();
+
+    const rows = await Promise.all(
+      subsSnap.docs.map(async (d) => {
+        const uid = d.id;
+        const sub = d.data() as any;
+        const [businessSnap, authRec] = await Promise.all([
+          firestore.doc(`users/${uid}/settings/business`).get(),
+          admin.auth().getUser(uid).catch(() => null),
+        ]);
+        const business = businessSnap.data() || {};
+        const ts = (v: any) => v?.toMillis?.() || (v?._seconds ? v._seconds * 1000 : null);
+        return {
+          uid,
+          email: authRec?.email || business.email || null,
+          businessName: business.businessName || null,
+          status: sub.status || 'unknown',
+          tier: sub.tier || null,
+          platform: sub.platform || null,
+          currentPeriodEnd: ts(sub.currentPeriodEnd),
+          cancelAt: ts(sub.cancelAt),
+          canceledAt: ts(sub.canceledAt),
+          trialEnd: ts(sub.trialEnd),
+          createdAt: ts(sub.createdAt),
+          updatedAt: ts(sub.updatedAt),
+          lastPaymentAt: ts(sub.lastPaymentAt),
+          amount: sub.amount || null,
+          currency: sub.currency || 'AUD',
+        };
+      })
+    );
+
+    const active = rows.filter((r) => r.status === 'active').length;
+    const trialing = rows.filter((r) => r.status === 'trialing').length;
+    const canceled = rows.filter((r) => r.status === 'canceled' || r.status === 'cancelled').length;
+    const pastDue = rows.filter((r) => r.status === 'past_due' || r.status === 'unpaid').length;
+
+    return { subscriptions: rows, totals: { active, trialing, canceled, pastDue, all: rows.length } };
+  });
+
+// ============================================================
+// AFFILIATES — list + earnings
+// ============================================================
+
+export const adminListAffiliates = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .https.onCall(async (_data, context) => {
+    requireAdmin(context);
+    const firestore = db();
+
+    // Affiliate data lives at users/{uid}/profile/referral
+    const referralSnap = await firestore.collectionGroup('profile').get();
+    const affiliates: any[] = [];
+
+    for (const d of referralSnap.docs) {
+      if (d.id !== 'referral') continue;
+      const data = d.data() as any;
+      if (!data?.isAffiliate) continue;
+      const uid = d.ref.parent.parent?.id;
+      if (!uid) continue;
+
+      const [businessSnap, authRec] = await Promise.all([
+        firestore.doc(`users/${uid}/settings/business`).get(),
+        admin.auth().getUser(uid).catch(() => null),
+      ]);
+      const business = businessSnap.data() || {};
+      affiliates.push({
+        uid,
+        email: authRec?.email || business.email || null,
+        businessName: business.businessName || null,
+        referralCode: data.referralCode || null,
+        commissionRate: data.commissionRate || 0,
+        totalReferrals: data.totalReferrals || 0,
+        convertedReferrals: data.convertedReferrals || 0,
+        totalEarnings: data.totalEarnings || 0,
+        pendingEarnings: data.pendingEarnings || 0,
+        paidEarnings: data.paidEarnings || 0,
+        joinedAt: data.joinedAt?.toMillis?.() || data.joinedAt?._seconds * 1000 || null,
+      });
+    }
+
+    affiliates.sort((a, b) => (b.totalEarnings || 0) - (a.totalEarnings || 0));
+
+    const totals = affiliates.reduce(
+      (acc, a) => ({
+        affiliates: acc.affiliates + 1,
+        referrals: acc.referrals + (a.totalReferrals || 0),
+        converted: acc.converted + (a.convertedReferrals || 0),
+        totalEarnings: acc.totalEarnings + (a.totalEarnings || 0),
+        pending: acc.pending + (a.pendingEarnings || 0),
+        paid: acc.paid + (a.paidEarnings || 0),
+      }),
+      { affiliates: 0, referrals: 0, converted: 0, totalEarnings: 0, pending: 0, paid: 0 }
+    );
+
+    return { affiliates, totals };
+  });
+
+// ============================================================
 // DENORMALIZATION — maintain stats on user and supplier docs
 // ============================================================
 
