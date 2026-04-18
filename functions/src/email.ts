@@ -182,7 +182,9 @@ async function canSendEmail(userId: string, category: EmailCategory): Promise<bo
   }
 }
 
-// Core send function via Brevo API
+// Pre-create the emailLog doc, attach its id as a Brevo tag, then send. The
+// Brevo webhook posts back events keyed to that tag, which lets us correlate
+// delivery / bounce / open / click / spam back to this exact send.
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
   const { to, subject, htmlContent, category, userId, tags, attachment, unsubscribeUrl } = options;
   const apiKey = getBrevoApiKey();
@@ -206,6 +208,22 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
     }
   }
 
+  // Pre-create log doc — status: 'pending' until Brevo accepts, then 'sent'.
+  const logRef = await admin.firestore().collection('emailLog').add({
+    userId: userId || null,
+    to,
+    subject,
+    category,
+    tags: tags || [],
+    status: 'pending',
+    queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+    openCount: 0,
+    clickCount: 0,
+  });
+  const logId = logRef.id;
+  const trackingTag = `emailLogId:${logId}`;
+  const brevoTags = [...(tags || []), trackingTag];
+
   try {
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
@@ -220,56 +238,48 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         to: [{ email: to }],
         subject,
         htmlContent,
-        tags: tags || [],
-        ...(attachment?.length ? { attachment } : {}),
-        ...(unsubscribeUrl ? {
-          headers: {
+        tags: brevoTags,
+        // Brevo forwards custom JSON headers in webhook events — belt + braces
+        // in case tag parsing fails for any reason.
+        headers: {
+          ...(unsubscribeUrl ? {
             'List-Unsubscribe': `<${unsubscribeUrl}>`,
             'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-          },
-        } : {}),
+          } : {}),
+          'X-Mailin-custom': JSON.stringify({ emailLogId: logId, userId: userId || null, category }),
+        },
+        ...(attachment?.length ? { attachment } : {}),
       }),
     });
 
     if (!response.ok) {
       const errorBody = await response.text();
       console.error(`sendEmail: Brevo API error ${response.status} for "${subject}" to ${to}: ${errorBody}`);
+      await logRef.set({
+        status: 'send_failed',
+        sendError: `brevo-${response.status}`,
+        sendErrorBody: errorBody.slice(0, 500),
+        failedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
       return false;
     }
 
-    // Log the sent email
-    if (userId) {
-      await logEmail(userId, to, subject, category, tags);
-    }
+    const body = await response.json().catch(() => ({} as any));
+    await logRef.set({
+      status: 'sent',
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      brevoMessageId: body?.messageId || null,
+    }, { merge: true });
 
     return true;
   } catch (error: any) {
     console.error(`sendEmail: unexpected error for "${subject}" to ${to}:`, error?.message);
+    await logRef.set({
+      status: 'send_failed',
+      sendError: error?.message || 'unknown',
+      failedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
     return false;
-  }
-}
-
-// Log sent emails to Firestore for tracking
-async function logEmail(
-  userId: string,
-  to: string,
-  subject: string,
-  category: EmailCategory,
-  tags?: string[]
-): Promise<void> {
-  try {
-    await admin.firestore()
-      .collection('emailLog')
-      .add({
-        userId,
-        to,
-        subject,
-        category,
-        tags: tags || [],
-        sentAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-  } catch (error) {
-    console.error('logEmail: failed to write email log', error);
   }
 }
 

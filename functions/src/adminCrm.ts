@@ -605,15 +605,7 @@ export const adminSendUserEmail = functions.https.onCall(async (data, context) =
   if (!to) throw new functions.https.HttpsError('not-found', 'No email address on file for this user');
 
   const category = bypassPrefs ? 'transactional' : 'marketing';
-  const emailLogId = await createAdminEmailLog({
-    userId: uid,
-    to,
-    subject,
-    category,
-    tags: ['admin_manual'],
-    source: 'admin_manual',
-  });
-  const htmlContent = adminEmailTemplate({ subject, bodyHtml: body, emailLogId });
+  const htmlContent = adminEmailTemplate({ subject, bodyHtml: body });
   const sent = await sendEmail({
     to,
     subject,
@@ -628,20 +620,15 @@ export const adminSendUserEmail = functions.https.onCall(async (data, context) =
     action: 'send_email',
     targetType: 'user',
     targetId: uid,
-    payload: { subject, to, sent, emailLogId },
+    payload: { subject, to, sent },
   });
-  return { ok: sent, emailLogId };
+  return { ok: sent };
 });
 
-function pixelUrl(emailLogId: string): string {
-  // Project-agnostic resolution from function region/project — matches the rest of the codebase.
-  return `https://us-central1-hansendev.cloudfunctions.net/emailOpenPixel?id=${encodeURIComponent(emailLogId)}`;
-}
-
+// Outbound emails now track via Brevo's built-in open/click tracking + our
+// webhook (see brevoEmailWebhook below). sendEmail() in email.ts creates the
+// emailLog doc and tags the Brevo send with its id.
 function adminEmailTemplate(params: { subject: string; bodyHtml: string; emailLogId?: string }) {
-  const pixel = params.emailLogId
-    ? `<img src="${pixelUrl(params.emailLogId)}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px;" />`
-    : '';
   return `<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <div style="max-width:600px;margin:0 auto;background:#ffffff;">
@@ -654,32 +641,7 @@ function adminEmailTemplate(params: { subject: string; bodyHtml: string; emailLo
   <div style="padding:24px 32px;background:#0F172A;color:#94A3B8;font-size:13px;">
     Tom at QuoteMate · <a href="mailto:tom@hansendev.com.au" style="color:#fb923c;">tom@hansendev.com.au</a>
   </div>
-  ${pixel}
 </div></body></html>`;
-}
-
-// Create a pre-send emailLog doc so the outgoing HTML can embed the tracking
-// pixel that points back to this exact doc.
-async function createAdminEmailLog(params: {
-  userId?: string;
-  to: string;
-  subject: string;
-  category: string;
-  tags?: string[];
-  source: 'admin_manual' | 'admin_broadcast' | 'supplier' | 'feedback_reply';
-}): Promise<string> {
-  const ref = await db().collection('emailLog').add({
-    userId: params.userId || null,
-    to: params.to,
-    subject: params.subject,
-    category: params.category,
-    tags: params.tags || [],
-    source: params.source,
-    sentAt: admin.firestore.FieldValue.serverTimestamp(),
-    openedAt: null,
-    openCount: 0,
-  });
-  return ref.id;
 }
 
 // ============================================================
@@ -839,15 +801,7 @@ export const adminSendSupplierEmail = functions.https.onCall(async (data, contex
   const to = await getUserEmail(ownerUid);
   if (!to) throw new functions.https.HttpsError('not-found', 'No email on file for supplier owner');
 
-  const emailLogId = await createAdminEmailLog({
-    userId: ownerUid,
-    to,
-    subject,
-    category: 'transactional',
-    tags: ['admin_manual', 'supplier'],
-    source: 'supplier',
-  });
-  const htmlContent = adminEmailTemplate({ subject, bodyHtml: body, emailLogId });
+  const htmlContent = adminEmailTemplate({ subject, bodyHtml: body });
   const sent = await sendEmail({
     to,
     subject,
@@ -861,9 +815,9 @@ export const adminSendSupplierEmail = functions.https.onCall(async (data, contex
     action: 'send_email',
     targetType: 'supplier',
     targetId: id,
-    payload: { to, subject, sent, ownerUid, emailLogId },
+    payload: { to, subject, sent, ownerUid },
   });
-  return { ok: sent, emailLogId };
+  return { ok: sent };
 });
 
 // ============================================================
@@ -966,15 +920,7 @@ export const adminBroadcast = functions
         failed++;
         continue;
       }
-      const emailLogId = await createAdminEmailLog({
-        userId: uid,
-        to,
-        subject,
-        category: 'marketing',
-        tags: ['admin_broadcast', segment],
-        source: 'admin_broadcast',
-      });
-      const html = adminEmailTemplate({ subject, bodyHtml: body, emailLogId });
+      const html = adminEmailTemplate({ subject, bodyHtml: body });
       const ok = await sendEmail({
         to,
         subject,
@@ -1013,15 +959,7 @@ export const adminReplyToFeedback = functions.https.onCall(async (data, context)
   const to = uid ? await getUserEmail(uid) : fb.email;
   if (!to) throw new functions.https.HttpsError('failed-precondition', 'no email on record');
 
-  const emailLogId = await createAdminEmailLog({
-    userId: uid,
-    to,
-    subject,
-    category: 'transactional',
-    tags: ['feedback_reply'],
-    source: 'feedback_reply',
-  });
-  const html = adminEmailTemplate({ subject, bodyHtml: body, emailLogId });
+  const html = adminEmailTemplate({ subject, bodyHtml: body });
   const sent = await sendEmail({
     to,
     subject,
@@ -1272,15 +1210,13 @@ export const writeDailyMetricsSnapshotNow = functions.https.onRequest(async (req
 export const adminMetricsSeries = functions.https.onCall(async (data, context) => {
   requireAdmin(context);
   const days = Math.min(Math.max(Number(data?.days) || 30, 7), 180);
-  const snap = await db()
-    .collection('adminMetricsSnapshots')
-    .orderBy(admin.firestore.FieldPath.documentId(), 'desc')
-    .limit(days)
-    .get();
-  const series = snap.docs
+  // Doc ids are YYYY-MM-DD so they sort lexicographically by date. Default
+  // ascending order avoids the composite-index requirement of a DESC query.
+  const snap = await db().collection('adminMetricsSnapshots').get();
+  const all = snap.docs
     .map((d) => ({ date: d.id, ...(d.data() as any) }))
-    .reverse();
-  return { series };
+    .sort((a, b) => a.date.localeCompare(b.date));
+  return { series: all.slice(-days) };
 });
 
 // ============================================================
@@ -1493,6 +1429,278 @@ export const emailOpenPixel = functions.https.onRequest(async (req, res) => {
   res.set('Pragma', 'no-cache');
   res.set('Expires', '0');
   res.status(200).send(PIXEL_GIF);
+});
+
+// ============================================================
+// BREVO WEBHOOK — delivery / bounce / spam / open / click / unsubscribe
+// ============================================================
+//
+// Configure in Brevo dashboard → Transactional → Settings → Webhook:
+//   https://us-central1-hansendev.cloudfunctions.net/brevoEmailWebhook?key=<BREVO_WEBHOOK_SECRET>
+// Tick every event type you want surfaced. Our sendEmail() tags every send
+// with `emailLogId:<id>` and sets X-Mailin-custom: {emailLogId, userId, category}
+// — the webhook parses either to find the matching emailLog doc.
+//
+// Brevo event payloads: https://developers.brevo.com/docs/transactional-webhooks
+// Events we handle:
+//   request, delivered, deferred, soft_bounce, hard_bounce, spam,
+//   invalid_email, blocked, error, opened, click, unsubscribe
+
+function parseEmailLogId(body: any): string | null {
+  // Prefer X-Mailin-custom header (JSON string) if present.
+  const custom = body['X-Mailin-custom'] || body.mailinCustom;
+  if (typeof custom === 'string') {
+    try {
+      const parsed = JSON.parse(custom);
+      if (parsed?.emailLogId) return String(parsed.emailLogId);
+    } catch {}
+  }
+  // Fall back to parsing the tags array for `emailLogId:<id>`.
+  const tagField = body.tag || body.tags;
+  let tags: string[] = [];
+  if (Array.isArray(tagField)) tags = tagField;
+  else if (typeof tagField === 'string') {
+    try { tags = JSON.parse(tagField); } catch { tags = [tagField]; }
+  }
+  for (const t of tags) {
+    if (typeof t === 'string' && t.startsWith('emailLogId:')) return t.slice('emailLogId:'.length);
+  }
+  return null;
+}
+
+function timestampFromBrevo(body: any): admin.firestore.FieldValue | admin.firestore.Timestamp {
+  const raw = body.date || body.ts_event || body.ts;
+  if (typeof raw === 'number') return admin.firestore.Timestamp.fromMillis(raw * 1000);
+  if (typeof raw === 'string') {
+    const t = Date.parse(raw);
+    if (!isNaN(t)) return admin.firestore.Timestamp.fromMillis(t);
+  }
+  return admin.firestore.FieldValue.serverTimestamp();
+}
+
+export const brevoEmailWebhook = functions.https.onRequest(async (req, res) => {
+  try {
+    const key = (req.query.key as string | undefined) || req.get('x-brevo-key');
+    const expected = process.env.BREVO_WEBHOOK_SECRET;
+    if (!expected || !key || key !== expected) {
+      console.warn('brevoEmailWebhook: unauthorized attempt');
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+
+    // Brevo sends a single event per POST, or (rarely) a batch array.
+    const events: any[] = Array.isArray(req.body) ? req.body : [req.body];
+    let matched = 0;
+    let unmatched = 0;
+
+    for (const body of events) {
+      const event = String(body.event || '').toLowerCase();
+      const logId = parseEmailLogId(body);
+      if (!logId) {
+        unmatched++;
+        console.info(`brevoEmailWebhook: ${event} event with no emailLogId`, body.email, body['message-id']);
+        continue;
+      }
+      const logRef = db().doc(`emailLog/${logId}`);
+      const at = timestampFromBrevo(body);
+      const update: any = {
+        [`events.${event}.at`]: at,
+        [`events.${event}.count`]: admin.firestore.FieldValue.increment(1),
+        lastEvent: event,
+        lastEventAt: at,
+      };
+
+      switch (event) {
+        case 'request':
+        case 'delivered':
+          update.status = 'delivered';
+          update.deliveredAt = at;
+          break;
+        case 'deferred':
+          if (!update.status) update.status = 'deferred';
+          update.deferredAt = at;
+          break;
+        case 'soft_bounce':
+        case 'hard_bounce':
+          update.status = 'bounced';
+          update.bouncedAt = at;
+          update.bounceType = event === 'hard_bounce' ? 'hard' : 'soft';
+          update.bounceReason = body.reason || body['reason'] || null;
+          break;
+        case 'spam':
+          update.status = 'spam';
+          update.spamReportedAt = at;
+          break;
+        case 'unsubscribe':
+          update.unsubscribedAt = at;
+          break;
+        case 'blocked':
+          update.status = 'blocked';
+          update.blockedAt = at;
+          update.blockedReason = body.reason || null;
+          break;
+        case 'invalid_email':
+        case 'error':
+          update.status = 'error';
+          update.deliveryError = body.reason || event;
+          break;
+        case 'opened':
+        case 'unique_opened':
+          update.openedAt = update.openedAt || at;
+          update.openCount = admin.firestore.FieldValue.increment(1);
+          break;
+        case 'click':
+          update.firstClickedAt = update.firstClickedAt || at;
+          update.clickCount = admin.firestore.FieldValue.increment(1);
+          if (body.link || body.url) {
+            update.clickedUrls = admin.firestore.FieldValue.arrayUnion(body.link || body.url);
+          }
+          break;
+        default:
+          // Unknown event type — still record under events.{event}
+          break;
+      }
+
+      // Mirror brevoMessageId for cross-referencing.
+      if (body['message-id'] && !update.brevoMessageId) update.brevoMessageId = body['message-id'];
+
+      await logRef.set(update, { merge: true });
+      matched++;
+    }
+
+    res.json({ ok: true, matched, unmatched });
+  } catch (err: any) {
+    console.error('brevoEmailWebhook: handler error', err);
+    res.status(500).json({ error: err?.message || 'webhook error' });
+  }
+});
+
+// ============================================================
+// EMAIL EVENTS — admin callables to browse delivery telemetry
+// ============================================================
+
+export const adminListEmailEvents = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const limit = Math.min(Math.max(Number(data?.limit) || 100, 1), 500);
+    const category = data?.category as string | undefined;
+    const status = data?.status as string | undefined;
+    const userId = data?.userId as string | undefined;
+
+    let q: admin.firestore.Query = db().collection('emailLog').orderBy('queuedAt', 'desc');
+    if (category) q = q.where('category', '==', category);
+    if (status) q = q.where('status', '==', status);
+    if (userId) q = q.where('userId', '==', userId);
+
+    const snap = await q.limit(limit).get().catch(async () => {
+      // Fall back to sentAt if older docs don't have queuedAt
+      let q2: admin.firestore.Query = db().collection('emailLog').orderBy('sentAt', 'desc');
+      if (category) q2 = q2.where('category', '==', category);
+      if (status) q2 = q2.where('status', '==', status);
+      if (userId) q2 = q2.where('userId', '==', userId);
+      return q2.limit(limit).get();
+    });
+
+    const rows = snap.docs.map((d) => {
+      const v = d.data() as any;
+      return {
+        id: d.id,
+        userId: v.userId || null,
+        to: v.to || null,
+        subject: v.subject || null,
+        category: v.category || null,
+        status: v.status || (v.sentAt ? 'sent' : 'pending'),
+        tags: v.tags || [],
+        queuedAt: ts(v.queuedAt),
+        sentAt: ts(v.sentAt),
+        deliveredAt: ts(v.deliveredAt),
+        bouncedAt: ts(v.bouncedAt),
+        bounceType: v.bounceType || null,
+        bounceReason: v.bounceReason || null,
+        openedAt: ts(v.openedAt),
+        openCount: v.openCount || 0,
+        firstClickedAt: ts(v.firstClickedAt),
+        clickCount: v.clickCount || 0,
+        clickedUrls: v.clickedUrls || [],
+        spamReportedAt: ts(v.spamReportedAt),
+        unsubscribedAt: ts(v.unsubscribedAt),
+        blockedAt: ts(v.blockedAt),
+        blockedReason: v.blockedReason || null,
+        deliveryError: v.deliveryError || null,
+        lastEvent: v.lastEvent || null,
+        lastEventAt: ts(v.lastEventAt),
+      };
+    });
+
+    // Totals for the filtered slice (aggregate in memory — cheap at limit 500)
+    const totals = {
+      all: rows.length,
+      delivered: rows.filter((r) => r.status === 'delivered' || !!r.deliveredAt).length,
+      bounced: rows.filter((r) => !!r.bouncedAt).length,
+      opened: rows.filter((r) => !!r.openedAt).length,
+      clicked: rows.filter((r) => !!r.firstClickedAt).length,
+      spam: rows.filter((r) => !!r.spamReportedAt).length,
+      unsubscribed: rows.filter((r) => !!r.unsubscribedAt).length,
+      failed: rows.filter((r) => r.status === 'send_failed' || r.status === 'error' || r.status === 'blocked').length,
+    };
+
+    return { events: rows, totals };
+  });
+
+export const adminEmailHealth = functions.https.onCall(async (_data, context) => {
+  requireAdmin(context);
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  const twentyFourHoursAgo = admin.firestore.Timestamp.fromMillis(now - day);
+  const sevenDaysAgo = admin.firestore.Timestamp.fromMillis(now - 7 * day);
+
+  // Only look at recent docs to keep this cheap
+  const snap = await db()
+    .collection('emailLog')
+    .where('queuedAt', '>=', sevenDaysAgo)
+    .get()
+    .catch(() => ({ docs: [] as any[] }));
+
+  let sent24 = 0, sent7d = 0;
+  let delivered24 = 0, delivered7d = 0;
+  let bounced24 = 0, bounced7d = 0;
+  let opened24 = 0, opened7d = 0;
+  let clicked24 = 0, clicked7d = 0;
+  let spam7d = 0, failed7d = 0;
+  for (const d of (snap as any).docs) {
+    const v = d.data() as any;
+    const queuedAt = ts(v.queuedAt) || ts(v.sentAt) || 0;
+    if (queuedAt < now - 7 * day) continue;
+    sent7d++;
+    if (queuedAt >= now - day) sent24++;
+    if (v.deliveredAt) {
+      delivered7d++;
+      if (ts(v.deliveredAt)! >= now - day) delivered24++;
+    }
+    if (v.bouncedAt) {
+      bounced7d++;
+      if (ts(v.bouncedAt)! >= now - day) bounced24++;
+    }
+    if (v.openedAt) {
+      opened7d++;
+      if (ts(v.openedAt)! >= now - day) opened24++;
+    }
+    if (v.firstClickedAt) {
+      clicked7d++;
+      if (ts(v.firstClickedAt)! >= now - day) clicked24++;
+    }
+    if (v.spamReportedAt) spam7d++;
+    if (v.status === 'send_failed' || v.status === 'error' || v.status === 'blocked') failed7d++;
+  }
+
+  // Ignore the unused 24h-ago timestamp (declared for parity with existing conventions).
+  void twentyFourHoursAgo;
+
+  return {
+    last24h: { sent: sent24, delivered: delivered24, bounced: bounced24, opened: opened24, clicked: clicked24 },
+    last7d: { sent: sent7d, delivered: delivered7d, bounced: bounced7d, opened: opened7d, clicked: clicked7d, spam: spam7d, failed: failed7d },
+  };
 });
 
 // ============================================================
