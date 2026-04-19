@@ -1225,6 +1225,128 @@ export const adminMetricsSeries = functions.https.onCall(async (data, context) =
 });
 
 // ============================================================
+// QUOTES — global log across all tradies
+// ============================================================
+
+export const adminListQuotes = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const limit = Math.min(Math.max(Number(data?.limit) || 300, 1), 2000);
+    const statusFilter = (data?.status || '').toString();
+    const userIdFilter = (data?.userId || '').toString();
+
+    const firestore = db();
+    // Quotes live at users/{uid}/quotes/{id} — collection-group query spans all users.
+    const snap = await firestore.collectionGroup('quotes').orderBy('createdAt', 'desc').limit(limit).get();
+
+    // Batch-resolve user info so each row can show the business name + email.
+    const uidSet = new Set<string>();
+    for (const d of snap.docs) {
+      const uid = d.ref.parent.parent?.id;
+      if (uid) uidSet.add(uid);
+    }
+    const uidList = Array.from(uidSet);
+    const authMap = new Map<string, admin.auth.UserRecord>();
+    for (let i = 0; i < uidList.length; i += 100) {
+      const chunk = uidList.slice(i, i + 100);
+      if (!chunk.length) continue;
+      const res = await admin.auth().getUsers(chunk.map((uid) => ({ uid })));
+      for (const u of res.users) authMap.set(u.uid, u);
+    }
+    const businessMap = new Map<string, any>();
+    await Promise.all(
+      uidList.map(async (uid) => {
+        const b = await firestore.doc(`users/${uid}/settings/business`).get().catch(() => null);
+        businessMap.set(uid, b?.data() || {});
+      })
+    );
+
+    const rows = snap.docs
+      .map((d) => {
+        const uid = d.ref.parent.parent?.id || '';
+        const q = d.data() as any;
+        if (userIdFilter && uid !== userIdFilter) return null;
+        if (statusFilter && q.status !== statusFilter) return null;
+        const auth = authMap.get(uid);
+        const biz = businessMap.get(uid) || {};
+        return {
+          id: d.id,
+          uid,
+          userEmail: auth?.email || biz.email || null,
+          userBusinessName: biz.businessName || auth?.displayName || null,
+          customerName: q.customerName || null,
+          customerEmail: q.customerEmail || null,
+          customerPhone: q.customerPhone || null,
+          jobAddress: q.jobAddress || null,
+          job: typeof q.job === 'string' ? q.job.slice(0, 200) : null,
+          status: q.status || 'draft',
+          total: Number(q.total) || 0,
+          subtotal: Number(q.subtotal) || 0,
+          gst: Number(q.gst) || 0,
+          materialsSubtotal: Number(q.materialsSubtotal) || 0,
+          laborTotal: Number(q.laborTotal) || 0,
+          markup: Number(q.markup) || 0,
+          materialCount: Array.isArray(q.materials) ? q.materials.length : 0,
+          photoCount: Array.isArray(q.photos) ? q.photos.length : 0,
+          createdAt: ts(q.createdAt),
+          updatedAt: ts(q.updatedAt),
+          respondedAt: ts(q.respondedAt),
+          respondedBy: q.respondedBy || null,
+          hasAcceptanceToken: !!q.acceptanceToken,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+
+    // Totals across the filtered slice.
+    const totals = {
+      all: rows.length,
+      draft: rows.filter((r) => r.status === 'draft').length,
+      sent: rows.filter((r) => r.status === 'sent').length,
+      viewed: rows.filter((r) => r.status === 'viewed').length,
+      accepted: rows.filter((r) => r.status === 'accepted').length,
+      declined: rows.filter((r) => r.status === 'declined').length,
+      valueAll: rows.reduce((a, r) => a + r.total, 0),
+      valueSent: rows
+        .filter((r) => r.status === 'sent' || r.status === 'viewed' || r.status === 'accepted' || r.status === 'declined')
+        .reduce((a, r) => a + r.total, 0),
+      valueAccepted: rows.filter((r) => r.status === 'accepted').reduce((a, r) => a + r.total, 0),
+    };
+
+    return { quotes: rows, totals };
+  });
+
+export const adminGetQuote = functions.https.onCall(async (data, context) => {
+  requireAdmin(context);
+  const uid = (data?.uid || '').toString();
+  const id = (data?.id || '').toString();
+  if (!uid || !id) throw new functions.https.HttpsError('invalid-argument', 'uid and id required');
+
+  const [quoteSnap, biz, authRec] = await Promise.all([
+    db().doc(`users/${uid}/quotes/${id}`).get(),
+    db().doc(`users/${uid}/settings/business`).get(),
+    admin.auth().getUser(uid).catch(() => null),
+  ]);
+  if (!quoteSnap.exists) throw new functions.https.HttpsError('not-found', 'quote not found');
+
+  const q = quoteSnap.data() as any;
+  return {
+    id,
+    uid,
+    userEmail: authRec?.email || null,
+    userBusinessName: biz.data()?.businessName || null,
+    quote: {
+      ...q,
+      createdAt: ts(q.createdAt),
+      updatedAt: ts(q.updatedAt),
+      respondedAt: ts(q.respondedAt),
+      acceptanceTokenCreatedAt: ts(q.acceptanceTokenCreatedAt),
+      syncedAt: ts(q.syncedAt),
+    },
+  };
+});
+
+// ============================================================
 // USER STATUS — grant/revoke Pro, disable, enable, delete
 // ============================================================
 
