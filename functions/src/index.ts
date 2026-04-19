@@ -3673,9 +3673,17 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Record that the customer viewed the quote (triggers onQuoteViewed notification)
+      // Record that the customer viewed the quote (triggers onQuoteViewed notification).
+      // Also increment viewCount + stamp firstViewedAt the first time for admin visibility.
       if (quoteRef) {
-        await quoteRef.update({ lastViewedAt: admin.firestore.FieldValue.serverTimestamp() });
+        const viewUpdate: any = {
+          lastViewedAt: admin.firestore.FieldValue.serverTimestamp(),
+          viewCount: admin.firestore.FieldValue.increment(1),
+        };
+        if (!foundQuote.firstViewedAt) {
+          viewUpdate.firstViewedAt = admin.firestore.FieldValue.serverTimestamp();
+        }
+        await quoteRef.update(viewUpdate);
       }
 
       // Return quote data for the acceptance page (excluding sensitive fields)
@@ -10408,14 +10416,26 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         }
       }
       // Reverse-lookup index so dispute events (which don't carry order_id)
-      // can resolve back to this quote via payment.id.
-      await firestore.doc(`squarePayments/${payment.id}`).set({
-        userId,
-        quoteId,
-        kind: idx.kind,
-        orderId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
+      // can resolve back to this quote via payment.id. Stamped with amount +
+      // appFee so the admin revenue view can aggregate QuoteMate earnings.
+      {
+        const paidCents = Number(payment?.amount_money?.amount) || 0;
+        const channel: 'in_person' | 'online' = idx.source === 'in_app' ? 'in_person' : 'online';
+        const feePct = channel === 'in_person' ? QM_APP_FEE_PCT_IN_PERSON : QM_APP_FEE_PCT_ONLINE;
+        const appFeeCents = Math.max(0, dollarsToCents(centsToDollars(paidCents) * (feePct / 100)));
+        await firestore.doc(`squarePayments/${payment.id}`).set({
+          userId,
+          quoteId,
+          kind: idx.kind,
+          orderId,
+          amountCents: paidCents,
+          appFeeCents,
+          channel,
+          currency: payment?.amount_money?.currency || 'AUD',
+          paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
       if (!wasAlreadyAccepted) {
         update.status = 'accepted';
         update.respondedAt = admin.firestore.FieldValue.serverTimestamp();
@@ -10514,13 +10534,26 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
       { merge: true },
     );
     // Reverse-lookup index so dispute events (which carry disputed payment
-    // id but not order id) can resolve back to this invoice.
-    await firestore.doc(`squarePayments/${payment.id}`).set({
-      userId,
-      invoiceId,
-      orderId,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    // id but not order id) can resolve back to this invoice. Also stamped with
+    // amount + appFee so the admin revenue view can aggregate QuoteMate earnings.
+    {
+      const paidCents = Number(payment?.amount_money?.amount) || 0;
+      const channel: 'in_person' | 'online' = idx.source === 'in_app' ? 'in_person' : 'online';
+      const feePct = channel === 'in_person' ? QM_APP_FEE_PCT_IN_PERSON : QM_APP_FEE_PCT_ONLINE;
+      const appFeeCents = Math.max(0, dollarsToCents(centsToDollars(paidCents) * (feePct / 100)));
+      await firestore.doc(`squarePayments/${payment.id}`).set({
+        userId,
+        invoiceId,
+        orderId,
+        kind: 'invoice',
+        amountCents: paidCents,
+        appFeeCents,
+        channel,
+        currency: payment?.amount_money?.currency || 'AUD',
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
 
     // If the invoice has already been pushed to Xero, record the payment
     // there too. Best-effort; errors are swallowed inside the helper.
