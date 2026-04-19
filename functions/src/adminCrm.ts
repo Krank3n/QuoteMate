@@ -1238,7 +1238,9 @@ export const adminListQuotes = functions
 
     const firestore = db();
     // Quotes live at users/{uid}/quotes/{id} — collection-group query spans all users.
-    const snap = await firestore.collectionGroup('quotes').orderBy('createdAt', 'desc').limit(limit).get();
+    // Fetched without orderBy to avoid requiring a composite index; sort/limit in memory.
+    // At current scale (<1k quotes) this is fine; revisit if it grows past a few thousand.
+    const snap = await firestore.collectionGroup('quotes').get();
 
     // Batch-resolve user info so each row can show the business name + email.
     const uidSet = new Set<string>();
@@ -1296,7 +1298,9 @@ export const adminListQuotes = functions
           hasAcceptanceToken: !!q.acceptanceToken,
         };
       })
-      .filter((r): r is NonNullable<typeof r> => r !== null);
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, limit);
 
     // Totals across the filtered slice.
     const totals = {
