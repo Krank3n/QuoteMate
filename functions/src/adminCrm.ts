@@ -1281,7 +1281,14 @@ export const adminListQuotes = functions
           customerEmail: q.customerEmail || null,
           customerPhone: q.customerPhone || null,
           jobAddress: q.jobAddress || null,
-          job: typeof q.job === 'string' ? q.job.slice(0, 200) : null,
+          job: (() => {
+            if (typeof q.job === 'string') return q.job.slice(0, 200);
+            if (q.job && typeof q.job === 'object') {
+              const parts = [q.job.name, q.job.description].filter((x) => typeof x === 'string' && x.trim());
+              return parts.join(' — ').slice(0, 200) || null;
+            }
+            return null;
+          })(),
           status: q.status || 'draft',
           total: Number(q.total) || 0,
           subtotal: Number(q.subtotal) || 0,
