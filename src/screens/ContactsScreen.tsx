@@ -1,8 +1,6 @@
 /**
  * Contacts Screen
- * Manage customer contacts — view, add, edit, delete
- * Phone contacts are a live search source (not imported here).
- * Contacts are built organically from quoting history.
+ * Manage customer contacts — view, add, edit, delete, import from phone.
  */
 
 import React, { useState, useMemo } from 'react';
@@ -12,6 +10,8 @@ import {
   FlatList,
   TouchableOpacity,
   Alert,
+  Linking,
+  Platform,
 } from 'react-native';
 import {
   Text,
@@ -32,20 +32,36 @@ import { Contact } from '../types';
 import {
   createContact,
   updateContact,
+  getAllPhoneContacts,
+  requestPhoneContactsPermission,
+  normalizePhone,
 } from '../services/contactService';
 import { SOURCE_COLORS } from '../hooks/useUnifiedContactSearch';
 import { ContactActionsBar } from '../components/document/ContactActionsBar';
+import { AlertModal, AlertType } from '../components/AlertModal';
+
+type AlertConfig = {
+  type: AlertType;
+  title: string;
+  message: string;
+  primaryText?: string;
+  primaryAction?: () => void;
+  secondaryText?: string;
+  secondaryAction?: () => void;
+};
 
 type FilterType = 'all' | 'saved' | 'xero';
 
 export function ContactsScreen() {
-  const { contacts, xeroContacts, xeroConnection, saveContact, deleteContact, syncXeroContacts } = useStore();
+  const { contacts, xeroContacts, xeroConnection, saveContact, deleteContact, syncXeroContacts, importContacts } = useStore();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [xeroSyncing, setXeroSyncing] = useState(false);
+  const [phoneImporting, setPhoneImporting] = useState(false);
+  const [alert, setAlert] = useState<AlertConfig | null>(null);
 
   // Form state for add/edit
   const [formName, setFormName] = useState('');
@@ -152,6 +168,95 @@ export function ContactsScreen() {
     );
   };
 
+  const openSettings = () => {
+    if (Platform.OS === 'ios') Linking.openURL('app-settings:');
+    else Linking.openSettings();
+  };
+
+  const handlePhoneImport = async () => {
+    const permission = await requestPhoneContactsPermission();
+    if (!permission.granted) {
+      if (!permission.canAskAgain) {
+        setAlert({
+          type: 'info',
+          title: 'Contacts Access',
+          message: 'To import your phone contacts, allow access in your device settings.',
+          primaryText: 'Open Settings',
+          primaryAction: () => {
+            setAlert(null);
+            openSettings();
+          },
+          secondaryText: 'Not Now',
+          secondaryAction: () => setAlert(null),
+        });
+      }
+      return;
+    }
+
+    setPhoneImporting(true);
+    try {
+      const phoneContacts = await getAllPhoneContacts();
+      if (phoneContacts.length === 0) {
+        setAlert({
+          type: 'info',
+          title: 'No Contacts',
+          message: 'No contacts found on your device.',
+        });
+        return;
+      }
+
+      const existingPhones = new Set(
+        contacts.filter((c) => c.phone).map((c) => normalizePhone(c.phone!))
+      );
+      const existingEmails = new Set(
+        contacts.filter((c) => c.email).map((c) => c.email!.toLowerCase())
+      );
+
+      const newOnes = phoneContacts.filter((c) => {
+        const phoneMatch = c.phone && existingPhones.has(normalizePhone(c.phone));
+        const emailMatch = c.email && existingEmails.has(c.email.toLowerCase());
+        return !phoneMatch && !emailMatch;
+      });
+
+      if (newOnes.length === 0) {
+        setAlert({
+          type: 'info',
+          title: 'Nothing New',
+          message: `All ${phoneContacts.length} phone contacts are already saved.`,
+        });
+        return;
+      }
+
+      setAlert({
+        type: 'info',
+        title: 'Import Contacts',
+        message: `Import ${newOnes.length} new contact${newOnes.length === 1 ? '' : 's'} from your phone?`,
+        primaryText: 'Import',
+        primaryAction: async () => {
+          setAlert(null);
+          try {
+            await importContacts(newOnes);
+            setAlert({
+              type: 'success',
+              title: 'Imported',
+              message: `${newOnes.length} contact${newOnes.length === 1 ? '' : 's'} added.`,
+            });
+          } catch (e: any) {
+            setAlert({
+              type: 'error',
+              title: 'Import Failed',
+              message: e?.message || 'Could not save contacts.',
+            });
+          }
+        },
+        secondaryText: 'Cancel',
+        secondaryAction: () => setAlert(null),
+      });
+    } finally {
+      setPhoneImporting(false);
+    }
+  };
+
   const handleXeroSync = async () => {
     setXeroSyncing(true);
     try {
@@ -246,14 +351,24 @@ export function ContactsScreen() {
       </View>
 
       {/* Action buttons */}
-      {xeroConnection && (
-        <View style={styles.actionsRow}>
+      <View style={styles.actionsRow}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handlePhoneImport}
+          disabled={phoneImporting}
+        >
+          <MaterialCommunityIcons name="cellphone" size={18} color={colors.primary} />
+          <Text style={styles.actionButtonText}>
+            {phoneImporting ? 'Importing...' : 'Import from Phone'}
+          </Text>
+        </TouchableOpacity>
+        {xeroConnection && (
           <TouchableOpacity style={styles.actionButton} onPress={handleXeroSync} disabled={xeroSyncing}>
             <MaterialCommunityIcons name="cloud-sync" size={18} color={colors.primary} />
             <Text style={styles.actionButtonText}>{xeroSyncing ? 'Syncing...' : 'Sync Xero'}</Text>
           </TouchableOpacity>
-        </View>
-      )}
+        )}
+      </View>
 
       {/* Xero contacts section (not yet saved locally) */}
       {xeroContacts.length > 0 && filter !== 'saved' && (
@@ -395,6 +510,17 @@ export function ContactsScreen() {
         </Modal>
       </Portal>
 
+      <AlertModal
+        visible={alert !== null}
+        onDismiss={() => setAlert(null)}
+        type={alert?.type || 'info'}
+        title={alert?.title || ''}
+        message={alert?.message || ''}
+        primaryButtonText={alert?.primaryText || 'OK'}
+        primaryButtonAction={alert?.primaryAction || (() => setAlert(null))}
+        secondaryButtonText={alert?.secondaryText}
+        secondaryButtonAction={alert?.secondaryAction}
+      />
     </View>
   );
 }

@@ -33,11 +33,11 @@ The release signing config in `android/app/build.gradle` reads from `keystore.pr
 
 2. Read `android/app/build.gradle` and note the current `versionCode` and `versionName`.
 
-3. **Ask the user** what versionCode and versionName the Play Store currently has. The EAS remote value (`eas build:version:get`) is often stale and behind the actual Play Store. Do NOT rely on it alone.
+3. **Default to bumping from `build.gradle`.** The local `build.gradle` value is usually in sync with Play Store because the last successful build wrote it. Unless the user says otherwise, bump from there. Only ask if you have a specific reason to suspect drift (e.g. prior build failed, user mentions an out-of-band release). Never trust the EAS remote value (`eas build:version:get`) — it is often stale.
 
 4. Set the new versions:
-   - `versionCode` = max(current build.gradle value, user-provided Play Store value) + 1
-   - `versionName` = bump the patch number by 1 from the higher of build.gradle or Play Store (e.g. "1.0.85" → "1.0.86")
+   - `versionCode` = current build.gradle value + 1 (or max with a user-supplied Play Store value, if given)
+   - `versionName` = bump the patch number by 1 (e.g. "1.0.87" → "1.0.88")
    - Use the Edit tool to update the values in `android/app/build.gradle`.
 
 5. Run the Gradle release bundle build (**do NOT run `clean` first** — it wipes native CMake caches and causes prefab errors):

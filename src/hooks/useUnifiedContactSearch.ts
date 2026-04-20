@@ -4,7 +4,6 @@
  */
 
 import { useMemo, useState, useEffect, useCallback } from 'react';
-import { Platform, Linking, Alert } from 'react-native';
 import { Contact, SearchableContact, Quote, Invoice } from '../types';
 import {
   deduplicateContacts,
@@ -23,8 +22,9 @@ interface UseUnifiedContactSearchOptions {
 interface UnifiedSearchResult {
   results: SearchableContact[];
   phonePermissionGranted: boolean;
-  requestPhonePermission: () => Promise<void>;
   phonePermissionChecked: boolean;
+  phonePermissionCanAskAgain: boolean;
+  requestPhonePermission: () => Promise<{ granted: boolean; canAskAgain: boolean }>;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -45,16 +45,14 @@ export function useUnifiedContactSearch({
 }: UseUnifiedContactSearchOptions): UnifiedSearchResult {
   const [phonePermissionGranted, setPhonePermissionGranted] = useState(false);
   const [phonePermissionChecked, setPhonePermissionChecked] = useState(false);
+  const [phonePermissionCanAskAgain, setPhonePermissionCanAskAgain] = useState(true);
   const [phoneResults, setPhoneResults] = useState<SearchableContact[]>([]);
-
-  const [permissionRequested, setPermissionRequested] = useState(false);
-  const [canAskAgain, setCanAskAgain] = useState(true);
 
   // Check phone permission status on mount
   useEffect(() => {
     checkPhoneContactsPermission().then((result) => {
       setPhonePermissionGranted(result.granted);
-      setCanAskAgain(result.canAskAgain);
+      setPhonePermissionCanAskAgain(result.canAskAgain);
       setPhonePermissionChecked(true);
     }).catch(() => {
       setPhonePermissionChecked(true);
@@ -65,38 +63,9 @@ export function useUnifiedContactSearch({
     const { requestPhoneContactsPermission } = await import('../services/contactService');
     const result = await requestPhoneContactsPermission();
     setPhonePermissionGranted(result.granted);
-    setCanAskAgain(result.canAskAgain);
-    setPermissionRequested(true);
-
-    // If permanently denied on Android, offer to open settings
-    if (!result.granted && !result.canAskAgain) {
-      Alert.alert(
-        'Contacts Access',
-        'To search your phone contacts, allow access in your device settings.',
-        [
-          { text: 'Not Now', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => {
-            if (Platform.OS === 'ios') {
-              Linking.openURL('app-settings:');
-            } else {
-              Linking.openSettings();
-            }
-          }},
-        ]
-      );
-    }
+    setPhonePermissionCanAskAgain(result.canAskAgain);
+    return result;
   }, []);
-
-  // Auto-request phone contacts permission when user starts typing (>= 2 chars)
-  // Only asks if we haven't already requested this session AND the OS will show a dialog
-  useEffect(() => {
-    if (!enabled || phonePermissionGranted || permissionRequested || query.length < 2) return;
-    if (!phonePermissionChecked) return;
-    if (!canAskAgain) return; // Don't auto-request if permanently denied
-
-    setPermissionRequested(true);
-    requestPhonePermission();
-  }, [query, enabled, phonePermissionGranted, permissionRequested, phonePermissionChecked, canAskAgain, requestPhonePermission]);
 
   // Search phone contacts when query changes (debounced via effect)
   useEffect(() => {
@@ -220,7 +189,8 @@ export function useUnifiedContactSearch({
   return {
     results,
     phonePermissionGranted,
-    requestPhonePermission,
     phonePermissionChecked,
+    phonePermissionCanAskAgain,
+    requestPhonePermission,
   };
 }

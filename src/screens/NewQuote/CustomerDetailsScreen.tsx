@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import {
   Text,
@@ -37,6 +38,7 @@ import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/U
 import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 import { useUnifiedContactSearch, SOURCE_COLORS } from '../../hooks/useUnifiedContactSearch';
 import { SearchableContact } from '../../types';
+import { AlertModal } from '../../components/AlertModal';
 
 export function CustomerDetailsScreen() {
   const navigation = useNavigation<any>();
@@ -89,13 +91,32 @@ export function CustomerDetailsScreen() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState<string | undefined>(currentDocument?.contactId);
 
-  // Unified contact search across all sources (auto-requests phone permission when typing)
-  const { results: filteredCustomers } = useUnifiedContactSearch({
+  // Unified contact search across all sources
+  const {
+    results: filteredCustomers,
+    phonePermissionGranted,
+    phonePermissionChecked,
+    requestPhonePermission,
+  } = useUnifiedContactSearch({
     query: customerName,
     contacts,
     quotes,
     xeroContacts,
   });
+
+  const [settingsAlertVisible, setSettingsAlertVisible] = useState(false);
+
+  const handleEnablePhoneContacts = async () => {
+    const result = await requestPhonePermission();
+    if (!result.granted && !result.canAskAgain) {
+      setSettingsAlertVisible(true);
+    }
+  };
+
+  const showPhoneContactsPrompt =
+    phonePermissionChecked &&
+    !phonePermissionGranted &&
+    customerName.trim().length >= 2;
 
   // Load existing customer data on mount (for editing existing quotes).
   // Runs once only — the quote is always set in the store before navigating here,
@@ -315,7 +336,7 @@ export function CustomerDetailsScreen() {
             />
 
             {/* Auto-complete Suggestions */}
-            {showSuggestions && filteredCustomers.length > 0 && (
+            {showSuggestions && (filteredCustomers.length > 0 || showPhoneContactsPrompt) && (
               <Card style={styles.suggestionsCard}>
                 <Card.Content style={styles.suggestionsContent}>
                   <Text style={styles.suggestionsHeader}>Suggestions:</Text>
@@ -363,6 +384,40 @@ export function CustomerDetailsScreen() {
                       </TouchableOpacity>
                     </React.Fragment>
                   ))}
+
+                  {showPhoneContactsPrompt && (
+                    <>
+                      {filteredCustomers.length > 0 && <Divider style={styles.suggestionDivider} />}
+                      <TouchableOpacity
+                        style={styles.suggestionItem}
+                        onPress={handleEnablePhoneContacts}
+                      >
+                        <View style={styles.suggestionContent}>
+                          <View style={styles.suggestionMain}>
+                            <MaterialCommunityIcons
+                              name="cellphone-key"
+                              size={20}
+                              color={SOURCE_COLORS.phone}
+                              style={styles.suggestionIcon}
+                            />
+                            <View style={styles.suggestionText}>
+                              <Text style={styles.suggestionName}>
+                                Search your phone contacts for "{customerName.trim()}"
+                              </Text>
+                              <Text style={styles.suggestionDetail}>
+                                Tap to allow access
+                              </Text>
+                            </View>
+                          </View>
+                          <MaterialCommunityIcons
+                            name="chevron-right"
+                            size={20}
+                            color={colors.onSurface}
+                          />
+                        </View>
+                      </TouchableOpacity>
+                    </>
+                  )}
                 </Card.Content>
               </Card>
             )}
@@ -423,6 +478,22 @@ export function CustomerDetailsScreen() {
           }}
         />
       )}
+
+      <AlertModal
+        visible={settingsAlertVisible}
+        onDismiss={() => setSettingsAlertVisible(false)}
+        type="info"
+        title="Contacts Access"
+        message="To search your phone contacts, allow access in your device settings."
+        primaryButtonText="Open Settings"
+        primaryButtonAction={() => {
+          setSettingsAlertVisible(false);
+          if (Platform.OS === 'ios') Linking.openURL('app-settings:');
+          else Linking.openSettings();
+        }}
+        secondaryButtonText="Not Now"
+        secondaryButtonAction={() => setSettingsAlertVisible(false)}
+      />
     </View>
   );
 }

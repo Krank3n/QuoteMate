@@ -1225,6 +1225,297 @@ export const adminMetricsSeries = functions.https.onCall(async (data, context) =
 });
 
 // ============================================================
+// QUOTES — global log across all tradies
+// ============================================================
+
+export const adminListQuotes = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const limit = Math.min(Math.max(Number(data?.limit) || 300, 1), 2000);
+    const statusFilter = (data?.status || '').toString();
+    const userIdFilter = (data?.userId || '').toString();
+
+    const firestore = db();
+    // Quotes live at users/{uid}/quotes/{id} — collection-group query spans all users.
+    // Fetched without orderBy to avoid requiring a composite index; sort/limit in memory.
+    // At current scale (<1k quotes) this is fine; revisit if it grows past a few thousand.
+    const snap = await firestore.collectionGroup('quotes').get();
+
+    // Batch-resolve user info so each row can show the business name + email.
+    const uidSet = new Set<string>();
+    for (const d of snap.docs) {
+      const uid = d.ref.parent.parent?.id;
+      if (uid) uidSet.add(uid);
+    }
+    const uidList = Array.from(uidSet);
+    const authMap = new Map<string, admin.auth.UserRecord>();
+    for (let i = 0; i < uidList.length; i += 100) {
+      const chunk = uidList.slice(i, i + 100);
+      if (!chunk.length) continue;
+      const res = await admin.auth().getUsers(chunk.map((uid) => ({ uid })));
+      for (const u of res.users) authMap.set(u.uid, u);
+    }
+    const businessMap = new Map<string, any>();
+    await Promise.all(
+      uidList.map(async (uid) => {
+        const b = await firestore.doc(`users/${uid}/settings/business`).get().catch(() => null);
+        businessMap.set(uid, b?.data() || {});
+      })
+    );
+
+    const rows = snap.docs
+      .map((d) => {
+        const uid = d.ref.parent.parent?.id || '';
+        const q = d.data() as any;
+        if (userIdFilter && uid !== userIdFilter) return null;
+        if (statusFilter && q.status !== statusFilter) return null;
+        const auth = authMap.get(uid);
+        const biz = businessMap.get(uid) || {};
+        return {
+          id: d.id,
+          uid,
+          userEmail: auth?.email || biz.email || null,
+          userBusinessName: biz.businessName || auth?.displayName || null,
+          customerName: q.customerName || null,
+          customerEmail: q.customerEmail || null,
+          customerPhone: q.customerPhone || null,
+          jobAddress: q.jobAddress || null,
+          job: (() => {
+            if (typeof q.job === 'string') return q.job.slice(0, 200);
+            if (q.job && typeof q.job === 'object') {
+              const parts = [q.job.name, q.job.description].filter((x) => typeof x === 'string' && x.trim());
+              return parts.join(' — ').slice(0, 200) || null;
+            }
+            return null;
+          })(),
+          status: q.status || 'draft',
+          total: Number(q.total) || 0,
+          subtotal: Number(q.subtotal) || 0,
+          gst: Number(q.gst) || 0,
+          materialsSubtotal: Number(q.materialsSubtotal) || 0,
+          laborTotal: Number(q.laborTotal) || 0,
+          markup: Number(q.markup) || 0,
+          materialCount: Array.isArray(q.materials) ? q.materials.length : 0,
+          photoCount: Array.isArray(q.photos) ? q.photos.length : 0,
+          createdAt: ts(q.createdAt),
+          updatedAt: ts(q.updatedAt),
+          respondedAt: ts(q.respondedAt),
+          respondedBy: q.respondedBy || null,
+          firstViewedAt: ts(q.firstViewedAt),
+          lastViewedAt: ts(q.lastViewedAt),
+          viewCount: Number(q.viewCount) || 0,
+          hasAcceptanceToken: !!q.acceptanceToken,
+          // Square payment state — depositPaid tracks deposit-kind, paidTotal tracks full-payment kind.
+          depositPaid: Number(q.depositPaid) || 0,
+          paidTotal: Number(q.paidTotal) || 0,
+          balanceDue: Number(q.balanceDue) || 0,
+          depositPaidAt: ts(q.depositPaidAt),
+          squarePaymentId: q.depositSquarePaymentId || q.squarePaymentId || null,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, limit);
+
+    // Totals across the filtered slice.
+    const totals = {
+      all: rows.length,
+      draft: rows.filter((r) => r.status === 'draft').length,
+      sent: rows.filter((r) => r.status === 'sent').length,
+      viewed: rows.filter((r) => r.status === 'viewed' || (!!r.firstViewedAt && r.status === 'sent')).length,
+      viewedButNoResponse: rows.filter((r) => !!r.firstViewedAt && !r.respondedAt).length,
+      accepted: rows.filter((r) => r.status === 'accepted').length,
+      declined: rows.filter((r) => r.status === 'declined').length,
+      valueAll: rows.reduce((a, r) => a + r.total, 0),
+      valueSent: rows
+        .filter((r) => r.status === 'sent' || r.status === 'viewed' || r.status === 'accepted' || r.status === 'declined')
+        .reduce((a, r) => a + r.total, 0),
+      valueAccepted: rows.filter((r) => r.status === 'accepted').reduce((a, r) => a + r.total, 0),
+      valueViewedPending: rows.filter((r) => !!r.firstViewedAt && !r.respondedAt).reduce((a, r) => a + r.total, 0),
+      valuePaid: rows.reduce((a, r) => a + Math.max(r.paidTotal, r.depositPaid), 0),
+      paidCount: rows.filter((r) => r.paidTotal > 0 || r.depositPaid > 0).length,
+    };
+
+    return { quotes: rows, totals };
+  });
+
+export const adminGetQuote = functions.https.onCall(async (data, context) => {
+  requireAdmin(context);
+  const uid = (data?.uid || '').toString();
+  const id = (data?.id || '').toString();
+  if (!uid || !id) throw new functions.https.HttpsError('invalid-argument', 'uid and id required');
+
+  const [quoteSnap, biz, authRec] = await Promise.all([
+    db().doc(`users/${uid}/quotes/${id}`).get(),
+    db().doc(`users/${uid}/settings/business`).get(),
+    admin.auth().getUser(uid).catch(() => null),
+  ]);
+  if (!quoteSnap.exists) throw new functions.https.HttpsError('not-found', 'quote not found');
+
+  const q = quoteSnap.data() as any;
+  return {
+    id,
+    uid,
+    userEmail: authRec?.email || null,
+    userBusinessName: biz.data()?.businessName || null,
+    quote: {
+      ...q,
+      createdAt: ts(q.createdAt),
+      updatedAt: ts(q.updatedAt),
+      respondedAt: ts(q.respondedAt),
+      acceptanceTokenCreatedAt: ts(q.acceptanceTokenCreatedAt),
+      syncedAt: ts(q.syncedAt),
+      firstViewedAt: ts(q.firstViewedAt),
+      lastViewedAt: ts(q.lastViewedAt),
+      viewCount: Number(q.viewCount) || 0,
+    },
+  };
+});
+
+// ============================================================
+// REVENUE — Square payment aggregation
+// ============================================================
+//
+// Each completed Square payment is written to `squarePayments/{paymentId}` by the
+// Square webhook. New writes include amountCents + appFeeCents + channel so we
+// can aggregate QuoteMate's cut. Older payments (before this instrumentation)
+// only have {userId, quoteId|invoiceId, orderId} — for those we fall back to
+// summing depositPaid/paidTotal on the quote/invoice and estimating the fee.
+
+const CENTS_PER_DOLLAR = 100;
+const ONLINE_FEE_PCT = 1.0;  // must match QM_APP_FEE_PCT_ONLINE in shared/pdf/squareFees.ts
+
+interface PaymentRow {
+  id: string;
+  userId: string | null;
+  userEmail: string | null;
+  userBusinessName: string | null;
+  kind: 'invoice' | 'quote_deposit' | 'quote_full' | 'unknown';
+  quoteId: string | null;
+  invoiceId: string | null;
+  amountDollars: number;
+  appFeeDollars: number;
+  channel: string;
+  paidAt: number | null;
+  orderId: string | null;
+  currency: string;
+  enriched: boolean; // false → legacy payment, fields inferred
+}
+
+export const adminListPayments = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 120 })
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const firestore = db();
+    const limit = Math.min(Math.max(Number(data?.limit) || 500, 1), 2000);
+
+    const snap = await firestore.collection('squarePayments').get();
+
+    // Batch-resolve user info for display.
+    const uidSet = new Set<string>();
+    for (const d of snap.docs) {
+      const u = (d.data() as any)?.userId;
+      if (u) uidSet.add(u);
+    }
+    const uidList = Array.from(uidSet);
+    const authMap = new Map<string, admin.auth.UserRecord>();
+    for (let i = 0; i < uidList.length; i += 100) {
+      const chunk = uidList.slice(i, i + 100);
+      if (!chunk.length) continue;
+      const res = await admin.auth().getUsers(chunk.map((uid) => ({ uid })));
+      for (const u of res.users) authMap.set(u.uid, u);
+    }
+    const businessMap = new Map<string, any>();
+    await Promise.all(
+      uidList.map(async (uid) => {
+        const b = await firestore.doc(`users/${uid}/settings/business`).get().catch(() => null);
+        businessMap.set(uid, b?.data() || {});
+      })
+    );
+
+    const rows: PaymentRow[] = [];
+    for (const d of snap.docs) {
+      const p = d.data() as any;
+      const uid: string | null = p.userId || null;
+      const auth = uid ? authMap.get(uid) : null;
+      const biz = uid ? businessMap.get(uid) || {} : {};
+      const enriched = typeof p.amountCents === 'number';
+      let amountDollars = enriched ? (p.amountCents || 0) / CENTS_PER_DOLLAR : 0;
+      let appFeeDollars = enriched ? (p.appFeeCents || 0) / CENTS_PER_DOLLAR : 0;
+
+      // Legacy fallback: look up the referenced quote/invoice to get the paid amount.
+      if (!enriched && uid) {
+        try {
+          if (p.invoiceId) {
+            const inv = await firestore.doc(`users/${uid}/invoices/${p.invoiceId}`).get();
+            amountDollars = Number(inv.data()?.paidTotal || inv.data()?.paidAmount) || 0;
+          } else if (p.quoteId) {
+            const q = await firestore.doc(`users/${uid}/quotes/${p.quoteId}`).get();
+            amountDollars = Math.max(
+              Number(q.data()?.paidTotal) || 0,
+              Number(q.data()?.depositPaid) || 0
+            );
+          }
+          appFeeDollars = (amountDollars * ONLINE_FEE_PCT) / 100;
+        } catch {}
+      }
+
+      rows.push({
+        id: d.id,
+        userId: uid,
+        userEmail: auth?.email || biz.email || null,
+        userBusinessName: biz.businessName || auth?.displayName || null,
+        kind: p.kind || (p.invoiceId ? 'invoice' : p.quoteId ? 'quote_deposit' : 'unknown'),
+        quoteId: p.quoteId || null,
+        invoiceId: p.invoiceId || null,
+        amountDollars,
+        appFeeDollars,
+        channel: p.channel || 'online',
+        paidAt: ts(p.paidAt) || ts(p.createdAt),
+        orderId: p.orderId || null,
+        currency: p.currency || 'AUD',
+        enriched,
+      });
+    }
+
+    rows.sort((a, b) => (b.paidAt || 0) - (a.paidAt || 0));
+    const trimmed = rows.slice(0, limit);
+
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    const sumFee = (cutoff: number | null) =>
+      rows.filter((r) => cutoff === null || (r.paidAt && r.paidAt >= cutoff)).reduce((a, r) => a + r.appFeeDollars, 0);
+    const sumGross = (cutoff: number | null) =>
+      rows.filter((r) => cutoff === null || (r.paidAt && r.paidAt >= cutoff)).reduce((a, r) => a + r.amountDollars, 0);
+    const count = (cutoff: number | null) =>
+      rows.filter((r) => cutoff === null || (r.paidAt && r.paidAt >= cutoff)).length;
+
+    const totals = {
+      allTime: { grossDollars: sumGross(null), feeDollars: sumFee(null), count: count(null) },
+      last24h: { grossDollars: sumGross(now - DAY), feeDollars: sumFee(now - DAY), count: count(now - DAY) },
+      last7d: { grossDollars: sumGross(now - 7 * DAY), feeDollars: sumFee(now - 7 * DAY), count: count(now - 7 * DAY) },
+      last30d: { grossDollars: sumGross(now - 30 * DAY), feeDollars: sumFee(now - 30 * DAY), count: count(now - 30 * DAY) },
+      enrichedCount: rows.filter((r) => r.enriched).length,
+      legacyCount: rows.filter((r) => !r.enriched).length,
+    };
+
+    // Top earners — users ranked by QuoteMate app-fee contribution.
+    const perUser = new Map<string, { userId: string; userEmail: string | null; userBusinessName: string | null; grossDollars: number; feeDollars: number; count: number }>();
+    for (const r of rows) {
+      if (!r.userId) continue;
+      const cur = perUser.get(r.userId) || { userId: r.userId, userEmail: r.userEmail, userBusinessName: r.userBusinessName, grossDollars: 0, feeDollars: 0, count: 0 };
+      cur.grossDollars += r.amountDollars;
+      cur.feeDollars += r.appFeeDollars;
+      cur.count += 1;
+      perUser.set(r.userId, cur);
+    }
+    const topUsers = Array.from(perUser.values()).sort((a, b) => b.feeDollars - a.feeDollars).slice(0, 10);
+
+    return { payments: trimmed, totals, topUsers };
+  });
+
+// ============================================================
 // USER STATUS — grant/revoke Pro, disable, enable, delete
 // ============================================================
 
