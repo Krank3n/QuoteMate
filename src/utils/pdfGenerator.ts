@@ -1,6 +1,12 @@
 /**
  * PDF Generator Utility
- * Client-side PDF export using shared HTML templates and Expo Print
+ * Client-side PDF export using shared HTML templates and Expo Print.
+ *
+ * The unified entry points are `generateDocumentPDF` and `exportDocumentPDF`,
+ * which branch on `Document.type`. The legacy `generateQuotePDF` /
+ * `exportQuotePDF` / `generateInvoicePDF` / `exportInvoicePDF` exports are
+ * thin adapters kept for callers that still hold a `Quote` or `Invoice`
+ * (e.g. the in-progress NewQuote flow and the View screens).
  */
 
 import * as FileSystem from 'expo-file-system';
@@ -9,6 +15,8 @@ import * as Sharing from 'expo-sharing';
 import * as MailComposer from 'expo-mail-composer';
 import { format } from 'date-fns';
 import { Quote, BusinessSettings, Invoice } from '../types';
+import { Document } from '../types/document';
+import { quoteToDocument, invoiceToDocument } from '../types/documentAdapter';
 import { formatPaymentTerms, getAmountDue } from './invoiceCalculator';
 import { formatCurrency } from './quoteCalculator';
 import { Platform, Alert } from 'react-native';
@@ -96,18 +104,83 @@ export function generatePdfFilename(
   return `${type}_${sanitizedCustomer}_${sanitizedJob}_${dateStr}.pdf`;
 }
 
-export async function generateQuotePDF(quote: Quote, businessSettings: BusinessSettings | null, options?: { isPro?: boolean }): Promise<string> {
+// ============================================================
+// UNIFIED DOCUMENT PDF
+// ============================================================
+
+/**
+ * Build the PDF HTML for a unified Document. Branches on `doc.type` to call
+ * the matching shared HTML builder.
+ */
+export async function generateDocumentPDF(
+  doc: Document,
+  businessSettings: BusinessSettings | null,
+  options?: { isPro?: boolean },
+): Promise<string> {
   const logoHtml = await prepareLogoHtml(businessSettings, options?.isPro);
+  const business = mapBusinessData(businessSettings, logoHtml);
+
+  if (doc.type === 'invoice') {
+    const pdfData: InvoicePdfData = {
+      customerName: doc.customerName,
+      customerEmail: doc.customerEmail,
+      customerPhone: doc.customerPhone,
+      jobAddress: doc.jobAddress,
+      quoteDate: format(new Date(doc.updatedAt), 'dd MMMM yyyy'),
+      invoiceNumber: doc.number,
+      issueDate: format(new Date(doc.issueDate ?? doc.createdAt), 'dd MMMM yyyy'),
+      dueDate: format(new Date(doc.dueDate ?? doc.createdAt), 'dd MMMM yyyy'),
+      paymentTerms: formatPaymentTerms(doc.paymentTerms ?? 'net_14', doc.customPaymentDays),
+      paidAmount: doc.paidTotal,
+      job: doc.job,
+      materials: doc.materials.map(m => ({
+        name: m.name,
+        quantity: m.quantity,
+        unit: m.unit,
+        price: m.price,
+        totalPrice: m.totalPrice,
+        section: m.section,
+      })),
+      materialsSubtotal: doc.materialsSubtotal,
+      laborHours: doc.laborHours,
+      laborRate: doc.laborRate,
+      laborUnit: doc.laborUnit,
+      laborTotal: doc.laborTotal,
+      laborExtraHours: doc.laborExtraHours,
+      sections: doc.sections?.map(s => ({
+        name: s.name,
+        laborHours: s.laborHours,
+        laborRate: s.laborRate,
+        laborUnit: s.laborUnit,
+        laborTotal: s.laborTotal,
+      })),
+      subtotal: doc.subtotal,
+      markup: doc.markup,
+      markupAmount: doc.markupAmount,
+      laborMarkup: doc.laborMarkup ?? doc.markup,
+      showMarkup: doc.showMarkup === true && businessSettings?.showMarkup !== false,
+      travelAdjustment: doc.travelAdjustment,
+      gst: doc.gst,
+      total: doc.total,
+      notes: doc.notes,
+      showLaborHours: businessSettings?.showLaborHours,
+      showLaborBreakdown: doc.showLaborBreakdown !== false,
+      groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
+      paymentMethods: businessSettings?.paymentMethods,
+      terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
+    };
+    return buildInvoicePdfHtml(pdfData, business);
+  }
 
   const pdfData: QuotePdfData = {
-    customerName: quote.customerName,
-    customerEmail: quote.customerEmail,
-    customerPhone: quote.customerPhone,
-    jobAddress: quote.jobAddress,
-    quoteNumber: quote.quoteNumber,
-    quoteDate: format(new Date(quote.updatedAt), 'dd MMMM yyyy'),
-    job: quote.job,
-    materials: quote.materials.map(m => ({
+    customerName: doc.customerName,
+    customerEmail: doc.customerEmail,
+    customerPhone: doc.customerPhone,
+    jobAddress: doc.jobAddress,
+    quoteNumber: doc.number,
+    quoteDate: format(new Date(doc.updatedAt), 'dd MMMM yyyy'),
+    job: doc.job,
+    materials: doc.materials.map(m => ({
       name: m.name,
       quantity: m.quantity,
       unit: m.unit,
@@ -115,56 +188,69 @@ export async function generateQuotePDF(quote: Quote, businessSettings: BusinessS
       totalPrice: m.totalPrice,
       section: m.section,
     })),
-    materialsSubtotal: quote.materialsSubtotal,
-    laborHours: quote.laborHours,
-    laborRate: quote.laborRate,
-    laborUnit: quote.laborUnit,
-    laborTotal: quote.laborTotal,
-    laborExtraHours: quote.laborExtraHours,
-    sections: quote.sections?.map(s => ({
+    materialsSubtotal: doc.materialsSubtotal,
+    laborHours: doc.laborHours,
+    laborRate: doc.laborRate,
+    laborUnit: doc.laborUnit,
+    laborTotal: doc.laborTotal,
+    laborExtraHours: doc.laborExtraHours,
+    sections: doc.sections?.map(s => ({
       name: s.name,
       laborHours: s.laborHours,
       laborRate: s.laborRate,
       laborUnit: s.laborUnit,
       laborTotal: s.laborTotal,
     })),
-    subtotal: quote.subtotal,
-    markup: quote.markup,
-    markupAmount: quote.markupAmount,
-    laborMarkup: quote.laborMarkup ?? quote.markup,
-    showMarkup: quote.showMarkup === true && businessSettings?.showMarkup !== false,
-    travelAdjustment: quote.travelAdjustment,
-    gst: quote.gst,
-    total: quote.total,
-    notes: quote.notes,
+    subtotal: doc.subtotal,
+    markup: doc.markup,
+    markupAmount: doc.markupAmount,
+    laborMarkup: doc.laborMarkup ?? doc.markup,
+    showMarkup: doc.showMarkup === true && businessSettings?.showMarkup !== false,
+    travelAdjustment: doc.travelAdjustment,
+    gst: doc.gst,
+    total: doc.total,
+    notes: doc.notes,
     showLaborHours: businessSettings?.showLaborHours,
-    showLaborBreakdown: quote.showLaborBreakdown !== false,
+    showLaborBreakdown: doc.showLaborBreakdown !== false,
     groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
     paymentMethods: businessSettings?.paymentMethods,
-    terms: quote.termsSnapshot || businessSettings?.termsAndConditions,
+    terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
   };
-
-  return buildQuotePdfHtml(pdfData, mapBusinessData(businessSettings, logoHtml));
+  return buildQuotePdfHtml(pdfData, business);
 }
 
 /**
- * Export PDF with consistent filename and platform-specific handling
- * @param quote - The quote to export
- * @param businessSettings - Business settings for the PDF
- * @param action - 'export' (download/save) or 'share' (share sheet)
+ * Export PDF with consistent filename and platform-specific handling.
+ *
+ * `action` semantics (carried over from the legacy `exportQuotePDF`):
+ *   - 'share'  → mobile: directly open the share sheet; web: open print dialog
+ *   - 'export' → mobile: show an alert offering Email / Share / OK; web: print
+ *
+ * The unified entry point is plumbing-only — the `Document.type` branch
+ * decides the filename and email subject/body copy.
  */
-export async function exportQuotePDF(
-  quote: Quote,
+export async function exportDocumentPDF(
+  doc: Document,
   businessSettings: BusinessSettings | null,
   action: 'export' | 'share' = 'export',
-  options?: { isPro?: boolean }
+  options?: { isPro?: boolean },
 ): Promise<void> {
   try {
-    // Generate PDF HTML
-    const html = await generateQuotePDF(quote, businessSettings, options);
+    const html = await generateDocumentPDF(doc, businessSettings, options);
 
-    // Generate clean filename
-    const filename = generatePdfFilename('Quote', quote.customerName, quote.job.name, new Date(quote.updatedAt));
+    const isInvoice = doc.type === 'invoice';
+    const typeLabel: 'Quote' | 'Invoice' = isInvoice ? 'Invoice' : 'Quote';
+    const filename = generatePdfFilename(
+      typeLabel,
+      doc.customerName,
+      doc.job.name,
+      new Date(doc.updatedAt),
+    );
+    const emailSubject = `${typeLabel} for ${doc.customerName} - ${doc.job.name}`;
+    const dueDate = isInvoice && doc.dueDate ? new Date(doc.dueDate) : null;
+    const emailBody = isInvoice
+      ? `Please find attached your invoice for ${doc.job.name}.\n\nTotal: ${formatCurrency(doc.total)}${dueDate ? `\nDue: ${format(dueDate, 'dd MMMM yyyy')}` : ''}\n\nThank you for your business!`
+      : `Please find attached your quote for ${doc.job.name}.\n\nTotal: ${formatCurrency(doc.total)}\n\nThank you for your interest!`;
 
     if (Platform.OS === 'web') {
       // On web, use browser's native print functionality
@@ -172,11 +258,7 @@ export async function exportQuotePDF(
       if (printWindow) {
         printWindow.document.write(html);
         printWindow.document.close();
-
-        // Set the document title to the filename
         printWindow.document.title = filename;
-
-        // Wait for content to load before triggering print
         printWindow.onload = () => {
           printWindow.focus();
           printWindow.print();
@@ -184,233 +266,101 @@ export async function exportQuotePDF(
       } else {
         Alert.alert('Error', 'Please allow popups to export PDF');
       }
-    } else {
-      // Mobile platforms - use expo-print
-      const { uri } = await Print.printToFileAsync({ html });
-
-      // Copy to proper filename for sharing
-      const newUri = `${FileSystem.cacheDirectory}${filename}`;
-      await FileSystem.copyAsync({
-        from: uri,
-        to: newUri,
-      });
-
-      if (action === 'share') {
-        // Share the PDF
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) {
-          await Sharing.shareAsync(newUri, {
-            UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
-            mimeType: 'application/pdf',
-            dialogTitle: filename,
-          });
-        } else {
-          Alert.alert('PDF Created', `${filename} saved successfully`);
-        }
-      } else {
-        // Export - show options to share or email
-        Alert.alert(
-          'PDF Exported',
-          `${filename} created successfully`,
-          [
-            {
-              text: 'Email',
-              onPress: async () => {
-                try {
-                  const isAvailable = await MailComposer.isAvailableAsync();
-                  if (isAvailable) {
-                    await MailComposer.composeAsync({
-                      subject: `Quote for ${quote.customerName} - ${quote.job.name}`,
-                      recipients: quote.customerEmail ? [quote.customerEmail] : [],
-                      body: `Please find attached your quote for ${quote.job.name}.\n\nTotal: ${formatCurrency(quote.total)}\n\nThank you for your interest!`,
-                      attachments: [newUri],
-                    });
-                  } else {
-                    Alert.alert('Error', 'Email is not available on this device');
-                  }
-                } catch (error) {
-                  Alert.alert('Error', 'Failed to compose email');
-                }
-              },
-            },
-            {
-              text: 'Share',
-              onPress: async () => {
-                const isAvailable = await Sharing.isAvailableAsync();
-                if (isAvailable) {
-                  await Sharing.shareAsync(newUri, {
-                    UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
-                    mimeType: 'application/pdf',
-                    dialogTitle: filename,
-                  });
-                }
-              },
-            },
-            { text: 'OK' },
-          ]
-        );
-      }
+      return;
     }
+
+    // Mobile platforms - use expo-print
+    const { uri } = await Print.printToFileAsync({ html });
+
+    // Copy to proper filename for sharing
+    const newUri = `${FileSystem.cacheDirectory}${filename}`;
+    await FileSystem.copyAsync({ from: uri, to: newUri });
+
+    if (action === 'share') {
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(newUri, {
+          UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
+          mimeType: 'application/pdf',
+          dialogTitle: filename,
+        });
+      } else {
+        Alert.alert('PDF Created', `${filename} saved successfully`);
+      }
+      return;
+    }
+
+    Alert.alert(
+      'PDF Exported',
+      `${filename} created successfully`,
+      [
+        {
+          text: 'Email',
+          onPress: async () => {
+            try {
+              const isAvailable = await MailComposer.isAvailableAsync();
+              if (isAvailable) {
+                await MailComposer.composeAsync({
+                  subject: emailSubject,
+                  recipients: doc.customerEmail ? [doc.customerEmail] : [],
+                  body: emailBody,
+                  attachments: [newUri],
+                });
+              } else {
+                Alert.alert('Error', 'Email is not available on this device');
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to compose email');
+            }
+          },
+        },
+        {
+          text: 'Share',
+          onPress: async () => {
+            const isAvailable = await Sharing.isAvailableAsync();
+            if (isAvailable) {
+              await Sharing.shareAsync(newUri, {
+                UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
+                mimeType: 'application/pdf',
+                dialogTitle: filename,
+              });
+            }
+          },
+        },
+        { text: 'OK' },
+      ],
+    );
   } catch (error) {
     Alert.alert('Error', 'Failed to export PDF. Please try again.');
   }
 }
 
-/**
- * Generate Invoice PDF HTML
- */
-export async function generateInvoicePDF(invoice: Invoice, businessSettings: BusinessSettings | null, options?: { isPro?: boolean }): Promise<string> {
-  const logoHtml = await prepareLogoHtml(businessSettings, options?.isPro);
-  const amountDue = getAmountDue(invoice);
+// ============================================================
+// LEGACY WRAPPERS — kept for callers still holding Quote/Invoice values
+// ============================================================
 
-  const pdfData: InvoicePdfData = {
-    customerName: invoice.customerName,
-    customerEmail: invoice.customerEmail,
-    customerPhone: invoice.customerPhone,
-    jobAddress: invoice.jobAddress,
-    quoteDate: format(new Date(invoice.updatedAt), 'dd MMMM yyyy'),
-    invoiceNumber: invoice.invoiceNumber,
-    issueDate: format(new Date(invoice.issueDate), 'dd MMMM yyyy'),
-    dueDate: format(new Date(invoice.dueDate), 'dd MMMM yyyy'),
-    paymentTerms: formatPaymentTerms(invoice.paymentTerms, invoice.customPaymentDays),
-    paidAmount: invoice.paidAmount,
-    job: invoice.job,
-    materials: invoice.materials.map(m => ({
-      name: m.name,
-      quantity: m.quantity,
-      unit: m.unit,
-      price: m.price,
-      totalPrice: m.totalPrice,
-      section: m.section,
-    })),
-    materialsSubtotal: invoice.materialsSubtotal,
-    laborHours: invoice.laborHours,
-    laborRate: invoice.laborRate,
-    laborUnit: invoice.laborUnit,
-    laborTotal: invoice.laborTotal,
-    laborExtraHours: invoice.laborExtraHours,
-    sections: invoice.sections?.map(s => ({
-      name: s.name,
-      laborHours: s.laborHours,
-      laborRate: s.laborRate,
-      laborUnit: s.laborUnit,
-      laborTotal: s.laborTotal,
-    })),
-    subtotal: invoice.subtotal,
-    markup: invoice.markup,
-    markupAmount: invoice.markupAmount,
-    laborMarkup: invoice.laborMarkup ?? invoice.markup,
-    showMarkup: invoice.showMarkup === true && businessSettings?.showMarkup !== false,
-    travelAdjustment: invoice.travelAdjustment,
-    gst: invoice.gst,
-    total: invoice.total,
-    notes: invoice.notes,
-    showLaborHours: businessSettings?.showLaborHours,
-    showLaborBreakdown: invoice.showLaborBreakdown !== false,
-    groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
-    paymentMethods: businessSettings?.paymentMethods,
-    terms: invoice.termsSnapshot || businessSettings?.termsAndConditions,
-  };
-
-  return buildInvoicePdfHtml(pdfData, mapBusinessData(businessSettings, logoHtml));
+export async function generateQuotePDF(quote: Quote, businessSettings: BusinessSettings | null, options?: { isPro?: boolean }): Promise<string> {
+  return generateDocumentPDF(quoteToDocument(quote), businessSettings, options);
 }
 
-/**
- * Export Invoice PDF with consistent filename and platform-specific handling
- * @param invoice - The invoice to export
- * @param businessSettings - Business settings for the PDF
- * @param action - 'export' (download/save) or 'share' (share sheet)
- */
+export async function exportQuotePDF(
+  quote: Quote,
+  businessSettings: BusinessSettings | null,
+  action: 'export' | 'share' = 'export',
+  options?: { isPro?: boolean },
+): Promise<void> {
+  return exportDocumentPDF(quoteToDocument(quote), businessSettings, action, options);
+}
+
+export async function generateInvoicePDF(invoice: Invoice, businessSettings: BusinessSettings | null, options?: { isPro?: boolean }): Promise<string> {
+  return generateDocumentPDF(invoiceToDocument(invoice), businessSettings, options);
+}
+
 export async function exportInvoicePDF(
   invoice: Invoice,
   businessSettings: BusinessSettings | null,
   action: 'export' | 'share' = 'export',
-  options?: { isPro?: boolean }
+  options?: { isPro?: boolean },
 ): Promise<void> {
-  try {
-    const html = await generateInvoicePDF(invoice, businessSettings, options);
-
-    // Generate clean filename
-    const filename = generatePdfFilename('Invoice', invoice.customerName, invoice.job.name, new Date(invoice.updatedAt));
-
-    if (Platform.OS === 'web') {
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.write(html);
-        printWindow.document.close();
-        printWindow.document.title = filename;
-
-        printWindow.onload = () => {
-          printWindow.focus();
-          printWindow.print();
-        };
-      } else {
-        Alert.alert('Error', 'Please allow popups to export PDF');
-      }
-    } else {
-      const { uri } = await Print.printToFileAsync({ html });
-
-      const newUri = `${FileSystem.cacheDirectory}${filename}`;
-      await FileSystem.copyAsync({
-        from: uri,
-        to: newUri,
-      });
-
-      if (action === 'share') {
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) {
-          await Sharing.shareAsync(newUri, {
-            UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
-            mimeType: 'application/pdf',
-            dialogTitle: filename,
-          });
-        } else {
-          Alert.alert('PDF Created', `${filename} saved successfully`);
-        }
-      } else {
-        Alert.alert(
-          'PDF Exported',
-          `${filename} created successfully`,
-          [
-            {
-              text: 'Email',
-              onPress: async () => {
-                try {
-                  const isAvailable = await MailComposer.isAvailableAsync();
-                  if (isAvailable) {
-                    await MailComposer.composeAsync({
-                      subject: `Invoice for ${invoice.customerName} - ${invoice.job.name}`,
-                      recipients: invoice.customerEmail ? [invoice.customerEmail] : [],
-                      body: `Please find attached your invoice for ${invoice.job.name}.\n\nTotal: ${formatCurrency(invoice.total)}\nDue: ${format(new Date(invoice.dueDate), 'dd MMMM yyyy')}\n\nThank you for your business!`,
-                      attachments: [newUri],
-                    });
-                  } else {
-                    Alert.alert('Error', 'Email is not available on this device');
-                  }
-                } catch (error) {
-                  Alert.alert('Error', 'Failed to compose email');
-                }
-              },
-            },
-            {
-              text: 'Share',
-              onPress: async () => {
-                const isAvailable = await Sharing.isAvailableAsync();
-                if (isAvailable) {
-                  await Sharing.shareAsync(newUri, {
-                    UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
-                    mimeType: 'application/pdf',
-                    dialogTitle: filename,
-                  });
-                }
-              },
-            },
-            { text: 'OK' },
-          ]
-        );
-      }
-    }
-  } catch (error) {
-    Alert.alert('Error', 'Failed to export PDF. Please try again.');
-  }
+  return exportDocumentPDF(invoiceToDocument(invoice), businessSettings, action, options);
 }
