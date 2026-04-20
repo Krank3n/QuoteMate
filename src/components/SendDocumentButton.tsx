@@ -18,8 +18,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { exportQuotePDF, exportInvoicePDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
-import { EmailPreviewModal } from './EmailPreviewModal';
-import { InvoiceEmailPreviewModal } from './InvoiceEmailPreviewModal';
+import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
 import {
   generateQuoteEmail,
   getDefaultEmailBody,
@@ -52,12 +51,9 @@ export function SendDocumentButton({
     ? 'Send Invoice'
     : (quote.status === 'sent' ? 'Resend' : 'Send'));
 
-  const { subscriptionStatus, saveDraft, saveInvoice, quotes } = useStore();
+  const { subscriptionStatus, saveDraft, saveInvoice } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
-  const sourceQuotePhotos = isInvoice && invoice.sourceQuoteId
-    ? quotes.find((q) => q.id === invoice.sourceQuoteId)?.photos || []
-    : [];
 
   const [sendDialogVisible, setSendDialogVisible] = useState(false);
   const [emailPreviewVisible, setEmailPreviewVisible] = useState(false);
@@ -282,32 +278,17 @@ export function SendDocumentButton({
         options={sendOptions}
       />
 
-      {isInvoice ? (
-        <InvoiceEmailPreviewModal
-          visible={emailPreviewVisible}
-          onDismiss={handleEmailPreviewDismiss}
-          invoice={invoice}
-          businessSettings={businessSettings}
-          emailBody={emailBody}
-          onEmailBodyChange={setEmailBody}
-          onRegenerate={handleRegenerateEmail}
-          isPro={isPro}
-          isRegenerating={isGeneratingEmail}
-          photoCount={sourceQuotePhotos.length}
-        />
-      ) : (
-        <EmailPreviewModal
-          visible={emailPreviewVisible}
-          onDismiss={handleEmailPreviewDismiss}
-          quote={quote}
-          businessSettings={businessSettings}
-          emailBody={emailBody}
-          onEmailBodyChange={setEmailBody}
-          onRegenerate={handleRegenerateEmail}
-          isPro={isPro}
-          isRegenerating={isGeneratingEmail}
-        />
-      )}
+      <DocumentEmailPreviewModal
+        visible={emailPreviewVisible}
+        onDismiss={handleEmailPreviewDismiss}
+        doc={doc}
+        businessSettings={businessSettings}
+        emailBody={emailBody}
+        onEmailBodyChange={setEmailBody}
+        onRegenerate={handleRegenerateEmail}
+        isPro={isPro}
+        isRegenerating={isGeneratingEmail}
+      />
     </>
   );
 }

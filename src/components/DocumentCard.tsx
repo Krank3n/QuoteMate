@@ -33,8 +33,7 @@ import { ShimmerOverlay } from './ShimmerOverlay';
 import { TapRipple } from './TapRipple';
 import { GrainOverlay } from './GrainOverlay';
 import { ActionSheet } from './ActionSheet';
-import { EmailPreviewModal } from './EmailPreviewModal';
-import { InvoiceEmailPreviewModal } from './InvoiceEmailPreviewModal';
+import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
 import {
   generateQuoteEmail,
   getDefaultEmailBody,
@@ -88,10 +87,7 @@ export const DocumentCard = React.memo(function DocumentCard({
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const idleAnim = useRef(new Animated.Value(0)).current;
   const idleTilt = useRef(new Animated.Value(0)).current;
-  const { subscriptionStatus, saveDraft, saveInvoice, quotes, xeroConnection, pushInvoiceToXero } = useStore();
-  const sourceQuotePhotos = isInvoice && invoice.sourceQuoteId
-    ? quotes.find((q) => q.id === invoice.sourceQuoteId)?.photos || []
-    : [];
+  const { subscriptionStatus, saveDraft, saveInvoice, xeroConnection, pushInvoiceToXero } = useStore();
 
   const bobDurationRef = useRef(2400 + Math.random() * 1200);
   const tiltDurationRef = useRef(3200 + Math.random() * 1600);
@@ -488,17 +484,16 @@ export const DocumentCard = React.memo(function DocumentCard({
           showConfetti={false}
         />
 
-        <InvoiceEmailPreviewModal
+        <DocumentEmailPreviewModal
           visible={emailPreviewVisible}
           onDismiss={handleEmailPreviewDismiss}
-          invoice={invoice}
+          doc={doc}
           businessSettings={businessSettings}
           emailBody={emailBody}
           onEmailBodyChange={setEmailBody}
           onRegenerate={handleRegenerateEmail}
           isPro={isPro}
           isRegenerating={isGeneratingEmail}
-          photoCount={sourceQuotePhotos.length}
         />
       </>
     );
@@ -631,10 +626,10 @@ export const DocumentCard = React.memo(function DocumentCard({
         showConfetti={false}
       />
 
-      <EmailPreviewModal
+      <DocumentEmailPreviewModal
         visible={emailPreviewVisible}
         onDismiss={handleEmailPreviewDismiss}
-        quote={quote}
+        doc={doc}
         businessSettings={businessSettings}
         emailBody={emailBody}
         onEmailBodyChange={setEmailBody}
