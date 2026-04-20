@@ -151,28 +151,107 @@ function stripUndefined(value: any): any {
 }
 
 // ---------------------------------------------------------------------------
-// Stage transitions
+// Stage transitions — single canonical chokepoint
 // ---------------------------------------------------------------------------
 
 /**
- * Soft-enforced stage transition. Logs a structured warning if the move
- * isn't legal but still applies it — phase-2 is observability-only, phase-4
- * tightens this to hard-rejection at write time.
+ * Phase-4 stage-write chokepoint. Every server-side path that mutates a
+ * document's stage MUST go through this function so the state machine in
+ * shared/document/stage.ts can observe (and, in phase-4-tighten, enforce)
+ * transitions consistently.
+ *
+ * Soft-enforce semantics: an illegal transition is logged to Cloud Logging
+ * AND recorded as a Firestore violation event (read by getStageViolationCounts),
+ * but the write is still applied — phase-4 is observability-only. Phase-4-
+ * tighten will flip this to a hard rejection.
+ *
+ * Signature note: the caller passes `fromStage` rather than the function
+ * re-loading the document. Every existing call site already has the doc in
+ * hand, and a stage write inside a payment webhook is hot enough that an
+ * extra read isn't free.
  */
-export function tryStageTransition(
-  doc: DocumentRecord,
+
+export interface SetDocumentStageInput {
+  uid: string;
+  docId: string;
+  fromStage: DocumentStage;
+  toStage: DocumentStage;
+  reason: string;
+  /**
+   * If supplied, the stage write (and any extraUpdates) is added to this
+   * batch instead of issued as its own set(). Lets the caller fold the
+   * stage transition into a wider document write atomically.
+   */
+  batch?: FirebaseFirestore.WriteBatch;
+  /**
+   * Additional fields to merge alongside `stage` on the documents/{id} doc.
+   * `updatedAt` is always stamped by this helper.
+   */
+  extraUpdates?: AnyData;
+}
+
+export interface SetDocumentStageResult {
+  accepted: boolean;
+  from: DocumentStage;
+  to: DocumentStage;
+}
+
+const STAGE_VIOLATIONS_COLLECTION = '_telemetry/stage/violations';
+
+function recordStageViolation(
+  uid: string,
+  docId: string,
+  from: DocumentStage,
   to: DocumentStage,
-  context: string,
-): DocumentStage {
-  if (!canTransition(doc.stage, to)) {
-    functions.logger.warn('phase2_illegal_stage_transition', {
-      docId: doc.id,
-      from: doc.stage,
-      to,
-      context,
+  reason: string,
+  callsite: string | undefined,
+): void {
+  // Fire-and-forget. We don't want a Firestore hiccup on the telemetry write
+  // to derail the actual stage write the caller is trying to do.
+  db().collection(STAGE_VIOLATIONS_COLLECTION).add({
+    uid,
+    docId,
+    from,
+    to,
+    reason,
+    callsite: callsite ?? null,
+    at: admin.firestore.FieldValue.serverTimestamp(),
+  }).catch((err: any) => {
+    functions.logger.warn('phase4_stage_violation_log_failed', {
+      uid, docId, message: err?.message,
     });
+  });
+}
+
+export async function setDocumentStage(
+  input: SetDocumentStageInput,
+): Promise<SetDocumentStageResult> {
+  const { uid, docId, fromStage, toStage, reason, batch, extraUpdates } = input;
+  const accepted = canTransition(fromStage, toStage);
+  if (!accepted) {
+    const callsite = new Error().stack;
+    console.warn('[stage] illegal transition', {
+      uid, docId, from: fromStage, to: toStage, reason, callsite,
+    });
+    functions.logger.warn('phase4_illegal_stage_transition', {
+      uid, docId, from: fromStage, to: toStage, reason,
+    });
+    recordStageViolation(uid, docId, fromStage, toStage, reason, callsite);
   }
-  return to;
+
+  const update: AnyData = stripUndefined({
+    ...(extraUpdates || {}),
+    stage: toStage,
+    updatedAt: Date.now(),
+  });
+  const ref = db().doc(`users/${uid}/documents/${docId}`);
+  if (batch) {
+    batch.set(ref, update, { merge: true });
+  } else {
+    await ref.set(update, { merge: true });
+  }
+
+  return { accepted, from: fromStage, to: toStage };
 }
 
 // ---------------------------------------------------------------------------
@@ -395,14 +474,18 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
   batch.set(quoteRef, quoteUpdate, { merge: true });
   // Step 7 — auto-flip stage on send. For real sends only.
   if (!isTestSend) {
-    const targetStage: DocumentStage = 'quote_sent';
-    tryStageTransition(doc, targetStage, 'sendDocumentEmail:quote');
-    batch.set(docRef, stripUndefined({
-      stage: targetStage,
-      aiEmailBody: emailBody,
-      acceptanceTokenCreatedAt: Date.now(),
-      updatedAt: Date.now(),
-    }), { merge: true });
+    await setDocumentStage({
+      uid: userId,
+      docId,
+      fromStage: doc.stage,
+      toStage: 'quote_sent',
+      reason: 'sendDocumentEmail:quote',
+      batch,
+      extraUpdates: {
+        aiEmailBody: emailBody,
+        acceptanceTokenCreatedAt: Date.now(),
+      },
+    });
   }
   batch.set(firestore.doc(`quoteAcceptanceTokens/${hashedToken}`), {
     userId,
@@ -570,7 +653,6 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
   // quoteId but the invoice doc is keyed by invoiceId). Resolve.
   const legacyInvoiceId = (doc.legacyInvoiceId as string | undefined) ?? docId;
   const invoiceRef = firestore.doc(`users/${userId}/invoices/${legacyInvoiceId}`);
-  const docRef = firestore.doc(`users/${userId}/documents/${docId}`);
 
   const invoiceUpdate: AnyData = {};
   if (input.overrides) {
@@ -593,15 +675,18 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
   // current stage is quote_accepted; otherwise it could be draft. Either way,
   // sending an invoice puts the doc into invoice_sent.
   if (!isTestSend) {
-    const targetStage: DocumentStage = 'invoice_sent';
-    tryStageTransition(doc, targetStage, 'sendDocumentEmail:invoice');
-    await docRef.set(stripUndefined({
-      stage: targetStage,
-      aiEmailBody: emailBody,
-      termsSnapshot: termsToSend ?? undefined,
-      termsVersionHash: termsVersionHash ?? undefined,
-      updatedAt: Date.now(),
-    }), { merge: true });
+    await setDocumentStage({
+      uid: userId,
+      docId,
+      fromStage: doc.stage,
+      toStage: 'invoice_sent',
+      reason: 'sendDocumentEmail:invoice',
+      extraUpdates: {
+        aiEmailBody: emailBody,
+        termsSnapshot: termsToSend ?? undefined,
+        termsVersionHash: termsVersionHash ?? undefined,
+      },
+    });
   }
 
   // Mint Square invoice payment link (best-effort)
@@ -831,10 +916,6 @@ export async function applyPaymentToDocument(
   const paidTotal = newPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
   const balanceDue = Math.max(0, total - paidTotal);
 
-  if (nextStage !== doc.stage) {
-    tryStageTransition(doc, nextStage, `applyPaymentToDocument:${kind}`);
-  }
-
   // Mark the active payment link consumed if this payment came in via it.
   // The customer may re-open the email and click the same link; flagging
   // consumed lets the receiving page (or future SDK consumers) show a
@@ -844,13 +925,19 @@ export async function applyPaymentToDocument(
     ? { ...active, consumedAt: active.consumedAt ?? Date.now() }
     : undefined;
 
-  await writeDocumentUpdate(userId, doc.id, {
-    payments: newPayments,
-    paidTotal,
-    balanceDue,
-    stage: nextStage,
-    paymentSyncError: admin.firestore.FieldValue.delete(),
-    ...(updatedActive ? { activePaymentLink: updatedActive } : {}),
+  await setDocumentStage({
+    uid: userId,
+    docId: doc.id,
+    fromStage: doc.stage,
+    toStage: nextStage,
+    reason: `applyPaymentToDocument:${kind}`,
+    extraUpdates: {
+      payments: newPayments,
+      paidTotal,
+      balanceDue,
+      paymentSyncError: admin.firestore.FieldValue.delete(),
+      ...(updatedActive ? { activePaymentLink: updatedActive } : {}),
+    },
   });
 }
 
