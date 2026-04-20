@@ -4,6 +4,8 @@ export type {
   DocumentPayment,
   DocumentPaymentKind,
   DocumentPaymentMethod,
+  DocumentPaymentLink,
+  DocumentPaymentLinkKind,
   DocumentRecord,
   LegacyDocumentRecord,
 } from './types';

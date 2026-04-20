@@ -27,12 +27,15 @@ export type {
   DocumentPayment,
   DocumentPaymentKind,
   DocumentPaymentMethod,
+  DocumentPaymentLink,
+  DocumentPaymentLinkKind,
 } from '../../shared/document/types';
 
 import type {
   DocumentStage,
   DocumentType,
   DocumentPayment,
+  DocumentPaymentLink,
 } from '../../shared/document/types';
 
 export interface Document {
@@ -129,6 +132,13 @@ export interface Document {
   squarePaymentLinkUrl?: string;
   squarePaymentId?: string;
   squarePaidAt?: number;
+
+  // ===== Phase-3 unified payment-link lifecycle =====
+  // Single active link per Document, rotated on stage transitions. Old links
+  // are kept in archivedPaymentLinks[] for audit (Square links don't get
+  // explicitly voided — they 404 after their TTL).
+  activePaymentLink?: DocumentPaymentLink;
+  archivedPaymentLinks?: DocumentPaymentLink[];
 
   // ===== Deposit shape (snapshotted from quote, also drives invoice credit) =====
   requireDeposit?: boolean;

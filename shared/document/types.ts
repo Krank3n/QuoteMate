@@ -34,6 +34,27 @@ export interface DocumentPayment {
 }
 
 /**
+ * A Square hosted payment link associated with a Document. `kind` mirrors the
+ * payment it collects: a deposit while the doc is a quote, the outstanding
+ * balance once invoiced. The Square Payment Links API does not support
+ * mutating price after creation, so a stage/amount change requires creating
+ * a new link and archiving the old one.
+ */
+export type DocumentPaymentLinkKind = 'deposit' | 'balance' | 'quote_full';
+
+export interface DocumentPaymentLink {
+  id: string;
+  url: string;
+  kind: DocumentPaymentLinkKind;
+  amount: number;
+  createdAt: number; // ms epoch
+  consumedAt?: number; // ms epoch — set once the link's payment lands
+  archivedAt?: number; // ms epoch — set when superseded by a rotation
+  /** Square order id; populated when known so we can reverse-index. */
+  orderId?: string;
+}
+
+/**
  * Loosely typed record-shape of a Document. The strongly typed version lives
  * in `src/types/document.ts` and is structurally compatible — both share the
  * same field names, this one just relaxes the deep types so the shared code
