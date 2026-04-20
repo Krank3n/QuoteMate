@@ -1097,6 +1097,21 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   createInvoiceFromQuote: async (quote: Quote) => {
+    // Phase-5: prefer the unified convertDocumentToInvoice path when a
+    // matching document exists (server canonicalises via setDocumentStage,
+    // mirror trigger projects to the legacy invoices collection).
+    const matchingDoc = get().getDocumentByLegacyId(quote.id);
+    if (matchingDoc && matchingDoc.type === 'quote' && !matchingDoc.invoicedAt) {
+      try {
+        const converted = await get().convertDocumentToInvoice(matchingDoc.id);
+        const invoice: Invoice = (await import('../types/documentAdapter')).documentToInvoice(converted);
+        set({ currentInvoice: invoice });
+        return invoice;
+      } catch {
+        // Fall through to the legacy path on failure.
+      }
+    }
+
     // Idempotency: if this quote has already been invoiced, return the
     // existing invoice instead of minting a duplicate. Tapping Convert twice
     // (or doing it on two devices) used to spawn two invoices and the
@@ -1982,15 +1997,19 @@ export const useStore = create<AppState>((set, get) => ({
     if (!existing) {
       throw new Error('Document not found');
     }
-    // Idempotent: already an invoice
+    // Idempotent: already an invoice — short-circuit before any RPC.
     if (existing.type === 'invoice' || existing.invoicedAt) {
       return existing;
     }
+    // Stamp client-side first so the UI updates immediately, then ask the
+    // server to canonicalise via setDocumentStage. The server is the source
+    // of truth for the stage transition; the optimistic update keeps the
+    // dashboard responsive on slow connections.
     const now = Date.now();
     const depositCredit = Math.max(0, Number(existing.depositPaid) || 0);
     const adjustedTotal = Math.max(0, (existing.total || 0) - depositCredit);
     const invoiceNumber = await get().getNextInvoiceNumber();
-    const converted: Document = {
+    const optimistic: Document = {
       ...existing,
       type: 'invoice',
       stage: 'invoice_sent',
@@ -2003,8 +2022,21 @@ export const useStore = create<AppState>((set, get) => ({
       legacyInvoiceId: existing.id,
       updatedAt: now,
     };
-    await get().saveDocument(converted);
-    return converted;
+    set((state) => ({
+      documents: state.documents.map((d) => (d.id === documentId ? optimistic : d)),
+    }));
+    if (auth.currentUser) {
+      try {
+        const { httpsCallable, getFunctions } = await import('firebase/functions');
+        const fn = httpsCallable(getFunctions(), 'convertDocumentToInvoice');
+        await fn({ documentId, invoiceNumber });
+      } catch (err) {
+        // Server failed — keep the optimistic state but log so the user can
+        // retry. Mirror trigger will reconcile on the next legacy write.
+        logSyncError('invoice', documentId, err);
+      }
+    }
+    return optimistic;
   },
 
   // Clear all data (for logout)

@@ -1298,3 +1298,64 @@ export const getStageViolationCounts = functions.https.onCall(
     };
   },
 );
+
+// ---------------------------------------------------------------------------
+// Convert quote → invoice (phase-5 step 5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Server-side flip from quote to invoice. Loads the document, computes the
+ * invoice-side fields (issueDate, dueDate, deposit credit, adjusted total),
+ * and writes the new state through setDocumentStage so the canonical state
+ * machine observes the transition. Idempotent — re-calling once invoicedAt
+ * is set returns the existing document untouched.
+ */
+export const convertDocumentToInvoice = functions.https.onCall(
+  async (data, context) => {
+    const uid = context.auth?.uid;
+    if (!uid) {
+      throw new functions.https.HttpsError('unauthenticated', 'Sign-in required.');
+    }
+    const docId = String(data?.documentId || '').trim();
+    if (!docId) {
+      throw new functions.https.HttpsError('invalid-argument', 'documentId is required.');
+    }
+    const invoiceNumber = data?.invoiceNumber ? String(data.invoiceNumber) : undefined;
+
+    const existing = await loadDocument(uid, docId);
+    if (!existing) {
+      throw new functions.https.HttpsError('not-found', 'Document not found.');
+    }
+
+    // Idempotent — already invoiced.
+    if (existing.type === 'invoice' || existing.invoicedAt) {
+      return { ok: true, alreadyInvoiced: true, document: existing };
+    }
+
+    const now = Date.now();
+    const dueDate = now + 14 * 24 * 60 * 60 * 1000;
+    const depositCredit = Math.max(0, Number(existing.depositPaid) || 0);
+    const adjustedTotal = Math.max(0, (Number(existing.total) || 0) - depositCredit);
+
+    await setDocumentStage({
+      uid,
+      docId,
+      fromStage: existing.stage,
+      toStage: 'invoice_sent',
+      reason: 'manual_convert',
+      extraUpdates: {
+        type: 'invoice',
+        number: invoiceNumber ?? existing.number,
+        invoicedAt: now,
+        issueDate: now,
+        dueDate,
+        paymentTerms: 'net_14',
+        total: adjustedTotal,
+        legacyInvoiceId: docId,
+      },
+    });
+
+    const updated = await loadDocument(uid, docId);
+    return { ok: true, alreadyInvoiced: false, document: updated };
+  },
+);
