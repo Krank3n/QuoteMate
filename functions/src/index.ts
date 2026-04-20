@@ -34,6 +34,7 @@ import {
   logShimInvocation,
   type SquareLinkMinter,
 } from './documentHandlers';
+export { getStageViolationCounts } from './documentHandlers';
 import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './shared/document/adapter';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';

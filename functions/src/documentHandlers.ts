@@ -1211,3 +1211,90 @@ export async function createOrRotatePaymentLink(
     reason: decision.reason,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Phase-4 telemetry — admin-only callable surfacing the violation count so
+// the operator can decide whether the state machine is safe to harden.
+// ---------------------------------------------------------------------------
+
+interface StageViolationSample {
+  uid: string;
+  docId: string;
+  from: string;
+  to: string;
+  reason: string;
+  at: number;
+}
+
+interface StageViolationCountsResult {
+  totalShimInvocations: number;
+  totalIllegalTransitions: number;
+  lastSampleAt: number | null;
+  sampleViolations: StageViolationSample[];
+}
+
+const VIOLATION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const VIOLATION_SAMPLE_LIMIT = 25;
+
+export const getStageViolationCounts = functions.https.onCall(
+  async (_data, context): Promise<StageViolationCountsResult> => {
+    const isAdmin = context.auth?.token?.admin === true;
+    if (!context.auth?.uid || !isAdmin) {
+      throw new functions.https.HttpsError('permission-denied', 'Admin access required.');
+    }
+
+    const firestore = db();
+    const cutoff = Date.now() - VIOLATION_RETENTION_MS;
+
+    // Opportunistic purge of entries older than the retention window. Done
+    // here rather than via a scheduled job since this endpoint is the only
+    // reader and the volume is expected to be low (it's a violation log).
+    try {
+      const stale = await firestore.collection(STAGE_VIOLATIONS_COLLECTION)
+        .where('at', '<', new Date(cutoff))
+        .limit(500)
+        .get();
+      if (!stale.empty) {
+        const purgeBatch = firestore.batch();
+        stale.docs.forEach((d) => purgeBatch.delete(d.ref));
+        await purgeBatch.commit();
+      }
+    } catch (err: any) {
+      functions.logger.warn('phase4_stage_violation_purge_failed', { message: err?.message });
+    }
+
+    // Fresh slice for the count + samples.
+    const recent = await firestore.collection(STAGE_VIOLATIONS_COLLECTION)
+      .orderBy('at', 'desc')
+      .limit(500)
+      .get();
+
+    const sampleViolations: StageViolationSample[] = recent.docs
+      .slice(0, VIOLATION_SAMPLE_LIMIT)
+      .map((d) => {
+        const data = d.data();
+        return {
+          uid: String(data.uid ?? ''),
+          docId: String(data.docId ?? ''),
+          from: String(data.from ?? ''),
+          to: String(data.to ?? ''),
+          reason: String(data.reason ?? ''),
+          at: data.at?.toMillis?.() ?? 0,
+        };
+      });
+
+    const lastSampleAt = sampleViolations[0]?.at ?? null;
+
+    // The shim invocation counter lives in Cloud Logging (logShimInvocation),
+    // not Firestore. Reading it would require an external query to GCP
+    // Logging; the user said "overkill" — return 0 so the field exists for
+    // the UI contract but the meaningful number is the illegal-transition
+    // count read directly from the violation collection.
+    return {
+      totalShimInvocations: 0,
+      totalIllegalTransitions: recent.size,
+      lastSampleAt,
+      sampleViolations,
+    };
+  },
+);
