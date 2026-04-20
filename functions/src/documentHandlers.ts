@@ -1,0 +1,871 @@
+/**
+ * Phase-2 unified Cloud Function handlers driven by the unified Document model.
+ * Old per-type endpoints (sendQuoteEmail / sendInvoiceEmail / etc.) are kept
+ * as shims in functions/src/index.ts and delegate here.
+ *
+ * Design principles:
+ *   - The source of truth is `users/{uid}/documents/{docId}`. Reads prefer it,
+ *     and fall back to legacy quotes/invoices via the shared adapter when the
+ *     mirror hasn't fired yet (early adopters or pre-backfill).
+ *   - Writes go to the legacy collection AND to documents/{id} so neither view
+ *     lags. The mirror trigger from phase-1 keeps the documents projection
+ *     consistent regardless, but the direct write keeps reads fast.
+ *   - Branching on doc.type / doc.stage replaces the parallel quote/invoice
+ *     code paths.
+ */
+
+import * as admin from 'firebase-admin';
+import * as functions from 'firebase-functions';
+import {
+  buildQuoteEmailHtml,
+  buildInvoiceEmailHtml,
+  sendEmail,
+  getUserEmail,
+  sendQuoteSentEmail,
+} from './email';
+import {
+  buildQuotePdfHtml,
+  buildInvoicePdfHtml,
+  generateQuotePdfBuffer,
+} from './pdfGenerator';
+import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
+import { dollarsToCents, centsToDollars } from './shared/pdf/money';
+import {
+  quoteRecordToDocumentRecord,
+  invoiceRecordToDocumentRecord,
+  documentRecordToQuoteRecord,
+  documentRecordToInvoiceRecord,
+} from './shared/document/adapter';
+import { canTransition } from './shared/document/stage';
+import type {
+  DocumentRecord,
+  DocumentStage,
+  DocumentPayment,
+} from './shared/document/types';
+
+type AnyData = Record<string, any>;
+
+// ---------------------------------------------------------------------------
+// Document loaders
+// ---------------------------------------------------------------------------
+
+const db = () => admin.firestore();
+
+/**
+ * Load a unified document for a user. Prefers `documents/{id}`. Falls back to
+ * `quotes/{id}` then `invoices/{id}`, mirroring through the shared adapter on
+ * the fly so the rest of the handler chain only deals with the unified shape.
+ *
+ * Returns null when nothing matching exists.
+ */
+export async function loadDocument(
+  userId: string,
+  docId: string,
+): Promise<DocumentRecord | null> {
+  const firestore = db();
+  const docRef = firestore.doc(`users/${userId}/documents/${docId}`);
+  const docSnap = await docRef.get();
+  if (docSnap.exists) {
+    return docSnap.data() as DocumentRecord;
+  }
+
+  // Fall back to legacy. Quote-id-keyed mirror collapses converted invoices
+  // back onto their source quote, so we look at the invoice path first only
+  // if a quote with this id doesn't exist.
+  const quoteSnap = await firestore.doc(`users/${userId}/quotes/${docId}`).get();
+  if (quoteSnap.exists) {
+    return quoteRecordToDocumentRecord(quoteSnap.data() as AnyData, docId);
+  }
+  const invoiceSnap = await firestore.doc(`users/${userId}/invoices/${docId}`).get();
+  if (invoiceSnap.exists) {
+    return invoiceRecordToDocumentRecord(invoiceSnap.data() as AnyData, docId);
+  }
+  return null;
+}
+
+/**
+ * Load a document by interpreting the legacy quote id semantics. If the quote
+ * has been converted to an invoice (legacyInvoiceId set in the documents
+ * mirror or invoiceId on the quote), the unified document is keyed by the
+ * source quote id, so this just delegates to loadDocument.
+ */
+export async function loadDocumentForQuoteId(
+  userId: string,
+  quoteId: string,
+): Promise<DocumentRecord | null> {
+  return loadDocument(userId, quoteId);
+}
+
+/**
+ * Load a document for a legacy invoice id. The mirror keys on sourceQuoteId
+ * when set; if the lookup by raw invoice id misses, fall back through the
+ * adapter so callers always see the unified view.
+ */
+export async function loadDocumentForInvoiceId(
+  userId: string,
+  invoiceId: string,
+): Promise<DocumentRecord | null> {
+  const firestore = db();
+  const invoiceSnap = await firestore.doc(`users/${userId}/invoices/${invoiceId}`).get();
+  if (!invoiceSnap.exists) {
+    return loadDocument(userId, invoiceId);
+  }
+  const invoice = invoiceSnap.data() as AnyData;
+  const mirrorId = typeof invoice.sourceQuoteId === 'string' && invoice.sourceQuoteId
+    ? invoice.sourceQuoteId
+    : invoiceId;
+  const mirrorSnap = await firestore.doc(`users/${userId}/documents/${mirrorId}`).get();
+  if (mirrorSnap.exists) {
+    return mirrorSnap.data() as DocumentRecord;
+  }
+  return invoiceRecordToDocumentRecord(invoice, invoiceId);
+}
+
+/**
+ * Persist a partial document update. Writes to the documents collection
+ * directly so the new view doesn't lag the legacy collection. Idempotent
+ * via merge:true; updatedAt is bumped to current time.
+ */
+export async function writeDocumentUpdate(
+  userId: string,
+  docId: string,
+  partial: AnyData,
+): Promise<void> {
+  const ref = db().doc(`users/${userId}/documents/${docId}`);
+  await ref.set(stripUndefined({ ...partial, updatedAt: Date.now() }), { merge: true });
+}
+
+function stripUndefined(value: any): any {
+  if (Array.isArray(value)) return value.map(stripUndefined).filter((v) => v !== undefined);
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    const out: AnyData = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v === undefined) continue;
+      out[k] = stripUndefined(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+// ---------------------------------------------------------------------------
+// Stage transitions
+// ---------------------------------------------------------------------------
+
+/**
+ * Soft-enforced stage transition. Logs a structured warning if the move
+ * isn't legal but still applies it — phase-2 is observability-only, phase-4
+ * tightens this to hard-rejection at write time.
+ */
+export function tryStageTransition(
+  doc: DocumentRecord,
+  to: DocumentStage,
+  context: string,
+): DocumentStage {
+  if (!canTransition(doc.stage, to)) {
+    functions.logger.warn('phase2_illegal_stage_transition', {
+      docId: doc.id,
+      from: doc.stage,
+      to,
+      context,
+    });
+  }
+  return to;
+}
+
+// ---------------------------------------------------------------------------
+// PDF + email payload builders (shared between quote and invoice flows)
+// ---------------------------------------------------------------------------
+
+interface BusinessSettings {
+  businessName?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  abn?: string;
+  website?: string;
+  logoStorageUrl?: string;
+  logoUri?: string;
+  brandColor?: string;
+  pdfTemplate?: any;
+  showMarkup?: boolean;
+  showLaborHours?: boolean;
+  groupMaterialsBySection?: boolean;
+  paymentMethods?: any;
+  termsAndConditions?: string;
+  [key: string]: any;
+}
+
+function applyHideMarkupForDisplay(q: any) {
+  const matMarkup = Number(q.markup) || 0;
+  const laborMarkup = Number(q.laborMarkup ?? q.markup) || 0;
+  const hideMarkup = q.showMarkup !== true && (matMarkup > 0 || laborMarkup > 0);
+  if (!hideMarkup) {
+    return {
+      materials: (q.materials || []).map((m: any) => ({ ...m })),
+      materialsSubtotal: q.materialsSubtotal || 0,
+      laborTotal: q.laborTotal || 0,
+      subtotal: q.subtotal || 0,
+      markupAmount: q.markupAmount || 0,
+    };
+  }
+  const matFactor = 1 + matMarkup / 100;
+  const laborFactor = 1 + laborMarkup / 100;
+  const inflatedMaterials = (q.materials || []).map((m: any) => ({
+    ...m,
+    price: (Number(m.price) || 0) * matFactor,
+    totalPrice: (Number(m.totalPrice) || 0) * matFactor,
+  }));
+  return {
+    materials: inflatedMaterials,
+    materialsSubtotal: (Number(q.materialsSubtotal) || 0) * matFactor,
+    laborTotal: (Number(q.laborTotal) || 0) * laborFactor,
+    subtotal:
+      ((Number(q.materialsSubtotal) || 0) * matFactor) +
+      ((Number(q.laborTotal) || 0) * laborFactor) +
+      (Number(q.travelAdjustment) || 0),
+    markupAmount: 0,
+  };
+}
+
+function buildPdfMaterials(materials: any[]): any[] {
+  return (materials || []).map((m: any) => ({
+    name: m.name,
+    quantity: m.quantity,
+    unit: m.unit,
+    price: m.price || 0,
+    totalPrice: m.totalPrice || 0,
+    section: m.section,
+  }));
+}
+
+function buildPdfSections(sections: any[]): any[] {
+  return (sections || []).map((s: any) => ({
+    name: s.name,
+    laborHours: s.laborHours,
+    laborRate: s.laborRate,
+    laborUnit: s.laborUnit,
+    laborTotal: s.laborTotal,
+  }));
+}
+
+function businessLogoHtml(business: BusinessSettings): string {
+  const url = business.logoStorageUrl || business.logoUri || '';
+  if (!url) return '';
+  return `<img src="${url}" alt="${business.businessName || 'Business'}" class="logo" />`;
+}
+
+function sanitizeFilename(s: string): string {
+  return s.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 30);
+}
+
+function fmtAuDate(value: any): string {
+  return new Date(value || Date.now()).toLocaleDateString('en-AU', {
+    day: '2-digit', month: 'long', year: 'numeric',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Email/PDF input shape — unified, derived from a Document
+// ---------------------------------------------------------------------------
+
+export interface SendDocumentEmailInput {
+  userId: string;
+  docId: string;
+  emailBody: string;
+  recipientEmail: string;
+  isTestSend?: boolean;
+  includePhotos?: boolean;
+  /**
+   * Override fields the client may have edited locally and wants persisted as
+   * part of this send. Mirrors the legacy `quote: ...` / `invoice: ...` body
+   * field on the old endpoints.
+   */
+  overrides?: AnyData;
+  /**
+   * Helpers normally constructed in the index.ts squareWebhook scope but
+   * needed here to mint deposit/full-quote payment links during quote send.
+   * Injected so this module doesn't need to import the entire Square stack.
+   */
+  squareDepositLinkMint?: (userId: string, quoteId: string) => Promise<{ paymentLinkUrl: string } | null>;
+  squareInvoiceLinkMint?: (userId: string, invoiceId: string) => Promise<{ paymentLinkId: string; paymentLinkUrl: string } | null>;
+  /**
+   * Generate the customer acceptance URL for a quote. Injected because the
+   * URL host is environment-specific and the legacy code derives it from a
+   * project-level constant in index.ts.
+   */
+  acceptanceUrlForToken?: (token: string) => string;
+  /**
+   * For quotes: photo attachment fetch helper (Brevo expects base64 attachments).
+   */
+  fetchPhotoAttachments?: (urls: string[]) => Promise<Array<{ name: string; content: string }>>;
+  /**
+   * Crypto helpers for acceptance token. Injected (not imported) to keep this
+   * file free of crypto/Node-only deps that complicate testing.
+   */
+  generateAcceptanceToken?: () => { token: string; hashedToken: string };
+}
+
+export interface SendDocumentEmailResult {
+  success: boolean;
+  acceptanceUrl?: string;
+}
+
+/**
+ * Unified email-send. Branches on doc.type for quote vs invoice copy, PDF
+ * template, and acceptance/payment link side-effects. The shape returned
+ * matches what the legacy sendQuoteEmail / sendInvoiceEmail returned so the
+ * shims can pass it through unmodified.
+ */
+export async function sendDocumentEmail(
+  doc: DocumentRecord,
+  input: SendDocumentEmailInput,
+): Promise<SendDocumentEmailResult> {
+  const firestore = db();
+  const { userId, docId, emailBody, recipientEmail, isTestSend, includePhotos } = input;
+
+  // Settings + terms snapshot
+  const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
+  const business: BusinessSettings = settingsDoc.exists ? (settingsDoc.data() as BusinessSettings) : {};
+  const termsRaw = typeof business.termsAndConditions === 'string'
+    ? business.termsAndConditions.trim()
+    : '';
+  const termsToSend: string | null = termsRaw || null;
+  const termsVersionHash = termsToSend ? hashTerms(termsToSend) : null;
+
+  if (doc.type === 'quote') {
+    return sendQuoteFlavour({
+      userId, docId, emailBody, recipientEmail, isTestSend, includePhotos,
+      doc, business, termsToSend, termsVersionHash, input,
+    });
+  }
+  return sendInvoiceFlavour({
+    userId, docId, emailBody, recipientEmail, isTestSend, includePhotos,
+    doc, business, termsToSend, termsVersionHash, input,
+  });
+}
+
+interface FlavourArgs {
+  userId: string;
+  docId: string;
+  emailBody: string;
+  recipientEmail: string;
+  isTestSend?: boolean;
+  includePhotos?: boolean;
+  doc: DocumentRecord;
+  business: BusinessSettings;
+  termsToSend: string | null;
+  termsVersionHash: string | null;
+  input: SendDocumentEmailInput;
+}
+
+async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailResult> {
+  const firestore = db();
+  const { userId, docId, emailBody, recipientEmail, isTestSend, includePhotos,
+          doc, business, termsToSend, termsVersionHash, input } = args;
+
+  // Quote-shaped projection for downstream PDF/email builders that still
+  // accept the legacy field names (quoteNumber, requireDeposit, etc.).
+  const quote: AnyData = documentRecordToQuoteRecord(doc as DocumentRecord);
+  Object.assign(quote, input.overrides || {});
+
+  // Acceptance token
+  const tokenGen = input.generateAcceptanceToken ?? (() => {
+    throw new Error('generateAcceptanceToken not injected');
+  });
+  const { token, hashedToken } = tokenGen();
+  const quoteRef = firestore.doc(`users/${userId}/quotes/${docId}`);
+  const docRef = firestore.doc(`users/${userId}/documents/${docId}`);
+
+  const batch = firestore.batch();
+  const quoteUpdate: AnyData = {
+    acceptanceTokenHash: hashedToken,
+    acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  if (input.overrides) {
+    Object.assign(quoteUpdate, input.overrides);
+    delete quoteUpdate.id;
+  }
+  if (!isTestSend) {
+    quoteUpdate.status = 'sent';
+    quoteUpdate.aiEmailBody = emailBody;
+  }
+  batch.set(quoteRef, quoteUpdate, { merge: true });
+  // Step 7 — auto-flip stage on send. For real sends only.
+  if (!isTestSend) {
+    const targetStage: DocumentStage = 'quote_sent';
+    tryStageTransition(doc, targetStage, 'sendDocumentEmail:quote');
+    batch.set(docRef, stripUndefined({
+      stage: targetStage,
+      aiEmailBody: emailBody,
+      acceptanceTokenCreatedAt: Date.now(),
+      updatedAt: Date.now(),
+    }), { merge: true });
+  }
+  batch.set(firestore.doc(`quoteAcceptanceTokens/${hashedToken}`), {
+    userId,
+    quoteId: docId,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  await batch.commit();
+
+  const acceptanceUrl = input.acceptanceUrlForToken
+    ? input.acceptanceUrlForToken(token)
+    : `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
+
+  const photoUrls = (quote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
+  const logoUrl = business.logoStorageUrl || business.logoUri || '';
+  const displayQuote = applyHideMarkupForDisplay(quote);
+  const emailMaterials = displayQuote.materials.map((m: any) => ({
+    name: m.name, quantity: m.quantity, unit: m.unit,
+    totalPrice: m.totalPrice || 0, section: m.section,
+  }));
+  const businessData = {
+    name: business.businessName || '', abn: business.abn,
+    phone: business.phone, email: business.email,
+    address: business.address, logoUrl, brandColor: business.brandColor,
+  };
+
+  // Deposit calculation
+  const depositRequired = quote.requireDeposit === true;
+  const depositPctForEmail = depositRequired ? (Number(quote.depositPercentage) || 0) : 0;
+  const depositAmountForEmail = depositPctForEmail > 0
+    ? centsToDollars(dollarsToCents((Number(quote.total) || 0) * (depositPctForEmail / 100)))
+    : 0;
+
+  // Snapshot terms (legacy collection AND mirror)
+  if (!isTestSend && termsToSend) {
+    await quoteRef.set({ termsSnapshot: termsToSend, termsVersionHash }, { merge: true });
+    await docRef.set({ termsSnapshot: termsToSend, termsVersionHash, updatedAt: Date.now() }, { merge: true });
+  }
+
+  // Mint Square deposit link (best-effort)
+  let depositPayNowUrl: string | undefined;
+  if (!isTestSend && depositRequired && depositPctForEmail > 0 && depositAmountForEmail > 0 && input.squareDepositLinkMint) {
+    try {
+      await quoteRef.set({ depositAmount: depositAmountForEmail }, { merge: true });
+      const linkResult = await input.squareDepositLinkMint(userId, docId);
+      if (linkResult) depositPayNowUrl = linkResult.paymentLinkUrl;
+    } catch (err: any) {
+      console.error('[square] deposit link mint threw in sendDocumentEmail (quote)', {
+        userId, docId, message: err?.message,
+      });
+    }
+  }
+
+  const htmlContent = buildQuoteEmailHtml({
+    customerName: quote.customerName || 'Client',
+    emailBody,
+    jobName: quote.job?.name || 'Job',
+    materials: emailMaterials,
+    laborTotal: displayQuote.laborTotal,
+    materialsSubtotal: displayQuote.materialsSubtotal,
+    subtotal: displayQuote.subtotal,
+    gst: quote.gst || 0,
+    total: quote.total || 0,
+    acceptanceUrl,
+    photoUrls,
+    depositAmount: depositAmountForEmail || undefined,
+    depositPercentage: depositPctForEmail || undefined,
+    depositPayNowUrl,
+    hasTerms: !!termsToSend,
+    business: businessData,
+  });
+
+  const pdfHtml = buildQuotePdfHtml(
+    {
+      customerName: quote.customerName || 'Client',
+      customerEmail: quote.customerEmail,
+      customerPhone: quote.customerPhone,
+      jobAddress: quote.jobAddress,
+      quoteNumber: quote.quoteNumber,
+      quoteDate: fmtAuDate(quote.updatedAt),
+      job: quote.job || { name: 'Job', description: '' },
+      materials: buildPdfMaterials(quote.materials),
+      materialsSubtotal: quote.materialsSubtotal || 0,
+      laborHours: quote.laborHours,
+      laborRate: quote.laborRate,
+      laborUnit: quote.laborUnit,
+      laborTotal: quote.laborTotal || 0,
+      laborExtraHours: quote.laborExtraHours,
+      sections: buildPdfSections(quote.sections),
+      subtotal: quote.subtotal || 0,
+      markup: quote.markup || 0,
+      markupAmount: quote.markupAmount || 0,
+      laborMarkup: quote.laborMarkup ?? quote.markup ?? 0,
+      showMarkup: quote.showMarkup === true && business.showMarkup !== false,
+      travelAdjustment: quote.travelAdjustment,
+      gst: quote.gst || 0,
+      total: quote.total || 0,
+      notes: quote.notes,
+      showLaborHours: business.showLaborHours,
+      showLaborBreakdown: quote.showLaborBreakdown !== false,
+      groupMaterialsBySection: business.groupMaterialsBySection,
+      paymentMethods: business.paymentMethods,
+      terms: termsToSend || undefined,
+    },
+    {
+      businessName: business.businessName || 'Business',
+      email: business.email,
+      phone: business.phone,
+      website: business.website,
+      abn: business.abn,
+      address: business.address,
+      logoHtml: businessLogoHtml(business),
+      brandColor: business.brandColor,
+      pdfTemplate: business.pdfTemplate,
+    },
+  );
+
+  const pdfBuffer = await generateQuotePdfBuffer(pdfHtml);
+  const pdfBase64 = pdfBuffer.toString('base64');
+  const pdfFilename = `Quote_${sanitizeFilename(quote.customerName || 'Client')}_${sanitizeFilename(quote.job?.name || 'Job')}.pdf`;
+  const attachments: Array<{ name: string; content: string }> = [{ name: pdfFilename, content: pdfBase64 }];
+
+  if (includePhotos && photoUrls.length > 0 && input.fetchPhotoAttachments) {
+    const photoAttachments = await input.fetchPhotoAttachments(photoUrls);
+    attachments.push(...photoAttachments);
+  }
+
+  const sent = await sendEmail({
+    to: recipientEmail,
+    subject: `${isTestSend ? '[TEST] ' : ''}Quotation from ${business.businessName || 'Your Tradie'} - ${quote.job?.name || 'Job'}`,
+    htmlContent,
+    category: 'transactional',
+    userId,
+    tags: isTestSend ? ['quote-test'] : ['quote-to-client'],
+    attachment: attachments,
+  });
+
+  if (!sent) return { success: false };
+
+  if (!isTestSend) {
+    const tradieEmail = await getUserEmail(userId);
+    if (tradieEmail) {
+      await sendQuoteSentEmail(
+        tradieEmail,
+        quote.customerName || 'Client',
+        quote.quoteNumber || docId,
+        quote.total || 0,
+        userId,
+      );
+    }
+  }
+
+  return { success: true, acceptanceUrl };
+}
+
+async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailResult> {
+  const firestore = db();
+  const { userId, docId, emailBody, recipientEmail, isTestSend, includePhotos,
+          doc, business, termsToSend, termsVersionHash, input } = args;
+
+  const invoice: AnyData = documentRecordToInvoiceRecord(doc as DocumentRecord);
+  Object.assign(invoice, input.overrides || {});
+
+  // The legacy invoice may live under a different doc id than the unified
+  // document (for converted-from-quote invoices, the unified doc is keyed by
+  // quoteId but the invoice doc is keyed by invoiceId). Resolve.
+  const legacyInvoiceId = (doc.legacyInvoiceId as string | undefined) ?? docId;
+  const invoiceRef = firestore.doc(`users/${userId}/invoices/${legacyInvoiceId}`);
+  const docRef = firestore.doc(`users/${userId}/documents/${docId}`);
+
+  const invoiceUpdate: AnyData = {};
+  if (input.overrides) {
+    Object.assign(invoiceUpdate, input.overrides);
+    delete invoiceUpdate.id;
+  }
+  if (!isTestSend) {
+    invoiceUpdate.status = 'sent';
+    invoiceUpdate.aiEmailBody = emailBody;
+    invoiceUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+  if (!isTestSend && termsToSend) {
+    invoiceUpdate.termsSnapshot = termsToSend;
+    invoiceUpdate.termsVersionHash = termsVersionHash;
+  }
+  if (Object.keys(invoiceUpdate).length > 0) {
+    await invoiceRef.set(invoiceUpdate, { merge: true });
+  }
+  // Step 7 — auto-flip stage on send. For invoices created via convert flow,
+  // current stage is quote_accepted; otherwise it could be draft. Either way,
+  // sending an invoice puts the doc into invoice_sent.
+  if (!isTestSend) {
+    const targetStage: DocumentStage = 'invoice_sent';
+    tryStageTransition(doc, targetStage, 'sendDocumentEmail:invoice');
+    await docRef.set(stripUndefined({
+      stage: targetStage,
+      aiEmailBody: emailBody,
+      termsSnapshot: termsToSend ?? undefined,
+      termsVersionHash: termsVersionHash ?? undefined,
+      updatedAt: Date.now(),
+    }), { merge: true });
+  }
+
+  // Mint Square invoice payment link (best-effort)
+  let payNowUrl: string | undefined;
+  if (!isTestSend && input.squareInvoiceLinkMint) {
+    try {
+      const squareConnDoc = await firestore.doc(`users/${userId}/settings/squareConnection`).get();
+      if (squareConnDoc.exists) {
+        const linkResult = await input.squareInvoiceLinkMint(userId, legacyInvoiceId);
+        if (linkResult) {
+          payNowUrl = linkResult.paymentLinkUrl;
+          invoice.squarePaymentLinkId = linkResult.paymentLinkId;
+          invoice.squarePaymentLinkUrl = linkResult.paymentLinkUrl;
+        }
+      }
+    } catch (err: any) {
+      console.error('[square] invoice pay link mint threw in sendDocumentEmail', {
+        userId, docId, message: err?.message,
+      });
+    }
+  }
+
+  const logoUrl = business.logoStorageUrl || business.logoUri || '';
+  const emailMaterials = (invoice.materials || []).map((m: any) => ({
+    name: m.name, quantity: m.quantity, unit: m.unit,
+    totalPrice: m.totalPrice || 0, section: m.section,
+  }));
+  const businessData = {
+    name: business.businessName || '', abn: business.abn,
+    phone: business.phone, email: business.email,
+    address: business.address, logoUrl, brandColor: business.brandColor,
+  };
+
+  const htmlContent = buildInvoiceEmailHtml({
+    customerName: invoice.customerName || 'Client',
+    emailBody,
+    jobName: invoice.job?.name || 'Job',
+    materials: emailMaterials,
+    laborTotal: invoice.laborTotal || 0,
+    materialsSubtotal: invoice.materialsSubtotal || 0,
+    subtotal: invoice.subtotal || 0,
+    gst: invoice.gst || 0,
+    total: invoice.total || 0,
+    invoiceNumber: invoice.invoiceNumber,
+    dueDate: invoice.dueDate || new Date().toISOString(),
+    payNowUrl,
+    depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
+    hasTerms: !!termsToSend,
+    business: businessData,
+  });
+
+  const pdfHtml = buildInvoicePdfHtml(
+    {
+      customerName: invoice.customerName || 'Client',
+      customerEmail: invoice.customerEmail,
+      customerPhone: invoice.customerPhone,
+      jobAddress: invoice.jobAddress,
+      quoteNumber: invoice.invoiceNumber,
+      quoteDate: fmtAuDate(invoice.updatedAt),
+      invoiceNumber: invoice.invoiceNumber,
+      issueDate: fmtAuDate(invoice.issueDate || invoice.createdAt),
+      dueDate: fmtAuDate(invoice.dueDate),
+      paymentTerms: invoice.paymentTerms,
+      paidAmount: invoice.paidAmount || 0,
+      depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
+      job: invoice.job || { name: 'Job', description: '' },
+      materials: buildPdfMaterials(invoice.materials),
+      materialsSubtotal: invoice.materialsSubtotal || 0,
+      laborHours: invoice.laborHours,
+      laborRate: invoice.laborRate,
+      laborUnit: invoice.laborUnit,
+      laborTotal: invoice.laborTotal || 0,
+      laborExtraHours: invoice.laborExtraHours,
+      sections: buildPdfSections(invoice.sections),
+      subtotal: invoice.subtotal || 0,
+      markup: invoice.markup || 0,
+      markupAmount: invoice.markupAmount || 0,
+      laborMarkup: invoice.laborMarkup ?? invoice.markup ?? 0,
+      showMarkup: invoice.showMarkup === true && business.showMarkup !== false,
+      travelAdjustment: invoice.travelAdjustment,
+      gst: invoice.gst || 0,
+      total: invoice.total || 0,
+      notes: invoice.notes,
+      showLaborHours: business.showLaborHours,
+      showLaborBreakdown: invoice.showLaborBreakdown !== false,
+      groupMaterialsBySection: business.groupMaterialsBySection,
+      paymentMethods: business.paymentMethods,
+      terms: termsToSend || undefined,
+    },
+    {
+      businessName: business.businessName || 'Business',
+      email: business.email,
+      phone: business.phone,
+      website: business.website,
+      abn: business.abn,
+      address: business.address,
+      logoHtml: businessLogoHtml(business),
+      brandColor: business.brandColor,
+      pdfTemplate: business.pdfTemplate,
+    },
+  );
+
+  const pdfBuffer = await generateQuotePdfBuffer(pdfHtml);
+  const pdfBase64 = pdfBuffer.toString('base64');
+  const pdfFilename = `Invoice_${sanitizeFilename(invoice.customerName || 'Client')}_${sanitizeFilename(invoice.job?.name || 'Job')}.pdf`;
+  const attachments: Array<{ name: string; content: string }> = [{ name: pdfFilename, content: pdfBase64 }];
+
+  if (includePhotos && invoice.sourceQuoteId && input.fetchPhotoAttachments) {
+    const sourceQuoteDoc = await firestore.doc(`users/${userId}/quotes/${invoice.sourceQuoteId}`).get();
+    if (sourceQuoteDoc.exists) {
+      const sourceQuote = sourceQuoteDoc.data() as AnyData;
+      const photoUrls = (sourceQuote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
+      if (photoUrls.length > 0) {
+        const photoAttachments = await input.fetchPhotoAttachments(photoUrls);
+        attachments.push(...photoAttachments);
+      }
+    }
+  }
+
+  const sent = await sendEmail({
+    to: recipientEmail,
+    subject: `${isTestSend ? '[TEST] ' : ''}Invoice from ${business.businessName || 'Your Tradie'} - ${invoice.job?.name || 'Job'}`,
+    htmlContent,
+    category: 'transactional',
+    userId,
+    tags: isTestSend ? ['invoice-test'] : ['invoice-to-client'],
+    attachment: attachments,
+  });
+
+  if (!sent) return { success: false };
+  return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// Square webhook payment routing
+// ---------------------------------------------------------------------------
+
+export interface SquarePaymentReconciliationInput {
+  userId: string;
+  paymentId: string;
+  orderId: string;
+  amountCents: number;
+  source: 'in_app' | 'pay_link';
+  /** quote_deposit | quote_full | invoice — same kinds the index already uses. */
+  kind: string;
+  quoteId?: string | null;
+  invoiceId?: string | null;
+}
+
+/**
+ * Apply a Square payment to the unified document ledger. The legacy webhook
+ * still updates quotes/invoices directly (so the mirror cascades), but this
+ * helper writes a complementary update to documents/{id} so the new view
+ * doesn't lag on payment events.
+ *
+ * Recompute paidTotal/balanceDue on every write. Drive stage transitions
+ * via the state machine (soft-enforced).
+ */
+export async function applyPaymentToDocument(
+  input: SquarePaymentReconciliationInput,
+): Promise<void> {
+  const { userId, paymentId, kind, quoteId, invoiceId } = input;
+
+  const docId = (kind === 'quote_deposit' || kind === 'quote_full')
+    ? quoteId
+    : invoiceId;
+  if (!docId) return;
+
+  const doc = await loadDocument(userId, docId);
+  if (!doc) return;
+
+  // Idempotency: skip if this payment is already on the ledger.
+  const alreadyOnLedger = (doc.payments || []).some(
+    (p: DocumentPayment) => p.squarePaymentId === paymentId,
+  );
+  if (alreadyOnLedger) return;
+
+  const paidDollars = centsToDollars(input.amountCents);
+  const total = Number(doc.total) || 0;
+
+  let payment: DocumentPayment;
+  let nextStage: DocumentStage = doc.stage;
+
+  if (kind === 'quote_deposit') {
+    const expectedCap = Number(doc.depositAmount) || paidDollars;
+    const cappedAmount = expectedCap > 0 ? Math.min(paidDollars, expectedCap) : paidDollars;
+    payment = {
+      id: `deposit-${paymentId}`,
+      kind: 'deposit',
+      amount: cappedAmount,
+      paidAt: Date.now(),
+      squarePaymentId: paymentId,
+      method: 'square',
+    };
+    if (doc.stage === 'quote_sent' || doc.stage === 'draft') {
+      nextStage = 'quote_accepted';
+    }
+  } else if (kind === 'quote_full') {
+    const cappedAmount = total > 0 ? Math.min(paidDollars, total) : paidDollars;
+    payment = {
+      id: `full-${paymentId}`,
+      kind: 'balance',
+      amount: cappedAmount,
+      paidAt: Date.now(),
+      squarePaymentId: paymentId,
+      method: 'square',
+    };
+    if (doc.stage === 'quote_sent' || doc.stage === 'draft') {
+      nextStage = 'quote_accepted';
+    }
+  } else {
+    // invoice balance
+    const cappedAmount = total > 0 ? Math.min(paidDollars, total) : paidDollars;
+    payment = {
+      id: `square-${paymentId}`,
+      kind: 'balance',
+      amount: cappedAmount,
+      paidAt: Date.now(),
+      squarePaymentId: paymentId,
+      method: 'square',
+    };
+    const newPaidTotal = (Number(doc.paidTotal) || 0) + cappedAmount;
+    nextStage = newPaidTotal + 0.005 >= total ? 'paid' : 'partially_paid';
+  }
+
+  const newPayments = [...(doc.payments || []), payment];
+  const paidTotal = newPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+  const balanceDue = Math.max(0, total - paidTotal);
+
+  if (nextStage !== doc.stage) {
+    tryStageTransition(doc, nextStage, `applyPaymentToDocument:${kind}`);
+  }
+
+  await writeDocumentUpdate(userId, doc.id, {
+    payments: newPayments,
+    paidTotal,
+    balanceDue,
+    stage: nextStage,
+    paymentSyncError: admin.firestore.FieldValue.delete(),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Xero — wraps the existing invoice-only sync so the call site is doc-driven.
+// ---------------------------------------------------------------------------
+
+export interface XeroSyncDelegate {
+  pushInvoice: (userId: string, invoiceId: string, invoice: AnyData) => Promise<void>;
+}
+
+export async function syncDocumentToXero(
+  doc: DocumentRecord,
+  userId: string,
+  delegate: XeroSyncDelegate,
+): Promise<void> {
+  if (doc.type !== 'invoice') return;
+  const invoiceId = (doc.legacyInvoiceId as string | undefined) ?? doc.id;
+  const invoice = documentRecordToInvoiceRecord(doc as DocumentRecord);
+  await delegate.pushInvoice(userId, invoiceId, invoice);
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry — used by the legacy endpoint shims so we can monitor when old
+// clients still hit the legacy paths.
+// ---------------------------------------------------------------------------
+
+export function logShimInvocation(endpoint: string, userId: string, extras?: AnyData): void {
+  functions.logger.info('phase2_shim_invoked', { endpoint, userId, ...(extras || {}) });
+}
