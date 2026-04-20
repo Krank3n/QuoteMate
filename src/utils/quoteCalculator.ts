@@ -1,20 +1,28 @@
 /**
  * Quote calculation utilities
- * Handles pricing calculations with GST for Australian quotes
+ *
+ * Quote-specific helpers — calculation entry points and the legacy labour
+ * heal. Generic helpers (formatCurrency, markup math, profit margin) live
+ * in documentCalculator and are re-exported here so existing callers don't
+ * need to update their import paths.
  */
 
 import { Material, Quote, QuoteSection, QuoteCalculation } from '../types';
+import {
+  calculateDocumentTotals,
+  roundToTwoDecimals,
+} from './documentCalculator';
+
+export {
+  formatCurrency,
+  updateMaterialTotalPrice,
+  updateAllMaterialPrices,
+  calculateEffectiveHourlyRate,
+  calculateProfitMargin,
+} from './documentCalculator';
 
 /**
- * Calculate quote totals
- * @param materials - List of materials with prices
- * @param laborRate - Hourly/daily labor rate
- * @param laborHours - Number of hours/days
- * @param markupPercent - Material markup percentage (e.g., 20 for 20%)
- * @param travelAdjustment - Travel adjustment percentage
- * @param sections - Optional sections with per-section labor
- * @param laborMarkupPercent - Labor markup percentage (independent from material markup)
- * @param laborExtraHours - Extra labour hours added on top of (or subtracted from) sections sum. Can be negative.
+ * Calculate quote totals.
  */
 export function calculateQuote(
   materials: Material[],
@@ -26,45 +34,24 @@ export function calculateQuote(
   laborMarkupPercent: number = 0,
   laborExtraHours: number = 0
 ): QuoteCalculation {
-  // Calculate materials subtotal
-  const materialsSubtotal = materials.reduce((sum, material) => {
-    return sum + material.totalPrice;
-  }, 0);
-
-  // Calculate labor total — from sections if available (plus any extra),
-  // otherwise simple rate × hours.
-  const laborTotal = sections && sections.length > 0
-    ? sections.reduce((sum, s) => sum + s.laborTotal, 0) + (laborExtraHours * laborRate)
-    : laborRate * laborHours;
-
-  // Subtotal before markup
-  const subtotal = materialsSubtotal + laborTotal;
-
-  // Calculate combined markup: material markup on materials + labor markup on labor
-  const materialMarkupAmount = materialsSubtotal * (markupPercent / 100);
-  const laborMarkupAmount = laborTotal * (laborMarkupPercent / 100);
-  const markupAmount = materialMarkupAmount + laborMarkupAmount;
-
-  // Calculate travel adjustment amount separately
-  const travelAdjustmentAmount = subtotal * (travelAdjustment / 100);
-
-  // Subtotal with markup and travel adjustment (before GST)
-  const subtotalWithMarkup = subtotal + markupAmount + travelAdjustmentAmount;
-
-  // Calculate GST (10% in Australia)
-  const gst = subtotalWithMarkup * 0.1;
-
-  // Final total
-  const total = subtotalWithMarkup + gst;
-
+  const calc = calculateDocumentTotals(
+    materials,
+    laborRate,
+    laborHours,
+    markupPercent,
+    travelAdjustment,
+    sections,
+    laborMarkupPercent,
+    laborExtraHours,
+  );
   return {
-    materialsSubtotal: roundToTwoDecimals(materialsSubtotal),
-    laborTotal: roundToTwoDecimals(laborTotal),
-    subtotal: roundToTwoDecimals(subtotal),
-    markupAmount: roundToTwoDecimals(markupAmount),
-    travelAdjustmentAmount: roundToTwoDecimals(travelAdjustmentAmount),
-    gst: roundToTwoDecimals(gst),
-    total: roundToTwoDecimals(total),
+    materialsSubtotal: calc.materialsSubtotal,
+    laborTotal: calc.laborTotal,
+    subtotal: calc.subtotal,
+    markupAmount: calc.markupAmount,
+    travelAdjustmentAmount: calc.travelAdjustmentAmount,
+    gst: calc.gst,
+    total: calc.total,
   };
 }
 
@@ -91,8 +78,6 @@ export function healBrokenLabourSections<T extends { sections?: QuoteSection[]; 
   const sumMul = quote.sections.reduce((sum, s) => sum + (s.multiplier || 1), 0);
   if (sumMul <= 0) return quote;
 
-  // Per-unit hours is uniform across sections; each section's contribution
-  // scales by its multiplier. sum(perUnit × mul × rate) === topLevelTotal.
   const perUnitHours = (quote.laborHours || 0) / sumMul;
   const rate = quote.laborRate || 0;
   const healedSections = quote.sections.map((s) => ({
@@ -107,8 +92,7 @@ export function healBrokenLabourSections<T extends { sections?: QuoteSection[]; 
 }
 
 /**
- * Update a quote with new calculations
- * @param quote - The quote to update
+ * Update a quote with new calculations.
  */
 export function updateQuoteCalculations(quote: Quote): Quote {
   const healed = healBrokenLabourSections(quote);
@@ -133,68 +117,4 @@ export function updateQuoteCalculations(quote: Quote): Quote {
     total: calculation.total,
     updatedAt: new Date(),
   };
-}
-
-/**
- * Update material total price
- * @param material - The material to update
- */
-export function updateMaterialTotalPrice(material: Material): Material {
-  return {
-    ...material,
-    totalPrice: roundToTwoDecimals(material.quantity * material.price),
-  };
-}
-
-/**
- * Update all materials' total prices
- * @param materials - List of materials to update
- */
-export function updateAllMaterialPrices(materials: Material[]): Material[] {
-  return materials.map(updateMaterialTotalPrice);
-}
-
-/**
- * Format currency for display (Australian dollars)
- * @param amount - The amount to format
- */
-export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-AU', {
-    style: 'currency',
-    currency: 'AUD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
-
-/**
- * Round a number to 2 decimal places
- * @param num - Number to round
- */
-function roundToTwoDecimals(num: number): number {
-  return Math.round(num * 100) / 100;
-}
-
-/**
- * Calculate the effective hourly rate after markup
- * This is useful for tradies to see what they're actually charging
- */
-export function calculateEffectiveHourlyRate(
-  totalRevenue: number,
-  laborHours: number
-): number {
-  if (laborHours === 0) return 0;
-  return roundToTwoDecimals(totalRevenue / laborHours);
-}
-
-/**
- * Calculate profit margin percentage
- */
-export function calculateProfitMargin(
-  total: number,
-  costs: number
-): number {
-  if (total === 0) return 0;
-  const profit = total - costs;
-  return roundToTwoDecimals((profit / total) * 100);
 }

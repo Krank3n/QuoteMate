@@ -37,6 +37,7 @@ import {
   isInvoiceOverdue,
 } from '../utils/invoiceCalculator';
 import { Invoice, PaymentMethod } from '../types';
+import { documentToInvoice } from '../types/documentAdapter';
 import {
   DocumentHeader,
   CustomerSection,
@@ -76,6 +77,7 @@ export function ViewInvoiceScreen() {
     updateInvoice,
     xeroConnection,
     pushInvoiceToXero,
+    getDocumentByLegacyId,
   } = useStore();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
@@ -108,7 +110,9 @@ export function ViewInvoiceScreen() {
     };
   }, []);
 
-  // Load invoice data
+  // Load invoice data — prefer the legacy slice, fall back to the unified
+  // documents collection (needed once the legacy collection is empty for a
+  // user, or while the documents listener is the only fresh source).
   useEffect(() => {
     if (isNew && currentInvoice) {
       setDisplayInvoice(currentInvoice);
@@ -117,9 +121,12 @@ export function ViewInvoiceScreen() {
       const savedInvoice = invoices.find((i) => i.id === invoiceId);
       if (savedInvoice) {
         setDisplayInvoice(savedInvoice);
+      } else {
+        const docMatch = getDocumentByLegacyId(invoiceId);
+        if (docMatch) setDisplayInvoice(documentToInvoice(docMatch));
       }
     }
-  }, [invoiceId, invoices, currentInvoice, isNew]);
+  }, [invoiceId, invoices, currentInvoice, isNew, getDocumentByLegacyId]);
 
   // Refresh invoice data when screen comes into focus
   useFocusEffect(
@@ -128,9 +135,12 @@ export function ViewInvoiceScreen() {
         const savedInvoice = invoices.find((i) => i.id === invoiceId);
         if (savedInvoice) {
           setDisplayInvoice(savedInvoice);
+        } else {
+          const docMatch = getDocumentByLegacyId(invoiceId);
+          if (docMatch) setDisplayInvoice(documentToInvoice(docMatch));
         }
       }
-    }, [invoices, invoiceId, isNew])
+    }, [invoices, invoiceId, isNew, getDocumentByLegacyId])
   );
 
   const handleSave = async () => {

@@ -16,9 +16,12 @@ import { useNavigation, useRoute, useScrollToTop } from '@react-navigation/nativ
 
 import { useStore } from '../store/useStore';
 import { Quote } from '../types';
+import { documentToQuote } from '../types/documentAdapter';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
-import { QuoteCard } from '../components/QuoteCard';
+import { DocumentCard } from '../components/DocumentCard';
+import { quoteToDocument } from '../types/documentAdapter';
+import type { Document } from '../types/document';
 import { AlertModal } from '../components/AlertModal';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
@@ -34,7 +37,23 @@ export function QuotesListScreen() {
 
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { quotes, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings, canCreateQuote, createInvoiceFromQuote, saveInvoice, loadQuotes, subscriptionStatus } = useStore();
+  const { quotes: legacyQuotes, documents, documentsLoaded, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings, canCreateQuote, createInvoiceFromQuote, saveInvoice, loadQuotes, subscriptionStatus } = useStore();
+
+  // Read from the unified documents collection. Filter to quote-side stages
+  // and project back to the typed Quote shape via the canonical adapter so
+  // the rest of this screen can stay unchanged. Falls back to the legacy
+  // slice when the documents listener hasn't filled in yet (first paint or
+  // pre-mirror data).
+  const quotes = useMemo<Quote[]>(() => {
+    if (!documentsLoaded || documents.length === 0) {
+      return legacyQuotes;
+    }
+    const QUOTE_STAGES = new Set(['draft', 'quote_sent', 'quote_accepted', 'quote_rejected']);
+    const fromDocs = documents
+      .filter((d) => d.type === 'quote' || QUOTE_STAGES.has(d.stage))
+      .map((d) => documentToQuote(d));
+    return fromDocs.length > 0 ? fromDocs : legacyQuotes;
+  }, [documents, documentsLoaded, legacyQuotes]);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -193,21 +212,27 @@ export function QuotesListScreen() {
     }
   };
 
-  const renderQuoteCard = useCallback(({ item: quote, index }: { item: Quote; index: number }) => (
-    <AnimatedListItem index={index}>
-      <QuoteCard
-        quote={quote}
-        businessSettings={businessSettings}
-        onView={handleViewQuote}
-        onEdit={handleEditQuote}
-        onDelete={handleDeleteQuote}
-        onDuplicate={handleDuplicateQuote}
-        onSave={saveQuote}
-        onStatusChange={handleOpenStatusSheet}
-        onConvertToInvoice={handleConvertToInvoice}
-      />
-    </AnimatedListItem>
-  ), [businessSettings, handleViewQuote, handleEditQuote, handleDeleteQuote, handleDuplicateQuote, saveQuote, handleOpenStatusSheet, handleConvertToInvoice]);
+  const renderQuoteCard = useCallback(({ item: quote, index }: { item: Quote; index: number }) => {
+    // Project the typed Quote back into the unified Document for the new card.
+    // The quote came from documents anyway (via the screen-level memo), so this
+    // is a round-trip; cheap, and keeps the card 100% type-driven.
+    const doc: Document = quoteToDocument(quote);
+    return (
+      <AnimatedListItem index={index}>
+        <DocumentCard
+          doc={doc}
+          businessSettings={businessSettings}
+          onView={handleViewQuote}
+          onEdit={(d) => handleEditQuote(quote)}
+          onDelete={handleDeleteQuote}
+          onDuplicate={() => handleDuplicateQuote(quote)}
+          onSave={() => saveQuote(quote)}
+          onStatusChange={() => handleOpenStatusSheet(quote)}
+          onConvertToInvoice={() => handleConvertToInvoice(quote)}
+        />
+      </AnimatedListItem>
+    );
+  }, [businessSettings, handleViewQuote, handleEditQuote, handleDeleteQuote, handleDuplicateQuote, saveQuote, handleOpenStatusSheet, handleConvertToInvoice]);
 
   return (
     <View style={styles.container}>

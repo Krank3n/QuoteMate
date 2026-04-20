@@ -17,9 +17,12 @@ import { useNavigation, useFocusEffect, useScrollToTop } from '@react-navigation
 
 import { useStore } from '../store/useStore';
 import { Invoice, Quote } from '../types';
+import { documentToInvoice, documentToQuote } from '../types/documentAdapter';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
-import { InvoiceCard } from '../components/InvoiceCard';
+import { DocumentCard } from '../components/DocumentCard';
+import { invoiceToDocument } from '../types/documentAdapter';
+import type { Document } from '../types/document';
 import { ProBadge } from '../components/ProBadge';
 import { isInvoiceOverdue } from '../utils/invoiceCalculator';
 import { AnimatedListItem } from '../components/AnimatedListItem';
@@ -43,8 +46,10 @@ export function InvoicesListScreen() {
 
   const navigation = useNavigation<any>();
   const {
-    invoices,
-    quotes,
+    invoices: legacyInvoices,
+    quotes: legacyQuotes,
+    documents,
+    documentsLoaded,
     deleteInvoice,
     setCurrentInvoice,
     createNewInvoice,
@@ -56,6 +61,30 @@ export function InvoicesListScreen() {
     loadNextInvoiceNumber,
     subscriptionStatus,
   } = useStore();
+
+  // Derive the displayed invoices/quotes from the unified documents
+  // collection, falling back to the legacy slices when the documents
+  // listener hasn't filled in yet.
+  const invoices = useMemo<Invoice[]>(() => {
+    if (!documentsLoaded || documents.length === 0) {
+      return legacyInvoices;
+    }
+    const fromDocs = documents
+      .filter((d) => d.type === 'invoice')
+      .map((d) => documentToInvoice(d));
+    return fromDocs.length > 0 ? fromDocs : legacyInvoices;
+  }, [documents, documentsLoaded, legacyInvoices]);
+
+  const quotes = useMemo<Quote[]>(() => {
+    if (!documentsLoaded || documents.length === 0) {
+      return legacyQuotes;
+    }
+    const QUOTE_STAGES = new Set(['draft', 'quote_sent', 'quote_accepted', 'quote_rejected']);
+    const fromDocs = documents
+      .filter((d) => d.type === 'quote' || QUOTE_STAGES.has(d.stage))
+      .map((d) => documentToQuote(d));
+    return fromDocs.length > 0 ? fromDocs : legacyQuotes;
+  }, [documents, documentsLoaded, legacyQuotes]);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -202,20 +231,23 @@ export function InvoicesListScreen() {
     }
   };
 
-  const renderInvoiceCard = useCallback(({ item: invoice, index }: { item: Invoice; index: number }) => (
-    <AnimatedListItem index={index}>
-      <InvoiceCard
-        invoice={invoice}
-        businessSettings={businessSettings}
-        onView={handleViewInvoice}
-        onEdit={handleEditInvoice}
-        onDelete={handleDeleteInvoice}
-        onRecordPayment={handleRecordPayment}
-        onSave={saveInvoice}
-        onDuplicate={handleDuplicateInvoice}
-      />
-    </AnimatedListItem>
-  ), [businessSettings, handleViewInvoice, handleEditInvoice, handleDeleteInvoice, handleRecordPayment, saveInvoice, handleDuplicateInvoice]);
+  const renderInvoiceCard = useCallback(({ item: invoice, index }: { item: Invoice; index: number }) => {
+    const doc: Document = invoiceToDocument(invoice);
+    return (
+      <AnimatedListItem index={index}>
+        <DocumentCard
+          doc={doc}
+          businessSettings={businessSettings}
+          onView={handleViewInvoice}
+          onEdit={() => handleEditInvoice(invoice)}
+          onDelete={handleDeleteInvoice}
+          onDuplicate={() => handleDuplicateInvoice(invoice)}
+          onSave={() => saveInvoice(invoice)}
+          onRecordPayment={() => handleRecordPayment(invoice)}
+        />
+      </AnimatedListItem>
+    );
+  }, [businessSettings, handleViewInvoice, handleEditInvoice, handleDeleteInvoice, handleRecordPayment, saveInvoice, handleDuplicateInvoice]);
 
   return (
     <View style={styles.container}>

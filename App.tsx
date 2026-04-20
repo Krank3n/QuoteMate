@@ -41,6 +41,7 @@ import { subscriptionSyncService } from './src/services/subscriptionSyncService'
 import { auth } from './src/config/firebase';
 import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
+import { documentService } from './src/services/documentService';
 import { notificationService } from './src/services/notificationService';
 import { checkForUpdate, AppUpdateInfo } from './src/services/appUpdateService';
 import { checkDeferredLink } from './src/services/supplierDiscoveryService';
@@ -62,7 +63,7 @@ export default function App() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [userDataLoaded, setUserDataLoaded] = useState(false);
-  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, checkTourStatus, loadXeroConnection, loadContacts } = useStore();
+  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, checkTourStatus, loadXeroConnection, loadContacts, loadDocuments, listenToDocuments } = useStore();
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [showUpdateSheet, setShowUpdateSheet] = useState(false);
 
@@ -79,6 +80,7 @@ export default function App() {
 
         await Promise.all([
           loadQuotes(),
+          loadDocuments(),
           loadBusinessSettings(),
           checkOnboarding(),
           loadSubscription(),
@@ -130,6 +132,12 @@ export default function App() {
           useStore.getState().mergeRemoteInvoices(invoices);
         });
 
+        // Phase-5: real-time listener for the unified Document collection.
+        // Coexists with the legacy listeners during the cutover — server-side
+        // mirror keeps both projections in sync, the legacy slices are still
+        // referenced by older edit/save flows.
+        listenToDocuments();
+
         firestoreService.listenToBusinessSettings((settings) => {
           if (settings) {
             useStore.setState({ businessSettings: settings });
@@ -148,6 +156,7 @@ export default function App() {
       } else {
         // User signed out, clean up listeners and notification token
         firestoreService.cleanup();
+        documentService.cleanup();
         notificationService.removeNotificationListeners();
         setUserDataLoaded(false);
       }
@@ -194,6 +203,7 @@ export default function App() {
     return () => {
       subscriptionSyncService.cleanup();
       firestoreService.cleanup();
+      documentService.cleanup();
       notificationService.removeNotificationListeners();
     };
   }, []);

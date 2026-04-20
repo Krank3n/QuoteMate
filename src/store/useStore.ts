@@ -7,10 +7,12 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
+import { Document } from '../types/document';
 import { TourPhase } from '../components/tour/tourFlow';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { firestoreService } from '../services/firestoreService';
+import { documentService } from '../services/documentService';
 import { auth } from '../config/firebase';
 
 /**
@@ -163,6 +165,18 @@ interface AppState {
   pushPaymentToXero: (invoiceId: string, xeroInvoiceId: string, amount: number, date: Date, method?: string) => Promise<void>;
   xeroBulkSync: (invoiceIds: string[]) => Promise<{ successCount: number; totalCount: number }>;
 
+  // Unified Documents (phase-5 client cutover) — reads from
+  // users/{uid}/documents and writes both there AND to the legacy collection
+  // via the canonical adapter so older app builds still see live data.
+  documents: Document[];
+  documentsLoaded: boolean;
+  loadDocuments: () => Promise<void>;
+  listenToDocuments: () => void;
+  saveDocument: (doc: Document) => Promise<void>;
+  getDocumentById: (id: string) => Document | undefined;
+  getDocumentByLegacyId: (legacyId: string) => Document | undefined;
+  convertDocumentToInvoice: (documentId: string) => Promise<Document>;
+
   // Cleanup
   clearAllData: () => Promise<void>;
 }
@@ -240,6 +254,8 @@ export const useStore = create<AppState>((set, get) => ({
   unifiedTourActive: false,
   unifiedTourPhase: null,
   unifiedTourQuoteId: null,
+  documents: [],
+  documentsLoaded: false,
 
   // Business settings
   setBusinessSettings: async (settings: BusinessSettings) => {
@@ -1081,6 +1097,21 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   createInvoiceFromQuote: async (quote: Quote) => {
+    // Phase-5: prefer the unified convertDocumentToInvoice path when a
+    // matching document exists (server canonicalises via setDocumentStage,
+    // mirror trigger projects to the legacy invoices collection).
+    const matchingDoc = get().getDocumentByLegacyId(quote.id);
+    if (matchingDoc && matchingDoc.type === 'quote' && !matchingDoc.invoicedAt) {
+      try {
+        const converted = await get().convertDocumentToInvoice(matchingDoc.id);
+        const invoice: Invoice = (await import('../types/documentAdapter')).documentToInvoice(converted);
+        set({ currentInvoice: invoice });
+        return invoice;
+      } catch {
+        // Fall through to the legacy path on failure.
+      }
+    }
+
     // Idempotency: if this quote has already been invoiced, return the
     // existing invoice instead of minting a duplicate. Tapping Convert twice
     // (or doing it on two devices) used to spawn two invoices and the
@@ -1911,6 +1942,103 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  // Unified Documents
+  loadDocuments: async () => {
+    if (!auth.currentUser) return;
+    try {
+      const docs = await documentService.loadDocuments();
+      set({ documents: docs, documentsLoaded: true });
+    } catch {
+      set({ documentsLoaded: true });
+    }
+  },
+
+  listenToDocuments: () => {
+    if (!auth.currentUser) return;
+    documentService.listenToDocuments((documents) => {
+      set({ documents, documentsLoaded: true });
+    });
+  },
+
+  saveDocument: async (document: Document) => {
+    const next = { ...document, updatedAt: Date.now() };
+    // Optimistic local update
+    set((state) => {
+      const existing = state.documents.findIndex((d) => d.id === next.id);
+      const documents = existing >= 0
+        ? state.documents.map((d, i) => (i === existing ? next : d))
+        : [...state.documents, next];
+      return { documents };
+    });
+    if (auth.currentUser) {
+      try {
+        await documentService.saveDocument(next);
+      } catch (err) {
+        logSyncError(next.type === 'invoice' ? 'invoice' : 'quote', next.id, err);
+      }
+    }
+  },
+
+  getDocumentById: (id: string) => {
+    return get().documents.find((d) => d.id === id);
+  },
+
+  getDocumentByLegacyId: (legacyId: string) => {
+    const docs = get().documents;
+    return (
+      docs.find((d) => d.id === legacyId) ||
+      docs.find((d) => d.legacyQuoteId === legacyId) ||
+      docs.find((d) => d.legacyInvoiceId === legacyId)
+    );
+  },
+
+  convertDocumentToInvoice: async (documentId: string) => {
+    const existing = get().getDocumentById(documentId);
+    if (!existing) {
+      throw new Error('Document not found');
+    }
+    // Idempotent: already an invoice — short-circuit before any RPC.
+    if (existing.type === 'invoice' || existing.invoicedAt) {
+      return existing;
+    }
+    // Stamp client-side first so the UI updates immediately, then ask the
+    // server to canonicalise via setDocumentStage. The server is the source
+    // of truth for the stage transition; the optimistic update keeps the
+    // dashboard responsive on slow connections.
+    const now = Date.now();
+    const depositCredit = Math.max(0, Number(existing.depositPaid) || 0);
+    const adjustedTotal = Math.max(0, (existing.total || 0) - depositCredit);
+    const invoiceNumber = await get().getNextInvoiceNumber();
+    const optimistic: Document = {
+      ...existing,
+      type: 'invoice',
+      stage: 'invoice_sent',
+      number: invoiceNumber,
+      invoicedAt: now,
+      issueDate: now,
+      dueDate: calculateDueDate(new Date(now), 'net_14').getTime(),
+      paymentTerms: 'net_14',
+      total: adjustedTotal,
+      legacyInvoiceId: existing.id,
+      updatedAt: now,
+    };
+    set((state) => ({
+      documents: state.documents.map((d) => (d.id === documentId ? optimistic : d)),
+    }));
+    if (auth.currentUser) {
+      try {
+        const { httpsCallable, getFunctions } = await import('firebase/functions');
+        const fn = httpsCallable(getFunctions(), 'convertDocumentToInvoice');
+        await fn({ documentId, invoiceNumber });
+      } catch (err) {
+        // Server failed — keep the optimistic state but log so the user can
+        // retry. Mirror trigger will reconcile on the next legacy write.
+        logSyncError('invoice', documentId, err);
+      }
+    }
+    return optimistic;
+  },
+
   // Clear all data (for logout)
   clearAllData: async () => {
     try {
@@ -1948,6 +2076,8 @@ export const useStore = create<AppState>((set, get) => ({
         contacts: [],
         contactsLoaded: false,
         xeroContacts: [],
+        documents: [],
+        documentsLoaded: false,
       });
     } catch (error) {
       throw error;
