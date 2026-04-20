@@ -11,6 +11,7 @@
 
 import type {
   DocumentPayment,
+  DocumentPaymentLink,
   DocumentRecord,
   DocumentStage,
   DocumentType,
@@ -151,6 +152,10 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     depositPaymentLinkUrl: s.depositPaymentLinkUrl,
     depositPaymentLinkCreatedAt: toMs(s.depositPaymentLinkCreatedAt),
     depositSquarePaymentId: s.depositSquarePaymentId,
+    fullPaymentLinkId: type === 'quote' ? s.fullPaymentLinkId : undefined,
+    fullPaymentLinkUrl: type === 'quote' ? s.fullPaymentLinkUrl : undefined,
+    fullPaymentLinkCreatedAt: type === 'quote' ? toMs(s.fullPaymentLinkCreatedAt) : undefined,
+    fullPaymentLinkAmount: type === 'quote' ? s.fullPaymentLinkAmount : undefined,
 
     // Quote-only optionals (undefined for invoices)
     acceptanceToken: type === 'quote' ? s.acceptanceToken : undefined,
@@ -180,6 +185,8 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     squarePaymentLinkId: type === 'invoice' ? s.squarePaymentLinkId : undefined,
     squarePaymentLinkUrl:
       type === 'invoice' ? s.squarePaymentLinkUrl : undefined,
+    squarePaymentLinkCreatedAt:
+      type === 'invoice' ? toMs(s.squarePaymentLinkCreatedAt) : undefined,
     squarePaymentId: type === 'invoice' ? s.squarePaymentId : undefined,
     squarePaidAt: type === 'invoice' ? toMs(s.squarePaidAt) : undefined,
   };
@@ -257,6 +264,61 @@ export function sumPayments(payments: DocumentPayment[]): number {
   return payments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
 }
 
+// -------- payment link derivation ---------------------------------------
+
+/**
+ * Derive the active payment link from legacy quote fields. A quote may have
+ * a deposit link (depositPaymentLink*) or a full-quote link (fullPaymentLink*);
+ * the deposit link takes precedence while the deposit is the outstanding
+ * payment, otherwise the full-quote link wins.
+ *
+ * `consumedAt` is set when the corresponding squarePaymentId is recorded.
+ */
+function deriveQuoteActiveLink(quote: LegacyDocumentRecord): DocumentPaymentLink | undefined {
+  const depositId = quote.depositPaymentLinkId;
+  const depositUrl = quote.depositPaymentLinkUrl;
+  if (typeof depositId === 'string' && typeof depositUrl === 'string') {
+    return {
+      id: depositId,
+      url: depositUrl,
+      kind: 'deposit',
+      amount: Number(quote.depositAmount) || 0,
+      createdAt: toMs(quote.depositPaymentLinkCreatedAt) ?? toMsRequired(quote.updatedAt),
+      consumedAt: quote.depositSquarePaymentId
+        ? toMs(quote.depositPaidAt) ?? toMsRequired(quote.updatedAt)
+        : undefined,
+    };
+  }
+  const fullId = quote.fullPaymentLinkId;
+  const fullUrl = quote.fullPaymentLinkUrl;
+  if (typeof fullId === 'string' && typeof fullUrl === 'string') {
+    return {
+      id: fullId,
+      url: fullUrl,
+      kind: 'quote_full',
+      amount: Number(quote.fullPaymentLinkAmount) || 0,
+      createdAt: toMs(quote.fullPaymentLinkCreatedAt) ?? toMsRequired(quote.updatedAt),
+    };
+  }
+  return undefined;
+}
+
+function deriveInvoiceActiveLink(invoice: LegacyDocumentRecord): DocumentPaymentLink | undefined {
+  const id = invoice.squarePaymentLinkId;
+  const url = invoice.squarePaymentLinkUrl;
+  if (typeof id !== 'string' || typeof url !== 'string') return undefined;
+  return {
+    id,
+    url,
+    kind: 'balance',
+    amount: Math.max(0, Number(invoice.total) - (Number(invoice.depositCredit) || 0)),
+    createdAt: toMs(invoice.squarePaymentLinkCreatedAt) ?? toMsRequired(invoice.updatedAt),
+    consumedAt: invoice.squarePaymentId
+      ? toMs(invoice.squarePaidAt) ?? toMsRequired(invoice.updatedAt)
+      : undefined,
+  };
+}
+
 // -------- forward adapters (legacy → Document) --------------------------
 
 export function quoteRecordToDocumentRecord(
@@ -267,6 +329,11 @@ export function quoteRecordToDocumentRecord(
   const payments = buildQuotePayments(quote, quoteId);
   const paidTotal = sumPayments(payments);
   const total = Number(quote.total ?? 0);
+  const activePaymentLink = quote.activePaymentLink as DocumentPaymentLink | undefined
+    ?? deriveQuoteActiveLink(quote);
+  const archivedPaymentLinks = Array.isArray(quote.archivedPaymentLinks)
+    ? (quote.archivedPaymentLinks as DocumentPaymentLink[])
+    : undefined;
   return {
     ...shared,
     id: quoteId,
@@ -278,6 +345,8 @@ export function quoteRecordToDocumentRecord(
     payments,
     paidTotal,
     balanceDue: Math.max(0, total - paidTotal),
+    activePaymentLink,
+    archivedPaymentLinks,
     legacyQuoteId: quoteId,
     legacyInvoiceId: quote.invoiceId,
   } as DocumentRecord;
@@ -291,6 +360,11 @@ export function invoiceRecordToDocumentRecord(
   const payments = buildInvoicePayments(invoice, invoiceId);
   const paidTotal = sumPayments(payments);
   const total = Number(invoice.total ?? 0);
+  const activePaymentLink = invoice.activePaymentLink as DocumentPaymentLink | undefined
+    ?? deriveInvoiceActiveLink(invoice);
+  const archivedPaymentLinks = Array.isArray(invoice.archivedPaymentLinks)
+    ? (invoice.archivedPaymentLinks as DocumentPaymentLink[])
+    : undefined;
   return {
     ...shared,
     id: invoiceId,
@@ -302,6 +376,8 @@ export function invoiceRecordToDocumentRecord(
     payments,
     paidTotal,
     balanceDue: Math.max(0, total - paidTotal),
+    activePaymentLink,
+    archivedPaymentLinks,
     legacyQuoteId: invoice.sourceQuoteId,
     legacyInvoiceId: invoiceId,
   } as DocumentRecord;
@@ -350,6 +426,11 @@ export { stageToQuoteStatus, stageToInvoiceStatus };
 
 export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocumentRecord {
   const depositPayment = doc.payments.find((p) => p.kind === 'deposit');
+  const active = doc.activePaymentLink as DocumentPaymentLink | undefined;
+  // The unified link supersedes the legacy fields when set; otherwise the
+  // doc's own legacy field copies (kept by older writers) are returned.
+  const depositLink = active && active.kind === 'deposit' ? active : undefined;
+  const fullLink = active && active.kind === 'quote_full' ? active : undefined;
   return {
     id: doc.id,
     quoteNumber: doc.number,
@@ -399,10 +480,16 @@ export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocument
     depositAmount: doc.depositAmount,
     depositPaid: depositPayment?.amount ?? doc.depositPaid,
     depositPaidAt: fromMs(depositPayment?.paidAt ?? doc.depositPaidAt),
-    depositPaymentLinkId: doc.depositPaymentLinkId,
-    depositPaymentLinkUrl: doc.depositPaymentLinkUrl,
-    depositPaymentLinkCreatedAt: doc.depositPaymentLinkCreatedAt,
+    depositPaymentLinkId: depositLink?.id ?? doc.depositPaymentLinkId,
+    depositPaymentLinkUrl: depositLink?.url ?? doc.depositPaymentLinkUrl,
+    depositPaymentLinkCreatedAt: depositLink?.createdAt ?? doc.depositPaymentLinkCreatedAt,
     depositSquarePaymentId: depositPayment?.squarePaymentId ?? doc.depositSquarePaymentId,
+    fullPaymentLinkId: fullLink?.id ?? (doc as any).fullPaymentLinkId,
+    fullPaymentLinkUrl: fullLink?.url ?? (doc as any).fullPaymentLinkUrl,
+    fullPaymentLinkCreatedAt: fullLink?.createdAt ?? (doc as any).fullPaymentLinkCreatedAt,
+    fullPaymentLinkAmount: fullLink?.amount ?? (doc as any).fullPaymentLinkAmount,
+    activePaymentLink: doc.activePaymentLink,
+    archivedPaymentLinks: doc.archivedPaymentLinks,
     termsSnapshot: doc.termsSnapshot,
     termsVersionHash: doc.termsVersionHash,
     depositTcAccepted: doc.depositTcAccepted,
@@ -425,6 +512,8 @@ export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocume
   const depositCredit = doc.payments
     .filter((p) => p.kind === 'deposit')
     .reduce((acc, p) => acc + p.amount, 0);
+  const active = doc.activePaymentLink as DocumentPaymentLink | undefined;
+  const balanceLink = active && active.kind === 'balance' ? active : undefined;
 
   const paymentMethod: string | undefined = paid
     ? paid.method === 'square'
@@ -483,10 +572,13 @@ export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocume
     xeroSyncStatus: doc.xeroSyncStatus,
     xeroSyncedAt: fromMs(doc.xeroSyncedAt),
     xeroSyncError: doc.xeroSyncError,
-    squarePaymentLinkId: doc.squarePaymentLinkId,
-    squarePaymentLinkUrl: doc.squarePaymentLinkUrl,
+    squarePaymentLinkId: balanceLink?.id ?? doc.squarePaymentLinkId,
+    squarePaymentLinkUrl: balanceLink?.url ?? doc.squarePaymentLinkUrl,
+    squarePaymentLinkCreatedAt: balanceLink?.createdAt ?? (doc as any).squarePaymentLinkCreatedAt,
     squarePaymentId: doc.squarePaymentId,
     squarePaidAt: fromMs(doc.squarePaidAt),
+    activePaymentLink: doc.activePaymentLink,
+    archivedPaymentLinks: doc.archivedPaymentLinks,
     depositCredit: depositCredit > 0 ? depositCredit : undefined,
     depositCreditFromQuoteId: depositCredit > 0 ? doc.legacyQuoteId : undefined,
     termsSnapshot: doc.termsSnapshot,
