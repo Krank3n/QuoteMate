@@ -28,6 +28,7 @@ import {
 } from './email';
 import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from './pdfGenerator';
 export * from './adminCrm';
+export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { hashTerms } from './shared/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/money';
