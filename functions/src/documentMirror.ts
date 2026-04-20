@@ -20,282 +20,13 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 
-// ---------------------------------------------------------------------------
-// Adapter — duplicates src/types/documentAdapter.ts behaviour with relaxed
-// input typing so the trigger can accept raw Firestore data. Kept in lockstep
-// with the canonical adapter; see src/types/documentAdapter.ts for the
-// authoritative version used by the client.
-// ---------------------------------------------------------------------------
+import {
+  quoteRecordToDocumentRecord,
+  invoiceRecordToDocumentRecord,
+} from './shared/document/adapter';
+import type { LegacyDocumentRecord } from './shared/document/types';
 
-type AnyData = Record<string, any>;
-
-function toMs(value: any): number | undefined {
-  if (value === null || value === undefined) return undefined;
-  if (typeof value === 'number') return value;
-  if (value instanceof Date) {
-    const t = value.getTime();
-    return isNaN(t) ? undefined : t;
-  }
-  if (typeof value === 'string') {
-    const t = Date.parse(value);
-    return isNaN(t) ? undefined : t;
-  }
-  if (typeof value === 'object' && typeof value.toDate === 'function') {
-    const t = value.toDate().getTime();
-    return isNaN(t) ? undefined : t;
-  }
-  if (typeof value === 'object' && typeof value.seconds === 'number') {
-    return value.seconds * 1000;
-  }
-  return undefined;
-}
-
-function toMsRequired(value: any): number {
-  return toMs(value) ?? Date.now();
-}
-
-type DocumentType = 'quote' | 'invoice';
-type DocumentStage =
-  | 'draft'
-  | 'quote_sent'
-  | 'quote_accepted'
-  | 'quote_rejected'
-  | 'invoice_sent'
-  | 'partially_paid'
-  | 'paid'
-  | 'cancelled';
-
-interface DocumentPayment {
-  id: string;
-  kind: 'deposit' | 'balance' | 'manual';
-  amount: number;
-  paidAt: number;
-  squarePaymentId?: string;
-  method?: 'square' | 'bank' | 'cash' | 'other';
-  notes?: string;
-}
-
-function deriveStage(source: AnyData, type: DocumentType): DocumentStage {
-  const status = source.status as string | undefined;
-
-  if (type === 'invoice') {
-    const paidTotal = Number(source.paidTotal ?? source.paidAmount ?? 0);
-    const total = Number(source.total ?? 0);
-    if (status === 'cancelled') return 'cancelled';
-    if (status === 'paid' || (total > 0 && paidTotal >= total)) return 'paid';
-    if (status === 'partial' || (paidTotal > 0 && paidTotal < total)) {
-      return 'partially_paid';
-    }
-    if (status === 'sent' || status === 'overdue') return 'invoice_sent';
-    return 'draft';
-  }
-
-  switch (status) {
-    case 'cancelled':
-      return 'cancelled';
-    case 'rejected':
-      return 'quote_rejected';
-    case 'accepted':
-    case 'completed':
-    case 'paid':
-    case 'partial':
-      return 'quote_accepted';
-    case 'sent':
-    case 'overdue':
-      return 'quote_sent';
-    case 'draft':
-    default:
-      return 'draft';
-  }
-}
-
-function projectShared(s: AnyData, type: DocumentType): AnyData {
-  return {
-    contactId: s.contactId,
-    customerName: s.customerName ?? '',
-    customerEmail: s.customerEmail,
-    customerPhone: s.customerPhone,
-    jobAddress: s.jobAddress,
-    job: s.job,
-    materials: s.materials ?? [],
-    laborRate: Number(s.laborRate ?? 0),
-    laborHours: Number(s.laborHours ?? 0),
-    laborUnit: s.laborUnit,
-    laborTotal: Number(s.laborTotal ?? 0),
-    laborExtraHours: s.laborExtraHours,
-    sections: s.sections,
-    materialsSubtotal: Number(s.materialsSubtotal ?? 0),
-    markup: Number(s.markup ?? 0),
-    laborMarkup: s.laborMarkup,
-    markupAmount: Number(s.markupAmount ?? 0),
-    subtotal: Number(s.subtotal ?? 0),
-    gst: Number(s.gst ?? 0),
-    total: Number(s.total ?? 0),
-    showMarkup: s.showMarkup,
-    showLaborBreakdown: s.showLaborBreakdown,
-    travelAdjustment: s.travelAdjustment,
-    estimatedDistance: s.estimatedDistance,
-    estimatedFuelCost: s.estimatedFuelCost,
-    travelGeocodeFailed: s.travelGeocodeFailed,
-    termsSnapshot: s.termsSnapshot,
-    termsVersionHash: s.termsVersionHash,
-    depositTcAccepted: s.depositTcAccepted,
-    fullTcAccepted: s.fullTcAccepted,
-    tcAccepted: s.tcAccepted,
-    notes: s.notes,
-    draftEmailBody: s.draftEmailBody,
-    paymentSyncError: s.paymentSyncError,
-    disputeStatus: s.disputeStatus,
-    disputeId: s.disputeId,
-    jobId: s.jobId,
-    requireDeposit: s.requireDeposit,
-    depositPercentage: s.depositPercentage,
-    depositAmount: s.depositAmount,
-    depositPaid: s.depositPaid,
-    depositPaidAt: toMs(s.depositPaidAt),
-    depositPaymentLinkId: s.depositPaymentLinkId,
-    depositPaymentLinkUrl: s.depositPaymentLinkUrl,
-    depositPaymentLinkCreatedAt: toMs(s.depositPaymentLinkCreatedAt),
-    depositSquarePaymentId: s.depositSquarePaymentId,
-
-    acceptanceToken: type === 'quote' ? s.acceptanceToken : undefined,
-    acceptanceTokenCreatedAt:
-      type === 'quote' ? toMs(s.acceptanceTokenCreatedAt) : undefined,
-    respondedAt: type === 'quote' ? toMs(s.respondedAt) : undefined,
-    respondedBy: type === 'quote' ? s.respondedBy : undefined,
-    clientNotes: type === 'quote' ? s.clientNotes : undefined,
-    templateSuggestions:
-      type === 'quote' ? s.templateSuggestions : undefined,
-    photos: type === 'quote' ? s.photos : undefined,
-    aiEmailBody: type === 'quote' ? s.aiEmailBody : undefined,
-    aiSkipped: type === 'quote' ? s.aiSkipped : undefined,
-    draftStep: type === 'quote' ? s.draftStep : undefined,
-    invoicedAt: type === 'quote' ? toMs(s.invoicedAt) : undefined,
-
-    issueDate: type === 'invoice' ? toMs(s.issueDate) : undefined,
-    dueDate: type === 'invoice' ? toMs(s.dueDate) : undefined,
-    paymentTerms: type === 'invoice' ? s.paymentTerms : undefined,
-    customPaymentDays: type === 'invoice' ? s.customPaymentDays : undefined,
-    xeroInvoiceId: type === 'invoice' ? s.xeroInvoiceId : undefined,
-    xeroContactId: type === 'invoice' ? s.xeroContactId : undefined,
-    xeroSyncStatus: type === 'invoice' ? s.xeroSyncStatus : undefined,
-    xeroSyncedAt: type === 'invoice' ? toMs(s.xeroSyncedAt) : undefined,
-    xeroSyncError: type === 'invoice' ? s.xeroSyncError : undefined,
-    squarePaymentLinkId: type === 'invoice' ? s.squarePaymentLinkId : undefined,
-    squarePaymentLinkUrl:
-      type === 'invoice' ? s.squarePaymentLinkUrl : undefined,
-    squarePaymentId: type === 'invoice' ? s.squarePaymentId : undefined,
-    squarePaidAt: type === 'invoice' ? toMs(s.squarePaidAt) : undefined,
-  };
-}
-
-function buildQuotePayments(quote: AnyData, quoteId: string): DocumentPayment[] {
-  const out: DocumentPayment[] = [];
-  const depositPaid = Number(quote.depositPaid ?? 0);
-  if (depositPaid > 0) {
-    out.push({
-      id: quote.depositSquarePaymentId
-        ? `deposit-${quote.depositSquarePaymentId}`
-        : `deposit-${quoteId}`,
-      kind: 'deposit',
-      amount: depositPaid,
-      paidAt: toMsRequired(quote.depositPaidAt ?? quote.updatedAt),
-      squarePaymentId: quote.depositSquarePaymentId,
-      method: quote.depositSquarePaymentId ? 'square' : undefined,
-    });
-  }
-  return out;
-}
-
-function buildInvoicePayments(invoice: AnyData, invoiceId: string): DocumentPayment[] {
-  const out: DocumentPayment[] = [];
-  const depositCredit = Number(invoice.depositCredit ?? 0);
-  if (depositCredit > 0) {
-    out.push({
-      id: `deposit-credit-${invoice.depositCreditFromQuoteId ?? invoiceId}`,
-      kind: 'deposit',
-      amount: depositCredit,
-      paidAt: toMsRequired(invoice.createdAt),
-      method: 'square',
-      notes: 'Carried over from source quote',
-    });
-  }
-
-  const squarePaid = invoice.squarePaymentId
-    ? Number(invoice.paidAmount ?? invoice.total ?? 0)
-    : 0;
-  if (squarePaid > 0 && invoice.squarePaymentId) {
-    out.push({
-      id: `square-${invoice.squarePaymentId}`,
-      kind: 'balance',
-      amount: squarePaid,
-      paidAt: toMsRequired(invoice.squarePaidAt ?? invoice.paidDate),
-      squarePaymentId: invoice.squarePaymentId,
-      method: 'square',
-    });
-  } else {
-    const manual = Number(invoice.paidAmount ?? 0);
-    if (manual > 0) {
-      out.push({
-        id: `manual-${invoiceId}`,
-        kind: 'manual',
-        amount: manual,
-        paidAt: toMsRequired(invoice.paidDate),
-        method: invoice.paymentMethod === 'card' ? 'square' :
-                invoice.paymentMethod === 'cash' ? 'cash' :
-                invoice.paymentMethod === 'bank_transfer' ? 'bank' : 'other',
-        notes: invoice.paymentNotes,
-      });
-    }
-  }
-  return out;
-}
-
-function sumPayments(payments: DocumentPayment[]): number {
-  return payments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
-}
-
-function quoteToDocument(quote: AnyData, quoteId: string): AnyData {
-  const shared = projectShared(quote, 'quote');
-  const payments = buildQuotePayments(quote, quoteId);
-  const paidTotal = sumPayments(payments);
-  const total = Number(quote.total ?? 0);
-  return {
-    ...shared,
-    id: quoteId,
-    number: quote.quoteNumber || `QU-${quoteId.slice(0, 6)}`,
-    stage: deriveStage(quote, 'quote'),
-    type: 'quote',
-    createdAt: toMsRequired(quote.createdAt),
-    updatedAt: toMsRequired(quote.updatedAt),
-    payments,
-    paidTotal,
-    balanceDue: Math.max(0, total - paidTotal),
-    legacyQuoteId: quoteId,
-    legacyInvoiceId: quote.invoiceId,
-  };
-}
-
-function invoiceToDocument(invoice: AnyData, invoiceId: string): AnyData {
-  const shared = projectShared(invoice, 'invoice');
-  const payments = buildInvoicePayments(invoice, invoiceId);
-  const paidTotal = sumPayments(payments);
-  const total = Number(invoice.total ?? 0);
-  return {
-    ...shared,
-    id: invoiceId,
-    number: invoice.invoiceNumber || `IN-${invoiceId.slice(0, 6)}`,
-    stage: deriveStage(invoice, 'invoice'),
-    type: 'invoice',
-    createdAt: toMsRequired(invoice.createdAt),
-    updatedAt: toMsRequired(invoice.updatedAt),
-    payments,
-    paidTotal,
-    balanceDue: Math.max(0, total - paidTotal),
-    legacyQuoteId: invoice.sourceQuoteId,
-    legacyInvoiceId: invoiceId,
-  };
-}
+type AnyData = LegacyDocumentRecord;
 
 // ---------------------------------------------------------------------------
 // Mirror writers — pure side-effect functions used by both triggers and the
@@ -412,13 +143,13 @@ export const onQuoteWritten = functions.firestore
         .get();
       if (invoiceSnap.exists) {
         const invoiceData = invoiceSnap.data() as AnyData;
-        const projection = invoiceToDocument(invoiceData, invoiceSnap.id);
+        const projection = invoiceRecordToDocumentRecord(invoiceData, invoiceSnap.id);
         await writeMirror(userId, mirrorIdForQuote(quoteId), projection);
         return;
       }
     }
 
-    const projection = quoteToDocument(after, quoteId);
+    const projection = quoteRecordToDocumentRecord(after, quoteId);
     await writeMirror(userId, mirrorIdForQuote(quoteId), projection);
   });
 
@@ -441,7 +172,7 @@ export const onInvoiceWritten = functions.firestore
           .collection('quotes').doc(sourceQuoteId)
           .get();
         if (quoteSnap.exists) {
-          const projection = quoteToDocument(quoteSnap.data() as AnyData, quoteSnap.id);
+          const projection = quoteRecordToDocumentRecord(quoteSnap.data() as AnyData, quoteSnap.id);
           await writeMirror(userId, mirrorIdForQuote(sourceQuoteId), projection);
           return;
         }
@@ -452,7 +183,7 @@ export const onInvoiceWritten = functions.firestore
 
     if (!after) return;
 
-    const projection = invoiceToDocument(after, invoiceId);
+    const projection = invoiceRecordToDocumentRecord(after, invoiceId);
     await writeMirror(userId, mirrorIdForInvoice(after, invoiceId), projection);
   });
 
@@ -495,7 +226,7 @@ async function mirrorAllForUser(userId: string, summary: BackfillSummary): Promi
         invoicesByQuoteId.set(data.sourceQuoteId, { id: inv.id, data });
       }
       try {
-        const projection = invoiceToDocument(data, inv.id);
+        const projection = invoiceRecordToDocumentRecord(data, inv.id);
         const res = await writeMirror(userId, mirrorIdForInvoice(data, inv.id), projection);
         if (res.written) summary.invoicesMirrored++;
         if (res.skipped) summary.skipped++;
@@ -526,7 +257,7 @@ async function mirrorAllForUser(userId: string, summary: BackfillSummary): Promi
           summary.skipped++;
           continue;
         }
-        const projection = quoteToDocument(q.data() as AnyData, q.id);
+        const projection = quoteRecordToDocumentRecord(q.data() as AnyData, q.id);
         const res = await writeMirror(userId, mirrorIdForQuote(q.id), projection);
         if (res.written) summary.quotesMirrored++;
         if (res.skipped) summary.skipped++;

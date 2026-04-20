@@ -7,8 +7,8 @@ import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 
 // Re-export shared builders and types for use by index.ts
-export { buildQuotePdfHtml, buildInvoicePdfHtml } from './shared';
-export type { QuotePdfData, InvoicePdfData, BusinessPdfData } from './shared';
+export { buildQuotePdfHtml, buildInvoicePdfHtml } from './shared/pdf';
+export type { QuotePdfData, InvoicePdfData, BusinessPdfData } from './shared/pdf';
 
 // ---- Render HTML to PDF buffer via Puppeteer ----
 

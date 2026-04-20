@@ -1,9 +1,10 @@
 /**
  * Unified Document type — the eventual replacement for the parallel Quote
- * and Invoice collections. Defined here so the adapter, state machine, and
- * tests have a single source of truth ahead of the phase-2 migration that
- * will swap the storage layer over. Quote and Invoice continue to be the
- * canonical types until then; nothing reads or writes Document yet.
+ * and Invoice collections. The stage/payment primitives live in
+ * `shared/document/types.ts` so the server (Cloud Functions) and client
+ * share one source of truth. The strongly-typed `Document` interface here
+ * overlays those primitives with the client's existing typed deep fields
+ * (Job, Material, etc.).
  */
 
 import type {
@@ -20,37 +21,26 @@ import type {
   LaborUnit,
 } from './index';
 
-export type DocumentStage =
-  | 'draft'
-  | 'quote_sent'
-  | 'quote_accepted' // deposit may or may not be paid
-  | 'quote_rejected'
-  | 'invoice_sent'
-  | 'partially_paid'
-  | 'paid'
-  | 'cancelled';
+export type {
+  DocumentStage,
+  DocumentType,
+  DocumentPayment,
+  DocumentPaymentKind,
+  DocumentPaymentMethod,
+} from '../../shared/document/types';
 
-export type DocumentType = 'quote' | 'invoice';
-
-export type DocumentPaymentKind = 'deposit' | 'balance' | 'manual';
-export type DocumentPaymentMethod = 'square' | 'bank' | 'cash' | 'other';
-
-export interface DocumentPayment {
-  id: string;
-  kind: DocumentPaymentKind;
-  amount: number;
-  paidAt: number; // ms epoch — Firestore-friendly across web/native
-  squarePaymentId?: string;
-  method?: DocumentPaymentMethod;
-  notes?: string;
-}
+import type {
+  DocumentStage,
+  DocumentType,
+  DocumentPayment,
+} from '../../shared/document/types';
 
 export interface Document {
   id: string;
   number: string; // QU-1042 / IN-1042 — format chosen at format time, derived from stage
   stage: DocumentStage;
   type: DocumentType; // current canonical view of this doc
-  createdAt: number; // ms epoch — see DocumentPayment.paidAt note
+  createdAt: number; // ms epoch — Firestore-friendly across web/native
   updatedAt: number;
 
   // ===== Customer + job =====

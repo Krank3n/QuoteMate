@@ -30,14 +30,14 @@ import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from '
 export * from './adminCrm';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
-import { hashTerms } from './shared/terms/defaultAuTradie';
-import { dollarsToCents, centsToDollars } from './shared/money';
+import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
+import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   QM_APP_FEE_PCT_ONLINE,
   QM_APP_FEE_PCT_IN_PERSON,
   PASSTHROUGH_SURCHARGE_PCT,
-} from './shared/squareFees';
-// (All resolve via the functions/src/shared symlink → shared/pdf)
+} from './shared/pdf/squareFees';
+// (All resolve via the functions/src/shared symlink → shared/)
 
 // Initialize Firebase Admin
 admin.initializeApp();
