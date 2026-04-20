@@ -49,6 +49,7 @@ import { AlertModal } from '../components/AlertModal';
 import { TRADE_CATEGORIES } from '../constants/tradeCategories';
 import { auth, storage } from '../config/firebase';
 import * as squareService from '../services/squareService';
+import { compressLogo } from '../services/photoService';
 import { lightTap, successTap, errorTap, selectionTap } from '../utils/haptics';
 
 const STORAGE_KEY = 'onboarding:draft';
@@ -326,16 +327,20 @@ export function NewOnboardingScreen() {
     const userId = auth.currentUser?.uid;
     if (!userId) throw new Error('Not signed in');
 
+    // Compress/resize before upload so we don't ship multi-MB camera-roll
+    // images for something that renders at ~150px on PDFs and emails.
+    const compressedUri = await compressLogo(uri);
+
     const blob: Blob = await new Promise((resolve, reject) => {
       if (Platform.OS === 'web') {
-        fetch(uri).then(r => r.blob()).then(resolve).catch(reject);
+        fetch(compressedUri).then(r => r.blob()).then(resolve).catch(reject);
         return;
       }
       const xhr = new XMLHttpRequest();
       xhr.onload = () => resolve(xhr.response);
       xhr.onerror = () => reject(new Error('Failed to read image file'));
       xhr.responseType = 'blob';
-      xhr.open('GET', uri, true);
+      xhr.open('GET', compressedUri, true);
       xhr.send(null);
     });
 

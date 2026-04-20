@@ -459,17 +459,25 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
   const docRef = firestore.doc(`users/${userId}/documents/${docId}`);
 
   const batch = firestore.batch();
-  const quoteUpdate: AnyData = {
-    acceptanceTokenHash: hashedToken,
-    acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  };
+  // Field ordering: Object.assign client overrides FIRST, then stamp
+  // server-managed fields on top. A resend that round-trips
+  // acceptanceTokenCreatedAt as a null/stale value via the client must not
+  // clobber the fresh serverTimestamp — that bug let the acceptance page
+  // read `new Date(null)` = 1970 and false-report links as expired.
+  const quoteUpdate: AnyData = {};
   if (input.overrides) {
     Object.assign(quoteUpdate, input.overrides);
     delete quoteUpdate.id;
   }
+  quoteUpdate.acceptanceTokenHash = hashedToken;
+  quoteUpdate.acceptanceTokenCreatedAt = admin.firestore.FieldValue.serverTimestamp();
   if (!isTestSend) {
     quoteUpdate.status = 'sent';
+    quoteUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
     quoteUpdate.aiEmailBody = emailBody;
+    // Server-stamped updatedAt forces the client's mergeRemoteQuotes to
+    // accept the 'sent' snapshot over its own in-flight saveDraft write.
+    quoteUpdate.updatedAt = admin.firestore.FieldValue.serverTimestamp();
   }
   batch.set(quoteRef, quoteUpdate, { merge: true });
   // Step 7 — auto-flip stage on send. For real sends only.

@@ -2860,6 +2860,60 @@ function hashToken(token: string): string {
 }
 
 /**
+ * Normalise any Firestore-shaped timestamp value into a JS Date.
+ * Handles: Firestore Timestamp, {_seconds, _nanoseconds}, {seconds, nanoseconds},
+ * ISO string, number, Date, null/undefined. Returns null for missing/invalid
+ * input — callers MUST treat that as "no expiry anchor available" and handle
+ * accordingly rather than falling into `new Date(null)` (which is 1970 and
+ * would make every link appear expired).
+ */
+function normaliseTimestamp(value: any): Date | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    try {
+      const d = value.toDate();
+      return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+    } catch { /* fall through */ }
+  }
+  if (typeof value === 'object') {
+    const seconds = typeof value.seconds === 'number' ? value.seconds
+                  : typeof value._seconds === 'number' ? value._seconds
+                  : null;
+    const nanos = typeof value.nanoseconds === 'number' ? value.nanoseconds
+                : typeof value._nanoseconds === 'number' ? value._nanoseconds
+                : 0;
+    if (seconds !== null) return new Date(seconds * 1000 + nanos / 1e6);
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/**
+ * Resolve the best available timestamp to anchor the acceptance-token expiry
+ * check against. Prefers the quote's acceptanceTokenCreatedAt, falls back to
+ * the token doc's createdAt (which is stamped server-side on every mint and
+ * is the source of truth if the quote's field got clobbered by a stale
+ * client-side ISO string), then to the quote's createdAt as a last resort.
+ * Returns null only if nothing usable exists — callers should then skip the
+ * expiry check rather than expire the link spuriously.
+ */
+function resolveTokenCreatedAt(
+  foundQuote: any,
+  tokenData?: any,
+): Date | null {
+  return (
+    normaliseTimestamp(foundQuote?.acceptanceTokenCreatedAt) ||
+    normaliseTimestamp(tokenData?.createdAt) ||
+    normaliseTimestamp(foundQuote?.createdAt) ||
+    null
+  );
+}
+
+/**
  * Generate a secure acceptance token for a quote
  * Creates a 256-bit random token, stores it on the quote, returns the acceptance URL
  */
@@ -3180,6 +3234,7 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
       let foundQuote: any = null;
       let businessSettings: any = null;
       let quoteRef: FirebaseFirestore.DocumentReference | null = null;
+      let tokenDataForExpiry: any = null;
       const tokenHash = hashToken(token);
 
       // O(1) lookup via dedicated tokens collection (hashed)
@@ -3192,6 +3247,7 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
 
       if (tokenDoc.exists) {
         const tokenData = tokenDoc.data()!;
+        tokenDataForExpiry = tokenData;
         const quoteDoc = await db.collection('users').doc(tokenData.userId)
           .collection('quotes').doc(tokenData.quoteId).get();
 
@@ -3255,11 +3311,13 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Check if token has expired (30 days)
-      const tokenCreatedAt = foundQuote.acceptanceTokenCreatedAt?.toDate?.() ||
-        new Date(foundQuote.acceptanceTokenCreatedAt);
-      const now = new Date();
-      if (now.getTime() - tokenCreatedAt.getTime() > TOKEN_EXPIRATION_MS) {
+      // Check if token has expired (30 days). Fall back to the token doc's
+      // server-stamped createdAt if the quote's acceptanceTokenCreatedAt was
+      // clobbered by a stale client-side ISO string. If nothing resolves, skip
+      // the expiry check rather than letting `new Date(null)` = 1970 make
+      // every link look expired.
+      const tokenCreatedAt = resolveTokenCreatedAt(foundQuote, tokenDataForExpiry);
+      if (tokenCreatedAt && Date.now() - tokenCreatedAt.getTime() > TOKEN_EXPIRATION_MS) {
         res.status(410).json({ success: false, error: 'This link has expired. Please request a new quote.' });
         return;
       }
@@ -3372,6 +3430,7 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
       let foundQuote: any = null;
       let foundUserId: string = '';
       let businessSettings: any = null;
+      let tokenDataForExpiry: any = null;
       const tokenHash = hashToken(token);
 
       // O(1) lookup via dedicated tokens collection (hashed)
@@ -3384,6 +3443,7 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
 
       if (tokenDoc.exists) {
         const tokenData = tokenDoc.data()!;
+        tokenDataForExpiry = tokenData;
         foundUserId = tokenData.userId;
         const quoteDoc = await db.collection('users').doc(tokenData.userId)
           .collection('quotes').doc(tokenData.quoteId).get();
@@ -3454,11 +3514,12 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Check token expiration
-      const tokenCreatedAt = foundQuote.acceptanceTokenCreatedAt?.toDate?.() ||
-        new Date(foundQuote.acceptanceTokenCreatedAt);
-      const now = new Date();
-      if (now.getTime() - tokenCreatedAt.getTime() > TOKEN_EXPIRATION_MS) {
+      // Check token expiration. Fall back to token doc's createdAt if the
+      // quote's acceptanceTokenCreatedAt was clobbered by a stale client
+      // ISO string; skip the check entirely if nothing usable resolves so
+      // `new Date(null)` = 1970 can't spuriously expire every link.
+      const tokenCreatedAt = resolveTokenCreatedAt(foundQuote, tokenDataForExpiry);
+      if (tokenCreatedAt && Date.now() - tokenCreatedAt.getTime() > TOKEN_EXPIRATION_MS) {
         res.status(410).json({ success: false, error: 'This link has expired' });
         return;
       }
@@ -3619,10 +3680,13 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
       return;
     }
 
-    // Check token expiration
-    const tokenCreatedAt = foundQuote.acceptanceTokenCreatedAt?.toDate?.() ||
-      new Date(foundQuote.acceptanceTokenCreatedAt);
-    if (Date.now() - tokenCreatedAt.getTime() > TOKEN_EXPIRATION_MS) {
+    // Check token expiration. Prefer the token doc's createdAt (always
+    // server-stamped at mint time) over the quote's acceptanceTokenCreatedAt
+    // field — the latter can get clobbered by a stale client ISO string and
+    // reduce to `new Date(null)` = 1970, which would make every link look
+    // expired. Skip the check if nothing resolves rather than false-expiring.
+    const tokenCreatedAt = resolveTokenCreatedAt(foundQuote, tokenData);
+    if (tokenCreatedAt && Date.now() - tokenCreatedAt.getTime() > TOKEN_EXPIRATION_MS) {
       res.status(200).send(generateConfirmationPage(
         'error',
         'This link has expired. Please contact the business directly.',
