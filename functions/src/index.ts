@@ -30,7 +30,9 @@ import {
   loadDocumentForQuoteId,
   loadDocumentForInvoiceId,
   applyPaymentToDocument,
+  createOrRotatePaymentLink,
   logShimInvocation,
+  type SquareLinkMinter,
 } from './documentHandlers';
 import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './shared/document/adapter';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
@@ -3004,8 +3006,14 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         isTestSend,
         includePhotos,
         overrides: quoteFromClient && typeof quoteFromClient === 'object' ? quoteFromClient : undefined,
-        squareDepositLinkMint: createSquareDepositPaymentLinkInternal,
-        squareInvoiceLinkMint: createSquarePaymentLinkInternal,
+        squareDepositLinkMint: async (uid, qid) => {
+          const r = await mintAndRotate(uid, qid, 'deposit');
+          return r ? { paymentLinkUrl: r.paymentLinkUrl } : null;
+        },
+        squareInvoiceLinkMint: async (uid, iid) => {
+          const r = await mintAndRotate(uid, iid, 'invoice');
+          return r ? { paymentLinkId: r.paymentLinkId, paymentLinkUrl: r.paymentLinkUrl } : null;
+        },
         acceptanceUrlForToken: (token) =>
           `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`,
         fetchPhotoAttachments,
@@ -3072,7 +3080,10 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         isTestSend,
         includePhotos,
         overrides: invoiceFromClient && typeof invoiceFromClient === 'object' ? invoiceFromClient : undefined,
-        squareInvoiceLinkMint: createSquarePaymentLinkInternal,
+        squareInvoiceLinkMint: async (uid, iid) => {
+          const r = await mintAndRotate(uid, iid, 'invoice');
+          return r ? { paymentLinkId: r.paymentLinkId, paymentLinkUrl: r.paymentLinkUrl } : null;
+        },
         fetchPhotoAttachments,
       });
 
@@ -3671,13 +3682,24 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
       const depositPct = depositRequired ? (Number(foundQuote.depositPercentage) || 0) : 0;
       if (depositRequired && depositPct > 0) {
         try {
-          const linkResult = await createSquareDepositPaymentLinkInternal(foundUserId, foundQuote.id);
-          if (linkResult) {
-            depositPayment = { url: linkResult.paymentLinkUrl, amount: linkResult.depositAmount };
+          // Prefer the doc's active link; mint via the rotation path so the
+          // unified ledger picks up any new link rather than going around it.
+          const unifiedDoc = await loadDocumentForQuoteId(foundUserId, foundQuote.id);
+          const active = unifiedDoc?.activePaymentLink as
+            { id: string; url: string; kind: string; amount: number; consumedAt?: number } | undefined;
+          if (active && active.kind === 'deposit' && !active.consumedAt) {
+            depositPayment = { url: active.url, amount: active.amount };
           } else {
-            console.warn('[square] deposit link mint returned null on acceptance', {
-              userId: foundUserId, quoteId: foundQuote.id,
-            });
+            const linkResult = await mintAndRotate(foundUserId, foundQuote.id, 'deposit');
+            if (linkResult) {
+              const depositAmount = Number(foundQuote.depositAmount)
+                || ((Number(foundQuote.total) || 0) * (depositPct / 100));
+              depositPayment = { url: linkResult.paymentLinkUrl, amount: depositAmount };
+            } else {
+              console.warn('[square] deposit link mint returned null on acceptance', {
+                userId: foundUserId, quoteId: foundQuote.id,
+              });
+            }
           }
         } catch (err: any) {
           console.error('[square] deposit link mint threw on acceptance', {
@@ -9534,6 +9556,58 @@ async function createSquarePaymentLinkInternal(
   return { paymentLinkId, paymentLinkUrl };
 }
 
+/**
+ * Phase-3 minter: thin facade over the index.ts internal mint helpers so
+ * documentHandlers.createOrRotatePaymentLink can stay free of Square HTTP/auth
+ * code. Each mint call inside still performs its own legacy-field write +
+ * orderId index registration; the rotator reads the doc state and decides
+ * whether to call us at all.
+ */
+const phase3SquareMinter: SquareLinkMinter = {
+  mintDeposit: async (userId: string, quoteId: string) => {
+    return createSquareDepositPaymentLinkInternal(userId, quoteId);
+  },
+  mintQuoteFull: async (userId: string, quoteId: string) => {
+    return createSquareFullQuotePaymentLinkInternal(userId, quoteId);
+  },
+  mintInvoice: async (userId: string, invoiceId: string) => {
+    return createSquarePaymentLinkInternal(userId, invoiceId);
+  },
+};
+
+/**
+ * Wrap the legacy mint helper to also rotate the unified active link on the
+ * Document. Returns the legacy-shaped result for back-compat with callers
+ * that read paymentLinkId/paymentLinkUrl.
+ */
+async function mintAndRotate(
+  userId: string,
+  legacyTargetId: string,
+  expectedKind: 'deposit' | 'quote_full' | 'invoice',
+): Promise<{ paymentLinkId: string; paymentLinkUrl: string; depositAmount?: number; amount?: number } | null> {
+  // Resolve to the unified document id. For deposit/quote_full the legacy id
+  // is the quoteId (which is also the unified docId). For invoices the
+  // unified doc may live under the source quote's id (collapsed).
+  let unifiedDocId: string = legacyTargetId;
+  if (expectedKind === 'invoice') {
+    const inv = await loadDocumentForInvoiceId(userId, legacyTargetId);
+    if (inv) unifiedDocId = inv.id;
+  }
+  const rotated = await createOrRotatePaymentLink(userId, unifiedDocId, phase3SquareMinter);
+  if (!rotated) {
+    // Rotation declined (e.g. doc has no link need). Fall back to the raw
+    // legacy mint so callers like the take-payment sheet still get a URL.
+    if (expectedKind === 'deposit') {
+      return createSquareDepositPaymentLinkInternal(userId, legacyTargetId);
+    }
+    if (expectedKind === 'quote_full') {
+      return createSquareFullQuotePaymentLinkInternal(userId, legacyTargetId);
+    }
+    return createSquarePaymentLinkInternal(userId, legacyTargetId);
+  }
+  return { paymentLinkId: rotated.paymentLinkId, paymentLinkUrl: rotated.url };
+}
+
 export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
@@ -9546,7 +9620,7 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
 
     // Accept either:
     //   legacy: { invoiceId }
-    //   new:    { kind: 'invoice' | 'quote_deposit', targetId }
+    //   new:    { kind: 'invoice' | 'quote_deposit' | 'quote_full', targetId }
     const { invoiceId, kind, targetId } = req.body || {};
 
     if (kind === 'quote_deposit') {
@@ -9554,7 +9628,7 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
         res.status(400).json({ error: 'Missing targetId' });
         return;
       }
-      const result = await createSquareDepositPaymentLinkInternal(decodedToken.uid, targetId);
+      const result = await mintAndRotate(decodedToken.uid, targetId, 'deposit');
       if (!result) {
         res.status(400).json({ error: 'Failed to create Square deposit payment link' });
         return;
@@ -9568,7 +9642,7 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
         res.status(400).json({ error: 'Missing targetId' });
         return;
       }
-      const result = await createSquareFullQuotePaymentLinkInternal(decodedToken.uid, targetId);
+      const result = await mintAndRotate(decodedToken.uid, targetId, 'quote_full');
       if (!result) {
         res.status(400).json({ error: 'Failed to create Square full quote payment link' });
         return;
@@ -9583,7 +9657,7 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const result = await createSquarePaymentLinkInternal(decodedToken.uid, id);
+    const result = await mintAndRotate(decodedToken.uid, id, 'invoice');
     if (!result) {
       res.status(400).json({ error: 'Failed to create Square payment link' });
       return;
