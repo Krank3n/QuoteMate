@@ -19,7 +19,9 @@ import { Quote } from '../types';
 import { documentToQuote } from '../types/documentAdapter';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
-import { QuoteCard } from '../components/QuoteCard';
+import { DocumentCard } from '../components/DocumentCard';
+import { quoteToDocument } from '../types/documentAdapter';
+import type { Document } from '../types/document';
 import { AlertModal } from '../components/AlertModal';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
@@ -210,21 +212,27 @@ export function QuotesListScreen() {
     }
   };
 
-  const renderQuoteCard = useCallback(({ item: quote, index }: { item: Quote; index: number }) => (
-    <AnimatedListItem index={index}>
-      <QuoteCard
-        quote={quote}
-        businessSettings={businessSettings}
-        onView={handleViewQuote}
-        onEdit={handleEditQuote}
-        onDelete={handleDeleteQuote}
-        onDuplicate={handleDuplicateQuote}
-        onSave={saveQuote}
-        onStatusChange={handleOpenStatusSheet}
-        onConvertToInvoice={handleConvertToInvoice}
-      />
-    </AnimatedListItem>
-  ), [businessSettings, handleViewQuote, handleEditQuote, handleDeleteQuote, handleDuplicateQuote, saveQuote, handleOpenStatusSheet, handleConvertToInvoice]);
+  const renderQuoteCard = useCallback(({ item: quote, index }: { item: Quote; index: number }) => {
+    // Project the typed Quote back into the unified Document for the new card.
+    // The quote came from documents anyway (via the screen-level memo), so this
+    // is a round-trip; cheap, and keeps the card 100% type-driven.
+    const doc: Document = quoteToDocument(quote);
+    return (
+      <AnimatedListItem index={index}>
+        <DocumentCard
+          doc={doc}
+          businessSettings={businessSettings}
+          onView={handleViewQuote}
+          onEdit={(d) => handleEditQuote(quote)}
+          onDelete={handleDeleteQuote}
+          onDuplicate={() => handleDuplicateQuote(quote)}
+          onSave={() => saveQuote(quote)}
+          onStatusChange={() => handleOpenStatusSheet(quote)}
+          onConvertToInvoice={() => handleConvertToInvoice(quote)}
+        />
+      </AnimatedListItem>
+    );
+  }, [businessSettings, handleViewQuote, handleEditQuote, handleDeleteQuote, handleDuplicateQuote, saveQuote, handleOpenStatusSheet, handleConvertToInvoice]);
 
   return (
     <View style={styles.container}>

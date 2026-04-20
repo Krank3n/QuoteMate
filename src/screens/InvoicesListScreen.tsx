@@ -20,7 +20,9 @@ import { Invoice, Quote } from '../types';
 import { documentToInvoice, documentToQuote } from '../types/documentAdapter';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
-import { InvoiceCard } from '../components/InvoiceCard';
+import { DocumentCard } from '../components/DocumentCard';
+import { invoiceToDocument } from '../types/documentAdapter';
+import type { Document } from '../types/document';
 import { ProBadge } from '../components/ProBadge';
 import { isInvoiceOverdue } from '../utils/invoiceCalculator';
 import { AnimatedListItem } from '../components/AnimatedListItem';
@@ -229,20 +231,23 @@ export function InvoicesListScreen() {
     }
   };
 
-  const renderInvoiceCard = useCallback(({ item: invoice, index }: { item: Invoice; index: number }) => (
-    <AnimatedListItem index={index}>
-      <InvoiceCard
-        invoice={invoice}
-        businessSettings={businessSettings}
-        onView={handleViewInvoice}
-        onEdit={handleEditInvoice}
-        onDelete={handleDeleteInvoice}
-        onRecordPayment={handleRecordPayment}
-        onSave={saveInvoice}
-        onDuplicate={handleDuplicateInvoice}
-      />
-    </AnimatedListItem>
-  ), [businessSettings, handleViewInvoice, handleEditInvoice, handleDeleteInvoice, handleRecordPayment, saveInvoice, handleDuplicateInvoice]);
+  const renderInvoiceCard = useCallback(({ item: invoice, index }: { item: Invoice; index: number }) => {
+    const doc: Document = invoiceToDocument(invoice);
+    return (
+      <AnimatedListItem index={index}>
+        <DocumentCard
+          doc={doc}
+          businessSettings={businessSettings}
+          onView={handleViewInvoice}
+          onEdit={() => handleEditInvoice(invoice)}
+          onDelete={handleDeleteInvoice}
+          onDuplicate={() => handleDuplicateInvoice(invoice)}
+          onSave={() => saveInvoice(invoice)}
+          onRecordPayment={() => handleRecordPayment(invoice)}
+        />
+      </AnimatedListItem>
+    );
+  }, [businessSettings, handleViewInvoice, handleEditInvoice, handleDeleteInvoice, handleRecordPayment, saveInvoice, handleDuplicateInvoice]);
 
   return (
     <View style={styles.container}>

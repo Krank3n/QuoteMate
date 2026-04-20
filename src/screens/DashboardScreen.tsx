@@ -21,7 +21,8 @@ import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
 import { WebContainer } from '../components/WebContainer';
-import { QuoteCard } from '../components/QuoteCard';
+import { DocumentCard } from '../components/DocumentCard';
+import { quoteToDocument } from '../types/documentAdapter';
 import { AlertModal } from '../components/AlertModal';
 import { updateActivityTimestamp } from '../services/emailService';
 import { AnimatedNumber } from '../components/AnimatedNumber';
@@ -753,16 +754,16 @@ export function DashboardScreen() {
             {recentQuotes.map((quote, index) => (
               <AnimatedListItem key={quote.id} index={index}>
                 <View ref={index === 0 ? recentQuoteCardRef : undefined}>
-                <QuoteCard
-                  quote={quote}
+                <DocumentCard
+                  doc={quoteToDocument(quote)}
                   businessSettings={businessSettings}
                   onView={handleViewQuote}
-                  onEdit={handleEditQuote}
+                  onEdit={() => handleEditQuote(quote)}
                   onDelete={handleDeleteQuote}
-                  onDuplicate={handleDuplicateQuote}
-                  onSave={saveQuote}
-                  onStatusChange={handleOpenStatusSheet}
-                  onConvertToInvoice={handleConvertToInvoice}
+                  onDuplicate={() => handleDuplicateQuote(quote)}
+                  onSave={() => saveQuote(quote)}
+                  onStatusChange={() => handleOpenStatusSheet(quote)}
+                  onConvertToInvoice={() => handleConvertToInvoice(quote)}
                   swipeableRef={index === 0 ? firstQuoteSwipeRef : undefined}
                 />
                 </View>
