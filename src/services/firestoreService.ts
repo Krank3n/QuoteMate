@@ -106,18 +106,27 @@ class FirestoreService {
       // as Timestamps and could be Invalid Dates if previously parsed with `new Date(<Timestamp>)`.
       // Use merge:true so we don't clobber server-only fields like acceptanceTokenHash that the
       // sendQuoteEmail cloud function maintains.
-      await setDoc(quoteRef, stripUndefined({
+      //
+      // We deliberately omit acceptanceTokenCreatedAt / respondedAt from the
+      // payload when they have no value instead of writing `null`. The
+      // acceptance-page expiry check does `new Date(foundQuote.acceptanceTokenCreatedAt)`
+      // which, given a null, returns 1970 and makes every link look expired.
+      // Writing null via merge would overwrite the server-stamped timestamp
+      // from sendQuoteEmail if a local save races after the send completes.
+      const payload: Record<string, any> = {
         ...quote,
         createdAt: safeIsoString(quote.createdAt) || new Date().toISOString(),
         updatedAt: safeIsoString(quote.updatedAt) || new Date().toISOString(),
-        // Handle new quote acceptance fields
         acceptanceToken: quote.acceptanceToken || null,
-        acceptanceTokenCreatedAt: safeIsoString(quote.acceptanceTokenCreatedAt),
-        respondedAt: safeIsoString(quote.respondedAt),
         respondedBy: quote.respondedBy || null,
         clientNotes: quote.clientNotes || null,
         syncedAt: new Date().toISOString(),
-      }), { merge: true });
+      };
+      const tokenCreatedAtIso = safeIsoString(quote.acceptanceTokenCreatedAt);
+      if (tokenCreatedAtIso) payload.acceptanceTokenCreatedAt = tokenCreatedAtIso;
+      const respondedAtIso = safeIsoString(quote.respondedAt);
+      if (respondedAtIso) payload.respondedAt = respondedAtIso;
+      await setDoc(quoteRef, stripUndefined(payload), { merge: true });
     } catch (error) {
       throw error;
     }

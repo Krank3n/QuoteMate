@@ -14,6 +14,12 @@ import { storage } from '../config/firebase';
 const MAX_WIDTH = 1200;
 const JPEG_QUALITY = 0.7;
 
+// Logo-specific compression — logos appear small on PDFs/emails so 512px is
+// plenty. Keeps uploaded file size in the low-10s of KB range instead of
+// multi-MB photos straight from the camera roll.
+const LOGO_MAX_WIDTH = 512;
+const LOGO_JPEG_QUALITY = 0.8;
+
 /**
  * Compress and resize an image before saving
  */
@@ -23,6 +29,24 @@ export async function compressImage(uri: string): Promise<string> {
       uri,
       [{ resize: { width: MAX_WIDTH } }],
       { compress: JPEG_QUALITY, format: SaveFormat.JPEG }
+    );
+    return result.uri;
+  } catch (error) {
+    return uri;
+  }
+}
+
+/**
+ * Compress a logo for upload. Smaller target size than general quote photos
+ * because logos render at ~100-200px on PDFs and emails — storing anything
+ * larger wastes Firebase Storage and slows email rendering.
+ */
+export async function compressLogo(uri: string): Promise<string> {
+  try {
+    const result = await manipulateAsync(
+      uri,
+      [{ resize: { width: LOGO_MAX_WIDTH } }],
+      { compress: LOGO_JPEG_QUALITY, format: SaveFormat.JPEG }
     );
     return result.uri;
   } catch (error) {

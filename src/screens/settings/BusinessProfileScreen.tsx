@@ -33,6 +33,7 @@ import { auth, storage, db } from '../../config/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { geocodeAddress } from '../../utils/travelCalculator';
 import { checkSquareConnection } from '../../services/squareService';
+import { compressLogo } from '../../services/photoService';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -159,18 +160,23 @@ export function BusinessProfileScreen() {
     const userId = auth.currentUser?.uid;
     if (!userId) throw new Error('Not signed in');
 
+    // Compress/resize before upload. Logos end up as small thumbnails on PDFs
+    // and emails — shipping the raw camera-roll image (often 3-6 MB) was
+    // wasting Storage quota and slowing every PDF/email render.
+    const compressedUri = await compressLogo(uri);
+
     // On native, fetch(file://).blob() is unreliable in React Native — use XHR
     // per Firebase's official RN guidance. On web, fetch works fine.
     const blob: Blob = await new Promise((resolve, reject) => {
       if (Platform.OS === 'web') {
-        fetch(uri).then(r => r.blob()).then(resolve).catch(reject);
+        fetch(compressedUri).then(r => r.blob()).then(resolve).catch(reject);
         return;
       }
       const xhr = new XMLHttpRequest();
       xhr.onload = () => resolve(xhr.response);
       xhr.onerror = () => reject(new Error('Failed to read image file'));
       xhr.responseType = 'blob';
-      xhr.open('GET', uri, true);
+      xhr.open('GET', compressedUri, true);
       xhr.send(null);
     });
 
