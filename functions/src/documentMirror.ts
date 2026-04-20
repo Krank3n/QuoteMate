@@ -89,10 +89,32 @@ async function writeMirror(
   const ref = documentRef(userId, mirrorId);
   const existing = await ref.get();
   if (existing.exists) {
-    const existingUpdated = Number(existing.data()?.updatedAt ?? 0);
+    const existingData = existing.data() ?? {};
+    const existingUpdated = Number(existingData.updatedAt ?? 0);
     const incomingUpdated = Number(projection.updatedAt ?? 0);
     if (existingUpdated > incomingUpdated) {
       return { written: false, skipped: true, reason: 'newer-on-disk' };
+    }
+    // Phase-4: detect drift between server-side stage logic (setDocumentStage)
+    // and the legacy-status-derived stage. Logged only — the mirror keeps
+    // overwriting with the derived value so legacy clients remain authoritative
+    // for their own writes; phase-5 (client migration) eliminates the drift
+    // source by making the client write through documents/{id} directly.
+    const existingStage = existingData.stage;
+    const incomingStage = projection.stage;
+    if (
+      typeof existingStage === 'string' &&
+      typeof incomingStage === 'string' &&
+      existingStage !== incomingStage
+    ) {
+      functions.logger.warn('[stage] mirror_drift', {
+        userId,
+        docId: mirrorId,
+        existing: existingStage,
+        incoming: incomingStage,
+        existingUpdatedAt: existingUpdated,
+        incomingUpdatedAt: incomingUpdated,
+      });
     }
   }
   await ref.set(stripUndefined(projection), { merge: true });
