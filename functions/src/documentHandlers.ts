@@ -41,6 +41,8 @@ import type {
   DocumentRecord,
   DocumentStage,
   DocumentPayment,
+  DocumentPaymentLink,
+  DocumentPaymentLinkKind,
 } from './shared/document/types';
 
 type AnyData = Record<string, any>;
@@ -833,12 +835,22 @@ export async function applyPaymentToDocument(
     tryStageTransition(doc, nextStage, `applyPaymentToDocument:${kind}`);
   }
 
+  // Mark the active payment link consumed if this payment came in via it.
+  // The customer may re-open the email and click the same link; flagging
+  // consumed lets the receiving page (or future SDK consumers) show a
+  // "payment received" state instead of erroring.
+  const active = doc.activePaymentLink as DocumentPaymentLink | undefined;
+  const updatedActive: DocumentPaymentLink | undefined = active
+    ? { ...active, consumedAt: active.consumedAt ?? Date.now() }
+    : undefined;
+
   await writeDocumentUpdate(userId, doc.id, {
     payments: newPayments,
     paidTotal,
     balanceDue,
     stage: nextStage,
     paymentSyncError: admin.firestore.FieldValue.delete(),
+    ...(updatedActive ? { activePaymentLink: updatedActive } : {}),
   });
 }
 
@@ -868,4 +880,247 @@ export async function syncDocumentToXero(
 
 export function logShimInvocation(endpoint: string, userId: string, extras?: AnyData): void {
   functions.logger.info('phase2_shim_invoked', { endpoint, userId, ...(extras || {}) });
+}
+
+// ---------------------------------------------------------------------------
+// Phase-3 unified payment-link lifecycle
+// ---------------------------------------------------------------------------
+
+/**
+ * Mints a new Square hosted payment link for a given amount/kind. Implemented
+ * in functions/src/index.ts where the Square HTTP/auth machinery lives;
+ * injected here so this module stays free of the Square stack.
+ */
+export interface SquareLinkMinter {
+  mintDeposit: (userId: string, quoteId: string) => Promise<{
+    paymentLinkId: string; paymentLinkUrl: string; depositAmount: number;
+  } | null>;
+  mintQuoteFull: (userId: string, quoteId: string) => Promise<{
+    paymentLinkId: string; paymentLinkUrl: string; amount: number;
+  } | null>;
+  mintInvoice: (userId: string, invoiceId: string) => Promise<{
+    paymentLinkId: string; paymentLinkUrl: string;
+  } | null>;
+}
+
+interface RotationDecision {
+  needed: boolean;
+  reason: string;
+  kind?: DocumentPaymentLinkKind;
+  amount?: number;
+}
+
+/**
+ * Decide whether the doc currently needs a different active link than the one
+ * it already has. Pure — no I/O — so the rotation gate is testable.
+ *
+ * Rules:
+ *   - draft / cancelled / paid / quote_rejected: no link.
+ *   - quote_sent + requireDeposit: deposit link sized to depositAmount.
+ *   - quote_sent without deposit: no link (customer accepts via the page).
+ *   - quote_accepted: keep whatever link is there (consumed); no rotation.
+ *   - invoice_sent / partially_paid: balance link sized to balanceDue
+ *     (total − paidTotal).
+ */
+function decideRotation(doc: DocumentRecord): RotationDecision {
+  const total = Number(doc.total) || 0;
+  const paidTotal = Number(doc.paidTotal) || 0;
+  const balance = Math.max(0, total - paidTotal);
+  const stage = doc.stage;
+
+  if (stage === 'draft' || stage === 'cancelled' || stage === 'paid' || stage === 'quote_rejected') {
+    return { needed: false, reason: 'stage-no-link' };
+  }
+
+  if (stage === 'quote_sent') {
+    if (doc.requireDeposit !== true) return { needed: false, reason: 'quote-no-deposit' };
+    const depositAmount = Number(doc.depositAmount) || 0;
+    if (depositAmount <= 0) return { needed: false, reason: 'quote-zero-deposit' };
+    return { needed: true, reason: 'quote_sent', kind: 'deposit', amount: depositAmount };
+  }
+
+  if (stage === 'quote_accepted') {
+    return { needed: false, reason: 'accepted-await-invoice' };
+  }
+
+  if (stage === 'invoice_sent' || stage === 'partially_paid') {
+    if (balance <= 0) return { needed: false, reason: 'no-balance' };
+    return { needed: true, reason: stage, kind: 'balance', amount: balance };
+  }
+
+  return { needed: false, reason: 'unknown-stage' };
+}
+
+/**
+ * Mirror the active link onto the corresponding legacy quote/invoice doc so
+ * pre-phase-3 clients keep finding the deposit/squarePaymentLink* fields they
+ * read today. This is a best-effort write — failure is logged but doesn't
+ * fail the rotation (the unified doc is the source of truth).
+ */
+async function mirrorLinkToLegacy(
+  userId: string,
+  doc: DocumentRecord,
+  link: DocumentPaymentLink | null,
+): Promise<void> {
+  const firestore = db();
+  try {
+    if (doc.type === 'quote' || (doc.type === 'invoice' && doc.legacyQuoteId)) {
+      const quoteId = (doc.type === 'quote' ? doc.id : doc.legacyQuoteId) as string;
+      const quoteRef = firestore.doc(`users/${userId}/quotes/${quoteId}`);
+      const update: AnyData = {};
+      if (link && link.kind === 'deposit') {
+        update.depositPaymentLinkId = link.id;
+        update.depositPaymentLinkUrl = link.url;
+        update.depositPaymentLinkCreatedAt = link.createdAt;
+      } else if (link && link.kind === 'quote_full') {
+        update.fullPaymentLinkId = link.id;
+        update.fullPaymentLinkUrl = link.url;
+        update.fullPaymentLinkCreatedAt = link.createdAt;
+        update.fullPaymentLinkAmount = link.amount;
+      }
+      if (Object.keys(update).length > 0) {
+        await quoteRef.set(update, { merge: true });
+      }
+    }
+    if (doc.type === 'invoice') {
+      const invoiceId = (doc.legacyInvoiceId as string | undefined) ?? doc.id;
+      const invoiceRef = firestore.doc(`users/${userId}/invoices/${invoiceId}`);
+      if (link && link.kind === 'balance') {
+        await invoiceRef.set({
+          squarePaymentLinkId: link.id,
+          squarePaymentLinkUrl: link.url,
+          squarePaymentLinkCreatedAt: link.createdAt,
+        }, { merge: true });
+      }
+    }
+  } catch (err: any) {
+    functions.logger.warn('phase3_legacy_link_mirror_failed', {
+      docId: doc.id, userId, message: err?.message,
+    });
+  }
+}
+
+/**
+ * Mark the active link consumed when its corresponding payment is reconciled.
+ * Idempotent: a second call against the same paymentId is a no-op.
+ */
+export async function markActivePaymentLinkConsumed(
+  userId: string,
+  docId: string,
+  paymentId: string,
+  paidAt: number = Date.now(),
+): Promise<void> {
+  const doc = await loadDocument(userId, docId);
+  if (!doc) return;
+  const active = doc.activePaymentLink as DocumentPaymentLink | undefined;
+  if (!active || active.consumedAt) return;
+  const consumed: DocumentPaymentLink = { ...active, consumedAt: paidAt };
+  await writeDocumentUpdate(userId, doc.id, {
+    activePaymentLink: consumed,
+    // Stamp a hint so audit/debugging can trace which payment closed the link.
+    activePaymentLinkConsumedBy: paymentId,
+  });
+}
+
+export interface RotateLinkResult {
+  url: string;
+  paymentLinkId: string;
+  rotated: boolean;
+  reused: boolean;
+  reason: string;
+}
+
+/**
+ * Document-driven payment-link minter. Looks at the document's stage + amounts,
+ * decides what kind of link is needed, mints via the injected Square minter if
+ * the existing active link doesn't already satisfy that need, archives the old
+ * one, and mirrors the new fields back to the legacy quote/invoice doc.
+ *
+ * Returns null when no link is needed (e.g. quote without deposit, paid doc),
+ * the existing link details when it can be reused, or the new link details
+ * after a successful mint.
+ */
+export async function createOrRotatePaymentLink(
+  userId: string,
+  docId: string,
+  minter: SquareLinkMinter,
+): Promise<RotateLinkResult | null> {
+  const doc = await loadDocument(userId, docId);
+  if (!doc) return null;
+
+  const decision = decideRotation(doc);
+  if (!decision.needed) {
+    return null;
+  }
+
+  const active = doc.activePaymentLink as DocumentPaymentLink | undefined;
+  // Reuse the active link only if its kind AND amount still satisfy the
+  // current need. Square's API doesn't let us update a link's price, so any
+  // amount drift forces a fresh mint.
+  if (
+    active &&
+    !active.consumedAt &&
+    active.kind === decision.kind &&
+    Math.abs(Number(active.amount || 0) - Number(decision.amount || 0)) < 0.005
+  ) {
+    return {
+      url: active.url,
+      paymentLinkId: active.id,
+      rotated: false,
+      reused: true,
+      reason: decision.reason,
+    };
+  }
+
+  const legacyTargetId = decision.kind === 'balance'
+    ? ((doc.legacyInvoiceId as string | undefined) ?? doc.id)
+    : doc.id;
+
+  let minted: { paymentLinkId: string; paymentLinkUrl: string } | null;
+  if (decision.kind === 'deposit') {
+    minted = await minter.mintDeposit(userId, legacyTargetId);
+  } else if (decision.kind === 'quote_full') {
+    minted = await minter.mintQuoteFull(userId, legacyTargetId);
+  } else {
+    minted = await minter.mintInvoice(userId, legacyTargetId);
+  }
+  if (!minted) {
+    functions.logger.warn('phase3_mint_failed', {
+      userId, docId, kind: decision.kind, reason: decision.reason,
+    });
+    return null;
+  }
+
+  const newLink: DocumentPaymentLink = {
+    id: minted.paymentLinkId,
+    url: minted.paymentLinkUrl,
+    kind: decision.kind!,
+    amount: decision.amount!,
+    createdAt: Date.now(),
+  };
+
+  // Archive the previous link if it differs from the new one. We don't try
+  // to void Square links — they expire after their TTL, and a customer who
+  // hits the URL after expiry sees Square's standard "expired" page.
+  const archived: DocumentPaymentLink[] = Array.isArray(doc.archivedPaymentLinks)
+    ? [...(doc.archivedPaymentLinks as DocumentPaymentLink[])]
+    : [];
+  if (active && active.id !== newLink.id) {
+    archived.push({ ...active, archivedAt: Date.now() });
+  }
+
+  await writeDocumentUpdate(userId, doc.id, {
+    activePaymentLink: newLink,
+    archivedPaymentLinks: archived,
+  });
+
+  await mirrorLinkToLegacy(userId, doc, newLink);
+
+  return {
+    url: newLink.url,
+    paymentLinkId: newLink.id,
+    rotated: true,
+    reused: false,
+    reason: decision.reason,
+  };
 }
