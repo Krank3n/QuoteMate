@@ -16,6 +16,7 @@ import { useNavigation, useRoute, useScrollToTop } from '@react-navigation/nativ
 
 import { useStore } from '../store/useStore';
 import { Quote } from '../types';
+import { documentToQuote } from '../types/documentAdapter';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { QuoteCard } from '../components/QuoteCard';
@@ -34,7 +35,23 @@ export function QuotesListScreen() {
 
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { quotes, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings, canCreateQuote, createInvoiceFromQuote, saveInvoice, loadQuotes, subscriptionStatus } = useStore();
+  const { quotes: legacyQuotes, documents, documentsLoaded, deleteQuote, duplicateQuote, setCurrentQuote, createNewQuote, saveQuote, businessSettings, canCreateQuote, createInvoiceFromQuote, saveInvoice, loadQuotes, subscriptionStatus } = useStore();
+
+  // Read from the unified documents collection. Filter to quote-side stages
+  // and project back to the typed Quote shape via the canonical adapter so
+  // the rest of this screen can stay unchanged. Falls back to the legacy
+  // slice when the documents listener hasn't filled in yet (first paint or
+  // pre-mirror data).
+  const quotes = useMemo<Quote[]>(() => {
+    if (!documentsLoaded || documents.length === 0) {
+      return legacyQuotes;
+    }
+    const QUOTE_STAGES = new Set(['draft', 'quote_sent', 'quote_accepted', 'quote_rejected']);
+    const fromDocs = documents
+      .filter((d) => d.type === 'quote' || QUOTE_STAGES.has(d.stage))
+      .map((d) => documentToQuote(d));
+    return fromDocs.length > 0 ? fromDocs : legacyQuotes;
+  }, [documents, documentsLoaded, legacyQuotes]);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 

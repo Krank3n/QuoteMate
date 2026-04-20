@@ -16,6 +16,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import { useStore } from '../store/useStore';
+import { documentToQuote } from '../types/documentAdapter';
 import { colors } from '../theme';
 import { generateQuotePDF } from '../utils/pdfGenerator';
 import { SendQuoteButton } from '../components/SendQuoteButton';
@@ -42,7 +43,7 @@ export function ViewQuoteScreen() {
   const route = useRoute<any>();
   const quoteId = route.params?.quoteId;
 
-  const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote, createInvoiceFromQuote, saveInvoice, nextQuoteNumber } = useStore();
+  const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote, createInvoiceFromQuote, saveInvoice, nextQuoteNumber, getDocumentByLegacyId } = useStore();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const compactLabels = windowWidth < 400;
@@ -52,10 +53,14 @@ export function ViewQuoteScreen() {
   // the store updates (~100ms), instead of waiting for a focus effect +
   // InteractionManager handle that could stay open for several seconds and
   // froze the materials card for ~10s after returning from MaterialsList.
-  const displayQuote = useMemo(
-    () => quotes.find((q) => q.id === quoteId) || null,
-    [quotes, quoteId]
-  );
+  const displayQuote = useMemo(() => {
+    const fromQuotes = quotes.find((q) => q.id === quoteId);
+    if (fromQuotes) return fromQuotes;
+    // Fallback: the quote-id may live as a document (post-conversion the
+    // document stays at the original quoteId per the phase-1 collapse rule).
+    const docMatch = getDocumentByLegacyId(quoteId);
+    return docMatch ? documentToQuote(docMatch) : null;
+  }, [quotes, quoteId, getDocumentByLegacyId]);
 
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
