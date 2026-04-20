@@ -3001,7 +3001,12 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       const hashedToken = hashToken(token);
 
       // Always store the acceptance token so the link works (even for test sends)
-      // Only update quote status to 'sent' for real sends
+      // Only update quote status to 'sent' for real sends.
+      //
+      // Bumping updatedAt to a server timestamp and stamping sentAt ensures
+      // the client's mergeRemoteQuotes doesn't reject the status='sent'
+      // snapshot in favour of its own newer in-flight saveDraft write — which
+      // was swallowing the "sent" flag client-side.
       const batch = firestore.batch();
       const quoteUpdate: Record<string, any> = {
         acceptanceTokenHash: hashedToken,
@@ -3015,7 +3020,9 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       }
       if (!isTestSend) {
         quoteUpdate.status = 'sent';
+        quoteUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
         quoteUpdate.aiEmailBody = emailBody;
+        quoteUpdate.updatedAt = admin.firestore.FieldValue.serverTimestamp();
       }
       // set+merge handles both updates and the case where the doc doesn't yet
       // exist on the server (background sync hadn't fired before send).
