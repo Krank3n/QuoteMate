@@ -7,7 +7,6 @@ import {
   getUserEmail,
   sendEmail,
   sendWelcomeEmail,
-  sendQuoteSentEmail,
   sendQuoteAcceptedEmail,
   sendQuoteDeclinedEmail,
   sendPaymentFailedEmail,
@@ -19,16 +18,21 @@ import {
   sendNewUserNotificationEmail,
   sendFeedbackEmail,
   sendQuoteFollowUpEmail,
-  buildQuoteEmailHtml,
-  buildInvoiceEmailHtml,
   sendAffiliateInviteEmail,
   sendNewProSubscriptionEmail,
   sendMaterialListErrorEmail,
   sendDraftNudgeEmail,
 } from './email';
-import { buildQuotePdfHtml, buildInvoicePdfHtml, generateQuotePdfBuffer } from './pdfGenerator';
 export * from './adminCrm';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
+import {
+  sendDocumentEmail,
+  loadDocumentForQuoteId,
+  loadDocumentForInvoiceId,
+  applyPaymentToDocument,
+  logShimInvocation,
+} from './documentHandlers';
+import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './shared/document/adapter';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
@@ -2953,8 +2957,12 @@ async function fetchPhotoAttachments(
 }
 
 /**
- * Send a quote to a client via Brevo email
- * Generates acceptance link, sends branded HTML email, updates quote status
+ * Send a quote to a client via Brevo email.
+ *
+ * Phase-2 shim: loads the unified Document (falling back to the legacy quote
+ * via the shared adapter) and delegates to the unified sendDocumentEmail
+ * core. Keeps the same endpoint name + response shape so old clients keep
+ * working unchanged.
  */
 export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '1GB' }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -2974,268 +2982,45 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       return;
     }
 
+    logShimInvocation('sendQuoteEmail', userId, { quoteId });
+
     try {
-      const firestore = admin.firestore();
-      const quoteRef = firestore.doc(`users/${userId}/quotes/${quoteId}`);
-
-      // Prefer the client-provided quote (latest in-memory edits) over Firestore,
-      // because the client's background sync may not have persisted yet. Fall back
-      // to Firestore for older clients that don't send the full quote in the body.
-      let quote: any;
-      if (quoteFromClient && typeof quoteFromClient === 'object') {
-        quote = quoteFromClient;
-      } else {
-        const quoteDoc = await quoteRef.get();
-        if (!quoteDoc.exists) {
-          res.status(404).json({ error: 'Quote not found' });
-          return;
-        }
-        quote = quoteDoc.data()!;
+      let doc = await loadDocumentForQuoteId(userId, quoteId);
+      if (!doc && quoteFromClient && typeof quoteFromClient === 'object') {
+        // Old client passed the quote inline and the mirror hasn't fired yet.
+        // Build the unified shape ad-hoc so the unified core has something to work with.
+        doc = quoteRecordToDocumentRecord(quoteFromClient, quoteId);
+      }
+      if (!doc) {
+        res.status(404).json({ error: 'Quote not found' });
+        return;
       }
 
-      // Fetch business settings
-      const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
-      const business = settingsDoc.exists ? settingsDoc.data()! : {};
-
-      // Generate acceptance token
-      const token = crypto.randomBytes(32).toString('hex');
-      const hashedToken = hashToken(token);
-
-      // Always store the acceptance token so the link works (even for test sends)
-      // Only update quote status to 'sent' for real sends
-      const batch = firestore.batch();
-      const quoteUpdate: Record<string, any> = {
-        acceptanceTokenHash: hashedToken,
-        acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      };
-      if (quoteFromClient) {
-        // Persist the latest client-side version so subsequent reads (e.g. the
-        // acceptance page) see the same data the customer was emailed.
-        Object.assign(quoteUpdate, quoteFromClient);
-        delete quoteUpdate.id;
-      }
-      if (!isTestSend) {
-        quoteUpdate.status = 'sent';
-        quoteUpdate.aiEmailBody = emailBody;
-      }
-      // set+merge handles both updates and the case where the doc doesn't yet
-      // exist on the server (background sync hadn't fired before send).
-      batch.set(quoteRef, quoteUpdate, { merge: true });
-      batch.set(firestore.doc(`quoteAcceptanceTokens/${hashedToken}`), {
+      const result = await sendDocumentEmail(doc, {
         userId,
-        quoteId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      await batch.commit();
-
-      const acceptanceUrl = `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
-
-      // Build photo URLs from quote
-      const photoUrls = (quote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
-
-      // Resolve business logo URL (may be a local URI - use logoUrl if available from storage)
-      // Support both logoStorageUrl (legacy field) and logoUri (client saves
-       // the Firebase Storage download URL here after upload).
-       let logoUrl = business.logoStorageUrl || business.logoUri || '';
-
-      // Build email HTML
-      const displayQuote = applyHideMarkupForDisplay(quote);
-      const emailMaterials = displayQuote.materials.map((m: any) => ({
-        name: m.name,
-        quantity: m.quantity,
-        unit: m.unit,
-        totalPrice: m.totalPrice || 0,
-        section: m.section,
-      }));
-
-      const businessData = {
-        name: business.businessName || '',
-        abn: business.abn,
-        phone: business.phone,
-        email: business.email,
-        address: business.address,
-        logoUrl,
-        brandColor: business.brandColor,
-      };
-
-      // Compute the deposit amount fresh from current totals so the customer
-      // sees the right number even if the quote was edited after first save.
-      const depositRequired = quote.requireDeposit === true;
-      const depositPctForEmail = depositRequired ? (Number(quote.depositPercentage) || 0) : 0;
-      const depositAmountForEmail = depositPctForEmail > 0
-        ? centsToDollars(dollarsToCents((Number(quote.total) || 0) * (depositPctForEmail / 100)))
-        : 0;
-
-      // Snapshot the current T&Cs onto the quote so later edits to the
-      // business's terms don't rewrite what the customer saw. T&Cs are
-      // opt-in — if the tradie hasn't set any, nothing gets snapshotted and
-      // the PDF/email skip the terms section entirely.
-      const termsRaw = typeof business.termsAndConditions === 'string'
-        ? business.termsAndConditions.trim()
-        : '';
-      const termsToSend: string | null = termsRaw || null;
-      const termsVersionHash = termsToSend ? hashTerms(termsToSend) : null;
-      if (!isTestSend && termsToSend) {
-        await firestore.doc(`users/${userId}/quotes/${quoteId}`).set(
-          { termsSnapshot: termsToSend, termsVersionHash },
-          { merge: true },
-        );
-      }
-
-      // If the quote has a deposit and the tradie has Square connected, mint
-      // the hosted payment link now so the email's primary CTA can become
-      // "Accept & Pay Deposit" — paying = accepting (webhook handles both).
-      // Best-effort: if Square fails we fall back to the standard Accept flow.
-      let depositPayNowUrl: string | undefined;
-      if (!isTestSend && depositRequired && depositPctForEmail > 0 && depositAmountForEmail > 0) {
-        try {
-          // Snapshot deposit fields on the quote before minting so the helper
-          // sees the right amount when calculating Square's price_money.
-          await firestore.doc(`users/${userId}/quotes/${quoteId}`).set(
-            { depositAmount: depositAmountForEmail },
-            { merge: true },
-          );
-          const linkResult = await createSquareDepositPaymentLinkInternal(userId, quoteId);
-          if (linkResult) {
-            depositPayNowUrl = linkResult.paymentLinkUrl;
-          } else {
-            console.warn('[square] deposit link mint returned null in sendQuoteEmail', { userId, quoteId });
-          }
-        } catch (err: any) {
-          console.error('[square] deposit link mint threw in sendQuoteEmail', {
-            userId, quoteId, message: err?.message,
-          });
-          // Fall back to standard Accept button.
-        }
-      }
-
-      const htmlContent = buildQuoteEmailHtml({
-        customerName: quote.customerName || 'Client',
+        docId: quoteId,
         emailBody,
-        jobName: quote.job?.name || 'Job',
-        materials: emailMaterials,
-        laborTotal: displayQuote.laborTotal,
-        materialsSubtotal: displayQuote.materialsSubtotal,
-        subtotal: displayQuote.subtotal,
-        gst: quote.gst || 0,
-        total: quote.total || 0,
-        acceptanceUrl,
-        photoUrls,
-        depositAmount: depositAmountForEmail || undefined,
-        depositPercentage: depositPctForEmail || undefined,
-        depositPayNowUrl,
-        hasTerms: !!termsToSend,
-        business: businessData,
-      });
-
-      // Generate PDF attachment
-      const pdfHtml = buildQuotePdfHtml(
-        {
-          customerName: quote.customerName || 'Client',
-          customerEmail: quote.customerEmail,
-          customerPhone: quote.customerPhone,
-          jobAddress: quote.jobAddress,
-          quoteNumber: quote.quoteNumber,
-          quoteDate: new Date(quote.updatedAt || Date.now()).toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' }),
-          job: quote.job || { name: 'Job', description: '' },
-          materials: (quote.materials || []).map((m: any) => ({
-            name: m.name,
-            quantity: m.quantity,
-            unit: m.unit,
-            price: m.price || 0,
-            totalPrice: m.totalPrice || 0,
-            section: m.section,
-          })),
-          materialsSubtotal: quote.materialsSubtotal || 0,
-          laborHours: quote.laborHours,
-          laborRate: quote.laborRate,
-          laborUnit: quote.laborUnit,
-          laborTotal: quote.laborTotal || 0,
-          laborExtraHours: quote.laborExtraHours,
-          sections: (quote.sections || []).map((s: any) => ({
-            name: s.name,
-            laborHours: s.laborHours,
-            laborRate: s.laborRate,
-            laborUnit: s.laborUnit,
-            laborTotal: s.laborTotal,
-          })),
-          subtotal: quote.subtotal || 0,
-          markup: quote.markup || 0,
-          markupAmount: quote.markupAmount || 0,
-          laborMarkup: quote.laborMarkup ?? quote.markup ?? 0,
-          showMarkup: quote.showMarkup === true && business.showMarkup !== false,
-          travelAdjustment: quote.travelAdjustment,
-          gst: quote.gst || 0,
-          total: quote.total || 0,
-          notes: quote.notes,
-          showLaborHours: business.showLaborHours,
-          showLaborBreakdown: quote.showLaborBreakdown !== false,
-          groupMaterialsBySection: business.groupMaterialsBySection,
-          paymentMethods: business.paymentMethods,
-          terms: termsToSend || undefined,
+        recipientEmail,
+        isTestSend,
+        includePhotos,
+        overrides: quoteFromClient && typeof quoteFromClient === 'object' ? quoteFromClient : undefined,
+        squareDepositLinkMint: createSquareDepositPaymentLinkInternal,
+        squareInvoiceLinkMint: createSquarePaymentLinkInternal,
+        acceptanceUrlForToken: (token) =>
+          `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`,
+        fetchPhotoAttachments,
+        generateAcceptanceToken: () => {
+          const token = crypto.randomBytes(32).toString('hex');
+          return { token, hashedToken: hashToken(token) };
         },
-        {
-          businessName: business.businessName || 'Business',
-          email: business.email,
-          phone: business.phone,
-          website: business.website,
-          abn: business.abn,
-          address: business.address,
-          logoHtml: (business.logoStorageUrl || business.logoUri) ? `<img src="${business.logoStorageUrl || business.logoUri}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
-          brandColor: business.brandColor,
-          pdfTemplate: business.pdfTemplate,
-        }
-      );
-
-      const pdfBuffer = await generateQuotePdfBuffer(pdfHtml);
-      const pdfBase64 = pdfBuffer.toString('base64');
-
-      // Build clean filename
-      const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 30);
-      const pdfFilename = `Quote_${sanitize(quote.customerName || 'Client')}_${sanitize(quote.job?.name || 'Job')}.pdf`;
-
-      // Build attachments array
-      const attachments: Array<{ name: string; content: string }> = [
-        { name: pdfFilename, content: pdfBase64 },
-      ];
-
-      // Attach job photos if requested
-      if (includePhotos && photoUrls.length > 0) {
-        const photoAttachments = await fetchPhotoAttachments(photoUrls);
-        attachments.push(...photoAttachments);
-      }
-
-      // Send via Brevo
-      const sent = await sendEmail({
-        to: recipientEmail,
-        subject: `${isTestSend ? '[TEST] ' : ''}Quotation from ${business.businessName || 'Your Tradie'} - ${quote.job?.name || 'Job'}`,
-        htmlContent,
-        category: 'transactional',
-        userId,
-        tags: isTestSend ? ['quote-test'] : ['quote-to-client'],
-        attachment: attachments,
       });
 
-      if (!sent) {
+      if (!result.success) {
         res.status(500).json({ error: 'Failed to send email' });
         return;
       }
 
-      // Send confirmation to tradie (skip for test sends)
-      if (!isTestSend) {
-        const tradieEmail = await getUserEmail(userId);
-        if (tradieEmail) {
-          await sendQuoteSentEmail(
-            tradieEmail,
-            quote.customerName || 'Client',
-            quote.quoteNumber || quoteId,
-            quote.total || 0,
-            userId
-          );
-        }
-      }
-
-      res.json({ success: true, acceptanceUrl });
+      res.json({ success: true, acceptanceUrl: result.acceptanceUrl });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -3243,7 +3028,11 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
 });
 
 /**
- * Send an invoice to a customer via Brevo email with PDF attachment
+ * Send an invoice to a customer via Brevo email with PDF attachment.
+ *
+ * Phase-2 shim: loads the unified Document for this invoice and delegates to
+ * the unified sendDocumentEmail core. Same endpoint name + response shape so
+ * old clients keep working unchanged.
  */
 export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory: '1GB' }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -3263,231 +3052,31 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
       return;
     }
 
+    logShimInvocation('sendInvoiceEmail', userId, { invoiceId });
+
     try {
-      const firestore = admin.firestore();
-      const invoiceRef = firestore.doc(`users/${userId}/invoices/${invoiceId}`);
-
-      // Prefer the client-provided invoice (latest in-memory edits) over Firestore,
-      // because the client's background sync may not have persisted yet. Fall back
-      // to Firestore for older clients.
-      let invoice: any;
-      if (invoiceFromClient && typeof invoiceFromClient === 'object') {
-        invoice = invoiceFromClient;
-      } else {
-        const invoiceDoc = await invoiceRef.get();
-        if (!invoiceDoc.exists) {
-          res.status(404).json({ error: 'Invoice not found' });
-          return;
-        }
-        invoice = invoiceDoc.data()!;
+      let doc = await loadDocumentForInvoiceId(userId, invoiceId);
+      if (!doc && invoiceFromClient && typeof invoiceFromClient === 'object') {
+        doc = invoiceRecordToDocumentRecord(invoiceFromClient, invoiceId);
+      }
+      if (!doc) {
+        res.status(404).json({ error: 'Invoice not found' });
+        return;
       }
 
-      // Fetch business settings
-      const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
-      const business = settingsDoc.exists ? settingsDoc.data()! : {};
-
-      // Persist any client-provided edits, plus mark as sent for real sends.
-      const invoiceUpdate: Record<string, any> = {};
-      if (invoiceFromClient) {
-        Object.assign(invoiceUpdate, invoiceFromClient);
-        delete invoiceUpdate.id;
-      }
-      if (!isTestSend) {
-        invoiceUpdate.status = 'sent';
-        invoiceUpdate.aiEmailBody = emailBody;
-        invoiceUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
-      }
-      // Snapshot the current T&Cs onto the invoice so later edits don't
-      // rewrite what the customer saw. Opt-in: no terms set → no snapshot
-      // and no terms section in the PDF/email.
-      const invoiceTermsRaw = typeof business.termsAndConditions === 'string'
-        ? business.termsAndConditions.trim()
-        : '';
-      const invoiceTermsToSend: string | null = invoiceTermsRaw || null;
-      const invoiceTermsVersionHash = invoiceTermsToSend
-        ? hashTerms(invoiceTermsToSend)
-        : null;
-      if (!isTestSend && invoiceTermsToSend) {
-        invoiceUpdate.termsSnapshot = invoiceTermsToSend;
-        invoiceUpdate.termsVersionHash = invoiceTermsVersionHash;
-      }
-      if (Object.keys(invoiceUpdate).length > 0) {
-        await invoiceRef.set(invoiceUpdate, { merge: true });
-      }
-
-      // If the tradie has Square connected, mint a fresh hosted payment link so
-      // the invoice email has a Pay Now button. Best-effort: if Square fails we
-      // still send the email without the button.
-      let payNowUrl: string | undefined;
-      if (!isTestSend) {
-        try {
-          const squareConnDoc = await firestore
-            .doc(`users/${userId}/settings/squareConnection`)
-            .get();
-          if (squareConnDoc.exists) {
-            const linkResult = await createSquarePaymentLinkInternal(userId, invoiceId);
-            if (linkResult) {
-              payNowUrl = linkResult.paymentLinkUrl;
-              // Reflect the link on the in-memory invoice so downstream (e.g.
-              // the PDF builder below) sees the freshly-written values.
-              invoice.squarePaymentLinkId = linkResult.paymentLinkId;
-              invoice.squarePaymentLinkUrl = linkResult.paymentLinkUrl;
-            } else {
-              console.warn('[square] invoice pay link mint returned null', { userId, invoiceId });
-            }
-          }
-        } catch (err: any) {
-          console.error('[square] invoice pay link mint threw', {
-            userId, invoiceId, message: err?.message,
-          });
-          // Never block the email on a payment-link failure.
-        }
-      }
-
-      // Resolve business logo URL
-      // Support both logoStorageUrl (legacy field) and logoUri (client saves
-       // the Firebase Storage download URL here after upload).
-       let logoUrl = business.logoStorageUrl || business.logoUri || '';
-
-      // Build email HTML
-      const emailMaterials = (invoice.materials || []).map((m: any) => ({
-        name: m.name,
-        quantity: m.quantity,
-        unit: m.unit,
-        totalPrice: m.totalPrice || 0,
-        section: m.section,
-      }));
-
-      const businessData = {
-        name: business.businessName || '',
-        abn: business.abn,
-        phone: business.phone,
-        email: business.email,
-        address: business.address,
-        logoUrl,
-        brandColor: business.brandColor,
-      };
-
-      const htmlContent = buildInvoiceEmailHtml({
-        customerName: invoice.customerName || 'Client',
-        emailBody,
-        jobName: invoice.job?.name || 'Job',
-        materials: emailMaterials,
-        laborTotal: invoice.laborTotal || 0,
-        materialsSubtotal: invoice.materialsSubtotal || 0,
-        subtotal: invoice.subtotal || 0,
-        gst: invoice.gst || 0,
-        total: invoice.total || 0,
-        invoiceNumber: invoice.invoiceNumber,
-        dueDate: invoice.dueDate || new Date().toISOString(),
-        payNowUrl,
-        depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
-        hasTerms: !!invoiceTermsToSend,
-        business: businessData,
-      });
-
-      // Generate Invoice PDF attachment
-      const pdfHtml = buildInvoicePdfHtml(
-        {
-          customerName: invoice.customerName || 'Client',
-          customerEmail: invoice.customerEmail,
-          customerPhone: invoice.customerPhone,
-          jobAddress: invoice.jobAddress,
-          quoteNumber: invoice.invoiceNumber,
-          quoteDate: new Date(invoice.updatedAt || Date.now()).toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' }),
-          invoiceNumber: invoice.invoiceNumber,
-          issueDate: new Date(invoice.issueDate || invoice.createdAt || Date.now()).toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' }),
-          dueDate: new Date(invoice.dueDate || Date.now()).toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' }),
-          paymentTerms: invoice.paymentTerms,
-          paidAmount: invoice.paidAmount || 0,
-          depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
-          job: invoice.job || { name: 'Job', description: '' },
-          materials: (invoice.materials || []).map((m: any) => ({
-            name: m.name,
-            quantity: m.quantity,
-            unit: m.unit,
-            price: m.price || 0,
-            totalPrice: m.totalPrice || 0,
-            section: m.section,
-          })),
-          materialsSubtotal: invoice.materialsSubtotal || 0,
-          laborHours: invoice.laborHours,
-          laborRate: invoice.laborRate,
-          laborUnit: invoice.laborUnit,
-          laborTotal: invoice.laborTotal || 0,
-          laborExtraHours: invoice.laborExtraHours,
-          sections: (invoice.sections || []).map((s: any) => ({
-            name: s.name,
-            laborHours: s.laborHours,
-            laborRate: s.laborRate,
-            laborUnit: s.laborUnit,
-            laborTotal: s.laborTotal,
-          })),
-          subtotal: invoice.subtotal || 0,
-          markup: invoice.markup || 0,
-          markupAmount: invoice.markupAmount || 0,
-          laborMarkup: invoice.laborMarkup ?? invoice.markup ?? 0,
-          showMarkup: invoice.showMarkup === true && business.showMarkup !== false,
-          travelAdjustment: invoice.travelAdjustment,
-          gst: invoice.gst || 0,
-          total: invoice.total || 0,
-          notes: invoice.notes,
-          showLaborHours: business.showLaborHours,
-          showLaborBreakdown: invoice.showLaborBreakdown !== false,
-          groupMaterialsBySection: business.groupMaterialsBySection,
-          paymentMethods: business.paymentMethods,
-          terms: invoiceTermsToSend || undefined,
-        },
-        {
-          businessName: business.businessName || 'Business',
-          email: business.email,
-          phone: business.phone,
-          website: business.website,
-          abn: business.abn,
-          address: business.address,
-          logoHtml: (business.logoStorageUrl || business.logoUri) ? `<img src="${business.logoStorageUrl || business.logoUri}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
-          brandColor: business.brandColor,
-          pdfTemplate: business.pdfTemplate,
-        }
-      );
-
-      const pdfBuffer = await generateQuotePdfBuffer(pdfHtml);
-      const pdfBase64 = pdfBuffer.toString('base64');
-
-      // Build clean filename
-      const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 30);
-      const pdfFilename = `Invoice_${sanitize(invoice.customerName || 'Client')}_${sanitize(invoice.job?.name || 'Job')}.pdf`;
-
-      // Build attachments array
-      const attachments: Array<{ name: string; content: string }> = [
-        { name: pdfFilename, content: pdfBase64 },
-      ];
-
-      // Attach job photos if requested (from source quote)
-      if (includePhotos && invoice.sourceQuoteId) {
-        const sourceQuoteDoc = await firestore.doc(`users/${userId}/quotes/${invoice.sourceQuoteId}`).get();
-        if (sourceQuoteDoc.exists) {
-          const sourceQuote = sourceQuoteDoc.data()!;
-          const photoUrls = (sourceQuote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
-          if (photoUrls.length > 0) {
-            const photoAttachments = await fetchPhotoAttachments(photoUrls);
-            attachments.push(...photoAttachments);
-          }
-        }
-      }
-
-      // Send via Brevo
-      const sent = await sendEmail({
-        to: recipientEmail,
-        subject: `${isTestSend ? '[TEST] ' : ''}Invoice from ${business.businessName || 'Your Tradie'} - ${invoice.job?.name || 'Job'}`,
-        htmlContent,
-        category: 'transactional',
+      const result = await sendDocumentEmail(doc, {
         userId,
-        tags: isTestSend ? ['invoice-test'] : ['invoice-to-client'],
-        attachment: attachments,
+        docId: doc.id,
+        emailBody,
+        recipientEmail,
+        isTestSend,
+        includePhotos,
+        overrides: invoiceFromClient && typeof invoiceFromClient === 'object' ? invoiceFromClient : undefined,
+        squareInvoiceLinkMint: createSquarePaymentLinkInternal,
+        fetchPhotoAttachments,
       });
 
-      if (!sent) {
+      if (!result.success) {
         res.status(500).json({ error: 'Failed to send email' });
         return;
       }
@@ -10444,6 +10033,25 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
       }
       await quoteRef.set(update, { merge: true });
 
+      // Phase-2: also push the payment into the unified document ledger so the
+      // documents/{quoteId} view reflects this payment without waiting for the
+      // mirror trigger to re-derive paidTotal/balanceDue from the quote.
+      try {
+        await applyPaymentToDocument({
+          userId,
+          paymentId: payment.id,
+          orderId,
+          amountCents: Number(payment?.amount_money?.amount) || 0,
+          source: idx.source === 'in_app' ? 'in_app' : 'pay_link',
+          kind: idx.kind,
+          quoteId,
+        });
+      } catch (err: any) {
+        functions.logger.warn('phase2_unified_payment_write_failed', {
+          paymentId: payment.id, kind: idx.kind, message: err?.message,
+        });
+      }
+
       // Fire acceptance side-effects exactly once, only when this payment is
       // what flipped the quote (avoids double-firing if the customer accepted
       // separately first).
@@ -10554,6 +10162,24 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         paidAt: admin.firestore.FieldValue.serverTimestamp(),
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+    }
+
+    // Phase-2: push the payment into the unified document ledger so the
+    // documents/{id} view reflects this payment immediately.
+    try {
+      await applyPaymentToDocument({
+        userId,
+        paymentId: payment.id,
+        orderId,
+        amountCents: Number(payment?.amount_money?.amount) || 0,
+        source: idx.source === 'in_app' ? 'in_app' : 'pay_link',
+        kind: 'invoice',
+        invoiceId,
+      });
+    } catch (err: any) {
+      functions.logger.warn('phase2_unified_payment_write_failed', {
+        paymentId: payment.id, kind: 'invoice', message: err?.message,
+      });
     }
 
     // If the invoice has already been pushed to Xero, record the payment
