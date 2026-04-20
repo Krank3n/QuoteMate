@@ -101,6 +101,32 @@ export function phoneContactToContact(expoContact: ExpoContacts.Contact): Contac
 }
 
 /**
+ * Fetch all device phone contacts, mapped to our Contact type.
+ * Used for bulk import. Filters out entries with no name.
+ */
+export async function getAllPhoneContacts(): Promise<Contact[]> {
+  try {
+    const { data } = await ExpoContacts.getContactsAsync({
+      fields: [
+        ExpoContacts.Fields.FirstName,
+        ExpoContacts.Fields.LastName,
+        ExpoContacts.Fields.Emails,
+        ExpoContacts.Fields.PhoneNumbers,
+        ExpoContacts.Fields.Addresses,
+        ExpoContacts.Fields.Company,
+        ExpoContacts.Fields.UrlAddresses,
+      ],
+    });
+
+    return data
+      .filter((c) => c.firstName || c.lastName)
+      .map(phoneContactToContact);
+  } catch (error) {
+    return [];
+  }
+}
+
+/**
  * Search device phone contacts by name query
  */
 export async function searchPhoneContacts(

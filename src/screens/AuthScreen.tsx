@@ -3,8 +3,8 @@
  * Handles sign in and sign up for all platforms (web, iOS, Android)
  */
 
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, Animated } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, Animated, TextInput as RNTextInput } from 'react-native';
 import { Text, TextInput, Button, Surface, Title, ActivityIndicator } from 'react-native-paper';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -16,6 +16,7 @@ import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
+import { lightTap, errorTap } from '../utils/haptics';
 
 // Needed for expo-auth-session to work properly
 WebBrowser.maybeCompleteAuthSession();
@@ -54,6 +55,10 @@ export function AuthScreen() {
   // Animation values
   const fadeAnim = useState(new Animated.Value(0))[0];
   const logoScale = useState(new Animated.Value(0.8))[0];
+
+  // Input refs for keyboard Return key chaining
+  const passwordRef = useRef<RNTextInput>(null);
+  const confirmPasswordRef = useRef<RNTextInput>(null);
 
   // Configure Google Sign-In for mobile (iOS/Android)
   // On web, we use Firebase popup instead of expo-auth-session
@@ -132,9 +137,11 @@ export function AuthScreen() {
   const handleSignIn = async () => {
     if (!email || !password) {
       setError('Please enter email and password');
+      errorTap();
       return;
     }
 
+    lightTap();
     setLoading(true);
     setError('');
 
@@ -143,6 +150,7 @@ export function AuthScreen() {
       // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       setError(getErrorMessage(err.code));
+      errorTap();
     } finally {
       setLoading(false);
     }
@@ -151,19 +159,23 @@ export function AuthScreen() {
   const handleSignUp = async () => {
     if (!email || !password) {
       setError('Please enter email and password');
+      errorTap();
       return;
     }
 
     if (password !== confirmPassword) {
       setError('Passwords do not match');
+      errorTap();
       return;
     }
 
     if (password.length < 6) {
       setError('Password must be at least 6 characters');
+      errorTap();
       return;
     }
 
+    lightTap();
     setLoading(true);
     setError('');
 
@@ -173,6 +185,7 @@ export function AuthScreen() {
       // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       setError(getErrorMessage(err.code));
+      errorTap();
     } finally {
       setLoading(false);
     }
@@ -418,6 +431,8 @@ export function AuthScreen() {
                   autoComplete="email"
                   textContentType="emailAddress"
                   importantForAutofill="yes"
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordRef.current?.focus()}
                   style={styles.input}
                   outlineStyle={styles.inputOutline}
                   disabled={loading}
@@ -425,6 +440,7 @@ export function AuthScreen() {
                 />
 
                 <TextInput
+                  ref={passwordRef}
                   label="Password"
                   value={password}
                   onChangeText={setPassword}
@@ -435,6 +451,14 @@ export function AuthScreen() {
                   autoComplete={isSignUp ? 'new-password' : 'current-password'}
                   textContentType={isSignUp ? 'newPassword' : 'password'}
                   importantForAutofill="yes"
+                  returnKeyType={isSignUp ? 'next' : 'done'}
+                  onSubmitEditing={() => {
+                    if (isSignUp) {
+                      confirmPasswordRef.current?.focus();
+                    } else {
+                      handleSignIn();
+                    }
+                  }}
                   style={styles.input}
                   outlineStyle={styles.inputOutline}
                   disabled={loading}
@@ -444,6 +468,7 @@ export function AuthScreen() {
 
                 {isSignUp && (
                   <TextInput
+                    ref={confirmPasswordRef}
                     label="Confirm password"
                     value={confirmPassword}
                     onChangeText={setConfirmPassword}
@@ -454,6 +479,8 @@ export function AuthScreen() {
                     autoComplete="new-password"
                     textContentType="newPassword"
                     importantForAutofill="yes"
+                    returnKeyType="done"
+                    onSubmitEditing={handleSignUp}
                     style={styles.input}
                     outlineStyle={styles.inputOutline}
                     disabled={loading}

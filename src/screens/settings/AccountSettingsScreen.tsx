@@ -17,10 +17,25 @@ import {
   Surface,
   Title,
   Button,
+  TextInput,
+  Portal,
+  Modal as PaperModal,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { signOut, deleteUser } from 'firebase/auth';
+import {
+  signOut,
+  deleteUser,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
+  EmailAuthProvider,
+  GoogleAuthProvider,
+  OAuthProvider,
+  User,
+} from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+import * as Google from 'expo-auth-session/providers/google';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 
 import { useStore } from '../../store/useStore';
 import { auth, db } from '../../config/firebase';
@@ -33,8 +48,22 @@ export function AccountSettingsScreen() {
   const { clearAllData } = useStore();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [showPasswordReauthModal, setShowPasswordReauthModal] = useState(false);
+  const [reauthPassword, setReauthPassword] = useState('');
+  const [reauthLoading, setReauthLoading] = useState(false);
+  const [reauthError, setReauthError] = useState('');
   const [marketingEmails, setMarketingEmails] = useState(true);
   const [emailPrefsLoading, setEmailPrefsLoading] = useState(true);
+
+  // Google OAuth (mobile). On web we use reauthenticateWithPopup instead.
+  const androidClientId = __DEV__ && process.env.GOOGLE_OAUTH_ANDROID_CLIENT_ID_DEBUG
+    ? process.env.GOOGLE_OAUTH_ANDROID_CLIENT_ID_DEBUG
+    : process.env.GOOGLE_OAUTH_ANDROID_CLIENT_ID;
+  const [, , googlePromptAsync] = Google.useAuthRequest({
+    iosClientId: process.env.GOOGLE_OAUTH_IOS_CLIENT_ID || undefined,
+    androidClientId: androidClientId || undefined,
+    webClientId: process.env.GOOGLE_OAUTH_WEB_CLIENT_ID || undefined,
+  });
 
   // Load email preferences from Firestore
   useEffect(() => {
@@ -99,42 +128,135 @@ export function AccountSettingsScreen() {
     setShowDeleteAccountModal(true);
   };
 
-  const confirmDeleteAccount = async () => {
-    setShowDeleteAccountModal(false);
-
+  const clearWebStorage = async () => {
+    if (Platform.OS !== 'web') return;
     try {
-      const currentUser = auth.currentUser;
-      if (!currentUser) {
-        throw new Error('No user is currently signed in');
-      }
-
-      await clearAllData();
-      await deleteUser(currentUser);
-
-      if (Platform.OS === 'web') {
-        try {
-          localStorage.clear();
-          sessionStorage.clear();
-          if (window.indexedDB) {
-            const dbs = await window.indexedDB.databases();
-            for (const db of dbs) {
-              if (db.name) {
-                window.indexedDB.deleteDatabase(db.name);
-              }
-            }
+      localStorage.clear();
+      sessionStorage.clear();
+      if (window.indexedDB) {
+        const dbs = await window.indexedDB.databases();
+        for (const db of dbs) {
+          if (db.name) {
+            window.indexedDB.deleteDatabase(db.name);
           }
-        } catch (e) {
         }
+      }
+    } catch {}
+  };
+
+  const finalizeDelete = async (user: User) => {
+    try {
+      await deleteUser(user);
+      await clearAllData();
+      await clearWebStorage();
+      if (Platform.OS === 'web') {
         window.location.replace(window.location.origin);
       }
     } catch (error: any) {
+      Alert.alert(
+        'Deletion Failed',
+        'Failed to delete account: ' + (error.message || 'Unknown error'),
+        [{ text: 'OK' }]
+      );
+    }
+  };
 
-      if (error.code === 'auth/requires-recent-login') {
+  const reauthWithGoogle = async (user: User) => {
+    if (Platform.OS === 'web') {
+      await reauthenticateWithPopup(user, new GoogleAuthProvider());
+      return;
+    }
+    const result = await googlePromptAsync();
+    if (result?.type !== 'success') {
+      throw { code: 'reauth-cancelled' };
+    }
+    const credential = GoogleAuthProvider.credential(result.params.id_token);
+    await reauthenticateWithCredential(user, credential);
+  };
+
+  const reauthWithApple = async (user: User) => {
+    if (Platform.OS === 'web') {
+      await reauthenticateWithPopup(user, new OAuthProvider('apple.com'));
+      return;
+    }
+    const nonce = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    const hashedNonce = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, nonce);
+    const appleCredential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+      nonce: hashedNonce,
+    });
+    if (!appleCredential.identityToken) {
+      throw new Error('No identity token returned from Apple');
+    }
+    const firebaseCredential = new OAuthProvider('apple.com').credential({
+      idToken: appleCredential.identityToken,
+      rawNonce: nonce,
+    });
+    await reauthenticateWithCredential(user, firebaseCredential);
+  };
+
+  const startReauthForDelete = async (user: User) => {
+    const providerId = user.providerData[0]?.providerId;
+
+    if (providerId === 'password') {
+      setReauthPassword('');
+      setReauthError('');
+      setShowPasswordReauthModal(true);
+      return;
+    }
+
+    try {
+      if (providerId === 'google.com') {
+        await reauthWithGoogle(user);
+      } else if (providerId === 'apple.com') {
+        await reauthWithApple(user);
+      } else {
         Alert.alert(
           'Re-authentication Required',
-          'For security, you need to sign in again before deleting your account. Please sign out and sign back in, then try again.',
+          'Please sign out and sign back in, then try deleting your account again.',
           [{ text: 'OK' }]
         );
+        return;
+      }
+      await finalizeDelete(user);
+    } catch (error: any) {
+      if (
+        error?.code === 'reauth-cancelled' ||
+        error?.code === 'ERR_REQUEST_CANCELED' ||
+        error?.code === 'auth/popup-closed-by-user'
+      ) {
+        return;
+      }
+      Alert.alert(
+        'Re-authentication Failed',
+        error?.message || 'Unable to verify your identity. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const confirmDeleteAccount = async () => {
+    setShowDeleteAccountModal(false);
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      Alert.alert('Error', 'No user is currently signed in.');
+      return;
+    }
+
+    try {
+      await deleteUser(currentUser);
+      await clearAllData();
+      await clearWebStorage();
+      if (Platform.OS === 'web') {
+        window.location.replace(window.location.origin);
+      }
+    } catch (error: any) {
+      if (error.code === 'auth/requires-recent-login') {
+        await startReauthForDelete(currentUser);
       } else {
         Alert.alert(
           'Deletion Failed',
@@ -142,6 +264,41 @@ export function AccountSettingsScreen() {
           [{ text: 'OK' }]
         );
       }
+    }
+  };
+
+  const submitPasswordReauth = async () => {
+    const currentUser = auth.currentUser;
+    if (!currentUser?.email) {
+      setReauthError('Unable to verify your account.');
+      return;
+    }
+    if (!reauthPassword) {
+      setReauthError('Please enter your password.');
+      return;
+    }
+
+    setReauthLoading(true);
+    setReauthError('');
+    try {
+      const credential = EmailAuthProvider.credential(currentUser.email, reauthPassword);
+      await reauthenticateWithCredential(currentUser, credential);
+      setShowPasswordReauthModal(false);
+      setReauthPassword('');
+      await finalizeDelete(currentUser);
+    } catch (error: any) {
+      if (
+        error.code === 'auth/wrong-password' ||
+        error.code === 'auth/invalid-credential'
+      ) {
+        setReauthError('Incorrect password. Please try again.');
+      } else if (error.code === 'auth/too-many-requests') {
+        setReauthError('Too many attempts. Please wait and try again.');
+      } else {
+        setReauthError(error.message || 'Unable to verify your identity.');
+      }
+    } finally {
+      setReauthLoading(false);
     }
   };
 
@@ -237,6 +394,63 @@ export function AccountSettingsScreen() {
         secondaryButtonAction={() => setShowLogoutModal(false)}
         showConfetti={false}
       />
+
+      <Portal>
+        <PaperModal
+          visible={showPasswordReauthModal}
+          onDismiss={() => {
+            if (reauthLoading) return;
+            setShowPasswordReauthModal(false);
+            setReauthPassword('');
+            setReauthError('');
+          }}
+          contentContainerStyle={styles.passwordModal}
+        >
+          <Title style={styles.passwordModalTitle}>Confirm your password</Title>
+          <Text style={styles.passwordModalMessage}>
+            For security, please re-enter your password to permanently delete your account.
+          </Text>
+          <TextInput
+            mode="outlined"
+            label="Password"
+            value={reauthPassword}
+            onChangeText={(v) => {
+              setReauthPassword(v);
+              if (reauthError) setReauthError('');
+            }}
+            secureTextEntry
+            autoFocus
+            disabled={reauthLoading}
+            style={styles.passwordInput}
+            onSubmitEditing={submitPasswordReauth}
+          />
+          {reauthError ? (
+            <Text style={styles.passwordModalError}>{reauthError}</Text>
+          ) : null}
+          <View style={styles.passwordModalButtons}>
+            <Button
+              mode="text"
+              onPress={() => {
+                setShowPasswordReauthModal(false);
+                setReauthPassword('');
+                setReauthError('');
+              }}
+              disabled={reauthLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              mode="contained"
+              onPress={submitPasswordReauth}
+              loading={reauthLoading}
+              disabled={reauthLoading}
+              buttonColor={colors.error}
+            >
+              Delete Account
+            </Button>
+          </View>
+        </PaperModal>
+      </Portal>
 
       <AlertModal
         visible={showDeleteAccountModal}
@@ -340,5 +554,36 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.onSurface,
     lineHeight: 18,
+  },
+  passwordModal: {
+    backgroundColor: colors.surface,
+    marginHorizontal: 24,
+    padding: 24,
+    borderRadius: 12,
+  },
+  passwordModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  passwordModalMessage: {
+    fontSize: 14,
+    color: colors.onSurface,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  passwordInput: {
+    backgroundColor: colors.surface,
+  },
+  passwordModalError: {
+    color: colors.error,
+    fontSize: 13,
+    marginTop: 8,
+  },
+  passwordModalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 20,
   },
 });

@@ -17,11 +17,11 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+  BackHandler,
   TouchableOpacity,
   Animated,
-  Dimensions,
   Image,
+  TextInput as RNTextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -38,17 +38,20 @@ import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
 import ColorPicker, { Panel1, HueSlider, type ColorFormatsObject } from 'reanimated-color-picker';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useStore } from '../store/useStore';
 import { BusinessSettings } from '../types';
 import { colors } from '../theme';
 import { OnboardingProgress, OnboardingStep } from '../components/OnboardingProgress';
 import { CelebrationAnimation } from '../components/CelebrationAnimation';
+import { AlertModal } from '../components/AlertModal';
 import { TRADE_CATEGORIES } from '../constants/tradeCategories';
 import { auth, storage } from '../config/firebase';
 import * as squareService from '../services/squareService';
+import { lightTap, successTap, errorTap, selectionTap } from '../utils/haptics';
 
-const { width } = Dimensions.get('window');
+const STORAGE_KEY = 'onboarding:draft';
 
 const ONBOARDING_STEPS: OnboardingStep[] = [
   { id: 1, label: 'Company', icon: 'office-building' },
@@ -95,12 +98,80 @@ export function NewOnboardingScreen() {
   const [squareConnected, setSquareConnected] = useState(false);
   const [squareError, setSquareError] = useState<string | null>(null);
 
+  // Inline validation (replaces Alert popups)
+  const [showBusinessNameError, setShowBusinessNameError] = useState(false);
+  const [showCategoryError, setShowCategoryError] = useState(false);
+
+  // Modal state (replaces remaining Alert popups)
+  const [removeLogoModalVisible, setRemoveLogoModalVisible] = useState(false);
+  const [squareSkipModalVisible, setSquareSkipModalVisible] = useState(false);
+  const [completeErrorVisible, setCompleteErrorVisible] = useState(false);
+
+  // "Why we ask" tooltips
+  const [activeTooltip, setActiveTooltip] = useState<'abn' | 'brand' | null>(null);
+
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
+  const scrollRef = useRef<ScrollView>(null);
+  const hydratedRef = useRef(false);
 
-  // Animate step transitions
+  // Input refs — for focusing next input on keyboard Return and auto-focus on step entry
+  const phoneRef = useRef<RNTextInput>(null);
+  const emailRef = useRef<RNTextInput>(null);
+  const abnRef = useRef<RNTextInput>(null);
+  const laborRateRef = useRef<RNTextInput>(null);
+  const markupRef = useRef<RNTextInput>(null);
+
+  // Hydrate draft from AsyncStorage on mount (resume where user left off)
   useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const d = JSON.parse(raw);
+          if (typeof d.currentStep === 'number') setCurrentStep(d.currentStep);
+          if (typeof d.businessName === 'string') setBusinessName(d.businessName);
+          if (Array.isArray(d.selectedCategories)) setSelectedCategories(d.selectedCategories);
+          if (typeof d.phone === 'string') setPhone(d.phone);
+          if (typeof d.email === 'string') setEmail(d.email);
+          if (typeof d.abn === 'string') setAbn(d.abn);
+          if (typeof d.brandColor === 'string') setBrandColor(d.brandColor);
+          if (typeof d.laborRate === 'string') setLaborRate(d.laborRate);
+          if (typeof d.markup === 'string') setMarkup(d.markup);
+          // logoUri is intentionally not persisted — local file:// URIs don't survive app restarts.
+        }
+      } catch {
+        // Ignore; start fresh.
+      } finally {
+        hydratedRef.current = true;
+      }
+    })();
+  }, []);
+
+  // Persist draft whenever key fields change (debounced by React's batching)
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        currentStep,
+        businessName,
+        selectedCategories,
+        phone,
+        email,
+        abn,
+        brandColor,
+        laborRate,
+        markup,
+      }),
+    ).catch(() => { /* ignore storage errors */ });
+  }, [currentStep, businessName, selectedCategories, phone, email, abn, brandColor, laborRate, markup]);
+
+  // Animate step transitions, reset scroll, haptic tick, auto-focus first input
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+
     fadeAnim.setValue(0);
     slideAnim.setValue(50);
 
@@ -116,22 +187,38 @@ export function NewOnboardingScreen() {
         useNativeDriver: true,
       }),
     ]).start();
+
+    // Auto-focus first input on text-entry steps (after the slide-in finishes)
+    const focusTimer = setTimeout(() => {
+      if (currentStep === 3) phoneRef.current?.focus();
+      else if (currentStep === 5) laborRateRef.current?.focus();
+    }, 450);
+
+    return () => clearTimeout(focusTimer);
   }, [currentStep]);
 
-  // Handle next step
-  const handleNext = () => {
-    if (currentStep === 1) {
-      if (!businessName.trim()) {
-        Alert.alert('Required', 'Please enter your business name');
-        return;
+  // Android hardware back — go to previous step instead of exiting
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (currentStep > 1) {
+        handleBack();
+        return true; // consume the event
       }
-    } else if (currentStep === 2) {
-      if (selectedCategories.length === 0) {
-        Alert.alert('Required', 'Please select at least one trade category');
-        return;
-      }
-    }
+      return false; // let OS handle (exits app)
+    });
+    return () => sub.remove();
+  }, [currentStep]);
 
+  // Validation — whether the current step is allowed to advance.
+  const isCurrentStepValid = (): boolean => {
+    if (currentStep === 1) return businessName.trim().length > 0;
+    if (currentStep === 2) return selectedCategories.length > 0;
+    return true;
+  };
+
+  // Advance to the next step (or complete)
+  const advance = () => {
     if (currentStep < TOTAL_STEPS) {
       setCurrentStep(currentStep + 1);
     } else {
@@ -139,9 +226,26 @@ export function NewOnboardingScreen() {
     }
   };
 
+  // Handle next step
+  const handleNext = () => {
+    if (currentStep === 1 && !businessName.trim()) {
+      setShowBusinessNameError(true);
+      errorTap();
+      return;
+    }
+    if (currentStep === 2 && selectedCategories.length === 0) {
+      setShowCategoryError(true);
+      errorTap();
+      return;
+    }
+    lightTap();
+    advance();
+  };
+
   // Handle back
   const handleBack = () => {
     if (currentStep > 1) {
+      lightTap();
       setCurrentStep(currentStep - 1);
     }
   };
@@ -150,15 +254,26 @@ export function NewOnboardingScreen() {
   // except on the final step which completes onboarding.
   const handleSkip = () => {
     if (currentStep < 3) return;
-    if (currentStep < TOTAL_STEPS) {
-      setCurrentStep(currentStep + 1);
-    } else {
-      handleComplete();
+    // Skipping Square is costly (revenue), so nudge the user once before letting them through.
+    if (currentStep === TOTAL_STEPS && !squareConnected) {
+      setSquareSkipModalVisible(true);
+      return;
     }
+    lightTap();
+    advance();
+  };
+
+  // User confirmed skipping the Square step from the modal.
+  const confirmSquareSkip = () => {
+    setSquareSkipModalVisible(false);
+    lightTap();
+    advance();
   };
 
   // Handle category toggle (multi-select)
   const handleCategoryToggle = (categoryId: string) => {
+    selectionTap();
+    setShowCategoryError(false);
     setSelectedCategories(prev => {
       if (prev.includes(categoryId)) {
         return prev.filter(c => c !== categoryId);
@@ -169,42 +284,39 @@ export function NewOnboardingScreen() {
   };
 
   // Logo picker (ported from BusinessProfileScreen)
+  const [logoPickError, setLogoPickError] = useState<string | null>(null);
   const handlePickLogo = async () => {
+    setLogoPickError(null);
     try {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (permissionResult.granted === false) {
-        Alert.alert('Permission Required', 'Permission to access camera roll is required!');
+        setLogoPickError('Permission to access your photo library is required to pick a logo.');
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
+        allowsEditing: true,
         quality: 0.8,
       });
 
       if (!result.canceled && result.assets[0]) {
+        selectionTap();
         setLogoUri(result.assets[0].uri);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
+      setLogoPickError("We couldn't open the image picker. Please try again.");
     }
   };
 
   const handleRemoveLogo = () => {
-    Alert.alert(
-      'Remove Logo',
-      'Are you sure you want to remove your company logo?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => setLogoUri(undefined),
-        },
-      ]
-    );
+    setRemoveLogoModalVisible(true);
+  };
+
+  const confirmRemoveLogo = () => {
+    setRemoveLogoModalVisible(false);
+    setLogoUri(undefined);
   };
 
   // Upload logo to Firebase Storage (ported from BusinessProfileScreen)
@@ -313,10 +425,14 @@ export function NewOnboardingScreen() {
       await setBusinessSettings(settings);
       setIsLoading(false);
 
-      // Show success animation
+      // Clear the draft now that the user is fully onboarded.
+      AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+
+      successTap();
       setShowSuccess(true);
     } catch (error) {
-      Alert.alert('Error', 'Failed to save settings. Please try again.');
+      setCompleteErrorVisible(true);
+      errorTap();
       setIsLoading(false);
     }
   };
@@ -367,15 +483,23 @@ export function NewOnboardingScreen() {
         <TextInput
           label="Business Name"
           value={businessName}
-          onChangeText={setBusinessName}
+          onChangeText={(t) => {
+            setBusinessName(t);
+            if (showBusinessNameError && t.trim().length > 0) setShowBusinessNameError(false);
+          }}
           mode="outlined"
           style={styles.input}
           placeholder="e.g., Smith's Plumbing"
           autoFocus
+          returnKeyType="next"
           onSubmitEditing={handleNext}
           autoComplete="off"
           textContentType="organizationName"
+          error={showBusinessNameError}
         />
+        {showBusinessNameError && (
+          <Text style={styles.fieldError}>Please enter your business name</Text>
+        )}
       </Surface>
     </View>
   );
@@ -394,6 +518,9 @@ export function NewOnboardingScreen() {
         <Paragraph style={styles.stepDescription}>
           Select all categories that apply (you can choose multiple)
         </Paragraph>
+        {showCategoryError && (
+          <Text style={styles.fieldError}>Please select at least one category</Text>
+        )}
       </View>
 
       <ScrollView style={styles.scrollableContent}>
@@ -457,6 +584,7 @@ export function NewOnboardingScreen() {
 
       <Surface style={styles.card}>
         <TextInput
+          ref={phoneRef}
           label="Phone"
           value={phone}
           onChangeText={setPhone}
@@ -465,9 +593,12 @@ export function NewOnboardingScreen() {
           keyboardType="phone-pad"
           textContentType="telephoneNumber"
           autoComplete="tel"
+          returnKeyType="next"
+          onSubmitEditing={() => emailRef.current?.focus()}
         />
 
         <TextInput
+          ref={emailRef}
           label="Email"
           value={email}
           onChangeText={setEmail}
@@ -477,9 +608,12 @@ export function NewOnboardingScreen() {
           textContentType="emailAddress"
           autoCapitalize="none"
           autoComplete="email"
+          returnKeyType="next"
+          onSubmitEditing={() => abnRef.current?.focus()}
         />
 
         <TextInput
+          ref={abnRef}
           label="ABN"
           value={abn}
           onChangeText={setAbn}
@@ -487,8 +621,27 @@ export function NewOnboardingScreen() {
           style={styles.input}
           keyboardType="number-pad"
           autoComplete="off"
+          returnKeyType="done"
+          onSubmitEditing={handleNext}
         />
-        <Text style={styles.helperText}>Used on tax invoices</Text>
+        <View style={styles.helperRow}>
+          <Text style={styles.helperText}>Used on tax invoices</Text>
+          <TouchableOpacity
+            onPress={() => setActiveTooltip(activeTooltip === 'abn' ? null : 'abn')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <MaterialCommunityIcons
+              name="information-outline"
+              size={16}
+              color={colors.textMuted}
+            />
+          </TouchableOpacity>
+        </View>
+        {activeTooltip === 'abn' && (
+          <Text style={styles.tooltipText}>
+            Adding your ABN lets customers claim GST credits and makes your invoices tax-compliant. You can add it later in Settings.
+          </Text>
+        )}
       </Surface>
     </View>
   );
@@ -534,13 +687,36 @@ export function NewOnboardingScreen() {
               color={colors.primary}
             />
             <Text style={styles.logoUploadText}>Tap to Upload Logo</Text>
-            <Text style={styles.logoUploadHint}>Recommended: 500x500px (square)</Text>
+            <Text style={styles.logoUploadHint}>Any shape — crop and zoom on the next screen</Text>
           </TouchableOpacity>
+        )}
+        {logoPickError && (
+          <View style={styles.errorBox}>
+            <MaterialCommunityIcons name="alert-circle-outline" size={16} color={colors.error} />
+            <Text style={styles.errorText}>{logoPickError}</Text>
+          </View>
         )}
       </Surface>
 
       <Surface style={styles.card}>
-        <Title style={styles.cardTitle}>Brand Colour</Title>
+        <View style={styles.cardTitleRow}>
+          <Title style={styles.cardTitle}>Brand Colour</Title>
+          <TouchableOpacity
+            onPress={() => setActiveTooltip(activeTooltip === 'brand' ? null : 'brand')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <MaterialCommunityIcons
+              name="information-outline"
+              size={18}
+              color={colors.textMuted}
+            />
+          </TouchableOpacity>
+        </View>
+        {activeTooltip === 'brand' && (
+          <Text style={styles.tooltipText}>
+            Your brand colour accents headings and totals on every PDF. Customers are more likely to remember and trust a consistent look.
+          </Text>
+        )}
 
         {brandColor ? (
           <View style={[styles.colorBanner, { backgroundColor: brandColor }]}>
@@ -607,9 +783,8 @@ export function NewOnboardingScreen() {
             mode="contained"
             onPress={() => {
               if (/^#[0-9A-Fa-f]{6}$/.test(hexInput)) {
+                selectionTap();
                 setBrandColor(hexInput);
-              } else {
-                Alert.alert('Invalid Colour', 'Enter a valid hex colour (e.g. #3B82F6)');
               }
             }}
             disabled={!/^#[0-9A-Fa-f]{6}$/.test(hexInput)}
@@ -641,6 +816,7 @@ export function NewOnboardingScreen() {
 
       <Surface style={styles.card}>
         <TextInput
+          ref={laborRateRef}
           label="Hourly Labor Rate"
           value={laborRate}
           onChangeText={setLaborRate}
@@ -651,9 +827,12 @@ export function NewOnboardingScreen() {
           right={<TextInput.Affix text="/hr" />}
           autoComplete="off"
           textContentType="none"
+          returnKeyType="next"
+          onSubmitEditing={() => markupRef.current?.focus()}
         />
 
         <TextInput
+          ref={markupRef}
           label="Markup Percentage"
           value={markup}
           onChangeText={setMarkup}
@@ -663,6 +842,8 @@ export function NewOnboardingScreen() {
           right={<TextInput.Affix text="%" />}
           autoComplete="off"
           textContentType="none"
+          returnKeyType="done"
+          onSubmitEditing={handleNext}
         />
       </Surface>
     </View>
@@ -759,6 +940,7 @@ export function NewOnboardingScreen() {
 
       {/* Step Content - Scrollable */}
       <ScrollView
+        ref={scrollRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -808,6 +990,46 @@ export function NewOnboardingScreen() {
         visible={showSuccess}
         onComplete={handleSuccessComplete}
         message="Welcome to QuoteMate!"
+      />
+
+      {/* Confirm removing the company logo */}
+      <AlertModal
+        visible={removeLogoModalVisible}
+        onDismiss={() => setRemoveLogoModalVisible(false)}
+        type="warning"
+        title="Remove logo?"
+        message="This will remove your company logo. You can add it again any time."
+        primaryButtonText="Remove"
+        primaryButtonAction={confirmRemoveLogo}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => setRemoveLogoModalVisible(false)}
+      />
+
+      {/* Nudge before skipping Square (revenue-impacting step) */}
+      <AlertModal
+        visible={squareSkipModalVisible}
+        onDismiss={() => setSquareSkipModalVisible(false)}
+        type="info"
+        title="Skip card payments?"
+        message="Without Square, customers won't be able to pay invoices by card. You can always connect it later in Settings."
+        primaryButtonText="Connect Square"
+        primaryButtonAction={() => {
+          setSquareSkipModalVisible(false);
+          handleConnectSquare();
+        }}
+        secondaryButtonText="Skip anyway"
+        secondaryButtonAction={confirmSquareSkip}
+      />
+
+      {/* Completion error */}
+      <AlertModal
+        visible={completeErrorVisible}
+        onDismiss={() => setCompleteErrorVisible(false)}
+        type="error"
+        title="Something went wrong"
+        message="We couldn't save your settings. Please check your connection and try again."
+        primaryButtonText="OK"
+        primaryButtonAction={() => setCompleteErrorVisible(false)}
       />
     </KeyboardAvoidingView>
   );
@@ -864,14 +1086,43 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 12,
   },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
   input: {
     marginBottom: 16,
   },
   helperText: {
     fontSize: 13,
     color: colors.textMuted,
+  },
+  helperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginTop: -8,
     marginBottom: 8,
+  },
+  tooltipText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 18,
+    marginTop: 4,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.surfaceLight,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
+  },
+  fieldError: {
+    fontSize: 13,
+    color: colors.error,
+    marginTop: 4,
   },
   gridContainer: {
     flexDirection: 'row',
