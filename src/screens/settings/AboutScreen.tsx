@@ -3,7 +3,7 @@
  * App version and information
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -15,13 +15,25 @@ import {
 import {
   Text,
   Surface,
+  Button,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
+import { auth } from '../../config/firebase';
+
+type BackfillSummary = {
+  usersProcessed: number;
+  quotesMirrored: number;
+  invoicesMirrored: number;
+  skipped: number;
+  errors: number;
+  errorSamples?: Array<{ userId: string; kind: string; error: string }>;
+};
 
 const features = [
   { icon: 'robot' as const, text: 'AI-powered job analysis' },
@@ -51,6 +63,34 @@ const supportLinks = [
 export function AboutScreen() {
   const appVersion = Constants.expoConfig?.version || '1.0.0';
   const buildNumber = Constants.expoConfig?.ios?.buildNumber || Constants.expoConfig?.android?.versionCode || '1';
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [backfillStatus, setBackfillStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [backfillResult, setBackfillResult] = useState<BackfillSummary | null>(null);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
+    user.getIdTokenResult()
+      .then((tr) => setIsAdmin(tr.claims?.admin === true))
+      .catch(() => setIsAdmin(false));
+  }, []);
+
+  const runBackfill = async () => {
+    setBackfillStatus('running');
+    setBackfillError(null);
+    setBackfillResult(null);
+    try {
+      const fn = httpsCallable<unknown, BackfillSummary>(getFunctions(), 'mirrorAllDocuments');
+      const res = await fn({});
+      setBackfillResult(res.data);
+      setBackfillStatus('done');
+    } catch (err: any) {
+      setBackfillError(err?.message || String(err));
+      setBackfillStatus('error');
+    }
+  };
 
   const handleLinkPress = (url: string) => {
     Linking.openURL(url);
@@ -137,6 +177,47 @@ export function AboutScreen() {
             ))}
           </Surface>
 
+          {isAdmin && (
+            <Surface style={styles.card}>
+              <Text style={styles.sectionTitle}>Admin tools</Text>
+              <Text style={styles.description}>
+                Backfill the unified documents collection from existing quotes
+                and invoices. Safe to re-run.
+              </Text>
+              <Button
+                mode="contained"
+                onPress={runBackfill}
+                loading={backfillStatus === 'running'}
+                disabled={backfillStatus === 'running'}
+                style={styles.adminButton}
+              >
+                {backfillStatus === 'running' ? 'Running…' : 'Run documents backfill'}
+              </Button>
+              {backfillResult && (
+                <View style={styles.adminResult}>
+                  <Text style={styles.adminResultLine}>
+                    Users processed: {backfillResult.usersProcessed}
+                  </Text>
+                  <Text style={styles.adminResultLine}>
+                    Quotes mirrored: {backfillResult.quotesMirrored}
+                  </Text>
+                  <Text style={styles.adminResultLine}>
+                    Invoices mirrored: {backfillResult.invoicesMirrored}
+                  </Text>
+                  <Text style={styles.adminResultLine}>
+                    Skipped (up-to-date): {backfillResult.skipped}
+                  </Text>
+                  <Text style={styles.adminResultLine}>
+                    Errors: {backfillResult.errors}
+                  </Text>
+                </View>
+              )}
+              {backfillError && (
+                <Text style={styles.adminError}>{backfillError}</Text>
+              )}
+            </Surface>
+          )}
+
           {/* Footer */}
           <View style={styles.footer}>
             <Text style={styles.madeWith}>
@@ -159,6 +240,26 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 32,
+  },
+  adminButton: {
+    marginTop: 12,
+  },
+  adminResult: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  adminResultLine: {
+    fontSize: 13,
+    color: colors.text,
+    marginBottom: 4,
+    fontFamily: 'monospace',
+  },
+  adminError: {
+    marginTop: 12,
+    color: colors.error,
+    fontSize: 13,
   },
 
   // Hero
