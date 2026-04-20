@@ -23,7 +23,7 @@ import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { isInvoiceOverdue, getOverdueText, getAmountDue } from '../utils/invoiceCalculator';
-import { exportQuotePDF, exportInvoicePDF } from '../utils/pdfGenerator';
+import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
 import { selectionTap } from '../utils/haptics';
 import { SwipeableCard } from './SwipeableCard';
@@ -272,11 +272,7 @@ export const DocumentCard = React.memo(function DocumentCard({
 
   const handleShare = async () => {
     try {
-      if (isInvoice) {
-        await exportInvoicePDF(invoice, businessSettings, 'share', { isPro });
-      } else {
-        await exportQuotePDF(quote, businessSettings, 'share', { isPro });
-      }
+      await exportDocumentPDF(doc, businessSettings, 'share', { isPro });
     } catch {
       Alert.alert('Error', `Failed to share ${isInvoice ? 'invoice' : 'quote'}. Please try again.`);
     }
@@ -284,11 +280,7 @@ export const DocumentCard = React.memo(function DocumentCard({
 
   const handleExport = async () => {
     try {
-      if (isInvoice) {
-        await exportInvoicePDF(invoice, businessSettings, 'export', { isPro });
-      } else {
-        await exportQuotePDF(quote, businessSettings, 'export', { isPro });
-      }
+      await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
     } catch {
       Alert.alert('Error', `Failed to export ${isInvoice ? 'invoice' : 'quote'}. Please try again.`);
     }

@@ -15,7 +15,7 @@ import { Quote, Invoice, BusinessSettings } from '../types';
 import { Document } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { exportQuotePDF, exportInvoicePDF } from '../utils/pdfGenerator';
+import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
 import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
@@ -237,11 +237,7 @@ export function SendDocumentButton({
   const handleExportFromDialog = async () => {
     setSendDialogVisible(false);
     try {
-      if (isInvoice) {
-        await exportInvoicePDF(invoice, businessSettings, 'export', { isPro });
-      } else {
-        await exportQuotePDF(quote, businessSettings, 'export', { isPro });
-      }
+      await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
     } catch {
       Alert.alert('Error', 'Failed to export PDF. Please try again.');
     }
