@@ -23,6 +23,7 @@ import { DocumentCard } from '../components/DocumentCard';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
+import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
 import { lightTap } from '../utils/haptics';
 
 type FilterKind = 'all' | 'quotes' | 'invoices' | 'drafts' | 'sent' | 'paid';
@@ -87,6 +88,8 @@ export function DocumentsListScreen() {
   const [filter, setFilter] = useState<FilterKind>('all');
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(documentsLoaded || documents.length > 0);
+  const [statusSheetVisible, setStatusSheetVisible] = useState(false);
+  const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
 
   useEffect(() => {
     if (!initialLoaded && documents.length > 0) setInitialLoaded(true);
@@ -201,6 +204,27 @@ export function DocumentsListScreen() {
     navigation.navigate('RecordPayment' as never, { invoiceId: doc.id } as never);
   };
 
+  const handleOpenStatusSheet = (doc: Document) => {
+    if (doc.type !== 'quote') return;
+    setSelectedQuote(documentToQuote(doc));
+    setStatusSheetVisible(true);
+  };
+
+  const handleStatusSelect = async (newStatus: string) => {
+    if (!selectedQuote) return;
+    try {
+      await saveQuote({
+        ...selectedQuote,
+        status: newStatus as Quote['status'],
+        updatedAt: new Date(),
+      });
+    } catch {
+      Alert.alert('Error', 'Failed to update quote status. Please try again.');
+    }
+    setStatusSheetVisible(false);
+    setSelectedQuote(null);
+  };
+
   const renderCard = useCallback(({ item, index }: { item: Document; index: number }) => (
     <AnimatedListItem index={index}>
       <DocumentCard
@@ -213,6 +237,7 @@ export function DocumentsListScreen() {
         onSave={handleSave}
         onConvertToInvoice={item.type === 'quote' ? handleConvert : undefined}
         onRecordPayment={item.type === 'invoice' ? handleRecordPayment : undefined}
+        onStatusChange={item.type === 'quote' ? handleOpenStatusSheet : undefined}
       />
     </AnimatedListItem>
   ), [businessSettings, documents]);
@@ -311,6 +336,17 @@ export function DocumentsListScreen() {
         onPress={handleNew}
         color={colors.white}
         accessibilityLabel="Create new document"
+      />
+
+      <StatusSheet
+        visible={statusSheetVisible}
+        onDismiss={() => {
+          setStatusSheetVisible(false);
+          setSelectedQuote(null);
+        }}
+        currentStatus={selectedQuote?.status || 'draft'}
+        onSelect={handleStatusSelect}
+        options={QUOTE_STATUS_OPTIONS}
       />
     </View>
   );
