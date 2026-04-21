@@ -6,7 +6,7 @@
  * SwipeableCard wrapper, same idle bob/tilt, same shimmer/grain overlays.
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { View, StyleSheet, Alert, Animated } from 'react-native';
 import {
   Text,
@@ -17,7 +17,7 @@ import {
 import { format, formatDistanceToNow, differenceInDays } from 'date-fns';
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Quote, Invoice, BusinessSettings, InvoiceStatus } from '../types';
+import { Quote, Invoice, BusinessSettings } from '../types';
 import { Document } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { colors } from '../theme';
@@ -49,10 +49,8 @@ interface DocumentCardProps {
   onDelete: (id: string) => void;
   onDuplicate: (doc: Document) => void;
   onSave: (doc: Document) => void;
-  /** Quote-only: status change handler. Ignored for invoices. */
+  /** Stage change handler — parent opens a StageSheet with the doc. */
   onStatusChange?: (doc: Document) => void;
-  /** Quote-only: convert action handler. */
-  onConvertToInvoice?: (doc: Document) => void;
   /** Invoice-only: record payment handler. */
   onRecordPayment?: (doc: Document) => void;
   swipeableRef?: React.RefObject<any>;
@@ -67,18 +65,18 @@ export const DocumentCard = React.memo(function DocumentCard({
   onDuplicate,
   onSave,
   onStatusChange,
-  onConvertToInvoice,
   onRecordPayment,
   swipeableRef,
 }: DocumentCardProps) {
   const isInvoice = doc.type === 'invoice';
   // Project to legacy shapes for the existing children (PDF export, send button,
   // email preview) so we don't have to rewrite every dependent service today.
-  const quote: Quote = documentToQuote(doc);
-  const invoice: Invoice = documentToInvoice(doc);
+  // Memoise — the card re-renders often during scroll and the adapter walks
+  // the doc's materials/sections each call.
+  const quote: Quote = useMemo(() => documentToQuote(doc), [doc]);
+  const invoice: Invoice = useMemo(() => documentToInvoice(doc), [doc]);
 
   const [menuVisible, setMenuVisible] = useState(false);
-  const [statusMenuVisible, setStatusMenuVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [emailPreviewVisible, setEmailPreviewVisible] = useState(false);
   const [emailBody, setEmailBody] = useState('');
@@ -302,13 +300,6 @@ export const DocumentCard = React.memo(function DocumentCard({
     }
   };
 
-  const handleStatusChangeInvoice = async (newStatus: InvoiceStatus) => {
-    selectionTap();
-    setStatusMenuVisible(false);
-    const updatedInvoice: Invoice = { ...invoice, status: newStatus, updatedAt: new Date() };
-    await saveInvoice(updatedInvoice);
-  };
-
   if (isInvoice) {
     const overdueText = getOverdueText(invoice);
     const amountDue = getAmountDue(invoice);
@@ -360,7 +351,8 @@ export const DocumentCard = React.memo(function DocumentCard({
                           textStyle={styles.statusText}
                           onPress={(e) => {
                             e.stopPropagation();
-                            setStatusMenuVisible(true);
+                            selectionTap();
+                            onStatusChange?.(doc);
                           }}
                         >
                           {invoice.status}
@@ -427,26 +419,6 @@ export const DocumentCard = React.memo(function DocumentCard({
                 }]
               : []),
             { icon: 'delete-outline', label: 'Delete', onPress: handleDelete, color: colors.error, divider: true },
-          ]}
-        />
-
-        <ActionSheet
-          visible={statusMenuVisible}
-          onDismiss={() => setStatusMenuVisible(false)}
-          title="Update Status"
-          options={[
-            ...(invoice.status !== 'draft'
-              ? [{ icon: 'file-document-edit-outline', label: 'Mark as Draft', onPress: () => handleStatusChangeInvoice('draft') }]
-              : []),
-            ...(invoice.status !== 'sent' && invoice.status !== 'paid'
-              ? [{ icon: 'send-outline', label: 'Mark as Sent', onPress: () => handleStatusChangeInvoice('sent') }]
-              : []),
-            ...(invoice.status !== 'paid'
-              ? [{ icon: 'check-circle-outline', label: 'Mark as Paid', onPress: () => handleStatusChangeInvoice('paid') }]
-              : []),
-            ...(invoice.status !== 'cancelled'
-              ? [{ icon: 'close-circle-outline', label: 'Cancel Invoice', onPress: () => handleStatusChangeInvoice('cancelled'), color: colors.error, divider: true }]
-              : []),
           ]}
         />
 
@@ -597,9 +569,6 @@ export const DocumentCard = React.memo(function DocumentCard({
           { icon: 'content-copy', label: 'Duplicate', onPress: () => onDuplicate(doc) },
           { icon: 'share-variant', label: 'Share', onPress: handleShare },
           { icon: 'file-pdf-box', label: 'Export PDF', onPress: handleExport },
-          ...(onConvertToInvoice
-            ? [{ icon: 'file-replace', label: 'Convert to Invoice', onPress: () => onConvertToInvoice(doc) }]
-            : []),
           { icon: 'delete-outline', label: 'Delete', onPress: handleDelete, color: colors.error, divider: true },
         ]}
       />
