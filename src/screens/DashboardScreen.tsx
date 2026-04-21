@@ -29,7 +29,9 @@ import { AnimatedNumber } from '../components/AnimatedNumber';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
-import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
+import { StageSheet } from '../components/StageSheet';
+import { applyStageChange } from '../utils/applyStageChange';
+import type { Document, DocumentStage } from '../types/document';
 import { SwipeableCard } from '../components/SwipeableCard';
 import { lightTap, successTap } from '../utils/haptics';
 import { TrialBanner } from '../components/TrialBanner';
@@ -274,11 +276,8 @@ export function DashboardScreen() {
     if (recentQuoteCardRef.current) registerRef('recentQuoteCard', recentQuoteCardRef.current);
   });
 
-  const [statusSheetVisible, setStatusSheetVisible] = useState(false);
-  const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
-  const [convertModalVisible, setConvertModalVisible] = useState(false);
-  const [quoteToConvert, setQuoteToConvert] = useState<Quote | null>(null);
-  const [isConverting, setIsConverting] = useState(false);
+  const [stageSheetVisible, setStageSheetVisible] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(quotes.length > 0);
   useEffect(() => {
@@ -432,30 +431,6 @@ export function DashboardScreen() {
     }
   };
 
-  const handleConvertToInvoice = (quote: Quote) => {
-    if (!isPro) {
-      navigation.navigate('Paywall' as never);
-      return;
-    }
-    setQuoteToConvert(quote);
-    setConvertModalVisible(true);
-  };
-
-  const handleConfirmConvert = async () => {
-    if (!quoteToConvert) return;
-    setIsConverting(true);
-    try {
-      const invoice = await createInvoiceFromQuote(quoteToConvert);
-      await saveInvoice(invoice);
-      setConvertModalVisible(false);
-      setQuoteToConvert(null);
-      navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
-    } catch (error) {
-    } finally {
-      setIsConverting(false);
-    }
-  };
-
   const handleDeleteQuote = async (quoteId: string) => {
     // QuoteCard already shows its own confirmation modal, so just delete directly
     try {
@@ -477,51 +452,34 @@ export function DashboardScreen() {
     setQuoteToDelete(null);
   };
 
-  const handleOpenStatusSheet = (quote: Quote) => {
-    setSelectedQuote(quote);
-    setStatusSheetVisible(true);
+  const handleOpenStageSheet = (doc: Document) => {
+    setSelectedDoc(doc);
+    setStageSheetVisible(true);
   };
 
-  const handleStatusSelect = async (newStatus: string) => {
-    if (!selectedQuote) return;
-    try {
-      const updatedQuote = {
-        ...selectedQuote,
-        status: newStatus as Quote['status'],
-        updatedAt: new Date(),
-      };
-      await saveQuote(updatedQuote);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update quote status. Please try again.');
+  const handleStageSelect = async (target: DocumentStage) => {
+    if (!selectedDoc) return;
+    setStageSheetVisible(false);
+    if (target === 'invoice_sent' && selectedDoc.type === 'quote' && !isPro) {
+      navigation.navigate('Paywall' as never);
+      setSelectedDoc(null);
+      return;
     }
-    setStatusSheetVisible(false);
-    setSelectedQuote(null);
+    try {
+      await applyStageChange(selectedDoc, target, {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
+      });
+    } catch {
+      Alert.alert('Error', 'Failed to update stage. Please try again.');
+    }
+    setSelectedDoc(null);
   };
 
   return (
     <>
-      {/* Convert to Invoice Modal */}
-      <AlertModal
-        visible={convertModalVisible}
-        onDismiss={() => {
-          setConvertModalVisible(false);
-          setQuoteToConvert(null);
-        }}
-        type="info"
-        icon="file-replace"
-        title="Convert to Invoice"
-        message={quoteToConvert ? `Create an invoice from this quote for ${quoteToConvert.customerName}?` : ''}
-        showConfetti={false}
-        primaryButtonText="Convert"
-        primaryButtonAction={handleConfirmConvert}
-        secondaryButtonText="Cancel"
-        secondaryButtonAction={() => {
-          setConvertModalVisible(false);
-          setQuoteToConvert(null);
-        }}
-        secondaryButtonLoading={isConverting}
-      />
-
       {/* Duplicate Success */}
       <AlertModal
         visible={duplicateSuccessVisible}
@@ -762,8 +720,7 @@ export function DashboardScreen() {
                   onDelete={handleDeleteQuote}
                   onDuplicate={() => handleDuplicateQuote(quote)}
                   onSave={() => saveQuote(quote)}
-                  onStatusChange={() => handleOpenStatusSheet(quote)}
-                  onConvertToInvoice={() => handleConvertToInvoice(quote)}
+                  onStatusChange={handleOpenStageSheet}
                   swipeableRef={index === 0 ? firstQuoteSwipeRef : undefined}
                 />
                 </View>
@@ -798,17 +755,18 @@ export function DashboardScreen() {
       </WebContainer>
     </ScrollView>
 
-    {/* Status Sheet */}
-    <StatusSheet
-      visible={statusSheetVisible}
-      onDismiss={() => {
-        setStatusSheetVisible(false);
-        setSelectedQuote(null);
-      }}
-      currentStatus={selectedQuote?.status || 'draft'}
-      onSelect={handleStatusSelect}
-      options={QUOTE_STATUS_OPTIONS}
-    />
+    {/* Stage Sheet */}
+    {selectedDoc && (
+      <StageSheet
+        visible={stageSheetVisible}
+        onDismiss={() => {
+          setStageSheetVisible(false);
+          setSelectedDoc(null);
+        }}
+        doc={selectedDoc}
+        onSelect={handleStageSelect}
+      />
+    )}
 
     {/* Spotlight Tour — only active during 'dashboard' phase, not 'dashboardComplete' */}
     <SpotlightTour

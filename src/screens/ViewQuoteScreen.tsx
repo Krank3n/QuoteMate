@@ -16,7 +16,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import { useStore } from '../store/useStore';
-import { documentToQuote } from '../types/documentAdapter';
+import { documentToQuote, quoteToDocument } from '../types/documentAdapter';
+import type { DocumentStage } from '../types/document';
 import { colors } from '../theme';
 import { generateQuotePDF } from '../utils/pdfGenerator';
 import { SendQuoteButton } from '../components/SendQuoteButton';
@@ -24,6 +25,8 @@ import { AlertModal } from '../components/AlertModal';
 import { TakePaymentSheet, TakePaymentTarget } from '../components/TakePaymentSheet';
 import { SquareReconnectBanner } from '../components/SquareReconnectBanner';
 import { PaymentSyncErrorBanner, DisputeBanner, InvoicedBanner } from '../components/PaymentAlertBanners';
+import { StageSheet } from '../components/StageSheet';
+import { applyStageChange } from '../utils/applyStageChange';
 import * as squareService from '../services/squareService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebContainer } from '../components/WebContainer';
@@ -43,7 +46,9 @@ export function ViewQuoteScreen() {
   const route = useRoute<any>();
   const quoteId = route.params?.quoteId;
 
-  const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote, createInvoiceFromQuote, saveInvoice, nextQuoteNumber, getDocumentByLegacyId } = useStore();
+  const { quotes, currentQuote, businessSettings, saveQuote, setCurrentQuote, createInvoiceFromQuote, saveInvoice, nextQuoteNumber, getDocumentByLegacyId, subscriptionStatus } = useStore();
+  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const compactLabels = windowWidth < 400;
@@ -62,8 +67,7 @@ export function ViewQuoteScreen() {
     return docMatch ? documentToQuote(docMatch) : null;
   }, [quotes, quoteId, getDocumentByLegacyId]);
 
-  const [showConvertModal, setShowConvertModal] = useState(false);
-  const [isConverting, setIsConverting] = useState(false);
+  const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [isEditingNumber, setIsEditingNumber] = useState(false);
   const [quoteNumber, setQuoteNumber] = useState('');
@@ -144,23 +148,22 @@ export function ViewQuoteScreen() {
     navigation.navigate('NewQuote', { screen: screenMap[section], params: { editing: true } });
   };
 
-  const handleConvertToInvoice = () => {
-    setShowConvertModal(true);
-  };
-
-  const handleConfirmConvert = async () => {
-    setIsConverting(true);
+  const handleStageSelect = async (target: DocumentStage) => {
+    setStageSheetVisible(false);
+    const doc = quoteToDocument(quote);
+    if (target === 'invoice_sent' && !isPro) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
     try {
-      const invoice = await createInvoiceFromQuote(quote);
-      // If the quote was already invoiced, createInvoiceFromQuote returned
-      // the existing invoice — saveInvoice is still safe (it merges) but a
-      // no-op-ish write is fine and keeps the success path uniform.
-      await saveInvoice(invoice);
-      setShowConvertModal(false);
-      navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
-    } catch (error) {
-    } finally {
-      setIsConverting(false);
+      await applyStageChange(doc, target, {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
+      });
+    } catch {
+      // Silent — the list reload will surface the real state.
     }
   };
 
@@ -175,26 +178,8 @@ export function ViewQuoteScreen() {
     }
   };
 
-  // Show convert button for accepted or sent quotes
-  const canConvertToInvoice = quote.status === 'accepted' || quote.status === 'sent' || quote.status === 'completed';
-
   return (
     <View style={styles.container}>
-      <AlertModal
-        visible={showConvertModal}
-        onDismiss={() => setShowConvertModal(false)}
-        type="info"
-        icon="file-replace"
-        title="Convert to Invoice"
-        message={`Create an invoice from this quote for ${quote.customerName}?`}
-        showConfetti={false}
-        primaryButtonText="Convert"
-        primaryButtonAction={handleConfirmConvert}
-        secondaryButtonText="Cancel"
-        secondaryButtonAction={() => setShowConvertModal(false)}
-        secondaryButtonLoading={isConverting}
-      />
-
       <DocumentHeader
         title="Quote Preview"
         onBackPress={() => navigation.goBack()}
@@ -347,42 +332,28 @@ export function ViewQuoteScreen() {
             </Button>
           );
         })()}
-        {canConvertToInvoice ? (
-          <>
-            <Button
-              mode="outlined"
-              onPress={handleConvertToInvoice}
-              style={styles.outlinedButton}
-              contentStyle={styles.buttonContent}
-              labelStyle={styles.outlinedButtonLabel}
-            >
-              Convert to Invoice
-            </Button>
-            <SendQuoteButton
-              quote={quote}
-              businessSettings={businessSettings}
-              buttonStyle={styles.sendButton}
-            />
-          </>
-        ) : (
-          <>
-            <Button
-              mode="outlined"
-              onPress={() => navigation.goBack()}
-              style={styles.outlinedButton}
-              contentStyle={styles.buttonContent}
-              labelStyle={styles.outlinedButtonLabel}
-            >
-              Close
-            </Button>
-            <SendQuoteButton
-              quote={quote}
-              businessSettings={businessSettings}
-              buttonStyle={styles.sendButton}
-            />
-          </>
-        )}
+        <Button
+          mode="outlined"
+          onPress={() => setStageSheetVisible(true)}
+          style={styles.outlinedButton}
+          contentStyle={styles.buttonContent}
+          labelStyle={styles.outlinedButtonLabel}
+        >
+          {compactLabels ? 'Stage' : 'Update Stage'}
+        </Button>
+        <SendQuoteButton
+          quote={quote}
+          businessSettings={businessSettings}
+          buttonStyle={styles.sendButton}
+        />
       </View>
+
+      <StageSheet
+        visible={stageSheetVisible}
+        onDismiss={() => setStageSheetVisible(false)}
+        doc={quoteToDocument(quote)}
+        onSelect={handleStageSelect}
+      />
 
       <TakePaymentSheet
         visible={takePaymentVisible}

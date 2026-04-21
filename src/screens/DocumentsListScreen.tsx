@@ -14,8 +14,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useScrollToTop } from '@react-navigation/native';
 
 import { useStore } from '../store/useStore';
-import type { Document } from '../types/document';
-import type { Quote, Invoice } from '../types';
+import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
@@ -23,7 +22,8 @@ import { DocumentCard } from '../components/DocumentCard';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
-import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
+import { StageSheet } from '../components/StageSheet';
+import { applyStageChange } from '../utils/applyStageChange';
 import { lightTap } from '../utils/haptics';
 
 type FilterKind = 'all' | 'quotes' | 'invoices' | 'drafts' | 'sent' | 'paid';
@@ -88,8 +88,8 @@ export function DocumentsListScreen() {
   const [filter, setFilter] = useState<FilterKind>('all');
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(documentsLoaded || documents.length > 0);
-  const [statusSheetVisible, setStatusSheetVisible] = useState(false);
-  const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  const [stageSheetVisible, setStageSheetVisible] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
 
   useEffect(() => {
     if (!initialLoaded && documents.length > 0) setInitialLoaded(true);
@@ -185,44 +185,35 @@ export function DocumentsListScreen() {
     }
   };
 
-  const handleConvert = async (doc: Document) => {
-    if (!isPro) {
-      navigation.navigate('Paywall' as never);
-      return;
-    }
-    try {
-      const quote = documentToQuote(doc);
-      const invoice = await createInvoiceFromQuote(quote);
-      await saveInvoice(invoice);
-      navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
-    } catch {
-      Alert.alert('Error', 'Failed to convert to invoice. Please try again.');
-    }
-  };
-
   const handleRecordPayment = (doc: Document) => {
     navigation.navigate('RecordPayment' as never, { invoiceId: doc.id } as never);
   };
 
-  const handleOpenStatusSheet = (doc: Document) => {
-    if (doc.type !== 'quote') return;
-    setSelectedQuote(documentToQuote(doc));
-    setStatusSheetVisible(true);
+  const handleOpenStageSheet = (doc: Document) => {
+    setSelectedDoc(doc);
+    setStageSheetVisible(true);
   };
 
-  const handleStatusSelect = async (newStatus: string) => {
-    if (!selectedQuote) return;
+  const handleStageSelect = async (target: DocumentStage) => {
+    if (!selectedDoc) return;
+    setStageSheetVisible(false);
+    // Paywall gate on convert — mirrors the legacy handler.
+    if (target === 'invoice_sent' && selectedDoc.type === 'quote' && !isPro) {
+      navigation.navigate('Paywall' as never);
+      setSelectedDoc(null);
+      return;
+    }
     try {
-      await saveQuote({
-        ...selectedQuote,
-        status: newStatus as Quote['status'],
-        updatedAt: new Date(),
+      await applyStageChange(selectedDoc, target, {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
       });
     } catch {
-      Alert.alert('Error', 'Failed to update quote status. Please try again.');
+      Alert.alert('Error', 'Failed to update stage. Please try again.');
     }
-    setStatusSheetVisible(false);
-    setSelectedQuote(null);
+    setSelectedDoc(null);
   };
 
   const renderCard = useCallback(({ item, index }: { item: Document; index: number }) => (
@@ -235,9 +226,8 @@ export function DocumentsListScreen() {
         onDelete={handleDelete}
         onDuplicate={handleDuplicate}
         onSave={handleSave}
-        onConvertToInvoice={item.type === 'quote' ? handleConvert : undefined}
         onRecordPayment={item.type === 'invoice' ? handleRecordPayment : undefined}
-        onStatusChange={item.type === 'quote' ? handleOpenStatusSheet : undefined}
+        onStatusChange={handleOpenStageSheet}
       />
     </AnimatedListItem>
   ), [businessSettings, documents]);
@@ -338,16 +328,17 @@ export function DocumentsListScreen() {
         accessibilityLabel="Create new document"
       />
 
-      <StatusSheet
-        visible={statusSheetVisible}
-        onDismiss={() => {
-          setStatusSheetVisible(false);
-          setSelectedQuote(null);
-        }}
-        currentStatus={selectedQuote?.status || 'draft'}
-        onSelect={handleStatusSelect}
-        options={QUOTE_STATUS_OPTIONS}
-      />
+      {selectedDoc && (
+        <StageSheet
+          visible={stageSheetVisible}
+          onDismiss={() => {
+            setStageSheetVisible(false);
+            setSelectedDoc(null);
+          }}
+          doc={selectedDoc}
+          onSelect={handleStageSelect}
+        />
+      )}
     </View>
   );
 }

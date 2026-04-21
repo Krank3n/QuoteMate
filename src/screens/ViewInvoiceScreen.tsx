@@ -37,7 +37,7 @@ import {
   isInvoiceOverdue,
 } from '../utils/invoiceCalculator';
 import { Invoice, PaymentMethod } from '../types';
-import { documentToInvoice } from '../types/documentAdapter';
+import { documentToInvoice, invoiceToDocument } from '../types/documentAdapter';
 import {
   DocumentHeader,
   CustomerSection,
@@ -49,7 +49,9 @@ import {
 } from '../components/document';
 import { useResolvedCustomer } from '../hooks/useResolvedCustomer';
 import { WebContainer } from '../components/WebContainer';
-import { StatusSheet, INVOICE_STATUS_OPTIONS } from '../components/StatusSheet';
+import { StageSheet } from '../components/StageSheet';
+import { applyStageChange } from '../utils/applyStageChange';
+import type { DocumentStage } from '../types/document';
 
 function formatPaymentMethod(method: PaymentMethod): string {
   const methods: Record<PaymentMethod, string> = {
@@ -73,6 +75,8 @@ export function ViewInvoiceScreen() {
     currentInvoice,
     businessSettings,
     saveInvoice,
+    saveQuote,
+    createInvoiceFromQuote,
     setCurrentInvoice,
     updateInvoice,
     xeroConnection,
@@ -88,7 +92,7 @@ export function ViewInvoiceScreen() {
   const [isEditingJob, setIsEditingJob] = useState(false);
   const [paymentTermsMenuVisible, setPaymentTermsMenuVisible] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
-  const [statusSheetVisible, setStatusSheetVisible] = useState(false);
+  const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [isXeroPushing, setIsXeroPushing] = useState(false);
   const [squareConnected, setSquareConnected] = useState(false);
   const [squareDisconnectedReason, setSquareDisconnectedReason] = useState<string | null>(null);
@@ -185,20 +189,33 @@ export function ViewInvoiceScreen() {
     navigation.navigate('NewInvoice', { screen: screenMap[section], params: { editing: true } });
   };
 
-  const handleStatusSelect = async (newStatus: string) => {
+  const handleStageSelect = async (target: DocumentStage) => {
     if (!displayInvoice) return;
+    setStageSheetVisible(false);
+    const doc = invoiceToDocument(displayInvoice);
     try {
-      const updatedInvoice = {
-        ...displayInvoice,
-        status: newStatus as Invoice['status'],
-        updatedAt: new Date(),
-      };
-      await saveInvoice(updatedInvoice);
-      setDisplayInvoice(updatedInvoice);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update invoice status.');
+      await applyStageChange(doc, target, {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
+      });
+      // Optimistically reflect the mapped status on the local display so the
+      // chip flips immediately; the store re-hydrates on next save/load.
+      if (target !== 'invoice_sent' || displayInvoice.status === 'draft') {
+        const statusMap: Partial<Record<DocumentStage, Invoice['status']>> = {
+          draft: 'draft',
+          invoice_sent: 'sent',
+          partially_paid: 'partial',
+          paid: 'paid',
+          cancelled: 'cancelled',
+        };
+        const mapped = statusMap[target];
+        if (mapped) setDisplayInvoice({ ...displayInvoice, status: mapped, updatedAt: new Date() });
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to update invoice stage.');
     }
-    setStatusSheetVisible(false);
   };
 
   const handlePushToXero = async () => {
@@ -289,7 +306,7 @@ export function ViewInvoiceScreen() {
           disputeId={(invoice as any)?.disputeId}
         />
         {/* Status Section */}
-        <TouchableOpacity onPress={() => setStatusSheetVisible(true)} activeOpacity={0.7}>
+        <TouchableOpacity onPress={() => setStageSheetVisible(true)} activeOpacity={0.7}>
         <Surface style={documentStyles.section}>
           <View style={documentStyles.sectionHeader}>
             <View style={documentStyles.sectionHeaderLeft}>
@@ -675,13 +692,12 @@ export function ViewInvoiceScreen() {
         showConfetti={false}
       />
 
-      {/* Status Sheet */}
-      <StatusSheet
-        visible={statusSheetVisible}
-        onDismiss={() => setStatusSheetVisible(false)}
-        currentStatus={invoice.status}
-        onSelect={handleStatusSelect}
-        options={INVOICE_STATUS_OPTIONS}
+      {/* Stage Sheet */}
+      <StageSheet
+        visible={stageSheetVisible}
+        onDismiss={() => setStageSheetVisible(false)}
+        doc={invoiceToDocument(invoice)}
+        onSelect={handleStageSelect}
       />
     </View>
   );

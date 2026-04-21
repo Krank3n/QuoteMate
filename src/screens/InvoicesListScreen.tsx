@@ -10,7 +10,6 @@ import {
   Searchbar,
   Chip,
   FAB,
-  Menu,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect, useScrollToTop } from '@react-navigation/native';
@@ -22,13 +21,15 @@ import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { DocumentCard } from '../components/DocumentCard';
 import { invoiceToDocument } from '../types/documentAdapter';
-import type { Document } from '../types/document';
+import type { Document, DocumentStage } from '../types/document';
 import { ProBadge } from '../components/ProBadge';
 import { isInvoiceOverdue } from '../utils/invoiceCalculator';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { QuoteSelectSheet } from '../components/QuoteSelectSheet';
+import { StageSheet } from '../components/StageSheet';
+import { applyStageChange } from '../utils/applyStageChange';
 
 type FilterStatus = 'all' | 'draft' | 'sent' | 'paid' | 'overdue';
 
@@ -54,6 +55,7 @@ export function InvoicesListScreen() {
     setCurrentInvoice,
     createNewInvoice,
     createInvoiceFromQuote,
+    saveQuote,
     saveInvoice,
     duplicateInvoice,
     businessSettings,
@@ -96,6 +98,8 @@ export function InvoicesListScreen() {
   const [quoteDialogVisible, setQuoteDialogVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(invoices.length > 0);
+  const [stageSheetVisible, setStageSheetVisible] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
 
   useEffect(() => {
     if (!initialLoaded && invoices.length > 0) setInitialLoaded(true);
@@ -231,6 +235,27 @@ export function InvoicesListScreen() {
     }
   };
 
+  const handleOpenStageSheet = (doc: Document) => {
+    setSelectedDoc(doc);
+    setStageSheetVisible(true);
+  };
+
+  const handleStageSelect = async (target: DocumentStage) => {
+    if (!selectedDoc) return;
+    setStageSheetVisible(false);
+    try {
+      await applyStageChange(selectedDoc, target, {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
+      });
+    } catch {
+      Alert.alert('Error', 'Failed to update stage. Please try again.');
+    }
+    setSelectedDoc(null);
+  };
+
   const renderInvoiceCard = useCallback(({ item: invoice, index }: { item: Invoice; index: number }) => {
     const doc: Document = invoiceToDocument(invoice);
     return (
@@ -244,6 +269,7 @@ export function InvoicesListScreen() {
           onDuplicate={() => handleDuplicateInvoice(invoice)}
           onSave={() => saveInvoice(invoice)}
           onRecordPayment={() => handleRecordPayment(invoice)}
+          onStatusChange={handleOpenStageSheet}
         />
       </AnimatedListItem>
     );
@@ -376,6 +402,19 @@ export function InvoicesListScreen() {
         onSelect={handleSelectQuote}
         quotes={convertibleQuotes}
       />
+
+      {/* Stage Sheet */}
+      {selectedDoc && (
+        <StageSheet
+          visible={stageSheetVisible}
+          onDismiss={() => {
+            setStageSheetVisible(false);
+            setSelectedDoc(null);
+          }}
+          doc={selectedDoc}
+          onSelect={handleStageSelect}
+        />
+      )}
     </View>
   );
 }
