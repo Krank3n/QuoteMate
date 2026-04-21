@@ -14,8 +14,11 @@ export function useSheetBackHandler(
   onDismiss: () => void,
   runCloseAnimation: (onFinished: () => void) => void,
 ) {
-  const [shouldRender, setShouldRender] = useState(false);
-  const prevVisible = useRef(visible);
+  // prevVisible starts as false so a sheet mounted already-visible
+  // (as with `{selected && <Sheet visible />}` patterns) trips the
+  // opening branch on first effect run.
+  const [shouldRender, setShouldRender] = useState(visible);
+  const prevVisible = useRef(false);
 
   useEffect(() => {
     if (visible && !prevVisible.current) {
