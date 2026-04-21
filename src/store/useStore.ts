@@ -224,6 +224,25 @@ const getMonthEnd = () => {
   return new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 };
 
+// Cached map keyed on the documents array identity. Rebuilt whenever the
+// store swaps in a new array (every set({ documents })), so lookups stay
+// O(1) during the hot path (screen focus, preview paint).
+let legacyDocIndexCache: { docs: Document[]; map: Map<string, Document> } | null = null;
+function buildLegacyDocIndex(docs: Document[]): Map<string, Document> {
+  if (legacyDocIndexCache && legacyDocIndexCache.docs === docs) {
+    return legacyDocIndexCache.map;
+  }
+  const map = new Map<string, Document>();
+  for (const d of docs) {
+    // Doc id itself is the common case — invoiceId/quoteId lookups go here.
+    if (!map.has(d.id)) map.set(d.id, d);
+    if (d.legacyQuoteId && !map.has(d.legacyQuoteId)) map.set(d.legacyQuoteId, d);
+    if (d.legacyInvoiceId && !map.has(d.legacyInvoiceId)) map.set(d.legacyInvoiceId, d);
+  }
+  legacyDocIndexCache = { docs, map };
+  return map;
+}
+
 // Create the store
 export const useStore = create<AppState>((set, get) => ({
   // Initial state
@@ -1985,11 +2004,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   getDocumentByLegacyId: (legacyId: string) => {
     const docs = get().documents;
-    return (
-      docs.find((d) => d.id === legacyId) ||
-      docs.find((d) => d.legacyQuoteId === legacyId) ||
-      docs.find((d) => d.legacyInvoiceId === legacyId)
-    );
+    const index = buildLegacyDocIndex(docs);
+    return index.get(legacyId);
   },
 
   convertDocumentToInvoice: async (documentId: string) => {

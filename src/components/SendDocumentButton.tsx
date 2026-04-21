@@ -6,7 +6,7 @@
  * visuals as the originals.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { StyleSheet, Alert, Share, Linking, Platform } from 'react-native';
 import { Button } from 'react-native-paper';
 import { format } from 'date-fns';
@@ -44,8 +44,10 @@ export function SendDocumentButton({
   buttonStyle,
 }: SendDocumentButtonProps) {
   const isInvoice = doc.type === 'invoice';
-  const quote: Quote = documentToQuote(doc);
-  const invoice: Invoice = documentToInvoice(doc);
+  // The adapters walk every material/section on each call; memoise so
+  // scroll-triggered re-renders don't rebuild the whole projection.
+  const quote: Quote = useMemo(() => documentToQuote(doc), [doc]);
+  const invoice: Invoice = useMemo(() => documentToInvoice(doc), [doc]);
 
   const resolvedLabel = buttonLabel ?? (isInvoice
     ? 'Send Invoice'
@@ -60,64 +62,19 @@ export function SendDocumentButton({
   const [emailBody, setEmailBody] = useState('');
   const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
 
-  const handleEmailQuote = async () => {
-    setSendDialogVisible(false);
-    if (quote.draftEmailBody) {
-      setEmailBody(quote.draftEmailBody);
-      setEmailPreviewVisible(true);
-      return;
-    }
-    setIsGeneratingEmail(true);
-    setEmailPreviewVisible(true);
-    try {
-      let body: string;
-      if (isPro) {
-        body = await generateQuoteEmail({
-          jobName: quote.job.name,
-          jobDescription: quote.job.description || '',
-          materials: quote.materials.map((m) => ({ name: m.name, quantity: m.quantity, unit: m.unit })),
-          laborHours: quote.laborHours,
-          total: quote.total,
-          businessName: businessSettings?.businessName || '',
-          customerName: quote.customerName,
-        });
-      } else {
-        body = getDefaultEmailBody(
-          quote.customerName,
-          quote.job.name,
-          quote.total,
-          businessSettings?.businessName || 'Your Business',
-        );
-      }
-      setEmailBody(body);
-      saveDraft({ ...quote, draftEmailBody: body });
-    } catch {
-      const fallback = getDefaultEmailBody(
-        quote.customerName,
-        quote.job.name,
-        quote.total,
-        businessSettings?.businessName || 'Your Business',
-      );
-      setEmailBody(fallback);
-      saveDraft({ ...quote, draftEmailBody: fallback });
-    } finally {
-      setIsGeneratingEmail(false);
-    }
+  // Centralise the per-type (generate, fallback, persist) triple so email
+  // generation and regeneration share one code path.
+  type EmailHandler = {
+    draftBody: string | undefined;
+    generate: () => Promise<string>;
+    fallback: () => string;
+    persistBody: (body: string) => void;
   };
 
-  const handleEmailInvoice = async () => {
-    setSendDialogVisible(false);
-    if (invoice.draftEmailBody) {
-      setEmailBody(invoice.draftEmailBody);
-      setEmailPreviewVisible(true);
-      return;
-    }
-    setIsGeneratingEmail(true);
-    setEmailPreviewVisible(true);
-    try {
-      let body: string;
-      if (isPro) {
-        body = await generateInvoiceEmail({
+  const emailHandler: EmailHandler = isInvoice
+    ? {
+        draftBody: invoice.draftEmailBody,
+        generate: () => generateInvoiceEmail({
           jobName: invoice.job.name,
           jobDescription: invoice.job.description || '',
           materials: invoice.materials.map((m) => ({ name: m.name, quantity: m.quantity, unit: m.unit })),
@@ -127,54 +84,19 @@ export function SendDocumentButton({
           customerName: invoice.customerName,
           dueDate: new Date(invoice.dueDate).toISOString(),
           invoiceNumber: invoice.invoiceNumber,
-        });
-      } else {
-        body = getDefaultInvoiceEmailBody(
+        }),
+        fallback: () => getDefaultInvoiceEmailBody(
           invoice.customerName,
           invoice.job.name,
           invoice.total,
           businessSettings?.businessName || 'Your Business',
           new Date(invoice.dueDate).toISOString(),
-        );
+        ),
+        persistBody: (body) => { saveInvoice({ ...invoice, draftEmailBody: body }); },
       }
-      setEmailBody(body);
-      saveInvoice({ ...invoice, draftEmailBody: body });
-    } catch {
-      const fallback = getDefaultInvoiceEmailBody(
-        invoice.customerName,
-        invoice.job.name,
-        invoice.total,
-        businessSettings?.businessName || 'Your Business',
-        new Date(invoice.dueDate).toISOString(),
-      );
-      setEmailBody(fallback);
-      saveInvoice({ ...invoice, draftEmailBody: fallback });
-    } finally {
-      setIsGeneratingEmail(false);
-    }
-  };
-
-  const handleEmailOption = isInvoice ? handleEmailInvoice : handleEmailQuote;
-
-  const handleRegenerateEmail = async () => {
-    setIsGeneratingEmail(true);
-    try {
-      if (isInvoice) {
-        const body = await generateInvoiceEmail({
-          jobName: invoice.job.name,
-          jobDescription: invoice.job.description || '',
-          materials: invoice.materials.map((m) => ({ name: m.name, quantity: m.quantity, unit: m.unit })),
-          laborHours: invoice.laborHours,
-          total: invoice.total,
-          businessName: businessSettings?.businessName || '',
-          customerName: invoice.customerName,
-          dueDate: new Date(invoice.dueDate).toISOString(),
-          invoiceNumber: invoice.invoiceNumber,
-        });
-        setEmailBody(body);
-        saveInvoice({ ...invoice, draftEmailBody: body });
-      } else {
-        const body = await generateQuoteEmail({
+    : {
+        draftBody: quote.draftEmailBody,
+        generate: () => generateQuoteEmail({
           jobName: quote.job.name,
           jobDescription: quote.job.description || '',
           materials: quote.materials.map((m) => ({ name: m.name, quantity: m.quantity, unit: m.unit })),
@@ -182,10 +104,44 @@ export function SendDocumentButton({
           total: quote.total,
           businessName: businessSettings?.businessName || '',
           customerName: quote.customerName,
-        });
-        setEmailBody(body);
-        saveDraft({ ...quote, draftEmailBody: body });
-      }
+        }),
+        fallback: () => getDefaultEmailBody(
+          quote.customerName,
+          quote.job.name,
+          quote.total,
+          businessSettings?.businessName || 'Your Business',
+        ),
+        persistBody: (body) => { saveDraft({ ...quote, draftEmailBody: body }); },
+      };
+
+  const handleEmailOption = async () => {
+    setSendDialogVisible(false);
+    if (emailHandler.draftBody) {
+      setEmailBody(emailHandler.draftBody);
+      setEmailPreviewVisible(true);
+      return;
+    }
+    setIsGeneratingEmail(true);
+    setEmailPreviewVisible(true);
+    try {
+      const body = isPro ? await emailHandler.generate() : emailHandler.fallback();
+      setEmailBody(body);
+      emailHandler.persistBody(body);
+    } catch {
+      const fallback = emailHandler.fallback();
+      setEmailBody(fallback);
+      emailHandler.persistBody(fallback);
+    } finally {
+      setIsGeneratingEmail(false);
+    }
+  };
+
+  const handleRegenerateEmail = async () => {
+    setIsGeneratingEmail(true);
+    try {
+      const body = await emailHandler.generate();
+      setEmailBody(body);
+      emailHandler.persistBody(body);
     } catch {
       Alert.alert('Error', 'Could not regenerate email. Please try again.');
     } finally {
