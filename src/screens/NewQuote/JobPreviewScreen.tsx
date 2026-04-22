@@ -29,8 +29,10 @@ import { quoteToDocument, invoiceToDocument } from '../../types/documentAdapter'
 import { calculateDueDate, formatPaymentTerms } from '../../utils/invoiceCalculator';
 import type { PaymentTerms } from '../../types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SendSwitcher } from '../../components/SendSwitcher';
+import { SendTypePill } from '../../components/SendSwitcher';
+import { SendDocumentButton } from '../../components/SendDocumentButton';
 import { DocumentSentBanner } from '../../components/DocumentSentBanner';
+import { reconcileNextNumber } from '../../utils/nextNumber';
 import { successTap } from '../../utils/haptics';
 import { WebContainer } from '../../components/WebContainer';
 import {
@@ -97,6 +99,8 @@ export function JobPreviewScreen() {
     nextQuoteNumber,
     nextInvoiceNumber,
     documents,
+    quotes,
+    invoices,
     unifiedTourActive,
     unifiedTourPhase,
   } = useStore();
@@ -145,6 +149,31 @@ export function JobPreviewScreen() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
+
+  // Predict the next ref number directly from the live quotes / invoices
+  // arrays on every render. This sidesteps a race where the stale
+  // AsyncStorage counter could show "Q-001" even after Firestore already
+  // had Q-050 etc — see utils/nextNumber.ts for the reconciliation logic.
+  // We pass the cached counter as a floor so tradies who manually bumped
+  // it keep their ceiling.
+  const predictedRefNumber = useMemo(() => {
+    if (isInvoiceMode) {
+      const n = reconcileNextNumber({
+        items: invoices,
+        field: (i) => i.invoiceNumber,
+        prefix: 'INV',
+        cached: nextInvoiceNumber,
+      });
+      return `INV-${String(n).padStart(3, '0')}`;
+    }
+    const n = reconcileNextNumber({
+      items: quotes,
+      field: (q) => q.quoteNumber,
+      prefix: 'Q',
+      cached: nextQuoteNumber,
+    });
+    return `Q-${String(n).padStart(3, '0')}`;
+  }, [isInvoiceMode, quotes, invoices, nextQuoteNumber, nextInvoiceNumber]);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMsg] = useState(() => SUCCESS_MESSAGES[Math.floor(Math.random() * SUCCESS_MESSAGES.length)]);
 
@@ -440,10 +469,7 @@ export function JobPreviewScreen() {
                   <View style={styles.quoteNumberBadge}>
                     <MaterialCommunityIcons name="file-document-outline" size={14} color={colors.primary} />
                     <Text style={styles.quoteNumber}>
-                      {refNumber ||
-                        (isInvoiceMode
-                          ? `INV-${String(nextInvoiceNumber).padStart(3, '0')}`
-                          : `Q-${String(nextQuoteNumber).padStart(3, '0')}`)}
+                      {refNumber || predictedRefNumber}
                     </Text>
                   </View>
                   <MaterialCommunityIcons name="pencil-outline" size={12} color={colors.textMuted} />
@@ -653,24 +679,37 @@ export function JobPreviewScreen() {
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <Button
-          mode="outlined"
-          onPress={handleBackToDashboard}
-          loading={isSaving}
-          disabled={isSaving}
-          icon="view-dashboard"
-          style={styles.bottomButtonHalf}
-          contentStyle={styles.bottomButtonContent}
-        >
-          Back to Dashboard
-        </Button>
-        <View ref={sendButtonRef} style={styles.bottomButtonHalf}>
-          {liveDoc ? (
-            <SendSwitcher
-              doc={liveDoc}
-              businessSettings={businessSettings}
-            />
-          ) : null}
+        {/* Pill sits on its own row above the buttons so it's clearly
+            the modifier for Send, not a sibling of Back. Right-aligned
+            under the send column so the grouping is unambiguous. */}
+        {liveDoc ? (
+          <View style={styles.bottomPillRow}>
+            <SendTypePill doc={liveDoc} />
+          </View>
+        ) : null}
+        <View style={styles.bottomButtonsRow}>
+          <Button
+            mode="outlined"
+            onPress={handleBackToDashboard}
+            loading={isSaving}
+            disabled={isSaving}
+            icon="view-dashboard"
+            style={styles.bottomButtonHalf}
+            contentStyle={styles.bottomButtonContent}
+          >
+            Back
+          </Button>
+          <View ref={sendButtonRef} style={styles.bottomButtonHalf}>
+            {liveDoc ? (
+              <SendDocumentButton
+                doc={liveDoc}
+                businessSettings={businessSettings}
+                buttonMode="contained"
+                buttonLabel={liveDoc.type === 'invoice' ? 'Send Invoice' : 'Send Quote'}
+                buttonIcon="send"
+              />
+            ) : null}
+          </View>
         </View>
       </View>
 
@@ -933,10 +972,10 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   bottomBar: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     paddingHorizontal: 16,
-    paddingTop: 14,
-    gap: 12,
+    paddingTop: 10,
+    gap: 8,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
@@ -955,6 +994,15 @@ const styles = StyleSheet.create({
         boxShadow: '0 -2px 12px rgba(0,0,0,0.2)',
       },
     }),
+  },
+  bottomPillRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingRight: 2,
+  },
+  bottomButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
   },
   bottomButtonHalf: {
     flex: 1,

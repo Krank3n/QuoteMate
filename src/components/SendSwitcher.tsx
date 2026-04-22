@@ -1,15 +1,18 @@
 /**
- * SendSwitcher
+ * SendTypePill + SendSwitcher
  *
- * Pill toggle for "send as Quote vs Invoice" paired with the canonical
- * SendDocumentButton. The pill IS the convert trigger — tapping "Invoice"
- * on a quote-shaped doc runs convertDocumentToInvoice (after a confirm),
- * which updates the store. SendDocumentButton then re-renders for the
- * new type and its email template / SMS copy / payment link automatically
- * match.
+ * Pill toggle for "send as Quote vs Invoice". The pill IS the convert
+ * trigger — tapping "Invoice" on a quote-shaped doc runs the convert
+ * flow (after a confirm), which updates the store. SendDocumentButton
+ * then re-renders for the new type and its email template / SMS copy
+ * / payment link automatically match.
  *
  * Forward-only: once a doc is an invoice, the Quote side of the pill is
  * disabled. No un-invoicing.
+ *
+ * `SendTypePill` can be used stand-alone (e.g. JobPreview puts it in
+ * its own row above the Back/Send buttons); `SendSwitcher` is the
+ * combined pill + SendDocumentButton for simpler layouts.
  */
 
 import React, { useState } from 'react';
@@ -18,28 +21,33 @@ import { Text, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Document } from '../types/document';
-import type { BusinessSettings } from '../types';
+import type { BusinessSettings, Quote } from '../types';
 import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { SendDocumentButton } from './SendDocumentButton';
 
-interface SendSwitcherProps {
+interface SendTypePillProps {
   doc: Document;
-  businessSettings: BusinessSettings | null;
-  /** Style for the wrapping view (e.g. to fit a bottom-bar half-width). */
+  /** Style for the wrapping view. */
   style?: any;
+}
+
+interface SendSwitcherProps extends SendTypePillProps {
+  businessSettings: BusinessSettings | null;
 }
 
 type SendMode = 'quote' | 'invoice';
 
-export function SendSwitcher({ doc, businessSettings, style }: SendSwitcherProps) {
+export function SendTypePill({ doc, style }: SendTypePillProps) {
   const convertDocumentToInvoice = useStore((s) => s.convertDocumentToInvoice);
+  const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
+  const quotes = useStore((s) => s.quotes);
   const [converting, setConverting] = useState(false);
 
-  // The pill state is derived from the current doc type — no ephemeral UI
-  // state. Flipping to "invoice" IS the conversion, and the conversion
-  // bumps doc.type. Prevents the pill and the doc from ever disagreeing.
+  // Pill state is derived from current doc type — no ephemeral UI state.
+  // Flipping to "invoice" IS the conversion, and the conversion bumps
+  // doc.type, so the pill and the doc never disagree.
   const mode: SendMode = doc.type;
   const lockedToInvoice = doc.type === 'invoice';
 
@@ -65,9 +73,23 @@ export function SendSwitcher({ doc, businessSettings, style }: SendSwitcherProps
           onPress: async () => {
             setConverting(true);
             try {
-              await convertDocumentToInvoice(doc.id);
+              // Prefer convertDocumentToInvoice if the unified doc has
+              // already been mirrored in. If not (just saved — mirror
+              // trigger hasn't caught up yet), fall back to the legacy
+              // createInvoiceFromQuote path, which itself calls
+              // convertDocumentToInvoice internally once the mirror's
+              // ready. Either way the client gets a shaped Invoice.
+              const legacyQuote: Quote | undefined = quotes.find((q) => q.id === doc.id);
+              if (legacyQuote) {
+                await createInvoiceFromQuote(legacyQuote);
+              } else {
+                await convertDocumentToInvoice(doc.id);
+              }
             } catch {
-              Alert.alert('Error', 'Could not convert to invoice. Please try again.');
+              Alert.alert(
+                'Could not convert',
+                'Save the quote first, then try again.',
+              );
             } finally {
               setConverting(false);
             }
@@ -78,7 +100,7 @@ export function SendSwitcher({ doc, businessSettings, style }: SendSwitcherProps
   };
 
   return (
-    <View style={[styles.wrapper, style]}>
+    <View style={[styles.pillWrapper, style]}>
       <View style={styles.pillRow}>
         <PillOption
           label="Quote"
@@ -94,14 +116,22 @@ export function SendSwitcher({ doc, businessSettings, style }: SendSwitcherProps
           disabled={false}
           onPress={() => handlePillPress('invoice')}
         />
-        {converting ? (
-          <View style={styles.converting}>
-            <ActivityIndicator size={12} color={colors.primary} />
-            <Text style={styles.convertingLabel}>Converting…</Text>
-          </View>
-        ) : null}
       </View>
+      {converting ? (
+        <View style={styles.converting}>
+          <ActivityIndicator size={12} color={colors.primary} />
+          <Text style={styles.convertingLabel}>Converting…</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
+export function SendSwitcher({ doc, businessSettings, style }: SendSwitcherProps) {
+  const mode: SendMode = doc.type;
+  return (
+    <View style={[styles.wrapper, style]}>
+      <SendTypePill doc={doc} />
       <SendDocumentButton
         doc={doc}
         businessSettings={businessSettings}
@@ -162,10 +192,14 @@ const styles = StyleSheet.create({
   wrapper: {
     gap: 8,
   },
+  pillWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   pillRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
     padding: 3,
     borderRadius: 999,
     backgroundColor: colors.surfaceGray3,
@@ -200,7 +234,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginLeft: 8,
   },
   convertingLabel: {
     fontSize: 11,
