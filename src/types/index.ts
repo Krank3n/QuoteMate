@@ -137,7 +137,10 @@ export interface SupplierPartner {
   subscriberCount: number;
 }
 
-export interface Job {
+// Embedded job descriptor that lives inside a Quote/Invoice/Document. Pre-dates
+// the top-level Job entity introduced in Phase 8 — renamed to JobSpec to free
+// the name for the new top-level Job re-exported below.
+export interface JobSpec {
   id: string;
   name: string;
   description: string;
@@ -145,6 +148,10 @@ export interface Job {
   estimatedHours?: number;
   customParams?: Record<string, number>; // e.g., { steps: 15, length: 10 }
 }
+
+// Top-level Job entity. Re-exported from the shared module so the app and
+// the backend agree on the shape.
+export type { Job, JobStage, JobPhoto } from '../../shared/job/types';
 
 export interface Quote {
   id: string;
@@ -156,7 +163,7 @@ export interface Quote {
   customerEmail?: string;
   customerPhone?: string;
   jobAddress?: string;
-  job: Job;
+  job: JobSpec;
   materials: Material[];
   laborRate: number; // $/hour or $/day (depending on laborUnit)
   laborHours: number; // quantity of hours or days
@@ -495,7 +502,7 @@ export interface Invoice {
   jobAddress?: string;
 
   // Job & Materials (same as Quote)
-  job: Job;
+  job: JobSpec;
   materials: Material[];
 
   // Pricing (same as Quote)

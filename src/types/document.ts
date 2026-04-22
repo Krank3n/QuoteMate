@@ -8,7 +8,7 @@
  */
 
 import type {
-  Job,
+  JobSpec,
   Material,
   QuoteSection,
   QuotePhoto,
@@ -52,7 +52,7 @@ export interface Document {
   customerEmail?: string;
   customerPhone?: string;
   jobAddress?: string;
-  job: Job;
+  job: JobSpec;
 
   // ===== Materials, labor, sections =====
   materials: Material[];
