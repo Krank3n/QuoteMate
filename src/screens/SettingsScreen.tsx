@@ -95,6 +95,15 @@ export function SettingsScreen() {
           badge: 'NEW',
           badgeColor: colors.primary,
         },
+        {
+          id: 'googleCalendar',
+          title: 'Google Calendar',
+          subtitle: 'Push scheduled jobs to your calendar',
+          icon: 'calendar-sync',
+          screen: 'GoogleCalendarIntegration',
+          badge: 'NEW',
+          badgeColor: colors.primary,
+        },
       ],
     },
     {

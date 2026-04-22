@@ -36,6 +36,7 @@ import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen';
 import { SquareIntegrationScreen } from '../screens/settings/SquareIntegrationScreen';
+import { GoogleCalendarIntegrationScreen } from '../screens/settings/GoogleCalendarIntegrationScreen';
 import { SectionTemplatesScreen } from '../screens/settings/SectionTemplatesScreen';
 import { JobTemplateEditorScreen } from '../screens/settings/JobTemplateEditorScreen';
 import { EditSupplierScreen } from '../screens/settings/EditSupplierScreen';
@@ -829,6 +830,22 @@ export function RootNavigator() {
           headerTintColor: colors.text,
           headerTitleStyle: { fontWeight: '700' },
           title: 'Square Payments',
+        }}
+      />
+      <RootStack.Screen
+        name="GoogleCalendarIntegration"
+        component={GoogleCalendarIntegrationScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Google Calendar',
         }}
       />
       <RootStack.Screen

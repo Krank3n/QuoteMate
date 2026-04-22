@@ -28,6 +28,7 @@ import {
 } from './TimeSlotPicker';
 import { buildGoogleCalendarUrl } from '../utils/gcalUrl';
 import { deriveDuration } from '../utils/deriveDuration';
+import { useGoogleCalendarAuth } from '../services/googleCalendarAuth';
 
 interface ScheduleJobSheetProps {
   visible: boolean;
@@ -73,6 +74,12 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
       : s.documents.find((d) => d.jobId === job.id),
   );
   const derived = useMemo(() => deriveDuration(primaryDoc), [primaryDoc]);
+  // When the user has connected Google Calendar via Settings, the
+  // server-side trigger pushes the event automatically — we don't need
+  // the deeplink button. When they haven't, the deeplink stays as the
+  // zero-OAuth escape hatch.
+  const { connection: gcalConnection } = useGoogleCalendarAuth();
+  const gcalConnected = !!gcalConnection;
 
   const [pendingDay, setPendingDay] = useState<string | undefined>(() =>
     toIsoDay(job.scheduledStartDate),
@@ -231,15 +238,28 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
             Save
           </Button>
 
-          <Button
-            mode="outlined"
-            onPress={handleOpenInGoogleCalendar}
-            disabled={!pendingDay || saving}
-            icon={'google' as any}
-            style={styles.gcalButton}
-          >
-            Open in Google Calendar
-          </Button>
+          {gcalConnected ? (
+            <View style={styles.gcalSyncedRow}>
+              <MaterialCommunityIcons
+                name={'calendar-check' as any}
+                size={14}
+                color={colors.success}
+              />
+              <Text style={styles.gcalSyncedLabel}>
+                Auto-syncs to your Google Calendar
+              </Text>
+            </View>
+          ) : (
+            <Button
+              mode="outlined"
+              onPress={handleOpenInGoogleCalendar}
+              disabled={!pendingDay || saving}
+              icon={'google' as any}
+              style={styles.gcalButton}
+            >
+              Open in Google Calendar
+            </Button>
+          )}
 
           {job.scheduledStartDate ? (
             <Button
@@ -317,5 +337,17 @@ const styles = StyleSheet.create({
   gcalButton: {
     borderRadius: 12,
     borderColor: colors.border,
+  },
+  gcalSyncedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 6,
+  },
+  gcalSyncedLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.success,
   },
 });
