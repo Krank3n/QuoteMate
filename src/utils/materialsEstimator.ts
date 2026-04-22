@@ -4,7 +4,7 @@
  */
 
 import { generateId } from './generateId';
-import { Material, JobTemplate, Job } from '../types';
+import { Material, JobTemplate, JobSpec } from '../types';
 
 interface JobInput {
   description: string;
@@ -212,11 +212,11 @@ export function createJobFromTemplate(
   template: JobTemplate,
   customParams: Record<string, number> = {},
   jobName: string = ''
-): { job: Job; materials: Material[]; estimatedHours: number } {
+): { job: JobSpec; materials: Material[]; estimatedHours: number } {
   const materials = estimateMaterialsFromTemplate(template, customParams);
   const estimatedHours = estimateLaborHours(template, customParams);
 
-  const job: Job = {
+  const job: JobSpec = {
     id: generateId(),
     name: jobName || template.name,
     description: template.description,

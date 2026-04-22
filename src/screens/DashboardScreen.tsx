@@ -17,11 +17,13 @@ import { useNavigation, useScrollToTop, useIsFocused } from '@react-navigation/n
 import { format } from 'date-fns';
 
 import { useStore } from '../store/useStore';
+import { useJobStore } from '../store/useJobStore';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
 import { WebContainer } from '../components/WebContainer';
 import { DocumentCard } from '../components/DocumentCard';
+import { JobCard } from '../components/JobCard';
 import { quoteToDocument } from '../types/documentAdapter';
 import { AlertModal } from '../components/AlertModal';
 import { updateActivityTimestamp } from '../services/emailService';
@@ -348,10 +350,22 @@ export function DashboardScreen() {
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] || null;
   }, [quotes]);
 
-  // Recent quotes (last 3)
+  // Recent quotes (last 3) — kept so the existing quote-scoped logic (tour
+  // dummy data, DocumentCard render for legacy-guided flows) still resolves.
   const recentQuotes = [...quotes]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 3);
+
+  // Recent jobs (last 3) — Phase 12 replaces the "Recent Quotes" card on
+  // the dashboard. Jobs are the new primary object.
+  const jobs = useJobStore((s) => s.jobs);
+  const recentJobs = useMemo(
+    () =>
+      [...jobs]
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, 3),
+    [jobs],
+  );
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -663,7 +677,7 @@ export function DashboardScreen() {
         </AnimatedListItem>
 
         <AnimatedListItem index={2} style={styles.statCardWrapper}>
-          <TapRipple onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'sent' }); }} accessibilityRole="button" accessibilityLabel={`${sentQuotes} quotes sent`} rippleColor="rgba(207,161,83,0.25)">
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Jobs'); }} accessibilityRole="button" accessibilityLabel={`${sentQuotes} quotes sent`} rippleColor="rgba(207,161,83,0.25)">
             <RNAnimated.View style={{ transform: [{ scale: cardBreath3 }, { rotate: cardTilt3.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
               <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.warningBg, transform: [{ translateY: iconFloat3 }, { scale: iconScale3 }] }]}>
@@ -679,7 +693,7 @@ export function DashboardScreen() {
         </AnimatedListItem>
 
         <AnimatedListItem index={3} style={styles.statCardWrapper}>
-          <TapRipple onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'accepted' }); }} accessibilityRole="button" accessibilityLabel={`${acceptedQuotes} jobs won`} rippleColor="rgba(0,200,151,0.25)">
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Jobs'); }} accessibilityRole="button" accessibilityLabel={`${acceptedQuotes} jobs won`} rippleColor="rgba(0,200,151,0.25)">
             <RNAnimated.View style={{ transform: [{ scale: cardBreath4 }, { rotate: cardTilt4.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
               <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.successBg, transform: [{ translateY: iconFloat4 }, { scale: iconScale4 }] }]}>
@@ -695,50 +709,43 @@ export function DashboardScreen() {
         </AnimatedListItem>
       </View>
 
-      {/* Recent Quotes */}
+      {/* Recent Jobs — Phase 12 replaces "Recent Quotes" */}
       <SkeletonCrossfade
         loaded={initialLoaded}
         skeleton={
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Recent Quotes</Text>
+            <Text style={styles.sectionTitle}>Recent Jobs</Text>
             <SkeletonCardList count={3} />
           </View>
         }
       >
-        {recentQuotes.length > 0 ? (
+        {recentJobs.length > 0 ? (
           <View ref={recentRef} style={styles.section}>
-            <Text style={styles.sectionTitle}>Recent Quotes</Text>
+            <Text style={styles.sectionTitle}>Recent Jobs</Text>
 
-            {recentQuotes.map((quote, index) => (
-              <AnimatedListItem key={quote.id} index={index}>
+            {recentJobs.map((job, index) => (
+              <AnimatedListItem key={job.id} index={index}>
                 <View ref={index === 0 ? recentQuoteCardRef : undefined}>
-                <DocumentCard
-                  doc={quoteToDocument(quote)}
-                  businessSettings={businessSettings}
-                  onView={handleViewQuote}
-                  onEdit={() => handleEditQuote(quote)}
-                  onDelete={handleDeleteQuote}
-                  onDuplicate={() => handleDuplicateQuote(quote)}
-                  onSave={() => saveQuote(quote)}
-                  onStatusChange={handleOpenStageSheet}
-                  swipeableRef={index === 0 ? firstQuoteSwipeRef : undefined}
-                />
+                  <JobCard
+                    job={job}
+                    onPress={(jobId) => navigation.navigate('ViewJob', { jobId })}
+                  />
                 </View>
               </AnimatedListItem>
             ))}
 
             <Button
               mode="text"
-              onPress={() => navigation.navigate('Quotes')}
+              onPress={() => navigation.navigate('Jobs')}
               style={styles.viewAllButton}
             >
-              View All Quotes
+              View All Jobs
             </Button>
           </View>
         ) : null}
       </SkeletonCrossfade>
 
-      {recentQuotes.length === 0 && initialLoaded && (
+      {recentJobs.length === 0 && initialLoaded && (
         <View style={styles.emptyState}>
           <RNAnimated.View style={[styles.emptyIconCircle, { transform: [{ translateY: emptyFloat }] }]}>
             <MaterialCommunityIcons name="hard-hat" size={36} color={colors.primary} />

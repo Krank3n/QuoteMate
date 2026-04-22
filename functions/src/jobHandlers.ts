@@ -1,0 +1,339 @@
+/**
+ * Phase 8 of the jobs refactor — top-level Job entity.
+ *
+ * Sits above the unified Document model (shared/document/*). One Job has many
+ * attached Documents via `doc.jobId`. The trigger here listens to writes on
+ * the unified documents collection (users/{uid}/documents/{docId}) and
+ * recomputes the attached Job's aggregates.
+ *
+ *  - onDocumentWriteSyncJob: fires on every unified-document write, refreshes
+ *    aggregates for any affected job (old jobId + new jobId so reassigning a
+ *    doc updates both sides).
+ *  - backfillJobsFromDocuments: admin-gated callable. Groups a user's existing
+ *    documents by customer + address + job name and proposes one Job per
+ *    group. Dry-run by default; pass commit:true to actually write.
+ *
+ *  Phase 8 deliberately does NOT auto-create Jobs on doc writes — creation
+ *  is explicit (the Phase 9 quote wizard, or the backfill). If a doc's jobId
+ *  is unset the trigger no-ops; if it dangles, it logs and skips.
+ */
+
+import * as functions from 'firebase-functions';
+import * as admin from 'firebase-admin';
+import { createHash } from 'crypto';
+
+import { computeJobAggregates } from './shared/job/aggregate';
+import { deriveJobStageFromDocs } from './shared/job/stage';
+import type { Job, JobDocument, JobStage } from './shared/job/types';
+
+const db = () => admin.firestore();
+
+// ---------------------------------------------------------------------------
+// Trigger
+// ---------------------------------------------------------------------------
+
+export const onDocumentWriteSyncJob = functions.firestore
+  .document('users/{userId}/documents/{docId}')
+  .onWrite(async (change, ctx) => {
+    const userId = ctx.params.userId as string;
+    for (const jobId of collectJobIds(change)) {
+      await syncJobAggregates(userId, jobId);
+    }
+  });
+
+// Gather every jobId that might be affected by this write: the new one, and
+// (if different) the old one — a doc moving from Job A to Job B needs both
+// aggregates refreshed.
+function collectJobIds(
+  change: functions.Change<functions.firestore.DocumentSnapshot>,
+): string[] {
+  const before = change.before.exists ? change.before.data() || {} : null;
+  const after = change.after.exists ? change.after.data() || {} : null;
+  const ids = new Set<string>();
+  const beforeJobId = typeof before?.jobId === 'string' ? before.jobId : null;
+  const afterJobId = typeof after?.jobId === 'string' ? after.jobId : null;
+  if (beforeJobId) ids.add(beforeJobId);
+  if (afterJobId) ids.add(afterJobId);
+  return [...ids];
+}
+
+async function syncJobAggregates(userId: string, jobId: string): Promise<void> {
+  const jobRef = db()
+    .collection('users').doc(userId)
+    .collection('jobs').doc(jobId);
+  const jobSnap = await jobRef.get();
+  if (!jobSnap.exists) {
+    // Dangling reference — a doc points at a Job that never existed or was
+    // deleted. Log and skip; don't auto-create (creation is explicit in
+    // Phase 9 and the backfill).
+    functions.logger.warn('syncJobAggregates: job missing', { userId, jobId });
+    return;
+  }
+
+  const docsSnap = await db()
+    .collection('users').doc(userId)
+    .collection('documents')
+    .where('jobId', '==', jobId)
+    .get();
+
+  const docs: JobDocument[] = docsSnap.docs.map((d) => ({
+    id: d.id,
+    ...(d.data() as Omit<JobDocument, 'id'>),
+  }));
+
+  const aggregates = computeJobAggregates({ id: jobId }, docs);
+
+  await jobRef.set(
+    {
+      ...aggregates,
+      updatedAt: Date.now(),
+    },
+    { merge: true },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Backfill
+// ---------------------------------------------------------------------------
+
+interface BackfillRequest {
+  userId?: string;
+  commit?: boolean;
+}
+
+interface BackfillGroupReport {
+  proposedJobId: string;
+  key: string;
+  customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  jobAddress: string;
+  jobName: string;
+  stage: JobStage;
+  primaryDocumentId?: string;
+  documentIds: string[];
+}
+
+interface BackfillConflict {
+  key: string;
+  reason: string;
+  docIds: string[];
+}
+
+interface BackfillResult {
+  userId: string;
+  commit: boolean;
+  groupCount: number;
+  docCount: number;
+  groups: BackfillGroupReport[];
+  conflicts: BackfillConflict[];
+}
+
+function requireAdmin(context: functions.https.CallableContext): string {
+  const uid = context.auth?.uid;
+  const isAdmin = context.auth?.token?.admin === true;
+  if (!uid || !isAdmin) {
+    throw new functions.https.HttpsError('permission-denied', 'Admin access required.');
+  }
+  return uid;
+}
+
+export const backfillJobsFromDocuments = functions
+  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .https.onCall(async (data: BackfillRequest, context) => {
+    requireAdmin(context);
+    const userId = data?.userId;
+    if (!userId) {
+      throw new functions.https.HttpsError('invalid-argument', 'userId required');
+    }
+    const commit = data?.commit === true;
+    return runBackfill({ userId, commit });
+  });
+
+async function runBackfill(opts: {
+  userId: string;
+  commit: boolean;
+}): Promise<BackfillResult> {
+  const { userId, commit } = opts;
+
+  const docsSnap = await db()
+    .collection('users').doc(userId)
+    .collection('documents')
+    .get();
+
+  interface Entry {
+    id: string;
+    data: JobDocument;
+    createdAtMs: number;
+  }
+
+  const groups = new Map<string, Entry[]>();
+  let docCount = 0;
+
+  for (const d of docsSnap.docs) {
+    const raw = d.data() as Omit<JobDocument, 'id'>;
+    const data: JobDocument = { id: d.id, ...raw };
+    const key = groupKey(data);
+    const list = groups.get(key) ?? [];
+    list.push({ id: d.id, data, createdAtMs: toMillis(raw.createdAt) });
+    groups.set(key, list);
+    docCount += 1;
+  }
+
+  const reports: BackfillGroupReport[] = [];
+  const conflicts: BackfillConflict[] = [];
+
+  for (const [key, entries] of groups.entries()) {
+    const distinctEmails = new Set(
+      entries
+        .map((e) => (e.data.customerEmail || '').trim().toLowerCase())
+        .filter(Boolean),
+    );
+    if (distinctEmails.size > 1) {
+      conflicts.push({
+        key,
+        reason:
+          'Multiple distinct customer emails grouped together by address + job name',
+        docIds: entries.map((e) => e.id),
+      });
+    }
+
+    const sorted = [...entries].sort((a, b) => b.createdAtMs - a.createdAtMs);
+    const latest = sorted[0];
+    const primaryDocumentId = latest?.id;
+
+    const stage = deriveJobStageFromDocs(entries.map((e) => e.data));
+
+    const proposedJobId = db()
+      .collection('users').doc(userId)
+      .collection('jobs').doc().id;
+
+    reports.push({
+      proposedJobId,
+      key,
+      customerName: latest.data.customerName || '',
+      customerEmail: latest.data.customerEmail,
+      customerPhone: latest.data.customerPhone,
+      jobAddress: latest.data.jobAddress || '',
+      jobName: latest.data.job?.name || 'Job',
+      stage,
+      primaryDocumentId,
+      documentIds: sorted.map((e) => e.id),
+    });
+  }
+
+  if (!commit) {
+    return {
+      userId,
+      commit: false,
+      groupCount: reports.length,
+      docCount,
+      groups: reports,
+      conflicts,
+    };
+  }
+
+  // Commit mode. One transaction per group so the Job materialisation and the
+  // per-doc jobId stamp land atomically.
+  for (const report of reports) {
+    const entries = groups.get(report.key)!;
+    await db().runTransaction(async (tx) => {
+      const now = Date.now();
+      const jobRef = db()
+        .collection('users').doc(userId)
+        .collection('jobs').doc(report.proposedJobId);
+
+      const docs = entries.map<JobDocument>((e) => ({
+        ...e.data,
+        jobId: report.proposedJobId,
+      }));
+      const aggregates = computeJobAggregates(
+        { id: report.proposedJobId },
+        docs,
+      );
+
+      // Union of photos across all attached docs, deduped by id or storageUrl.
+      const photos = docs.flatMap((d) => d.photos || []);
+      const seen = new Set<string>();
+      const uniquePhotos = photos.filter((p) => {
+        const k = p.id || p.storageUrl;
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+
+      const newJob: Job = {
+        id: report.proposedJobId,
+        userId,
+        customerName: report.customerName,
+        customerEmail: report.customerEmail,
+        customerPhone: report.customerPhone,
+        jobAddress: report.jobAddress,
+        name: report.jobName,
+        stage: report.stage,
+        documentIds: aggregates.documentIds,
+        primaryDocumentId: report.primaryDocumentId,
+        totalQuoted: aggregates.totalQuoted,
+        totalInvoiced: aggregates.totalInvoiced,
+        totalPaid: aggregates.totalPaid,
+        balanceDue: aggregates.balanceDue,
+        photos: uniquePhotos.length > 0 ? uniquePhotos : undefined,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      tx.set(jobRef, stripUndefined(newJob));
+
+      for (const e of entries) {
+        const docRef = db()
+          .collection('users').doc(userId)
+          .collection('documents').doc(e.id);
+        tx.update(docRef, { jobId: report.proposedJobId });
+      }
+    });
+  }
+
+  return {
+    userId,
+    commit: true,
+    groupCount: reports.length,
+    docCount,
+    groups: reports,
+    conflicts,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function groupKey(doc: JobDocument): string {
+  const customer =
+    (doc.customerEmail || doc.customerPhone || '').toString().trim().toLowerCase() ||
+    '∅';
+  const address = (doc.jobAddress || '').toString().trim().toLowerCase() || '∅';
+  const name = (doc.job?.name || '').toString().trim().toLowerCase() || '∅';
+  const raw = `${customer}‖${address}‖${name}`;
+  return createHash('sha1').update(raw).digest('hex').slice(0, 12);
+}
+
+function toMillis(v: unknown): number {
+  if (!v) return 0;
+  if (typeof (v as { toMillis?: () => number }).toMillis === 'function') {
+    return (v as { toMillis: () => number }).toMillis();
+  }
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === 'number') return v;
+  const parsed = Date.parse(String(v));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+// Firestore rejects undefined values in set(). Strip them so we can build Job
+// objects using optional fields without per-field ternaries.
+function stripUndefined<T extends object>(obj: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out as T;
+}

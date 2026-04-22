@@ -3,14 +3,14 @@ import { View, TouchableOpacity } from 'react-native';
 import { Text, Title, Surface, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../../theme';
-import { Job } from '../../types';
+import { JobSpec } from '../../types';
 import { documentStyles as styles } from './documentStyles';
 
 interface JobSectionProps {
-  job: Job;
+  job: JobSpec;
   onEdit?: () => void;
   isEditing?: boolean;
-  onJobChange?: (job: Job) => void;
+  onJobChange?: (job: JobSpec) => void;
 }
 
 export function JobSection({

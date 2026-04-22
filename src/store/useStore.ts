@@ -13,6 +13,7 @@ import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quot
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { firestoreService } from '../services/firestoreService';
 import { documentService } from '../services/documentService';
+import { ensureJobForDocument, ensureJobForQuote } from './useJobStore';
 import { auth } from '../config/firebase';
 
 /**
@@ -376,8 +377,12 @@ export const useStore = create<AppState>((set, get) => ({
   saveDraft: async (quote: Quote) => {
     try {
       const { quotes } = get();
+      // Phase-8: ensure a Job exists before the legacy quote hits Firestore —
+      // the mirror carries jobId into the unified Document, and the trigger
+      // needs an existing Job to update aggregates against.
+      const withJob = await ensureJobForQuote(quote);
       const calculatedQuote = updateQuoteCalculations({
-        ...quote,
+        ...withJob,
         updatedAt: new Date(),
       });
 
@@ -491,10 +496,13 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const { quotes, getNextQuoteNumber, subscriptionStatus } = get();
 
+      // Phase-8: auto-create a Job on first save if one isn't linked already.
+      const withJob = await ensureJobForQuote(quote);
+
       // Update or add quote
-      const existingIndex = quotes.findIndex((q) => q.id === quote.id);
+      const existingIndex = quotes.findIndex((q) => q.id === withJob.id);
       const isNewQuote = existingIndex < 0;
-      let calculatedQuote = updateQuoteCalculations(quote);
+      let calculatedQuote = updateQuoteCalculations(withJob);
 
       // For new quotes, enforce quota server-side (atomic check + increment)
       if (isNewQuote && auth.currentUser) {
@@ -1257,9 +1265,14 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const { invoices, getNextInvoiceNumber } = get();
 
-      const existingIndex = invoices.findIndex((i) => i.id === invoice.id);
+      // Phase-8: auto-create a Job on first save if one isn't linked already.
+      // Converted-from-quote invoices already carry jobId, so this is a no-op
+      // for that common path.
+      const withJob = await ensureJobForQuote(invoice);
+
+      const existingIndex = invoices.findIndex((i) => i.id === withJob.id);
       const isNewInvoice = existingIndex < 0;
-      let updatedInvoice = { ...invoice, updatedAt: new Date() };
+      let updatedInvoice = { ...withJob, updatedAt: new Date() };
 
       // Assign invoice number for new invoices that don't have one
       if (isNewInvoice && !updatedInvoice.invoiceNumber) {
@@ -1980,7 +1993,11 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   saveDocument: async (document: Document) => {
-    const next = { ...document, updatedAt: Date.now() };
+    // Phase-8: auto-create a Job if this doc isn't linked to one yet. The
+    // server trigger (onDocumentWriteSyncJob) needs an existing Job before
+    // aggregates can land — so we create it client-side before the save.
+    const withJob = await ensureJobForDocument(document);
+    const next = { ...withJob, updatedAt: Date.now() };
     // Optimistic local update
     set((state) => {
       const existing = state.documents.findIndex((d) => d.id === next.id);
