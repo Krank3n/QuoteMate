@@ -1,0 +1,600 @@
+/**
+ * ViewJobScreen
+ *
+ * Detail view for a single Job. Shows customer + address + stage,
+ * aggregate totals, scheduled dates, attached Documents (rendered as
+ * DocumentCards — reusing the existing card so changes there flow here),
+ * notes, and photos. Stage chip → JobStageSheet. Action row for
+ * scheduling, marking complete, cancelling.
+ */
+
+import React, { useState, useMemo } from 'react';
+import { View, StyleSheet, ScrollView, Alert, Pressable } from 'react-native';
+import { Text, Card, Button, TextInput } from 'react-native-paper';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { format } from 'date-fns';
+
+import type { Job, JobStage } from '../../shared/job/types';
+import { canTransition } from '../../shared/job/stage';
+import { useJobStore } from '../store/useJobStore';
+import { useStore } from '../store/useStore';
+import { colors } from '../theme';
+import { formatCurrency } from '../utils/quoteCalculator';
+import { WebContainer } from '../components/WebContainer';
+import { DocumentCard } from '../components/DocumentCard';
+import { StageSheet } from '../components/StageSheet';
+import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
+import type { Document, DocumentStage } from '../types/document';
+import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
+import { applyStageChange } from '../utils/applyStageChange';
+import { selectionTap, lightTap } from '../utils/haptics';
+
+function formatDate(ms?: number): string | null {
+  if (!ms) return null;
+  try {
+    return format(new Date(ms), 'EEE d MMM yyyy');
+  } catch {
+    return null;
+  }
+}
+
+export function ViewJobScreen() {
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const jobId: string = route.params?.jobId;
+
+  const job = useJobStore((s) => s.jobs.find((j) => j.id === jobId));
+  const saveJob = useJobStore((s) => s.saveJob);
+  const deleteJob = useJobStore((s) => s.deleteJob);
+
+  const {
+    documents,
+    businessSettings,
+    saveQuote,
+    saveInvoice,
+    deleteQuote,
+    deleteInvoice,
+    duplicateQuote,
+    duplicateInvoice,
+    createInvoiceFromQuote,
+    setCurrentQuote,
+    setCurrentInvoice,
+    subscriptionStatus,
+  } = useStore();
+
+  const isTrialActive = !!(
+    subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired
+  );
+  const isPro = subscriptionStatus?.isPro || isTrialActive;
+
+  const [stageSheetVisible, setStageSheetVisible] = useState(false);
+  const [docStageSheetDoc, setDocStageSheetDoc] = useState<Document | null>(null);
+  const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
+  const [notesDirty, setNotesDirty] = useState(false);
+
+  React.useEffect(() => {
+    if (job) {
+      setNotesDraft(job.notes ?? '');
+      setNotesDirty(false);
+    }
+  }, [job?.id, job?.notes]);
+
+  const attachedDocs = useMemo(
+    () => documents.filter((d) => d.jobId === jobId),
+    [documents, jobId],
+  );
+
+  if (!job) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <MaterialCommunityIcons
+          name={'briefcase-off-outline' as any}
+          size={48}
+          color={colors.textMuted}
+        />
+        <Text style={styles.missingTitle}>Job not found</Text>
+        <Text style={styles.missingText}>
+          It may have been deleted or hasn’t synced yet.
+        </Text>
+        <Button mode="contained" style={{ marginTop: 20 }} onPress={() => navigation.goBack()}>
+          Back
+        </Button>
+      </View>
+    );
+  }
+
+  const meta = JOB_STAGE_META[job.stage];
+  const scheduled = formatDate(job.scheduledStartDate);
+  const completedAt = formatDate(job.completedDate);
+
+  const handleStageSelect = async (target: JobStage) => {
+    setStageSheetVisible(false);
+    if (!canTransition(job.stage, target)) {
+      Alert.alert(
+        'Can’t go there from here',
+        `A job at stage "${job.stage}" can’t jump to "${target}". Try one of the intermediate stages first.`,
+      );
+      return;
+    }
+    try {
+      await saveJob({ ...job, stage: target });
+    } catch {
+      Alert.alert('Error', 'Failed to update stage. Please try again.');
+    }
+  };
+
+  const handleNotesSave = async () => {
+    if (!notesDirty) return;
+    await saveJob({ ...job, notes: notesDraft });
+    setNotesDirty(false);
+  };
+
+  const handleArchive = () => {
+    Alert.alert('Archive job?', 'Archived jobs move to the Archived filter.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Archive',
+        style: 'destructive',
+        onPress: async () => {
+          await saveJob({ ...job, archivedAt: Date.now() });
+        },
+      },
+    ]);
+  };
+
+  const handleDelete = () => {
+    if (attachedDocs.length > 0) {
+      Alert.alert(
+        'Can’t delete — docs attached',
+        'Delete or reassign the attached quotes and invoices first.',
+      );
+      return;
+    }
+    Alert.alert('Delete job?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteJob(job.id);
+          navigation.goBack();
+        },
+      },
+    ]);
+  };
+
+  // Document-row handlers — mirror DocumentsListScreen so the cards behave
+  // the same as on the list.
+  const handleDocView = (id: string) => {
+    const doc = documents.find((d) => d.id === id);
+    if (!doc) return;
+    if (doc.type === 'invoice') {
+      navigation.navigate('ViewInvoice', { invoiceId: id });
+    } else {
+      navigation.navigate('ViewQuote', { quoteId: id });
+    }
+  };
+
+  const handleDocEdit = (doc: Document) => {
+    if (doc.type === 'invoice') {
+      setCurrentInvoice(documentToInvoice(doc));
+      navigation.navigate('ViewInvoice', { invoiceId: doc.id });
+    } else {
+      setCurrentQuote(documentToQuote(doc));
+      navigation.navigate('NewQuote');
+    }
+  };
+
+  const handleDocDelete = async (id: string) => {
+    const doc = documents.find((d) => d.id === id);
+    if (!doc) return;
+    if (doc.type === 'invoice') await deleteInvoice(id);
+    else await deleteQuote(id);
+  };
+
+  const handleDocDuplicate = async (doc: Document) => {
+    if (doc.type === 'invoice') await duplicateInvoice(documentToInvoice(doc));
+    else await duplicateQuote(documentToQuote(doc));
+  };
+
+  const handleDocSave = (doc: Document) => {
+    if (doc.type === 'invoice') saveInvoice(documentToInvoice(doc));
+    else saveQuote(documentToQuote(doc));
+  };
+
+  const handleDocRecordPayment = (doc: Document) => {
+    navigation.navigate('RecordPayment', { invoiceId: doc.id });
+  };
+
+  const handleDocStageSelect = async (target: DocumentStage) => {
+    if (!docStageSheetDoc) return;
+    const doc = docStageSheetDoc;
+    setDocStageSheetDoc(null);
+    if (target === 'invoice_sent' && doc.type === 'quote' && !isPro) {
+      navigation.navigate('Paywall');
+      return;
+    }
+    try {
+      await applyStageChange(doc, target, {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
+      });
+    } catch {
+      Alert.alert('Error', 'Failed to update stage. Please try again.');
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <WebContainer>
+          <Card style={styles.headerCard}>
+            <View style={styles.headerRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.jobName}>{job.name}</Text>
+                <Text style={styles.customerLine}>{job.customerName}</Text>
+                {job.jobAddress ? (
+                  <View style={styles.inlineRow}>
+                    <MaterialCommunityIcons
+                      name="map-marker-outline"
+                      size={14}
+                      color={colors.textMuted}
+                    />
+                    <Text style={styles.inlineText}>{job.jobAddress}</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              <Pressable
+                onPress={() => {
+                  selectionTap();
+                  setStageSheetVisible(true);
+                }}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.stageChip,
+                  { backgroundColor: meta.bgColor, borderColor: meta.color + '55' },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={meta.icon as any}
+                  size={14}
+                  color={meta.color}
+                />
+                <Text style={[styles.stageLabel, { color: meta.color }]}>
+                  {meta.label.replace(/^Mark as /, '')}
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.totalsRow}>
+              <Totals label="Quoted" value={job.totalQuoted} />
+              <Totals label="Invoiced" value={job.totalInvoiced} />
+              <Totals label="Paid" value={job.totalPaid} />
+              <Totals label="Balance" value={job.balanceDue} accent={job.balanceDue > 0} />
+            </View>
+
+            {(scheduled || completedAt) ? (
+              <View style={styles.datesRow}>
+                {scheduled ? (
+                  <View style={styles.dateItem}>
+                    <MaterialCommunityIcons
+                      name="calendar-clock-outline"
+                      size={14}
+                      color={colors.textMuted}
+                    />
+                    <Text style={styles.dateLabel}>Scheduled</Text>
+                    <Text style={styles.dateValue}>{scheduled}</Text>
+                  </View>
+                ) : null}
+                {completedAt ? (
+                  <View style={styles.dateItem}>
+                    <MaterialCommunityIcons
+                      name="flag-checkered"
+                      size={14}
+                      color={colors.textMuted}
+                    />
+                    <Text style={styles.dateLabel}>Completed</Text>
+                    <Text style={styles.dateValue}>{completedAt}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+          </Card>
+        </WebContainer>
+
+        <WebContainer>
+          <SectionTitle label={`Documents (${attachedDocs.length})`} />
+          {attachedDocs.length === 0 ? (
+            <Card style={styles.emptyDocsCard}>
+              <View style={styles.emptyDocs}>
+                <MaterialCommunityIcons
+                  name={'file-document-plus-outline' as any}
+                  size={28}
+                  color={colors.textMuted}
+                />
+                <Text style={styles.emptyDocsText}>
+                  No quotes or invoices attached yet.
+                </Text>
+              </View>
+            </Card>
+          ) : (
+            attachedDocs.map((doc) => (
+              <DocumentCard
+                key={doc.id}
+                doc={doc}
+                businessSettings={businessSettings}
+                onView={handleDocView}
+                onEdit={handleDocEdit}
+                onDelete={handleDocDelete}
+                onDuplicate={handleDocDuplicate}
+                onSave={handleDocSave}
+                onRecordPayment={doc.type === 'invoice' ? handleDocRecordPayment : undefined}
+                onStatusChange={setDocStageSheetDoc}
+              />
+            ))
+          )}
+        </WebContainer>
+
+        <WebContainer>
+          <SectionTitle label="Notes" />
+          <Card style={styles.notesCard}>
+            <TextInput
+              mode="outlined"
+              multiline
+              value={notesDraft}
+              onChangeText={(text) => {
+                setNotesDraft(text);
+                setNotesDirty(true);
+              }}
+              placeholder="Internal notes about this job…"
+              style={styles.notesInput}
+              numberOfLines={4}
+            />
+            {notesDirty ? (
+              <Button mode="contained" onPress={handleNotesSave} style={styles.notesSave}>
+                Save notes
+              </Button>
+            ) : null}
+          </Card>
+        </WebContainer>
+
+        <WebContainer>
+          <View style={styles.dangerRow}>
+            <Button
+              mode="outlined"
+              icon={'archive-outline' as any}
+              onPress={() => {
+                lightTap();
+                handleArchive();
+              }}
+              style={styles.dangerButton}
+            >
+              Archive
+            </Button>
+            <Button
+              mode="outlined"
+              icon={'trash-can-outline' as any}
+              onPress={() => {
+                lightTap();
+                handleDelete();
+              }}
+              textColor={colors.error}
+              style={[styles.dangerButton, { borderColor: colors.error + '66' }]}
+            >
+              Delete
+            </Button>
+          </View>
+        </WebContainer>
+      </ScrollView>
+
+      <JobStageSheet
+        visible={stageSheetVisible}
+        onDismiss={() => setStageSheetVisible(false)}
+        job={job}
+        onSelect={handleStageSelect}
+      />
+
+      {docStageSheetDoc ? (
+        <StageSheet
+          visible={true}
+          onDismiss={() => setDocStageSheetDoc(null)}
+          doc={docStageSheetDoc}
+          onSelect={handleDocStageSelect}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function Totals({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: number;
+  accent?: boolean;
+}) {
+  return (
+    <View style={styles.totalsCell}>
+      <Text style={styles.totalsLabel}>{label}</Text>
+      <Text
+        style={[
+          styles.totalsValue,
+          accent ? { color: colors.warning } : undefined,
+        ]}
+      >
+        {formatCurrency(value)}
+      </Text>
+    </View>
+  );
+}
+
+function SectionTitle({ label }: { label: string }) {
+  return (
+    <Text style={styles.sectionTitle}>{label}</Text>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  scrollContent: { paddingBottom: 96 },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    gap: 8,
+  },
+  missingTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    marginTop: 12,
+  },
+  missingText: {
+    fontSize: 14,
+    color: colors.textMuted,
+    textAlign: 'center',
+  },
+  headerCard: {
+    margin: 16,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+    gap: 12,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  jobName: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  customerLine: {
+    fontSize: 14,
+    color: colors.onSurface,
+    marginTop: 2,
+  },
+  inlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  inlineText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    flexShrink: 1,
+  },
+  stageChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    gap: 4,
+  },
+  stageLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  totalsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 4,
+  },
+  totalsCell: {
+    flex: 1,
+    alignItems: 'flex-start',
+    minWidth: 0,
+  },
+  totalsLabel: {
+    fontSize: 10,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  totalsValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    marginTop: 2,
+  },
+  datesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  dateItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dateLabel: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  dateValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  emptyDocsCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+  },
+  emptyDocs: {
+    padding: 20,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyDocsText: {
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  notesCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    gap: 12,
+  },
+  notesInput: {
+    backgroundColor: colors.surface,
+    minHeight: 80,
+  },
+  notesSave: {
+    alignSelf: 'flex-end',
+    borderRadius: 12,
+  },
+  dangerRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
+  dangerButton: {
+    flex: 1,
+    borderRadius: 12,
+  },
+});

@@ -16,6 +16,8 @@ import { DashboardScreen } from '../screens/DashboardScreen';
 import { QuotesListScreen } from '../screens/QuotesListScreen';
 import { InvoicesListScreen } from '../screens/InvoicesListScreen';
 import { DocumentsListScreen } from '../screens/DocumentsListScreen';
+import { JobsListScreen } from '../screens/JobsListScreen';
+import { ViewJobScreen } from '../screens/ViewJobScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
 import { ViewQuoteScreen } from '../screens/ViewQuoteScreen';
@@ -59,6 +61,7 @@ import { useStore } from '../store/useStore';
 // Type definitions for navigation
 export type RootTabParamList = {
   Dashboard: undefined;
+  Jobs: undefined;
   Documents: undefined;
   Quotes: undefined;
   Invoices: undefined;
@@ -206,6 +209,7 @@ function NewInvoiceNavigator() {
 
 const TAB_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
   Dashboard: 'home',
+  Jobs: 'briefcase',
   Documents: 'file-multiple',
   Quotes: 'file-document-multiple',
   Invoices: 'receipt',
@@ -412,6 +416,11 @@ function MainTabs() {
         options={{ title: 'QuoteMate' }}
       />
       <Tab.Screen
+        name="Jobs"
+        component={JobsListScreen}
+        options={{ title: 'Jobs' }}
+      />
+      <Tab.Screen
         name="Documents"
         component={DocumentsListScreen}
         options={{ title: 'Documents' }}
@@ -494,6 +503,17 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: false,
+        }}
+      />
+      <RootStack.Screen
+        name="ViewJob"
+        component={ViewJobScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          title: 'Job',
         }}
       />
       <RootStack.Screen
