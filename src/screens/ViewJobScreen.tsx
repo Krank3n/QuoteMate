@@ -25,6 +25,7 @@ import { DocumentRow } from '../components/DocumentRow';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
 import { PaymentSheet } from '../components/PaymentSheet';
+import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { applyStageChange } from '../utils/applyStageChange';
 import { selectionTap, lightTap } from '../utils/haptics';
@@ -63,6 +64,7 @@ export function ViewJobScreen() {
   const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [docStageSheetDoc, setDocStageSheetDoc] = useState<Document | null>(null);
   const [paymentSheetDoc, setPaymentSheetDoc] = useState<Document | null>(null);
+  const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
   const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
   const [notesDirty, setNotesDirty] = useState(false);
 
@@ -242,32 +244,42 @@ export function ViewJobScreen() {
               <Totals label="Balance" value={job.balanceDue} accent={job.balanceDue > 0} />
             </View>
 
-            {(scheduled || completedAt) ? (
-              <View style={styles.datesRow}>
-                {scheduled ? (
-                  <View style={styles.dateItem}>
-                    <MaterialCommunityIcons
-                      name="calendar-clock-outline"
-                      size={14}
-                      color={colors.textMuted}
-                    />
-                    <Text style={styles.dateLabel}>Scheduled</Text>
-                    <Text style={styles.dateValue}>{scheduled}</Text>
-                  </View>
-                ) : null}
-                {completedAt ? (
-                  <View style={styles.dateItem}>
-                    <MaterialCommunityIcons
-                      name="flag-checkered"
-                      size={14}
-                      color={colors.textMuted}
-                    />
-                    <Text style={styles.dateLabel}>Completed</Text>
-                    <Text style={styles.dateValue}>{completedAt}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
+            <View style={styles.datesRow}>
+              <Pressable
+                onPress={() => {
+                  selectionTap();
+                  setScheduleSheetVisible(true);
+                }}
+                style={({ pressed }) => [styles.dateItem, pressed && { opacity: 0.7 }]}
+              >
+                <MaterialCommunityIcons
+                  name="calendar-clock-outline"
+                  size={14}
+                  color={scheduled ? colors.text : colors.primary}
+                />
+                <Text style={styles.dateLabel}>Scheduled</Text>
+                <Text
+                  style={[
+                    styles.dateValue,
+                    !scheduled && { color: colors.primary },
+                  ]}
+                >
+                  {scheduled || 'Pick a date'}
+                </Text>
+              </Pressable>
+
+              {completedAt ? (
+                <View style={styles.dateItem}>
+                  <MaterialCommunityIcons
+                    name="flag-checkered"
+                    size={14}
+                    color={colors.textMuted}
+                  />
+                  <Text style={styles.dateLabel}>Completed</Text>
+                  <Text style={styles.dateValue}>{completedAt}</Text>
+                </View>
+              ) : null}
+            </View>
           </Card>
         </WebContainer>
 
@@ -375,6 +387,12 @@ export function ViewJobScreen() {
           onRecordPayment={handleDocRecordPayment}
         />
       ) : null}
+
+      <ScheduleJobSheet
+        visible={scheduleSheetVisible}
+        onDismiss={() => setScheduleSheetVisible(false)}
+        job={job}
+      />
     </View>
   );
 }
