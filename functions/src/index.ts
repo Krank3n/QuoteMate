@@ -5069,10 +5069,19 @@ export const updateActivityTimestamp = functions.https.onRequest((req, res) => {
     if (!decodedToken) return;
 
     try {
+      // Capture client version info if provided — useful for support/debugging
+      // in admin. Sanity-checked because the payload comes from a client.
+      const rawVersion = typeof req.body?.appVersion === 'string' ? req.body.appVersion.trim() : '';
+      const rawPlatform = typeof req.body?.appPlatform === 'string' ? req.body.appPlatform.trim() : '';
+      const appVersion = /^[\d]+\.[\d]+\.[\d]+([.\-+][\w.-]*)?$/.test(rawVersion) ? rawVersion : null;
+      const appPlatform = ['ios', 'android', 'web', 'macos', 'windows'].includes(rawPlatform) ? rawPlatform : null;
+
       await admin.firestore()
         .doc(`users/${decodedToken.uid}/settings/emailState`)
         .set({
           lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
+          ...(appVersion ? { appVersion, appVersionSeenAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
+          ...(appPlatform ? { appPlatform } : {}),
         }, { merge: true });
 
       res.status(200).json({ success: true });

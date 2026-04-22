@@ -139,6 +139,45 @@ async function fetchAllSubscriptions(): Promise<Map<string, any>> {
   return map;
 }
 
+// Square connection lives at users/{uid}/settings/squareConnection. Doc is written
+// on successful OAuth connect and deleted on user-initiated disconnect, so doc
+// presence = currently connected. `disconnectedReason` is set (e.g. 'token_refresh_failed')
+// when the backend notices the connection is broken but keeps the doc for debugging.
+type SquareSummary = {
+  connected: boolean;
+  merchantId: string | null;
+  merchantName: string | null;
+  locationName: string | null;
+  env: string | null;
+  connectedAt: string | null;
+  disconnectedReason: string | null;
+};
+
+function summariseSquare(data: any | undefined): SquareSummary | null {
+  if (!data) return null;
+  return {
+    connected: !data.disconnectedReason,
+    merchantId: data.merchantId || null,
+    merchantName: data.merchantName || null,
+    locationName: data.locationName || null,
+    env: data.env || null,
+    connectedAt: data.connectedAt || null,
+    disconnectedReason: data.disconnectedReason || null,
+  };
+}
+
+async function fetchAllSquareConnections(): Promise<Map<string, any>> {
+  const snap = await db().collectionGroup('settings').get();
+  const map = new Map<string, any>();
+  for (const d of snap.docs) {
+    if (d.id !== 'squareConnection') continue;
+    const uid = d.ref.parent.parent?.id;
+    if (!uid) continue;
+    map.set(uid, d.data());
+  }
+  return map;
+}
+
 async function listAllAuthUsers(): Promise<admin.auth.UserRecord[]> {
   const all: admin.auth.UserRecord[] = [];
   let nextPageToken: string | undefined;
@@ -342,6 +381,15 @@ interface UserListRow {
   tags: string[];
   marketingOptIn: boolean;
   healthScore: number;
+  // 'connected'  = squareConnection doc present, no disconnectedReason
+  // 'broken'     = doc present but token refresh failed (still signed up, currently unusable)
+  // 'none'       = never connected, or user disconnected
+  squareStatus: 'connected' | 'broken' | 'none';
+  squareMerchantName: string | null;
+  squareEnv: string | null;
+  appVersion: string | null;
+  appPlatform: string | null;
+  appVersionSeenAt: number | null;
 }
 
 export const adminListUsers = functions
@@ -363,8 +411,11 @@ export const adminListUsers = functions
     const userDocMap = new Map<string, any>();
     for (const d of userDocsSnap.docs) userDocMap.set(d.id, d.data());
 
-    // Prefetch subscriptions in one collection-group pass instead of N reads
-    const subsMap = await fetchAllSubscriptions();
+    // Prefetch subscriptions + Square connections in single collection-group passes
+    const [subsMap, squareMap] = await Promise.all([
+      fetchAllSubscriptions(),
+      fetchAllSquareConnections(),
+    ]);
 
     const rows: UserListRow[] = await Promise.all(
       authUsers.map(async (auth) => {
@@ -379,6 +430,7 @@ export const adminListUsers = functions
         const business = businessSnap.data() || {};
         const subFields = deriveSubFields(subsMap.get(uid));
         const emailPrefs = emailPrefsSnap.data() || {};
+        const squareSummary = summariseSquare(squareMap.get(uid));
 
         const planTier = subFields.tier;
 
@@ -407,6 +459,12 @@ export const adminListUsers = functions
                 supplierBookCount: userData.supplierBookCount || 0,
                 tier: subFields.tier,
               }),
+          squareStatus: !squareSummary ? 'none' : squareSummary.connected ? 'connected' : 'broken',
+          squareMerchantName: squareSummary?.merchantName || null,
+          squareEnv: squareSummary?.env || null,
+          appVersion: emailState.appVersion || null,
+          appPlatform: emailState.appPlatform || null,
+          appVersionSeenAt: emailState.appVersionSeenAt?.toMillis?.() || null,
         };
       })
     );
@@ -441,6 +499,7 @@ export const adminGetUser = functions.https.onCall(async (data, context) => {
     regSnap,
     referralSnap,
     subSnap,
+    squareSnap,
     quotesSnap,
     invoicesSnap,
     notesSnap,
@@ -457,6 +516,7 @@ export const adminGetUser = functions.https.onCall(async (data, context) => {
     firestore.doc(`users/${uid}/settings/registrationInfo`).get(),
     firestore.doc(`users/${uid}/profile/referral`).get(),
     firestore.doc(`users/${uid}/profile/subscription`).get(),
+    firestore.doc(`users/${uid}/settings/squareConnection`).get(),
     firestore.collection(`users/${uid}/quotes`).orderBy('createdAt', 'desc').limit(25).get().catch(() => ({ docs: [] as any[] })),
     firestore.collection(`users/${uid}/invoices`).orderBy('createdAt', 'desc').limit(25).get().catch(() => ({ docs: [] as any[] })),
     firestore.collection(`users/${uid}/adminNotes`).orderBy('createdAt', 'desc').limit(50).get().catch(() => ({ docs: [] as any[] })),
@@ -514,6 +574,9 @@ export const adminGetUser = functions.https.onCall(async (data, context) => {
     registration: regSnap.data() || {},
     referral: referralSnap.data() || {},
     subscription: { ...(subSnap.data() || {}), ...deriveSubFields(subSnap.data()) },
+    // Square summary — tokens are intentionally stripped, admin only needs
+    // connection state + merchant identity for support.
+    square: summariseSquare(squareSnap.data()),
     quotes: (quotesSnap as any).docs.map(docToJson),
     invoices: (invoicesSnap as any).docs.map(docToJson),
     notes: (notesSnap as any).docs.map(docToJson),
@@ -1691,7 +1754,11 @@ export const adminExportCsv = functions
     const firestore = db();
 
     if (entity === 'users') {
-      const [authUsers, subsMap] = await Promise.all([listAllAuthUsers(), fetchAllSubscriptions()]);
+      const [authUsers, subsMap, squareMap] = await Promise.all([
+        listAllAuthUsers(),
+        fetchAllSubscriptions(),
+        fetchAllSquareConnections(),
+      ]);
       const rows: Record<string, any>[] = [];
       for (const auth of authUsers) {
         const [biz, es] = await Promise.all([
@@ -1701,6 +1768,7 @@ export const adminExportCsv = functions
         const b = biz.data() || {};
         const e = es.data() || {};
         const f = deriveSubFields(subsMap.get(auth.uid));
+        const sq = summariseSquare(squareMap.get(auth.uid));
         rows.push({
           uid: auth.uid,
           email: auth.email || '',
@@ -1714,11 +1782,17 @@ export const adminExportCsv = functions
           lastActivityAt: e.lastActivityAt?.toDate?.()?.toISOString?.() || '',
           signupAt: e.signupAt?.toDate?.()?.toISOString?.() || auth.metadata.creationTime || '',
           marketingOptIn: (await firestore.doc(`users/${auth.uid}/settings/emailPreferences`).get()).data()?.marketing !== false,
+          squareStatus: !sq ? 'none' : sq.connected ? 'connected' : 'broken',
+          squareMerchant: sq?.merchantName || '',
+          squareEnv: sq?.env || '',
+          squareConnectedAt: sq?.connectedAt || '',
+          appVersion: e.appVersion || '',
+          appPlatform: e.appPlatform || '',
         });
       }
       return {
         filename: `quotemate-users-${Date.now()}.csv`,
-        csv: rowsToCsv(['uid', 'email', 'displayName', 'businessName', 'phone', 'abn', 'plan', 'platform', 'currentPeriodEnd', 'lastActivityAt', 'signupAt', 'marketingOptIn'], rows),
+        csv: rowsToCsv(['uid', 'email', 'displayName', 'businessName', 'phone', 'abn', 'plan', 'platform', 'currentPeriodEnd', 'lastActivityAt', 'signupAt', 'marketingOptIn', 'squareStatus', 'squareMerchant', 'squareEnv', 'squareConnectedAt', 'appVersion', 'appPlatform'], rows),
       };
     }
 

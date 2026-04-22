@@ -181,8 +181,10 @@ export function CustomerDetailsScreen() {
     setShowSuggestions(text.length > 0);
   };
 
+  const hasContactMethod = customerEmail.trim().length > 0 || customerPhone.trim().length > 0;
+
   const handleSaveAndReturn = () => {
-    if (!currentQuote || !customerName.trim()) return;
+    if (!currentQuote || !customerName.trim() || !hasContactMethod) return;
     const updatedQuote = {
       ...currentQuote,
       contactId: selectedContactId,
@@ -199,7 +201,7 @@ export function CustomerDetailsScreen() {
   const handleNext = () => {
     if (!currentQuote) return;
 
-    if (!customerName.trim()) {
+    if (!customerName.trim() || !hasContactMethod) {
       return;
     }
 
@@ -423,6 +425,9 @@ export function CustomerDetailsScreen() {
             )}
 
             {/* Other Customer Fields */}
+            <Text style={styles.contactHint}>
+              Add an email or phone so you can send the quote to your customer.
+            </Text>
             <TextInput
               label="Email"
               value={customerEmail}
@@ -459,7 +464,7 @@ export function CustomerDetailsScreen() {
       <FixedBottomButton
         label={isEditFromPreview ? 'Save' : 'Next: Materials'}
         onPress={isEditFromPreview ? handleSaveAndReturn : handleNext}
-        disabled={!customerName.trim()}
+        disabled={!customerName.trim() || !hasContactMethod}
       />
 
       {unifiedTourActive && unifiedTourPhase === 'customerDetails' && (
@@ -560,6 +565,12 @@ const styles = StyleSheet.create({
   },
   input: {
     marginBottom: 16,
+  },
+  contactHint: {
+    fontSize: 13,
+    color: colors.onSurface,
+    opacity: 0.7,
+    marginBottom: 8,
   },
   recentCustomersContainer: {
     marginBottom: 16,
