@@ -24,6 +24,7 @@ import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
 import { JobTimeline } from '../components/JobTimeline';
 import { JobPhotoStrip } from '../components/JobPhotoStrip';
+import { JobChecklist } from '../components/JobChecklist';
 import { PaymentSheet } from '../components/PaymentSheet';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import { CustomerEditSheet } from '../components/CustomerEditSheet';
@@ -464,6 +465,10 @@ export function ViewJobScreen() {
               />
             ))
           )}
+        </WebContainer>
+
+        <WebContainer>
+          <JobChecklist job={job} />
         </WebContainer>
 
         <WebContainer>

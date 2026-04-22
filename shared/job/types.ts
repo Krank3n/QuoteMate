@@ -25,6 +25,17 @@ export interface JobPhoto {
   annotated?: boolean;
 }
 
+// Lightweight to-do item on a Job. Phase-17+: brain-dump of materials
+// needed, site tasks, follow-ups. Not a project-management feature, just
+// a note with a checkbox.
+export interface JobChecklistItem {
+  id: string;
+  text: string;
+  done: boolean;
+  createdAt: number;      // ms epoch
+  completedAt?: number;   // ms epoch — stamped when done flips to true
+}
+
 export interface Job {
   id: string;
   userId: string;                      // denormalised for indexing
@@ -84,6 +95,7 @@ export interface Job {
   // Media & notes
   photos?: JobPhoto[];
   notes?: string;
+  checklist?: JobChecklistItem[];
 
   createdAt: number;
   updatedAt: number;
