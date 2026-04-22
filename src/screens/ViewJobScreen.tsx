@@ -9,6 +9,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { View, StyleSheet, ScrollView, Alert, Pressable, Linking, Platform } from 'react-native';
+import { NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { Text, Card, Button, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -241,7 +242,10 @@ export function ViewJobScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      {/* NestableScrollContainer lets the JobChecklist's DraggableFlatList
+          sit inline without fighting the outer scroll on native. On web
+          it behaves as a regular scroll view. */}
+      <NestableScrollContainer contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           <Card style={styles.headerCard}>
             <View style={styles.headerRow}>
@@ -550,7 +554,7 @@ export function ViewJobScreen() {
             </Button>
           </View>
         </WebContainer>
-      </ScrollView>
+      </NestableScrollContainer>
 
       <JobStageSheet
         visible={stageSheetVisible}

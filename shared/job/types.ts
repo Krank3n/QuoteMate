@@ -34,6 +34,11 @@ export interface JobChecklistItem {
   done: boolean;
   createdAt: number;      // ms epoch
   completedAt?: number;   // ms epoch — stamped when done flips to true
+  /** Optional free-form notes — shown when the row is expanded. */
+  notes?: string;
+  /** Optional deadline — ms epoch. Renders as a chip on the row and a
+   * warning tint when overdue. */
+  dueAt?: number;
 }
 
 export interface Job {

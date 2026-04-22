@@ -2,18 +2,19 @@
  * JobChecklist
  *
  * Lightweight checkbox list stored on Job.checklist. Tradies brain-dump
- * materials, site tasks, follow-ups; tick them off as they go. No
- * project-management ambitions — just notes with a state flag.
+ * materials, site tasks, follow-ups; tick them off as they go. Each item
+ * can optionally carry notes and a due date (chip on the row, overdue
+ * tint when past).
  *
- * Visual:
- *  - Empty: dashed "Add checklist" CTA (matches the Notes empty-state
- *    pattern) so the screen stays uncluttered.
- *  - Populated: rounded card with each item as a tappable row; done items
- *    fade + strike through. A bottom "Add step" row with an inline
- *    TextInput lets the tradie type + Enter to append.
+ * Interactions:
+ *   - Tap the checkbox: toggle done / undone.
+ *   - Tap the row body: expand/collapse the notes + due-date editor.
+ *   - Long-press the drag handle on native: reorder (DraggableFlatList).
+ *     Web falls back to a static list — no drag there today.
+ *   - "Add step" row at the bottom: inline TextInput, Enter to append.
  *
- * Persistence: every mutation goes through useJobStore.saveJob with the
- * new checklist array. Optimistic via the store's local set().
+ * Lives inside ViewJobScreen's NestableScrollContainer so the
+ * DraggableFlatList can sit inline without fighting the outer scroll.
  */
 
 import React, { useState } from 'react';
@@ -28,12 +29,19 @@ import {
 } from 'react-native';
 import { Text, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import {
+  NestableDraggableFlatList,
+  RenderItemParams,
+  ScaleDecorator,
+} from 'react-native-draggable-flatlist';
+import { format } from 'date-fns';
 
 import type { Job, JobChecklistItem } from '../../shared/job/types';
 import { colors } from '../theme';
 import { useJobStore } from '../store/useJobStore';
 import { generateId } from '../utils/generateId';
 import { selectionTap, lightTap } from '../utils/haptics';
+import { DueDateSheet } from './DueDateSheet';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -49,33 +57,37 @@ export function JobChecklist({ job }: JobChecklistProps) {
   const [pendingText, setPendingText] = useState('');
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(items.length > 0);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [dueSheetItemId, setDueSheetItemId] = useState<string | null>(null);
 
-  const commit = async (next: JobChecklistItem[]) => {
-    LayoutAnimation.configureNext({
-      duration: 180,
-      create: { type: 'easeInEaseOut', property: 'opacity' },
-      update: { type: 'easeInEaseOut' },
-      delete: { type: 'easeInEaseOut', property: 'opacity' },
-    });
+  const commit = async (next: JobChecklistItem[], skipAnim?: boolean) => {
+    if (!skipAnim) {
+      LayoutAnimation.configureNext({
+        duration: 180,
+        create: { type: 'easeInEaseOut', property: 'opacity' },
+        update: { type: 'easeInEaseOut' },
+        delete: { type: 'easeInEaseOut', property: 'opacity' },
+      });
+    }
     await saveJob({ ...job, checklist: next });
+  };
+
+  const patch = async (id: string, changes: Partial<JobChecklistItem>) => {
+    const next = items.map((it) => (it.id === id ? { ...it, ...changes } : it));
+    await commit(next);
   };
 
   const toggle = async (id: string) => {
     selectionTap();
-    const next = items.map((it) =>
-      it.id === id
-        ? {
-            ...it,
-            done: !it.done,
-            completedAt: !it.done ? Date.now() : undefined,
-          }
-        : it,
-    );
-    await commit(next);
+    const target = items.find((it) => it.id === id);
+    if (!target) return;
+    const done = !target.done;
+    await patch(id, { done, completedAt: done ? Date.now() : undefined });
   };
 
   const remove = async (id: string) => {
     lightTap();
+    if (expandedId === id) setExpandedId(null);
     await commit(items.filter((it) => it.id !== id));
   };
 
@@ -89,9 +101,16 @@ export function JobChecklist({ job }: JobChecklistProps) {
       createdAt: Date.now(),
     };
     setPendingText('');
-    setAdding(false);
+    // Leave "adding" open so the tradie can rip through a list in one go.
     await commit([...items, newItem]);
   };
+
+  const reorder = async (next: JobChecklistItem[]) => {
+    // Drag-end fires a lot; skip LayoutAnimation to avoid a double bounce.
+    await commit(next, true);
+  };
+
+  const dueSheetItem = items.find((it) => it.id === dueSheetItemId) || null;
 
   // Collapsed empty state — tap to open and start typing.
   if (!editing && items.length === 0) {
@@ -116,6 +135,28 @@ export function JobChecklist({ job }: JobChecklistProps) {
 
   const done = items.filter((it) => it.done).length;
 
+  const renderRow = ({
+    item,
+    drag,
+    isActive,
+  }: RenderItemParams<JobChecklistItem>) => (
+    <ScaleDecorator>
+      <ChecklistRow
+        item={item}
+        isActive={isActive}
+        expanded={expandedId === item.id}
+        onToggleDone={() => toggle(item.id)}
+        onToggleExpand={() =>
+          setExpandedId((prev) => (prev === item.id ? null : item.id))
+        }
+        onDelete={() => remove(item.id)}
+        onDrag={drag}
+        onNotesChange={(text) => patch(item.id, { notes: text })}
+        onOpenDueSheet={() => setDueSheetItemId(item.id)}
+      />
+    </ScaleDecorator>
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
@@ -126,14 +167,31 @@ export function JobChecklist({ job }: JobChecklistProps) {
       </View>
 
       <View style={styles.list}>
-        {items.map((item) => (
-          <ChecklistRow
-            key={item.id}
-            item={item}
-            onToggle={() => toggle(item.id)}
-            onDelete={() => remove(item.id)}
+        {Platform.OS !== 'web' ? (
+          <NestableDraggableFlatList
+            data={items}
+            keyExtractor={(it) => it.id}
+            renderItem={renderRow}
+            onDragEnd={({ data }) => reorder(data)}
+            activationDistance={10}
           />
-        ))}
+        ) : (
+          items.map((item) => (
+            <ChecklistRow
+              key={item.id}
+              item={item}
+              isActive={false}
+              expanded={expandedId === item.id}
+              onToggleDone={() => toggle(item.id)}
+              onToggleExpand={() =>
+                setExpandedId((prev) => (prev === item.id ? null : item.id))
+              }
+              onDelete={() => remove(item.id)}
+              onNotesChange={(text) => patch(item.id, { notes: text })}
+              onOpenDueSheet={() => setDueSheetItemId(item.id)}
+            />
+          ))
+        )}
 
         {adding ? (
           <View style={styles.addRow}>
@@ -177,19 +235,44 @@ export function JobChecklist({ job }: JobChecklistProps) {
           </Pressable>
         )}
       </View>
+
+      <DueDateSheet
+        visible={!!dueSheetItem}
+        onDismiss={() => setDueSheetItemId(null)}
+        value={dueSheetItem?.dueAt}
+        onChange={(next) => {
+          if (!dueSheetItem) return;
+          patch(dueSheetItem.id, { dueAt: next });
+        }}
+        title={dueSheetItem?.text || 'Due date'}
+      />
     </View>
   );
 }
 
+interface ChecklistRowProps {
+  item: JobChecklistItem;
+  isActive: boolean;
+  expanded: boolean;
+  onToggleDone: () => void;
+  onToggleExpand: () => void;
+  onDelete: () => void;
+  onDrag?: () => void;
+  onNotesChange: (text: string) => void;
+  onOpenDueSheet: () => void;
+}
+
 function ChecklistRow({
   item,
-  onToggle,
+  isActive,
+  expanded,
+  onToggleDone,
+  onToggleExpand,
   onDelete,
-}: {
-  item: JobChecklistItem;
-  onToggle: () => void;
-  onDelete: () => void;
-}) {
+  onDrag,
+  onNotesChange,
+  onOpenDueSheet,
+}: ChecklistRowProps) {
   const [pressedDelete, setPressedDelete] = useState(false);
   const fadeAnim = React.useRef(new Animated.Value(item.done ? 0.55 : 1)).current;
 
@@ -201,49 +284,192 @@ function ChecklistRow({
     }).start();
   }, [item.done, fadeAnim]);
 
+  const now = Date.now();
+  const dueLabel = formatDueLabel(item.dueAt);
+  const overdue = !!(item.dueAt && !item.done && item.dueAt < now - 24 * 60 * 60 * 1000);
+  const dueToday = !!(item.dueAt && !item.done && !overdue && isSameDay(item.dueAt, now));
+
   return (
-    <Animated.View style={[styles.row, { opacity: fadeAnim }]}>
-      <Pressable onPress={onToggle} hitSlop={6} style={styles.checkboxPressable}>
-        <View
-          style={[
-            styles.checkbox,
-            item.done && styles.checkboxDone,
-          ]}
-        >
-          {item.done ? (
+    <Animated.View
+      style={[
+        styles.rowWrap,
+        { opacity: fadeAnim },
+        isActive && styles.rowActive,
+      ]}
+    >
+      <View style={styles.row}>
+        {onDrag ? (
+          <Pressable
+            onLongPress={onDrag}
+            delayLongPress={150}
+            style={styles.dragHandle}
+            hitSlop={4}
+          >
             <MaterialCommunityIcons
-              name={'check' as any}
-              size={14}
-              color={colors.white}
+              name={'drag-vertical' as any}
+              size={18}
+              color={colors.inactive}
             />
+          </Pressable>
+        ) : null}
+
+        <Pressable onPress={onToggleDone} hitSlop={6} style={styles.checkboxPressable}>
+          <View
+            style={[
+              styles.checkbox,
+              item.done && styles.checkboxDone,
+            ]}
+          >
+            {item.done ? (
+              <MaterialCommunityIcons
+                name={'check' as any}
+                size={14}
+                color={colors.white}
+              />
+            ) : null}
+          </View>
+        </Pressable>
+
+        <Pressable style={styles.textWrap} onPress={onToggleExpand}>
+          <Text
+            style={[styles.itemText, item.done && styles.itemTextDone]}
+            numberOfLines={expanded ? undefined : 2}
+          >
+            {item.text}
+          </Text>
+          {(dueLabel || item.notes) && !expanded ? (
+            <View style={styles.metaRow}>
+              {dueLabel ? (
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    onOpenDueSheet();
+                  }}
+                  hitSlop={6}
+                  style={[
+                    styles.dueChip,
+                    overdue && styles.dueChipOverdue,
+                    dueToday && styles.dueChipToday,
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name={'calendar-clock-outline' as any}
+                    size={10}
+                    color={
+                      overdue
+                        ? colors.error
+                        : dueToday
+                          ? colors.warning
+                          : colors.textMuted
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.dueChipLabel,
+                      overdue && { color: colors.error },
+                      dueToday && { color: colors.warning },
+                    ]}
+                  >
+                    {dueLabel}
+                  </Text>
+                </Pressable>
+              ) : null}
+              {item.notes ? (
+                <View style={styles.notesHintPill}>
+                  <MaterialCommunityIcons
+                    name={'text-box-outline' as any}
+                    size={10}
+                    color={colors.textMuted}
+                  />
+                  <Text style={styles.notesHintLabel}>Notes</Text>
+                </View>
+              ) : null}
+            </View>
           ) : null}
-        </View>
-      </Pressable>
+        </Pressable>
 
-      <Pressable style={styles.textWrap} onPress={onToggle}>
-        <Text
-          style={[styles.itemText, item.done && styles.itemTextDone]}
-          numberOfLines={3}
+        <Pressable
+          onPress={onDelete}
+          onPressIn={() => setPressedDelete(true)}
+          onPressOut={() => setPressedDelete(false)}
+          hitSlop={6}
+          style={styles.deleteButton}
         >
-          {item.text}
-        </Text>
-      </Pressable>
+          <MaterialCommunityIcons
+            name={'close' as any}
+            size={16}
+            color={pressedDelete ? colors.error : colors.textMuted}
+          />
+        </Pressable>
+      </View>
 
-      <Pressable
-        onPress={onDelete}
-        onPressIn={() => setPressedDelete(true)}
-        onPressOut={() => setPressedDelete(false)}
-        hitSlop={6}
-        style={styles.deleteButton}
-      >
-        <MaterialCommunityIcons
-          name={'close' as any}
-          size={16}
-          color={pressedDelete ? colors.error : colors.textMuted}
-        />
-      </Pressable>
+      {expanded ? (
+        <View style={styles.expandedBlock}>
+          <Pressable onPress={onOpenDueSheet} style={styles.dueButton}>
+            <MaterialCommunityIcons
+              name={'calendar-clock-outline' as any}
+              size={14}
+              color={item.dueAt ? colors.primary : colors.textMuted}
+            />
+            <Text
+              style={[
+                styles.dueButtonLabel,
+                item.dueAt
+                  ? { color: colors.text, fontWeight: '700' as const }
+                  : null,
+              ]}
+            >
+              {item.dueAt ? formatDueLong(item.dueAt) : 'Set due date'}
+            </Text>
+          </Pressable>
+          <TextInput
+            mode="outlined"
+            multiline
+            placeholder="Notes (optional)…"
+            value={item.notes || ''}
+            onChangeText={onNotesChange}
+            style={styles.notesInput}
+            numberOfLines={3}
+          />
+        </View>
+      ) : null}
     </Animated.View>
   );
+}
+
+function isSameDay(a: number, b: number): boolean {
+  const da = new Date(a);
+  const db = new Date(b);
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
+function formatDueLabel(ms?: number): string | null {
+  if (!ms) return null;
+  try {
+    const d = new Date(ms);
+    const now = Date.now();
+    if (isSameDay(ms, now)) return 'Today';
+    const tomorrow = now + 24 * 60 * 60 * 1000;
+    if (isSameDay(ms, tomorrow)) return 'Tomorrow';
+    const daysAgo = Math.floor((now - ms) / (24 * 60 * 60 * 1000));
+    if (daysAgo === 1) return 'Yesterday';
+    if (daysAgo > 1 && daysAgo <= 14) return `${daysAgo} days ago`;
+    return format(d, 'd MMM');
+  } catch {
+    return null;
+  }
+}
+
+function formatDueLong(ms: number): string {
+  try {
+    return format(new Date(ms), 'EEE d MMM yyyy');
+  } catch {
+    return '';
+  }
 }
 
 const styles = StyleSheet.create({
@@ -291,11 +517,27 @@ const styles = StyleSheet.create({
   list: {
     gap: 4,
   },
+  rowWrap: {
+    borderRadius: 10,
+  },
+  rowActive: {
+    backgroundColor: colors.surfaceGray3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 6,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     paddingVertical: 8,
+    paddingHorizontal: 2,
+  },
+  dragHandle: {
+    paddingHorizontal: 2,
+    paddingVertical: 6,
   },
   checkboxPressable: {
     paddingVertical: 2,
@@ -326,8 +568,77 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     color: colors.textMuted,
   },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    flexWrap: 'wrap',
+  },
+  dueChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceGray3,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  dueChipOverdue: {
+    backgroundColor: colors.errorBg,
+    borderColor: colors.error + '55',
+  },
+  dueChipToday: {
+    backgroundColor: colors.warningBg,
+    borderColor: colors.warning + '55',
+  },
+  dueChipLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  notesHintPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceGray3,
+  },
+  notesHintLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
   deleteButton: {
     padding: 4,
+  },
+  expandedBlock: {
+    paddingHorizontal: 2,
+    paddingBottom: 10,
+    paddingTop: 2,
+    gap: 8,
+  },
+  dueButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceGray3,
+    alignSelf: 'flex-start',
+  },
+  dueButtonLabel: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  notesInput: {
+    backgroundColor: 'transparent',
   },
   addRow: {
     flexDirection: 'row',
