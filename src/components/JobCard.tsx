@@ -14,8 +14,10 @@ import { formatDistanceToNow } from 'date-fns';
 
 import type { Job } from '../../shared/job/types';
 import { colors } from '../theme';
+import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { formatScheduledDateTime, formatScheduledDuration } from '../utils/formatSchedule';
+import { deriveDuration } from '../utils/deriveDuration';
 import { JOB_STAGE_META } from './JobStageSheet';
 import { selectionTap } from '../utils/haptics';
 
@@ -48,11 +50,19 @@ function formatUpdatedAt(ms: number): string {
 export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress }: JobCardProps) {
   const meta = JOB_STAGE_META[job.stage];
   const headline = pickHeadlineAmount(job);
-  const scheduled = formatScheduledDateTime(job.scheduledStartDate);
-  const duration = formatScheduledDuration(
-    job.scheduledDurationDays,
-    job.scheduledHoursPerDay,
+  // Pull the primary attached doc so duration on the card matches the
+  // labour quoted on the linked Document — single source of truth.
+  const primaryDoc = useStore((s) =>
+    job.primaryDocumentId
+      ? s.documents.find((d) => d.id === job.primaryDocumentId)
+      : s.documents.find((d) => d.jobId === job.id),
   );
+  const { durationDays, hoursPerDay } = deriveDuration(primaryDoc);
+  const scheduled = formatScheduledDateTime(job.scheduledStartDate);
+  const duration =
+    scheduled && (durationDays > 1 || hoursPerDay !== 8)
+      ? formatScheduledDuration(durationDays, hoursPerDay)
+      : null;
   const scheduledLine = scheduled
     ? duration
       ? `${scheduled} · ${duration}`

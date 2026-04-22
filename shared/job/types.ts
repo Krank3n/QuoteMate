@@ -45,13 +45,11 @@ export interface Job {
   documentIds: string[];
   primaryDocumentId?: string;
 
-  // Schedule
+  // Schedule. The "when" of the job — duration is intentionally NOT stored
+  // here; it's derived from the primary Document's labor (laborHours +
+  // laborUnit) so the tradie types it once, on the quote.
   scheduledStartDate?: number;         // ms epoch (start of first day)
-  scheduledEndDate?: number;           // ms epoch (end of final day, inclusive)
-  /** How many calendar days the job spans. 1 = single-day. */
-  scheduledDurationDays?: number;
-  /** Hours of work per day — drives the GCal event window per day. */
-  scheduledHoursPerDay?: number;
+  scheduledEndDate?: number;           // ms epoch (end of final day)
   estimatedDurationDays?: number;      // legacy hint, retained for back-compat
   actualStartDate?: number;
   completedDate?: number;

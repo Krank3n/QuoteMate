@@ -1,15 +1,11 @@
 /**
  * ScheduleJobSheet
  *
- * Day + time picker for a Job's scheduledStartDate, plus a shortcut to
- * open the event pre-filled in Google Calendar. The in-app picker stays
- * minimal — tradies pick a day + a half-hour slot, we store the
- * timestamp, and if they want reminders / customer invites / the full
- * calendar experience they open it in GCal.
- *
- * The sheet keeps picks local until the tradie taps Save — swapping a
- * day or a time chip no longer writes the job immediately, so "pick a
- * day, then set a time" works as a single motion.
+ * Day + start-time picker for a Job's scheduledStartDate, plus a
+ * shortcut to open the event pre-filled in Google Calendar. Duration is
+ * NOT collected here — it's derived from the linked Document's labor
+ * (the tradie types it once on the quote). The "Open in Google
+ * Calendar" link sizes the GCal event from that derived duration.
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -20,6 +16,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { format } from 'date-fns';
 
 import type { Job } from '../../shared/job/types';
+import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { useJobStore } from '../store/useJobStore';
@@ -30,7 +27,7 @@ import {
   formatMinutes,
 } from './TimeSlotPicker';
 import { buildGoogleCalendarUrl } from '../utils/gcalUrl';
-import { NumberStepper } from './NumberStepper';
+import { deriveDuration } from '../utils/deriveDuration';
 
 interface ScheduleJobSheetProps {
   visible: boolean;
@@ -68,6 +65,14 @@ function toIsoDay(ms?: number): string | undefined {
 
 export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetProps) {
   const saveJob = useJobStore((s) => s.saveJob);
+  // Look up the job's primary attached document so we can derive the GCal
+  // event duration from quoted labor instead of asking the tradie again.
+  const primaryDoc = useStore((s) =>
+    job.primaryDocumentId
+      ? s.documents.find((d) => d.id === job.primaryDocumentId)
+      : s.documents.find((d) => d.jobId === job.id),
+  );
+  const derived = useMemo(() => deriveDuration(primaryDoc), [primaryDoc]);
 
   const [pendingDay, setPendingDay] = useState<string | undefined>(() =>
     toIsoDay(job.scheduledStartDate),
@@ -75,29 +80,15 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   const [pendingMinutes, setPendingMinutes] = useState<number | null>(() =>
     minutesFromTimestamp(job.scheduledStartDate),
   );
-  const [pendingDays, setPendingDays] = useState<number>(
-    () => Math.max(1, Number(job.scheduledDurationDays) || 1),
-  );
-  const [pendingHoursPerDay, setPendingHoursPerDay] = useState<number>(
-    () => Math.max(1, Number(job.scheduledHoursPerDay) || 8),
-  );
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (visible) {
       setPendingDay(toIsoDay(job.scheduledStartDate));
       setPendingMinutes(minutesFromTimestamp(job.scheduledStartDate));
-      setPendingDays(Math.max(1, Number(job.scheduledDurationDays) || 1));
-      setPendingHoursPerDay(Math.max(1, Number(job.scheduledHoursPerDay) || 8));
       setSaving(false);
     }
-  }, [
-    visible,
-    job.id,
-    job.scheduledStartDate,
-    job.scheduledDurationDays,
-    job.scheduledHoursPerDay,
-  ]);
+  }, [visible, job.id, job.scheduledStartDate]);
 
   const markedDates = useMemo(() => {
     if (!pendingDay) return {};
@@ -113,22 +104,20 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   const pendingSummary = useMemo(() => {
     if (!pendingDay) return 'Pick a day';
     const dayLabel = format(new Date(`${pendingDay}T00:00:00`), 'EEE d MMM');
-    const timePart =
-      pendingMinutes == null ? 'All day' : formatMinutes(pendingMinutes);
-    const durationPart =
-      pendingDays > 1
-        ? ` · ${pendingDays} days · ${pendingHoursPerDay}h/day`
-        : pendingMinutes != null
-          ? ` · ${pendingHoursPerDay}h`
-          : '';
-    return `${dayLabel} · ${timePart}${durationPart}`;
-  }, [pendingDay, pendingMinutes, pendingDays, pendingHoursPerDay]);
+    const timePart = pendingMinutes == null ? 'All day' : formatMinutes(pendingMinutes);
+    return `${dayLabel} · ${timePart}`;
+  }, [pendingDay, pendingMinutes]);
+
+  const durationLabel = useMemo(() => {
+    const { durationDays, hoursPerDay } = derived;
+    if (durationDays === 1 && hoursPerDay === 8 && !primaryDoc) return null;
+    const days = `${durationDays} ${durationDays === 1 ? 'day' : 'days'}`;
+    return `${days} · ${hoursPerDay}h/day (from quote)`;
+  }, [derived, primaryDoc]);
 
   const dirty =
     (pendingDay || undefined) !== toIsoDay(job.scheduledStartDate) ||
-    pendingMinutes !== minutesFromTimestamp(job.scheduledStartDate) ||
-    pendingDays !== Math.max(1, Number(job.scheduledDurationDays) || 1) ||
-    pendingHoursPerDay !== Math.max(1, Number(job.scheduledHoursPerDay) || 8);
+    pendingMinutes !== minutesFromTimestamp(job.scheduledStartDate);
 
   const handleDayPress = (day: DateData) => {
     setPendingDay(day.dateString);
@@ -139,12 +128,7 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
     setSaving(true);
     try {
       const next = combineDayAndMinutes(pendingDay, pendingMinutes);
-      const updated: Job = {
-        ...job,
-        scheduledStartDate: next,
-        scheduledDurationDays: pendingDays,
-        scheduledHoursPerDay: pendingHoursPerDay,
-      };
+      const updated: Job = { ...job, scheduledStartDate: next };
       await saveJob(updated);
       return updated;
     } finally {
@@ -158,14 +142,14 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   };
 
   const handleOpenInGoogleCalendar = async () => {
-    // If the tradie changed date / time in the sheet but hasn't hit Save,
-    // persist first so what they see in GCal matches what's on the job.
+    // Persist any pending edits first so what the tradie sees in GCal
+    // matches what's on the job.
     const target: Job = dirty && pendingDay ? ((await handleSave()) ?? job) : job;
     if (!target.scheduledStartDate) {
       Alert.alert('Pick a date first', 'Choose a day before opening Google Calendar.');
       return;
     }
-    const url = buildGoogleCalendarUrl(target);
+    const url = buildGoogleCalendarUrl(target, primaryDoc);
     const supported = await Linking.canOpenURL(url);
     if (!supported) {
       Alert.alert("Couldn't open Google Calendar", 'Copy the link from the URL bar instead.');
@@ -182,8 +166,6 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
         ...job,
         scheduledStartDate: undefined,
         scheduledEndDate: undefined,
-        scheduledDurationDays: undefined,
-        scheduledHoursPerDay: undefined,
       });
       onDismiss();
     } finally {
@@ -226,28 +208,16 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
           <TimeSlotPicker value={pendingMinutes} onChange={setPendingMinutes} />
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Duration</Text>
-          <View style={styles.stepperRow}>
-            <Text style={styles.stepperLabel}>Days</Text>
-            <NumberStepper
-              value={pendingDays}
-              onChange={setPendingDays}
-              min={1}
-              max={60}
-              unit="day"
+        {durationLabel ? (
+          <View style={styles.derivedRow}>
+            <MaterialCommunityIcons
+              name={'timer-sand' as any}
+              size={14}
+              color={colors.textMuted}
             />
+            <Text style={styles.derivedText}>{durationLabel}</Text>
           </View>
-          <View style={styles.stepperRow}>
-            <Text style={styles.stepperLabel}>Hours / day</Text>
-            <NumberStepper
-              value={pendingHoursPerDay}
-              onChange={setPendingHoursPerDay}
-              min={1}
-              max={24}
-            />
-          </View>
-        </View>
+        ) : null}
 
         <View style={styles.buttonStack}>
           <Button
@@ -324,17 +294,15 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginLeft: 4,
   },
-  stepperRow: {
+  derivedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
+    gap: 6,
     paddingHorizontal: 4,
   },
-  stepperLabel: {
-    fontSize: 14,
-    color: colors.text,
-    fontWeight: '500',
+  derivedText: {
+    fontSize: 12,
+    color: colors.textMuted,
   },
   buttonStack: {
     gap: 8,

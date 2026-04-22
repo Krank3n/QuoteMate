@@ -31,6 +31,7 @@ import {
   formatScheduledDateTime,
   formatScheduledDuration,
 } from '../utils/formatSchedule';
+import { deriveDuration } from '../utils/deriveDuration';
 import { selectionTap, lightTap } from '../utils/haptics';
 
 export function ViewJobScreen() {
@@ -94,11 +95,17 @@ export function ViewJobScreen() {
   }
 
   const meta = JOB_STAGE_META[job.stage];
+  // Duration comes from the primary attached doc's labour rather than
+  // duplicate fields on the Job itself.
+  const primaryDoc = job.primaryDocumentId
+    ? documents.find((d) => d.id === job.primaryDocumentId)
+    : documents.find((d) => d.jobId === job.id);
+  const { durationDays, hoursPerDay } = deriveDuration(primaryDoc);
   const scheduled = formatScheduledDateTime(job.scheduledStartDate);
-  const duration = formatScheduledDuration(
-    job.scheduledDurationDays,
-    job.scheduledHoursPerDay,
-  );
+  const duration =
+    scheduled && (durationDays > 1 || hoursPerDay !== 8)
+      ? formatScheduledDuration(durationDays, hoursPerDay)
+      : null;
   const scheduledFull =
     scheduled && duration ? `${scheduled} · ${duration}` : scheduled;
   const completedAt = formatScheduledDateLong(job.completedDate);

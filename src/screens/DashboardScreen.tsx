@@ -24,6 +24,7 @@ import { Quote } from '../types';
 import { WebContainer } from '../components/WebContainer';
 import { DocumentCard } from '../components/DocumentCard';
 import { JobCard } from '../components/JobCard';
+import { NewJobSheet } from '../components/NewJobSheet';
 import { quoteToDocument } from '../types/documentAdapter';
 import { AlertModal } from '../components/AlertModal';
 import { updateActivityTimestamp } from '../services/emailService';
@@ -280,6 +281,7 @@ export function DashboardScreen() {
 
   const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
+  const [newJobSheetVisible, setNewJobSheetVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(quotes.length > 0);
   useEffect(() => {
@@ -398,7 +400,10 @@ export function DashboardScreen() {
   };
 
   const handleNewQuote = () => {
-    // Check if user can create a new quote
+    // Kept around for legacy callers (e.g. resuming a draft, the tour). The
+    // FAB itself goes through handleNewJob → NewJobSheet so customer +
+    // address + name get captured up front and a Job materialises before
+    // the wizard opens.
     if (!canCreateQuote()) {
       navigation.navigate('Paywall' as never);
       return;
@@ -407,6 +412,15 @@ export function DashboardScreen() {
     lightTap();
     createNewQuote();
     navigation.navigate('NewQuote' as never);
+  };
+
+  const handleNewJob = () => {
+    if (!canCreateQuote()) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
+    lightTap();
+    setNewJobSheetVisible(true);
   };
 
   const handleViewQuote = (quoteId: string) => {
@@ -631,12 +645,12 @@ export function DashboardScreen() {
           <Button
             mode="contained"
             icon="plus-circle"
-            onPress={handleNewQuote}
+            onPress={handleNewJob}
             style={styles.newQuoteButton}
             contentStyle={styles.newQuoteButtonContent}
-            accessibilityLabel="Create a new quote"
+            accessibilityLabel="Start a new job"
           >
-            New Quote
+            New Job
           </Button>
         </View>
         </View>
@@ -755,7 +769,7 @@ export function DashboardScreen() {
             Knock off early or get cracking
           </Text>
           <Text style={styles.emptySubtext}>
-            Hit "New Quote" and she'll be right
+            Hit "New Job" and she'll be right
           </Text>
         </View>
       )}
@@ -774,6 +788,14 @@ export function DashboardScreen() {
         onSelect={handleStageSelect}
       />
     )}
+
+    {/* Phase 12 — "New Job" FAB on dashboard funnels through the same
+        capture sheet as the Jobs tab so customer + address + name carry
+        through into the wizard's draft Quote. */}
+    <NewJobSheet
+      visible={newJobSheetVisible}
+      onDismiss={() => setNewJobSheetVisible(false)}
+    />
 
     {/* Spotlight Tour — only active during 'dashboard' phase, not 'dashboardComplete' */}
     <SpotlightTour
