@@ -49,11 +49,17 @@ describe('documentStage', () => {
       // Cannot un-pay
       expect(canTransition('paid', 'draft')).toBe(false);
       expect(canTransition('paid', 'invoice_sent')).toBe(false);
-      // Cannot resurrect a cancelled doc
-      expect(canTransition('cancelled', 'draft')).toBe(false);
+      // Cancelled is escapable via draft, but only via draft — no direct
+      // jump into a paid / sent / accepted stage.
       expect(canTransition('cancelled', 'paid')).toBe(false);
+      expect(canTransition('cancelled', 'invoice_sent')).toBe(false);
+      expect(canTransition('cancelled', 'quote_sent')).toBe(false);
       // Quote cannot become an invoice without going via accepted
       expect(canTransition('quote_sent', 'invoice_sent')).toBe(false);
+    });
+
+    it('allows un-cancelling back to draft', () => {
+      expect(canTransition('cancelled', 'draft')).toBe(true);
     });
   });
 
@@ -66,19 +72,10 @@ describe('documentStage', () => {
   });
 
   describe('isTerminal', () => {
-    it('marks cancelled as terminal', () => {
-      expect(isTerminal('cancelled')).toBe(true);
-    });
-
-    it('does not mark paid as fully terminal — refund escape hatch exists', () => {
-      // paid → cancelled is the refund path; paid is therefore non-terminal
-      // by the strict definition (no outbound transitions = terminal).
-      expect(isTerminal('paid')).toBe(false);
-    });
-
-    it('marks every non-cancelled stage as non-terminal', () => {
+    it('no stage is terminal — even cancelled can drop back to draft', () => {
+      // Strict definition: terminal ⇒ no outbound transitions.
+      // With the cancelled → draft un-cancel edge, every stage can exit.
       for (const s of ALL_STAGES) {
-        if (s === 'cancelled') continue;
         expect(isTerminal(s)).toBe(false);
       }
     });

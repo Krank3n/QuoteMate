@@ -28,8 +28,7 @@ interface DocumentRowProps {
 }
 
 function stageShortLabel(stage: Document['stage']): string {
-  const meta = STAGE_META[stage];
-  return meta ? meta.label.replace(/^Mark as /, '').replace(/^Convert to /, '') : stage;
+  return STAGE_META[stage]?.chipLabel ?? stage;
 }
 
 export function DocumentRow({

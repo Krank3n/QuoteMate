@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Pressable } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Pressable, Linking, Platform } from 'react-native';
 import { Text, Card, Button, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -195,6 +195,35 @@ export function ViewJobScreen() {
     }
   };
 
+  const openMaps = () => {
+    const addr = (job.jobAddress || '').trim();
+    if (!addr) return;
+    selectionTap();
+    // Apple Maps on iOS, generic Google Maps elsewhere. Both fall through
+    // to the platform's native handler via Linking.
+    const url =
+      Platform.OS === 'ios'
+        ? `http://maps.apple.com/?q=${encodeURIComponent(addr)}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
+    Linking.openURL(url).catch(() => {
+      Alert.alert("Couldn't open Maps", 'Try copying the address instead.');
+    });
+  };
+
+  const openTel = () => {
+    const phone = (job.customerPhone || '').trim();
+    if (!phone) return;
+    selectionTap();
+    Linking.openURL(`tel:${phone.replace(/\s+/g, '')}`).catch(() => {});
+  };
+
+  const openSms = () => {
+    const phone = (job.customerPhone || '').trim();
+    if (!phone) return;
+    selectionTap();
+    Linking.openURL(`sms:${phone.replace(/\s+/g, '')}`).catch(() => {});
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -204,14 +233,58 @@ export function ViewJobScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.jobName}>{job.name}</Text>
                 <Text style={styles.customerLine}>{job.customerName}</Text>
+
                 {job.jobAddress ? (
-                  <View style={styles.inlineRow}>
+                  <Pressable
+                    onPress={openMaps}
+                    style={({ pressed }) => [styles.inlineRow, pressed && { opacity: 0.6 }]}
+                  >
                     <MaterialCommunityIcons
                       name="map-marker-outline"
                       size={14}
-                      color={colors.textMuted}
+                      color={colors.primary}
                     />
-                    <Text style={styles.inlineText}>{job.jobAddress}</Text>
+                    <Text style={[styles.inlineText, styles.inlineLink]} numberOfLines={2}>
+                      {job.jobAddress}
+                    </Text>
+                  </Pressable>
+                ) : null}
+
+                {job.customerPhone ? (
+                  <View style={styles.contactRow}>
+                    <Pressable
+                      onPress={openTel}
+                      hitSlop={8}
+                      style={({ pressed }) => [
+                        styles.contactButton,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                    >
+                      <MaterialCommunityIcons
+                        name={'phone-outline' as any}
+                        size={14}
+                        color={colors.primary}
+                      />
+                      <Text style={styles.contactButtonLabel}>Call</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={openSms}
+                      hitSlop={8}
+                      style={({ pressed }) => [
+                        styles.contactButton,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                    >
+                      <MaterialCommunityIcons
+                        name={'message-text-outline' as any}
+                        size={14}
+                        color={colors.primary}
+                      />
+                      <Text style={styles.contactButtonLabel}>Text</Text>
+                    </Pressable>
+                    <Text style={styles.contactNumber} numberOfLines={1}>
+                      {job.customerPhone}
+                    </Text>
                   </View>
                 ) : null}
               </View>
@@ -479,6 +552,39 @@ const styles = StyleSheet.create({
   },
   inlineText: {
     fontSize: 13,
+    color: colors.textMuted,
+    flexShrink: 1,
+  },
+  inlineLink: {
+    color: colors.primary,
+    textDecorationLine: 'underline',
+    fontWeight: '500',
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    flexWrap: 'wrap',
+  },
+  contactButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: colors.primaryBg,
+    borderWidth: 1,
+    borderColor: colors.primary + '44',
+  },
+  contactButtonLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  contactNumber: {
+    fontSize: 12,
     color: colors.textMuted,
     flexShrink: 1,
   },

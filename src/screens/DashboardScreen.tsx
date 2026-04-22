@@ -24,7 +24,6 @@ import { Quote } from '../types';
 import { WebContainer } from '../components/WebContainer';
 import { DocumentCard } from '../components/DocumentCard';
 import { JobCard } from '../components/JobCard';
-import { NewJobSheet } from '../components/NewJobSheet';
 import { quoteToDocument } from '../types/documentAdapter';
 import { AlertModal } from '../components/AlertModal';
 import { updateActivityTimestamp } from '../services/emailService';
@@ -281,7 +280,6 @@ export function DashboardScreen() {
 
   const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
-  const [newJobSheetVisible, setNewJobSheetVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(quotes.length > 0);
   useEffect(() => {
@@ -399,29 +397,24 @@ export function DashboardScreen() {
     setDeleteDraftModalVisible(false);
   };
 
-  const handleNewQuote = () => {
-    // Kept around for legacy callers (e.g. resuming a draft, the tour). The
-    // FAB itself goes through handleNewJob → NewJobSheet so customer +
-    // address + name get captured up front and a Job materialises before
-    // the wizard opens.
-    if (!canCreateQuote()) {
-      navigation.navigate('Paywall' as never);
-      return;
-    }
-
-    lightTap();
-    createNewQuote();
-    navigation.navigate('NewQuote' as never);
-  };
-
+  // The "New Job" button on the dashboard funnels straight into the quote
+  // wizard. Customer + address + job title get captured on the wizard's
+  // existing screens, and saveDraft's ensureJobForQuote auto-creates the
+  // top-level Job once those fields have something in them — no extra
+  // intermediate sheet.
   const handleNewJob = () => {
     if (!canCreateQuote()) {
       navigation.navigate('Paywall' as never);
       return;
     }
     lightTap();
-    setNewJobSheetVisible(true);
+    createNewQuote();
+    navigation.navigate('NewQuote' as never);
   };
+
+  // Alias retained for the resume-draft and tour callsites that already
+  // referenced this name.
+  const handleNewQuote = handleNewJob;
 
   const handleViewQuote = (quoteId: string) => {
     navigation.navigate('ViewQuote' as never, { quoteId } as never);
@@ -789,13 +782,6 @@ export function DashboardScreen() {
       />
     )}
 
-    {/* Phase 12 — "New Job" FAB on dashboard funnels through the same
-        capture sheet as the Jobs tab so customer + address + name carry
-        through into the wizard's draft Quote. */}
-    <NewJobSheet
-      visible={newJobSheetVisible}
-      onDismiss={() => setNewJobSheetVisible(false)}
-    />
 
     {/* Spotlight Tour — only active during 'dashboard' phase, not 'dashboardComplete' */}
     <SpotlightTour

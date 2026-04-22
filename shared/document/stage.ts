@@ -9,13 +9,18 @@
  *   quote_rejected      → quote_sent | quote_accepted | cancelled   (re-pitch path)
  *   invoice_sent        → partially_paid | paid | cancelled
  *   partially_paid      → paid | cancelled
- *   paid                → (terminal — only `cancelled` to support refunds)
- *   cancelled           → (terminal)
+ *   paid                → cancelled
+ *   cancelled           → draft                                     (un-cancel)
  *
  * Extra edges landed with Phase 11 to cover fast-paying customers:
  *   - draft → quote_accepted: customer paid a deposit on the first draft.
  *   - quote_rejected → quote_accepted: un-reject without re-pitching.
  *   - quote_sent → paid: customer paid the full quote amount directly.
+ *
+ * Mistake-recovery edge:
+ *   - cancelled → draft: a cancelled doc drops back to draft so the tradie
+ *     can rework the figures and re-send. They can move forward from there
+ *     via the normal forward transitions.
  *
  * Self-transitions are always allowed — saving an unchanged stage is a no-op.
  */
@@ -30,7 +35,7 @@ export const LEGAL_TRANSITIONS: Readonly<Record<DocumentStage, ReadonlyArray<Doc
   invoice_sent: ['partially_paid', 'paid', 'cancelled'],
   partially_paid: ['paid', 'cancelled'],
   paid: ['cancelled'],
-  cancelled: [],
+  cancelled: ['draft'],
 };
 
 export function canTransition(from: DocumentStage, to: DocumentStage): boolean {

@@ -95,14 +95,71 @@ async function syncJobAggregates(userId: string, jobId: string): Promise<void> {
     ? buildUserFieldSync(job, primary as unknown as Record<string, unknown>)
     : {};
 
+  // Forward-only stage cascade. If any attached doc has moved to quote_sent
+  // / accepted / invoiced / partial / paid, nudge the Job along — but only
+  // forward. Leaves manual progressions (scheduled / in_progress /
+  // completed) intact and never drags a paid or cancelled job backwards.
+  const stageBump = deriveJobStageBump(
+    typeof job.stage === 'string' ? (job.stage as string) : 'inquiry',
+    docs,
+  );
+
   await jobRef.set(
     {
       ...aggregates,
       ...userFields,
+      ...(stageBump ? { stage: stageBump } : {}),
       updatedAt: Date.now(),
     },
     { merge: true },
   );
+}
+
+const JOB_STAGE_ORDER = [
+  'inquiry',
+  'quoted',
+  'accepted',
+  'scheduled',
+  'in_progress',
+  'completed',
+  'paid',
+  'closed',
+] as const;
+
+/**
+ * Compute an optional forward-only stage nudge for the parent Job based on
+ * the current set of attached documents. Returns null when no change is
+ * warranted.
+ *
+ *   any attached doc.stage === 'paid'            → Job 'paid'
+ *   any 'invoice_sent' / 'partially_paid'         → Job 'in_progress'
+ *   any 'quote_accepted'                          → Job 'accepted'
+ *   any 'quote_sent'                              → Job 'quoted'
+ *
+ * Never moves the Job backwards — if the tradie has manually pushed it to
+ * 'scheduled' or 'in_progress', that stands until the Document payments
+ * / stages catch up.
+ *
+ * Skips cancelled / closed jobs entirely — those are user decisions.
+ */
+function deriveJobStageBump(currentStage: string, docs: JobDocument[]): string | null {
+  if (currentStage === 'cancelled' || currentStage === 'closed') return null;
+
+  const active = docs.filter((d) => d.stage !== 'cancelled');
+  if (active.length === 0) return null;
+
+  let target: string | null = null;
+  if (active.some((d) => d.stage === 'paid')) target = 'paid';
+  else if (active.some((d) => d.stage === 'invoice_sent' || d.stage === 'partially_paid')) {
+    target = 'in_progress';
+  } else if (active.some((d) => d.stage === 'quote_accepted')) target = 'accepted';
+  else if (active.some((d) => d.stage === 'quote_sent')) target = 'quoted';
+
+  if (!target) return null;
+  const curIdx = JOB_STAGE_ORDER.indexOf(currentStage as typeof JOB_STAGE_ORDER[number]);
+  const tgtIdx = JOB_STAGE_ORDER.indexOf(target as typeof JOB_STAGE_ORDER[number]);
+  if (curIdx === -1 || tgtIdx === -1) return null;
+  return tgtIdx > curIdx ? target : null;
 }
 
 // Prefer the document pointed at by primaryDocumentId; fall back to the most

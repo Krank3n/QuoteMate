@@ -4,8 +4,9 @@
  * Top-level view of the user's jobs (Phase 10). Lists Jobs produced by
  * useJobStore, with filters (All / Active / Scheduled / Completed / Archived)
  * and search by customer or job name. Tap a card to open ViewJobScreen.
- * FAB opens the NewJobSheet, which creates a Job and drops into the quote
- * wizard.
+ * FAB drops straight into the quote wizard — saveDraft's
+ * ensureJobForQuote auto-creates the Job once customer / address / job
+ * title have been entered, so no interstitial sheet is needed.
  */
 
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
@@ -16,11 +17,11 @@ import { useNavigation, useScrollToTop } from '@react-navigation/native';
 
 import type { Job, JobStage } from '../../shared/job/types';
 import { useJobStore } from '../store/useJobStore';
+import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { JobCard } from '../components/JobCard';
 import { JobStageSheet } from '../components/JobStageSheet';
-import { NewJobSheet } from '../components/NewJobSheet';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
@@ -62,13 +63,14 @@ export function JobsListScreen() {
 
   const navigation = useNavigation<any>();
   const { jobs, jobsLoaded, loadJobs, saveJob } = useJobStore();
+  const canCreateQuote = useStore((s) => s.canCreateQuote);
+  const createNewQuote = useStore((s) => s.createNewQuote);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterKind>('active');
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(jobsLoaded || jobs.length > 0);
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
-  const [newJobSheetVisible, setNewJobSheetVisible] = useState(false);
 
   useEffect(() => {
     if (!initialLoaded && jobs.length > 0) setInitialLoaded(true);
@@ -105,8 +107,16 @@ export function JobsListScreen() {
   };
 
   const handleNew = () => {
+    if (!canCreateQuote()) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
     lightTap();
-    setNewJobSheetVisible(true);
+    // Funnel into the existing quote wizard. The wizard captures customer
+    // + address + job title on its own screens; saveDraft auto-creates
+    // the Job once those fields are populated. No interstitial sheet.
+    createNewQuote();
+    navigation.navigate('NewQuote' as never);
   };
 
   const handleView = (jobId: string) => {
@@ -249,10 +259,6 @@ export function JobsListScreen() {
         />
       )}
 
-      <NewJobSheet
-        visible={newJobSheetVisible}
-        onDismiss={() => setNewJobSheetVisible(false)}
-      />
     </View>
   );
 }

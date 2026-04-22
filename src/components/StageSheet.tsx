@@ -27,7 +27,11 @@ interface StageSheetProps {
 }
 
 interface StageMeta {
-  label: string;
+  /** Static state name shown in chips ("Cancelled", "Invoice sent"). */
+  chipLabel: string;
+  /** Verb-y label shown as a row in the action sheet ("Mark as Sent",
+   *  "Convert to Invoice"). */
+  actionLabel: string;
   icon: string;
   color: string;
   bgColor: string;
@@ -35,52 +39,60 @@ interface StageMeta {
 
 export const STAGE_META: Record<DocumentStage, StageMeta> = {
   draft: {
-    label: 'Mark as Draft',
+    chipLabel: 'Draft',
+    actionLabel: 'Mark as Draft',
     icon: 'file-document-edit-outline',
     color: colors.info,
     bgColor: colors.infoBg,
   },
   quote_sent: {
-    label: 'Mark as Sent',
+    chipLabel: 'Quote sent',
+    actionLabel: 'Mark as Sent',
     icon: 'send-outline',
     color: colors.warning,
     bgColor: colors.warningBg,
   },
   quote_accepted: {
-    label: 'Mark as Accepted',
+    chipLabel: 'Accepted',
+    actionLabel: 'Mark as Accepted',
     icon: 'check-circle-outline',
     color: colors.success,
     bgColor: colors.successBg,
   },
   quote_rejected: {
-    label: 'Mark as Rejected',
+    chipLabel: 'Rejected',
+    actionLabel: 'Mark as Rejected',
     icon: 'close-circle-outline',
     color: colors.error,
     bgColor: colors.errorBg,
   },
   invoice_sent: {
-    // Intentionally phrased as the convert action — when a quote-side stage
-    // transitions to invoice_sent, the only user-facing effect is the
-    // quote→invoice conversion.
-    label: 'Convert to Invoice',
+    // actionLabel phrased as "Convert to Invoice" because that's what
+    // selecting it does from a quote-side stage. Once the doc is an
+    // invoice, the chip reads the plain state name.
+    chipLabel: 'Invoice sent',
+    actionLabel: 'Convert to Invoice',
     icon: 'file-swap-outline',
     color: colors.primary,
     bgColor: colors.primaryBg,
   },
   partially_paid: {
-    label: 'Mark as Partially Paid',
+    chipLabel: 'Part paid',
+    actionLabel: 'Mark as Partially Paid',
     icon: 'progress-check',
     color: colors.info,
     bgColor: colors.infoBg,
   },
   paid: {
-    label: 'Mark as Paid',
+    chipLabel: 'Paid',
+    actionLabel: 'Mark as Paid',
     icon: 'cash-check',
     color: colors.success,
     bgColor: colors.successBg,
   },
   cancelled: {
-    label: 'Cancel',
+    chipLabel: 'Cancelled',
+    actionLabel: 'Cancel',
     icon: 'close-octagon-outline',
     color: colors.error,
     bgColor: colors.errorBg,
@@ -150,7 +162,7 @@ export function StageSheet({
                 </View>
 
                 <View style={styles.labelContainer}>
-                  <Text style={styles.optionLabel}>{meta.label}</Text>
+                  <Text style={styles.optionLabel}>{meta.actionLabel}</Text>
                 </View>
 
                 <MaterialCommunityIcons
