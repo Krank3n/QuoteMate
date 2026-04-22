@@ -25,6 +25,7 @@ import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
 import { JobTimeline } from '../components/JobTimeline';
 import { PaymentSheet } from '../components/PaymentSheet';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
+import { CustomerEditSheet } from '../components/CustomerEditSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { applyStageChange } from '../utils/applyStageChange';
 import {
@@ -61,13 +62,18 @@ export function ViewJobScreen() {
   const [docStageSheetDoc, setDocStageSheetDoc] = useState<Document | null>(null);
   const [paymentSheetDoc, setPaymentSheetDoc] = useState<Document | null>(null);
   const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
+  const [customerSheetVisible, setCustomerSheetVisible] = useState(false);
   const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
   const [notesDirty, setNotesDirty] = useState(false);
+  const [notesEditing, setNotesEditing] = useState(false);
 
   React.useEffect(() => {
     if (job) {
       setNotesDraft(job.notes ?? '');
       setNotesDirty(false);
+      // Existing notes → open the editor so they're visible. Empty →
+      // keep the "Add notes" CTA collapsed.
+      setNotesEditing((job.notes ?? '').trim().length > 0);
     }
   }, [job?.id, job?.notes]);
 
@@ -126,6 +132,9 @@ export function ViewJobScreen() {
     if (!notesDirty) return;
     await saveJob({ ...job, notes: notesDraft });
     setNotesDirty(false);
+    // If they saved an empty string, collapse back to the "Add notes" CTA
+    // so the screen stays tidy.
+    if (!notesDraft.trim()) setNotesEditing(false);
   };
 
   const handleArchive = () => {
@@ -225,6 +234,11 @@ export function ViewJobScreen() {
     Linking.openURL(`sms:${phone.replace(/\s+/g, '')}`).catch(() => {});
   };
 
+  const customerIsUnknown =
+    !job.customerName || job.customerName.trim() === '' || job.customerName === 'Unknown customer';
+  const hasAnyMoney =
+    job.totalQuoted > 0 || job.totalInvoiced > 0 || job.totalPaid > 0 || job.balanceDue > 0;
+
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -232,8 +246,39 @@ export function ViewJobScreen() {
           <Card style={styles.headerCard}>
             <View style={styles.headerRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.jobName}>{job.name}</Text>
-                <Text style={styles.customerLine}>{job.customerName}</Text>
+                <Text style={styles.jobName}>{job.name || 'Untitled job'}</Text>
+
+                {customerIsUnknown ? (
+                  <Pressable
+                    onPress={() => {
+                      selectionTap();
+                      setCustomerSheetVisible(true);
+                    }}
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      styles.assignCustomer,
+                      pressed && { opacity: 0.7 },
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name={'account-plus-outline' as any}
+                      size={14}
+                      color={colors.primary}
+                    />
+                    <Text style={styles.assignCustomerLabel}>Add customer details</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    onPress={() => {
+                      selectionTap();
+                      setCustomerSheetVisible(true);
+                    }}
+                    hitSlop={4}
+                    style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+                  >
+                    <Text style={styles.customerLine}>{job.customerName}</Text>
+                  </Pressable>
+                )}
 
                 {job.jobAddress ? (
                   <Pressable
@@ -313,50 +358,85 @@ export function ViewJobScreen() {
               </Pressable>
             </View>
 
-            <View style={styles.totalsRow}>
-              <Totals label="Quoted" value={job.totalQuoted} />
-              <Totals label="Invoiced" value={job.totalInvoiced} />
-              <Totals label="Paid" value={job.totalPaid} />
-              <Totals label="Balance" value={job.balanceDue} accent={job.balanceDue > 0} />
-            </View>
+            {/* Totals stay visible only when there's actually money to show.
+                Showing a 4-up $0.00 grid makes an empty new job feel broken. */}
+            {hasAnyMoney ? (
+              <View style={styles.totalsRow}>
+                {job.totalQuoted > 0 ? (
+                  <Totals label="Quoted" value={job.totalQuoted} />
+                ) : null}
+                {job.totalInvoiced > 0 ? (
+                  <Totals label="Invoiced" value={job.totalInvoiced} />
+                ) : null}
+                {job.totalPaid > 0 ? (
+                  <Totals label="Paid" value={job.totalPaid} />
+                ) : null}
+                {job.balanceDue > 0 ? (
+                  <Totals label="Balance" value={job.balanceDue} accent />
+                ) : null}
+              </View>
+            ) : null}
 
-            <View style={styles.datesRow}>
-              <Pressable
-                onPress={() => {
-                  selectionTap();
-                  setScheduleSheetVisible(true);
-                }}
-                style={({ pressed }) => [styles.dateItem, pressed && { opacity: 0.7 }]}
-              >
+            {completedAt ? (
+              <View style={styles.completedRow}>
                 <MaterialCommunityIcons
-                  name="calendar-clock-outline"
+                  name="flag-checkered"
                   size={14}
-                  color={scheduled ? colors.text : colors.primary}
+                  color={colors.success}
                 />
-                <Text style={styles.dateLabel}>Scheduled</Text>
-                <Text
-                  style={[
-                    styles.dateValue,
-                    !scheduled && { color: colors.primary },
-                  ]}
-                >
-                  {scheduledFull || 'Pick a date'}
-                </Text>
-              </Pressable>
-
-              {completedAt ? (
-                <View style={styles.dateItem}>
-                  <MaterialCommunityIcons
-                    name="flag-checkered"
-                    size={14}
-                    color={colors.textMuted}
-                  />
-                  <Text style={styles.dateLabel}>Completed</Text>
-                  <Text style={styles.dateValue}>{completedAt}</Text>
-                </View>
-              ) : null}
-            </View>
+                <Text style={styles.completedLabel}>Completed</Text>
+                <Text style={styles.completedValue}>{completedAt}</Text>
+              </View>
+            ) : null}
           </Card>
+        </WebContainer>
+
+        {/* Standalone Schedule card — full-width tappable block with clear
+            affordance. Tap anywhere to open the schedule sheet. */}
+        <WebContainer>
+          <Pressable
+            onPress={() => {
+              selectionTap();
+              setScheduleSheetVisible(true);
+            }}
+            style={({ pressed }) => [
+              styles.scheduleCard,
+              scheduled && styles.scheduleCardSet,
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <View
+              style={[
+                styles.scheduleIconWrap,
+                scheduled ? styles.scheduleIconWrapSet : styles.scheduleIconWrapUnset,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={scheduled ? ('calendar-clock' as any) : ('calendar-plus' as any)}
+                size={20}
+                color={scheduled ? colors.primary : colors.textMuted}
+              />
+            </View>
+            <View style={styles.scheduleBody}>
+              <Text style={styles.scheduleHeadline}>
+                {scheduled ? 'Scheduled' : 'Schedule this job'}
+              </Text>
+              <Text
+                style={[
+                  styles.scheduleDetail,
+                  !scheduled && { color: colors.textMuted },
+                ]}
+                numberOfLines={2}
+              >
+                {scheduledFull || 'Pick a day, a start time, and we’ll size the GCal event for you.'}
+              </Text>
+            </View>
+            <MaterialCommunityIcons
+              name={'chevron-right' as any}
+              size={22}
+              color={colors.inactive}
+            />
+          </Pressable>
         </WebContainer>
 
         <WebContainer>
@@ -393,25 +473,53 @@ export function ViewJobScreen() {
 
         <WebContainer>
           <SectionTitle label="Notes" />
-          <Card style={styles.notesCard}>
-            <TextInput
-              mode="outlined"
-              multiline
-              value={notesDraft}
-              onChangeText={(text) => {
-                setNotesDraft(text);
-                setNotesDirty(true);
+          {/* Collapsed state: just a tappable "Add notes" row. Once there's
+              actual text on the job OR the tradie has explicitly tapped to
+              edit, the full TextInput + Save button render. Keeps the
+              detail view uncluttered for the common no-notes case. */}
+          {!notesEditing && !notesDraft.trim() ? (
+            <Pressable
+              onPress={() => {
+                selectionTap();
+                setNotesEditing(true);
               }}
-              placeholder="Internal notes about this job…"
-              style={styles.notesInput}
-              numberOfLines={4}
-            />
-            {notesDirty ? (
-              <Button mode="contained" onPress={handleNotesSave} style={styles.notesSave}>
-                Save notes
-              </Button>
-            ) : null}
-          </Card>
+              style={({ pressed }) => [
+                styles.notesAddButton,
+                pressed && { opacity: 0.85 },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={'note-plus-outline' as any}
+                size={18}
+                color={colors.textMuted}
+              />
+              <Text style={styles.notesAddLabel}>Add notes</Text>
+            </Pressable>
+          ) : (
+            <Card style={styles.notesCard}>
+              <TextInput
+                mode="outlined"
+                multiline
+                value={notesDraft}
+                onChangeText={(text) => {
+                  setNotesDraft(text);
+                  setNotesDirty(true);
+                }}
+                placeholder="Internal notes about this job…"
+                style={styles.notesInput}
+                numberOfLines={4}
+                autoFocus={notesEditing && !notesDraft.trim()}
+                onBlur={() => {
+                  if (!notesDraft.trim() && !notesDirty) setNotesEditing(false);
+                }}
+              />
+              {notesDirty ? (
+                <Button mode="contained" onPress={handleNotesSave} style={styles.notesSave}>
+                  Save notes
+                </Button>
+              ) : null}
+            </Card>
+          )}
         </WebContainer>
 
         <WebContainer>
@@ -423,19 +531,20 @@ export function ViewJobScreen() {
                 lightTap();
                 handleArchive();
               }}
-              style={styles.dangerButton}
+              style={styles.archiveButton}
             >
               Archive
             </Button>
             <Button
-              mode="outlined"
+              mode="text"
               icon={'trash-can-outline' as any}
               onPress={() => {
                 lightTap();
                 handleDelete();
               }}
               textColor={colors.error}
-              style={[styles.dangerButton, { borderColor: colors.error + '66' }]}
+              style={styles.deleteButton}
+              compact
             >
               Delete
             </Button>
@@ -471,6 +580,12 @@ export function ViewJobScreen() {
       <ScheduleJobSheet
         visible={scheduleSheetVisible}
         onDismiss={() => setScheduleSheetVisible(false)}
+        job={job}
+      />
+
+      <CustomerEditSheet
+        visible={customerSheetVisible}
+        onDismiss={() => setCustomerSheetVisible(false)}
         job={job}
       />
     </View>
@@ -629,24 +744,101 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginTop: 2,
   },
-  datesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  dateItem: {
+  completedRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    marginTop: 2,
   },
-  dateLabel: {
+  completedLabel: {
     fontSize: 12,
     color: colors.textMuted,
-  },
-  dateValue: {
-    fontSize: 12,
     fontWeight: '600',
+  },
+  completedValue: {
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.text,
+  },
+  assignCustomer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+  },
+  assignCustomerLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+    textDecorationLine: 'underline',
+  },
+  scheduleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  scheduleCardSet: {
+    borderColor: colors.primary + '55',
+    backgroundColor: colors.primaryBg + '22',
+  },
+  scheduleIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduleIconWrapUnset: {
+    backgroundColor: colors.surfaceGray3,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+  },
+  scheduleIconWrapSet: {
+    backgroundColor: colors.primaryBg,
+  },
+  scheduleBody: {
+    flex: 1,
+    gap: 2,
+  },
+  scheduleHeadline: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  scheduleDetail: {
+    fontSize: 12,
+    color: colors.onSurface,
+    lineHeight: 16,
+  },
+  notesAddButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+  },
+  notesAddLabel: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '500',
   },
   sectionTitle: {
     fontSize: 15,
@@ -688,12 +880,16 @@ const styles = StyleSheet.create({
   },
   dangerRow: {
     flexDirection: 'row',
-    gap: 12,
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 16,
     marginTop: 8,
   },
-  dangerButton: {
+  archiveButton: {
     flex: 1,
+    borderRadius: 12,
+  },
+  deleteButton: {
     borderRadius: 12,
   },
 });
