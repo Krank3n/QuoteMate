@@ -13,9 +13,6 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DashboardScreen } from '../screens/DashboardScreen';
-import { QuotesListScreen } from '../screens/QuotesListScreen';
-import { InvoicesListScreen } from '../screens/InvoicesListScreen';
-import { DocumentsListScreen } from '../screens/DocumentsListScreen';
 import { JobsListScreen } from '../screens/JobsListScreen';
 import { ViewJobScreen } from '../screens/ViewJobScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
@@ -62,9 +59,6 @@ import { useStore } from '../store/useStore';
 export type RootTabParamList = {
   Dashboard: undefined;
   Jobs: undefined;
-  Documents: undefined;
-  Quotes: undefined;
-  Invoices: undefined;
   Settings: undefined;
 };
 
@@ -210,9 +204,6 @@ function NewInvoiceNavigator() {
 const TAB_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
   Dashboard: 'home',
   Jobs: 'briefcase',
-  Documents: 'file-multiple',
-  Quotes: 'file-document-multiple',
-  Invoices: 'receipt',
   Settings: 'cog',
 };
 
@@ -419,21 +410,6 @@ function MainTabs() {
         name="Jobs"
         component={JobsListScreen}
         options={{ title: 'Jobs' }}
-      />
-      <Tab.Screen
-        name="Documents"
-        component={DocumentsListScreen}
-        options={{ title: 'Documents' }}
-      />
-      <Tab.Screen
-        name="Quotes"
-        component={QuotesListScreen}
-        options={{ title: 'My Quotes' }}
-      />
-      <Tab.Screen
-        name="Invoices"
-        component={InvoicesListScreen}
-        options={{ title: 'Invoices' }}
       />
       <Tab.Screen
         name="Settings"
