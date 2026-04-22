@@ -19,6 +19,7 @@ import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
 
 import { useStore } from './src/store/useStore';
+import { useJobStore } from './src/store/useJobStore';
 import { theme, colors } from './src/theme';
 
 // Custom navigation theme to match our dark theme
@@ -81,6 +82,7 @@ export default function App() {
         await Promise.all([
           loadQuotes(),
           loadDocuments(),
+          useJobStore.getState().loadJobs(),
           loadBusinessSettings(),
           checkOnboarding(),
           loadSubscription(),
@@ -138,6 +140,12 @@ export default function App() {
         // referenced by older edit/save flows.
         listenToDocuments();
 
+        // Phase-8: real-time listener for the Jobs collection. Aggregates on
+        // each Job are written by the onDocumentWriteSyncJob trigger, so the
+        // listener is the only way the client stays in sync with those
+        // server-side updates.
+        useJobStore.getState().listenToJobs();
+
         firestoreService.listenToBusinessSettings((settings) => {
           if (settings) {
             useStore.setState({ businessSettings: settings });
@@ -157,6 +165,7 @@ export default function App() {
         // User signed out, clean up listeners and notification token
         firestoreService.cleanup();
         documentService.cleanup();
+        useJobStore.getState().cleanup();
         notificationService.removeNotificationListeners();
         setUserDataLoaded(false);
       }
