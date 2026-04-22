@@ -1483,7 +1483,7 @@ async function callClaudeForMaterials(
     },
     body: JSON.stringify({
       model: 'claude-opus-4-6',
-      max_tokens: 8000,
+      max_tokens: 32000,
       temperature: 0.2,
       messages: [{ role: 'user', content: messageContent }],
     }),
@@ -1495,6 +1495,9 @@ async function callClaudeForMaterials(
   }
 
   const data = await response.json();
+  if (data.stop_reason === 'max_tokens') {
+    throw new Error('Material list exceeded response size — try breaking the job into smaller stages');
+  }
   const content = data.content[0].text;
   return parseLLMJson(content);
 }
@@ -1503,7 +1506,7 @@ async function callClaudeForMaterials(
  * Analyze Job Description — Gemini 3 Pro Preview primary, Claude Opus 4.6 fallback.
  * This Cloud Function acts as a proxy to avoid CORS issues on web.
  */
-export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
+export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 300 }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
       res.status(405).send('Method Not Allowed');
@@ -4665,10 +4668,19 @@ export const updateActivityTimestamp = functions.https.onRequest((req, res) => {
     if (!decodedToken) return;
 
     try {
+      // Capture client version info if provided — useful for support/debugging
+      // in admin. Sanity-checked because the payload comes from a client.
+      const rawVersion = typeof req.body?.appVersion === 'string' ? req.body.appVersion.trim() : '';
+      const rawPlatform = typeof req.body?.appPlatform === 'string' ? req.body.appPlatform.trim() : '';
+      const appVersion = /^[\d]+\.[\d]+\.[\d]+([.\-+][\w.-]*)?$/.test(rawVersion) ? rawVersion : null;
+      const appPlatform = ['ios', 'android', 'web', 'macos', 'windows'].includes(rawPlatform) ? rawPlatform : null;
+
       await admin.firestore()
         .doc(`users/${decodedToken.uid}/settings/emailState`)
         .set({
           lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
+          ...(appVersion ? { appVersion, appVersionSeenAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
+          ...(appPlatform ? { appPlatform } : {}),
         }, { merge: true });
 
       res.status(200).json({ success: true });

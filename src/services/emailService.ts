@@ -2,6 +2,8 @@
  * Email Service - Client-side integration for email preferences and activity tracking
  */
 
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { auth } from '../config/firebase';
 
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
@@ -26,7 +28,10 @@ export async function updateActivityTimestamp(): Promise<void> {
     await fetch(`${FIREBASE_FUNCTIONS_URL}/updateActivityTimestamp`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        appVersion: Constants.expoConfig?.version || null,
+        appPlatform: Platform.OS,
+      }),
     });
   } catch (error) {
     // Silently fail - this is non-critical
