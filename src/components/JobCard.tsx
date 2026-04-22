@@ -75,7 +75,14 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress 
 
           {onStagePress ? (
             <Pressable
-              onPress={() => { selectionTap(); onStagePress(job); }}
+              // stopPropagation so the chip tap opens the stage sheet
+              // instead of bubbling to the Card.onPress (which would
+              // navigate into ViewJob).
+              onPress={(e) => {
+                e.stopPropagation();
+                selectionTap();
+                onStagePress(job);
+              }}
               hitSlop={8}
               style={({ pressed }) => [
                 styles.stageChip,
@@ -85,7 +92,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress 
             >
               <MaterialCommunityIcons name={meta.icon as any} size={14} color={meta.color} />
               <Text style={[styles.stageLabel, { color: meta.color }]}>
-                {meta.label.replace(/^Mark as /, '')}
+                {meta.chipLabel}
               </Text>
             </Pressable>
           ) : (
@@ -97,7 +104,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress 
             >
               <MaterialCommunityIcons name={meta.icon as any} size={14} color={meta.color} />
               <Text style={[styles.stageLabel, { color: meta.color }]}>
-                {meta.label.replace(/^Mark as /, '')}
+                {meta.chipLabel}
               </Text>
             </View>
           )}

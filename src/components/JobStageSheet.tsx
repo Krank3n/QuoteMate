@@ -24,7 +24,11 @@ interface JobStageSheetProps {
 }
 
 interface StageMeta {
-  label: string;
+  /** Static state name shown in chips ("Cancelled", "In Progress"). */
+  chipLabel: string;
+  /** Verb-y label shown as a row in the action sheet ("Cancel Job",
+   *  "Mark as Paid"). */
+  actionLabel: string;
   icon: string;
   color: string;
   bgColor: string;
@@ -32,55 +36,64 @@ interface StageMeta {
 
 export const JOB_STAGE_META: Record<JobStage, StageMeta> = {
   inquiry: {
-    label: 'Mark as Inquiry',
+    chipLabel: 'Inquiry',
+    actionLabel: 'Mark as Inquiry',
     icon: 'help-circle-outline',
     color: colors.info,
     bgColor: colors.infoBg,
   },
   quoted: {
-    label: 'Mark as Quoted',
+    chipLabel: 'Quoted',
+    actionLabel: 'Mark as Quoted',
     icon: 'send-outline',
     color: colors.warning,
     bgColor: colors.warningBg,
   },
   accepted: {
-    label: 'Mark as Accepted',
+    chipLabel: 'Accepted',
+    actionLabel: 'Mark as Accepted',
     icon: 'check-circle-outline',
     color: colors.success,
     bgColor: colors.successBg,
   },
   scheduled: {
-    label: 'Mark as Scheduled',
+    chipLabel: 'Scheduled',
+    actionLabel: 'Mark as Scheduled',
     icon: 'calendar-clock-outline',
     color: colors.info,
     bgColor: colors.infoBg,
   },
   in_progress: {
-    label: 'Mark as In Progress',
+    chipLabel: 'In Progress',
+    actionLabel: 'Mark as In Progress',
     icon: 'hammer-wrench',
     color: colors.warning,
     bgColor: colors.warningBg,
   },
   completed: {
-    label: 'Mark as Completed',
+    chipLabel: 'Completed',
+    actionLabel: 'Mark as Completed',
     icon: 'flag-checkered',
     color: colors.success,
     bgColor: colors.successBg,
   },
   paid: {
-    label: 'Mark as Paid',
+    chipLabel: 'Paid',
+    actionLabel: 'Mark as Paid',
     icon: 'cash-check',
     color: colors.success,
     bgColor: colors.successBg,
   },
   closed: {
-    label: 'Archive',
+    chipLabel: 'Closed',
+    actionLabel: 'Archive',
     icon: 'archive-outline',
     color: colors.inactive,
     bgColor: colors.surfaceGray3,
   },
   cancelled: {
-    label: 'Cancel Job',
+    chipLabel: 'Cancelled',
+    actionLabel: 'Cancel Job',
     icon: 'close-octagon-outline',
     color: colors.error,
     bgColor: colors.errorBg,
@@ -158,7 +171,7 @@ export function JobStageSheet({
                 </View>
 
                 <View style={styles.labelContainer}>
-                  <Text style={styles.optionLabel}>{meta.label}</Text>
+                  <Text style={styles.optionLabel}>{meta.actionLabel}</Text>
                 </View>
 
                 <MaterialCommunityIcons

@@ -227,7 +227,7 @@ export function ViewJobScreen() {
                   color={meta.color}
                 />
                 <Text style={[styles.stageLabel, { color: meta.color }]}>
-                  {meta.label.replace(/^Mark as /, '')}
+                  {meta.chipLabel}
                 </Text>
               </Pressable>
             </View>
