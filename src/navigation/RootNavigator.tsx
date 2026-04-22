@@ -47,8 +47,7 @@ import { CustomerDetailsScreen } from '../screens/NewQuote/CustomerDetailsScreen
 import { MaterialsListScreen } from '../screens/NewQuote/MaterialsListScreen';
 import { AddMaterialScreen } from '../screens/NewQuote/AddMaterialScreen';
 import { LaborMarkupScreen } from '../screens/NewQuote/LaborMarkupScreen';
-import { QuotePreviewScreen } from '../screens/NewQuote/QuotePreviewScreen';
-import { InvoicePreviewScreen } from '../screens/NewQuote/InvoicePreviewScreen';
+import { JobPreviewScreen } from '../screens/NewQuote/JobPreviewScreen';
 
 import { colors } from '../theme';
 import { TourRefsProvider } from '../components/tour/useTourRefs';
@@ -129,8 +128,8 @@ function NewQuoteNavigator() {
       />
       <NewQuoteStack.Screen
         name="QuotePreview"
-        component={QuotePreviewScreen}
-        options={{ title: 'Quote Preview' }}
+        component={JobPreviewScreen}
+        options={{ title: 'Job Preview' }}
       />
     </NewQuoteStack.Navigator>
   );
@@ -194,8 +193,8 @@ function NewInvoiceNavigator() {
       />
       <NewQuoteStack.Screen
         name="InvoicePreview"
-        component={InvoicePreviewScreen}
-        options={{ title: 'Invoice Preview' }}
+        component={JobPreviewScreen}
+        options={{ title: 'Job Preview' }}
       />
     </NewQuoteStack.Navigator>
   );

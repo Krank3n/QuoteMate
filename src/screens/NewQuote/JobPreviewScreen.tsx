@@ -1,10 +1,14 @@
 /**
- * Quote Preview Screen
- * Final review and export/share quote
- * Auto-saves on mount with inline confetti celebration
+ * Job Preview Screen
+ *
+ * End of the New Job wizard. Unified replacement for the old separate
+ * QuotePreviewScreen + InvoicePreviewScreen — branches on doc type for
+ * the invoice-only payment-terms block, auto-saves on mount with the
+ * confetti celebration, and defers the "send as Quote / Invoice" choice
+ * to SendSwitcher.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity, Animated } from 'react-native';
 import {
   Text,
@@ -12,16 +16,21 @@ import {
   Surface,
   Title,
   TextInput,
+  Menu,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import { useStore } from '../../store/useStore';
+import { useDocumentMode } from '../../utils/documentMode';
 import { colors } from '../../theme';
-import { generateQuotePDF } from '../../utils/pdfGenerator';
+import { generateDocumentPDF } from '../../utils/pdfGenerator';
+import { quoteToDocument, invoiceToDocument } from '../../types/documentAdapter';
+import { calculateDueDate, formatPaymentTerms } from '../../utils/invoiceCalculator';
+import type { PaymentTerms } from '../../types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SendQuoteButton } from '../../components/SendQuoteButton';
-import { QuoteSentBanner } from '../../components/QuoteSentBanner';
+import { SendSwitcher } from '../../components/SendSwitcher';
+import { DocumentSentBanner } from '../../components/DocumentSentBanner';
 import { successTap } from '../../utils/haptics';
 import { WebContainer } from '../../components/WebContainer';
 import {
@@ -50,15 +59,15 @@ interface ConfettiPiece {
 const CONFETTI_COLORS = [colors.success, colors.secondary, colors.info, colors.primary];
 
 const SUCCESS_MESSAGES: { title: string; subtitle: string }[] = [
-  { title: "Bloody Ripper!", subtitle: "Quote's locked and loaded" },
+  { title: "Bloody Ripper!", subtitle: "Job's locked and loaded" },
   { title: "Too Easy!", subtitle: "She's all saved, mate" },
-  { title: "Beauty!", subtitle: "Quote's good to go" },
+  { title: "Beauty!", subtitle: "Job's good to go" },
   { title: "No Worries!", subtitle: "Saved and ready to send" },
-  { title: "Strewth!", subtitle: "That quote's a done deal" },
+  { title: "Strewth!", subtitle: "That one's a done deal" },
   { title: "Good as Gold!", subtitle: "Ready for the customer" },
-  { title: "Nailed It!", subtitle: "Quote saved, legend" },
+  { title: "Nailed It!", subtitle: "Job saved, legend" },
   { title: "Sweet as!", subtitle: "All wrapped up, mate" },
-  { title: "Bonzer!", subtitle: "Quote's in the bag" },
+  { title: "Bonzer!", subtitle: "Job's in the bag" },
   { title: "You Beauty!", subtitle: "Send it when you're ready" },
 ];
 
@@ -73,9 +82,24 @@ function createConfettiPieces(): ConfettiPiece[] {
   }));
 }
 
-export function QuotePreviewScreen() {
+export function JobPreviewScreen() {
   const navigation = useNavigation<any>();
-  const { currentQuote, saveQuote, businessSettings, setCurrentQuote, nextQuoteNumber, unifiedTourActive, unifiedTourPhase } = useStore();
+  const mode = useDocumentMode();
+  const {
+    currentQuote,
+    currentInvoice,
+    saveQuote,
+    saveInvoice,
+    updateInvoice,
+    businessSettings,
+    setCurrentQuote,
+    setCurrentInvoice,
+    nextQuoteNumber,
+    nextInvoiceNumber,
+    documents,
+    unifiedTourActive,
+    unifiedTourPhase,
+  } = useStore();
   const insets = useSafeAreaInsets();
 
   // Tour refs
@@ -90,11 +114,35 @@ export function QuotePreviewScreen() {
     if (sendButtonRef.current) registerRef('sendButton', sendButtonRef.current);
   });
 
-  const [notes, setNotes] = useState(currentQuote?.notes || '');
-  const savedNotesRef = useRef(currentQuote?.notes || '');
-  const status = currentQuote?.status || 'draft';
-  const [quoteNumber, setQuoteNumber] = useState(currentQuote?.quoteNumber || '');
+  // The wizard writes one or the other — prefer whichever is set. mode is the
+  // tiebreaker for the route-declared intent.
+  const isInvoiceMode = mode === 'invoice' && !!currentInvoice;
+  const workingDoc = isInvoiceMode ? currentInvoice : currentQuote;
+
+  const [notes, setNotes] = useState(workingDoc?.notes || '');
+  const savedNotesRef = useRef(workingDoc?.notes || '');
+  const [refNumber, setRefNumber] = useState<string>(
+    isInvoiceMode
+      ? (currentInvoice?.invoiceNumber || '')
+      : (currentQuote?.quoteNumber || ''),
+  );
   const [isEditingNumber, setIsEditingNumber] = useState(false);
+
+  // Payment terms — invoice-only state; inert for quote-mode.
+  const [paymentTerms, setPaymentTerms] = useState<PaymentTerms>(
+    currentInvoice?.paymentTerms || 'net_14',
+  );
+  const [customDays, setCustomDays] = useState(
+    currentInvoice?.customPaymentDays?.toString() || '',
+  );
+  const [paymentTermsMenuVisible, setPaymentTermsMenuVisible] = useState(false);
+  const issueDate = currentInvoice?.issueDate || new Date();
+  const dueDate = calculateDueDate(
+    issueDate,
+    paymentTerms,
+    paymentTerms === 'custom' ? parseInt(customDays) || 0 : undefined,
+  );
+
   const [isSaving, setIsSaving] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -117,9 +165,9 @@ export function QuotePreviewScreen() {
   const checkScale = useRef(new Animated.Value(0)).current;
   const subtitleOpacity = useRef(new Animated.Value(0)).current;
 
-  // Auto-save on mount (skip during unified tour — dummy quote shouldn't be saved)
+  // Auto-save on mount (skip during unified tour — dummy doc shouldn't be saved)
   useEffect(() => {
-    if (!currentQuote) return;
+    if (!workingDoc) return;
     if (unifiedTourActive) return;
 
     // Start celebration immediately — don't wait for save
@@ -214,26 +262,41 @@ export function QuotePreviewScreen() {
       ]).start(() => setShowSuccess(false));
     }, 2000);
 
-    // Save in the background
+    // Save in the background — branch on mode so invoices go through
+    // saveInvoice (which assigns invoiceNumbers) and quotes through
+    // saveQuote (which assigns quoteNumbers). The mirror + adapter carry
+    // everything into the unified documents collection either way.
     const autoSave = async () => {
       try {
         setIsSaving(true);
 
-        const updatedQuote = {
-          ...currentQuote,
-          notes,
-          status,
-          draftStep: undefined,
-          ...(quoteNumber ? { quoteNumber } : {}),
-          updatedAt: new Date(),
-        };
-
-        await saveQuote(updatedQuote);
+        if (isInvoiceMode && currentInvoice) {
+          const updatedInvoice = {
+            ...currentInvoice,
+            notes,
+            paymentTerms,
+            customPaymentDays:
+              paymentTerms === 'custom' ? parseInt(customDays) || 0 : undefined,
+            dueDate,
+            ...(refNumber ? { invoiceNumber: refNumber } : {}),
+            updatedAt: new Date(),
+          };
+          await saveInvoice(updatedInvoice);
+        } else if (currentQuote) {
+          const updatedQuote = {
+            ...currentQuote,
+            notes,
+            draftStep: undefined,
+            ...(refNumber ? { quoteNumber: refNumber } : {}),
+            updatedAt: new Date(),
+          };
+          await saveQuote(updatedQuote);
+        }
         savedNotesRef.current = notes;
         setIsSaving(false);
       } catch (error) {
         setIsSaving(false);
-        Alert.alert('Error', 'Failed to save quote. Please try again.');
+        Alert.alert('Error', 'Failed to save job. Please try again.');
       }
     };
 
@@ -242,30 +305,73 @@ export function QuotePreviewScreen() {
 
   const handleBackToDashboard = useCallback(async () => {
     // Re-save if notes changed since auto-save
-    if (notes !== savedNotesRef.current && currentQuote) {
+    if (notes !== savedNotesRef.current && workingDoc) {
       try {
-        const updatedQuote = {
-          ...currentQuote,
-          notes,
-          status,
-          draftStep: undefined,
-          ...(quoteNumber ? { quoteNumber } : {}),
-          updatedAt: new Date(),
-        };
-        await saveQuote(updatedQuote);
+        if (isInvoiceMode && currentInvoice) {
+          await saveInvoice({
+            ...currentInvoice,
+            notes,
+            paymentTerms,
+            customPaymentDays:
+              paymentTerms === 'custom' ? parseInt(customDays) || 0 : undefined,
+            dueDate,
+            ...(refNumber ? { invoiceNumber: refNumber } : {}),
+            updatedAt: new Date(),
+          });
+        } else if (currentQuote) {
+          await saveQuote({
+            ...currentQuote,
+            notes,
+            draftStep: undefined,
+            ...(refNumber ? { quoteNumber: refNumber } : {}),
+            updatedAt: new Date(),
+          });
+        }
       } catch (error) {
         // Non-blocking — navigate anyway
       }
     }
 
-    setCurrentQuote(null);
+    if (isInvoiceMode) setCurrentInvoice(null);
+    else setCurrentQuote(null);
     navigation.getParent()?.goBack();
-  }, [notes, currentQuote, quoteNumber, status, saveQuote, setCurrentQuote, navigation]);
+  }, [
+    notes,
+    workingDoc,
+    isInvoiceMode,
+    currentInvoice,
+    currentQuote,
+    refNumber,
+    paymentTerms,
+    customDays,
+    dueDate,
+    saveQuote,
+    saveInvoice,
+    setCurrentQuote,
+    setCurrentInvoice,
+    navigation,
+  ]);
+
+  // Pull the live unified Document from the documents collection. Used for
+  // the PDF preview + SendSwitcher so they reflect the latest canonical
+  // state (e.g. after a convert-to-invoice). Falls back to an adapter
+  // projection if the unified doc hasn't landed yet (first paint, or
+  // offline).
+  const liveDoc = useMemo(() => {
+    const id = workingDoc?.id;
+    if (!id) return null;
+    const fromStore = documents.find((d) => d.id === id);
+    if (fromStore) return fromStore;
+    if (currentInvoice) return invoiceToDocument(currentInvoice);
+    if (currentQuote) return quoteToDocument(currentQuote);
+    return null;
+  }, [workingDoc?.id, documents, currentInvoice, currentQuote]);
 
   const handleViewPDF = async () => {
+    if (!liveDoc) return;
     setIsPdfLoading(true);
     try {
-      const html = await generateQuotePDF(currentQuote!, businessSettings);
+      const html = await generateDocumentPDF(liveDoc, businessSettings);
 
       if (Platform.OS === 'web') {
         const iframe = document.createElement('iframe');
@@ -296,7 +402,7 @@ export function QuotePreviewScreen() {
     }
   };
 
-  if (!currentQuote) {
+  if (!workingDoc) {
     return null;
   }
 
@@ -308,18 +414,18 @@ export function QuotePreviewScreen() {
         contentContainerStyle={styles.scrollContent}
       >
         <WebContainer>
-        <QuoteSentBanner quote={currentQuote} />
-        {/* Quote Number & Date */}
+        <DocumentSentBanner doc={liveDoc} />
+        {/* Ref number + date (+ payment terms / due date for invoice mode) */}
         <Surface style={styles.headerCard}>
           <View style={styles.headerRow}>
             <View style={styles.headerLeft}>
               {isEditingNumber ? (
                 <TextInput
-                  value={quoteNumber}
-                  onChangeText={setQuoteNumber}
+                  value={refNumber}
+                  onChangeText={setRefNumber}
                   onBlur={() => setIsEditingNumber(false)}
                   onSubmitEditing={() => setIsEditingNumber(false)}
-                  placeholder="e.g. Q-001"
+                  placeholder={isInvoiceMode ? 'e.g. INV-001' : 'e.g. Q-001'}
                   autoFocus
                   style={styles.quoteNumberInput}
                   mode="flat"
@@ -334,7 +440,10 @@ export function QuotePreviewScreen() {
                   <View style={styles.quoteNumberBadge}>
                     <MaterialCommunityIcons name="file-document-outline" size={14} color={colors.primary} />
                     <Text style={styles.quoteNumber}>
-                      {quoteNumber || `Q-${String(nextQuoteNumber).padStart(3, '0')}`}
+                      {refNumber ||
+                        (isInvoiceMode
+                          ? `INV-${String(nextInvoiceNumber).padStart(3, '0')}`
+                          : `Q-${String(nextQuoteNumber).padStart(3, '0')}`)}
                     </Text>
                   </View>
                   <MaterialCommunityIcons name="pencil-outline" size={12} color={colors.textMuted} />
@@ -344,7 +453,7 @@ export function QuotePreviewScreen() {
             <View style={styles.headerDateBadge}>
               <MaterialCommunityIcons name="calendar-outline" size={13} color={colors.textMuted} />
               <Text style={styles.quoteDate}>
-                {new Date(currentQuote.createdAt).toLocaleDateString('en-AU', {
+                {new Date(workingDoc.createdAt).toLocaleDateString('en-AU', {
                   day: 'numeric',
                   month: 'short',
                   year: 'numeric',
@@ -352,54 +461,162 @@ export function QuotePreviewScreen() {
               </Text>
             </View>
           </View>
+
+          {isInvoiceMode && currentInvoice ? (
+            <View style={styles.paymentTermsBlock}>
+              <Menu
+                visible={paymentTermsMenuVisible}
+                onDismiss={() => setPaymentTermsMenuVisible(false)}
+                anchor={
+                  <TouchableOpacity
+                    style={styles.paymentTermsSelector}
+                    onPress={() => setPaymentTermsMenuVisible(true)}
+                  >
+                    <View style={styles.paymentTermsRow}>
+                      <MaterialCommunityIcons
+                        name={'clock-outline' as any}
+                        size={14}
+                        color={colors.textMuted}
+                      />
+                      <Text style={styles.paymentTermsLabel}>Payment terms</Text>
+                    </View>
+                    <View style={styles.paymentTermsRow}>
+                      <Text style={styles.paymentTermsValue}>
+                        {formatPaymentTerms(
+                          paymentTerms,
+                          parseInt(customDays) || undefined,
+                        )}
+                      </Text>
+                      <MaterialCommunityIcons
+                        name="chevron-down"
+                        size={16}
+                        color={colors.primary}
+                      />
+                    </View>
+                  </TouchableOpacity>
+                }
+              >
+                <Menu.Item
+                  onPress={() => {
+                    setPaymentTerms('due_on_receipt');
+                    setPaymentTermsMenuVisible(false);
+                  }}
+                  title="Due on Receipt"
+                />
+                <Menu.Item
+                  onPress={() => {
+                    setPaymentTerms('net_7');
+                    setPaymentTermsMenuVisible(false);
+                  }}
+                  title="Net 7 (7 days)"
+                />
+                <Menu.Item
+                  onPress={() => {
+                    setPaymentTerms('net_14');
+                    setPaymentTermsMenuVisible(false);
+                  }}
+                  title="Net 14 (14 days)"
+                />
+                <Menu.Item
+                  onPress={() => {
+                    setPaymentTerms('net_30');
+                    setPaymentTermsMenuVisible(false);
+                  }}
+                  title="Net 30 (30 days)"
+                />
+                <Menu.Item
+                  onPress={() => {
+                    setPaymentTerms('custom');
+                    setPaymentTermsMenuVisible(false);
+                  }}
+                  title="Custom"
+                />
+              </Menu>
+
+              {paymentTerms === 'custom' ? (
+                <TextInput
+                  label="Custom Days"
+                  value={customDays}
+                  onChangeText={(text) => {
+                    setCustomDays(text);
+                    const days = parseInt(text) || 0;
+                    const newDueDate = calculateDueDate(issueDate, 'custom', days);
+                    updateInvoice({
+                      ...currentInvoice,
+                      customPaymentDays: days,
+                      dueDate: newDueDate,
+                    });
+                  }}
+                  mode="outlined"
+                  keyboardType="number-pad"
+                  style={styles.customDaysInput}
+                  right={<TextInput.Affix text="days" />}
+                />
+              ) : null}
+
+              <View style={styles.datesRow}>
+                <Text style={styles.dateMeta}>
+                  Issue: {new Date(issueDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
+                </Text>
+                <Text style={[styles.dateMeta, styles.dueDateMeta]}>
+                  Due: {dueDate.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </Text>
+              </View>
+            </View>
+          ) : null}
         </Surface>
 
         <View ref={editSectionsRef}>
         <CustomerSection
-          customerName={currentQuote.customerName}
-          customerEmail={currentQuote.customerEmail}
-          customerPhone={currentQuote.customerPhone}
-          jobAddress={currentQuote.jobAddress}
+          customerName={workingDoc.customerName}
+          customerEmail={workingDoc.customerEmail}
+          customerPhone={workingDoc.customerPhone}
+          jobAddress={workingDoc.jobAddress}
           onEdit={() => navigation.navigate('CustomerDetails')}
         />
         </View>
 
         <JobSection
-          job={currentQuote.job}
+          job={workingDoc.job}
           onEdit={() => navigation.navigate('JobDetails')}
         />
 
         <MaterialsSection
-          materials={currentQuote.materials}
-          materialsSubtotal={currentQuote.materialsSubtotal}
+          materials={workingDoc.materials}
+          materialsSubtotal={workingDoc.materialsSubtotal}
           onEdit={() => navigation.navigate('MaterialsList')}
-          markupPercent={currentQuote.markup}
-          rollMarkupIntoMaterials={currentQuote.showMarkup !== true && currentQuote.markup > 0}
+          markupPercent={workingDoc.markup}
+          rollMarkupIntoMaterials={workingDoc.showMarkup !== true && workingDoc.markup > 0}
         />
 
         <LaborSection
-          laborHours={currentQuote.laborHours}
-          laborRate={currentQuote.laborRate}
-          laborTotal={currentQuote.laborTotal}
-          laborUnit={currentQuote.laborUnit}
-          sections={currentQuote.sections}
+          laborHours={workingDoc.laborHours}
+          laborRate={workingDoc.laborRate}
+          laborTotal={workingDoc.laborTotal}
+          laborUnit={workingDoc.laborUnit}
+          sections={workingDoc.sections}
           showLaborHours={businessSettings?.showLaborHours}
           onEdit={() => navigation.navigate('LaborMarkup')}
-          laborMarkupPercent={currentQuote.laborMarkup ?? currentQuote.markup}
-          rollMarkupIntoLabor={currentQuote.showMarkup !== true && (currentQuote.laborMarkup ?? currentQuote.markup) > 0}
-          laborExtraHours={currentQuote.laborExtraHours}
+          laborMarkupPercent={workingDoc.laborMarkup ?? workingDoc.markup}
+          rollMarkupIntoLabor={
+            workingDoc.showMarkup !== true &&
+            (workingDoc.laborMarkup ?? workingDoc.markup) > 0
+          }
+          laborExtraHours={workingDoc.laborExtraHours}
         />
 
         <TotalsSection
-          subtotal={currentQuote.subtotal}
-          markup={currentQuote.markup}
-          markupAmount={currentQuote.markupAmount}
-          gst={currentQuote.gst}
-          total={currentQuote.total}
+          subtotal={workingDoc.subtotal}
+          markup={workingDoc.markup}
+          markupAmount={workingDoc.markupAmount}
+          gst={workingDoc.gst}
+          total={workingDoc.total}
           hideZeroMarkup
-          hideMarkup={currentQuote.showMarkup !== true}
-          travelAdjustmentAmount={currentQuote.subtotal * ((currentQuote.travelAdjustment ?? 0) / 100)}
-          travelAdjustmentPercent={currentQuote.travelAdjustment}
+          hideMarkup={workingDoc.showMarkup !== true}
+          travelAdjustmentAmount={
+            workingDoc.subtotal * ((workingDoc.travelAdjustment ?? 0) / 100)
+          }
+          travelAdjustmentPercent={workingDoc.travelAdjustment}
         />
 
         <Surface style={documentStyles.section}>
@@ -417,7 +634,7 @@ export function QuotePreviewScreen() {
             mode="outlined"
             multiline
             numberOfLines={4}
-            placeholder="Add any additional notes for this quote..."
+            placeholder="Add any additional notes for this job..."
             style={styles.notesInput}
           />
         </Surface>
@@ -448,13 +665,12 @@ export function QuotePreviewScreen() {
           Back to Dashboard
         </Button>
         <View ref={sendButtonRef} style={styles.bottomButtonHalf}>
-          <SendQuoteButton
-            quote={currentQuote}
-            businessSettings={businessSettings}
-            buttonMode="contained"
-            buttonLabel="Send"
-            buttonIcon="send"
-          />
+          {liveDoc ? (
+            <SendSwitcher
+              doc={liveDoc}
+              businessSettings={businessSettings}
+            />
+          ) : null}
         </View>
       </View>
 
@@ -668,6 +884,50 @@ const styles = StyleSheet.create({
   notesInput: {
     textAlignVertical: 'top',
     paddingTop: 8,
+  },
+  paymentTermsBlock: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: 8,
+  },
+  paymentTermsSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 2,
+  },
+  paymentTermsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  paymentTermsLabel: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  paymentTermsValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  customDaysInput: {
+    marginTop: 4,
+  },
+  datesRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  dateMeta: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  dueDateMeta: {
+    color: colors.text,
+    fontWeight: '600',
   },
   viewPdfButton: {
     marginBottom: 16,

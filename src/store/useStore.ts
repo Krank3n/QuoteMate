@@ -11,6 +11,7 @@ import { Document } from '../types/document';
 import { TourPhase } from '../components/tour/tourFlow';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
+import { reconcileNextNumber } from '../utils/nextNumber';
 import { firestoreService } from '../services/firestoreService';
 import { documentService } from '../services/documentService';
 import { ensureJobForDocument, ensureJobForQuote } from './useJobStore';
@@ -488,7 +489,16 @@ export const useStore = create<AppState>((set, get) => ({
       return bTs - aTs;
     });
 
-    set({ quotes: merged });
+    // Reconcile the predicted next quote number against the merged set so
+    // the preview header doesn't predict a value that collides with
+    // Firestore. Cheap — one scan over the array.
+    const reconciledNextNumber = reconcileNextNumber({
+      items: merged,
+      field: (q) => q.quoteNumber,
+      prefix: 'Q',
+      cached: get().nextQuoteNumber,
+    });
+    set({ quotes: merged, nextQuoteNumber: reconciledNextNumber });
   },
 
   // Save quote to storage
@@ -710,7 +720,13 @@ export const useStore = create<AppState>((set, get) => ({
             STORAGE_KEYS.QUOTES,
             JSON.stringify(backfilled)
           );
-          set({ quotes: backfilled });
+          const reconciledNextNumber = reconcileNextNumber({
+            items: backfilled,
+            field: (q) => q.quoteNumber,
+            prefix: 'Q',
+            cached: get().nextQuoteNumber,
+          });
+          set({ quotes: backfilled, nextQuoteNumber: reconciledNextNumber });
           return;
         }
       }
@@ -729,7 +745,13 @@ export const useStore = create<AppState>((set, get) => ({
         const quotes = parsed.map((q) =>
           q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q
         );
-        set({ quotes });
+        const reconciledNextNumber = reconcileNextNumber({
+          items: quotes,
+          field: (q) => q.quoteNumber,
+          prefix: 'Q',
+          cached: get().nextQuoteNumber,
+        });
+        set({ quotes, nextQuoteNumber: reconciledNextNumber });
 
         // Sync to cloud if user is signed in but no cloud data exists
         if (auth.currentUser && quotes.length > 0) {
@@ -1076,11 +1098,20 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   getNextQuoteNumber: async () => {
-    const { nextQuoteNumber } = get();
-    const quoteNumber = `Q-${String(nextQuoteNumber).padStart(3, '0')}`;
+    // Reconcile against the actually-persisted quote numbers so a fresh
+    // install / second device doesn't restart the counter from Q-001
+    // (see utils/nextNumber.ts for the why).
+    const { nextQuoteNumber: cached, quotes } = get();
+    const next = reconcileNextNumber({
+      items: quotes,
+      field: (q) => q.quoteNumber,
+      prefix: 'Q',
+      cached,
+    });
+    const quoteNumber = `Q-${String(next).padStart(3, '0')}`;
 
     // Increment and save for next time
-    const newNextQuoteNumber = nextQuoteNumber + 1;
+    const newNextQuoteNumber = next + 1;
     await AsyncStorage.setItem(STORAGE_KEYS.NEXT_QUOTE_NUMBER, String(newNextQuoteNumber));
     set({ nextQuoteNumber: newNextQuoteNumber });
 
@@ -1369,7 +1400,13 @@ export const useStore = create<AppState>((set, get) => ({
       return bTs - aTs;
     });
 
-    set({ invoices: merged });
+    const reconciledNextNumber = reconcileNextNumber({
+      items: merged,
+      field: (i) => i.invoiceNumber,
+      prefix: 'INV',
+      cached: get().nextInvoiceNumber,
+    });
+    set({ invoices: merged, nextInvoiceNumber: reconciledNextNumber });
   },
 
   deleteInvoice: async (invoiceId: string) => {
@@ -1412,7 +1449,13 @@ export const useStore = create<AppState>((set, get) => ({
             STORAGE_KEYS.INVOICES,
             JSON.stringify(backfilled)
           );
-          set({ invoices: backfilled });
+          const reconciledNextNumber = reconcileNextNumber({
+            items: backfilled,
+            field: (i) => i.invoiceNumber,
+            prefix: 'INV',
+            cached: get().nextInvoiceNumber,
+          });
+          set({ invoices: backfilled, nextInvoiceNumber: reconciledNextNumber });
           return;
         }
       }
@@ -1437,7 +1480,13 @@ export const useStore = create<AppState>((set, get) => ({
         const invoices = parsed.map((i) =>
           i.laborMarkup === undefined ? { ...i, laborMarkup: i.markup } : i
         );
-        set({ invoices });
+        const reconciledNextNumber = reconcileNextNumber({
+          items: invoices,
+          field: (i) => i.invoiceNumber,
+          prefix: 'INV',
+          cached: get().nextInvoiceNumber,
+        });
+        set({ invoices, nextInvoiceNumber: reconciledNextNumber });
 
         // Sync to cloud if user is signed in but no cloud data exists
         if (auth.currentUser && invoices.length > 0) {
@@ -1464,11 +1513,19 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   getNextInvoiceNumber: async () => {
-    const { nextInvoiceNumber } = get();
-    const invoiceNumber = `INV-${String(nextInvoiceNumber).padStart(3, '0')}`;
+    // Reconcile against the actually-persisted invoice numbers —
+    // mirror of getNextQuoteNumber's handling.
+    const { nextInvoiceNumber: cached, invoices } = get();
+    const next = reconcileNextNumber({
+      items: invoices,
+      field: (i) => i.invoiceNumber,
+      prefix: 'INV',
+      cached,
+    });
+    const invoiceNumber = `INV-${String(next).padStart(3, '0')}`;
 
     // Increment and save for next time
-    const newNextInvoiceNumber = nextInvoiceNumber + 1;
+    const newNextInvoiceNumber = next + 1;
     await AsyncStorage.setItem(STORAGE_KEYS.NEXT_INVOICE_NUMBER, String(newNextInvoiceNumber));
     set({ nextInvoiceNumber: newNextInvoiceNumber });
 
