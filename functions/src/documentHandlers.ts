@@ -947,6 +947,52 @@ export async function applyPaymentToDocument(
       ...(updatedActive ? { activePaymentLink: updatedActive } : {}),
     },
   });
+
+  // Phase 11: cascade the document's stage jump onto the parent Job so the
+  // Jobs tab reflects reality without the tradie touching anything. A deposit
+  // lands and the Job flips from 'quoted' to 'accepted'; an invoice paid in
+  // full flips it to 'paid'. Only fire when the Document actually moved
+  // stages — otherwise every follow-on payment would re-promote.
+  const jobId = typeof (doc as AnyData).jobId === 'string'
+    ? ((doc as AnyData).jobId as string)
+    : null;
+  if (jobId && nextStage !== doc.stage) {
+    await cascadeJobStageFromDocumentPayment(userId, jobId, nextStage);
+  }
+}
+
+/**
+ * Cascade DocumentStage jumps onto the parent Job. Strict about when it fires:
+ *   - Document → quote_accepted: Job 'inquiry' | 'quoted' → 'accepted'
+ *   - Document → paid:           Job '<=completed' → 'paid'
+ * Leaves the Job alone if the tradie has already pushed it further (no
+ * demotions, no overriding manual "in_progress" / "scheduled").
+ */
+async function cascadeJobStageFromDocumentPayment(
+  userId: string,
+  jobId: string,
+  docStage: DocumentStage,
+): Promise<void> {
+  const jobRef = db().doc(`users/${userId}/jobs/${jobId}`);
+  const snap = await jobRef.get();
+  if (!snap.exists) return;
+  const job = snap.data() || {};
+  const currentJobStage = typeof job.stage === 'string' ? (job.stage as string) : 'inquiry';
+
+  let nextJobStage: string | null = null;
+  if (docStage === 'quote_accepted') {
+    if (currentJobStage === 'inquiry' || currentJobStage === 'quoted') {
+      nextJobStage = 'accepted';
+    }
+  } else if (docStage === 'paid') {
+    const parkedStages = ['closed', 'cancelled', 'paid'];
+    if (!parkedStages.includes(currentJobStage)) {
+      nextJobStage = 'paid';
+    }
+  }
+
+  if (!nextJobStage) return;
+  await jobRef.set({ stage: nextJobStage, updatedAt: Date.now() }, { merge: true });
 }
 
 // ---------------------------------------------------------------------------

@@ -1,11 +1,10 @@
 /**
  * ViewJobScreen
  *
- * Detail view for a single Job. Shows customer + address + stage,
- * aggregate totals, scheduled dates, attached Documents (rendered as
- * DocumentCards — reusing the existing card so changes there flow here),
- * notes, and photos. Stage chip → JobStageSheet. Action row for
- * scheduling, marking complete, cancelling.
+ * Detail view for a single Job. Shows customer + address + stage, aggregate
+ * totals, scheduled dates, attached Documents (rendered as DocumentRows with
+ * the Phase-11 two-chip split), notes, and archive/delete actions.
+ * Stage chip → JobStageSheet.
  */
 
 import React, { useState, useMemo } from 'react';
@@ -15,18 +14,18 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { format } from 'date-fns';
 
-import type { Job, JobStage } from '../../shared/job/types';
+import type { JobStage } from '../../shared/job/types';
 import { canTransition } from '../../shared/job/stage';
 import { useJobStore } from '../store/useJobStore';
 import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { WebContainer } from '../components/WebContainer';
-import { DocumentCard } from '../components/DocumentCard';
+import { DocumentRow } from '../components/DocumentRow';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
+import { PaymentSheet } from '../components/PaymentSheet';
 import type { Document, DocumentStage } from '../types/document';
-import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { applyStageChange } from '../utils/applyStageChange';
 import { selectionTap, lightTap } from '../utils/haptics';
 
@@ -50,16 +49,9 @@ export function ViewJobScreen() {
 
   const {
     documents,
-    businessSettings,
     saveQuote,
     saveInvoice,
-    deleteQuote,
-    deleteInvoice,
-    duplicateQuote,
-    duplicateInvoice,
     createInvoiceFromQuote,
-    setCurrentQuote,
-    setCurrentInvoice,
     subscriptionStatus,
   } = useStore();
 
@@ -70,6 +62,7 @@ export function ViewJobScreen() {
 
   const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [docStageSheetDoc, setDocStageSheetDoc] = useState<Document | null>(null);
+  const [paymentSheetDoc, setPaymentSheetDoc] = useState<Document | null>(null);
   const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
   const [notesDirty, setNotesDirty] = useState(false);
 
@@ -166,41 +159,12 @@ export function ViewJobScreen() {
 
   // Document-row handlers — mirror DocumentsListScreen so the cards behave
   // the same as on the list.
-  const handleDocView = (id: string) => {
-    const doc = documents.find((d) => d.id === id);
-    if (!doc) return;
+  const handleDocView = (doc: Document) => {
     if (doc.type === 'invoice') {
-      navigation.navigate('ViewInvoice', { invoiceId: id });
-    } else {
-      navigation.navigate('ViewQuote', { quoteId: id });
-    }
-  };
-
-  const handleDocEdit = (doc: Document) => {
-    if (doc.type === 'invoice') {
-      setCurrentInvoice(documentToInvoice(doc));
       navigation.navigate('ViewInvoice', { invoiceId: doc.id });
     } else {
-      setCurrentQuote(documentToQuote(doc));
-      navigation.navigate('NewQuote');
+      navigation.navigate('ViewQuote', { quoteId: doc.id });
     }
-  };
-
-  const handleDocDelete = async (id: string) => {
-    const doc = documents.find((d) => d.id === id);
-    if (!doc) return;
-    if (doc.type === 'invoice') await deleteInvoice(id);
-    else await deleteQuote(id);
-  };
-
-  const handleDocDuplicate = async (doc: Document) => {
-    if (doc.type === 'invoice') await duplicateInvoice(documentToInvoice(doc));
-    else await duplicateQuote(documentToQuote(doc));
-  };
-
-  const handleDocSave = (doc: Document) => {
-    if (doc.type === 'invoice') saveInvoice(documentToInvoice(doc));
-    else saveQuote(documentToQuote(doc));
   };
 
   const handleDocRecordPayment = (doc: Document) => {
@@ -324,17 +288,12 @@ export function ViewJobScreen() {
             </Card>
           ) : (
             attachedDocs.map((doc) => (
-              <DocumentCard
+              <DocumentRow
                 key={doc.id}
                 doc={doc}
-                businessSettings={businessSettings}
                 onView={handleDocView}
-                onEdit={handleDocEdit}
-                onDelete={handleDocDelete}
-                onDuplicate={handleDocDuplicate}
-                onSave={handleDocSave}
-                onRecordPayment={doc.type === 'invoice' ? handleDocRecordPayment : undefined}
-                onStatusChange={setDocStageSheetDoc}
+                onStagePress={setDocStageSheetDoc}
+                onPaymentPress={setPaymentSheetDoc}
               />
             ))
           )}
@@ -405,6 +364,15 @@ export function ViewJobScreen() {
           onDismiss={() => setDocStageSheetDoc(null)}
           doc={docStageSheetDoc}
           onSelect={handleDocStageSelect}
+        />
+      ) : null}
+
+      {paymentSheetDoc ? (
+        <PaymentSheet
+          visible={true}
+          onDismiss={() => setPaymentSheetDoc(null)}
+          doc={paymentSheetDoc}
+          onRecordPayment={handleDocRecordPayment}
         />
       ) : null}
     </View>
