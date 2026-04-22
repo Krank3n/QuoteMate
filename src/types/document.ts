@@ -106,6 +106,11 @@ export interface Document {
   aiEmailBody?: string;
   aiSkipped?: boolean;
   draftStep?: string;
+  // Stage-transition timestamps. Set by setDocumentStage on the server —
+  // never overwritten once set. Drive the activity timeline on ViewJob.
+  sentAt?: number;           // first time the doc was stage_sent (quote or invoice)
+  acceptedAt?: number;       // first time the doc moved to quote_accepted
+  paidInFullAt?: number;     // first time the doc moved to paid
   // When the doc transitioned from quote-shaped to invoice-shaped.
   invoicedAt?: number;
 

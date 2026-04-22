@@ -104,16 +104,39 @@ async function syncJobAggregates(userId: string, jobId: string): Promise<void> {
     docs,
   );
 
+  // Stamp the per-stage timestamp the Phase-17 activity timeline uses.
+  // Only write if the Job is actually changing stage AND the target stamp
+  // isn't already set (write-once semantics — don't bump the clock on a
+  // second transition into the same stage).
+  const stampField = stageBump ? STAGE_STAMP_FIELD[stageBump] : null;
+  const alreadyStamped =
+    !!stampField && typeof job[stampField] === 'number' && job[stampField] > 0;
+  const stageStamp =
+    stampField && !alreadyStamped ? { [stampField]: Date.now() } : {};
+
   await jobRef.set(
     {
       ...aggregates,
       ...userFields,
       ...(stageBump ? { stage: stageBump } : {}),
+      ...stageStamp,
       updatedAt: Date.now(),
     },
     { merge: true },
   );
 }
+
+// Map Job stage → write-once timestamp field on the Job document.
+const STAGE_STAMP_FIELD: Record<string, string> = {
+  quoted: 'quotedAt',
+  accepted: 'acceptedAt',
+  scheduled: 'scheduledAt',
+  in_progress: 'inProgressAt',
+  completed: 'completedAt',
+  paid: 'paidAt',
+  closed: 'closedAt',
+  cancelled: 'cancelledAt',
+};
 
 const JOB_STAGE_ORDER = [
   'inquiry',

@@ -22,6 +22,7 @@ import { WebContainer } from '../components/WebContainer';
 import { DocumentRow } from '../components/DocumentRow';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
+import { JobTimeline } from '../components/JobTimeline';
 import { PaymentSheet } from '../components/PaymentSheet';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import type { Document, DocumentStage } from '../types/document';
@@ -356,6 +357,10 @@ export function ViewJobScreen() {
               ) : null}
             </View>
           </Card>
+        </WebContainer>
+
+        <WebContainer>
+          <JobTimeline job={job} documents={attachedDocs} />
         </WebContainer>
 
         <WebContainer>

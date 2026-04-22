@@ -241,6 +241,7 @@ export async function setDocumentStage(
 
   const update: AnyData = stripUndefined({
     ...(extraUpdates || {}),
+    ...stageTransitionTimestamps(fromStage, toStage),
     stage: toStage,
     updatedAt: Date.now(),
   });
@@ -252,6 +253,34 @@ export async function setDocumentStage(
   }
 
   return { accepted, from: fromStage, to: toStage };
+}
+
+/**
+ * Stamp the per-stage "when did this happen" field used by the Phase-17
+ * activity timeline. Only fires when the doc actually moves stage (so
+ * self-transitions don't reset the original timestamp) and only for the
+ * field mapped to the incoming stage.
+ */
+function stageTransitionTimestamps(
+  fromStage: DocumentStage,
+  toStage: DocumentStage,
+): Record<string, number> {
+  if (fromStage === toStage) return {};
+  const now = Date.now();
+  switch (toStage) {
+    case 'quote_sent':
+      return { sentAt: now };
+    case 'quote_accepted':
+      return { acceptedAt: now };
+    case 'invoice_sent':
+      // invoicedAt is also set by convertDocumentToInvoice via extraUpdates;
+      // stamping sentAt here captures the "I actually sent the invoice" event.
+      return { sentAt: now };
+    case 'paid':
+      return { paidInFullAt: now };
+    default:
+      return {};
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -43,6 +43,19 @@ interface JobState {
   cleanup: () => void;
 }
 
+// Job stage → write-once timestamp field. Mirrors the server's
+// STAGE_STAMP_FIELD in functions/src/jobHandlers.ts — keep them in sync.
+const JOB_STAGE_STAMP_FIELD: Record<string, string> = {
+  quoted: 'quotedAt',
+  accepted: 'acceptedAt',
+  scheduled: 'scheduledAt',
+  in_progress: 'inProgressAt',
+  completed: 'completedAt',
+  paid: 'paidAt',
+  closed: 'closedAt',
+  cancelled: 'cancelledAt',
+};
+
 export const useJobStore = create<JobState>((set, get) => ({
   jobs: [],
   jobsLoaded: false,
@@ -65,7 +78,23 @@ export const useJobStore = create<JobState>((set, get) => ({
   },
 
   saveJob: async (job: Job) => {
-    const next: Job = { ...job, updatedAt: Date.now() };
+    // Stamp the per-stage "when did this happen" field if the stage is
+    // changing and that field isn't already set. Write-once semantics —
+    // tapping a stage chip twice doesn't reset the timestamp. The server
+    // trigger does the same thing for cascades; this handles the
+    // direct-client-write path (tap → stage sheet → saveJob).
+    const prior = get().jobs.find((j) => j.id === job.id);
+    const stageChanged = prior && prior.stage !== job.stage;
+    const stampField = stageChanged ? JOB_STAGE_STAMP_FIELD[job.stage] : null;
+    const alreadyStamped =
+      !!stampField &&
+      typeof (job as unknown as Record<string, unknown>)[stampField] === 'number';
+    const withStamp: Job =
+      stampField && !alreadyStamped
+        ? ({ ...job, [stampField]: Date.now() } as Job)
+        : job;
+
+    const next: Job = { ...withStamp, updatedAt: Date.now() };
     // Optimistic local update.
     set((state) => {
       const i = state.jobs.findIndex((j) => j.id === next.id);

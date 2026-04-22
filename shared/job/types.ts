@@ -54,6 +54,18 @@ export interface Job {
   actualStartDate?: number;
   completedDate?: number;
 
+  // Stage-transition timestamps. Stamped by the jobHandlers trigger when
+  // the Job's stage advances. Drive the activity timeline on ViewJob.
+  // Write-once: never overwritten once set.
+  quotedAt?: number;        // inquiry → quoted
+  acceptedAt?: number;      // → accepted
+  scheduledAt?: number;     // → scheduled
+  inProgressAt?: number;    // → in_progress
+  completedAt?: number;     // → completed (paired with completedDate for back-compat)
+  paidAt?: number;          // → paid
+  closedAt?: number;        // → closed
+  cancelledAt?: number;     // → cancelled
+
   // Calendar sync (Phase 14 — declared but unused in Phase 8)
   googleCalendarEventId?: string;
   googleCalendarId?: string;
