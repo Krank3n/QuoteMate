@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { View, StyleSheet, FlatList, Alert, RefreshControl, Pressable } from 'react-native';
+import { View, StyleSheet, FlatList, Alert, RefreshControl } from 'react-native';
 import { Text, Searchbar, Chip, FAB } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useScrollToTop } from '@react-navigation/native';
@@ -17,7 +17,6 @@ import { useNavigation, useScrollToTop } from '@react-navigation/native';
 import type { Job, JobStage } from '../../shared/job/types';
 import { useJobStore } from '../store/useJobStore';
 import { colors } from '../theme';
-import { JobsCalendarScreen } from './JobsCalendarScreen';
 import { WebContainer } from '../components/WebContainer';
 import { JobCard } from '../components/JobCard';
 import { JobStageSheet } from '../components/JobStageSheet';
@@ -66,7 +65,6 @@ export function JobsListScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterKind>('active');
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(jobsLoaded || jobs.length > 0);
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
@@ -142,25 +140,9 @@ export function JobsListScreen() {
     [],
   );
 
-  // Calendar view reuses JobsCalendarScreen as-is. The toggle lives at the
-  // top of JobsListScreen so the tab header stays simple; when 'calendar'
-  // is picked we swap bodies rather than route-switch (no extra stack
-  // complexity, one tab, one mental model).
-  if (viewMode === 'calendar') {
-    return (
-      <View style={styles.container}>
-        <WebContainer>
-          <ViewToggle mode={viewMode} onChange={setViewMode} />
-        </WebContainer>
-        <JobsCalendarScreen />
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
       <WebContainer>
-        <ViewToggle mode={viewMode} onChange={setViewMode} />
         <Searchbar
           placeholder="Search jobs..."
           onChangeText={setSearchQuery}
@@ -274,96 +256,6 @@ export function JobsListScreen() {
     </View>
   );
 }
-
-function ViewToggle({
-  mode,
-  onChange,
-}: {
-  mode: 'list' | 'calendar';
-  onChange: (mode: 'list' | 'calendar') => void;
-}) {
-  return (
-    <View style={toggleStyles.row}>
-      <ToggleButton
-        icon="view-list"
-        label="List"
-        active={mode === 'list'}
-        onPress={() => onChange('list')}
-      />
-      <ToggleButton
-        icon="calendar-month-outline"
-        label="Calendar"
-        active={mode === 'calendar'}
-        onPress={() => onChange('calendar')}
-      />
-    </View>
-  );
-}
-
-function ToggleButton({
-  icon,
-  label,
-  active,
-  onPress,
-}: {
-  icon: string;
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={() => {
-        lightTap();
-        onPress();
-      }}
-      style={({ pressed }) => [
-        toggleStyles.button,
-        active && toggleStyles.buttonActive,
-        pressed && { opacity: 0.8 },
-      ]}
-    >
-      <MaterialCommunityIcons
-        name={icon as any}
-        size={16}
-        color={active ? colors.white : colors.text}
-      />
-      <Text style={[toggleStyles.label, active && toggleStyles.labelActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-const toggleStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    marginHorizontal: 16,
-    marginTop: 16,
-    backgroundColor: colors.surfaceGray3,
-    borderRadius: 999,
-    padding: 3,
-    alignSelf: 'flex-start',
-    gap: 2,
-  },
-  button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 999,
-  },
-  buttonActive: {
-    backgroundColor: colors.primary,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  labelActive: {
-    color: colors.white,
-  },
-});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },

@@ -10,11 +10,12 @@ import React from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
 import { Text, Card } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 
 import type { Job } from '../../shared/job/types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
+import { formatScheduledDateTime } from '../utils/formatSchedule';
 import { JOB_STAGE_META } from './JobStageSheet';
 import { selectionTap } from '../utils/haptics';
 
@@ -44,19 +45,10 @@ function formatUpdatedAt(ms: number): string {
   }
 }
 
-function formatScheduledDate(ms?: number): string | null {
-  if (!ms) return null;
-  try {
-    return format(new Date(ms), 'EEE d MMM');
-  } catch {
-    return null;
-  }
-}
-
 export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress }: JobCardProps) {
   const meta = JOB_STAGE_META[job.stage];
   const headline = pickHeadlineAmount(job);
-  const scheduled = formatScheduledDate(job.scheduledStartDate);
+  const scheduled = formatScheduledDateTime(job.scheduledStartDate);
   const docCount = job.documentIds?.length ?? 0;
 
   return (

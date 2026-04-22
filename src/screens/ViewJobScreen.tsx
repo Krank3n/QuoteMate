@@ -12,7 +12,6 @@ import { View, StyleSheet, ScrollView, Alert, Pressable } from 'react-native';
 import { Text, Card, Button, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { format } from 'date-fns';
 
 import type { JobStage } from '../../shared/job/types';
 import { useJobStore } from '../store/useJobStore';
@@ -27,16 +26,11 @@ import { PaymentSheet } from '../components/PaymentSheet';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { applyStageChange } from '../utils/applyStageChange';
+import {
+  formatScheduledDateLong,
+  formatScheduledDateTime,
+} from '../utils/formatSchedule';
 import { selectionTap, lightTap } from '../utils/haptics';
-
-function formatDate(ms?: number): string | null {
-  if (!ms) return null;
-  try {
-    return format(new Date(ms), 'EEE d MMM yyyy');
-  } catch {
-    return null;
-  }
-}
 
 export function ViewJobScreen() {
   const navigation = useNavigation<any>();
@@ -99,8 +93,8 @@ export function ViewJobScreen() {
   }
 
   const meta = JOB_STAGE_META[job.stage];
-  const scheduled = formatDate(job.scheduledStartDate);
-  const completedAt = formatDate(job.completedDate);
+  const scheduled = formatScheduledDateTime(job.scheduledStartDate);
+  const completedAt = formatScheduledDateLong(job.completedDate);
 
   const handleStageSelect = async (target: JobStage) => {
     setStageSheetVisible(false);
