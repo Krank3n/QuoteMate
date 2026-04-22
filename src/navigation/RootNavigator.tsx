@@ -528,8 +528,13 @@ export function RootNavigator() {
         options={{
           presentation: 'modal',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Record Payment',
         }}
       />
@@ -539,8 +544,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Insights',
         }}
       />
@@ -564,8 +574,13 @@ export function RootNavigator() {
         options={{
           presentation: 'modal',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Upgrade to Pro',
           ...(Platform.OS === 'web' && {
             contentStyle: {
@@ -582,8 +597,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Business Details',
         }}
       />
@@ -593,8 +613,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Business Defaults',
         }}
       />
@@ -604,8 +629,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Payment Methods',
         }}
       />
@@ -615,8 +645,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Trade & Pricing',
         }}
       />
@@ -626,8 +661,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Subscription',
         }}
       />
@@ -637,8 +677,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Account',
         }}
       />
@@ -648,8 +693,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'PDF Templates',
         }}
       />
@@ -659,8 +709,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Job Templates',
         }}
       />
@@ -670,8 +725,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Job Template',
         }}
       />
@@ -681,8 +741,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Add Material',
         }}
       />
@@ -692,8 +757,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Edit Supplier',
         }}
       />
@@ -703,8 +773,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Refer a Friend',
         }}
       />
@@ -714,8 +789,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Notifications',
         }}
       />
@@ -725,8 +805,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Xero Integration',
         }}
       />
@@ -736,8 +821,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Square Payments',
         }}
       />
@@ -747,8 +837,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Feedback',
         }}
       />
@@ -758,8 +853,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'About',
         }}
       />
@@ -769,8 +869,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Contacts',
         }}
       />
@@ -780,8 +885,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Supplier Partners',
         }}
       />
