@@ -107,6 +107,15 @@ export default {
           autoVerify: true,
           data: [{ scheme: "https", host: "quotemateapp.au", pathPrefix: "/join" }],
           category: ["BROWSABLE", "DEFAULT"]
+        },
+        // expo-auth-session computes the Google OAuth redirect URI as
+        // `${applicationId}:/oauthredirect` (com.quotemate.app:/oauthredirect).
+        // Without this intent filter, Chrome has nothing to hand the redirect
+        // to after Google sign-in, so the tab silently stalls on the web view.
+        {
+          action: "VIEW",
+          data: [{ scheme: "com.quotemate.app" }],
+          category: ["BROWSABLE", "DEFAULT"]
         }
       ]
     },
