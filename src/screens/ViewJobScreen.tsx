@@ -29,6 +29,7 @@ import { applyStageChange } from '../utils/applyStageChange';
 import {
   formatScheduledDateLong,
   formatScheduledDateTime,
+  formatScheduledDuration,
 } from '../utils/formatSchedule';
 import { selectionTap, lightTap } from '../utils/haptics';
 
@@ -94,6 +95,12 @@ export function ViewJobScreen() {
 
   const meta = JOB_STAGE_META[job.stage];
   const scheduled = formatScheduledDateTime(job.scheduledStartDate);
+  const duration = formatScheduledDuration(
+    job.scheduledDurationDays,
+    job.scheduledHoursPerDay,
+  );
+  const scheduledFull =
+    scheduled && duration ? `${scheduled} · ${duration}` : scheduled;
   const completedAt = formatScheduledDateLong(job.completedDate);
 
   const handleStageSelect = async (target: JobStage) => {
@@ -252,7 +259,7 @@ export function ViewJobScreen() {
                     !scheduled && { color: colors.primary },
                   ]}
                 >
-                  {scheduled || 'Pick a date'}
+                  {scheduledFull || 'Pick a date'}
                 </Text>
               </Pressable>
 

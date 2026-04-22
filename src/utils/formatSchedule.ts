@@ -52,3 +52,20 @@ export function formatScheduledDateTime(ms?: number): string | null {
   const time = formatScheduledTime(ms);
   return time ? `${day} · ${time}` : day;
 }
+
+/**
+ * Compact duration string like "3 days · 8h/day", or "1 day", or null when
+ * neither field has a meaningful value.
+ */
+export function formatScheduledDuration(
+  days?: number,
+  hoursPerDay?: number,
+): string | null {
+  const d = Math.max(1, Number(days) || 1);
+  const h = Number(hoursPerDay) || 0;
+  const hasDays = days != null && days > 1;
+  const hasHours = h > 0;
+  if (!hasDays && !hasHours) return null;
+  const dayLabel = `${d} ${d === 1 ? 'day' : 'days'}`;
+  return hasHours ? `${dayLabel} · ${h}h/day` : dayLabel;
+}

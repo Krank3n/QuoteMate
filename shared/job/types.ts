@@ -46,9 +46,13 @@ export interface Job {
   primaryDocumentId?: string;
 
   // Schedule
-  scheduledStartDate?: number;         // ms epoch
-  scheduledEndDate?: number;
-  estimatedDurationDays?: number;
+  scheduledStartDate?: number;         // ms epoch (start of first day)
+  scheduledEndDate?: number;           // ms epoch (end of final day, inclusive)
+  /** How many calendar days the job spans. 1 = single-day. */
+  scheduledDurationDays?: number;
+  /** Hours of work per day — drives the GCal event window per day. */
+  scheduledHoursPerDay?: number;
+  estimatedDurationDays?: number;      // legacy hint, retained for back-compat
   actualStartDate?: number;
   completedDate?: number;
 

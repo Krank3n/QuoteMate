@@ -15,7 +15,7 @@ import { formatDistanceToNow } from 'date-fns';
 import type { Job } from '../../shared/job/types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { formatScheduledDateTime } from '../utils/formatSchedule';
+import { formatScheduledDateTime, formatScheduledDuration } from '../utils/formatSchedule';
 import { JOB_STAGE_META } from './JobStageSheet';
 import { selectionTap } from '../utils/haptics';
 
@@ -49,6 +49,15 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress 
   const meta = JOB_STAGE_META[job.stage];
   const headline = pickHeadlineAmount(job);
   const scheduled = formatScheduledDateTime(job.scheduledStartDate);
+  const duration = formatScheduledDuration(
+    job.scheduledDurationDays,
+    job.scheduledHoursPerDay,
+  );
+  const scheduledLine = scheduled
+    ? duration
+      ? `${scheduled} · ${duration}`
+      : scheduled
+    : null;
   const docCount = job.documentIds?.length ?? 0;
 
   return (
@@ -101,10 +110,10 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress 
           </View>
         ) : null}
 
-        {scheduled ? (
+        {scheduledLine ? (
           <View style={styles.inlineRow}>
             <MaterialCommunityIcons name="calendar-clock-outline" size={14} color={colors.textMuted} />
-            <Text style={styles.inlineText}>{scheduled}</Text>
+            <Text style={styles.inlineText} numberOfLines={1}>{scheduledLine}</Text>
           </View>
         ) : null}
 

@@ -30,6 +30,7 @@ import {
   formatMinutes,
 } from './TimeSlotPicker';
 import { buildGoogleCalendarUrl } from '../utils/gcalUrl';
+import { NumberStepper } from './NumberStepper';
 
 interface ScheduleJobSheetProps {
   visible: boolean;
@@ -74,15 +75,29 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   const [pendingMinutes, setPendingMinutes] = useState<number | null>(() =>
     minutesFromTimestamp(job.scheduledStartDate),
   );
+  const [pendingDays, setPendingDays] = useState<number>(
+    () => Math.max(1, Number(job.scheduledDurationDays) || 1),
+  );
+  const [pendingHoursPerDay, setPendingHoursPerDay] = useState<number>(
+    () => Math.max(1, Number(job.scheduledHoursPerDay) || 8),
+  );
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (visible) {
       setPendingDay(toIsoDay(job.scheduledStartDate));
       setPendingMinutes(minutesFromTimestamp(job.scheduledStartDate));
+      setPendingDays(Math.max(1, Number(job.scheduledDurationDays) || 1));
+      setPendingHoursPerDay(Math.max(1, Number(job.scheduledHoursPerDay) || 8));
       setSaving(false);
     }
-  }, [visible, job.id, job.scheduledStartDate]);
+  }, [
+    visible,
+    job.id,
+    job.scheduledStartDate,
+    job.scheduledDurationDays,
+    job.scheduledHoursPerDay,
+  ]);
 
   const markedDates = useMemo(() => {
     if (!pendingDay) return {};
@@ -98,14 +113,22 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   const pendingSummary = useMemo(() => {
     if (!pendingDay) return 'Pick a day';
     const dayLabel = format(new Date(`${pendingDay}T00:00:00`), 'EEE d MMM');
-    return pendingMinutes == null
-      ? `${dayLabel} · All day`
-      : `${dayLabel} · ${formatMinutes(pendingMinutes)}`;
-  }, [pendingDay, pendingMinutes]);
+    const timePart =
+      pendingMinutes == null ? 'All day' : formatMinutes(pendingMinutes);
+    const durationPart =
+      pendingDays > 1
+        ? ` · ${pendingDays} days · ${pendingHoursPerDay}h/day`
+        : pendingMinutes != null
+          ? ` · ${pendingHoursPerDay}h`
+          : '';
+    return `${dayLabel} · ${timePart}${durationPart}`;
+  }, [pendingDay, pendingMinutes, pendingDays, pendingHoursPerDay]);
 
   const dirty =
     (pendingDay || undefined) !== toIsoDay(job.scheduledStartDate) ||
-    pendingMinutes !== minutesFromTimestamp(job.scheduledStartDate);
+    pendingMinutes !== minutesFromTimestamp(job.scheduledStartDate) ||
+    pendingDays !== Math.max(1, Number(job.scheduledDurationDays) || 1) ||
+    pendingHoursPerDay !== Math.max(1, Number(job.scheduledHoursPerDay) || 8);
 
   const handleDayPress = (day: DateData) => {
     setPendingDay(day.dateString);
@@ -116,7 +139,12 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
     setSaving(true);
     try {
       const next = combineDayAndMinutes(pendingDay, pendingMinutes);
-      const updated = { ...job, scheduledStartDate: next };
+      const updated: Job = {
+        ...job,
+        scheduledStartDate: next,
+        scheduledDurationDays: pendingDays,
+        scheduledHoursPerDay: pendingHoursPerDay,
+      };
       await saveJob(updated);
       return updated;
     } finally {
@@ -150,7 +178,13 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   const handleClear = async () => {
     setSaving(true);
     try {
-      await saveJob({ ...job, scheduledStartDate: undefined });
+      await saveJob({
+        ...job,
+        scheduledStartDate: undefined,
+        scheduledEndDate: undefined,
+        scheduledDurationDays: undefined,
+        scheduledHoursPerDay: undefined,
+      });
       onDismiss();
     } finally {
       setSaving(false);
@@ -190,6 +224,29 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Start time</Text>
           <TimeSlotPicker value={pendingMinutes} onChange={setPendingMinutes} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Duration</Text>
+          <View style={styles.stepperRow}>
+            <Text style={styles.stepperLabel}>Days</Text>
+            <NumberStepper
+              value={pendingDays}
+              onChange={setPendingDays}
+              min={1}
+              max={60}
+              unit="day"
+            />
+          </View>
+          <View style={styles.stepperRow}>
+            <Text style={styles.stepperLabel}>Hours / day</Text>
+            <NumberStepper
+              value={pendingHoursPerDay}
+              onChange={setPendingHoursPerDay}
+              min={1}
+              max={24}
+            />
+          </View>
         </View>
 
         <View style={styles.buttonStack}>
@@ -266,6 +323,18 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginLeft: 4,
+  },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  stepperLabel: {
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '500',
   },
   buttonStack: {
     gap: 8,

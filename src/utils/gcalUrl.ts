@@ -1,12 +1,12 @@
 /**
  * Build a Google Calendar pre-filled "render" URL for a Job.
  *
- * This is the zero-backend escape hatch: tapping the link opens
- * calendar.google.com with the event template pre-populated from job
- * fields. The tradie tweaks whatever they want and hits save in GCal.
+ * The zero-backend escape hatch: tap the link, GCal opens with the event
+ * template populated from the Job. Tradie tweaks whatever they want and
+ * hits save in GCal.
  *
  * Full OAuth-based sync (Phase 14) remains a later tranche — when it
- * lands, event creation moves server-side and this helper becomes a
+ * lands, event creation moves server-side and this helper becomes the
  * fallback for users who haven't connected a Google account.
  */
 
@@ -14,7 +14,7 @@ import type { Job } from '../../shared/job/types';
 
 const GCAL_RENDER = 'https://calendar.google.com/calendar/render';
 
-/** YYYYMMDDTHHmmSS Z-less — GCal's template format. */
+/** YYYYMMDDTHHmmSSZ — GCal's template format. */
 function gcalInstant(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -30,12 +30,38 @@ function gcalInstant(ms: number): string {
   );
 }
 
+/** YYYYMMDD — GCal all-day format. */
+function gcalAllDay(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+}
+
 /**
- * Build dates=YYYYMMDDTHHmmSSZ/YYYYMMDDTHHmmSSZ.
- *
- *  - Timed: `scheduledStartDate` carries hours → duration defaults to 2h.
- *  - All-day: date-only → dates=YYYYMMDD/YYYYMMDD (GCal quirk — all-day end
- *    is exclusive, so it's the same day twice for a single-day event).
+ * Compute the event end timestamp from start + duration days + hours/day.
+ *  - Single day, timed: start + hoursPerDay (or 2h fallback).
+ *  - Multi-day, timed: last day's start time + hoursPerDay
+ *    (event spans Mon 9am → Wed 5pm, GCal renders it as a 3-day block —
+ *    matches how a tradie thinks about "I'm on this job Mon to Wed").
+ */
+function computeEndMs(
+  startMs: number,
+  durationDays: number,
+  hoursPerDay: number,
+): number {
+  const days = Math.max(1, durationDays);
+  const hours = Math.max(1, hoursPerDay);
+  const lastDayStart = new Date(startMs);
+  lastDayStart.setDate(lastDayStart.getDate() + (days - 1));
+  return lastDayStart.getTime() + hours * 60 * 60 * 1000;
+}
+
+/**
+ * Build dates=... query value for the GCal render URL.
+ *  - All-day event (no time set): dates=YYYYMMDD/YYYYMMDD+1 — GCal end is
+ *    exclusive, so a 1-day all-day event uses tomorrow as the end.
+ *  - Timed event: dates=YYYYMMDDTHHmmSSZ/YYYYMMDDTHHmmSSZ across the
+ *    duration window.
  */
 function gcalDates(job: Job): string | null {
   const start = job.scheduledStartDate;
@@ -43,22 +69,21 @@ function gcalDates(job: Job): string | null {
 
   const startD = new Date(start);
   const isAllDay = startD.getHours() === 0 && startD.getMinutes() === 0;
+  const days = Math.max(1, Number(job.scheduledDurationDays) || 1);
+  const hoursPerDay = Math.max(1, Number(job.scheduledHoursPerDay) || 8);
 
   if (isAllDay) {
-    const y = startD.getFullYear();
-    const m = (startD.getMonth() + 1).toString().padStart(2, '0');
-    const d = startD.getDate().toString().padStart(2, '0');
-    // GCal all-day events are half-open: [start, end). Single day = same
-    // date on both sides.
-    return `${y}${m}${d}/${y}${m}${d}`;
+    const endD = new Date(start);
+    endD.setDate(endD.getDate() + days); // exclusive end
+    return `${gcalAllDay(start)}/${gcalAllDay(endD.getTime())}`;
   }
 
-  const endMs =
+  const explicitEnd =
     job.scheduledEndDate && job.scheduledEndDate > start
       ? job.scheduledEndDate
-      : start + 2 * 60 * 60 * 1000; // default to 2h window
+      : computeEndMs(start, days, hoursPerDay);
 
-  return `${gcalInstant(start)}/${gcalInstant(endMs)}`;
+  return `${gcalInstant(start)}/${gcalInstant(explicitEnd)}`;
 }
 
 function joinDetails(lines: Array<string | undefined | null>): string {
@@ -70,11 +95,21 @@ export function buildGoogleCalendarUrl(job: Job): string {
   params.set('action', 'TEMPLATE');
   params.set(
     'text',
-    job.name ? `${job.name} — ${job.customerName || ''}`.trim().replace(/—\s*$/, '').trim() : 'Job',
+    job.name
+      ? `${job.name} — ${job.customerName || ''}`.trim().replace(/—\s*$/, '').trim()
+      : 'Job',
   );
+
+  const days = Math.max(1, Number(job.scheduledDurationDays) || 1);
+  const hoursPerDay = Math.max(1, Number(job.scheduledHoursPerDay) || 8);
+  const durationLine =
+    days === 1 && !job.scheduledHoursPerDay
+      ? undefined
+      : `Duration: ${days} day${days === 1 ? '' : 's'} · ${hoursPerDay}h/day`;
 
   const details = joinDetails([
     job.description,
+    durationLine,
     job.customerEmail ? `Email: ${job.customerEmail}` : undefined,
     job.customerPhone ? `Phone: ${job.customerPhone}` : undefined,
   ]);

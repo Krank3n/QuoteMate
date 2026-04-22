@@ -21,9 +21,9 @@ interface TimeSlotPickerProps {
   /** Minutes since midnight (e.g. 9:00am = 540). `null` = no time set. */
   value: number | null;
   onChange: (minutesSinceMidnight: number | null) => void;
-  /** Start-of-day in hours — default 7. */
+  /** Start-of-day in hours — default 5. Tradies start early. */
   startHour?: number;
-  /** End-of-day in hours — default 18. */
+  /** End-of-day in hours — default 19. */
   endHour?: number;
   /** Step between slots in minutes — default 30. */
   stepMinutes?: number;
@@ -58,8 +58,8 @@ export function combineDayAndMinutes(dayIso: string, minutes: number | null): nu
 export function TimeSlotPicker({
   value,
   onChange,
-  startHour = 7,
-  endHour = 18,
+  startHour = 5,
+  endHour = 19,
   stepMinutes = 30,
 }: TimeSlotPickerProps) {
   const scrollRef = useRef<ScrollView>(null);
