@@ -83,16 +83,27 @@ function NewQuoteNavigator() {
     <NewQuoteStack.Navigator
       screenOptions={{
         headerStyle: {
-          backgroundColor: colors.primary,
+          backgroundColor: colors.surfaceDark,
           elevation: 0,
           shadowOpacity: 0,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.border,
         },
         headerBackground: () => (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.primary }]} />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: colors.surfaceDark,
+                borderBottomWidth: 1,
+                borderBottomColor: colors.border,
+              },
+            ]}
+          />
         ),
-        headerTintColor: colors.white,
+        headerTintColor: colors.text,
         headerTitleStyle: {
-          fontWeight: 'bold',
+          fontWeight: '700',
         },
         cardStyle: { backgroundColor: colors.background },
         ...(Platform.OS === 'web' && {
@@ -143,16 +154,27 @@ function NewInvoiceNavigator() {
     <NewQuoteStack.Navigator
       screenOptions={{
         headerStyle: {
-          backgroundColor: colors.primary,
+          backgroundColor: colors.surfaceDark,
           elevation: 0,
           shadowOpacity: 0,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.border,
         },
         headerBackground: () => (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.primary }]} />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: colors.surfaceDark,
+                borderBottomWidth: 1,
+                borderBottomColor: colors.border,
+              },
+            ]}
+          />
         ),
-        headerTintColor: colors.white,
+        headerTintColor: colors.text,
         headerTitleStyle: {
-          fontWeight: 'bold',
+          fontWeight: '700',
         },
         cardStyle: { backgroundColor: colors.background },
         ...(Platform.OS === 'web' && {
@@ -387,16 +409,20 @@ function MainTabs() {
       tabBar={(props) => <LiquidTabBar {...props} />}
       screenOptions={{
         headerBackground: () => (
-          <LinearGradient
-            colors={['#00785a', colors.primary, '#00b07a']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFill}
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: colors.surfaceDark,
+                borderBottomWidth: 1,
+                borderBottomColor: colors.border,
+              },
+            ]}
           />
         ),
-        headerTintColor: colors.white,
+        headerTintColor: colors.text,
         headerTitleStyle: {
-          fontWeight: 'bold',
+          fontWeight: '700',
         },
       }}
     >
@@ -486,8 +512,13 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
+          headerStyle: {
+            backgroundColor: colors.surfaceDark,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Job',
         }}
       />

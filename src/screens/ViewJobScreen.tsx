@@ -23,6 +23,7 @@ import { DocumentRow } from '../components/DocumentRow';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
 import { JobTimeline } from '../components/JobTimeline';
+import { JobPhotoStrip } from '../components/JobPhotoStrip';
 import { PaymentSheet } from '../components/PaymentSheet';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import { CustomerEditSheet } from '../components/CustomerEditSheet';
@@ -431,6 +432,10 @@ export function ViewJobScreen() {
 
         <WebContainer>
           <JobTimeline job={job} documents={attachedDocs} />
+        </WebContainer>
+
+        <WebContainer>
+          <JobPhotoStrip job={job} documents={attachedDocs} />
         </WebContainer>
 
         <WebContainer>
