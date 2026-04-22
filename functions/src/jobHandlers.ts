@@ -70,6 +70,8 @@ async function syncJobAggregates(userId: string, jobId: string): Promise<void> {
     return;
   }
 
+  const job = jobSnap.data() || {};
+
   const docsSnap = await db()
     .collection('users').doc(userId)
     .collection('documents')
@@ -83,13 +85,71 @@ async function syncJobAggregates(userId: string, jobId: string): Promise<void> {
 
   const aggregates = computeJobAggregates({ id: jobId }, docs);
 
+  // Sync user-facing fields from the most recently updated attached doc when
+  // the Job still holds auto-create placeholders. A Job created via
+  // ensureJobForQuote on the first saveDraft sees an empty customerName /
+  // jobAddress; later wizard screens fill them in. This keeps the Job card
+  // in step without clobbering a real manual edit.
+  const primary = pickPrimaryDoc(docs);
+  const userFields = primary
+    ? buildUserFieldSync(job, primary as unknown as Record<string, unknown>)
+    : {};
+
   await jobRef.set(
     {
       ...aggregates,
+      ...userFields,
       updatedAt: Date.now(),
     },
     { merge: true },
   );
+}
+
+// Prefer the document pointed at by primaryDocumentId; fall back to the most
+// recently updated non-cancelled doc. Avoids letting a stale draft clobber
+// fresh customer details on a newer revision.
+function pickPrimaryDoc(docs: JobDocument[]): JobDocument | null {
+  if (docs.length === 0) return null;
+  const live = docs.filter((d) => d.stage !== 'cancelled');
+  const pool = live.length > 0 ? live : docs;
+  const byUpdated = [...pool].sort(
+    (a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0),
+  );
+  return byUpdated[0];
+}
+
+function buildUserFieldSync(
+  job: Record<string, unknown>,
+  doc: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const syncIfPlaceholder = (
+    jobField: string,
+    docField: string,
+    placeholders: string[],
+  ) => {
+    const current = typeof job[jobField] === 'string' ? (job[jobField] as string).trim() : '';
+    const isPlaceholder = current.length === 0 || placeholders.includes(current);
+    const incoming = typeof doc[docField] === 'string' ? (doc[docField] as string).trim() : '';
+    if (isPlaceholder && incoming.length > 0) out[jobField] = incoming;
+  };
+
+  syncIfPlaceholder('customerName', 'customerName', ['Unknown customer']);
+  syncIfPlaceholder('customerEmail', 'customerEmail', []);
+  syncIfPlaceholder('customerPhone', 'customerPhone', []);
+  syncIfPlaceholder('jobAddress', 'jobAddress', []);
+
+  // Job name lives on doc.job.name (embedded JobSpec), not at the top level.
+  const currentName = typeof job.name === 'string' ? (job.name as string).trim() : '';
+  const namePlaceholders = ['', 'Job', 'New job', 'Untitled job'];
+  const embeddedJob = (doc.job as { name?: unknown } | undefined) || {};
+  const incomingName =
+    typeof embeddedJob.name === 'string' ? embeddedJob.name.trim() : '';
+  if (namePlaceholders.includes(currentName) && incomingName.length > 0) {
+    out.name = incomingName;
+  }
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------

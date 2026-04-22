@@ -15,7 +15,6 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useScrollToTop } from '@react-navigation/native';
 
 import type { Job, JobStage } from '../../shared/job/types';
-import { canTransition } from '../../shared/job/stage';
 import { useJobStore } from '../store/useJobStore';
 import { colors } from '../theme';
 import { JobsCalendarScreen } from './JobsCalendarScreen';
@@ -124,13 +123,9 @@ export function JobsListScreen() {
     if (!stageSheetJob) return;
     const job = stageSheetJob;
     setStageSheetJob(null);
-    if (!canTransition(job.stage, target)) {
-      Alert.alert(
-        'Can’t go there from here',
-        `A job at stage "${job.stage}" can’t jump to "${target}". Try one of the intermediate stages first.`,
-      );
-      return;
-    }
+    // UI is flexible — the tradie can jump to any stage. The shared state
+    // machine is enforced server-side for correctness (future phase),
+    // not here.
     try {
       await saveJob({ ...job, stage: target });
     } catch {

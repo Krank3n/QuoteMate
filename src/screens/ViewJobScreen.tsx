@@ -15,7 +15,6 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { format } from 'date-fns';
 
 import type { JobStage } from '../../shared/job/types';
-import { canTransition } from '../../shared/job/stage';
 import { useJobStore } from '../store/useJobStore';
 import { useStore } from '../store/useStore';
 import { colors } from '../theme';
@@ -105,13 +104,8 @@ export function ViewJobScreen() {
 
   const handleStageSelect = async (target: JobStage) => {
     setStageSheetVisible(false);
-    if (!canTransition(job.stage, target)) {
-      Alert.alert(
-        'Can’t go there from here',
-        `A job at stage "${job.stage}" can’t jump to "${target}". Try one of the intermediate stages first.`,
-      );
-      return;
-    }
+    // UI is flexible — any stage jump is allowed. The shared state machine
+    // is enforced server-side for correctness (future phase), not here.
     try {
       await saveJob({ ...job, stage: target });
     } catch {
