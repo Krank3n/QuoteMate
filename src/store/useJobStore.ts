@@ -156,64 +156,104 @@ export const useJobStore = create<JobState>((set, get) => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * If the document isn't linked to a Job yet, create one using whatever
- * customer+address+name info is on the document and stamp jobId onto a
- * shallow copy. Returns the (possibly updated) document.
- *
- * Called from the save path so any quote saved without an explicit pre-step
- * still gets a Job. The explicit UI pre-step (Phase 10) will create the Job
- * up front; this keeps the contract consistent either way.
- */
-export async function ensureJobForDocument(doc: Document): Promise<Document> {
-  if (doc.jobId) return doc;
-  const customerName = (doc.customerName || '').trim();
-  // Drafts with nothing typed yet don't warrant a Job. Once the user has at
-  // least a name OR an address OR a job title, create the Job.
-  const hasName = customerName.length > 0;
-  const hasAddress = (doc.jobAddress || '').trim().length > 0;
-  const hasJobName = (doc.job?.name || '').trim().length > 0;
-  if (!hasName && !hasAddress && !hasJobName) return doc;
+interface JobLinkableSource {
+  jobId?: string;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  jobAddress?: string;
+  job?: { name?: string; description?: string };
+}
 
-  const job = await useJobStore.getState().createJob({
-    customerName: customerName || 'Unknown customer',
-    customerEmail: doc.customerEmail,
-    customerPhone: doc.customerPhone,
-    jobAddress: (doc.jobAddress || '').trim(),
-    name: (doc.job?.name || 'Job').trim() || 'Job',
-    description: doc.job?.description,
-  });
-  return { ...doc, jobId: job.id };
+// Treat these as "placeholder" values on a Job — always happy to overwrite
+// them as the tradie fills in later wizard steps. The legacy default of
+// 'Unknown customer' shipped once and we still need to recognise it on
+// existing Job records even though new Jobs no longer stamp it.
+const JOB_CUSTOMER_PLACEHOLDERS = ['', 'Unknown customer'];
+const JOB_NAME_PLACEHOLDERS = ['', 'Job', 'New job', 'Untitled job'];
+
+function isPlaceholder(value: string | undefined, placeholders: string[]): boolean {
+  const v = (value ?? '').trim();
+  return placeholders.includes(v);
 }
 
 /**
- * Legacy-quote variant. Mirrors ensureJobForDocument but operates on the
- * legacy Quote shape used in saveDraft / saveQuote.
+ * Make sure the source doc/quote has a Job attached, and make sure that
+ * Job's customer + address + job-name fields stay in step with whatever
+ * the user has typed so far. Two paths:
+ *
+ *  1. No jobId yet → create a Job if there's at least SOMETHING to go on
+ *     (name, address, or job title filled).
+ *  2. jobId already set → leave the Job alone UNLESS one of its fields is
+ *     still a placeholder. Then patch only the placeholder fields from the
+ *     source. A tradie who manually renamed the customer keeps their edit.
+ *
+ * Works without the server trigger being deployed.
  */
-export async function ensureJobForQuote<
-  T extends {
-    jobId?: string;
-    customerName?: string;
-    customerEmail?: string;
-    customerPhone?: string;
-    jobAddress?: string;
-    job?: { name?: string; description?: string };
-  },
->(quote: T): Promise<T> {
-  if (quote.jobId) return quote;
-  const customerName = (quote.customerName || '').trim();
-  const hasName = customerName.length > 0;
-  const hasAddress = (quote.jobAddress || '').trim().length > 0;
-  const hasJobName = (quote.job?.name || '').trim().length > 0;
-  if (!hasName && !hasAddress && !hasJobName) return quote;
+async function syncJobFromSource<T extends JobLinkableSource>(source: T): Promise<T> {
+  const customerName = (source.customerName || '').trim();
+  const customerEmail = (source.customerEmail || '').trim();
+  const customerPhone = (source.customerPhone || '').trim();
+  const jobAddress = (source.jobAddress || '').trim();
+  const jobName = (source.job?.name || '').trim();
+  const jobDescription = (source.job?.description || '').trim();
 
-  const job = await useJobStore.getState().createJob({
-    customerName: customerName || 'Unknown customer',
-    customerEmail: quote.customerEmail,
-    customerPhone: quote.customerPhone,
-    jobAddress: (quote.jobAddress || '').trim(),
-    name: (quote.job?.name || 'Job').trim() || 'Job',
-    description: quote.job?.description,
-  });
-  return { ...quote, jobId: job.id };
+  // Case 1 — unlinked. Bail out if there's nothing useful yet; otherwise
+  // create a fresh Job and stamp jobId on the source.
+  if (!source.jobId) {
+    const hasAny = !!(customerName || customerEmail || customerPhone || jobAddress || jobName);
+    if (!hasAny) return source;
+
+    const created = await useJobStore.getState().createJob({
+      customerName,
+      customerEmail: customerEmail || undefined,
+      customerPhone: customerPhone || undefined,
+      jobAddress,
+      name: jobName,
+      description: jobDescription || undefined,
+    });
+    return { ...source, jobId: created.id };
+  }
+
+  // Case 2 — already linked. Patch only the Job's placeholder fields so
+  // subsequent wizard screens backfill the Job without clobbering manual
+  // edits.
+  const existing = useJobStore.getState().getJobById(source.jobId);
+  if (!existing) return source;
+
+  const patch: Record<string, string> = {};
+  if (customerName && isPlaceholder(existing.customerName, JOB_CUSTOMER_PLACEHOLDERS)) {
+    patch.customerName = customerName;
+  }
+  if (customerEmail && !existing.customerEmail) {
+    patch.customerEmail = customerEmail;
+  }
+  if (customerPhone && !existing.customerPhone) {
+    patch.customerPhone = customerPhone;
+  }
+  if (jobAddress && !(existing.jobAddress || '').trim()) {
+    patch.jobAddress = jobAddress;
+  }
+  if (jobName && isPlaceholder(existing.name, JOB_NAME_PLACEHOLDERS)) {
+    patch.name = jobName;
+  }
+  if (Object.keys(patch).length === 0) return source;
+
+  await useJobStore.getState().saveJob({ ...existing, ...patch });
+  return source;
+}
+
+/**
+ * Document variant. Thin wrapper around syncJobFromSource.
+ */
+export async function ensureJobForDocument(doc: Document): Promise<Document> {
+  return syncJobFromSource(doc);
+}
+
+/**
+ * Legacy Quote / Invoice variant. Structurally compatible with the Document
+ * shape for the fields we care about.
+ */
+export async function ensureJobForQuote<T extends JobLinkableSource>(quote: T): Promise<T> {
+  return syncJobFromSource(quote);
 }

@@ -236,8 +236,6 @@ export function ViewJobScreen() {
 
   const customerIsUnknown =
     !job.customerName || job.customerName.trim() === '' || job.customerName === 'Unknown customer';
-  const hasAnyMoney =
-    job.totalQuoted > 0 || job.totalInvoiced > 0 || job.totalPaid > 0 || job.balanceDue > 0;
 
   return (
     <View style={styles.container}>
@@ -358,24 +356,16 @@ export function ViewJobScreen() {
               </Pressable>
             </View>
 
-            {/* Totals stay visible only when there's actually money to show.
-                Showing a 4-up $0.00 grid makes an empty new job feel broken. */}
-            {hasAnyMoney ? (
-              <View style={styles.totalsRow}>
-                {job.totalQuoted > 0 ? (
-                  <Totals label="Quoted" value={job.totalQuoted} />
-                ) : null}
-                {job.totalInvoiced > 0 ? (
-                  <Totals label="Invoiced" value={job.totalInvoiced} />
-                ) : null}
-                {job.totalPaid > 0 ? (
-                  <Totals label="Paid" value={job.totalPaid} />
-                ) : null}
-                {job.balanceDue > 0 ? (
-                  <Totals label="Balance" value={job.balanceDue} accent />
-                ) : null}
-              </View>
-            ) : null}
+            <View style={styles.totalsRow}>
+              <Totals label="Quoted" value={job.totalQuoted} />
+              <Totals label="Invoiced" value={job.totalInvoiced} />
+              <Totals label="Paid" value={job.totalPaid} />
+              <Totals
+                label="Balance"
+                value={job.balanceDue}
+                accent={job.balanceDue > 0}
+              />
+            </View>
 
             {completedAt ? (
               <View style={styles.completedRow}>
