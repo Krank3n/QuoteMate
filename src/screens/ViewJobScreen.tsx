@@ -36,6 +36,8 @@ import {
   type JobActionId,
 } from '../components/StickyJobActionBar';
 import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaymentSheet';
+import { SendDocumentDialog } from '../components/SendDocumentDialog';
+import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { applyStageChange } from '../utils/applyStageChange';
 import {
@@ -61,6 +63,7 @@ export function ViewJobScreen() {
     saveInvoice,
     createInvoiceFromQuote,
     subscriptionStatus,
+    businessSettings,
   } = useStore();
 
   const isTrialActive = !!(
@@ -74,6 +77,11 @@ export function ViewJobScreen() {
   const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
   const [customerSheetVisible, setCustomerSheetVisible] = useState(false);
   const [takePaymentTarget, setTakePaymentTarget] = useState<TakePaymentTarget | null>(null);
+  const [sendDialogDoc, setSendDialogDoc] = useState<Document | null>(null);
+  const [followUpState, setFollowUpState] = useState<{
+    doc: Document;
+    tone: FollowUpTone;
+  } | null>(null);
   const [pendingAction, setPendingAction] = useState<JobActionId | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
@@ -155,6 +163,47 @@ export function ViewJobScreen() {
     if (!notesDraft.trim()) setNotesEditing(false);
   };
 
+  // Classify how stale a sent doc is, for the Follow Up sheet tone.
+  const computeFollowUpTone = (doc: Document): FollowUpTone => {
+    const baseline =
+      doc.type === 'invoice' ? (doc.dueDate ?? doc.sentAt) : doc.sentAt;
+    if (!baseline) return 'gentle';
+    const days = (Date.now() - baseline) / (1000 * 60 * 60 * 24);
+    if (doc.type === 'invoice' && doc.dueDate) {
+      // Days past due
+      if (days < 3) return 'gentle';
+      if (days < 7) return 'firm';
+      return 'overdue';
+    }
+    if (days < 4) return 'gentle';
+    if (days < 7) return 'firm';
+    return 'overdue';
+  };
+
+  const openTakePaymentForDoc = (doc: Document) => {
+    if (doc.type === 'invoice') {
+      setTakePaymentTarget({
+        kind: 'invoice',
+        invoiceId: doc.id,
+        total: Number(doc.total ?? 0),
+        paidAmount: Number(doc.paidTotal ?? 0),
+        jobName: job.name,
+        invoiceNumber: doc.number,
+        terms: doc.termsSnapshot ?? null,
+      });
+      return;
+    }
+    setTakePaymentTarget({
+      kind: 'quote_deposit',
+      quoteId: doc.id,
+      depositAmount: Number(doc.depositAmount ?? 0),
+      depositPaid: Number(doc.depositPaid ?? 0),
+      total: Number(doc.total ?? 0),
+      jobName: job.name,
+      terms: doc.termsSnapshot ?? null,
+    });
+  };
+
   // Sticky-bar action dispatcher. One entry point so the bar's children
   // stay dumb — every CTA just reports its id, we resolve the side-effect
   // here against the store / nav / sheet state.
@@ -166,7 +215,9 @@ export function ViewJobScreen() {
           navigation.navigate('NewQuote', { jobId: job.id });
           break;
         case 'continueQuote':
+        case 'editQuote':
           if (actionableDoc) {
+            // Jump straight into the editor — one hop, not via preview.
             navigation.navigate('NewQuote', {
               jobId: job.id,
               quoteId: actionableDoc.id,
@@ -174,16 +225,12 @@ export function ViewJobScreen() {
           }
           break;
         case 'sendQuote':
+        case 'resendQuote':
         case 'sendInvoice':
-          // Route to the existing detail screen where SendDocumentButton
-          // already owns the full share dialog + AI email preview.
-          if (actionableDoc) {
-            if (actionableDoc.type === 'invoice') {
-              navigation.navigate('ViewInvoice', { invoiceId: actionableDoc.id });
-            } else {
-              navigation.navigate('ViewQuote', { quoteId: actionableDoc.id });
-            }
-          }
+        case 'resendInvoice':
+          // Open the shared send dialog as a modal stack *over* the Job
+          // screen — no navigation away.
+          if (actionableDoc) setSendDialogDoc(actionableDoc);
           break;
         case 'markApproved':
           if (actionableDoc && actionableDoc.type === 'quote') {
@@ -198,15 +245,37 @@ export function ViewJobScreen() {
           break;
         case 'takeDeposit':
           if (actionableDoc && actionableDoc.type === 'quote') {
-            setTakePaymentTarget({
-              kind: 'quote_deposit',
-              quoteId: actionableDoc.id,
-              depositAmount: Number(actionableDoc.depositAmount ?? 0),
-              depositPaid: Number(actionableDoc.depositPaid ?? 0),
-              total: Number(actionableDoc.total ?? 0),
-              jobName: job.name,
-              terms: actionableDoc.termsSnapshot ?? null,
+            openTakePaymentForDoc(actionableDoc);
+          }
+          break;
+        case 'tapToPayDraft':
+          // In-person approval path: the customer is here, about to tap.
+          // Flip the quote + job forward BEFORE opening the sheet so the
+          // state is consistent regardless of whether the tap succeeds.
+          // (If they back out, the tradie can revert via the stage sheet.)
+          if (actionableDoc && actionableDoc.type === 'quote') {
+            await applyStageChange(actionableDoc, 'quote_accepted', {
+              saveQuote,
+              saveInvoice,
+              createInvoiceFromQuote,
+              navigation,
             });
+            await saveJob({ ...job, stage: 'accepted' });
+            openTakePaymentForDoc(actionableDoc);
+          }
+          break;
+        case 'followUpQuote':
+        case 'followUpInvoice':
+          if (actionableDoc) {
+            setFollowUpState({
+              doc: actionableDoc,
+              tone: computeFollowUpTone(actionableDoc),
+            });
+          }
+          break;
+        case 'recordPayment':
+          if (actionableDoc && actionableDoc.type === 'invoice') {
+            navigation.navigate('RecordPayment', { invoiceId: actionableDoc.id });
           }
           break;
         case 'schedule':
@@ -238,15 +307,7 @@ export function ViewJobScreen() {
           break;
         case 'takeFinalPayment':
           if (actionableDoc && actionableDoc.type === 'invoice') {
-            setTakePaymentTarget({
-              kind: 'invoice',
-              invoiceId: actionableDoc.id,
-              total: Number(actionableDoc.total ?? 0),
-              paidAmount: Number(actionableDoc.paidTotal ?? 0),
-              jobName: job.name,
-              invoiceNumber: actionableDoc.number,
-              terms: actionableDoc.termsSnapshot ?? null,
-            });
+            openTakePaymentForDoc(actionableDoc);
           }
           break;
         case 'closeJob':
@@ -312,14 +373,10 @@ export function ViewJobScreen() {
     navigation.navigate('RecordPayment', { invoiceId: doc.id });
   };
 
-  // Envelope quick-action on a doc row — jump into its detail screen
-  // where SendDocumentButton already owns the full email preview flow.
+  // Envelope quick-action on a doc row — open the shared send dialog
+  // inline, same flow the sticky bar triggers. No navigation away.
   const handleDocSend = (doc: Document) => {
-    if (doc.type === 'invoice') {
-      navigation.navigate('ViewInvoice', { invoiceId: doc.id });
-    } else {
-      navigation.navigate('ViewQuote', { quoteId: doc.id });
-    }
+    setSendDialogDoc(doc);
   };
 
   // Card quick-action — open the shared Square sheet (tap-to-pay + share
@@ -825,6 +882,29 @@ export function ViewJobScreen() {
         onDismiss={() => setTakePaymentTarget(null)}
         onError={(message) => Alert.alert('Payment error', message)}
       />
+
+      {sendDialogDoc ? (
+        <SendDocumentDialog
+          visible={!!sendDialogDoc}
+          onDismiss={() => setSendDialogDoc(null)}
+          doc={sendDialogDoc}
+          businessSettings={businessSettings}
+        />
+      ) : null}
+
+      {followUpState ? (
+        <FollowUpSheet
+          visible={!!followUpState}
+          onDismiss={() => setFollowUpState(null)}
+          doc={followUpState.doc}
+          tone={followUpState.tone}
+          customerName={job.customerName || ''}
+          customerPhone={job.customerPhone}
+          customerEmail={job.customerEmail}
+          businessName={businessSettings?.businessName || 'us'}
+          jobName={job.name || 'the job'}
+        />
+      ) : null}
 
       <CustomerEditSheet
         visible={customerSheetVisible}

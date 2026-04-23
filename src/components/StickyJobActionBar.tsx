@@ -40,22 +40,85 @@ import { selectionTap, lightTap } from '../utils/haptics';
 export type JobActionId =
   | 'createQuote'
   | 'continueQuote'
+  | 'editQuote'
   | 'sendQuote'
+  | 'resendQuote'
   | 'markApproved'
   | 'takeDeposit'
+  | 'tapToPayDraft'
+  | 'followUpQuote'
   | 'schedule'
   | 'startJob'
   | 'generateInvoice'
   | 'markComplete'
   | 'takeFinalPayment'
   | 'sendInvoice'
+  | 'resendInvoice'
+  | 'followUpInvoice'
+  | 'recordPayment'
   | 'closeJob';
+
+type ActionTone = 'primary' | 'ghost' | 'warning' | 'urgent';
 
 interface ActionSpec {
   id: JobActionId;
   label: string;
   icon: string;
-  tone: 'primary' | 'ghost' | 'warning';
+  tone: ActionTone;
+}
+
+/**
+ * Age of the last send event in days. Feeds the Follow Up tone.
+ * 0–1 → fresh (no follow-up shown), 2–3 → gentle, 4–6 → firm,
+ * 7+ → overdue.
+ */
+export type FollowUpTone = 'gentle' | 'firm' | 'overdue';
+
+function daysSince(ms?: number): number | null {
+  if (!ms) return null;
+  const diff = Date.now() - ms;
+  if (diff < 0) return 0;
+  return diff / (1000 * 60 * 60 * 24);
+}
+
+function quoteFollowUp(sentAt?: number): FollowUpTone | null {
+  const d = daysSince(sentAt);
+  if (d == null || d < 2) return null;
+  if (d < 4) return 'gentle';
+  if (d < 7) return 'firm';
+  return 'overdue';
+}
+
+function invoiceFollowUp(sentAt?: number, dueAt?: number): FollowUpTone | null {
+  // Invoices follow up against due-date rather than send-date once a due
+  // date is known — that matches how tradies actually think about it.
+  const baseline = dueAt ?? sentAt;
+  const d = daysSince(baseline);
+  if (d == null) return null;
+  if (dueAt) {
+    // Past due: firmness escalates by days *over* due.
+    if (d < 0) return null;
+    if (d < 3) return 'gentle';
+    if (d < 7) return 'firm';
+    return 'overdue';
+  }
+  // Fallback: age since send, same thresholds as quotes.
+  if (d < 3) return null;
+  if (d < 7) return 'gentle';
+  if (d < 14) return 'firm';
+  return 'overdue';
+}
+
+function toneForFollowUp(t: FollowUpTone): ActionTone {
+  if (t === 'overdue') return 'urgent';
+  if (t === 'firm') return 'warning';
+  return 'ghost';
+}
+
+function followUpLabel(t: FollowUpTone, sentAt?: number): string {
+  const d = daysSince(sentAt);
+  if (t === 'overdue' && d != null) return `Nudge · ${Math.round(d)}d`;
+  return 'Follow Up';
 }
 
 interface StickyJobActionBarProps {
@@ -95,7 +158,8 @@ function invoiceBalanceOwed(doc: Document | null): boolean {
 
 /**
  * Resolve which actions to show for a given (jobStage, primaryDoc) combo.
- * Returns primary first, secondary second. One or both may be omitted.
+ * Returns up to two actions — primary first, secondary second. The
+ * sticky bar itself caps at two buttons.
  */
 export function resolveJobActions(
   stage: JobStage,
@@ -118,6 +182,7 @@ export function resolveJobActions(
     isInvoice &&
     (primaryDoc.stage === 'invoice_sent' || primaryDoc.stage === 'partially_paid');
   const isInvoicePaid = isInvoice && primaryDoc.stage === 'paid';
+  const isPartiallyPaid = isInvoice && primaryDoc.stage === 'partially_paid';
 
   // Invoice in play → money-collection is the priority.
   if (isInvoicePaid) {
@@ -126,14 +191,32 @@ export function resolveJobActions(
     ];
   }
   if (isInvoiceUnpaid || (isInvoice && invoiceBalanceOwed(primaryDoc))) {
+    const followUp = invoiceFollowUp(primaryDoc.sentAt, primaryDoc.dueDate);
+    const primary: ActionSpec = isPartiallyPaid
+      ? { id: 'takeFinalPayment', label: 'Take Remaining', icon: 'credit-card-outline', tone: 'primary' }
+      : { id: 'takeFinalPayment', label: 'Take Payment', icon: 'credit-card-outline', tone: 'primary' };
+    if (followUp) {
+      return [
+        primary,
+        {
+          id: 'followUpInvoice',
+          label: followUpLabel(followUp, primaryDoc.sentAt),
+          icon: followUp === 'overdue' ? 'alert-circle-outline' : 'bell-outline',
+          tone: toneForFollowUp(followUp),
+        },
+      ];
+    }
     return [
-      { id: 'takeFinalPayment', label: 'Take Payment', icon: 'credit-card-outline', tone: 'primary' },
-      { id: 'sendInvoice', label: 'Send Invoice', icon: 'email-send-outline', tone: 'ghost' },
+      primary,
+      isPartiallyPaid
+        ? { id: 'recordPayment', label: 'Log Payment', icon: 'cash-multiple', tone: 'ghost' }
+        : { id: 'resendInvoice', label: 'Resend', icon: 'email-send-outline', tone: 'ghost' },
     ];
   }
   if (isInvoice && isDraft) {
     return [
       { id: 'sendInvoice', label: 'Send Invoice', icon: 'email-send-outline', tone: 'primary' },
+      { id: 'editQuote', label: 'Edit', icon: 'pencil-outline', tone: 'ghost' },
     ];
   }
 
@@ -141,19 +224,36 @@ export function resolveJobActions(
   if (isDraft) {
     return [
       { id: 'sendQuote', label: 'Send Quote', icon: 'send-outline', tone: 'primary' },
-      { id: 'continueQuote', label: 'Edit Quote', icon: 'pencil-outline', tone: 'ghost' },
+      { id: 'tapToPayDraft', label: 'Tap to Pay', icon: 'credit-card-outline', tone: 'ghost' },
     ];
   }
   if (isQuoteSent) {
-    const actions: ActionSpec[] = [];
-    if (depositOwed(primaryDoc)) {
-      actions.push({ id: 'takeDeposit', label: 'Take Deposit', icon: 'credit-card-outline', tone: 'primary' });
-      actions.push({ id: 'markApproved', label: 'Mark Approved', icon: 'check-circle-outline', tone: 'ghost' });
-    } else {
-      actions.push({ id: 'markApproved', label: 'Mark Approved', icon: 'check-circle-outline', tone: 'primary' });
-      actions.push({ id: 'sendQuote', label: 'Resend', icon: 'send-outline', tone: 'ghost' });
+    const followUp = quoteFollowUp(primaryDoc.sentAt);
+    // Fresh (< 2 days) — no follow-up yet; lead with the approval path.
+    if (!followUp) {
+      if (depositOwed(primaryDoc)) {
+        return [
+          { id: 'takeDeposit', label: 'Take Deposit', icon: 'credit-card-outline', tone: 'primary' },
+          { id: 'markApproved', label: 'Mark Approved', icon: 'check-circle-outline', tone: 'ghost' },
+        ];
+      }
+      return [
+        { id: 'markApproved', label: 'Mark Approved', icon: 'check-circle-outline', tone: 'primary' },
+        { id: 'resendQuote', label: 'Resend', icon: 'email-send-outline', tone: 'ghost' },
+      ];
     }
-    return actions;
+    // Aging — promote the follow-up, demote the approval path.
+    return [
+      {
+        id: 'followUpQuote',
+        label: followUpLabel(followUp, primaryDoc.sentAt),
+        icon: followUp === 'overdue' ? 'alert-circle-outline' : 'bell-outline',
+        tone: toneForFollowUp(followUp),
+      },
+      depositOwed(primaryDoc)
+        ? { id: 'takeDeposit', label: 'Take Deposit', icon: 'credit-card-outline', tone: 'ghost' }
+        : { id: 'markApproved', label: 'Mark Approved', icon: 'check-circle-outline', tone: 'ghost' },
+    ];
   }
   if (isQuoteAccepted) {
     const actions: ActionSpec[] = [];
@@ -201,40 +301,37 @@ export function StickyJobActionBar({
       <View style={styles.row}>
         {actions.map((action) => {
           const isPending = pending === action.id;
-          const isPrimary = action.tone === 'primary';
+          const palette = resolveToneStyle(action.tone);
+          const tint = palette.tint;
           return (
             <Pressable
               key={action.id}
               onPress={() => {
                 if (isPending) return;
-                isPrimary ? selectionTap() : lightTap();
+                action.tone === 'primary' || action.tone === 'urgent'
+                  ? selectionTap()
+                  : lightTap();
                 onAction(action.id);
               }}
               disabled={isPending}
               style={({ pressed }) => [
                 styles.button,
-                isPrimary ? styles.primary : styles.ghost,
+                palette.container,
                 pressed && styles.pressed,
                 isPending && styles.disabled,
               ]}
             >
               {isPending ? (
-                <ActivityIndicator
-                  size="small"
-                  color={isPrimary ? colors.white : colors.primary}
-                />
+                <ActivityIndicator size="small" color={tint} />
               ) : (
                 <MaterialCommunityIcons
                   name={action.icon as any}
                   size={18}
-                  color={isPrimary ? colors.white : colors.primary}
+                  color={tint}
                 />
               )}
               <Text
-                style={[
-                  styles.label,
-                  isPrimary ? styles.labelPrimary : styles.labelGhost,
-                ]}
+                style={[styles.label, { color: tint }]}
                 numberOfLines={1}
               >
                 {action.label}
@@ -245,6 +342,38 @@ export function StickyJobActionBar({
       </View>
     </View>
   );
+}
+
+interface TonePalette {
+  container: { backgroundColor: string; borderColor?: string; borderWidth?: number };
+  tint: string;
+}
+
+function resolveToneStyle(tone: ActionTone): TonePalette {
+  switch (tone) {
+    case 'primary':
+      return { container: { backgroundColor: colors.primary }, tint: colors.white };
+    case 'warning':
+      return {
+        container: {
+          backgroundColor: colors.warningBg,
+          borderWidth: 1,
+          borderColor: colors.warning + '66',
+        },
+        tint: colors.warning,
+      };
+    case 'urgent':
+      return { container: { backgroundColor: colors.error }, tint: colors.white };
+    default:
+      return {
+        container: {
+          backgroundColor: colors.surfaceGray3,
+          borderWidth: 1,
+          borderColor: colors.border,
+        },
+        tint: colors.text,
+      };
+  }
 }
 
 const styles = StyleSheet.create({
@@ -273,14 +402,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 12,
   },
-  primary: {
-    backgroundColor: colors.primary,
-  },
-  ghost: {
-    backgroundColor: colors.surfaceGray3,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
   pressed: {
     opacity: 0.85,
   },
@@ -290,11 +411,5 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '700',
-  },
-  labelPrimary: {
-    color: colors.white,
-  },
-  labelGhost: {
-    color: colors.text,
   },
 });
