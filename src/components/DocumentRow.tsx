@@ -25,6 +25,10 @@ interface DocumentRowProps {
   onView: (doc: Document) => void;
   onStagePress?: (doc: Document) => void;
   onPaymentPress?: (doc: Document) => void;
+  /** When supplied, an envelope quick-action renders on the right. */
+  onSend?: (doc: Document) => void;
+  /** When supplied, a card quick-action renders on the right. */
+  onTakePayment?: (doc: Document) => void;
 }
 
 function stageShortLabel(stage: Document['stage']): string {
@@ -36,9 +40,12 @@ export function DocumentRow({
   onView,
   onStagePress,
   onPaymentPress,
+  onSend,
+  onTakePayment,
 }: DocumentRowProps) {
   const meta = STAGE_META[doc.stage];
   const label = stageShortLabel(doc.stage);
+  const hasQuickActions = !!(onSend || onTakePayment);
 
   return (
     <Pressable
@@ -101,11 +108,56 @@ export function DocumentRow({
         </View>
       </View>
 
-      <MaterialCommunityIcons
-        name={'chevron-right' as any}
-        size={20}
-        color={colors.inactive}
-      />
+      {hasQuickActions ? (
+        <View style={styles.actions}>
+          {onSend ? (
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation();
+                selectionTap();
+                onSend(doc);
+              }}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.actionButton,
+                pressed && styles.actionButtonPressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={'email-send-outline' as any}
+                size={18}
+                color={colors.primary}
+              />
+            </Pressable>
+          ) : null}
+          {onTakePayment ? (
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation();
+                selectionTap();
+                onTakePayment(doc);
+              }}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.actionButton,
+                pressed && styles.actionButtonPressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={'credit-card-outline' as any}
+                size={18}
+                color={colors.primary}
+              />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : (
+        <MaterialCommunityIcons
+          name={'chevron-right' as any}
+          size={20}
+          color={colors.inactive}
+        />
+      )}
     </Pressable>
   );
 }
@@ -170,5 +222,23 @@ const styles = StyleSheet.create({
   stageLabel: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+  },
+  actionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primaryBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.primary + '33',
+  },
+  actionButtonPressed: {
+    opacity: 0.7,
   },
 });
