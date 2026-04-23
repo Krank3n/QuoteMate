@@ -9,7 +9,7 @@ export default {
   expo: {
     name: "QuoteMate",
     slug: "quotemate",
-    version: "1.0.74",
+    version: "1.29",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -91,7 +91,10 @@ export default {
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
       buildNumber: "17",
-      associatedDomains: ["applinks:quotemateapp.au"]
+      associatedDomains: ["applinks:quotemateapp.au"],
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false
+      }
     },
     android: {
       adaptiveIcon: {

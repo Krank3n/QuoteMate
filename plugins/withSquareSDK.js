@@ -266,7 +266,11 @@ function withSquareSDK(config, props = {}) {
   config = withSquareIOSAppDelegate(config, applicationId);
   config = withSquareIOSInfoPlist(config);
   config = withSquareIOSBuildPhase(config);
-  config = withSquareIOSTapToPayEntitlement(config);
+  // Re-enable once Apple approves the Tap to Pay on iPhone entitlement request
+  // for team 5GHUTAV35B: https://developer.apple.com/contact/request/tap-to-pay-on-iphone/
+  // Ticking the checkbox on the App ID is necessary but not sufficient —
+  // Apple issues the entitlement on approved profiles only.
+  // config = withSquareIOSTapToPayEntitlement(config);
 
   config = withSquareAndroidRootGradle(config);
   config = withSquareAndroidAppGradle(config);
