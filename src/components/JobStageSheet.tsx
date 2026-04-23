@@ -11,6 +11,7 @@ import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Job, JobStage } from '../../shared/job/types';
+import { canTransition } from '../../shared/job/stage';
 import { colors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { BottomSheet, useStaggeredEntrance } from './BottomSheet';
@@ -19,6 +20,9 @@ interface JobStageSheetProps {
   visible: boolean;
   onDismiss: () => void;
   job: Job;
+  /** True if the job's primary doc has money against its deposit. Used
+   *  by the shared state machine to gate `accepted → quoted`. */
+  depositPaid?: boolean;
   onSelect: (targetStage: JobStage) => void;
   title?: string;
 }
@@ -100,9 +104,6 @@ export const JOB_STAGE_META: Record<JobStage, StageMeta> = {
   },
 };
 
-// The UI offers direct jumps to any non-terminal stage (per the meta-plan:
-// "strict in the backend, flexible in the UI"). The server-side state
-// machine still enforces the transition graph, so only legal edges succeed.
 const ALL_STAGES: JobStage[] = [
   'inquiry',
   'quoted',
@@ -119,16 +120,19 @@ export function JobStageSheet({
   visible,
   onDismiss,
   job,
+  depositPaid,
   onSelect,
   title = 'Update Stage',
 }: JobStageSheetProps) {
-  // Show all non-terminal, non-current stages — the UI is flexible so tradies
-  // can jump freely (e.g. accepted → completed without passing through
-  // in_progress). The server-side state machine still enforces the transition
-  // graph; illegal jumps are rejected there.
+  // Only offer legal transitions from the shared state machine. This
+  // changed in Phase-17 — the UI used to show every stage (trusting the
+  // server to reject illegal edges), but that meant tradies could tap a
+  // stage and hit a silent failure. Better to hide what you can't do.
   const targets = React.useMemo<JobStage[]>(() => {
-    return ALL_STAGES.filter((s) => s !== job.stage);
-  }, [job.stage]);
+    return ALL_STAGES.filter((s) =>
+      s !== job.stage && canTransition(job.stage, s, { depositPaid }),
+    );
+  }, [job.stage, depositPaid]);
 
   const anims = useStaggeredEntrance(targets.length, visible, 100, 40);
 

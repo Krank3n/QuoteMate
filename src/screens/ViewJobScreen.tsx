@@ -15,7 +15,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { formatDistanceToNow } from 'date-fns';
 
-import type { JobStage } from '../../shared/job/types';
+import type { Job, JobStage } from '../../shared/job/types';
 import { useJobStore } from '../store/useJobStore';
 import { useStore } from '../store/useStore';
 import { colors } from '../theme';
@@ -24,6 +24,10 @@ import { WebContainer } from '../components/WebContainer';
 import { DocumentRow } from '../components/DocumentRow';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
+import {
+  crossesContractLine,
+  depositHasBeenPaid,
+} from '../../shared/job/stage';
 import { JobTimeline } from '../components/JobTimeline';
 import { JobPhotoStrip } from '../components/JobPhotoStrip';
 import { JobChecklist } from '../components/JobChecklist';
@@ -64,7 +68,9 @@ export function ViewJobScreen() {
     createInvoiceFromQuote,
     subscriptionStatus,
     businessSettings,
+    duplicateDocumentForJob,
   } = useStore();
+  const duplicateJob = useJobStore((s) => s.duplicateJob);
 
   const isTrialActive = !!(
     subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired
@@ -143,15 +149,46 @@ export function ViewJobScreen() {
     scheduled && duration ? `${scheduled} · ${duration}` : scheduled;
   const completedAt = formatScheduledDateLong(job.completedDate);
 
-  const handleStageSelect = async (target: JobStage) => {
-    setStageSheetVisible(false);
-    // UI is flexible — any stage jump is allowed. The shared state machine
-    // is enforced server-side for correctness (future phase), not here.
+  const applyStageTransition = async (target: JobStage) => {
     try {
-      await saveJob({ ...job, stage: target });
+      const patch: Partial<Job> = { stage: target };
+      // Coupling: stage backward to 'quoted' should revert the primary
+      // doc too so the customer-facing state matches.
+      if (
+        target === 'quoted' &&
+        actionableDoc &&
+        actionableDoc.type === 'quote' &&
+        actionableDoc.stage === 'quote_accepted'
+      ) {
+        await applyStageChange(actionableDoc, 'quote_sent', {
+          saveQuote,
+          saveInvoice,
+          createInvoiceFromQuote,
+          navigation,
+        });
+      }
+      await saveJob({ ...job, ...patch });
     } catch {
       Alert.alert('Error', 'Failed to update stage. Please try again.');
     }
+  };
+
+  const handleStageSelect = async (target: JobStage) => {
+    setStageSheetVisible(false);
+    // When reverting across the accept or cancel line, the primary doc's
+    // state moves with the job. Prompt once so the tradie knows.
+    if (crossesContractLine(job.stage, target)) {
+      const message =
+        target === 'quoted'
+          ? 'This will also mark the quote as "sent" again so the customer-facing state matches. Continue?'
+          : 'This will reactivate the job back to inquiry. Continue?';
+      Alert.alert('Heads up', message, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Continue', onPress: () => applyStageTransition(target) },
+      ]);
+      return;
+    }
+    await applyStageTransition(target);
   };
 
   const handleNotesSave = async () => {
@@ -336,6 +373,42 @@ export function ViewJobScreen() {
         },
       },
     ]);
+  };
+
+  const handleDuplicate = () => {
+    Alert.alert(
+      'Duplicate this job?',
+      'Customer details, scope, and checklist get copied into a new Accepted job. Schedule, photos, and money state reset. Handy for recurring cleans or repeat fences.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Duplicate',
+          onPress: async () => {
+            try {
+              // Create the cloned job first (without a primary doc), then
+              // clone the doc into it, then patch the job with the new
+              // doc id. Two-step so the trigger's aggregate recomputation
+              // has a valid job to target.
+              const clonedJob = await duplicateJob(job.id);
+              if (primaryDoc) {
+                const clonedDoc = await duplicateDocumentForJob(
+                  primaryDoc.id,
+                  clonedJob.id,
+                );
+                await saveJob({
+                  ...clonedJob,
+                  primaryDocumentId: clonedDoc.id,
+                  documentIds: [clonedDoc.id],
+                });
+              }
+              navigation.replace('ViewJob', { jobId: clonedJob.id });
+            } catch (e) {
+              Alert.alert('Duplicate failed', 'Try again in a moment.');
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleDelete = () => {
@@ -812,6 +885,17 @@ export function ViewJobScreen() {
           <View style={styles.dangerRow}>
             <Button
               mode="outlined"
+              icon={'content-duplicate' as any}
+              onPress={() => {
+                lightTap();
+                handleDuplicate();
+              }}
+              style={styles.archiveButton}
+            >
+              Duplicate
+            </Button>
+            <Button
+              mode="outlined"
               icon={'archive-outline' as any}
               onPress={() => {
                 lightTap();
@@ -849,6 +933,7 @@ export function ViewJobScreen() {
         visible={stageSheetVisible}
         onDismiss={() => setStageSheetVisible(false)}
         job={job}
+        depositPaid={depositHasBeenPaid(primaryDoc)}
         onSelect={handleStageSelect}
       />
 

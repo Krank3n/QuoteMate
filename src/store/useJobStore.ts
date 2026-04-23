@@ -40,6 +40,22 @@ interface JobState {
   /** Look up the Job that a given Document is attached to (by doc.jobId). */
   getJobByDocumentId: (documentId: string) => Job | undefined;
 
+  /**
+   * Duplicate an existing Job — customer details, address, scope, and
+   * checklist are copied; schedule, photos, notes, and money state are
+   * reset. The cloned Job lands in `accepted` (the contract was already
+   * approved) with a cloned primary document marked `quote_accepted`, so
+   * the sticky bar immediately offers "Pick a Date". Returns the new Job.
+   *
+   * Caller is responsible for cloning the primary Document via the
+   * useStore.duplicateDocumentForJob helper — we can't import useStore
+   * here without creating a circular dep.
+   */
+  duplicateJob: (
+    sourceJobId: string,
+    clonedPrimaryDocumentId?: string,
+  ) => Promise<Job>;
+
   cleanup: () => void;
 }
 
@@ -145,6 +161,62 @@ export const useJobStore = create<JobState>((set, get) => ({
 
   getJobByDocumentId: (documentId: string) =>
     get().jobs.find((j) => j.documentIds.includes(documentId)),
+
+  duplicateJob: async (sourceJobId, clonedPrimaryDocumentId) => {
+    const source = get().jobs.find((j) => j.id === sourceJobId);
+    if (!source) throw new Error(`duplicateJob: source ${sourceJobId} not found`);
+
+    const now = Date.now();
+    const uid = auth.currentUser?.uid || 'local';
+    // Checklist items keep their text/notes but reset `done` + timestamps
+    // so the new visit starts with a fresh punch list.
+    const checklist = (source.checklist ?? []).map((item) => ({
+      ...item,
+      id: generateId(),
+      done: false,
+      completedAt: undefined,
+      createdAt: now,
+    }));
+
+    const clone: Job = {
+      id: generateId(),
+      userId: uid,
+      customerId: source.customerId,
+      customerName: source.customerName,
+      customerEmail: source.customerEmail,
+      customerPhone: source.customerPhone,
+      jobAddress: source.jobAddress,
+      name: source.name,
+      description: source.description,
+      // Contract's already approved — start in the execution lane.
+      stage: 'accepted',
+      documentIds: clonedPrimaryDocumentId ? [clonedPrimaryDocumentId] : [],
+      primaryDocumentId: clonedPrimaryDocumentId,
+      // Fresh schedule — tradie picks a new date.
+      scheduledStartDate: undefined,
+      scheduledEndDate: undefined,
+      actualStartDate: undefined,
+      completedDate: undefined,
+      estimatedDurationDays: source.estimatedDurationDays,
+      // New lifecycle, no stage-transition history.
+      acceptedAt: now,
+      // Aggregates reset; trigger will recompute from the cloned doc.
+      totalQuoted: 0,
+      totalInvoiced: 0,
+      totalPaid: 0,
+      balanceDue: 0,
+      // Fresh visit — drop photos/notes/calendar-event.
+      photos: [],
+      notes: undefined,
+      checklist,
+      googleCalendarEventId: undefined,
+      googleCalendarId: undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await get().saveJob(clone);
+    return clone;
+  },
 
   cleanup: () => {
     jobService.cleanup();

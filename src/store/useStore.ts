@@ -178,6 +178,16 @@ interface AppState {
   getDocumentById: (id: string) => Document | undefined;
   getDocumentByLegacyId: (legacyId: string) => Document | undefined;
   convertDocumentToInvoice: (documentId: string) => Promise<Document>;
+  /**
+   * Clone a Document for a new Job (Duplicate flow). Keeps scope/labor/
+   * materials/terms; resets stage to quote_accepted, money state to zero,
+   * pay-link fields to undefined, and reassigns jobId to the new Job.
+   * Returns the cloned Document.
+   */
+  duplicateDocumentForJob: (
+    sourceDocumentId: string,
+    newJobId: string,
+  ) => Promise<Document>;
 
   // Cleanup
   clearAllData: () => Promise<void>;
@@ -2127,6 +2137,69 @@ export const useStore = create<AppState>((set, get) => ({
       }
     }
     return optimistic;
+  },
+
+  duplicateDocumentForJob: async (sourceDocumentId: string, newJobId: string) => {
+    const source = get().getDocumentById(sourceDocumentId);
+    if (!source) throw new Error('Source document not found');
+    const now = Date.now();
+    // Fresh quote number for the new visit — the source's number still
+    // refers to the original.
+    const nextNumber = await get().getNextQuoteNumber();
+    // Regenerate ids on nested collections so nothing aliases back to the
+    // original; reset money + pay-link state so the new visit starts clean.
+    const clone: Document = {
+      ...source,
+      id: generateId(),
+      jobId: newJobId,
+      type: 'quote',
+      stage: 'quote_accepted',
+      number: nextNumber,
+      // Fresh lifecycle timestamps — the old ones refer to the old visit.
+      createdAt: now,
+      updatedAt: now,
+      sentAt: undefined,
+      acceptedAt: now,
+      invoicedAt: undefined,
+      issueDate: undefined,
+      dueDate: undefined,
+      // Money state — nothing has moved yet on this new visit.
+      depositPaid: 0,
+      depositPaidAt: undefined,
+      paidTotal: 0,
+      paidInFullAt: undefined,
+      payments: [],
+      // Pay-link state — new visit needs new links.
+      depositPaymentLinkId: undefined,
+      depositPaymentLinkUrl: undefined,
+      depositPaymentLinkCreatedAt: undefined,
+      depositSquarePaymentId: undefined,
+      squarePaymentLinkId: undefined,
+      squarePaymentLinkUrl: undefined,
+      squarePaymentId: undefined,
+      squarePaidAt: undefined,
+      activePaymentLink: undefined,
+      archivedPaymentLinks: undefined,
+      // Xero state belongs to the source invoice, not to this new visit.
+      xeroInvoiceId: undefined,
+      xeroSyncStatus: undefined,
+      xeroSyncedAt: undefined,
+      xeroSyncError: undefined,
+      legacyInvoiceId: undefined,
+      legacyQuoteId: undefined,
+      // Re-id nested rows so edits on one don't splash onto the other.
+      materials: (source.materials ?? []).map((m) => ({ ...m, id: generateId() })),
+      sections: (source.sections ?? []).map((s) => ({
+        ...s,
+        id: generateId(),
+      })),
+      // Photos are visit-specific; drop them.
+      photos: [],
+      // Draft email body — stale for a new visit.
+      draftEmailBody: undefined,
+    };
+    await get().saveDocument(clone);
+    return clone;
   },
 
   // Clear all data (for logout)

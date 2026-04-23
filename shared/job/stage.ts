@@ -1,29 +1,74 @@
-import type { JobStage, JobDocument } from './types';
+import type { JobStage, Job, JobDocument } from './types';
 
-// Legal forward transitions. Tradies don't always go in order — the UI lets
-// them jump freely — but the server enforces this set so we never corrupt
-// aggregates or end up in a terminal loop. Cancelled/closed are terminal.
+// Legal stage transitions. Enforced in the UI (stage sheet filters targets)
+// AND in the save path (server-side guard to land later). Terminal states
+// (cancelled, closed) expose a reactivation / unarchive path respectively
+// so tradies aren't trapped when life doesn't match the happy path.
+//
+// The one context-sensitive rule: `accepted → quoted` is only legal when
+// the quote is "soft" accepted — i.e. no deposit has been paid yet. Once
+// money has moved, the money firewall holds: can't revert back across
+// the accept line without explicitly cancelling first. That rule is
+// expressed in canTransition's `ctx.depositPaid` flag rather than the
+// static graph, since it depends on the primary document's state.
 export const JOB_STAGE_TRANSITIONS: Record<JobStage, JobStage[]> = {
   inquiry:     ['quoted', 'cancelled'],
-  quoted:      ['accepted', 'cancelled', 'inquiry'],
-  accepted:    ['scheduled', 'in_progress', 'cancelled'],
+  quoted:      ['accepted', 'inquiry', 'cancelled'],
+  // 'quoted' included here but gated by ctx.depositPaid in canTransition.
+  accepted:    ['scheduled', 'in_progress', 'quoted', 'cancelled'],
   scheduled:   ['in_progress', 'accepted', 'cancelled'],
-  in_progress: ['completed', 'cancelled'],
-  completed:   ['paid', 'cancelled'],
+  in_progress: ['completed', 'scheduled', 'cancelled'],
+  completed:   ['paid', 'in_progress', 'cancelled'],
   paid:        ['closed'],
-  closed:      [],
-  cancelled:   [],
+  closed:      ['paid'],       // unarchive
+  cancelled:   ['inquiry'],    // reactivate
 };
 
-export function canTransition(from: JobStage, to: JobStage): boolean {
-  if (from === to) return true; // no-op
-  return JOB_STAGE_TRANSITIONS[from]?.includes(to) ?? false;
+export interface TransitionContext {
+  /** True when money has moved through the primary doc's deposit. Blocks
+   *  `accepted → quoted` (once the customer's paid a deposit, the contract
+   *  is alive; reverting requires an explicit cancel first). */
+  depositPaid?: boolean;
 }
 
-export function assertTransition(from: JobStage, to: JobStage): void {
-  if (!canTransition(from, to)) {
+export function canTransition(
+  from: JobStage,
+  to: JobStage,
+  ctx: TransitionContext = {},
+): boolean {
+  if (from === to) return true;
+  const legal = JOB_STAGE_TRANSITIONS[from] ?? [];
+  if (!legal.includes(to)) return false;
+  // Money firewall: once deposit has been paid, accepted can't drop back
+  // to quoted. Everything else within the execution lane is still open.
+  if (from === 'accepted' && to === 'quoted' && ctx.depositPaid) {
+    return false;
+  }
+  return true;
+}
+
+export function assertTransition(
+  from: JobStage,
+  to: JobStage,
+  ctx: TransitionContext = {},
+): void {
+  if (!canTransition(from, to, ctx)) {
     throw new Error(`Illegal job stage transition: ${from} → ${to}`);
   }
+}
+
+/**
+ * Returns true when the transition crosses a "contract" line — i.e.
+ * reverses movement such that the primary doc's stage should be adjusted
+ * in lockstep. The UI uses this to decide whether to prompt the user
+ * before flipping.
+ */
+export function crossesContractLine(from: JobStage, to: JobStage): boolean {
+  // Going backwards across acceptance: doc flips quote_accepted → quote_sent.
+  if (from === 'accepted' && to === 'quoted') return true;
+  // Reactivating a cancelled job: doc was cancelled, put it back to draft.
+  if (from === 'cancelled' && to === 'inquiry') return true;
+  return false;
 }
 
 // Backfill-only: derive a starting JobStage from the set of DocumentStages
@@ -50,3 +95,19 @@ export function deriveJobStageFromDocs(docs: JobDocument[]): JobStage {
   if (stages.has('quote_sent')) return 'quoted';
   return 'inquiry';
 }
+
+/**
+ * Small helper: read the soft/hard accepted flag straight off a Job +
+ * its primary doc. Used by the stage sheet and the save path.
+ */
+export function depositHasBeenPaid(doc: {
+  depositPaid?: number;
+  depositAmount?: number;
+} | null | undefined): boolean {
+  if (!doc) return false;
+  return (doc.depositPaid ?? 0) > 0;
+}
+
+// Re-export Job type alongside so server-side callers have a single
+// import to reach for when they enforce transitions during save.
+export type { Job, JobStage };

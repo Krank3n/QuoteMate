@@ -169,8 +169,13 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   const handleClear = async () => {
     setSaving(true);
     try {
+      // If the job was only scheduled (not yet started / completed), drop
+      // it back to 'accepted' so the sticky bar + stage chip match — a
+      // scheduled job with no date is a contradiction.
+      const stage = job.stage === 'scheduled' ? 'accepted' : job.stage;
       await saveJob({
         ...job,
+        stage,
         scheduledStartDate: undefined,
         scheduledEndDate: undefined,
       });
