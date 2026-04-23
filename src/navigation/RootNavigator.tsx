@@ -84,7 +84,7 @@ function NewQuoteNavigator() {
     <NewQuoteStack.Navigator
       screenOptions={{
         headerStyle: {
-          backgroundColor: colors.surfaceDark,
+          backgroundColor: colors.background,
           elevation: 0,
           shadowOpacity: 0,
           borderBottomWidth: 1,
@@ -95,7 +95,7 @@ function NewQuoteNavigator() {
             style={[
               StyleSheet.absoluteFill,
               {
-                backgroundColor: colors.surfaceDark,
+                backgroundColor: colors.background,
                 borderBottomWidth: 1,
                 borderBottomColor: colors.border,
               },
@@ -155,7 +155,7 @@ function NewInvoiceNavigator() {
     <NewQuoteStack.Navigator
       screenOptions={{
         headerStyle: {
-          backgroundColor: colors.surfaceDark,
+          backgroundColor: colors.background,
           elevation: 0,
           shadowOpacity: 0,
           borderBottomWidth: 1,
@@ -166,7 +166,7 @@ function NewInvoiceNavigator() {
             style={[
               StyleSheet.absoluteFill,
               {
-                backgroundColor: colors.surfaceDark,
+                backgroundColor: colors.background,
                 borderBottomWidth: 1,
                 borderBottomColor: colors.border,
               },
@@ -414,7 +414,7 @@ function MainTabs() {
             style={[
               StyleSheet.absoluteFill,
               {
-                backgroundColor: colors.surfaceDark,
+                backgroundColor: colors.background,
                 borderBottomWidth: 1,
                 borderBottomColor: colors.border,
               },
@@ -514,7 +514,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -530,7 +530,7 @@ export function RootNavigator() {
           presentation: 'modal',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -546,7 +546,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -576,7 +576,7 @@ export function RootNavigator() {
           presentation: 'modal',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -599,7 +599,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -615,7 +615,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -631,7 +631,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -647,7 +647,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -663,7 +663,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -679,7 +679,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -695,7 +695,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -711,7 +711,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -727,7 +727,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -743,7 +743,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -759,7 +759,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -775,7 +775,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -791,7 +791,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -807,7 +807,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -823,7 +823,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -839,7 +839,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -855,7 +855,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -871,7 +871,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -887,7 +887,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },
@@ -903,7 +903,7 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.surfaceDark,
+            backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
           },

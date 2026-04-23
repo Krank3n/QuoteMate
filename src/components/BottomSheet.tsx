@@ -156,8 +156,12 @@ export function BottomSheet({
         <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} />
       </Animated.View>
 
-      {/* Sheet */}
-      <View style={styles.sheetWrapper} pointerEvents="box-none">
+      {/* Sheet — wrapper sits above the OS safe area (Android nav / iOS home
+          indicator) so content never ends up underneath system UI. */}
+      <View
+        style={[styles.sheetWrapper, { paddingBottom: safeInsets.bottom }]}
+        pointerEvents="box-none"
+      >
         <Animated.View
           style={[
             styles.sheet,
@@ -183,8 +187,7 @@ export function BottomSheet({
 
           {overlay}
 
-          {/* Safe area padding — use actual inset so Android nav bar is respected */}
-          <View style={{ height: Math.max(safeInsets.bottom, 16) }} />
+          <View style={styles.bottomPadding} />
         </Animated.View>
       </View>
     </Portal>
@@ -295,5 +298,8 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingBottom: 8,
+  },
+  bottomPadding: {
+    height: 16,
   },
 });
