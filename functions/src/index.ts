@@ -1547,6 +1547,21 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 300 }).
           contextSection += `\n- Common Materials for This Type of Job: ${tradeContext.suggestedMaterials.join(', ')}`;
           contextSection += '\n  (Consider these materials, but also include any others that would be needed)';
         }
+
+        // Template-guided context (from AI-guided templates with promptQuestions)
+        if (tradeContext.templateName) {
+          contextSection += `\n\nJob Type: ${tradeContext.templateName}`;
+        }
+        if (tradeContext.promptQuestions && tradeContext.promptQuestions.length > 0) {
+          contextSection += `\n\nThe user was prompted to mention these details:\n${tradeContext.promptQuestions.map((q: string) => `- ${q}`).join('\n')}`;
+          contextSection += '\n\nExtract these details from the description where mentioned, and use them to generate accurate material quantities and labor estimates.';
+        }
+        if (tradeContext.aiContext) {
+          contextSection += `\n\nExpert context for this job type:\n${tradeContext.aiContext}`;
+        }
+        if (tradeContext.estimatedHoursRange) {
+          contextSection += `\n\nExpected hours range: ${tradeContext.estimatedHoursRange.min}-${tradeContext.estimatedHoursRange.max} hours`;
+        }
       }
 
       // Determine store name

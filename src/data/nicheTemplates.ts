@@ -14,6 +14,8 @@ export interface NicheJobTemplate extends JobTemplate {
   pricingMethod: string; // References pricing method from tradeCategories
   suggestedMaterials: string[]; // Common materials for this job type
   estimatedHoursRange: { min: number; max: number };
+  promptQuestions?: string[];  // Guiding hints shown to tradie before describing job
+  aiContext?: string;          // Domain knowledge injected into AI prompt for accurate estimation
 }
 
 export const NICHE_TEMPLATES: NicheJobTemplate[] = [
@@ -39,6 +41,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'area / 500', // 500 m² per hour with ride-on
     estimatedHoursRange: { min: 1, max: 4 },
     suggestedMaterials: ['Fuel', 'Line trimmer cord', 'Waste bags'],
+    promptQuestions: [
+      'How big is the lawn roughly? (metres or just small/medium/large)',
+      'Is the ground flat or on a slope?',
+      'Any obstacles? (trees, garden beds, play equipment)',
+      'Edges need doing too?',
+    ],
+    aiContext: 'Ride-on mowing covers ~500m2/hr on flat ground, ~350m2/hr on slopes. Edge trimming adds 15-30min depending on perimeter. Obstacle-heavy blocks take ~30% longer. Fuel usage ~1L per 2500m2. Typical residential block: 400-800m2 lawn area.',
   },
   {
     id: 'hedge_trimming',
@@ -60,6 +69,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: '(length * height) / 5', // 5 m² per hour
     estimatedHoursRange: { min: 0.5, max: 3 },
     suggestedMaterials: ['Hedge trimmer fuel', 'Waste bags', 'Tarp'],
+    promptQuestions: [
+      'How long is the hedge roughly?',
+      'How tall? (waist height, head height, above head)',
+      'What type of hedge? (if you know)',
+      'Green waste removal needed?',
+    ],
+    aiContext: 'Hedge trimming rate ~5m2 face area per hour. Taller hedges (above head height) need a ladder and take ~40% longer. Dense species (box hedge, murraya) produce more waste. Green waste: ~1 bag per 10m2 of hedge face. Disposal adds time if tip run is needed.',
   },
   {
     id: 'garden_bed_install',
@@ -84,6 +100,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: '(area * 2) + (plants * 0.25)',
     estimatedHoursRange: { min: 2, max: 8 },
     suggestedMaterials: ['Garden soil', 'Mulch', 'Plants', 'Fertilizer', 'Weed mat', 'Garden edging'],
+    promptQuestions: [
+      'How big is the garden bed area?',
+      'How many plants roughly?',
+      'Any existing plants/lawn to remove first?',
+      'Irrigation/dripper system needed?',
+    ],
+    aiContext: 'Garden bed install: ~3 bags of soil per m2 (50mm depth), ~4 bags mulch per m2 (75mm depth). Plant spacing depends on species — typically 3-5 per m2 for groundcover, 1 per m2 for shrubs. Existing lawn removal adds ~1hr per 10m2. Irrigation/dripper adds materials and ~1hr per 10m run.',
   },
   {
     id: 'turf_laying',
@@ -105,6 +128,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'area / 10', // 10 m² per hour
     estimatedHoursRange: { min: 2, max: 10 },
     suggestedMaterials: ['Instant turf rolls', 'Top soil', 'Starter fertilizer', 'Soil leveling sand'],
+    promptQuestions: [
+      'How big is the area?',
+      'Is the existing surface lawn, dirt, or something else?',
+      'Any levelling needed?',
+      'What type of turf? (sir walter, couch, buffalo)',
+    ],
+    aiContext: 'Turf laying rate ~10m2/hr including prep. Existing lawn removal adds ~1hr per 20m2. Levelling with sand/soil adds ~2 bags per m2. Turf rolls are typically 1m2 each. Order 5-10% extra for cuts/waste. Starter fertilizer coverage ~40m2 per 4kg bag. Water heavily after install.',
   },
 
   // ============================================
@@ -129,6 +159,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'fixtures * 1',
     estimatedHoursRange: { min: 0.5, max: 2 },
     suggestedMaterials: ['Drain cleaner', 'Plumbing tape', 'Rags'],
+    promptQuestions: [
+      'How many blocked drains?',
+      'Which fixtures? (toilet, shower, kitchen sink, floor waste)',
+      'Has it been blocked before?',
+      'Any CCTV inspection needed?',
+    ],
+    aiContext: 'Drain unblocking: ~1hr per fixture with electric eel. Recurring blockages may indicate tree root intrusion — CCTV adds ~$150-300. Kitchen blockages often need grease treatment. Multiple fixtures on the same line usually share one blockage point. Floor waste blockages are often hair/soap — simpler fix.',
   },
   {
     id: 'toilet_install',
@@ -152,6 +189,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'toilets * 2',
     estimatedHoursRange: { min: 1.5, max: 3 },
     suggestedMaterials: ['Toilet suite', 'Flexible connector', 'Cistern washer', 'Pan collar', 'Silicone sealant', 'Plumbers putty'],
+    promptQuestions: [
+      'How many toilets?',
+      'Replacing existing or new location?',
+      'Any preference on style? (close-coupled, wall-hung, back-to-wall)',
+      'Floor or wall outlet?',
+    ],
+    aiContext: 'Toilet install: ~2hrs per unit for straight replacement. New location adds rough-in plumbing (~4hrs extra). Wall-hung toilets need concealed cistern frame — significantly more labour and materials. Back-to-wall requires accurate set-out. Floor outlet is standard; wall outlet may need pan converter.',
   },
   {
     id: 'hot_water_install',
@@ -176,6 +220,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: '4',
     estimatedHoursRange: { min: 3, max: 6 },
     suggestedMaterials: ['Hot water system', 'Copper pipe', 'Pipe fittings', 'PRV valve', 'Tempering valve', 'Isolating valves', 'Overflow tray'],
+    promptQuestions: [
+      'What size system? (number of people in house)',
+      'Electric or gas?',
+      'Replacing existing or new install?',
+      'Indoor or outdoor location?',
+    ],
+    aiContext: 'Hot water install: ~4hrs for like-for-like replacement, 6-8hrs for new install or fuel type change. Size guide: 1-2 people ~125L, 3-4 people ~250L, 5+ people ~315-400L. Gas to electric or vice versa requires additional pipework. Tempering valve is mandatory in Australia. PRV and expansion valve required. Indoor installs need overflow tray and drain.',
   },
   {
     id: 'bathroom_renovation',
@@ -204,6 +255,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'fixtures * 4',
     estimatedHoursRange: { min: 16, max: 40 },
     suggestedMaterials: ['Shower mixer', 'Basin mixer', 'Toilet suite', 'Vanity', 'Shower screen', 'Tiles', 'Waterproofing membrane', 'Copper pipe', 'PVC pipe', 'Various fittings'],
+    promptQuestions: [
+      'How big is the bathroom roughly?',
+      'What\'s being replaced? (shower, bath, vanity, toilet, all of it)',
+      'Tiling needed? (floor, walls, both)',
+      'Any structural changes? (moving walls, plumbing relocations)',
+    ],
+    aiContext: 'Bathroom reno is the most variable job. Full gut and reno: 4-6 weeks. Waterproofing is mandatory for wet areas (AS3740). Tile quantities: wall tiles ~3 boxes per m2 wall, floor tiles ~2 boxes per m2 floor. Allow 10-15% tile waste. Moving plumbing adds significant cost. Typical small bathroom ~4m2, standard ~6-8m2, large ~10m2+.',
   },
 
   // ============================================
@@ -230,6 +288,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'points * 0.5',
     estimatedHoursRange: { min: 1, max: 4 },
     suggestedMaterials: ['Power points', 'Electrical cable', 'Cable clips', 'Wall plates', 'Junction boxes'],
+    promptQuestions: [
+      'How many power points?',
+      'Which rooms?',
+      'Single or double GPOs?',
+      'Any outdoor or weatherproof ones?',
+    ],
+    aiContext: 'Power point install: ~30min per point for standard internal, ~45min for external weatherproof. Cable run length varies — internal walls ~5m avg, external ~8m. Outdoor GPOs need IP54-rated enclosures. Each point needs its own junction box. Cable: 2.5mm twin+earth for GPO circuits.',
   },
   {
     id: 'led_downlight_pack',
@@ -252,6 +317,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'packs * 3',
     estimatedHoursRange: { min: 2, max: 5 },
     suggestedMaterials: ['LED downlights (10 pack)', 'Electrical cable', 'Junction boxes', 'Hole saw', 'Cable clips'],
+    promptQuestions: [
+      'How many downlights roughly?',
+      'Which rooms?',
+      'Replacing existing or new holes in ceiling?',
+      'Dimmer switches needed?',
+    ],
+    aiContext: 'LED downlight install: ~15-20min per light for new holes, ~10min for replacing existing fittings. New holes need hole saw (90mm standard). Dimmer switches add ~$30-50 per switch and ~15min install each. Cable: 1.5mm twin+earth for lighting circuits. Max ~10 lights per circuit.',
   },
   {
     id: 'switchboard_upgrade',
@@ -274,6 +346,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: '6',
     estimatedHoursRange: { min: 4, max: 8 },
     suggestedMaterials: ['Switchboard enclosure', 'Circuit breakers', 'RCDs', 'Surge protector', 'Cable', 'Labels'],
+    promptQuestions: [
+      'How old is the current switchboard?',
+      'How many circuits roughly?',
+      'Any known issues? (tripping, flickering)',
+      'Surge protection wanted?',
+    ],
+    aiContext: 'Switchboard upgrade: 4-8hrs depending on complexity. Old ceramic fuse boards take longer to decommission. Typical house: 12-18 circuits. RCDs are mandatory (min 2). Surge protector is optional but recommended. Older homes may need main earth upgrade. If asbestos backing board is present, licensed removal required — flag this.',
   },
   {
     id: 'ev_charger_install',
@@ -296,6 +375,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'chargers * 4',
     estimatedHoursRange: { min: 3, max: 6 },
     suggestedMaterials: ['EV charger unit', 'Heavy duty cable', 'Circuit breaker', 'Conduit', 'Mounting bracket'],
+    promptQuestions: [
+      'How many chargers?',
+      'How far from the switchboard to the install location?',
+      'Wall-mounted or pedestal?',
+      'What amperage/kW? (7kW standard, 22kW fast)',
+    ],
+    aiContext: 'EV charger install: ~4hrs per unit. Cable run length is the main variable — 6mm twin+earth for 7kW (32A), 10mm for 22kW. Longer runs need heavier cable to manage voltage drop. 22kW chargers may require switchboard upgrade. Dedicated 32A circuit breaker per charger. Conduit for exposed runs. Pedestal installs need concrete base.',
   },
 
   // ============================================
@@ -325,6 +411,14 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: '(area * 2) + (height * area * 0.5)',
     estimatedHoursRange: { min: 16, max: 60 },
     suggestedMaterials: ['Merbau decking boards', 'Treated pine joists', 'Galvanized joist hangers', 'Deck screws', 'Concrete footings', 'Stirrups', 'Posts'],
+    promptQuestions: [
+      'How big roughly? (length x width or just small/medium/large)',
+      'How high off the ground?',
+      'What timber? (merbau, treated pine, composite)',
+      'Steps or stairs needed?',
+      'Handrails/balustrade needed?',
+    ],
+    aiContext: 'Deck construction: ~2hrs per m2 for standard height, add 50% for elevated decks. Merbau costs ~2x treated pine but lasts longer. Composite costs ~3x pine. Post footings: 2 bags concrete per post. Joist spacing 450mm centres. Decking boards: ~0.8 boards per m2 (90mm wide). Handrails/balustrades mandatory if >1m off ground. Steps add ~2hrs per step.',
   },
   {
     id: 'door_hanging',
@@ -348,6 +442,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'doors * 2',
     estimatedHoursRange: { min: 2, max: 8 },
     suggestedMaterials: ['Doors', 'Hinges', 'Door handles', 'Striker plates', 'Door stops', 'Architrave'],
+    promptQuestions: [
+      'How many doors?',
+      'Replacing existing or new openings?',
+      'Any special doors? (barn door, cavity slider, French doors)',
+      'New architraves/frames needed too?',
+    ],
+    aiContext: 'Door hanging: ~2hrs per standard hinged door replacement, ~3-4hrs for new openings (framing required). Cavity sliders need ~4hrs each including track install. Barn doors need header rail and stoppers. Standard door is 2040x820mm. Each door needs 3 hinges (100mm), 1 handle set, 1 striker plate. Architrave: 3 lengths per door (2 sides + head).',
   },
   {
     id: 'wardrobe_builtin',
@@ -375,6 +476,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'length * height * 3',
     estimatedHoursRange: { min: 12, max: 30 },
     suggestedMaterials: ['MDF sheets', 'Melamine boards', 'Hanging rails', 'Drawer runners', 'Shelf pins', 'Door tracks', 'Handles', 'Screws', 'Edging tape'],
+    promptQuestions: [
+      'How wide and tall?',
+      'Sliding doors or hinged?',
+      'How many drawers/shelves/hanging sections?',
+      'What finish? (melamine, painted MDF, timber veneer)',
+    ],
+    aiContext: 'Built-in wardrobe: ~3hrs per m2 of wardrobe face area. Sliding doors are quicker to install than hinged. Drawers add ~1hr each (including runners). Standard wardrobe height 2.4m. MDF sheets for structure, melamine for visible surfaces. Edging tape for all exposed board edges. Typical layout: 60% hanging, 20% shelves, 20% drawers.',
   },
 
   // ============================================
@@ -403,6 +511,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'area / 15', // 15 m² per hour
     estimatedHoursRange: { min: 4, max: 20 },
     suggestedMaterials: ['Interior paint', 'Primer/sealer', 'Drop sheets', 'Masking tape', 'Sandpaper', 'Sugar soap', 'Filler'],
+    promptQuestions: [
+      'How many rooms? Or roughly how much wall area?',
+      'Walls only or ceilings and trim too?',
+      'Current wall condition? (good, needs patching, needs stripping)',
+      'Any colour change? (light to dark or dark to light)',
+    ],
+    aiContext: 'Interior painting: ~15m2/hr for 2-coat system on good walls. Ceiling adds ~30% more time. Trim/skirting adds ~20%. Poor condition walls needing heavy patching double prep time. Dark-to-light colour changes need extra primer coat (3 coats total). Paint coverage: ~14m2/L for wall paint, ~12m2/L for ceiling. Typical room: ~40m2 wall area.',
   },
   {
     id: 'exterior_paint',
@@ -427,6 +542,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'area / 12', // Slower than interior
     estimatedHoursRange: { min: 8, max: 30 },
     suggestedMaterials: ['Exterior paint', 'Primer', 'Drop sheets', 'Masking tape', 'Sandpaper', 'Sugar soap', 'Filler', 'Scaffolding'],
+    promptQuestions: [
+      'How big is the house roughly? (single/double storey)',
+      'What\'s the surface? (weatherboard, render, brick)',
+      'Current condition? (peeling, chalky, good)',
+      'Scaffolding needed?',
+    ],
+    aiContext: 'Exterior painting: ~12m2/hr, slower than interior due to prep and access. Weatherboards need more prep (scraping, filling). Render is faster to paint but may need crack repair. Double-storey needs scaffolding — add hire cost and setup time (~2hrs). Paint coverage: ~12m2/L exterior grade. Typical single-storey house: ~150m2 wall area.',
   },
   {
     id: 'epoxy_garage_floor',
@@ -451,6 +573,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: '(area / 10) + 4', // Prep takes time
     estimatedHoursRange: { min: 6, max: 12 },
     suggestedMaterials: ['Epoxy coating kit', 'Primer', 'Concrete grinder discs', 'Roller', 'Brush', 'Paint tray', 'Degreaser'],
+    promptQuestions: [
+      'How big is the garage? (single, double, triple)',
+      'Current floor condition? (bare concrete, painted, stained)',
+      'Flake/chip finish or plain colour?',
+      'Any cracks to repair?',
+    ],
+    aiContext: 'Epoxy garage floor: significant prep time (~4hrs for grinding/degreasing). Single garage ~36m2, double ~54m2, triple ~72m2. Epoxy kit covers ~40m2 per kit. Previously painted floors need extra grinding. Flake finish adds ~$50-100 in materials. Crack repair with epoxy filler adds prep time. Must be done over 2 days (primer day 1, topcoat day 2).',
   },
 
   // ============================================
@@ -478,6 +607,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'area / 8', // 8 m² per hour
     estimatedHoursRange: { min: 6, max: 20 },
     suggestedMaterials: ['Floor polish/varnish', 'Sandpaper (various grits)', 'Wood filler', 'Drop sheets'],
+    promptQuestions: [
+      'How big is the area?',
+      'What type of timber? (if you know)',
+      'Current condition? (original, previously coated, damaged)',
+      'What finish? (gloss, satin, matte)',
+    ],
+    aiContext: 'Timber floor sand & polish: ~8m2/hr including 3 sanding passes (40, 80, 120 grit). Previously coated floors take longer to strip. Damaged boards may need replacement before sanding. Polish coverage: ~10m2/L per coat, 3 coats standard. Must allow 24hrs between coats. Typical house hallway+lounge: ~40-60m2.',
   },
   {
     id: 'hybrid_flooring_install',
@@ -500,6 +636,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'area / 12', // 12 m² per hour
     estimatedHoursRange: { min: 4, max: 16 },
     suggestedMaterials: ['Hybrid flooring planks', 'Underlay', 'Scotia/beading', 'Expansion foam', 'Floor adhesive'],
+    promptQuestions: [
+      'How big is the area?',
+      'What\'s being removed? (carpet, tiles, nothing)',
+      'Any transitions to other flooring types?',
+      'Underfloor heating?',
+    ],
+    aiContext: 'Hybrid flooring install: ~12m2/hr for floating install. Carpet removal adds ~1hr per 20m2. Tile removal is much slower (~4m2/hr) and adds disposal costs. Transition strips needed at doorways and flooring changes. Underfloor heating is compatible with most hybrid — check manufacturer specs. Allow 5-10% waste on planks. Underlay roll covers ~10m2.',
   },
   {
     id: 'carpet_install',
@@ -522,6 +665,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'area / 15', // 15 m² per hour
     estimatedHoursRange: { min: 3, max: 10 },
     suggestedMaterials: ['Carpet', 'Underlay', 'Gripper strips', 'Joining tape', 'Threshold strips'],
+    promptQuestions: [
+      'How big is the area? How many rooms?',
+      'Replacing existing carpet or new?',
+      'Any stairs?',
+      'Preference on carpet type? (plush, twist, loop)',
+    ],
+    aiContext: 'Carpet install: ~15m2/hr for flat areas. Stairs are much slower — ~20min per step. Existing carpet removal adds ~1hr per 20m2. Carpet sold by linear metre in standard widths (3.66m). Underlay: 1 roll per ~10m2. Gripper strips around all perimeters. Joins needed where room width exceeds carpet width. Threshold strips at every doorway.',
   },
 
   // ============================================
@@ -551,6 +701,13 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: '(bedrooms * 1.5) + (bathrooms * 2) + 4',
     estimatedHoursRange: { min: 6, max: 12 },
     suggestedMaterials: ['All-purpose cleaner', 'Glass cleaner', 'Bathroom cleaner', 'Oven cleaner', 'Microfiber cloths', 'Mop', 'Vacuum bags'],
+    promptQuestions: [
+      'How many bedrooms and bathrooms?',
+      'Carpet steam clean included?',
+      'Oven and rangehood clean?',
+      'Any outdoor areas? (balcony, garage)',
+    ],
+    aiContext: 'End-of-lease clean: ~1.5hrs per bedroom, ~2hrs per bathroom, +4hrs for kitchen/common areas. Carpet steam clean adds ~$30-50 per room and ~30min each. Oven deep clean adds ~1hr. Rangehood filter clean adds ~30min. Outdoor areas (balcony sweep/mop) add ~30min each. Must meet real estate inspection standards.',
   },
   {
     id: 'pressure_clean',
@@ -571,6 +728,97 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     estimatedHoursFormula: 'area / 50', // 50 m² per hour
     estimatedHoursRange: { min: 2, max: 8 },
     suggestedMaterials: ['Pressure washer detergent', 'Surface cleaner attachment', 'Fuel'],
+    promptQuestions: [
+      'What\'s being cleaned? (driveway, paths, walls, roof)',
+      'How big roughly?',
+      'What surface? (concrete, pavers, brick, tile, colorbond)',
+      'How dirty? (light, moderate, hasn\'t been done in years)',
+      'Sealer coat after?',
+    ],
+    aiContext: 'High-pressure cleaning rates depend on surface type and grime level. Concrete handles standard high pressure; pavers and sandstone need lower pressure. Oil stains need degreaser pre-treatment. Sealer coat adds ~50% more time and materials. Estimate 30-50m2 per hour depending on grime. Typical driveway: 30-60m2. Chemical usage: ~1L detergent concentrate per 200m2.',
+  },
+
+  // --- NEW: AI-guided cleaning templates (no requiredParams — description-driven) ---
+  {
+    id: 'roof_clean',
+    categoryId: 'cleaning',
+    nicheId: 'specialty',
+    name: 'Roof Cleaning',
+    description: 'Clean roof surface including moss and lichen removal',
+    icon: 'home-roof',
+    pricingMethod: 'per_sqm',
+    requiredParams: [],
+    defaultMaterials: [
+      { name: 'Roof Cleaning Solution', searchTerm: 'Roof cleaning solution concentrate 5L', quantityFormula: '2', unit: 'each' },
+      { name: 'Moss & Lichen Killer', searchTerm: 'Moss lichen killer concentrate 5L', quantityFormula: '1', unit: 'each' },
+      { name: 'Pressure Washer Detergent', searchTerm: 'Pressure washer detergent concentrate 5L', quantityFormula: '1', unit: 'each' },
+      { name: 'Safety Harness', searchTerm: 'Safety harness roof anchor kit', quantityFormula: '1', unit: 'each' },
+      { name: 'Petrol Fuel', searchTerm: 'Petrol fuel can 20L', quantityFormula: '1', unit: 'each' },
+    ],
+    estimatedHoursFormula: '6',
+    estimatedHoursRange: { min: 3, max: 12 },
+    suggestedMaterials: ['Roof cleaning solution', 'Moss/lichen killer', 'Pressure washer detergent', 'Safety harness', 'Fuel'],
+    promptQuestions: [
+      'What type of roof? (tile, colorbond, tin, flat)',
+      'How big roughly? (metres or just small/medium/large house)',
+      'How many stories?',
+      'How bad is the moss/dirt/lichen?',
+      'Gutters need doing too?',
+    ],
+    aiContext: 'Roof cleaning materials depend heavily on roof type. Tile roofs need more moss/lichen killer and softer pressure settings. Colorbond needs less chemicals but more care to avoid scratching. Estimate ~1L cleaning solution per 30m2 for moderate conditions, 1L per 20m2 for heavy. Add 1-2hrs for gutter cleaning. 2+ storey jobs need safety harness and take ~50% longer. Typical area: single storey house ~150m2 roof, double storey ~120m2 upper roof.',
+  },
+  {
+    id: 'house_wash',
+    categoryId: 'cleaning',
+    nicheId: 'specialty',
+    name: 'House Wash (Exterior Walls)',
+    description: 'Wash exterior walls and surfaces',
+    icon: 'home',
+    pricingMethod: 'per_sqm',
+    requiredParams: [],
+    defaultMaterials: [
+      { name: 'House Wash Solution', searchTerm: 'House wash cleaning solution concentrate 5L', quantityFormula: '2', unit: 'each' },
+      { name: 'Mould Treatment', searchTerm: 'Mould remover exterior spray 5L', quantityFormula: '1', unit: 'each' },
+      { name: 'Pressure Washer Detergent', searchTerm: 'Pressure washer detergent concentrate 5L', quantityFormula: '1', unit: 'each' },
+      { name: 'Petrol Fuel', searchTerm: 'Petrol fuel can 20L', quantityFormula: '1', unit: 'each' },
+    ],
+    estimatedHoursFormula: '5',
+    estimatedHoursRange: { min: 3, max: 10 },
+    suggestedMaterials: ['House wash solution', 'Mould treatment', 'Pressure washer detergent', 'Fuel'],
+    promptQuestions: [
+      'What are the walls made of? (brick, render, weatherboard, vinyl)',
+      'How big is the house roughly?',
+      'How many stories?',
+      'How dirty? (light dust, moderate grime, heavy mould)',
+      'Windows need cleaning too?',
+    ],
+    aiContext: 'Wall material determines chemical selection and pressure settings. Brick and render handle high pressure; weatherboard and vinyl need softer wash. Estimate ~1L house wash solution per 50m2. Rendered walls often need mould treatment. Window cleaning adds ~30min per 10 windows. Typical house perimeter: 40-60 linear metres, wall height per storey ~2.7m.',
+  },
+  {
+    id: 'driveway_pressure_wash',
+    categoryId: 'cleaning',
+    nicheId: 'specialty',
+    name: 'Driveway/Patio Pressure Wash',
+    description: 'Pressure wash driveway or patio surface',
+    icon: 'water-pump',
+    pricingMethod: 'per_sqm',
+    requiredParams: [],
+    defaultMaterials: [
+      { name: 'Pressure Washer Detergent', searchTerm: 'Pressure washer detergent concentrate 5L', quantityFormula: '1', unit: 'each' },
+      { name: 'Concrete Degreaser', searchTerm: 'Concrete degreaser cleaner 5L', quantityFormula: '1', unit: 'each' },
+      { name: 'Concrete Sealer', searchTerm: 'Concrete sealer clear 10L', quantityFormula: '1', unit: 'each' },
+      { name: 'Petrol Fuel', searchTerm: 'Petrol fuel can 20L', quantityFormula: '1', unit: 'each' },
+    ],
+    estimatedHoursFormula: '4',
+    estimatedHoursRange: { min: 2, max: 8 },
+    suggestedMaterials: ['Pressure washer detergent', 'Concrete degreaser', 'Concrete sealer', 'Fuel'],
+    promptQuestions: [
+      'What surface? (concrete, pavers, sandstone, exposed aggregate)',
+      'How big roughly? (metres or car spaces)',
+      'How dirty? (light, moderate, oil stains, heavy grime)',
+      'Sealer coat wanted after?',
+    ],
+    aiContext: 'Surface type determines detergent and technique. Concrete and exposed aggregate handle standard high pressure. Sandstone and pavers need lower pressure and specific cleaners. Oil stains need degreaser pre-treatment. Sealer coat adds materials and ~50% more time. Typical driveway: 30-60m2. Typical patio: 15-30m2. Estimate 30-50m2 per hour depending on grime level.',
   },
 ];
 

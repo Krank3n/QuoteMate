@@ -883,8 +883,44 @@ export function JobDetailsScreen() {
       return;
     }
 
-    // Validate parameters are filled in
+    // TEMPLATE + AI MODE: Template with prompt questions + user description → AI path
     const nicheTemplate = selectedTemplate as NicheJobTemplate;
+    if (nicheTemplate?.promptQuestions?.length &&
+        (!nicheTemplate.requiredParams || nicheTemplate.requiredParams.length === 0) &&
+        jobDescription.trim()) {
+      const job = {
+        id: generateId(),
+        name: jobName || selectedTemplate.name,
+        description: jobDescription,
+        template: selectedTemplate.id as any,
+        estimatedHours: nicheTemplate.estimatedHoursRange?.max || 8,
+      };
+
+      const updatedQuote = {
+        ...currentQuote,
+        job,
+        materials: [],
+        laborHours: nicheTemplate.estimatedHoursRange?.max || 8,
+        aiSkipped: false,
+        draftStep: 'CustomerDetails',
+        photos: jobPhotos,
+        // Store template context for AI analysis on MaterialsList screen
+        templateContext: {
+          templateName: selectedTemplate.name,
+          promptQuestions: nicheTemplate.promptQuestions,
+          aiContext: nicheTemplate.aiContext,
+          estimatedHoursRange: nicheTemplate.estimatedHoursRange,
+          suggestedMaterials: nicheTemplate.suggestedMaterials,
+        },
+      };
+
+      updateQuote(updatedQuote);
+      saveDraft(updatedQuote);
+      navigation.navigate('CustomerDetails');
+      return;
+    }
+
+    // TEMPLATE FORMULA MODE: Validate parameters are filled in
     if (nicheTemplate.requiredParams && nicheTemplate.requiredParams.length > 0) {
       const missingParams = nicheTemplate.requiredParams.filter(
         param => !customParams[param.key] || customParams[param.key] === 0
@@ -1080,7 +1116,13 @@ export function JobDetailsScreen() {
                   setUseCustomMode(false);
                   setSelectedTemplate(template);
                   setJobName(template.name);
-                  setJobDescription(template.description);
+                  // Clear description for AI-guided templates (promptQuestions + no requiredParams)
+                  // so the user writes/dictates their own description guided by prompt hints
+                  if (template.promptQuestions?.length && (!template.requiredParams || template.requiredParams.length === 0)) {
+                    setJobDescription('');
+                  } else {
+                    setJobDescription(template.description);
+                  }
 
                   if (template.requiredParams && template.requiredParams.length > 0) {
                     const params: Record<string, number> = {};
@@ -1131,6 +1173,19 @@ export function JobDetailsScreen() {
             Enter the measurements for this {selectedTemplate.name.toLowerCase()} job.
           </Text>
 
+          {/* Prompt questions as hints above param inputs */}
+          {(selectedTemplate as NicheJobTemplate).promptQuestions && (selectedTemplate as NicheJobTemplate).promptQuestions!.length > 0 && (
+            <View style={styles.promptQuestionsCard}>
+              <View style={styles.promptQuestionsHeader}>
+                <MaterialCommunityIcons name="lightbulb-outline" size={16} color={colors.secondary} />
+                <Text style={styles.promptQuestionsHeaderText}>Think about:</Text>
+              </View>
+              {(selectedTemplate as NicheJobTemplate).promptQuestions!.map((q, i) => (
+                <Text key={i} style={styles.promptQuestionText}>• {q}</Text>
+              ))}
+            </View>
+          )}
+
           {(selectedTemplate as NicheJobTemplate).requiredParams.map((param) => (
             <View key={param.key} style={styles.paramInputContainer}>
               <TextInput
@@ -1160,6 +1215,19 @@ export function JobDetailsScreen() {
           <Text style={styles.helperText}>
             Hit the mic and tell us what needs doing, or bash it out on the keyboard.
           </Text>
+
+          {/* Prompt questions as hints in description mode (for AI-guided templates) */}
+          {!useCustomMode && selectedTemplate && (selectedTemplate as NicheJobTemplate).promptQuestions && (selectedTemplate as NicheJobTemplate).promptQuestions!.length > 0 && (
+            <View style={styles.promptQuestionsCard}>
+              <View style={styles.promptQuestionsHeader}>
+                <MaterialCommunityIcons name="lightbulb-outline" size={16} color={colors.secondary} />
+                <Text style={styles.promptQuestionsHeaderText}>Think about:</Text>
+              </View>
+              {(selectedTemplate as NicheJobTemplate).promptQuestions!.map((q, i) => (
+                <Text key={i} style={styles.promptQuestionText}>• {q}</Text>
+              ))}
+            </View>
+          )}
 
         {/* Beautiful Record Button */}
         {(
@@ -1369,8 +1437,8 @@ export function JobDetailsScreen() {
         />
         </View>
 
-        {/* Job Photos */}
-        {useCustomMode && (
+        {/* Job Photos — show in custom mode or template-guided AI mode */}
+        {(useCustomMode || (!useCustomMode && selectedTemplate && (selectedTemplate as NicheJobTemplate).promptQuestions?.length && !(selectedTemplate as NicheJobTemplate).requiredParams?.length)) && (
           <>
             <View ref={jobPhotosRef}>
             <JobPhotos
@@ -1923,5 +1991,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textMuted,
     flex: 1,
+  },
+  promptQuestionsCard: {
+    backgroundColor: colors.warningBg || '#FFF8E1',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+  promptQuestionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  promptQuestionsHeaderText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.secondary,
+  },
+  promptQuestionText: {
+    fontSize: 13,
+    color: colors.onSurface,
+    lineHeight: 20,
+    paddingLeft: 4,
   },
 });
