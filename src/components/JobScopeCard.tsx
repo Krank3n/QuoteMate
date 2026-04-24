@@ -173,52 +173,51 @@ export function JobScopeCard({
             </Text>
           </View>
         </View>
-        <Pressable
-          onPress={handleToggle}
-          hitSlop={10}
-          style={({ pressed }) => [
-            styles.expandButton,
-            pressed && styles.expandButtonPressed,
-          ]}
-          accessibilityLabel={expanded ? 'Hide details' : 'Show details'}
-        >
-          <MaterialCommunityIcons
-            name={(expanded ? 'chevron-up' : 'chevron-down') as any}
-            size={20}
-            color={colors.textMuted}
-          />
-        </Pressable>
-      </View>
-
-      <View style={styles.chipRow}>
-        {onStagePress ? (
+        <View style={styles.headerRight}>
+          {onStagePress ? (
+            <Pressable
+              onPress={() => {
+                selectionTap();
+                onStagePress(doc);
+              }}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.stageChip,
+                {
+                  backgroundColor: meta.bgColor,
+                  borderColor: meta.color + '44',
+                },
+                pressed && styles.pressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={meta.icon as any}
+                size={12}
+                color={meta.color}
+              />
+              <Text style={[styles.stageLabel, { color: meta.color }]}>
+                {meta.chipLabel}
+                {stageAgoLabel(doc) ? ` · ${stageAgoLabel(doc)}` : ''}
+              </Text>
+            </Pressable>
+          ) : null}
+          <PaymentChip doc={doc} onPress={onPaymentPress} />
           <Pressable
-            onPress={() => {
-              selectionTap();
-              onStagePress(doc);
-            }}
-            hitSlop={6}
+            onPress={handleToggle}
+            hitSlop={10}
             style={({ pressed }) => [
-              styles.stageChip,
-              {
-                backgroundColor: meta.bgColor,
-                borderColor: meta.color + '44',
-              },
-              pressed && styles.pressed,
+              styles.expandButton,
+              pressed && styles.expandButtonPressed,
             ]}
+            accessibilityLabel={expanded ? 'Hide details' : 'Show details'}
           >
             <MaterialCommunityIcons
-              name={meta.icon as any}
-              size={12}
-              color={meta.color}
+              name={(expanded ? 'chevron-up' : 'chevron-down') as any}
+              size={20}
+              color={colors.textMuted}
             />
-            <Text style={[styles.stageLabel, { color: meta.color }]}>
-              {meta.chipLabel}
-              {stageAgoLabel(doc) ? ` · ${stageAgoLabel(doc)} ago` : ''}
-            </Text>
           </Pressable>
-        ) : null}
-        <PaymentChip doc={doc} onPress={onPaymentPress} />
+        </View>
       </View>
 
       <ScopeRow
@@ -472,6 +471,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     flex: 1,
+    minWidth: 0,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
   },
   typeBadge: {
     width: 32,
@@ -506,13 +512,6 @@ const styles = StyleSheet.create({
   },
   expandButtonPressed: {
     backgroundColor: colors.surfaceGray3,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    gap: 6,
-    alignItems: 'center',
-    paddingHorizontal: 2,
-    flexWrap: 'wrap',
   },
   stageChip: {
     flexDirection: 'row',

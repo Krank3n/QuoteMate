@@ -6,8 +6,16 @@
  * count, and last-updated timestamp. Tap → ViewJobScreen.
  */
 
-import React from 'react';
-import { View, StyleSheet, Pressable, Linking, Platform, Alert } from 'react-native';
+import React, { useRef, useEffect } from 'react';
+import {
+  View,
+  StyleSheet,
+  Pressable,
+  Linking,
+  Platform,
+  Alert,
+  Animated,
+} from 'react-native';
 import { Text, Card } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { formatDistanceToNow } from 'date-fns';
@@ -116,6 +124,47 @@ function formatUpdatedAt(ms: number): string {
 export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress, onMenuPress }: JobCardProps) {
   const meta = JOB_STAGE_META[job.stage];
   const headline = pickHeadlineAmount(job);
+
+  // Idle bob + tilt — ported from the old DocumentCard so the list
+  // feels alive rather than static. Each card picks its own duration
+  // and direction so the stack doesn't breathe in lockstep.
+  const idleAnim = useRef(new Animated.Value(0)).current;
+  const idleTilt = useRef(new Animated.Value(0)).current;
+  const bobDurationRef = useRef(2400 + Math.random() * 1200);
+  const tiltDurationRef = useRef(3200 + Math.random() * 1600);
+  const tiltDirRef = useRef(Math.random() > 0.5 ? 1 : -1);
+  const delayRef = useRef(Math.random() * 1500);
+
+  useEffect(() => {
+    const bobD = bobDurationRef.current;
+    const tiltD = tiltDurationRef.current;
+    const tiltDir = tiltDirRef.current;
+
+    const bobAnim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(idleAnim, { toValue: -2, duration: bobD / 2, useNativeDriver: true }),
+        Animated.timing(idleAnim, { toValue: 0, duration: bobD / 2, useNativeDriver: true }),
+      ]),
+    );
+    const tiltAnim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(idleTilt, { toValue: 0.4 * tiltDir, duration: tiltD / 2, useNativeDriver: true }),
+        Animated.timing(idleTilt, { toValue: -0.4 * tiltDir, duration: tiltD, useNativeDriver: true }),
+        Animated.timing(idleTilt, { toValue: 0, duration: tiltD / 2, useNativeDriver: true }),
+      ]),
+    );
+    const timer = setTimeout(() => {
+      bobAnim.start();
+      tiltAnim.start();
+    }, delayRef.current);
+    return () => {
+      clearTimeout(timer);
+      bobAnim.stop();
+      tiltAnim.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Pull the primary attached doc so duration on the card matches the
   // labour quoted on the linked Document — single source of truth.
   const primaryDoc = useStore((s) =>
@@ -138,8 +187,37 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
   const terminal = job.stage === 'cancelled' || job.stage === 'closed';
 
   return (
-    <Card style={styles.card} onPress={() => { selectionTap(); onPress(job.id); }}>
-      <View style={styles.cardContent}>
+    <Animated.View
+      style={{
+        transform: [
+          { translateY: idleAnim },
+          {
+            rotate: idleTilt.interpolate({
+              inputRange: [-1, 1],
+              outputRange: ['-1deg', '1deg'],
+            }),
+          },
+        ],
+      }}
+    >
+      <Card
+        style={[
+          styles.card,
+          // Stage-tinted accent — left stripe in the full stage color
+          // plus the card body in the muted `*Bg` variant. Keeps the
+          // list scannable at a glance without being garish.
+          {
+            borderLeftColor: meta.color,
+            borderLeftWidth: 4,
+            backgroundColor: meta.bgColor,
+          },
+        ]}
+        onPress={() => {
+          selectionTap();
+          onPress(job.id);
+        }}
+      >
+        <View style={styles.cardContent}>
         <View style={styles.topRow}>
           <View style={styles.titleBlock}>
             <Text style={styles.jobName} numberOfLines={1}>
@@ -289,8 +367,9 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
             </View>
           ) : null}
         </View>
-      </View>
-    </Card>
+        </View>
+      </Card>
+    </Animated.View>
   );
 });
 

@@ -7,7 +7,7 @@
  * Stage chip → JobStageSheet.
  */
 
-import React, { useState, useMemo, useLayoutEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, StyleSheet, Alert, Pressable, Linking, Platform } from 'react-native';
 import { NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { Text, Card, Button, TextInput } from 'react-native-paper';
@@ -36,7 +36,6 @@ import { JobPhotoStrip } from '../components/JobPhotoStrip';
 import { JobChecklist } from '../components/JobChecklist';
 import { PaymentSheet } from '../components/PaymentSheet';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
-import { CustomerEditSheet } from '../components/CustomerEditSheet';
 import {
   StickyJobActionBar,
   pickPrimaryDoc,
@@ -89,7 +88,6 @@ export function ViewJobScreen() {
   const [docStageSheetDoc, setDocStageSheetDoc] = useState<Document | null>(null);
   const [paymentSheetDoc, setPaymentSheetDoc] = useState<Document | null>(null);
   const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
-  const [customerSheetVisible, setCustomerSheetVisible] = useState(false);
   const [actionsSheetVisible, setActionsSheetVisible] = useState(false);
   const [takePaymentTarget, setTakePaymentTarget] = useState<TakePaymentTarget | null>(null);
   const [sendDialogDoc, setSendDialogDoc] = useState<Document | null>(null);
@@ -504,31 +502,6 @@ export function ViewJobScreen() {
     }
   };
 
-  // Kebab in the nav header — opens the Actions sheet.
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <Pressable
-          onPress={() => {
-            selectionTap();
-            setActionsSheetVisible(true);
-          }}
-          hitSlop={10}
-          style={({ pressed }) => [
-            styles.headerActionButton,
-            pressed && { opacity: 0.7 },
-          ]}
-          accessibilityLabel="Actions"
-        >
-          <MaterialCommunityIcons
-            name={'dots-vertical' as any}
-            size={22}
-            color={colors.white}
-          />
-        </Pressable>
-      ),
-    });
-  }, [navigation]);
 
   // The ONE way to enter the scope/materials/labor editor. Seeds the
   // wizard's `currentQuote` / `currentInvoice` with this doc (the
@@ -566,6 +539,22 @@ export function ViewJobScreen() {
     navigation.navigate('NewQuote', {
       screen: QUOTE_STEP_MAP[step],
       params: { editing: true },
+    });
+  };
+
+  // Customer edit lives in the wizard's CustomerDetails step — one
+  // editor surface, not two. If there's a primary doc we seed it
+  // with that doc's customer fields; otherwise we kick the tradie
+  // into a fresh quote with the job's customer carried across.
+  const openCustomerEditor = () => {
+    selectionTap();
+    if (primaryDoc) {
+      openEditorForDoc(primaryDoc, 'customer');
+      return;
+    }
+    navigation.navigate('NewQuote', {
+      screen: 'CustomerDetails',
+      params: { jobId: job.id, editing: true },
     });
   };
 
@@ -642,10 +631,7 @@ export function ViewJobScreen() {
 
                 {customerIsUnknown ? (
                   <Pressable
-                    onPress={() => {
-                      selectionTap();
-                      setCustomerSheetVisible(true);
-                    }}
+                    onPress={openCustomerEditor}
                     hitSlop={6}
                     style={({ pressed }) => [
                       styles.assignCustomer,
@@ -661,10 +647,7 @@ export function ViewJobScreen() {
                   </Pressable>
                 ) : (
                   <Pressable
-                    onPress={() => {
-                      selectionTap();
-                      setCustomerSheetVisible(true);
-                    }}
+                    onPress={openCustomerEditor}
                     hitSlop={4}
                     style={({ pressed }) => [pressed && { opacity: 0.7 }]}
                   >
@@ -727,27 +710,47 @@ export function ViewJobScreen() {
                 ) : null}
               </View>
 
-              <Pressable
-                onPress={() => {
-                  selectionTap();
-                  setStageSheetVisible(true);
-                }}
-                hitSlop={8}
-                style={({ pressed }) => [
-                  styles.stageChip,
-                  { backgroundColor: meta.bgColor, borderColor: meta.color + '55' },
-                  pressed && { opacity: 0.7 },
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name={meta.icon as any}
-                  size={14}
-                  color={meta.color}
-                />
-                <Text style={[styles.stageLabel, { color: meta.color }]}>
-                  {meta.chipLabel}
-                </Text>
-              </Pressable>
+              <View style={styles.headerChipsCol}>
+                <Pressable
+                  onPress={() => {
+                    selectionTap();
+                    setStageSheetVisible(true);
+                  }}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.stageChip,
+                    { backgroundColor: meta.bgColor, borderColor: meta.color + '55' },
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name={meta.icon as any}
+                    size={14}
+                    color={meta.color}
+                  />
+                  <Text style={[styles.stageLabel, { color: meta.color }]}>
+                    {meta.chipLabel}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    selectionTap();
+                    setActionsSheetVisible(true);
+                  }}
+                  hitSlop={10}
+                  style={({ pressed }) => [
+                    styles.headerKebab,
+                    pressed && styles.headerKebabPressed,
+                  ]}
+                  accessibilityLabel="Actions"
+                >
+                  <MaterialCommunityIcons
+                    name={'dots-vertical' as any}
+                    size={20}
+                    color={colors.textMuted}
+                  />
+                </Pressable>
+              </View>
             </View>
 
             {completedAt ? (
@@ -978,11 +981,6 @@ export function ViewJobScreen() {
         />
       ) : null}
 
-      <CustomerEditSheet
-        visible={customerSheetVisible}
-        onDismiss={() => setCustomerSheetVisible(false)}
-        job={job}
-      />
     </View>
   );
 }
@@ -1084,9 +1082,19 @@ const styles = StyleSheet.create({
   // Extra bottom pad clears the pinned StickyJobActionBar so the last
   // section (danger zone) isn't hidden behind it.
   scrollContent: { paddingBottom: 160 },
-  headerActionButton: {
-    marginRight: 8,
-    padding: 6,
+  headerChipsCol: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  headerKebab: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerKebabPressed: {
+    backgroundColor: colors.surfaceGray3,
   },
   moneyCard: {
     marginHorizontal: 16,
