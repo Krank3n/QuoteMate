@@ -202,13 +202,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
       }}
     >
       <Card
-        style={[
-          styles.card,
-          // Neutral base + left accent stripe in the full stage color.
-          // The animated shimmer below carries the stage-coloured tint
-          // so the card has life without being visually loud.
-          { borderLeftColor: meta.color, borderLeftWidth: 4 },
-        ]}
+        style={styles.card}
         onPress={() => {
           selectionTap();
           onPress(job.id);
@@ -279,7 +273,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
             >
               <MaterialCommunityIcons
                 name={'dots-vertical' as any}
-                size={20}
+                size={24}
                 color={colors.textMuted}
               />
             </Pressable>
@@ -421,13 +415,9 @@ function JobStageTimeline({ job }: { job: Job }) {
               >
                 <MaterialCommunityIcons
                   name={step.icon as any}
-                  size={12}
+                  size={14}
                   color={
-                    isCurrent
-                      ? colors.white
-                      : reached
-                        ? colors.success
-                        : colors.inactive
+                    reached || isCurrent ? colors.white : colors.inactive
                   }
                 />
               </View>
@@ -501,11 +491,12 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   menuButton: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 16,
+    borderRadius: 22,
+    marginRight: -6, // pull back so the touch target doesn't push the chip
   },
   menuButtonPressed: {
     backgroundColor: colors.surfaceGray3,
@@ -591,9 +582,9 @@ const styles = StyleSheet.create({
     width: 44,
   },
   timelineDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surfaceGray3,
@@ -601,12 +592,15 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   timelineDotReached: {
-    backgroundColor: colors.successBg,
-    borderColor: colors.success + '55',
+    // White icon on full-strength stage colour — high contrast against
+    // the shimmer-tinted card so the progress is immediately readable.
+    backgroundColor: colors.success,
+    borderColor: colors.success,
   },
   timelineDotCurrent: {
     backgroundColor: colors.success,
-    borderColor: colors.success,
+    borderColor: colors.white,
+    borderWidth: 2,
   },
   timelineLabel: {
     fontSize: 9,
@@ -615,21 +609,22 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   timelineLabelReached: {
-    color: colors.textMuted,
+    color: colors.text,
+    fontWeight: '600',
   },
   timelineLabelCurrent: {
     color: colors.text,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   timelineConnector: {
     flex: 1,
-    height: 2,
+    height: 3,
     backgroundColor: colors.border,
     marginHorizontal: 2,
-    marginBottom: 13, // align with the dot center (22px tall + 3 gap + label)
-    borderRadius: 1,
+    marginBottom: 13, // align with the dot centre
+    borderRadius: 1.5,
   },
   timelineConnectorReached: {
-    backgroundColor: colors.success + '88',
+    backgroundColor: colors.success,
   },
 });
