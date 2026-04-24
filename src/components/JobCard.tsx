@@ -357,7 +357,10 @@ function JobStageTimeline({ job }: { job: Job }) {
                   name={step.icon as any}
                   size={14}
                   color={
-                    reached || isCurrent ? colors.white : colors.inactive
+                    // Reached / current dots render on bright
+                    // colors.success; a dark icon reads cleanly
+                    // without being glaring against the dark theme.
+                    reached || isCurrent ? colors.background : colors.inactive
                   }
                 />
               </View>
