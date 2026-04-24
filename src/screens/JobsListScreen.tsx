@@ -28,7 +28,7 @@ import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaym
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
-import { documentToInvoice } from '../types/documentAdapter';
+import { documentToInvoice, documentToQuote } from '../types/documentAdapter';
 import type { Document } from '../types/document';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
@@ -78,6 +78,8 @@ export function JobsListScreen() {
   const xeroConnection = useStore((s) => s.xeroConnection);
   const pushInvoiceToXero = useStore((s) => s.pushInvoiceToXero);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  const setCurrentQuote = useStore((s) => s.setCurrentQuote);
+  const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterKind>('active');
@@ -180,6 +182,26 @@ export function JobsListScreen() {
   const handleActionSelect = async (action: JobAction, job: Job) => {
     setActionsSheetJob(null);
     switch (action) {
+      case 'edit': {
+        const doc = primaryDocForJob(job);
+        if (!doc) return;
+        // Seed the wizard store with the doc, then jump into the
+        // materials step. Mirrors ViewJob's editor entry — one path.
+        if (doc.type === 'invoice') {
+          setCurrentInvoice(documentToInvoice(doc));
+          navigation.navigate('NewInvoice', {
+            screen: 'MaterialsList',
+            params: { editing: true },
+          });
+        } else {
+          setCurrentQuote(documentToQuote(doc));
+          navigation.navigate('NewQuote', {
+            screen: 'MaterialsList',
+            params: { editing: true },
+          });
+        }
+        break;
+      }
       case 'send': {
         const doc = primaryDocForJob(job);
         if (doc) setSendDialogDoc(doc);

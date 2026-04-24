@@ -22,6 +22,7 @@ import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 
 export type JobAction =
+  | 'edit'
   | 'send'
   | 'takePayment'
   | 'duplicate'
@@ -56,6 +57,13 @@ interface RowDef {
 }
 
 const ROWS: RowDef[] = [
+  {
+    id: 'edit',
+    label: 'Edit scope & pricing',
+    sub: 'Change materials, labour, or markup',
+    icon: 'pencil-outline',
+    when: ({ primaryDoc }) => !!primaryDoc,
+  },
   {
     id: 'send',
     label: 'Send',

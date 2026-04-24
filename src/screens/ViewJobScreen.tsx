@@ -43,6 +43,7 @@ import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaym
 import { SendDocumentDialog } from '../components/SendDocumentDialog';
 import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import type { Document, DocumentStage } from '../types/document';
+import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { applyStageChange } from '../utils/applyStageChange';
 import {
   formatScheduledDateLong,
@@ -69,6 +70,8 @@ export function ViewJobScreen() {
     subscriptionStatus,
     businessSettings,
     duplicateDocumentForJob,
+    setCurrentQuote,
+    setCurrentInvoice,
   } = useStore();
   const duplicateJob = useJobStore((s) => s.duplicateJob);
 
@@ -254,11 +257,11 @@ export function ViewJobScreen() {
         case 'continueQuote':
         case 'editQuote':
           if (actionableDoc) {
-            // Jump straight into the editor — one hop, not via preview.
-            navigation.navigate('NewQuote', {
-              jobId: job.id,
-              quoteId: actionableDoc.id,
-            });
+            // Jump straight into the scope editor (materials). For
+            // drafts the user likely wants to tweak the price; for
+            // accepted docs they may want to revise before resend.
+            // Either way materials is the right landing step.
+            openEditorForDoc(actionableDoc, 'materials');
           }
           break;
         case 'sendQuote':
@@ -432,14 +435,11 @@ export function ViewJobScreen() {
     ]);
   };
 
-  // Document-row handlers — mirror DocumentsListScreen so the cards behave
-  // the same as on the list.
+  // Tap a doc row → jump into the scope editor (materials step is the
+  // most common "change the price" target). This screen is already the
+  // "view" — there's nowhere to route to — so tap = edit.
   const handleDocView = (doc: Document) => {
-    if (doc.type === 'invoice') {
-      navigation.navigate('ViewInvoice', { invoiceId: doc.id });
-    } else {
-      navigation.navigate('ViewQuote', { quoteId: doc.id });
-    }
+    openEditorForDoc(doc, 'materials');
   };
 
   const handleDocRecordPayment = (doc: Document) => {
@@ -450,6 +450,45 @@ export function ViewJobScreen() {
   // inline, same flow the sticky bar triggers. No navigation away.
   const handleDocSend = (doc: Document) => {
     setSendDialogDoc(doc);
+  };
+
+  // The ONE way to enter the scope/materials/labor editor. Seeds the
+  // wizard's `currentQuote` / `currentInvoice` with this doc (the
+  // wizard screens read off those store slots, not route params), then
+  // navigates into the nested NewQuote / NewInvoice stack at the
+  // chosen step. Called from: doc row tap, sticky-bar Edit button, and
+  // the kebab's Edit row.
+  type WizardStep = 'customer' | 'job' | 'materials' | 'labor';
+  const QUOTE_STEP_MAP: Record<WizardStep, string> = {
+    customer: 'CustomerDetails',
+    job: 'JobDetails',
+    materials: 'MaterialsList',
+    labor: 'LaborMarkup',
+  };
+  const INVOICE_STEP_MAP: Record<Exclude<WizardStep, 'customer' | 'job'>, string> = {
+    materials: 'MaterialsList',
+    labor: 'LaborMarkup',
+  };
+  const openEditorForDoc = (doc: Document, step: WizardStep = 'materials') => {
+    if (doc.type === 'invoice') {
+      const invoice = documentToInvoice(doc);
+      setCurrentInvoice(invoice);
+      const target =
+        step === 'materials' || step === 'labor'
+          ? INVOICE_STEP_MAP[step]
+          : 'MaterialsList';
+      navigation.navigate('NewInvoice', {
+        screen: target,
+        params: { editing: true },
+      });
+      return;
+    }
+    const quote = documentToQuote(doc);
+    setCurrentQuote(quote);
+    navigation.navigate('NewQuote', {
+      screen: QUOTE_STEP_MAP[step],
+      params: { editing: true },
+    });
   };
 
   // Card quick-action — open the shared Square sheet (tap-to-pay + share
