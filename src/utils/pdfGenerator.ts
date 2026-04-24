@@ -339,6 +339,34 @@ export async function exportDocumentPDF(
 // LEGACY WRAPPERS — kept for callers still holding Quote/Invoice values
 // ============================================================
 
+/**
+ * Open the doc in the OS native PDF preview (iOS print sheet / Android
+ * print preview / web browser print dialog). No "export" or "share"
+ * step — this is pure look-at-it. Use when the tradie wants to see
+ * what the customer will see before committing to send.
+ */
+export async function previewDocumentPDF(
+  doc: Document,
+  businessSettings: BusinessSettings | null,
+  options?: { isPro?: boolean },
+): Promise<void> {
+  const html = await generateDocumentPDF(doc, businessSettings, options);
+  if (Platform.OS === 'web') {
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+      return;
+    }
+    Alert.alert('Error', 'Please allow popups to preview the PDF.');
+    return;
+  }
+  // iOS: shows the AirPrint-style preview with zoom + share.
+  // Android: same — opens the system print preview UI.
+  await Print.printAsync({ html });
+}
+
 export async function generateQuotePDF(quote: Quote, businessSettings: BusinessSettings | null, options?: { isPro?: boolean }): Promise<string> {
   return generateDocumentPDF(quoteToDocument(quote), businessSettings, options);
 }
