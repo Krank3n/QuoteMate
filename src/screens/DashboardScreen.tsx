@@ -416,7 +416,26 @@ export function DashboardScreen() {
   const handleNewQuote = handleNewJob;
 
   const handleViewQuote = (quoteId: string) => {
-    navigation.navigate('ViewQuote' as never, { quoteId } as never);
+    // Post-UX-collapse: ViewQuote/ViewInvoice are gone. Look up the
+    // job that this quote is attached to and navigate to ViewJob. The
+    // quote↔job link lives on quote.jobId (Phase-8+), with a fallback
+    // via jobs.find for legacy docs.
+    const q = quotes.find((x) => x.id === quoteId);
+    const jobId = (q as any)?.jobId;
+    if (jobId) {
+      navigation.navigate('ViewJob' as never, { jobId } as never);
+      return;
+    }
+    // No linked job — open the scope editor instead so the user can
+    // work with the quote directly. ensureJobForQuote will fire on
+    // next save and stitch things together.
+    if (q) {
+      setCurrentQuote(q);
+      navigation.navigate('NewQuote' as never, {
+        screen: 'MaterialsList',
+        params: { editing: true },
+      } as never);
+    }
   };
 
   const handleEditQuote = (quote: Quote, section?: 'customer' | 'job' | 'materials' | 'labor') => {

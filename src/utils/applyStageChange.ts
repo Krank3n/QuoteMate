@@ -52,7 +52,14 @@ export async function applyStageChange(
     const quote = documentToQuote(doc);
     const invoice = await helpers.createInvoiceFromQuote(quote);
     await helpers.saveInvoice(invoice);
-    helpers.navigation?.navigate('ViewInvoice', { invoiceId: invoice.id });
+    // Navigate back to the Job (the single detail screen post-UX
+    // collapse). The invoice inherits jobId from the quote on
+    // creation — if it's missing we stay where we are and let the
+    // caller decide.
+    const jobId = (invoice as any).jobId ?? doc.jobId;
+    if (jobId) {
+      helpers.navigation?.navigate('ViewJob', { jobId });
+    }
     return;
   }
 

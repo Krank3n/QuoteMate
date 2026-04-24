@@ -17,7 +17,6 @@ import { JobsListScreen } from '../screens/JobsListScreen';
 import { ViewJobScreen } from '../screens/ViewJobScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
-import { LegacyDocRedirect } from '../screens/LegacyDocRedirect';
 import { RecordPaymentScreen } from '../screens/RecordPaymentScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
 
@@ -479,20 +478,6 @@ export function RootNavigator() {
       }}
     >
       <RootStack.Screen name="Main" component={MainTabs} />
-      {/* Legacy quote/invoice routes retire to a redirect-and-forward
-          component. Existing deep-links / bookmarks still land here,
-          but we auto-ensure a Job and navigation.replace into ViewJob
-          so the tradie never sees two paths for the same entity. */}
-      <RootStack.Screen
-        name="ViewQuote"
-        component={LegacyDocRedirect}
-        options={{ presentation: 'card', headerShown: false }}
-      />
-      <RootStack.Screen
-        name="ViewInvoice"
-        component={LegacyDocRedirect}
-        options={{ presentation: 'card', headerShown: false }}
-      />
       <RootStack.Screen
         name="ViewJob"
         component={ViewJobScreen}

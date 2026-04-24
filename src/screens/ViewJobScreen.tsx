@@ -22,6 +22,7 @@ import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { WebContainer } from '../components/WebContainer';
 import { DocumentRow } from '../components/DocumentRow';
+import { JobScopeCard, type ScopeStep } from '../components/JobScopeCard';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
 import {
@@ -435,21 +436,8 @@ export function ViewJobScreen() {
     ]);
   };
 
-  // Tap a doc row → jump into the scope editor (materials step is the
-  // most common "change the price" target). This screen is already the
-  // "view" — there's nowhere to route to — so tap = edit.
-  const handleDocView = (doc: Document) => {
-    openEditorForDoc(doc, 'materials');
-  };
-
   const handleDocRecordPayment = (doc: Document) => {
     navigation.navigate('RecordPayment', { invoiceId: doc.id });
-  };
-
-  // Envelope quick-action on a doc row — open the shared send dialog
-  // inline, same flow the sticky bar triggers. No navigation away.
-  const handleDocSend = (doc: Document) => {
-    setSendDialogDoc(doc);
   };
 
   // The ONE way to enter the scope/materials/labor editor. Seeds the
@@ -488,33 +476,6 @@ export function ViewJobScreen() {
     navigation.navigate('NewQuote', {
       screen: QUOTE_STEP_MAP[step],
       params: { editing: true },
-    });
-  };
-
-  // Card quick-action — open the shared Square sheet (tap-to-pay + share
-  // pay-link). Quote docs flow through the deposit path, invoices
-  // through the full-balance path.
-  const handleDocTakePayment = (doc: Document) => {
-    if (doc.type === 'invoice') {
-      setTakePaymentTarget({
-        kind: 'invoice',
-        invoiceId: doc.id,
-        total: Number(doc.total ?? 0),
-        paidAmount: Number(doc.paidTotal ?? 0),
-        jobName: job.name,
-        invoiceNumber: doc.number,
-        terms: doc.termsSnapshot ?? null,
-      });
-      return;
-    }
-    setTakePaymentTarget({
-      kind: 'quote_deposit',
-      quoteId: doc.id,
-      depositAmount: Number(doc.depositAmount ?? 0),
-      depositPaid: Number(doc.depositPaid ?? 0),
-      total: Number(doc.total ?? 0),
-      jobName: job.name,
-      terms: doc.termsSnapshot ?? null,
     });
   };
 
@@ -751,16 +712,16 @@ export function ViewJobScreen() {
           </Card>
         </WebContainer>
 
-        {/* Documents section — rendered inline as DocumentRows with
-            quick-action icons (envelope, card). */}
+        {/* Scope section — inline editor for the primary doc's guts.
+            Tap a subsection → jump into that wizard step. Replaces the
+            old DocumentRow + separate ViewQuote/ViewInvoice dance. */}
         {!executionFocus ? (
-          <DocsSection
-            attachedDocs={attachedDocs}
-            onView={handleDocView}
+          <ScopeBlock
+            primaryDoc={primaryDoc ?? null}
+            secondaryDocs={attachedDocs.filter((d) => d.id !== primaryDoc?.id)}
+            onEdit={openEditorForDoc}
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={setPaymentSheetDoc}
-            onSend={handleDocSend}
-            onTakePayment={handleDocTakePayment}
           />
         ) : null}
 
@@ -823,16 +784,15 @@ export function ViewJobScreen() {
           </WebContainer>
         ) : null}
 
-        {/* Docs dropped to below schedule + checklist when the job is in
-            execution mode (scheduling / working / completing). */}
+        {/* Scope dropped to below schedule + checklist when the job is
+            in execution mode (scheduling / working / completing). */}
         {executionFocus ? (
-          <DocsSection
-            attachedDocs={attachedDocs}
-            onView={handleDocView}
+          <ScopeBlock
+            primaryDoc={primaryDoc ?? null}
+            secondaryDocs={attachedDocs.filter((d) => d.id !== primaryDoc?.id)}
+            onEdit={openEditorForDoc}
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={setPaymentSheetDoc}
-            onSend={handleDocSend}
-            onTakePayment={handleDocTakePayment}
           />
         ) : null}
 
@@ -1240,27 +1200,26 @@ function SectionTitle({ label }: { label: string }) {
   );
 }
 
-interface DocsSectionProps {
-  attachedDocs: Document[];
-  onView: (doc: Document) => void;
+interface ScopeBlockProps {
+  primaryDoc: Document | null;
+  secondaryDocs: Document[];
+  onEdit: (doc: Document, step: ScopeStep) => void;
   onStagePress: (doc: Document) => void;
   onPaymentPress: (doc: Document) => void;
-  onSend: (doc: Document) => void;
-  onTakePayment: (doc: Document) => void;
 }
 
-function DocsSection({
-  attachedDocs,
-  onView,
+function ScopeBlock({
+  primaryDoc,
+  secondaryDocs,
+  onEdit,
   onStagePress,
   onPaymentPress,
-  onSend,
-  onTakePayment,
-}: DocsSectionProps) {
-  return (
-    <WebContainer>
-      <SectionTitle label={`Documents (${attachedDocs.length})`} />
-      {attachedDocs.length === 0 ? (
+}: ScopeBlockProps) {
+  if (!primaryDoc) {
+    // No doc yet — the sticky bar already offers "Create Quote". Render
+    // an empty-state stub so the section doesn't just vanish.
+    return (
+      <WebContainer>
         <Card style={styles.emptyDocsCard}>
           <View style={styles.emptyDocs}>
             <MaterialCommunityIcons
@@ -1269,28 +1228,35 @@ function DocsSection({
               color={colors.textMuted}
             />
             <Text style={styles.emptyDocsText}>
-              No quotes or invoices attached yet.
+              No quote yet. Create one to set scope and pricing.
             </Text>
           </View>
         </Card>
-      ) : (
-        attachedDocs.map((doc) => {
-          const showCard =
-            doc.type === 'invoice' ||
-            (doc.type === 'quote' && (doc.depositAmount ?? 0) > 0);
-          return (
+      </WebContainer>
+    );
+  }
+  return (
+    <WebContainer>
+      <JobScopeCard
+        doc={primaryDoc}
+        onEdit={onEdit}
+        onStagePress={onStagePress}
+        onPaymentPress={onPaymentPress}
+      />
+      {secondaryDocs.length > 0 ? (
+        <View style={styles.secondaryDocsWrap}>
+          <Text style={styles.secondaryDocsLabel}>Also on this job</Text>
+          {secondaryDocs.map((doc) => (
             <DocumentRow
               key={doc.id}
               doc={doc}
-              onView={onView}
+              onView={(d) => onEdit(d, 'materials')}
               onStagePress={onStagePress}
               onPaymentPress={onPaymentPress}
-              onSend={onSend}
-              onTakePayment={showCard ? onTakePayment : undefined}
             />
-          );
-        })
-      )}
+          ))}
+        </View>
+      ) : null}
     </WebContainer>
   );
 }
@@ -1576,6 +1542,19 @@ const styles = StyleSheet.create({
   emptyDocsText: {
     fontSize: 13,
     color: colors.textMuted,
+  },
+  secondaryDocsWrap: {
+    marginTop: 4,
+  },
+  secondaryDocsLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginHorizontal: 20,
+    marginBottom: 6,
+    marginTop: 4,
   },
   notesCard: {
     marginHorizontal: 16,
