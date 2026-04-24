@@ -20,7 +20,7 @@ import { colors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 
-export type JobAction = 'duplicate' | 'archive' | 'unarchive' | 'stage' | 'delete';
+export type JobAction = 'duplicate' | 'archive' | 'unarchive' | 'delete';
 
 interface JobActionsSheetProps {
   visible: boolean;
@@ -45,13 +45,6 @@ const ROWS: Row[] = [
     sub: 'Clone scope + checklist into a new Accepted job',
     icon: 'content-duplicate',
     when: () => true,
-  },
-  {
-    id: 'stage',
-    label: 'Change stage',
-    sub: 'Move the job forward or back',
-    icon: 'swap-horizontal',
-    when: (job) => job.stage !== 'cancelled' && job.stage !== 'closed',
   },
   {
     id: 'archive',

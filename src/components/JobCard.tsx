@@ -7,7 +7,7 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable, Linking, Platform, Alert } from 'react-native';
 import { Text, Card } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { formatDistanceToNow } from 'date-fns';
@@ -20,6 +20,28 @@ import { formatScheduledDateTime, formatScheduledDuration } from '../utils/forma
 import { deriveDuration } from '../utils/deriveDuration';
 import { JOB_STAGE_META } from './JobStageSheet';
 import { selectionTap } from '../utils/haptics';
+
+// Small circular icon buttons for the contact quick-taps (call / text /
+// email / map). Keep these close at hand so cleaners on the list can
+// reach a customer in one tap without opening the job.
+function openTel(phone: string) {
+  Linking.openURL(`tel:${phone.replace(/\s+/g, '')}`).catch(() => {});
+}
+function openSms(phone: string) {
+  Linking.openURL(`sms:${phone.replace(/\s+/g, '')}`).catch(() => {});
+}
+function openMailto(email: string) {
+  Linking.openURL(`mailto:${email}`).catch(() => {});
+}
+function openMaps(address: string) {
+  const url =
+    Platform.OS === 'ios'
+      ? `http://maps.apple.com/?q=${encodeURIComponent(address)}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+  Linking.openURL(url).catch(() => {
+    Alert.alert("Couldn't open Maps", 'Try copying the address instead.');
+  });
+}
 
 // Happy-path lifecycle shown as a 5-step mini progress tracker on the card.
 // Skips "inquiry" (pre-quote) and "completed" (ambiguous vs paid) to keep the
@@ -188,13 +210,55 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
           ) : null}
         </View>
 
+        {/* Contact quick-taps — tap-to-call / text / email / map without
+            opening the job. Each stops propagation so the card's own
+            onPress doesn't also fire. */}
+        {job.customerPhone || job.customerEmail || job.jobAddress ? (
+          <View style={styles.quickActionsRow}>
+            {job.customerPhone ? (
+              <QuickIcon
+                icon="phone-outline"
+                onPress={() => openTel(job.customerPhone!)}
+              />
+            ) : null}
+            {job.customerPhone ? (
+              <QuickIcon
+                icon="message-text-outline"
+                onPress={() => openSms(job.customerPhone!)}
+              />
+            ) : null}
+            {job.customerEmail ? (
+              <QuickIcon
+                icon="email-outline"
+                onPress={() => openMailto(job.customerEmail!)}
+              />
+            ) : null}
+            {job.jobAddress ? (
+              <QuickIcon
+                icon="map-marker-outline"
+                onPress={() => openMaps(job.jobAddress)}
+              />
+            ) : null}
+          </View>
+        ) : null}
+
         {!terminal ? <JobStageTimeline job={job} /> : null}
 
         {job.jobAddress ? (
-          <View style={styles.inlineRow}>
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              selectionTap();
+              openMaps(job.jobAddress);
+            }}
+            style={({ pressed }) => [
+              styles.inlineRow,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
             <MaterialCommunityIcons name="map-marker-outline" size={14} color={colors.textMuted} />
             <Text style={styles.inlineText} numberOfLines={1}>{job.jobAddress}</Text>
-          </View>
+          </Pressable>
         ) : null}
 
         {scheduledLine ? (
@@ -229,6 +293,35 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
     </Card>
   );
 });
+
+function QuickIcon({
+  icon,
+  onPress,
+}: {
+  icon: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={(e) => {
+        e.stopPropagation();
+        selectionTap();
+        onPress();
+      }}
+      hitSlop={6}
+      style={({ pressed }) => [
+        styles.quickIcon,
+        pressed && styles.quickIconPressed,
+      ]}
+    >
+      <MaterialCommunityIcons
+        name={icon as any}
+        size={16}
+        color={colors.primary}
+      />
+    </Pressable>
+  );
+}
 
 function JobStageTimeline({ job }: { job: Job }) {
   return (
@@ -336,6 +429,24 @@ const styles = StyleSheet.create({
   },
   menuButtonPressed: {
     backgroundColor: colors.surfaceGray3,
+  },
+  quickActionsRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 2,
+  },
+  quickIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryBg,
+    borderWidth: 1,
+    borderColor: colors.primary + '33',
+  },
+  quickIconPressed: {
+    opacity: 0.6,
   },
   stageLabel: {
     fontSize: 12,

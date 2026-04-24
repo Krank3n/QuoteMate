@@ -175,9 +175,6 @@ export function JobsListScreen() {
         }
         break;
       }
-      case 'stage':
-        setStageSheetJob(job);
-        break;
       case 'archive':
         await saveJob({ ...job, archivedAt: Date.now() });
         break;
