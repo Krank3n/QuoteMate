@@ -28,20 +28,12 @@ import { formatScheduledDateTime, formatScheduledDuration } from '../utils/forma
 import { deriveDuration } from '../utils/deriveDuration';
 import { JOB_STAGE_META } from './JobStageSheet';
 import { ShimmerOverlay } from './ShimmerOverlay';
+import { ContactQuickActions } from './ContactQuickActions';
 import { selectionTap } from '../utils/haptics';
 
 // Small circular icon buttons for the contact quick-taps (call / text /
 // email / map). Keep these close at hand so cleaners on the list can
 // reach a customer in one tap without opening the job.
-function openTel(phone: string) {
-  Linking.openURL(`tel:${phone.replace(/\s+/g, '')}`).catch(() => {});
-}
-function openSms(phone: string) {
-  Linking.openURL(`sms:${phone.replace(/\s+/g, '')}`).catch(() => {});
-}
-function openMailto(email: string) {
-  Linking.openURL(`mailto:${email}`).catch(() => {});
-}
 function openMaps(address: string) {
   const url =
     Platform.OS === 'ios'
@@ -283,34 +275,11 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
         {/* Contact quick-taps — tap-to-call / text / email / map without
             opening the job. Each stops propagation so the card's own
             onPress doesn't also fire. */}
-        {job.customerPhone || job.customerEmail || job.jobAddress ? (
-          <View style={styles.quickActionsRow}>
-            {job.customerPhone ? (
-              <QuickIcon
-                icon="phone-outline"
-                onPress={() => openTel(job.customerPhone!)}
-              />
-            ) : null}
-            {job.customerPhone ? (
-              <QuickIcon
-                icon="message-text-outline"
-                onPress={() => openSms(job.customerPhone!)}
-              />
-            ) : null}
-            {job.customerEmail ? (
-              <QuickIcon
-                icon="email-outline"
-                onPress={() => openMailto(job.customerEmail!)}
-              />
-            ) : null}
-            {job.jobAddress ? (
-              <QuickIcon
-                icon="map-marker-outline"
-                onPress={() => openMaps(job.jobAddress)}
-              />
-            ) : null}
-          </View>
-        ) : null}
+        <ContactQuickActions
+          phone={job.customerPhone}
+          email={job.customerEmail}
+          compact
+        />
 
         {!terminal ? <JobStageTimeline job={job} /> : null}
 
@@ -364,35 +333,6 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
     </Animated.View>
   );
 });
-
-function QuickIcon({
-  icon,
-  onPress,
-}: {
-  icon: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={(e) => {
-        e.stopPropagation();
-        selectionTap();
-        onPress();
-      }}
-      hitSlop={6}
-      style={({ pressed }) => [
-        styles.quickIcon,
-        pressed && styles.quickIconPressed,
-      ]}
-    >
-      <MaterialCommunityIcons
-        name={icon as any}
-        size={16}
-        color={colors.primary}
-      />
-    </Pressable>
-  );
-}
 
 function JobStageTimeline({ job }: { job: Job }) {
   return (
@@ -500,24 +440,6 @@ const styles = StyleSheet.create({
   },
   menuButtonPressed: {
     backgroundColor: colors.surfaceGray3,
-  },
-  quickActionsRow: {
-    flexDirection: 'row',
-    gap: 6,
-    marginTop: 2,
-  },
-  quickIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primaryBg,
-    borderWidth: 1,
-    borderColor: colors.primary + '33',
-  },
-  quickIconPressed: {
-    opacity: 0.6,
   },
   stageLabel: {
     fontSize: 12,

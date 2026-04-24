@@ -23,6 +23,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { WebContainer } from '../components/WebContainer';
 import { DocumentRow } from '../components/DocumentRow';
 import { JobScopeCard, type ScopeStep } from '../components/JobScopeCard';
+import { ContactQuickActions } from '../components/ContactQuickActions';
 import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { StageSheet } from '../components/StageSheet';
@@ -593,20 +594,6 @@ export function ViewJobScreen() {
     });
   };
 
-  const openTel = () => {
-    const phone = (job.customerPhone || '').trim();
-    if (!phone) return;
-    selectionTap();
-    Linking.openURL(`tel:${phone.replace(/\s+/g, '')}`).catch(() => {});
-  };
-
-  const openSms = () => {
-    const phone = (job.customerPhone || '').trim();
-    if (!phone) return;
-    selectionTap();
-    Linking.openURL(`sms:${phone.replace(/\s+/g, '')}`).catch(() => {});
-  };
-
   const customerIsUnknown =
     !job.customerName || job.customerName.trim() === '' || job.customerName === 'Unknown customer';
 
@@ -672,41 +659,26 @@ export function ViewJobScreen() {
                 ) : null}
 
                 {job.customerPhone ? (
-                  <View style={styles.contactRow}>
-                    <Pressable
-                      onPress={openTel}
-                      hitSlop={8}
-                      style={({ pressed }) => [
-                        styles.contactButton,
-                        pressed && { opacity: 0.7 },
-                      ]}
-                    >
-                      <MaterialCommunityIcons
-                        name={'phone-outline' as any}
-                        size={14}
-                        color={colors.primary}
-                      />
-                      <Text style={styles.contactButtonLabel}>Call</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={openSms}
-                      hitSlop={8}
-                      style={({ pressed }) => [
-                        styles.contactButton,
-                        pressed && { opacity: 0.7 },
-                      ]}
-                    >
-                      <MaterialCommunityIcons
-                        name={'message-text-outline' as any}
-                        size={14}
-                        color={colors.primary}
-                      />
-                      <Text style={styles.contactButtonLabel}>Text</Text>
-                    </Pressable>
-                    <Text style={styles.contactNumber} numberOfLines={1}>
-                      {job.customerPhone}
-                    </Text>
-                  </View>
+                  <Text style={styles.contactInline} numberOfLines={1}>
+                    <MaterialCommunityIcons
+                      name={'phone-outline' as any}
+                      size={13}
+                      color={colors.textMuted}
+                    />
+                    {'  '}
+                    {job.customerPhone}
+                  </Text>
+                ) : null}
+                {job.customerEmail ? (
+                  <Text style={styles.contactInline} numberOfLines={1}>
+                    <MaterialCommunityIcons
+                      name={'email-outline' as any}
+                      size={13}
+                      color={colors.textMuted}
+                    />
+                    {'  '}
+                    {job.customerEmail}
+                  </Text>
                 ) : null}
               </View>
 
@@ -752,6 +724,15 @@ export function ViewJobScreen() {
                 </Pressable>
               </View>
             </View>
+
+            {job.customerPhone || job.customerEmail ? (
+              <View style={styles.contactDivider}>
+                <ContactQuickActions
+                  phone={job.customerPhone}
+                  email={job.customerEmail}
+                />
+              </View>
+            ) : null}
 
             {completedAt ? (
               <View style={styles.completedRow}>
@@ -1176,33 +1157,16 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
     fontWeight: '500',
   },
-  contactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-    flexWrap: 'wrap',
-  },
-  contactButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: colors.primaryBg,
-    borderWidth: 1,
-    borderColor: colors.primary + '44',
-  },
-  contactButtonLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  contactNumber: {
-    fontSize: 12,
+  contactInline: {
+    fontSize: 13,
     color: colors.textMuted,
-    flexShrink: 1,
+    marginTop: 4,
+  },
+  contactDivider: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
   stageChip: {
     flexDirection: 'row',
