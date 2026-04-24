@@ -41,7 +41,7 @@ export function ContactQuickActions({
 
   const sizeStyle = compact ? styles.tileCompact : styles.tile;
   const labelStyle = compact ? styles.labelCompact : styles.label;
-  const iconSize = compact ? 20 : 22;
+  const iconSize = compact ? 18 : 20;
 
   const stopAndTap = (fn: () => void) => (e: any) => {
     e?.stopPropagation?.();
@@ -198,15 +198,9 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    // Each Tile's wrapper `col` is flex:1 so the tiles distribute
-    // evenly across the full card width regardless of how many
-    // render. No gap between — the centered tile inside each col
-    // gives the visual breathing room.
     marginTop: 8,
   },
   rowCompact: {
-    justifyContent: 'flex-start',
-    gap: 8,
     marginTop: 4,
   },
   col: {
@@ -215,22 +209,26 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   colCompact: {
-    flex: 0,
+    // Still flex:1 so tiles spread evenly across the card width
+    // regardless of count (1, 2, 3, or 4). Fixes the clustered-
+    // to-left look on cards where only a subset of contact
+    // channels are populated.
+    flex: 1,
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   tile: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
   },
   tileCompact: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,

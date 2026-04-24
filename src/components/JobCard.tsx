@@ -357,10 +357,11 @@ function JobStageTimeline({ job }: { job: Job }) {
                   name={step.icon as any}
                   size={14}
                   color={
-                    // Reached / current dots render on bright
-                    // colors.success; a dark icon reads cleanly
-                    // without being glaring against the dark theme.
-                    reached || isCurrent ? colors.background : colors.inactive
+                    // Subtle treatment: reached pips carry a muted
+                    // successBg fill with a white icon — cohesive
+                    // with the dark theme instead of glaring. Current
+                    // pip gets a brighter ring for emphasis.
+                    reached || isCurrent ? colors.white : colors.inactive
                   }
                 />
               </View>
@@ -517,12 +518,14 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   timelineDotReached: {
-    // White icon on full-strength stage colour — high contrast against
-    // the shimmer-tinted card so the progress is immediately readable.
-    backgroundColor: colors.success,
-    borderColor: colors.success,
+    // Muted success fill + white icon — reads as "done" without
+    // the harsh brightness of a solid colors.success fill.
+    backgroundColor: colors.successBg,
+    borderColor: colors.success + '66',
   },
   timelineDotCurrent: {
+    // Current stage pops — solid bright fill with a white ring so
+    // it stands out from the muted reached pips either side.
     backgroundColor: colors.success,
     borderColor: colors.white,
     borderWidth: 2,
@@ -550,6 +553,9 @@ const styles = StyleSheet.create({
     borderRadius: 1.5,
   },
   timelineConnectorReached: {
-    backgroundColor: colors.success,
+    // Subtler than the solid colors.success — matches the muted
+    // reached pip style so the connecting line doesn't outshout
+    // the dots it's joining.
+    backgroundColor: colors.success + '88',
   },
 });
