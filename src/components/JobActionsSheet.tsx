@@ -4,7 +4,7 @@
  * List-view counterpart to the Danger row on ViewJob. Covers the
  * "I don't want to open the job, just do the thing" path — mainly
  * for cleaners and other tradies with high-volume recurring work
- * where Duplicate + Archive need to be one tap each, not two.
+ * where Duplicate + Send + Take Payment need to be one tap each.
  *
  * Pure presentational component: it only reports the picked action
  * back to the parent; the parent owns the side-effects.
@@ -16,29 +16,60 @@ import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Job } from '../../shared/job/types';
+import type { Document } from '../types/document';
 import { colors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 
-export type JobAction = 'duplicate' | 'archive' | 'unarchive' | 'delete';
+export type JobAction =
+  | 'send'
+  | 'takePayment'
+  | 'duplicate'
+  | 'exportPdf'
+  | 'pushToXero'
+  | 'archive'
+  | 'unarchive'
+  | 'delete';
 
 interface JobActionsSheetProps {
   visible: boolean;
   onDismiss: () => void;
   job: Job | null;
+  /** The primary doc on the job, if any. Drives whether the doc-level
+   *  actions (Send, Take Payment, Export, Xero) render. */
+  primaryDoc?: Document | null;
+  xeroConnected?: boolean;
   onSelect: (action: JobAction, job: Job) => void;
 }
 
-interface Row {
+interface RowDef {
   id: JobAction;
   label: string;
   sub?: string;
   icon: string;
   tone?: 'normal' | 'danger';
-  when: (job: Job) => boolean;
+  when: (args: {
+    job: Job;
+    primaryDoc: Document | null;
+    xeroConnected: boolean;
+  }) => boolean;
 }
 
-const ROWS: Row[] = [
+const ROWS: RowDef[] = [
+  {
+    id: 'send',
+    label: 'Send',
+    sub: 'Email / SMS / Share / PDF',
+    icon: 'send-outline',
+    when: ({ primaryDoc }) => !!primaryDoc,
+  },
+  {
+    id: 'takePayment',
+    label: 'Take Payment',
+    sub: 'Tap to pay or share the Square link',
+    icon: 'credit-card-outline',
+    when: ({ primaryDoc }) => !!primaryDoc,
+  },
   {
     id: 'duplicate',
     label: 'Duplicate',
@@ -47,18 +78,36 @@ const ROWS: Row[] = [
     when: () => true,
   },
   {
+    id: 'exportPdf',
+    label: 'Export PDF',
+    sub: 'Save or share the document as PDF',
+    icon: 'file-pdf-box',
+    when: ({ primaryDoc }) => !!primaryDoc,
+  },
+  {
+    id: 'pushToXero',
+    label: 'Push to Xero',
+    sub: 'Sync this invoice to your Xero account',
+    icon: 'cloud-upload-outline',
+    when: ({ primaryDoc, xeroConnected }) =>
+      !!xeroConnected &&
+      !!primaryDoc &&
+      primaryDoc.type === 'invoice' &&
+      primaryDoc.stage !== 'draft',
+  },
+  {
     id: 'archive',
     label: 'Archive',
     sub: 'Move into the Archived filter',
     icon: 'archive-outline',
-    when: (job) => !job.archivedAt,
+    when: ({ job }) => !job.archivedAt,
   },
   {
     id: 'unarchive',
     label: 'Unarchive',
     sub: 'Move back to the active list',
     icon: 'archive-arrow-up-outline',
-    when: (job) => !!job.archivedAt,
+    when: ({ job }) => !!job.archivedAt,
   },
   {
     id: 'delete',
@@ -74,10 +123,17 @@ export function JobActionsSheet({
   visible,
   onDismiss,
   job,
+  primaryDoc,
+  xeroConnected,
   onSelect,
 }: JobActionsSheetProps) {
   if (!job) return null;
-  const rows = ROWS.filter((r) => r.when(job));
+  const ctx = {
+    job,
+    primaryDoc: primaryDoc ?? null,
+    xeroConnected: !!xeroConnected,
+  };
+  const rows = ROWS.filter((r) => r.when(ctx));
 
   return (
     <BottomSheet
@@ -85,6 +141,7 @@ export function JobActionsSheet({
       onDismiss={onDismiss}
       title={job.name || 'Untitled job'}
       subtitle={job.customerName || undefined}
+      scrollable
     >
       <View style={styles.list}>
         {rows.map((row) => {

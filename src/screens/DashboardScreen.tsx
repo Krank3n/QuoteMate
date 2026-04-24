@@ -22,7 +22,6 @@ import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
 import { WebContainer } from '../components/WebContainer';
-import { DocumentCard } from '../components/DocumentCard';
 import { JobCard } from '../components/JobCard';
 import { quoteToDocument } from '../types/documentAdapter';
 import { AlertModal } from '../components/AlertModal';
@@ -350,8 +349,8 @@ export function DashboardScreen() {
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] || null;
   }, [quotes]);
 
-  // Recent quotes (last 3) — kept so the existing quote-scoped logic (tour
-  // dummy data, DocumentCard render for legacy-guided flows) still resolves.
+  // Recent quotes (last 3) — kept so the existing quote-scoped logic
+  // (tour dummy data) still resolves.
   const recentQuotes = [...quotes]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 3);

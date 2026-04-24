@@ -23,7 +23,13 @@ import { WebContainer } from '../components/WebContainer';
 import { JobCard } from '../components/JobCard';
 import { JobStageSheet } from '../components/JobStageSheet';
 import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
+import { SendDocumentDialog } from '../components/SendDocumentDialog';
+import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaymentSheet';
 import { AnimatedListItem } from '../components/AnimatedListItem';
+import { pickPrimaryDoc } from '../components/StickyJobActionBar';
+import { exportDocumentPDF } from '../utils/pdfGenerator';
+import { documentToInvoice } from '../types/documentAdapter';
+import type { Document } from '../types/document';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { lightTap } from '../utils/haptics';
@@ -68,6 +74,10 @@ export function JobsListScreen() {
   const createNewQuote = useStore((s) => s.createNewQuote);
   const documents = useStore((s) => s.documents);
   const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
+  const businessSettings = useStore((s) => s.businessSettings);
+  const xeroConnection = useStore((s) => s.xeroConnection);
+  const pushInvoiceToXero = useStore((s) => s.pushInvoiceToXero);
+  const subscriptionStatus = useStore((s) => s.subscriptionStatus);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterKind>('active');
@@ -75,6 +85,8 @@ export function JobsListScreen() {
   const [initialLoaded, setInitialLoaded] = useState(jobsLoaded || jobs.length > 0);
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
   const [actionsSheetJob, setActionsSheetJob] = useState<Job | null>(null);
+  const [sendDialogDoc, setSendDialogDoc] = useState<Document | null>(null);
+  const [takePaymentTarget, setTakePaymentTarget] = useState<TakePaymentTarget | null>(null);
 
   useEffect(() => {
     if (!initialLoaded && jobs.length > 0) setInitialLoaded(true);
@@ -149,12 +161,81 @@ export function JobsListScreen() {
     setActionsSheetJob(job);
   };
 
+  // Look up a job's primary doc for the doc-level actions (Send / Take
+  // Payment / Export / Push to Xero). Same selection the ViewJob sticky
+  // bar uses: explicit primaryDocumentId wins, otherwise the most
+  // recently updated attached doc (invoices beat quotes).
+  const primaryDocForJob = (job: Job): Document | null => {
+    if (job.primaryDocumentId) {
+      const explicit = documents.find((d) => d.id === job.primaryDocumentId);
+      if (explicit) return explicit;
+    }
+    const attached = documents.filter((d) => d.jobId === job.id);
+    return pickPrimaryDoc(attached);
+  };
+
   // Central dispatcher for the 3-dot menu. Kept here (not inside
   // JobActionsSheet) because each action needs access to the stores
   // the screen already has in scope.
   const handleActionSelect = async (action: JobAction, job: Job) => {
     setActionsSheetJob(null);
     switch (action) {
+      case 'send': {
+        const doc = primaryDocForJob(job);
+        if (doc) setSendDialogDoc(doc);
+        break;
+      }
+      case 'takePayment': {
+        const doc = primaryDocForJob(job);
+        if (!doc) return;
+        if (doc.type === 'invoice') {
+          setTakePaymentTarget({
+            kind: 'invoice',
+            invoiceId: doc.id,
+            total: Number(doc.total ?? 0),
+            paidAmount: Number(doc.paidTotal ?? 0),
+            jobName: job.name,
+            invoiceNumber: doc.number,
+            terms: doc.termsSnapshot ?? null,
+          });
+        } else {
+          setTakePaymentTarget({
+            kind: 'quote_deposit',
+            quoteId: doc.id,
+            depositAmount: Number(doc.depositAmount ?? 0),
+            depositPaid: Number(doc.depositPaid ?? 0),
+            total: Number(doc.total ?? 0),
+            jobName: job.name,
+            terms: doc.termsSnapshot ?? null,
+          });
+        }
+        break;
+      }
+      case 'exportPdf': {
+        const doc = primaryDocForJob(job);
+        if (!doc) return;
+        const isTrialActive = !!(
+          subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired
+        );
+        const isPro = subscriptionStatus?.isPro || isTrialActive;
+        try {
+          await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
+        } catch {
+          Alert.alert('Error', 'Failed to export PDF. Please try again.');
+        }
+        break;
+      }
+      case 'pushToXero': {
+        const doc = primaryDocForJob(job);
+        if (!doc || doc.type !== 'invoice') return;
+        try {
+          await pushInvoiceToXero(documentToInvoice(doc));
+          Alert.alert('Synced to Xero', 'Invoice pushed successfully.');
+        } catch (e: any) {
+          Alert.alert('Xero sync failed', e?.message || 'Try again in a moment.');
+        }
+        break;
+      }
       case 'duplicate': {
         try {
           const cloned = await duplicateJob(job.id);
@@ -336,7 +417,25 @@ export function JobsListScreen() {
         visible={!!actionsSheetJob}
         onDismiss={() => setActionsSheetJob(null)}
         job={actionsSheetJob}
+        primaryDoc={actionsSheetJob ? primaryDocForJob(actionsSheetJob) : null}
+        xeroConnected={!!xeroConnection}
         onSelect={handleActionSelect}
+      />
+
+      {sendDialogDoc ? (
+        <SendDocumentDialog
+          visible={!!sendDialogDoc}
+          onDismiss={() => setSendDialogDoc(null)}
+          doc={sendDialogDoc}
+          businessSettings={businessSettings}
+        />
+      ) : null}
+
+      <TakePaymentSheet
+        visible={!!takePaymentTarget}
+        target={takePaymentTarget}
+        onDismiss={() => setTakePaymentTarget(null)}
+        onError={(message) => Alert.alert('Payment error', message)}
       />
 
     </View>
