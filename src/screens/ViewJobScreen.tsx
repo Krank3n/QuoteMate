@@ -725,11 +725,12 @@ export function ViewJobScreen() {
               </View>
             </View>
 
-            {job.customerPhone || job.customerEmail ? (
+            {job.customerPhone || job.customerEmail || job.jobAddress ? (
               <View style={styles.contactDivider}>
                 <ContactQuickActions
                   phone={job.customerPhone}
                   email={job.customerEmail}
+                  address={job.jobAddress}
                 />
               </View>
             ) : null}

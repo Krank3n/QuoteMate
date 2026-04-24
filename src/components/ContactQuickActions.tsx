@@ -12,7 +12,7 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, Pressable, Linking, Alert } from 'react-native';
+import { View, StyleSheet, Pressable, Linking, Platform, Alert } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -22,6 +22,7 @@ import { selectionTap } from '../utils/haptics';
 interface ContactQuickActionsProps {
   phone?: string;
   email?: string;
+  address?: string;
   /** Compact mode omits labels and uses smaller tiles — for dense
    *  list cards where vertical space is tight. */
   compact?: boolean;
@@ -30,15 +31,17 @@ interface ContactQuickActionsProps {
 export function ContactQuickActions({
   phone,
   email,
+  address,
   compact = false,
 }: ContactQuickActionsProps) {
   const hasPhone = !!(phone && phone.trim());
   const hasEmail = !!(email && email.trim());
-  if (!hasPhone && !hasEmail) return null;
+  const hasAddress = !!(address && address.trim());
+  if (!hasPhone && !hasEmail && !hasAddress) return null;
 
   const sizeStyle = compact ? styles.tileCompact : styles.tile;
   const labelStyle = compact ? styles.labelCompact : styles.label;
-  const iconSize = compact ? 20 : 24;
+  const iconSize = compact ? 20 : 22;
 
   const stopAndTap = (fn: () => void) => (e: any) => {
     e?.stopPropagation?.();
@@ -64,6 +67,16 @@ export function ContactQuickActions({
       Alert.alert("Couldn't open mail", 'Copy the address instead.'),
     );
   };
+  const handleMap = () => {
+    if (!address) return;
+    const url =
+      Platform.OS === 'ios'
+        ? `http://maps.apple.com/?q=${encodeURIComponent(address)}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+    Linking.openURL(url).catch(() =>
+      Alert.alert("Couldn't open Maps", 'Copy the address instead.'),
+    );
+  };
 
   return (
     <View style={[styles.row, compact && styles.rowCompact]}>
@@ -78,6 +91,7 @@ export function ContactQuickActions({
           sizeStyle={sizeStyle}
           labelStyle={labelStyle}
           showLabel={!compact}
+          compact={compact}
           onPress={stopAndTap(handleCall)}
         />
       ) : null}
@@ -92,6 +106,7 @@ export function ContactQuickActions({
           sizeStyle={sizeStyle}
           labelStyle={labelStyle}
           showLabel={!compact}
+          compact={compact}
           onPress={stopAndTap(handleText)}
         />
       ) : null}
@@ -106,7 +121,23 @@ export function ContactQuickActions({
           sizeStyle={sizeStyle}
           labelStyle={labelStyle}
           showLabel={!compact}
+          compact={compact}
           onPress={stopAndTap(handleEmail)}
+        />
+      ) : null}
+      {hasAddress ? (
+        <Tile
+          icon="map-marker"
+          label="Map"
+          labelColor={colors.primary}
+          bgColor={colors.primaryBg}
+          borderColor={colors.primary + '55'}
+          iconSize={iconSize}
+          sizeStyle={sizeStyle}
+          labelStyle={labelStyle}
+          showLabel={!compact}
+          compact={compact}
+          onPress={stopAndTap(handleMap)}
         />
       ) : null}
     </View>
@@ -123,6 +154,7 @@ interface TileProps {
   sizeStyle: any;
   labelStyle: any;
   showLabel: boolean;
+  compact: boolean;
   onPress: (e: any) => void;
 }
 
@@ -136,10 +168,11 @@ function Tile({
   sizeStyle,
   labelStyle,
   showLabel,
+  compact,
   onPress,
 }: TileProps) {
   return (
-    <View style={styles.col}>
+    <View style={compact ? styles.colCompact : styles.col}>
       <Pressable
         onPress={onPress}
         style={({ pressed }) => [
@@ -164,8 +197,11 @@ function Tile({
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 14,
+    alignItems: 'flex-start',
+    // Each Tile's wrapper `col` is flex:1 so the tiles distribute
+    // evenly across the full card width regardless of how many
+    // render. No gap between — the centered tile inside each col
+    // gives the visual breathing room.
     marginTop: 8,
   },
   rowCompact: {
@@ -174,13 +210,19 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   col: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+  },
+  colCompact: {
+    flex: 0,
     alignItems: 'center',
     gap: 6,
   },
   tile: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
