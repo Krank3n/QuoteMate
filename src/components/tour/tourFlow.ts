@@ -90,6 +90,6 @@ export function getScreenForPhase(phase: TourPhase): { screen: string; nested?: 
     case 'laborMarkup':
       return { screen: 'NewQuote', nested: 'LaborMarkup' };
     case 'quotePreview':
-      return { screen: 'NewQuote', nested: 'QuotePreview' };
+      return { screen: 'NewQuote', nested: 'JobPreview' };
   }
 }

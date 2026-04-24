@@ -201,7 +201,7 @@ export function UnifiedTourController() {
 
       case 'quotePreview':
         // Labor complete → navigate to preview
-        navigation.navigate('QuotePreview');
+        navigation.navigate('JobPreview');
         setUnifiedTourPhase('quotePreview');
         break;
 

@@ -102,8 +102,11 @@ export function getDocumentTypeLabel(mode: DocumentMode): string {
 }
 
 /**
- * Get the navigation target for the preview screen based on mode
+ * Get the navigation target for the preview screen. Both quote and
+ * invoice wizard flows land on the same `JobPreview` route now — the
+ * mode param on the stack's earlier screens disambiguates. Old callers
+ * passing `mode` are retained for API compatibility.
  */
-export function getPreviewScreenName(mode: DocumentMode): string {
-  return mode === 'invoice' ? 'InvoicePreview' : 'QuotePreview';
+export function getPreviewScreenName(_mode: DocumentMode): string {
+  return 'JobPreview';
 }

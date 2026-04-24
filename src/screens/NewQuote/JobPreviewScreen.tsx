@@ -32,6 +32,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SendTypePill } from '../../components/SendSwitcher';
 import { SendDocumentButton } from '../../components/SendDocumentButton';
 import { DocumentSentBanner } from '../../components/DocumentSentBanner';
+import { TakePaymentSheet, type TakePaymentTarget } from '../../components/TakePaymentSheet';
 import { reconcileNextNumber } from '../../utils/nextNumber';
 import { successTap } from '../../utils/haptics';
 import { WebContainer } from '../../components/WebContainer';
@@ -124,6 +125,7 @@ export function JobPreviewScreen() {
   const workingDoc = isInvoiceMode ? currentInvoice : currentQuote;
 
   const [notes, setNotes] = useState(workingDoc?.notes || '');
+  const [takePaymentTarget, setTakePaymentTarget] = useState<TakePaymentTarget | null>(null);
   const savedNotesRef = useRef(workingDoc?.notes || '');
   const [refNumber, setRefNumber] = useState<string>(
     isInvoiceMode
@@ -711,7 +713,55 @@ export function JobPreviewScreen() {
             ) : null}
           </View>
         </View>
+        {/* Take Payment — in-person capture path. Same shared sheet the
+            ViewJob sticky bar uses: quote → deposit (or full), invoice
+            → balance. Lets the tradie tap a card before the customer
+            walks off. */}
+        {liveDoc ? (
+          <Button
+            mode="outlined"
+            icon="credit-card-outline"
+            onPress={() => {
+              if (liveDoc.type === 'invoice') {
+                setTakePaymentTarget({
+                  kind: 'invoice',
+                  invoiceId: liveDoc.id,
+                  total: Number(liveDoc.total ?? 0),
+                  paidAmount: Number(liveDoc.paidTotal ?? 0),
+                  jobName: liveDoc.job?.name,
+                  invoiceNumber: liveDoc.number,
+                  terms: liveDoc.termsSnapshot ?? null,
+                });
+              } else {
+                setTakePaymentTarget({
+                  kind: 'quote_deposit',
+                  quoteId: liveDoc.id,
+                  depositAmount: Number(liveDoc.depositAmount ?? 0),
+                  depositPaid: Number(liveDoc.depositPaid ?? 0),
+                  total: Number(liveDoc.total ?? 0),
+                  jobName: liveDoc.job?.name,
+                  terms: liveDoc.termsSnapshot ?? null,
+                });
+              }
+            }}
+            style={styles.bottomButtonFull}
+            contentStyle={styles.bottomButtonContent}
+          >
+            {liveDoc.type === 'invoice'
+              ? 'Take Payment'
+              : (liveDoc.depositAmount ?? 0) > 0
+                ? 'Take Deposit'
+                : 'Tap to Pay'}
+          </Button>
+        ) : null}
       </View>
+
+      <TakePaymentSheet
+        visible={!!takePaymentTarget}
+        target={takePaymentTarget}
+        onDismiss={() => setTakePaymentTarget(null)}
+        onError={(message) => Alert.alert('Payment error', message)}
+      />
 
       {/* Confetti overlay — rendered last so it's on top */}
       <View style={[StyleSheet.absoluteFill, styles.celebrationOverlay]} pointerEvents="none">
@@ -1006,6 +1056,9 @@ const styles = StyleSheet.create({
   },
   bottomButtonHalf: {
     flex: 1,
+  },
+  bottomButtonFull: {
+    marginTop: 8,
   },
   bottomButtonContent: {
     paddingVertical: 8,
