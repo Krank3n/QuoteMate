@@ -22,6 +22,7 @@ import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { JobCard } from '../components/JobCard';
 import { JobStageSheet } from '../components/JobStageSheet';
+import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
@@ -62,15 +63,18 @@ export function JobsListScreen() {
   useScrollToTop(listRef);
 
   const navigation = useNavigation<any>();
-  const { jobs, jobsLoaded, loadJobs, saveJob } = useJobStore();
+  const { jobs, jobsLoaded, loadJobs, saveJob, deleteJob, duplicateJob } = useJobStore();
   const canCreateQuote = useStore((s) => s.canCreateQuote);
   const createNewQuote = useStore((s) => s.createNewQuote);
+  const documents = useStore((s) => s.documents);
+  const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterKind>('active');
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(jobsLoaded || jobs.length > 0);
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
+  const [actionsSheetJob, setActionsSheetJob] = useState<Job | null>(null);
 
   useEffect(() => {
     if (!initialLoaded && jobs.length > 0) setInitialLoaded(true);
@@ -141,10 +145,82 @@ export function JobsListScreen() {
     }
   };
 
+  const handleMenuPress = (job: Job) => {
+    setActionsSheetJob(job);
+  };
+
+  // Central dispatcher for the 3-dot menu. Kept here (not inside
+  // JobActionsSheet) because each action needs access to the stores
+  // the screen already has in scope.
+  const handleActionSelect = async (action: JobAction, job: Job) => {
+    setActionsSheetJob(null);
+    switch (action) {
+      case 'duplicate': {
+        try {
+          const cloned = await duplicateJob(job.id);
+          if (job.primaryDocumentId) {
+            const clonedDoc = await duplicateDocumentForJob(
+              job.primaryDocumentId,
+              cloned.id,
+            );
+            await saveJob({
+              ...cloned,
+              primaryDocumentId: clonedDoc.id,
+              documentIds: [clonedDoc.id],
+            });
+          }
+          navigation.navigate('ViewJob', { jobId: cloned.id });
+        } catch {
+          Alert.alert('Duplicate failed', 'Try again in a moment.');
+        }
+        break;
+      }
+      case 'stage':
+        setStageSheetJob(job);
+        break;
+      case 'archive':
+        await saveJob({ ...job, archivedAt: Date.now() });
+        break;
+      case 'unarchive':
+        await saveJob({ ...job, archivedAt: undefined });
+        break;
+      case 'delete': {
+        const attached = documents.filter((d) => d.jobId === job.id);
+        if (attached.length > 0) {
+          Alert.alert(
+            'Can’t delete — docs attached',
+            'Delete or reassign the attached quotes and invoices first, then try again.',
+          );
+          return;
+        }
+        Alert.alert('Delete job?', 'This cannot be undone.', [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteJob(job.id);
+              } catch {
+                Alert.alert('Delete failed', 'Try again in a moment.');
+              }
+            },
+          },
+        ]);
+        break;
+      }
+    }
+  };
+
   const renderCard = useCallback(
     ({ item, index }: { item: Job; index: number }) => (
       <AnimatedListItem index={index}>
-        <JobCard job={item} onPress={handleView} onStagePress={handleStagePress} />
+        <JobCard
+          job={item}
+          onPress={handleView}
+          onStagePress={handleStagePress}
+          onMenuPress={handleMenuPress}
+        />
       </AnimatedListItem>
     ),
     [],
@@ -258,6 +334,13 @@ export function JobsListScreen() {
           onSelect={handleStageSelect}
         />
       )}
+
+      <JobActionsSheet
+        visible={!!actionsSheetJob}
+        onDismiss={() => setActionsSheetJob(null)}
+        job={actionsSheetJob}
+        onSelect={handleActionSelect}
+      />
 
     </View>
   );

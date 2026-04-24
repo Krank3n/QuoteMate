@@ -67,6 +67,8 @@ interface JobCardProps {
   job: Job;
   onPress: (jobId: string) => void;
   onStagePress?: (job: Job) => void;
+  /** Opens the 3-dot action sheet (Duplicate / Archive / Delete / ...). */
+  onMenuPress?: (job: Job) => void;
 }
 
 // Top-line money depends on where the job is. Before an invoice is raised we
@@ -89,7 +91,7 @@ function formatUpdatedAt(ms: number): string {
   }
 }
 
-export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress }: JobCardProps) {
+export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress, onMenuPress }: JobCardProps) {
   const meta = JOB_STAGE_META[job.stage];
   const headline = pickHeadlineAmount(job);
   // Pull the primary attached doc so duration on the card matches the
@@ -161,6 +163,29 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress 
               </Text>
             </View>
           )}
+
+          {onMenuPress ? (
+            <Pressable
+              onPress={(e) => {
+                // stopPropagation so the kebab doesn't bubble to the card
+                // and open ViewJob.
+                e.stopPropagation();
+                selectionTap();
+                onMenuPress(job);
+              }}
+              hitSlop={10}
+              style={({ pressed }) => [
+                styles.menuButton,
+                pressed && styles.menuButtonPressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={'dots-vertical' as any}
+                size={20}
+                color={colors.textMuted}
+              />
+            </Pressable>
+          ) : null}
         </View>
 
         {!terminal ? <JobStageTimeline job={job} /> : null}
@@ -301,6 +326,16 @@ const styles = StyleSheet.create({
   },
   stageChipPressed: {
     opacity: 0.7,
+  },
+  menuButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+  },
+  menuButtonPressed: {
+    backgroundColor: colors.surfaceGray3,
   },
   stageLabel: {
     fontSize: 12,
