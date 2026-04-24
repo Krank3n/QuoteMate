@@ -176,7 +176,8 @@ export function ViewJobScreen() {
         });
       }
       await saveJob({ ...job, ...patch });
-    } catch {
+    } catch (err) {
+      console.error('[ViewJob] applyStageTransition failed', err);
       Alert.alert('Error', 'Failed to update stage. Please try again.');
     }
   };
@@ -725,6 +726,20 @@ export function ViewJobScreen() {
               </View>
             </View>
 
+            {/* Totals — pinned inside the header card just above the
+                ContactQuickActions divider. Reads right under the
+                customer/contact block instead of in a card on its own. */}
+            <View style={styles.totalsRow}>
+              <Totals label="Quoted" value={job.totalQuoted} />
+              <Totals label="Invoiced" value={job.totalInvoiced} />
+              <Totals label="Paid" value={job.totalPaid} />
+              <Totals
+                label="Balance"
+                value={job.balanceDue}
+                accent={job.balanceDue > 0}
+              />
+            </View>
+
             {job.customerPhone || job.customerEmail || job.jobAddress ? (
               <View style={styles.contactDivider}>
                 <ContactQuickActions
@@ -746,23 +761,6 @@ export function ViewJobScreen() {
                 <Text style={styles.completedValue}>{completedAt}</Text>
               </View>
             ) : null}
-          </Card>
-        </WebContainer>
-
-        {/* Money block — prominent, directly under the customer so the
-            contractor sees where the dollars stand at a glance. */}
-        <WebContainer>
-          <Card style={styles.moneyCard}>
-            <View style={styles.totalsRow}>
-              <Totals label="Quoted" value={job.totalQuoted} />
-              <Totals label="Invoiced" value={job.totalInvoiced} />
-              <Totals label="Paid" value={job.totalPaid} />
-              <Totals
-                label="Balance"
-                value={job.balanceDue}
-                accent={job.balanceDue > 0}
-              />
-            </View>
           </Card>
         </WebContainer>
 
@@ -1077,13 +1075,6 @@ const styles = StyleSheet.create({
   },
   headerKebabPressed: {
     backgroundColor: colors.surfaceGray3,
-  },
-  moneyCard: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 14,
-    borderRadius: 16,
-    backgroundColor: colors.surface,
   },
   activityToggle: {
     flexDirection: 'row',

@@ -287,27 +287,36 @@ async function syncJobFromSource<T extends JobLinkableSource>(source: T): Promis
     return { ...source, jobId: created.id };
   }
 
-  // Case 2 — already linked. Patch only the Job's placeholder fields so
-  // subsequent wizard screens backfill the Job without clobbering manual
-  // edits.
+  // Case 2 — already linked. Patch the Job's customer / job fields
+  // when the source has a different non-empty value. Used to restrict
+  // updates to placeholder-only fields, but that meant edits made in
+  // the wizard's CustomerDetails / JobDetails steps never made it back
+  // to the Job record. Now: if you typed something different in the
+  // wizard, that's your intent — the Job updates to match.
   const existing = useJobStore.getState().getJobById(source.jobId);
   if (!existing) return source;
 
   const patch: Record<string, string> = {};
-  if (customerName && isPlaceholder(existing.customerName, JOB_CUSTOMER_PLACEHOLDERS)) {
+  if (customerName && customerName !== (existing.customerName || '')) {
     patch.customerName = customerName;
   }
-  if (customerEmail && !existing.customerEmail) {
+  if (customerEmail && customerEmail !== (existing.customerEmail || '')) {
     patch.customerEmail = customerEmail;
   }
-  if (customerPhone && !existing.customerPhone) {
+  if (customerPhone && customerPhone !== (existing.customerPhone || '')) {
     patch.customerPhone = customerPhone;
   }
-  if (jobAddress && !(existing.jobAddress || '').trim()) {
+  if (jobAddress && jobAddress !== (existing.jobAddress || '')) {
     patch.jobAddress = jobAddress;
   }
-  if (jobName && isPlaceholder(existing.name, JOB_NAME_PLACEHOLDERS)) {
+  if (jobName && jobName !== (existing.name || '')) {
     patch.name = jobName;
+  }
+  if (
+    jobDescription &&
+    jobDescription !== (existing.description || '')
+  ) {
+    patch.description = jobDescription;
   }
   if (Object.keys(patch).length === 0) return source;
 

@@ -462,7 +462,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 4,
-    paddingBottom: 8,
+    paddingTop: 4,
+    paddingBottom: 12,
+    minHeight: 56, // breathing room so the chip + kebab read at a
+                   // standard touch-target size
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -504,11 +507,11 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   expandButton: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 16,
+    borderRadius: 18,
   },
   expandButtonPressed: {
     backgroundColor: colors.surfaceGray3,
@@ -516,14 +519,14 @@ const styles = StyleSheet.create({
   stageChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 999,
     borderWidth: 1,
-    gap: 4,
+    gap: 5,
   },
   stageLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
   },
   pressed: {
