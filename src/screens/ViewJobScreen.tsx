@@ -1177,7 +1177,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 8,
-    marginTop: 4,
+    marginTop: 14,
   },
   totalsCell: {
     flex: 1,
