@@ -25,6 +25,7 @@ import { JobStageSheet } from '../components/JobStageSheet';
 import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
 import { SendDocumentDialog } from '../components/SendDocumentDialog';
 import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaymentSheet';
+import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
@@ -89,6 +90,10 @@ export function JobsListScreen() {
   const [actionsSheetJob, setActionsSheetJob] = useState<Job | null>(null);
   const [sendDialogDoc, setSendDialogDoc] = useState<Document | null>(null);
   const [takePaymentTarget, setTakePaymentTarget] = useState<TakePaymentTarget | null>(null);
+  const [followUpState, setFollowUpState] = useState<{
+    doc: Document;
+    tone: FollowUpTone;
+  } | null>(null);
 
   useEffect(() => {
     if (!initialLoaded && jobs.length > 0) setInitialLoaded(true);
@@ -205,6 +210,21 @@ export function JobsListScreen() {
       case 'send': {
         const doc = primaryDocForJob(job);
         if (doc) setSendDialogDoc(doc);
+        break;
+      }
+      case 'followUp': {
+        const doc = primaryDocForJob(job);
+        if (!doc) break;
+        // Use the same aging thresholds as the sticky bar — tone
+        // firms up after each window.
+        const baseline =
+          doc.type === 'invoice' ? (doc.dueDate ?? doc.sentAt) : doc.sentAt;
+        const days = baseline
+          ? (Date.now() - baseline) / (1000 * 60 * 60 * 24)
+          : 0;
+        const tone: FollowUpTone =
+          days >= 7 ? 'overdue' : days >= 4 ? 'firm' : 'gentle';
+        setFollowUpState({ doc, tone });
         break;
       }
       case 'takePayment': {
@@ -459,6 +479,28 @@ export function JobsListScreen() {
         onDismiss={() => setTakePaymentTarget(null)}
         onError={(message) => Alert.alert('Payment error', message)}
       />
+
+      {followUpState ? (
+        <FollowUpSheet
+          visible={!!followUpState}
+          onDismiss={() => setFollowUpState(null)}
+          doc={followUpState.doc}
+          tone={followUpState.tone}
+          customerName={
+            (jobs.find((j) => j.id === followUpState.doc.jobId)?.customerName) ?? ''
+          }
+          customerPhone={
+            jobs.find((j) => j.id === followUpState.doc.jobId)?.customerPhone
+          }
+          customerEmail={
+            jobs.find((j) => j.id === followUpState.doc.jobId)?.customerEmail
+          }
+          businessName={businessSettings?.businessName || 'us'}
+          jobName={
+            (jobs.find((j) => j.id === followUpState.doc.jobId)?.name) ?? 'the job'
+          }
+        />
+      ) : null}
 
     </View>
   );

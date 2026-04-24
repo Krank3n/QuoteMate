@@ -26,7 +26,7 @@ import {
 } from 'react-native';
 import { Text, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { format } from 'date-fns';
+import { format, formatDistanceToNowStrict } from 'date-fns';
 
 import type { Document } from '../types/document';
 import { colors } from '../theme';
@@ -67,6 +67,35 @@ function sumMaterials(doc: Document): number {
     (acc, m) => acc + (Number(m.totalPrice) || 0),
     0,
   );
+}
+
+// Timestamp that best represents the current stage — drives the
+// "· 3d ago" suffix on the stage chip, picked up from the top banner
+// we retired (same logic, less visual noise).
+function stageTimestamp(doc: Document): number | null {
+  switch (doc.stage) {
+    case 'quote_sent':
+    case 'invoice_sent':
+      return doc.sentAt ?? doc.updatedAt ?? null;
+    case 'quote_accepted':
+      return doc.acceptedAt ?? doc.updatedAt ?? null;
+    case 'partially_paid':
+      return doc.updatedAt ?? null;
+    case 'paid':
+      return doc.paidInFullAt ?? doc.updatedAt ?? null;
+    default:
+      return null;
+  }
+}
+
+function stageAgoLabel(doc: Document): string | null {
+  const ts = stageTimestamp(doc);
+  if (!ts) return null;
+  try {
+    return formatDistanceToNowStrict(new Date(ts), { addSuffix: false });
+  } catch {
+    return null;
+  }
 }
 
 function laborSummary(doc: Document): string {
@@ -144,35 +173,52 @@ export function JobScopeCard({
             </Text>
           </View>
         </View>
-        <View style={styles.headerChips}>
-          {onStagePress ? (
-            <Pressable
-              onPress={() => {
-                selectionTap();
-                onStagePress(doc);
-              }}
-              hitSlop={6}
-              style={({ pressed }) => [
-                styles.stageChip,
-                {
-                  backgroundColor: meta.bgColor,
-                  borderColor: meta.color + '44',
-                },
-                pressed && styles.pressed,
-              ]}
-            >
-              <MaterialCommunityIcons
-                name={meta.icon as any}
-                size={12}
-                color={meta.color}
-              />
-              <Text style={[styles.stageLabel, { color: meta.color }]}>
-                {meta.chipLabel}
-              </Text>
-            </Pressable>
-          ) : null}
-          <PaymentChip doc={doc} onPress={onPaymentPress} />
-        </View>
+        <Pressable
+          onPress={handleToggle}
+          hitSlop={10}
+          style={({ pressed }) => [
+            styles.expandButton,
+            pressed && styles.expandButtonPressed,
+          ]}
+          accessibilityLabel={expanded ? 'Hide details' : 'Show details'}
+        >
+          <MaterialCommunityIcons
+            name={(expanded ? 'chevron-up' : 'chevron-down') as any}
+            size={20}
+            color={colors.textMuted}
+          />
+        </Pressable>
+      </View>
+
+      <View style={styles.chipRow}>
+        {onStagePress ? (
+          <Pressable
+            onPress={() => {
+              selectionTap();
+              onStagePress(doc);
+            }}
+            hitSlop={6}
+            style={({ pressed }) => [
+              styles.stageChip,
+              {
+                backgroundColor: meta.bgColor,
+                borderColor: meta.color + '44',
+              },
+              pressed && styles.pressed,
+            ]}
+          >
+            <MaterialCommunityIcons
+              name={meta.icon as any}
+              size={12}
+              color={meta.color}
+            />
+            <Text style={[styles.stageLabel, { color: meta.color }]}>
+              {meta.chipLabel}
+              {stageAgoLabel(doc) ? ` · ${stageAgoLabel(doc)} ago` : ''}
+            </Text>
+          </Pressable>
+        ) : null}
+        <PaymentChip doc={doc} onPress={onPaymentPress} />
       </View>
 
       <ScopeRow
@@ -211,44 +257,26 @@ export function JobScopeCard({
 
       {expanded ? <ExpandedBreakdown doc={doc} /> : null}
 
-      <View style={styles.actionRow}>
-        <Pressable
-          onPress={handlePreview}
-          disabled={previewing}
-          style={({ pressed }) => [
-            styles.actionButton,
-            pressed && styles.actionButtonPressed,
-            previewing && styles.actionButtonDisabled,
-          ]}
-        >
-          {previewing ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <MaterialCommunityIcons
-              name={'file-eye-outline' as any}
-              size={16}
-              color={colors.primary}
-            />
-          )}
-          <Text style={styles.actionLabel}>Preview PDF</Text>
-        </Pressable>
-        <Pressable
-          onPress={handleToggle}
-          style={({ pressed }) => [
-            styles.actionButton,
-            pressed && styles.actionButtonPressed,
-          ]}
-        >
+      <Pressable
+        onPress={handlePreview}
+        disabled={previewing}
+        style={({ pressed }) => [
+          styles.previewButton,
+          pressed && styles.actionButtonPressed,
+          previewing && styles.actionButtonDisabled,
+        ]}
+      >
+        {previewing ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
           <MaterialCommunityIcons
-            name={(expanded ? 'chevron-up' : 'chevron-down') as any}
+            name={'file-eye-outline' as any}
             size={16}
             color={colors.primary}
           />
-          <Text style={styles.actionLabel}>
-            {expanded ? 'Hide details' : 'Show details'}
-          </Text>
-        </Pressable>
-      </View>
+        )}
+        <Text style={styles.actionLabel}>Preview PDF</Text>
+      </Pressable>
     </View>
   );
 }
@@ -469,10 +497,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
   },
-  headerChips: {
+  expandButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+  },
+  expandButtonPressed: {
+    backgroundColor: colors.surfaceGray3,
+  },
+  chipRow: {
     flexDirection: 'row',
     gap: 6,
     alignItems: 'center',
+    paddingHorizontal: 2,
+    flexWrap: 'wrap',
   },
   stageChip: {
     flexDirection: 'row',
@@ -554,13 +594,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.text,
   },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingTop: 4,
-  },
-  actionButton: {
-    flex: 1,
+  previewButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -570,6 +604,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryBg,
     borderWidth: 1,
     borderColor: colors.primary + '33',
+    marginTop: 4,
   },
   actionButtonPressed: {
     opacity: 0.8,

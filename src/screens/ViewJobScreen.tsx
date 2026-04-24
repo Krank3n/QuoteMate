@@ -7,7 +7,7 @@
  * Stage chip → JobStageSheet.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useLayoutEffect } from 'react';
 import { View, StyleSheet, Alert, Pressable, Linking, Platform } from 'react-native';
 import { NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { Text, Card, Button, TextInput } from 'react-native-paper';
@@ -23,6 +23,8 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { WebContainer } from '../components/WebContainer';
 import { DocumentRow } from '../components/DocumentRow';
 import { JobScopeCard, type ScopeStep } from '../components/JobScopeCard';
+import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
+import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
 import {
@@ -75,6 +77,8 @@ export function ViewJobScreen() {
     setCurrentInvoice,
   } = useStore();
   const duplicateJob = useJobStore((s) => s.duplicateJob);
+  const xeroConnection = useStore((s) => s.xeroConnection);
+  const pushInvoiceToXero = useStore((s) => s.pushInvoiceToXero);
 
   const isTrialActive = !!(
     subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired
@@ -86,6 +90,7 @@ export function ViewJobScreen() {
   const [paymentSheetDoc, setPaymentSheetDoc] = useState<Document | null>(null);
   const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
   const [customerSheetVisible, setCustomerSheetVisible] = useState(false);
+  const [actionsSheetVisible, setActionsSheetVisible] = useState(false);
   const [takePaymentTarget, setTakePaymentTarget] = useState<TakePaymentTarget | null>(null);
   const [sendDialogDoc, setSendDialogDoc] = useState<Document | null>(null);
   const [followUpState, setFollowUpState] = useState<{
@@ -440,6 +445,91 @@ export function ViewJobScreen() {
     navigation.navigate('RecordPayment', { invoiceId: doc.id });
   };
 
+  // Dispatcher for the Actions sheet (the three-dot kebab in the nav
+  // header). Reuses the same JobAction set as JobCard's kebab so the
+  // mental model is identical from both entry points.
+  const handleActionSelect = async (action: JobAction) => {
+    setActionsSheetVisible(false);
+    switch (action) {
+      case 'takePayment':
+        if (primaryDoc) openTakePaymentForDoc(primaryDoc);
+        break;
+      case 'followUp':
+        if (primaryDoc) {
+          setFollowUpState({
+            doc: primaryDoc,
+            tone: computeFollowUpTone(primaryDoc),
+          });
+        }
+        break;
+      case 'edit':
+        if (primaryDoc) openEditorForDoc(primaryDoc, 'materials');
+        break;
+      case 'send':
+        if (primaryDoc) setSendDialogDoc(primaryDoc);
+        break;
+      case 'duplicate':
+        handleDuplicate();
+        break;
+      case 'exportPdf':
+        if (primaryDoc) {
+          try {
+            await exportDocumentPDF(primaryDoc, businessSettings, 'export', {
+              isPro,
+            });
+          } catch {
+            Alert.alert('Export failed', 'Try again in a moment.');
+          }
+        }
+        break;
+      case 'pushToXero':
+        if (primaryDoc?.type === 'invoice') {
+          try {
+            await pushInvoiceToXero(documentToInvoice(primaryDoc));
+            Alert.alert('Pushed to Xero', 'Invoice synced successfully.');
+          } catch (e: any) {
+            Alert.alert('Xero sync failed', e?.message ?? 'Try again in a moment.');
+          }
+        }
+        break;
+      case 'archive':
+        handleArchive();
+        break;
+      case 'unarchive':
+        await saveJob({ ...job, archivedAt: undefined });
+        break;
+      case 'delete':
+        handleDelete();
+        break;
+    }
+  };
+
+  // Kebab in the nav header — opens the Actions sheet.
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable
+          onPress={() => {
+            selectionTap();
+            setActionsSheetVisible(true);
+          }}
+          hitSlop={10}
+          style={({ pressed }) => [
+            styles.headerActionButton,
+            pressed && { opacity: 0.7 },
+          ]}
+          accessibilityLabel="Actions"
+        >
+          <MaterialCommunityIcons
+            name={'dots-vertical' as any}
+            size={22}
+            color={colors.white}
+          />
+        </Pressable>
+      ),
+    });
+  }, [navigation]);
+
   // The ONE way to enter the scope/materials/labor editor. Seeds the
   // wizard's `currentQuote` / `currentInvoice` with this doc (the
   // wizard screens read off those store slots, not route params), then
@@ -531,7 +621,6 @@ export function ViewJobScreen() {
   const customerIsUnknown =
     !job.customerName || job.customerName.trim() === '' || job.customerName === 'Unknown customer';
 
-  const stageBanner = deriveStageBanner(job, primaryDoc);
   // Execution stages (post-approval) prioritise schedule + checklist up
   // top; admin stages (pre-approval or final) lead with the documents.
   const executionFocus =
@@ -545,26 +634,6 @@ export function ViewJobScreen() {
           sit inline without fighting the outer scroll on native. On web
           it behaves as a regular scroll view. */}
       <NestableScrollContainer contentContainerStyle={styles.scrollContent}>
-        {/* Stage banner: the single most-relevant status line. Lives at
-            the very top so it reads before the tradie does anything
-            else. Color-coded to the phase (info/warning/success/error). */}
-        {stageBanner ? (
-          <WebContainer>
-            <View
-              style={[styles.stageBanner, { backgroundColor: stageBanner.tint }]}
-            >
-              <MaterialCommunityIcons
-                name={stageBanner.icon as any}
-                size={18}
-                color={stageBanner.accent}
-              />
-              <Text style={[styles.stageBannerText, { color: stageBanner.accent }]}>
-                {stageBanner.label}
-              </Text>
-            </View>
-          </WebContainer>
-        ) : null}
-
         <WebContainer>
           <Card style={styles.headerCard}>
             <View style={styles.headerRow}>
@@ -776,13 +845,9 @@ export function ViewJobScreen() {
           </WebContainer>
         ) : null}
 
-        {/* Checklist — only meaningful once there's approved work. Hidden
-            for pre-approval stages to keep the screen focused. */}
-        {executionFocus || job.stage === 'accepted' || job.stage === 'paid' ? (
-          <WebContainer>
-            <JobChecklist job={job} />
-          </WebContainer>
-        ) : null}
+        {/* Checklist hidden for now — feedback is that ViewJob is
+            already dense. Bring back behind a tap-to-expand when we
+            have a clearer signal that cleaners want it on this screen. */}
 
         {/* Scope dropped to below schedule + checklist when the job is
             in execution mode (scheduling / working / completing). */}
@@ -800,56 +865,9 @@ export function ViewJobScreen() {
           <JobPhotoStrip job={job} documents={attachedDocs} />
         </WebContainer>
 
-        <WebContainer>
-          <SectionTitle label="Notes" />
-          {/* Collapsed state: just a tappable "Add notes" row. Once there's
-              actual text on the job OR the tradie has explicitly tapped to
-              edit, the full TextInput + Save button render. Keeps the
-              detail view uncluttered for the common no-notes case. */}
-          {!notesEditing && !notesDraft.trim() ? (
-            <Pressable
-              onPress={() => {
-                selectionTap();
-                setNotesEditing(true);
-              }}
-              style={({ pressed }) => [
-                styles.notesAddButton,
-                pressed && { opacity: 0.85 },
-              ]}
-            >
-              <MaterialCommunityIcons
-                name={'note-plus-outline' as any}
-                size={18}
-                color={colors.textMuted}
-              />
-              <Text style={styles.notesAddLabel}>Add notes</Text>
-            </Pressable>
-          ) : (
-            <Card style={styles.notesCard}>
-              <TextInput
-                mode="outlined"
-                multiline
-                value={notesDraft}
-                onChangeText={(text) => {
-                  setNotesDraft(text);
-                  setNotesDirty(true);
-                }}
-                placeholder="Internal notes about this job…"
-                style={styles.notesInput}
-                numberOfLines={4}
-                autoFocus={notesEditing && !notesDraft.trim()}
-                onBlur={() => {
-                  if (!notesDraft.trim() && !notesDirty) setNotesEditing(false);
-                }}
-              />
-              {notesDirty ? (
-                <Button mode="contained" onPress={handleNotesSave} style={styles.notesSave}>
-                  Save notes
-                </Button>
-              ) : null}
-            </Card>
-          )}
-        </WebContainer>
+        {/* Notes hidden for now — same rationale as the checklist
+            above. Data still persists on the Job; just no surface
+            here until we have a better place for it. */}
 
         {/* Activity — collapsed by default and pushed near the bottom.
             Historical log, not an action surface, so it doesn't deserve
@@ -880,46 +898,16 @@ export function ViewJobScreen() {
           {timelineOpen ? <JobTimeline job={job} documents={attachedDocs} /> : null}
         </WebContainer>
 
-        <WebContainer>
-          <View style={styles.dangerRow}>
-            <Button
-              mode="outlined"
-              icon={'content-duplicate' as any}
-              onPress={() => {
-                lightTap();
-                handleDuplicate();
-              }}
-              style={styles.archiveButton}
-            >
-              Duplicate
-            </Button>
-            <Button
-              mode="outlined"
-              icon={'archive-outline' as any}
-              onPress={() => {
-                lightTap();
-                handleArchive();
-              }}
-              style={styles.archiveButton}
-            >
-              Archive
-            </Button>
-            <Button
-              mode="text"
-              icon={'trash-can-outline' as any}
-              onPress={() => {
-                lightTap();
-                handleDelete();
-              }}
-              textColor={colors.error}
-              style={styles.deleteButton}
-              compact
-            >
-              Delete
-            </Button>
-          </View>
-        </WebContainer>
       </NestableScrollContainer>
+
+      <JobActionsSheet
+        visible={actionsSheetVisible}
+        onDismiss={() => setActionsSheetVisible(false)}
+        job={job}
+        primaryDoc={primaryDoc ?? null}
+        xeroConnected={!!xeroConnection}
+        onSelect={handleActionSelect}
+      />
 
       <StickyJobActionBar
         job={job}
@@ -999,176 +987,6 @@ export function ViewJobScreen() {
   );
 }
 
-interface StageBanner {
-  label: string;
-  icon: string;
-  accent: string;
-  tint: string;
-}
-
-function deriveStageBanner(job: any, primaryDoc: Document | null | undefined): StageBanner | null {
-  const agoFromStamp = (ms?: number) => {
-    if (!ms) return null;
-    try {
-      return formatDistanceToNow(new Date(ms), { addSuffix: true });
-    } catch {
-      return null;
-    }
-  };
-
-  // Terminal states: short, final-sounding.
-  if (job.stage === 'cancelled') {
-    return {
-      label: 'Cancelled',
-      icon: 'close-octagon-outline',
-      accent: colors.error,
-      tint: colors.errorBg,
-    };
-  }
-  if (job.stage === 'closed') {
-    return {
-      label: 'Closed',
-      icon: 'archive-outline',
-      accent: colors.inactive,
-      tint: colors.surfaceGray3,
-    };
-  }
-  if (job.stage === 'paid') {
-    return {
-      label: 'Paid in full',
-      icon: 'cash-check',
-      accent: colors.success,
-      tint: colors.successBg,
-    };
-  }
-
-  const depositOwed = !!(
-    primaryDoc &&
-    primaryDoc.type === 'quote' &&
-    (primaryDoc.depositAmount ?? 0) > 0 &&
-    (primaryDoc.depositPaid ?? 0) < (primaryDoc.depositAmount ?? 0)
-  );
-
-  if (primaryDoc?.type === 'invoice') {
-    if (primaryDoc.stage === 'paid') {
-      return {
-        label: 'Invoice paid',
-        icon: 'check-decagram-outline',
-        accent: colors.success,
-        tint: colors.successBg,
-      };
-    }
-    if (
-      primaryDoc.stage === 'invoice_sent' ||
-      primaryDoc.stage === 'partially_paid'
-    ) {
-      const sent = agoFromStamp((primaryDoc as any).sentAt ?? primaryDoc.updatedAt);
-      const paid = Number(primaryDoc.paidTotal ?? 0);
-      const total = Number(primaryDoc.total ?? 0);
-      const balance = Math.max(0, total - paid);
-      const label =
-        paid > 0
-          ? `Partially paid · ${formatCurrency(balance)} outstanding`
-          : sent
-            ? `Invoice sent ${sent}`
-            : 'Invoice awaiting payment';
-      return {
-        label,
-        icon: 'receipt',
-        accent: colors.warning,
-        tint: colors.warningBg,
-      };
-    }
-    if (primaryDoc.stage === 'draft') {
-      return {
-        label: 'Invoice draft — send to start getting paid',
-        icon: 'file-document-edit-outline',
-        accent: colors.info,
-        tint: colors.infoBg,
-      };
-    }
-  }
-
-  if (primaryDoc?.type === 'quote') {
-    if (primaryDoc.stage === 'quote_sent') {
-      const sent = agoFromStamp((primaryDoc as any).sentAt ?? primaryDoc.updatedAt);
-      return {
-        label: sent ? `Quote sent ${sent}` : 'Quote sent — awaiting approval',
-        icon: 'send-outline',
-        accent: colors.info,
-        tint: colors.infoBg,
-      };
-    }
-    if (primaryDoc.stage === 'quote_accepted') {
-      if (depositOwed) {
-        return {
-          label: 'Approved — take the deposit',
-          icon: 'cash-plus',
-          accent: colors.warning,
-          tint: colors.warningBg,
-        };
-      }
-      if (job.stage === 'scheduled') {
-        const scheduled = formatScheduledDateLong(job.scheduledStartDate);
-        return {
-          label: scheduled ? `Scheduled · ${scheduled}` : 'Scheduled',
-          icon: 'calendar-clock',
-          accent: colors.success,
-          tint: colors.successBg,
-        };
-      }
-      if (job.stage === 'in_progress') {
-        const started = agoFromStamp(job.actualStartDate ?? job.inProgressAt);
-        return {
-          label: started ? `In progress since ${started}` : 'In progress',
-          icon: 'hammer-wrench',
-          accent: colors.warning,
-          tint: colors.warningBg,
-        };
-      }
-      if (job.stage === 'completed') {
-        return {
-          label: 'Work completed — time to invoice',
-          icon: 'flag-checkered',
-          accent: colors.success,
-          tint: colors.successBg,
-        };
-      }
-      return {
-        label: 'Quote approved — let’s schedule',
-        icon: 'check-circle-outline',
-        accent: colors.success,
-        tint: colors.successBg,
-      };
-    }
-    if (primaryDoc.stage === 'quote_rejected') {
-      return {
-        label: 'Quote rejected',
-        icon: 'close-circle-outline',
-        accent: colors.error,
-        tint: colors.errorBg,
-      };
-    }
-    if (primaryDoc.stage === 'draft') {
-      return {
-        label: 'Draft quote — finish and send',
-        icon: 'file-document-edit-outline',
-        accent: colors.info,
-        tint: colors.infoBg,
-      };
-    }
-  }
-
-  if (!primaryDoc) {
-    return {
-      label: 'No quote yet — create one to get started',
-      icon: 'file-document-plus-outline',
-      accent: colors.primary,
-      tint: colors.primaryBg,
-    };
-  }
-  return null;
-}
 
 function Totals({
   label,
@@ -1266,20 +1084,9 @@ const styles = StyleSheet.create({
   // Extra bottom pad clears the pinned StickyJobActionBar so the last
   // section (danger zone) isn't hidden behind it.
   scrollContent: { paddingBottom: 160 },
-  stageBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 16,
-    marginTop: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  stageBannerText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '700',
+  headerActionButton: {
+    marginRight: 8,
+    padding: 6,
   },
   moneyCard: {
     marginHorizontal: 16,

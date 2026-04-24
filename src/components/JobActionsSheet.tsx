@@ -22,9 +22,10 @@ import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 
 export type JobAction =
+  | 'takePayment'
+  | 'followUp'
   | 'edit'
   | 'send'
-  | 'takePayment'
   | 'duplicate'
   | 'exportPdf'
   | 'pushToXero'
@@ -56,7 +57,28 @@ interface RowDef {
   }) => boolean;
 }
 
+// Take Payment and Follow Up sit at the top — those are the
+// everyday actions; everything else (edit, send, archive, delete)
+// is less frequent.
 const ROWS: RowDef[] = [
+  {
+    id: 'takePayment',
+    label: 'Take Payment',
+    sub: 'Tap to pay or share the Square link',
+    icon: 'credit-card-outline',
+    when: ({ primaryDoc }) => !!primaryDoc,
+  },
+  {
+    id: 'followUp',
+    label: 'Follow Up',
+    sub: 'Send a nudge by SMS, email, or pay link',
+    icon: 'bell-outline',
+    when: ({ primaryDoc }) =>
+      !!primaryDoc &&
+      (primaryDoc.stage === 'quote_sent' ||
+        primaryDoc.stage === 'invoice_sent' ||
+        primaryDoc.stage === 'partially_paid'),
+  },
   {
     id: 'edit',
     label: 'Edit scope & pricing',
@@ -69,13 +91,6 @@ const ROWS: RowDef[] = [
     label: 'Send',
     sub: 'Email / SMS / Share / PDF',
     icon: 'send-outline',
-    when: ({ primaryDoc }) => !!primaryDoc,
-  },
-  {
-    id: 'takePayment',
-    label: 'Take Payment',
-    sub: 'Tap to pay or share the Square link',
-    icon: 'credit-card-outline',
     when: ({ primaryDoc }) => !!primaryDoc,
   },
   {
