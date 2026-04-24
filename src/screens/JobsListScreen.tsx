@@ -22,17 +22,10 @@ import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { JobCard } from '../components/JobCard';
 import { JobStageSheet } from '../components/JobStageSheet';
-import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
-import { SendDocumentDialog } from '../components/SendDocumentDialog';
-import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaymentSheet';
-import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import { AnimatedListItem } from '../components/AnimatedListItem';
-import { pickPrimaryDoc } from '../components/StickyJobActionBar';
-import { exportDocumentPDF } from '../utils/pdfGenerator';
-import { documentToInvoice, documentToQuote } from '../types/documentAdapter';
-import type { Document } from '../types/document';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
+import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap } from '../utils/haptics';
 
 type FilterKind = 'all' | 'active' | 'scheduled' | 'completed' | 'archived';
@@ -70,30 +63,19 @@ export function JobsListScreen() {
   useScrollToTop(listRef);
 
   const navigation = useNavigation<any>();
-  const { jobs, jobsLoaded, loadJobs, saveJob, deleteJob, duplicateJob } = useJobStore();
+  const { jobs, jobsLoaded, loadJobs, saveJob } = useJobStore();
   const canCreateQuote = useStore((s) => s.canCreateQuote);
   const createNewQuote = useStore((s) => s.createNewQuote);
-  const documents = useStore((s) => s.documents);
-  const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
-  const businessSettings = useStore((s) => s.businessSettings);
-  const xeroConnection = useStore((s) => s.xeroConnection);
-  const pushInvoiceToXero = useStore((s) => s.pushInvoiceToXero);
-  const subscriptionStatus = useStore((s) => s.subscriptionStatus);
-  const setCurrentQuote = useStore((s) => s.setCurrentQuote);
-  const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterKind>('active');
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(jobsLoaded || jobs.length > 0);
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
-  const [actionsSheetJob, setActionsSheetJob] = useState<Job | null>(null);
-  const [sendDialogDoc, setSendDialogDoc] = useState<Document | null>(null);
-  const [takePaymentTarget, setTakePaymentTarget] = useState<TakePaymentTarget | null>(null);
-  const [followUpState, setFollowUpState] = useState<{
-    doc: Document;
-    tone: FollowUpTone;
-  } | null>(null);
+
+  // Shared Actions sheet host (see useJobActionsSheet for the whole
+  // menu → dispatcher wiring including linked dialogs/sheets).
+  const actionsSheet = useJobActionsSheet(navigation);
 
   useEffect(() => {
     if (!initialLoaded && jobs.length > 0) setInitialLoaded(true);
@@ -164,173 +146,6 @@ export function JobsListScreen() {
     }
   };
 
-  const handleMenuPress = (job: Job) => {
-    setActionsSheetJob(job);
-  };
-
-  // Look up a job's primary doc for the doc-level actions (Send / Take
-  // Payment / Export / Push to Xero). Same selection the ViewJob sticky
-  // bar uses: explicit primaryDocumentId wins, otherwise the most
-  // recently updated attached doc (invoices beat quotes).
-  const primaryDocForJob = (job: Job): Document | null => {
-    if (job.primaryDocumentId) {
-      const explicit = documents.find((d) => d.id === job.primaryDocumentId);
-      if (explicit) return explicit;
-    }
-    const attached = documents.filter((d) => d.jobId === job.id);
-    return pickPrimaryDoc(attached);
-  };
-
-  // Central dispatcher for the 3-dot menu. Kept here (not inside
-  // JobActionsSheet) because each action needs access to the stores
-  // the screen already has in scope.
-  const handleActionSelect = async (action: JobAction, job: Job) => {
-    setActionsSheetJob(null);
-    switch (action) {
-      case 'edit': {
-        const doc = primaryDocForJob(job);
-        if (!doc) return;
-        // Seed the wizard store with the doc, then jump into the
-        // materials step. Mirrors ViewJob's editor entry — one path.
-        if (doc.type === 'invoice') {
-          setCurrentInvoice(documentToInvoice(doc));
-          navigation.navigate('NewInvoice', {
-            screen: 'MaterialsList',
-            params: { editing: true },
-          });
-        } else {
-          setCurrentQuote(documentToQuote(doc));
-          navigation.navigate('NewQuote', {
-            screen: 'MaterialsList',
-            params: { editing: true },
-          });
-        }
-        break;
-      }
-      case 'send': {
-        const doc = primaryDocForJob(job);
-        if (doc) setSendDialogDoc(doc);
-        break;
-      }
-      case 'followUp': {
-        const doc = primaryDocForJob(job);
-        if (!doc) break;
-        // Use the same aging thresholds as the sticky bar — tone
-        // firms up after each window.
-        const baseline =
-          doc.type === 'invoice' ? (doc.dueDate ?? doc.sentAt) : doc.sentAt;
-        const days = baseline
-          ? (Date.now() - baseline) / (1000 * 60 * 60 * 24)
-          : 0;
-        const tone: FollowUpTone =
-          days >= 7 ? 'overdue' : days >= 4 ? 'firm' : 'gentle';
-        setFollowUpState({ doc, tone });
-        break;
-      }
-      case 'takePayment': {
-        const doc = primaryDocForJob(job);
-        if (!doc) return;
-        if (doc.type === 'invoice') {
-          setTakePaymentTarget({
-            kind: 'invoice',
-            invoiceId: doc.id,
-            total: Number(doc.total ?? 0),
-            paidAmount: Number(doc.paidTotal ?? 0),
-            jobName: job.name,
-            invoiceNumber: doc.number,
-            terms: doc.termsSnapshot ?? null,
-          });
-        } else {
-          setTakePaymentTarget({
-            kind: 'quote_deposit',
-            quoteId: doc.id,
-            depositAmount: Number(doc.depositAmount ?? 0),
-            depositPaid: Number(doc.depositPaid ?? 0),
-            total: Number(doc.total ?? 0),
-            jobName: job.name,
-            terms: doc.termsSnapshot ?? null,
-          });
-        }
-        break;
-      }
-      case 'exportPdf': {
-        const doc = primaryDocForJob(job);
-        if (!doc) return;
-        const isTrialActive = !!(
-          subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired
-        );
-        const isPro = subscriptionStatus?.isPro || isTrialActive;
-        try {
-          await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
-        } catch {
-          Alert.alert('Error', 'Failed to export PDF. Please try again.');
-        }
-        break;
-      }
-      case 'pushToXero': {
-        const doc = primaryDocForJob(job);
-        if (!doc || doc.type !== 'invoice') return;
-        try {
-          await pushInvoiceToXero(documentToInvoice(doc));
-          Alert.alert('Synced to Xero', 'Invoice pushed successfully.');
-        } catch (e: any) {
-          Alert.alert('Xero sync failed', e?.message || 'Try again in a moment.');
-        }
-        break;
-      }
-      case 'duplicate': {
-        try {
-          const cloned = await duplicateJob(job.id);
-          if (job.primaryDocumentId) {
-            const clonedDoc = await duplicateDocumentForJob(
-              job.primaryDocumentId,
-              cloned.id,
-            );
-            await saveJob({
-              ...cloned,
-              primaryDocumentId: clonedDoc.id,
-              documentIds: [clonedDoc.id],
-            });
-          }
-          navigation.navigate('ViewJob', { jobId: cloned.id });
-        } catch {
-          Alert.alert('Duplicate failed', 'Try again in a moment.');
-        }
-        break;
-      }
-      case 'archive':
-        await saveJob({ ...job, archivedAt: Date.now() });
-        break;
-      case 'unarchive':
-        await saveJob({ ...job, archivedAt: undefined });
-        break;
-      case 'delete': {
-        const attached = documents.filter((d) => d.jobId === job.id);
-        if (attached.length > 0) {
-          Alert.alert(
-            'Can’t delete — docs attached',
-            'Delete or reassign the attached quotes and invoices first, then try again.',
-          );
-          return;
-        }
-        Alert.alert('Delete job?', 'This cannot be undone.', [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Delete',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                await deleteJob(job.id);
-              } catch {
-                Alert.alert('Delete failed', 'Try again in a moment.');
-              }
-            },
-          },
-        ]);
-        break;
-      }
-    }
-  };
 
   const renderCard = useCallback(
     ({ item, index }: { item: Job; index: number }) => (
@@ -339,7 +154,7 @@ export function JobsListScreen() {
           job={item}
           onPress={handleView}
           onStagePress={handleStagePress}
-          onMenuPress={handleMenuPress}
+          onMenuPress={actionsSheet.open}
         />
       </AnimatedListItem>
     ),
@@ -455,52 +270,7 @@ export function JobsListScreen() {
         />
       )}
 
-      <JobActionsSheet
-        visible={!!actionsSheetJob}
-        onDismiss={() => setActionsSheetJob(null)}
-        job={actionsSheetJob}
-        primaryDoc={actionsSheetJob ? primaryDocForJob(actionsSheetJob) : null}
-        xeroConnected={!!xeroConnection}
-        onSelect={handleActionSelect}
-      />
-
-      {sendDialogDoc ? (
-        <SendDocumentDialog
-          visible={!!sendDialogDoc}
-          onDismiss={() => setSendDialogDoc(null)}
-          doc={sendDialogDoc}
-          businessSettings={businessSettings}
-        />
-      ) : null}
-
-      <TakePaymentSheet
-        visible={!!takePaymentTarget}
-        target={takePaymentTarget}
-        onDismiss={() => setTakePaymentTarget(null)}
-        onError={(message) => Alert.alert('Payment error', message)}
-      />
-
-      {followUpState ? (
-        <FollowUpSheet
-          visible={!!followUpState}
-          onDismiss={() => setFollowUpState(null)}
-          doc={followUpState.doc}
-          tone={followUpState.tone}
-          customerName={
-            (jobs.find((j) => j.id === followUpState.doc.jobId)?.customerName) ?? ''
-          }
-          customerPhone={
-            jobs.find((j) => j.id === followUpState.doc.jobId)?.customerPhone
-          }
-          customerEmail={
-            jobs.find((j) => j.id === followUpState.doc.jobId)?.customerEmail
-          }
-          businessName={businessSettings?.businessName || 'us'}
-          jobName={
-            (jobs.find((j) => j.id === followUpState.doc.jobId)?.name) ?? 'the job'
-          }
-        />
-      ) : null}
+      {actionsSheet.element}
 
     </View>
   );

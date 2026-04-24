@@ -27,6 +27,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { formatScheduledDateTime, formatScheduledDuration } from '../utils/formatSchedule';
 import { deriveDuration } from '../utils/deriveDuration';
 import { JOB_STAGE_META } from './JobStageSheet';
+import { ShimmerOverlay } from './ShimmerOverlay';
 import { selectionTap } from '../utils/haptics';
 
 // Small circular icon buttons for the contact quick-taps (call / text /
@@ -203,20 +204,17 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
       <Card
         style={[
           styles.card,
-          // Stage-tinted accent — left stripe in the full stage color
-          // plus the card body in the muted `*Bg` variant. Keeps the
-          // list scannable at a glance without being garish.
-          {
-            borderLeftColor: meta.color,
-            borderLeftWidth: 4,
-            backgroundColor: meta.bgColor,
-          },
+          // Neutral base + left accent stripe in the full stage color.
+          // The animated shimmer below carries the stage-coloured tint
+          // so the card has life without being visually loud.
+          { borderLeftColor: meta.color, borderLeftWidth: 4 },
         ]}
         onPress={() => {
           selectionTap();
           onPress(job.id);
         }}
       >
+        <ShimmerOverlay tint={meta.color} intensity={0.12} />
         <View style={styles.cardContent}>
         <View style={styles.topRow}>
           <View style={styles.titleBlock}>
@@ -464,6 +462,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     backgroundColor: colors.surface,
     borderRadius: 16,
+    // Required so the ShimmerOverlay's sweep stays clipped inside the
+    // card's rounded corners.
+    overflow: 'hidden',
   },
   cardContent: {
     padding: 14,

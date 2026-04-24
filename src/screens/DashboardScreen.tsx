@@ -34,6 +34,7 @@ import { StageSheet } from '../components/StageSheet';
 import { applyStageChange } from '../utils/applyStageChange';
 import type { Document, DocumentStage } from '../types/document';
 import { SwipeableCard } from '../components/SwipeableCard';
+import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap, successTap } from '../utils/haptics';
 import { TrialBanner } from '../components/TrialBanner';
 import { SyncErrorBanner } from '../components/SyncErrorBanner';
@@ -255,6 +256,7 @@ export function DashboardScreen() {
     }
   }, []);
   const navigation = useNavigation<any>();
+  const jobActions = useJobActionsSheet(navigation);
   const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft, hasSeenTour, unifiedTourActive, unifiedTourPhase, startUnifiedTour } = useStore();
   const { registerRef } = useTourRefs();
   const [tourActive, setTourActive] = useState(false);
@@ -754,6 +756,7 @@ export function DashboardScreen() {
                   <JobCard
                     job={job}
                     onPress={(jobId) => navigation.navigate('ViewJob', { jobId })}
+                    onMenuPress={jobActions.open}
                   />
                 </View>
               </AnimatedListItem>
@@ -800,6 +803,7 @@ export function DashboardScreen() {
       />
     )}
 
+    {jobActions.element}
 
     {/* Spotlight Tour — only active during 'dashboard' phase, not 'dashboardComplete' */}
     <SpotlightTour
