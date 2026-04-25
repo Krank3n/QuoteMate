@@ -61,7 +61,7 @@ export type RootTabParamList = {
 };
 
 export type NewQuoteStackParamList = {
-  JobDetails: { mode?: 'quote' | 'invoice' } | undefined;
+  Details: { mode?: 'quote' | 'invoice' } | undefined;
   CustomerDetails: { mode?: 'quote' | 'invoice' } | undefined;
   MaterialsList: { mode?: 'quote' | 'invoice' } | undefined;
   AddMaterial: { materialId?: string; mode?: 'quote' | 'invoice' } | undefined;
@@ -107,9 +107,9 @@ function NewQuoteNavigator() {
       }}
     >
       <NewQuoteStack.Screen
-        name="JobDetails"
+        name="Details"
         component={JobDetailsScreen}
-        options={{ title: 'New Quote - Job Details' }}
+        options={{ title: 'New Job - Details' }}
       />
       <NewQuoteStack.Screen
         name="CustomerDetails"
@@ -174,9 +174,9 @@ function NewInvoiceNavigator() {
       }}
     >
       <NewQuoteStack.Screen
-        name="JobDetails"
+        name="Details"
         component={JobDetailsScreen}
-        options={{ title: 'New Invoice - Job Details' }}
+        options={{ title: 'New Job - Details' }}
         initialParams={{ mode: 'invoice' }}
       />
       <NewQuoteStack.Screen
@@ -521,7 +521,7 @@ export function RootNavigator() {
         }}
       />
       <RootStack.Screen
-        name="NewQuote"
+        name="NewJob"
         component={NewQuoteNavigator}
         options={{
           presentation: 'card',

@@ -100,6 +100,14 @@ interface JobDetailHeaderProps {
   completedAt: string | null;
   onCustomerEdit: () => void;
   onMenu: () => void;
+  /**
+   * Pre-formatted schedule string (e.g. "Wed, 12 May · 8:00 AM · 4h").
+   * When null, the chip flips to the "+ Add Schedule" call-to-action.
+   */
+  scheduledLabel?: string | null;
+  /** Shows the schedule chip; gated by ViewJob (e.g. only after a doc exists). */
+  showScheduleChip?: boolean;
+  onSchedulePress?: () => void;
 }
 
 export function JobDetailHeader({
@@ -109,6 +117,9 @@ export function JobDetailHeader({
   completedAt,
   onCustomerEdit,
   onMenu,
+  scheduledLabel,
+  showScheduleChip,
+  onSchedulePress,
 }: JobDetailHeaderProps) {
   const [activityOpen, setActivityOpen] = useState(false);
   const isTerminal = job.stage === 'cancelled' || job.stage === 'closed';
@@ -280,6 +291,53 @@ export function JobDetailHeader({
               color={colors.success}
             />
             <Text style={styles.completedText}>Completed {completedAt}</Text>
+          </View>
+        ) : null}
+
+        {/* Status & Schedule strip — sits directly above the timeline so
+            the active stage and the planned date read as a single
+            "where is this job at" signal. Tapping the chip opens the
+            schedule sheet (no middle card needed). */}
+        {showScheduleChip && onSchedulePress && !isTerminal ? (
+          <View style={styles.scheduleChipRow}>
+            <Pressable
+              onPress={() => {
+                selectionTap();
+                onSchedulePress();
+              }}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.scheduleChip,
+                scheduledLabel
+                  ? styles.scheduleChipSet
+                  : styles.scheduleChipUnset,
+                pressed && { opacity: 0.7 },
+              ]}
+              accessibilityLabel={
+                scheduledLabel ? 'Edit schedule' : 'Add schedule'
+              }
+            >
+              <MaterialCommunityIcons
+                name={
+                  (scheduledLabel
+                    ? 'calendar-clock'
+                    : 'calendar-plus') as any
+                }
+                size={14}
+                color={scheduledLabel ? colors.primary : colors.textMuted}
+              />
+              <Text
+                style={[
+                  styles.scheduleChipLabel,
+                  scheduledLabel
+                    ? styles.scheduleChipLabelSet
+                    : styles.scheduleChipLabelUnset,
+                ]}
+                numberOfLines={1}
+              >
+                {scheduledLabel || '+ Add Schedule'}
+              </Text>
+            </Pressable>
           </View>
         ) : null}
 
@@ -624,6 +682,42 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontStyle: 'italic',
   },
+  scheduleChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  scheduleChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  scheduleChipSet: {
+    backgroundColor: colors.primaryBg + '55',
+    borderColor: colors.primary + '55',
+  },
+  scheduleChipUnset: {
+    backgroundColor: 'transparent',
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+  },
+  scheduleChipLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  scheduleChipLabelSet: {
+    color: colors.primary,
+  },
+  scheduleChipLabelUnset: {
+    color: colors.textMuted,
+  },
   // Timeline styles mirror JobCard so the visual language matches
   // exactly between the list view and the detail view.
   timelineRow: {
@@ -678,9 +772,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.success + '88',
   },
   activityWrap: {
-    marginTop: 6,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    marginTop: 4,
   },
 });

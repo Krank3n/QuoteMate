@@ -396,7 +396,7 @@ export function DashboardScreen() {
   const handleContinueDraft = (draft: Quote) => {
     lightTap();
     setCurrentQuote(draft);
-    navigation.navigate('NewQuote' as never, { screen: draft.draftStep || 'JobDetails' } as never);
+    navigation.navigate('NewJob' as never, { screen: draft.draftStep || 'Details' } as never);
   };
 
   const handleDeleteDraft = () => {
@@ -426,7 +426,7 @@ export function DashboardScreen() {
     }
     lightTap();
     createNewQuote();
-    navigation.navigate('NewQuote' as never);
+    navigation.navigate('NewJob' as never);
   };
 
   // Alias retained for the resume-draft and tour callsites that already
@@ -449,7 +449,7 @@ export function DashboardScreen() {
     // next save and stitch things together.
     if (q) {
       setCurrentQuote(q);
-      navigation.navigate('NewQuote' as never, {
+      navigation.navigate('NewJob' as never, {
         screen: 'MaterialsList',
         params: { editing: true },
       } as never);
@@ -463,13 +463,13 @@ export function DashboardScreen() {
     if (section) {
       const screenMap = {
         customer: 'CustomerDetails',
-        job: 'JobDetails',
+        job: 'Details',
         materials: 'MaterialsList',
         labor: 'LaborMarkup',
       };
-      navigation.navigate('NewQuote' as never, { screen: screenMap[section] } as never);
+      navigation.navigate('NewJob' as never, { screen: screenMap[section] } as never);
     } else {
-      navigation.navigate('NewQuote' as never);
+      navigation.navigate('NewJob' as never);
     }
   };
 
@@ -842,7 +842,7 @@ export function DashboardScreen() {
         } else {
           // Legacy standalone dashboard tour
           createNewQuote();
-          navigation.navigate('NewQuote' as never, { screen: 'JobDetails', params: { fromTour: true } } as never);
+          navigation.navigate('NewJob' as never, { screen: 'Details', params: { fromTour: true } } as never);
         }
       }}
       onSkip={unifiedTourActive ? () => notifySkipRequest() : undefined}

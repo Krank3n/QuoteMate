@@ -606,7 +606,7 @@ export function JobPreviewScreen() {
 
         <JobSection
           job={workingDoc.job}
-          onEdit={() => navigation.navigate('JobDetails')}
+          onEdit={() => navigation.navigate('Details')}
         />
 
         <MaterialsSection

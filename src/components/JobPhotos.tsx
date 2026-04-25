@@ -366,7 +366,7 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
 
         {allPhotos.length < MAX_PHOTOS && (
           <TouchableOpacity
-            style={styles.addButton}
+            style={[styles.addButton, allPhotos.length === 0 && styles.addButtonEmpty]}
             onPress={showAddOptions}
             disabled={hasAnyUploading || interactionDisabled}
           >
@@ -504,6 +504,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.surface,
+  },
+  addButtonEmpty: {
+    width: '100%',
+    height: 100,
   },
   addText: {
     fontSize: 11,

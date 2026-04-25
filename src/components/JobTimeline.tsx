@@ -147,9 +147,8 @@ export function JobTimeline({
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <Text style={styles.heading}>Activity</Text>
-        {canExpand ? (
+      {canExpand ? (
+        <View style={styles.headerRow}>
           <Pressable onPress={toggle} hitSlop={8} style={styles.toggleRow}>
             <Text style={styles.toggleLabel}>
               {expanded ? 'Collapse' : `Show timeline · ${events.length}`}
@@ -162,8 +161,8 @@ export function JobTimeline({
               />
             </Animated.View>
           </Pressable>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
 
       <View style={styles.list}>
         {visible.map((event, idx) => (
@@ -265,23 +264,14 @@ const RAIL_WIDTH = 32;
 
 const styles = StyleSheet.create({
   container: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    backgroundColor: colors.surface,
-    borderRadius: 16,
+    // Embedded inside JobDetailHeader; no outer card chrome — the parent
+    // already supplies the surface, padding, and border.
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  heading: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
+    justifyContent: 'flex-end',
+    marginBottom: 4,
   },
   toggleRow: {
     flexDirection: 'row',

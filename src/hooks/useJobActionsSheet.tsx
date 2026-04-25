@@ -100,7 +100,7 @@ export function useJobActionsSheet(
           });
         } else {
           setCurrentQuote(documentToQuote(doc));
-          navigation.navigate('NewQuote', {
+          navigation.navigate('NewJob', {
             screen: 'MaterialsList',
             params: { editing: true },
           });

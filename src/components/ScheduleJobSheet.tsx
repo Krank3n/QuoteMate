@@ -135,7 +135,14 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
     setSaving(true);
     try {
       const next = combineDayAndMinutes(pendingDay, pendingMinutes);
-      const updated: Job = { ...job, scheduledStartDate: next };
+      // Setting a date should advance an Accepted job to Scheduled so the
+      // stage matches the date now sitting on it — mirrors handleClear,
+      // which demotes scheduled → accepted when the date is removed.
+      // Never moves backward from later stages (in_progress / completed /
+      // paid / closed / cancelled): editing the date there is fine, but
+      // shouldn't reset progress.
+      const stage: Job['stage'] = job.stage === 'accepted' ? 'scheduled' : job.stage;
+      const updated: Job = { ...job, scheduledStartDate: next, stage };
       await saveJob(updated);
       return updated;
     } finally {
@@ -186,7 +193,13 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   };
 
   return (
-    <BottomSheet visible={visible} onDismiss={onDismiss} title="Schedule job">
+    <BottomSheet
+      visible={visible}
+      onDismiss={onDismiss}
+      title="Schedule job"
+      maxHeightRatio={0.95}
+      scrollable
+    >
       <View style={styles.content}>
         <View style={styles.summaryPill}>
           <MaterialCommunityIcons

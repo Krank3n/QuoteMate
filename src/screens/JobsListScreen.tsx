@@ -121,7 +121,7 @@ export function JobsListScreen() {
     // + address + job title on its own screens; saveDraft auto-creates
     // the Job once those fields are populated. No interstitial sheet.
     createNewQuote();
-    navigation.navigate('NewQuote' as never);
+    navigation.navigate('NewJob' as never);
   };
 
   const handleView = (jobId: string) => {

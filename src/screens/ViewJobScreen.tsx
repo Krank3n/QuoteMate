@@ -256,7 +256,7 @@ export function ViewJobScreen() {
       setPendingAction(id);
       switch (id) {
         case 'createQuote':
-          navigation.navigate('NewQuote', { jobId: job.id });
+          navigation.navigate('NewJob', { jobId: job.id });
           break;
         case 'continueQuote':
         case 'editQuote':
@@ -506,13 +506,13 @@ export function ViewJobScreen() {
   // The ONE way to enter the scope/materials/labor editor. Seeds the
   // wizard's `currentQuote` / `currentInvoice` with this doc (the
   // wizard screens read off those store slots, not route params), then
-  // navigates into the nested NewQuote / NewInvoice stack at the
+  // navigates into the nested NewJob / NewInvoice stack at the
   // chosen step. Called from: doc row tap, sticky-bar Edit button, and
   // the kebab's Edit row.
   type WizardStep = 'customer' | 'job' | 'materials' | 'labor';
   const QUOTE_STEP_MAP: Record<WizardStep, string> = {
     customer: 'CustomerDetails',
-    job: 'JobDetails',
+    job: 'Details',
     materials: 'MaterialsList',
     labor: 'LaborMarkup',
   };
@@ -536,7 +536,7 @@ export function ViewJobScreen() {
     }
     const quote = documentToQuote(doc);
     setCurrentQuote(quote);
-    navigation.navigate('NewQuote', {
+    navigation.navigate('NewJob', {
       screen: QUOTE_STEP_MAP[step],
       params: { editing: true },
     });
@@ -552,7 +552,7 @@ export function ViewJobScreen() {
       openEditorForDoc(primaryDoc, 'customer');
       return;
     }
-    navigation.navigate('NewQuote', {
+    navigation.navigate('NewJob', {
       screen: 'CustomerDetails',
       params: { jobId: job.id, editing: true },
     });
@@ -602,6 +602,9 @@ export function ViewJobScreen() {
             completedAt={completedAt}
             onCustomerEdit={openCustomerEditor}
             onMenu={() => setActionsSheetVisible(true)}
+            scheduledLabel={scheduledFull}
+            showScheduleChip={!!primaryDoc}
+            onSchedulePress={() => setScheduleSheetVisible(true)}
           />
         </WebContainer>
 
@@ -618,56 +621,8 @@ export function ViewJobScreen() {
           />
         ) : null}
 
-        {/* Schedule card — hidden when there's no primary doc yet (no
-            point scheduling work that isn't quoted); otherwise shown with
-            active styling once a date is set. */}
-        {primaryDoc ? (
-          <WebContainer>
-            <Pressable
-              onPress={() => {
-                selectionTap();
-                setScheduleSheetVisible(true);
-              }}
-              style={({ pressed }) => [
-                styles.scheduleCard,
-                scheduled && styles.scheduleCardSet,
-                pressed && { opacity: 0.85 },
-              ]}
-            >
-              <View
-                style={[
-                  styles.scheduleIconWrap,
-                  scheduled ? styles.scheduleIconWrapSet : styles.scheduleIconWrapUnset,
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name={scheduled ? ('calendar-clock' as any) : ('calendar-plus' as any)}
-                  size={20}
-                  color={scheduled ? colors.primary : colors.textMuted}
-                />
-              </View>
-              <View style={styles.scheduleBody}>
-                <Text style={styles.scheduleHeadline}>
-                  {scheduled ? 'Scheduled' : 'Schedule this job'}
-                </Text>
-                <Text
-                  style={[
-                    styles.scheduleDetail,
-                    !scheduled && { color: colors.textMuted },
-                  ]}
-                  numberOfLines={2}
-                >
-                  {scheduledFull || 'Pick a day and start time.'}
-                </Text>
-              </View>
-              <MaterialCommunityIcons
-                name={'chevron-right' as any}
-                size={22}
-                color={colors.inactive}
-              />
-            </Pressable>
-          </WebContainer>
-        ) : null}
+        {/* Schedule lives inside the JobDetailHeader chip strip now —
+            no separate middle block. */}
 
         {/* Checklist hidden for now — feedback is that ViewJob is
             already dense. Bring back behind a tap-to-expand when we
@@ -869,54 +824,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textMuted,
     textAlign: 'center',
-  },
-  scheduleCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  scheduleCardSet: {
-    borderColor: colors.primary + '55',
-    backgroundColor: colors.primaryBg + '22',
-  },
-  scheduleIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scheduleIconWrapUnset: {
-    backgroundColor: colors.surfaceGray3,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.border,
-  },
-  scheduleIconWrapSet: {
-    backgroundColor: colors.primaryBg,
-  },
-  scheduleBody: {
-    flex: 1,
-    gap: 2,
-  },
-  scheduleHeadline: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  scheduleDetail: {
-    fontSize: 12,
-    color: colors.onSurface,
-    lineHeight: 16,
   },
   notesAddButton: {
     flexDirection: 'row',
