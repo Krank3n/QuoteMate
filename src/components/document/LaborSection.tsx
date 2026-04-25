@@ -22,6 +22,10 @@ interface LaborSectionProps {
   // Extra labour hours added on top of (or subtracted from) the section sums.
   // Rendered as a separate row inside the Pricing card when non-zero.
   laborExtraHours?: number;
+  // Editor surfaces (e.g. JobScopeCard expanded view) want the markup %
+  // visible even when the markup is broken out as its own totals row.
+  alwaysShowMarkupNote?: boolean;
+  style?: any;
 }
 
 export function LaborSection({
@@ -35,6 +39,8 @@ export function LaborSection({
   laborMarkupPercent = 0,
   rollMarkupIntoLabor = false,
   laborExtraHours = 0,
+  alwaysShowMarkupNote = false,
+  style,
 }: LaborSectionProps) {
   const unit = laborUnit || 'hours';
   const unitLabel = unit === 'days' ? 'days' : 'hours';
@@ -45,15 +51,17 @@ export function LaborSection({
   const displayLaborRate = laborRate * laborMultiplier;
   const displayLaborTotal = laborTotal * laborMultiplier;
   const markupRolledIn = rollMarkupIntoLabor && laborMarkupPercent > 0;
+  const showMarkupNote =
+    laborMarkupPercent > 0 && (markupRolledIn || alwaysShowMarkupNote);
 
   const content = (
-    <Surface style={styles.section}>
+    <Surface style={[styles.section, style]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionHeaderLeft}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.successBg }]}>
-            <MaterialCommunityIcons name="cash-multiple" size={18} color={colors.success} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
+            <MaterialCommunityIcons name="hammer-wrench" size={18} color={colors.primary} />
           </View>
-          <Title style={styles.sectionTitle}>Pricing</Title>
+          <Title style={styles.sectionTitle}>Labour & Markup</Title>
         </View>
         {onEdit && (
           <View style={styles.editButton}>
@@ -122,7 +130,7 @@ export function LaborSection({
         </View>
       )}
 
-      {markupRolledIn && (
+      {showMarkupNote && (
         <Text
           style={{
             fontSize: 11,
@@ -131,7 +139,9 @@ export function LaborSection({
             marginTop: 2,
           }}
         >
-          (incl. {laborMarkupPercent}% markup)
+          {markupRolledIn
+            ? `(incl. ${laborMarkupPercent}% markup)`
+            : `+ ${laborMarkupPercent}% markup applied at total`}
         </Text>
       )}
     </Surface>

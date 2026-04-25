@@ -9,9 +9,9 @@
  *
  * Collapsed (default): compact summary — description, materials
  * (count + subtotal), labour (hours / markup), total.
- * Expanded: full line-item list + labour box + totals + terms + dates
- * — same read-only detail the old ViewQuote/ViewInvoice screens used
- * to show before scope editing lived on the same page.
+ * Expanded: full quote-preview layout — Job, Materials, Pricing,
+ * Totals — each section editable (matches the old quote preview).
+ * Customer details remain editable from the customer header above.
  */
 
 import React, { useState } from 'react';
@@ -26,7 +26,7 @@ import {
 } from 'react-native';
 import { Text, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { format, formatDistanceToNowStrict } from 'date-fns';
+import { formatDistanceToNowStrict } from 'date-fns';
 
 import type { Document } from '../types/document';
 import { colors } from '../theme';
@@ -36,6 +36,12 @@ import { PaymentChip } from './PaymentChip';
 import { selectionTap } from '../utils/haptics';
 import { previewDocumentPDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
+import {
+  JobSection,
+  MaterialsSection,
+  LaborSection,
+  TotalsSection,
+} from './document';
 
 export type ScopeStep = 'job' | 'materials' | 'labor';
 
@@ -220,41 +226,45 @@ export function JobScopeCard({
         </View>
       </View>
 
-      <ScopeRow
-        icon="text-long"
-        label="Job description"
-        body={description || 'Tap to add a description for the customer'}
-        muted={!description}
-        onPress={() => onEdit(doc, 'job')}
-      />
+      {expanded ? (
+        <ExpandedSections doc={doc} onEdit={onEdit} />
+      ) : (
+        <>
+          <ScopeRow
+            icon="text-long"
+            label="Job description"
+            body={description || 'Tap to add a description for the customer'}
+            muted={!description}
+            onPress={() => onEdit(doc, 'job')}
+          />
 
-      <ScopeRow
-        icon="package-variant"
-        label="Materials"
-        body={
-          lineCount > 0
-            ? `${lineCount} ${lineCount === 1 ? 'item' : 'items'} · ${formatCurrency(materialsTotal)}`
-            : 'Tap to add materials'
-        }
-        muted={lineCount === 0}
-        onPress={() => onEdit(doc, 'materials')}
-      />
+          <ScopeRow
+            icon="package-variant"
+            label="Materials"
+            body={
+              lineCount > 0
+                ? `${lineCount} ${lineCount === 1 ? 'item' : 'items'} · ${formatCurrency(materialsTotal)}`
+                : 'Tap to add materials'
+            }
+            muted={lineCount === 0}
+            onPress={() => onEdit(doc, 'materials')}
+          />
 
-      <ScopeRow
-        icon="hammer-wrench"
-        label="Labour & markup"
-        body={laborSummary(doc)}
-        muted={(doc.laborHours ?? 0) === 0}
-        rightLabel={laborTotal > 0 ? formatCurrency(laborTotal) : undefined}
-        onPress={() => onEdit(doc, 'labor')}
-      />
+          <ScopeRow
+            icon="hammer-wrench"
+            label="Labour & markup"
+            body={laborSummary(doc)}
+            muted={(doc.laborHours ?? 0) === 0}
+            rightLabel={laborTotal > 0 ? formatCurrency(laborTotal) : undefined}
+            onPress={() => onEdit(doc, 'labor')}
+          />
 
-      <View style={styles.totalRow}>
-        <Text style={styles.totalLabel}>Total</Text>
-        <Text style={styles.totalValue}>{formatCurrency(total)}</Text>
-      </View>
-
-      {expanded ? <ExpandedBreakdown doc={doc} /> : null}
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Total</Text>
+            <Text style={styles.totalValue}>{formatCurrency(total)}</Text>
+          </View>
+        </>
+      )}
 
       <Pressable
         onPress={handlePreview}
@@ -280,119 +290,70 @@ export function JobScopeCard({
   );
 }
 
-function ExpandedBreakdown({ doc }: { doc: Document }) {
-  const materials = doc.materials ?? [];
-  const sections = doc.sections ?? [];
-  const subtotal = Number(doc.subtotal ?? 0);
-  const gst = Number(doc.gst ?? 0);
-  const markupAmount = Number(doc.markupAmount ?? 0);
-  const terms = doc.termsSnapshot?.trim() ?? '';
-  const isInvoice = doc.type === 'invoice';
+function ExpandedSections({
+  doc,
+  onEdit,
+}: {
+  doc: Document;
+  onEdit: (doc: Document, step: ScopeStep) => void;
+}) {
+  const businessSettings = useStore((s) => s.businessSettings);
+  const showMarkupRow = doc.showMarkup === true;
+  const laborMarkupPercent = doc.laborMarkup ?? doc.markup ?? 0;
+  const travelAdjustmentPercent = doc.travelAdjustment ?? 0;
+  const travelAdjustmentAmount =
+    Number(doc.subtotal ?? 0) * (travelAdjustmentPercent / 100);
+
+  // Match the collapsed scope rows so the card looks the same on
+  // expand/collapse — same surface, same icon palette, same row bg.
+  const sectionOverride = { backgroundColor: colors.surfaceGray3 };
 
   return (
     <View style={styles.expanded}>
-      {materials.length > 0 ? (
-        <View style={styles.expandedSection}>
-          <Text style={styles.expandedSectionLabel}>Materials</Text>
-          {materials.map((m) => (
-            <View key={m.id} style={styles.lineItem}>
-              <View style={styles.lineItemBody}>
-                <Text style={styles.lineItemName} numberOfLines={2}>
-                  {m.name || 'Unnamed item'}
-                </Text>
-                <Text style={styles.lineItemMeta}>
-                  {m.quantity} {m.unit} · {formatCurrency(Number(m.price) || 0)}
-                </Text>
-              </View>
-              <Text style={styles.lineItemTotal}>
-                {formatCurrency(Number(m.totalPrice) || 0)}
-              </Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
+      <JobSection
+        job={doc.job}
+        onEdit={() => onEdit(doc, 'job')}
+        style={sectionOverride}
+      />
 
-      {sections.length > 0 ? (
-        <View style={styles.expandedSection}>
-          <Text style={styles.expandedSectionLabel}>Sections</Text>
-          {sections.map((s) => (
-            <View key={s.id} style={styles.lineItem}>
-              <View style={styles.lineItemBody}>
-                <Text style={styles.lineItemName}>{s.name}</Text>
-                <Text style={styles.lineItemMeta}>
-                  ×{s.multiplier} · {s.laborHours}
-                  {s.laborUnit === 'days' ? 'd' : 'h'} @ ${s.laborRate}
-                </Text>
-              </View>
-              <Text style={styles.lineItemTotal}>
-                {formatCurrency(Number(s.laborTotal) || 0)}
-              </Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
+      <MaterialsSection
+        materials={doc.materials ?? []}
+        materialsSubtotal={Number(doc.materialsSubtotal ?? 0)}
+        onEdit={() => onEdit(doc, 'materials')}
+        markupPercent={doc.markup ?? 0}
+        rollMarkupIntoMaterials={!showMarkupRow && (doc.markup ?? 0) > 0}
+        style={sectionOverride}
+      />
 
-      <View style={styles.totalsBox}>
-        {markupAmount > 0 ? (
-          <BreakdownRow label="Markup" value={formatCurrency(markupAmount)} />
-        ) : null}
-        <BreakdownRow label="Subtotal" value={formatCurrency(subtotal)} />
-        {gst > 0 ? (
-          <BreakdownRow label="GST" value={formatCurrency(gst)} />
-        ) : null}
-        <BreakdownRow
-          label="Total"
-          value={formatCurrency(Number(doc.total ?? 0))}
-          bold
-        />
-      </View>
+      <LaborSection
+        laborHours={Number(doc.laborHours ?? 0)}
+        laborRate={Number(doc.laborRate ?? 0)}
+        laborTotal={Number(doc.laborTotal ?? 0)}
+        laborUnit={doc.laborUnit}
+        sections={doc.sections}
+        // Editor view — always surface hours × rate to the tradie even
+        // when the customer-facing PDF setting hides them.
+        showLaborHours
+        onEdit={() => onEdit(doc, 'labor')}
+        laborMarkupPercent={laborMarkupPercent}
+        rollMarkupIntoLabor={!showMarkupRow && laborMarkupPercent > 0}
+        alwaysShowMarkupNote
+        laborExtraHours={doc.laborExtraHours ?? 0}
+        style={sectionOverride}
+      />
 
-      {isInvoice && doc.dueDate ? (
-        <View style={styles.datesRow}>
-          {doc.issueDate ? (
-            <View style={styles.dateBox}>
-              <Text style={styles.dateLabel}>Issued</Text>
-              <Text style={styles.dateValue}>
-                {format(new Date(doc.issueDate), 'd MMM yyyy')}
-              </Text>
-            </View>
-          ) : null}
-          <View style={styles.dateBox}>
-            <Text style={styles.dateLabel}>Due</Text>
-            <Text style={styles.dateValue}>
-              {format(new Date(doc.dueDate), 'd MMM yyyy')}
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      {terms ? (
-        <View style={styles.termsBox}>
-          <Text style={styles.expandedSectionLabel}>Terms</Text>
-          <Text style={styles.termsText}>{terms}</Text>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function BreakdownRow({
-  label,
-  value,
-  bold,
-}: {
-  label: string;
-  value: string;
-  bold?: boolean;
-}) {
-  return (
-    <View style={styles.breakdownRow}>
-      <Text style={[styles.breakdownLabel, bold && styles.breakdownBold]}>
-        {label}
-      </Text>
-      <Text style={[styles.breakdownValue, bold && styles.breakdownBold]}>
-        {value}
-      </Text>
+      <TotalsSection
+        subtotal={Number(doc.subtotal ?? 0)}
+        markup={Number(doc.markup ?? 0)}
+        markupAmount={Number(doc.markupAmount ?? 0)}
+        gst={Number(doc.gst ?? 0)}
+        total={Number(doc.total ?? 0)}
+        hideZeroMarkup
+        hideMarkup={!showMarkupRow}
+        travelAdjustmentAmount={travelAdjustmentAmount}
+        travelAdjustmentPercent={travelAdjustmentPercent}
+        style={sectionOverride}
+      />
     </View>
   );
 }
@@ -621,105 +582,6 @@ const styles = StyleSheet.create({
   },
   expanded: {
     marginTop: 4,
-    gap: 12,
-    paddingHorizontal: 2,
-  },
-  expandedSection: {
-    gap: 6,
-  },
-  expandedSectionLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  lineItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: colors.surfaceGray3,
-  },
-  lineItemBody: {
-    flex: 1,
-    gap: 2,
-  },
-  lineItemName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  lineItemMeta: {
-    fontSize: 11,
-    color: colors.textMuted,
-  },
-  lineItemTotal: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-    minWidth: 70,
-    textAlign: 'right',
-  },
-  totalsBox: {
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
-    gap: 6,
-  },
-  breakdownRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  breakdownLabel: {
-    fontSize: 12,
-    color: colors.textMuted,
-  },
-  breakdownValue: {
-    fontSize: 13,
-    color: colors.text,
-  },
-  breakdownBold: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  datesRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  dateBox: {
-    flex: 1,
-    padding: 10,
-    borderRadius: 10,
-    backgroundColor: colors.surfaceGray3,
-    gap: 2,
-  },
-  dateLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  dateValue: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  termsBox: {
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: colors.surfaceGray3,
-    gap: 4,
-  },
-  termsText: {
-    fontSize: 12,
-    color: colors.onSurface,
-    lineHeight: 18,
+    gap: 0,
   },
 });

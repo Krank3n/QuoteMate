@@ -2,8 +2,9 @@
  * JobCard — compact card shown in the Jobs list.
  *
  * Simpler than DocumentCard. Shows the customer, address, stage chip,
- * money summary (quoted / invoiced / paid / balance), attached-document
- * count, and last-updated timestamp. Tap → ViewJobScreen.
+ * money summary (quoted / invoiced / paid / balance), and a status line
+ * with the most recent stage event (e.g. "Quote sent 2h ago").
+ * Tap → ViewJobScreen.
  */
 
 import React, { useRef, useEffect } from 'react';
@@ -28,7 +29,6 @@ import { formatScheduledDateTime, formatScheduledDuration } from '../utils/forma
 import { deriveDuration } from '../utils/deriveDuration';
 import { JOB_STAGE_META } from './JobStageSheet';
 import { ShimmerOverlay } from './ShimmerOverlay';
-import { ContactQuickActions } from './ContactQuickActions';
 import { selectionTap } from '../utils/haptics';
 
 // Small circular icon buttons for the contact quick-taps (call / text /
@@ -49,7 +49,7 @@ function openMaps(address: string) {
 // row short. Terminal states (cancelled/closed) suppress the tracker entirely.
 const TIMELINE_STEPS: Array<{ stage: JobStage; icon: string; label: string }> = [
   { stage: 'quoted', icon: 'send-outline', label: 'Quote' },
-  { stage: 'accepted', icon: 'cash-multiple', label: 'Deposit' },
+  { stage: 'accepted', icon: 'handshake-outline', label: 'Accepted' },
   { stage: 'scheduled', icon: 'calendar-check-outline', label: 'Scheduled' },
   { stage: 'in_progress', icon: 'hammer-wrench', label: 'In Progress' },
   { stage: 'paid', icon: 'check-decagram-outline', label: 'Paid' },
@@ -114,6 +114,37 @@ function formatUpdatedAt(ms: number): string {
   }
 }
 
+const STAGE_STATUS_LABELS: Record<JobStage, string> = {
+  inquiry: 'Created',
+  quoted: 'Quote sent',
+  accepted: 'Accepted',
+  scheduled: 'Scheduled',
+  in_progress: 'Started',
+  completed: 'Completed',
+  paid: 'Paid',
+  closed: 'Closed',
+  cancelled: 'Cancelled',
+};
+
+const STAGE_TIMESTAMP_KEY: Record<JobStage, keyof Job | null> = {
+  inquiry: null,
+  quoted: 'quotedAt',
+  accepted: 'acceptedAt',
+  scheduled: 'scheduledAt',
+  in_progress: 'inProgressAt',
+  completed: 'completedAt',
+  paid: 'paidAt',
+  closed: 'closedAt',
+  cancelled: 'cancelledAt',
+};
+
+function pickStageStatus(job: Job): { label: string; ms: number } {
+  const key = STAGE_TIMESTAMP_KEY[job.stage];
+  const stamped = key ? (job[key] as number | undefined) : undefined;
+  const ms = stamped || job.updatedAt || job.createdAt;
+  return { label: STAGE_STATUS_LABELS[job.stage], ms };
+}
+
 export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress, onMenuPress }: JobCardProps) {
   const meta = JOB_STAGE_META[job.stage];
   const headline = pickHeadlineAmount(job);
@@ -176,8 +207,13 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
       ? `${scheduled} · ${duration}`
       : scheduled
     : null;
-  const docCount = job.documentIds?.length ?? 0;
+  const status = pickStageStatus(job);
   const terminal = job.stage === 'cancelled' || job.stage === 'closed';
+  // Chip is redundant when the timeline's active pill already names
+  // the stage — only render it for stages that fall outside the
+  // five-step happy path (inquiry, completed, cancelled, closed).
+  const stageInTimeline = TIMELINE_STEPS.some((s) => s.stage === job.stage);
+  const showStageChip = !stageInTimeline;
 
   return (
     <Animated.View
@@ -204,15 +240,29 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
         <View style={styles.cardContent}>
         <View style={styles.topRow}>
           <View style={styles.titleBlock}>
-            <Text style={styles.jobName} numberOfLines={1}>
-              {job.name || 'Untitled job'}
-            </Text>
-            <Text style={styles.customer} numberOfLines={1}>
-              {job.customerName || 'Unknown customer'}
-            </Text>
+            <View style={styles.titleHeadRow}>
+              <Text style={styles.customer} numberOfLines={1}>
+                {job.customerName || 'Unknown customer'}
+              </Text>
+              {headline.value ? (
+                <Text style={styles.headlinePrice} numberOfLines={1}>
+                  {headline.value}
+                </Text>
+              ) : null}
+            </View>
+            <View style={styles.titleSubRow}>
+              <Text style={styles.jobName}>
+                {job.name || 'Untitled job'}
+              </Text>
+              <InlineContactActions
+                phone={job.customerPhone}
+                email={job.customerEmail}
+                address={job.jobAddress}
+              />
+            </View>
           </View>
 
-          {onStagePress ? (
+          {showStageChip && onStagePress ? (
             <Pressable
               // stopPropagation so the chip tap opens the stage sheet
               // instead of bubbling to the Card.onPress (which would
@@ -234,7 +284,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
                 {meta.chipLabel}
               </Text>
             </Pressable>
-          ) : (
+          ) : showStageChip ? (
             <View
               style={[
                 styles.stageChip,
@@ -246,7 +296,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
                 {meta.chipLabel}
               </Text>
             </View>
-          )}
+          ) : null}
 
           {onMenuPress ? (
             <Pressable
@@ -272,32 +322,11 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
           ) : null}
         </View>
 
-        {/* Contact quick-taps — tap-to-call / text / email / map without
-            opening the job. Each stops propagation so the card's own
-            onPress doesn't also fire. */}
-        <ContactQuickActions
-          phone={job.customerPhone}
-          email={job.customerEmail}
-          compact
-        />
-
-        {!terminal ? <JobStageTimeline job={job} /> : null}
-
         {job.jobAddress ? (
-          <Pressable
-            onPress={(e) => {
-              e.stopPropagation();
-              selectionTap();
-              openMaps(job.jobAddress);
-            }}
-            style={({ pressed }) => [
-              styles.inlineRow,
-              pressed && { opacity: 0.6 },
-            ]}
-          >
+          <View style={styles.inlineRow}>
             <MaterialCommunityIcons name="map-marker-outline" size={14} color={colors.textMuted} />
             <Text style={styles.inlineText} numberOfLines={1}>{job.jobAddress}</Text>
-          </Pressable>
+          </View>
         ) : null}
 
         {scheduledLine ? (
@@ -307,34 +336,117 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
           </View>
         ) : null}
 
-        <View style={styles.bottomRow}>
-          <View style={styles.metaRow}>
-            <MaterialCommunityIcons
-              name="file-document-multiple-outline"
-              size={14}
-              color={colors.textMuted}
-            />
-            <Text style={styles.metaText}>
-              {docCount} {docCount === 1 ? 'doc' : 'docs'}
-            </Text>
-            <Text style={styles.metaDot}>·</Text>
-            <Text style={styles.metaText}>{formatUpdatedAt(job.updatedAt)}</Text>
-          </View>
-
-          {headline.value ? (
-            <View style={styles.amountBlock}>
-              <Text style={styles.amountLabel}>{headline.label}</Text>
-              <Text style={styles.amountValue}>{headline.value}</Text>
-            </View>
-          ) : null}
+        <View style={styles.metaRow}>
+          <MaterialCommunityIcons
+            name="clock-outline"
+            size={14}
+            color={colors.textMuted}
+          />
+          <Text style={styles.metaText} numberOfLines={1}>
+            {status.label} {formatUpdatedAt(status.ms)}
+          </Text>
         </View>
+
+        {!terminal ? (
+          <JobStageTimeline job={job} onActivePress={onStagePress} />
+        ) : null}
         </View>
       </Card>
     </Animated.View>
   );
 });
 
-function JobStageTimeline({ job }: { job: Job }) {
+function InlineContactActions({
+  phone,
+  email,
+  address,
+}: {
+  phone?: string;
+  email?: string;
+  address?: string;
+}) {
+  const hasPhone = !!(phone && phone.trim());
+  const hasEmail = !!(email && email.trim());
+  const hasAddress = !!(address && address.trim());
+  if (!hasPhone && !hasEmail && !hasAddress) return null;
+
+  const stop = (fn: () => void) => (e: any) => {
+    e?.stopPropagation?.();
+    selectionTap();
+    fn();
+  };
+  const call = () => {
+    if (!phone) return;
+    Linking.openURL(`tel:${phone.replace(/\s+/g, '')}`).catch(() =>
+      Alert.alert("Couldn't call", 'Copy the number instead.'),
+    );
+  };
+  const text = () => {
+    if (!phone) return;
+    Linking.openURL(`sms:${phone.replace(/\s+/g, '')}`).catch(() =>
+      Alert.alert("Couldn't open SMS", 'Copy the number instead.'),
+    );
+  };
+  const mail = () => {
+    if (!email) return;
+    Linking.openURL(`mailto:${email}`).catch(() =>
+      Alert.alert("Couldn't open mail", 'Copy the address instead.'),
+    );
+  };
+  const map = () => {
+    if (!address) return;
+    openMaps(address);
+  };
+
+  return (
+    <View style={styles.inlineActions}>
+      {hasPhone ? (
+        <InlineIcon icon="phone" color={colors.success} onPress={stop(call)} />
+      ) : null}
+      {hasPhone ? (
+        <InlineIcon icon="message-text" color={colors.info} onPress={stop(text)} />
+      ) : null}
+      {hasEmail ? (
+        <InlineIcon icon="email" color={colors.warning} onPress={stop(mail)} />
+      ) : null}
+      {hasAddress ? (
+        <InlineIcon icon="map-marker" color={colors.primary} onPress={stop(map)} />
+      ) : null}
+    </View>
+  );
+}
+
+function InlineIcon({
+  icon,
+  color,
+  onPress,
+}: {
+  icon: string;
+  color: string;
+  bg?: string;
+  onPress: (e: any) => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={6}
+      style={({ pressed }) => [
+        styles.inlineIconBtn,
+        pressed && { opacity: 0.7 },
+      ]}
+    >
+      <MaterialCommunityIcons name={icon as any} size={14} color={color} />
+    </Pressable>
+  );
+}
+
+function JobStageTimeline({
+  job,
+  onActivePress,
+}: {
+  job: Job;
+  onActivePress?: (job: Job) => void;
+}) {
   return (
     <View style={styles.timelineRow}>
       {TIMELINE_STEPS.map((step, i) => {
@@ -345,37 +457,51 @@ function JobStageTimeline({ job }: { job: Job }) {
           isStageReached(job, TIMELINE_STEPS[i + 1].stage);
         return (
           <React.Fragment key={step.stage}>
-            <View style={styles.timelineStep}>
-              <View
-                style={[
-                  styles.timelineDot,
-                  reached && styles.timelineDotReached,
-                  isCurrent && styles.timelineDotCurrent,
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name={step.icon as any}
-                  size={14}
-                  color={
-                    // Subtle treatment: reached pips carry a muted
-                    // successBg fill with a white icon — cohesive
-                    // with the dark theme instead of glaring. Current
-                    // pip gets a brighter ring for emphasis.
-                    reached || isCurrent ? colors.white : colors.inactive
-                  }
+            {isCurrent ? (
+              onActivePress ? (
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    selectionTap();
+                    onActivePress(job);
+                  }}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.timelineActivePill,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name={step.icon as any}
+                    size={14}
+                    color={colors.success}
+                  />
+                  <Text style={styles.timelineActiveLabel} numberOfLines={1}>
+                    {step.label}
+                  </Text>
+                </Pressable>
+              ) : (
+                <View style={styles.timelineActivePill}>
+                  <MaterialCommunityIcons
+                    name={step.icon as any}
+                    size={14}
+                    color={colors.success}
+                  />
+                  <Text style={styles.timelineActiveLabel} numberOfLines={1}>
+                    {step.label}
+                  </Text>
+                </View>
+              )
+            ) : (
+              <View style={styles.timelineMicroSlot}>
+                <View
+                  style={[
+                    styles.timelineMicroDot,
+                    reached && styles.timelineMicroDotReached,
+                  ]}
                 />
               </View>
-              <Text
-                style={[
-                  styles.timelineLabel,
-                  reached && styles.timelineLabelReached,
-                  isCurrent && styles.timelineLabelCurrent,
-                ]}
-                numberOfLines={1}
-              >
-                {step.label}
-              </Text>
-            </View>
+            )}
             {i < TIMELINE_STEPS.length - 1 ? (
               <View
                 style={[
@@ -413,14 +539,48 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   jobName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 2,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.onSurface,
   },
   customer: {
-    fontSize: 13,
-    color: colors.onSurface,
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  titleHeadRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+  },
+  titleSubRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 2,
+  },
+  headlinePrice: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.success,
+  },
+  inlineActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginLeft: 'auto',
+  },
+  inlineIconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.white + '33',
+    backgroundColor: 'transparent',
   },
   stageChip: {
     flexDirection: 'row',
@@ -459,98 +619,75 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     flexShrink: 1,
   },
-  bottomRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    marginTop: 4,
-  },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    flex: 1,
+    marginTop: 4,
   },
   metaText: {
     fontSize: 12,
     color: colors.textMuted,
-  },
-  metaDot: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginHorizontal: 2,
-  },
-  amountBlock: {
-    alignItems: 'flex-end',
-  },
-  amountLabel: {
-    fontSize: 10,
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  amountValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
+    flexShrink: 1,
   },
   timelineRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
+    marginTop: 10,
     marginBottom: 2,
-    paddingHorizontal: 2,
+    // Break out of the card's 14px content padding so the timeline
+    // track reaches the rounded card edges.
+    marginHorizontal: -14,
+    paddingHorizontal: 12,
   },
-  timelineStep: {
+  timelineActivePill: {
+    // Flatter pill — matches the footer nav's liquid-pill indicator
+    // so the active step reads as "the thing you can tap" in the same
+    // visual vocabulary as the bottom tabs.
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    flexShrink: 0,
-    width: 44,
-  },
-  timelineDot: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceGray3,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  timelineDotReached: {
-    // Muted success fill + white icon — reads as "done" without
-    // the harsh brightness of a solid colors.success fill.
-    backgroundColor: colors.successBg,
-    borderColor: colors.success + '66',
-  },
-  timelineDotCurrent: {
-    // Current stage pops — solid bright fill with a white ring so
-    // it stands out from the muted reached pips either side.
-    backgroundColor: colors.success,
-    borderColor: colors.white,
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
     borderWidth: 2,
+    borderColor: colors.success,
+    backgroundColor: 'transparent',
+    flexShrink: 0,
   },
-  timelineLabel: {
-    fontSize: 9,
-    color: colors.inactive,
-    textAlign: 'center',
+  timelineActiveLabel: {
+    fontSize: 11,
+    color: colors.success,
+    fontWeight: '700',
     letterSpacing: 0.2,
   },
-  timelineLabelReached: {
-    color: colors.text,
-    fontWeight: '600',
+  timelineMicroSlot: {
+    // Same height as the active dot so the row stays vertically
+    // anchored — the micro dot sits centred inside this slot,
+    // matching the active dot's centreline.
+    width: 16,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  timelineLabelCurrent: {
-    color: colors.text,
-    fontWeight: '800',
+  timelineMicroDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    // Lifted off the dark slate background so future steps are still
+    // legible in glaring sunlight — colors.border was nearly invisible.
+    backgroundColor: colors.inactive,
+    borderWidth: 0,
+  },
+  timelineMicroDotReached: {
+    backgroundColor: colors.success,
   },
   timelineConnector: {
     flex: 1,
-    height: 3,
-    backgroundColor: colors.border,
+    height: 2,
+    backgroundColor: colors.inactive,
     marginHorizontal: 2,
-    marginBottom: 13, // align with the dot centre
-    borderRadius: 1.5,
+    borderRadius: 1,
   },
   timelineConnectorReached: {
     // Subtler than the solid colors.success — matches the muted

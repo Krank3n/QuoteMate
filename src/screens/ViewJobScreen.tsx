@@ -23,7 +23,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { WebContainer } from '../components/WebContainer';
 import { DocumentRow } from '../components/DocumentRow';
 import { JobScopeCard, type ScopeStep } from '../components/JobScopeCard';
-import { ContactQuickActions } from '../components/ContactQuickActions';
+import { JobDetailHeader } from '../components/JobDetailHeader';
 import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { StageSheet } from '../components/StageSheet';
@@ -32,7 +32,6 @@ import {
   crossesContractLine,
   depositHasBeenPaid,
 } from '../../shared/job/stage';
-import { JobTimeline } from '../components/JobTimeline';
 import { JobPhotoStrip } from '../components/JobPhotoStrip';
 import { JobChecklist } from '../components/JobChecklist';
 import { PaymentSheet } from '../components/PaymentSheet';
@@ -97,7 +96,6 @@ export function ViewJobScreen() {
     tone: FollowUpTone;
   } | null>(null);
   const [pendingAction, setPendingAction] = useState<JobActionId | null>(null);
-  const [timelineOpen, setTimelineOpen] = useState(false);
   const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
   const [notesDirty, setNotesDirty] = useState(false);
   const [notesEditing, setNotesEditing] = useState(false);
@@ -580,21 +578,6 @@ export function ViewJobScreen() {
     }
   };
 
-  const openMaps = () => {
-    const addr = (job.jobAddress || '').trim();
-    if (!addr) return;
-    selectionTap();
-    // Apple Maps on iOS, generic Google Maps elsewhere. Both fall through
-    // to the platform's native handler via Linking.
-    const url =
-      Platform.OS === 'ios'
-        ? `http://maps.apple.com/?q=${encodeURIComponent(addr)}`
-        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
-    Linking.openURL(url).catch(() => {
-      Alert.alert("Couldn't open Maps", 'Try copying the address instead.');
-    });
-  };
-
   const customerIsUnknown =
     !job.customerName || job.customerName.trim() === '' || job.customerName === 'Unknown customer';
 
@@ -612,156 +595,14 @@ export function ViewJobScreen() {
           it behaves as a regular scroll view. */}
       <NestableScrollContainer contentContainerStyle={styles.scrollContent}>
         <WebContainer>
-          <Card style={styles.headerCard}>
-            <View style={styles.headerRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.jobName}>{job.name || 'Untitled job'}</Text>
-
-                {customerIsUnknown ? (
-                  <Pressable
-                    onPress={openCustomerEditor}
-                    hitSlop={6}
-                    style={({ pressed }) => [
-                      styles.assignCustomer,
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <MaterialCommunityIcons
-                      name={'account-plus-outline' as any}
-                      size={14}
-                      color={colors.primary}
-                    />
-                    <Text style={styles.assignCustomerLabel}>Add customer details</Text>
-                  </Pressable>
-                ) : (
-                  <Pressable
-                    onPress={openCustomerEditor}
-                    hitSlop={4}
-                    style={({ pressed }) => [pressed && { opacity: 0.7 }]}
-                  >
-                    <Text style={styles.customerLine}>{job.customerName}</Text>
-                  </Pressable>
-                )}
-
-                {job.jobAddress ? (
-                  <Pressable
-                    onPress={openMaps}
-                    style={({ pressed }) => [styles.inlineRow, pressed && { opacity: 0.6 }]}
-                  >
-                    <MaterialCommunityIcons
-                      name="map-marker-outline"
-                      size={14}
-                      color={colors.primary}
-                    />
-                    <Text style={[styles.inlineText, styles.inlineLink]} numberOfLines={2}>
-                      {job.jobAddress}
-                    </Text>
-                  </Pressable>
-                ) : null}
-
-                {job.customerPhone ? (
-                  <Text style={styles.contactInline} numberOfLines={1}>
-                    <MaterialCommunityIcons
-                      name={'phone-outline' as any}
-                      size={13}
-                      color={colors.textMuted}
-                    />
-                    {'  '}
-                    {job.customerPhone}
-                  </Text>
-                ) : null}
-                {job.customerEmail ? (
-                  <Text style={styles.contactInline} numberOfLines={1}>
-                    <MaterialCommunityIcons
-                      name={'email-outline' as any}
-                      size={13}
-                      color={colors.textMuted}
-                    />
-                    {'  '}
-                    {job.customerEmail}
-                  </Text>
-                ) : null}
-              </View>
-
-              <View style={styles.headerChipsCol}>
-                <Pressable
-                  onPress={() => {
-                    selectionTap();
-                    setStageSheetVisible(true);
-                  }}
-                  hitSlop={8}
-                  style={({ pressed }) => [
-                    styles.stageChip,
-                    { backgroundColor: meta.bgColor, borderColor: meta.color + '55' },
-                    pressed && { opacity: 0.7 },
-                  ]}
-                >
-                  <MaterialCommunityIcons
-                    name={meta.icon as any}
-                    size={14}
-                    color={meta.color}
-                  />
-                  <Text style={[styles.stageLabel, { color: meta.color }]}>
-                    {meta.chipLabel}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    selectionTap();
-                    setActionsSheetVisible(true);
-                  }}
-                  hitSlop={10}
-                  style={({ pressed }) => [
-                    styles.headerKebab,
-                    pressed && styles.headerKebabPressed,
-                  ]}
-                  accessibilityLabel="Actions"
-                >
-                  <MaterialCommunityIcons
-                    name={'dots-vertical' as any}
-                    size={20}
-                    color={colors.textMuted}
-                  />
-                </Pressable>
-              </View>
-            </View>
-
-            {/* Totals — pinned inside the header card just above the
-                ContactQuickActions divider. Reads right under the
-                customer/contact block instead of in a card on its own. */}
-            <View style={styles.totalsRow}>
-              <Totals label="Quoted" value={job.totalQuoted} />
-              <Totals label="Invoiced" value={job.totalInvoiced} />
-              <Totals label="Paid" value={job.totalPaid} />
-              <Totals
-                label="Balance"
-                value={job.balanceDue}
-                accent={job.balanceDue > 0}
-              />
-            </View>
-
-            {job.customerPhone || job.customerEmail || job.jobAddress ? (
-              <View style={styles.contactDivider}>
-                <ContactQuickActions
-                  phone={job.customerPhone}
-                  email={job.customerEmail}
-                  address={job.jobAddress}
-                />
-              </View>
-            ) : null}
-
-            {completedAt ? (
-              <View style={styles.completedRow}>
-                <MaterialCommunityIcons
-                  name="flag-checkered"
-                  size={14}
-                  color={colors.success}
-                />
-                <Text style={styles.completedLabel}>Completed</Text>
-                <Text style={styles.completedValue}>{completedAt}</Text>
-              </View>
-            ) : null}
-          </Card>
+          <JobDetailHeader
+            job={job}
+            documents={attachedDocs}
+            customerIsUnknown={customerIsUnknown}
+            completedAt={completedAt}
+            onCustomerEdit={openCustomerEditor}
+            onMenu={() => setActionsSheetVisible(true)}
+          />
         </WebContainer>
 
         {/* Scope section — inline editor for the primary doc's guts.
@@ -852,34 +693,8 @@ export function ViewJobScreen() {
             above. Data still persists on the Job; just no surface
             here until we have a better place for it. */}
 
-        {/* Activity — collapsed by default and pushed near the bottom.
-            Historical log, not an action surface, so it doesn't deserve
-            top-of-screen real estate. */}
-        <WebContainer>
-          <Pressable
-            onPress={() => {
-              selectionTap();
-              setTimelineOpen((v) => !v);
-            }}
-            style={({ pressed }) => [
-              styles.activityToggle,
-              pressed && { opacity: 0.85 },
-            ]}
-          >
-            <MaterialCommunityIcons
-              name={'history' as any}
-              size={16}
-              color={colors.textMuted}
-            />
-            <Text style={styles.activityToggleLabel}>Activity</Text>
-            <MaterialCommunityIcons
-              name={(timelineOpen ? 'chevron-up' : 'chevron-down') as any}
-              size={18}
-              color={colors.textMuted}
-            />
-          </Pressable>
-          {timelineOpen ? <JobTimeline job={job} documents={attachedDocs} /> : null}
-        </WebContainer>
+        {/* Activity log lives inside the JobDetailHeader card now —
+            tap the bottom stage stepper to expand it inline. */}
 
       </NestableScrollContainer>
 
@@ -966,30 +781,6 @@ export function ViewJobScreen() {
 }
 
 
-function Totals({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: number;
-  accent?: boolean;
-}) {
-  return (
-    <View style={styles.totalsCell}>
-      <Text style={styles.totalsLabel}>{label}</Text>
-      <Text
-        style={[
-          styles.totalsValue,
-          accent ? { color: colors.warning } : undefined,
-        ]}
-      >
-        {formatCurrency(value)}
-      </Text>
-    </View>
-  );
-}
-
 function SectionTitle({ label }: { label: string }) {
   return (
     <Text style={styles.sectionTitle}>{label}</Text>
@@ -1062,38 +853,6 @@ const styles = StyleSheet.create({
   // Extra bottom pad clears the pinned StickyJobActionBar so the last
   // section (danger zone) isn't hidden behind it.
   scrollContent: { paddingBottom: 160 },
-  headerChipsCol: {
-    alignItems: 'flex-end',
-    gap: 6,
-  },
-  headerKebab: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerKebabPressed: {
-    backgroundColor: colors.surfaceGray3,
-  },
-  activityToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 16,
-    marginTop: 4,
-    marginBottom: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
-  },
-  activityToggleLabel: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textMuted,
-  },
   centered: {
     justifyContent: 'center',
     alignItems: 'center',
@@ -1110,121 +869,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textMuted,
     textAlign: 'center',
-  },
-  headerCard: {
-    margin: 16,
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: colors.surface,
-    gap: 12,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  jobName: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  customerLine: {
-    fontSize: 14,
-    color: colors.onSurface,
-    marginTop: 2,
-  },
-  inlineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 4,
-  },
-  inlineText: {
-    fontSize: 13,
-    color: colors.textMuted,
-    flexShrink: 1,
-  },
-  inlineLink: {
-    color: colors.primary,
-    textDecorationLine: 'underline',
-    fontWeight: '500',
-  },
-  contactInline: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginTop: 4,
-  },
-  contactDivider: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  stageChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: 1,
-    gap: 4,
-  },
-  stageLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  totalsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 4,
-  },
-  totalsCell: {
-    flex: 1,
-    alignItems: 'flex-start',
-    minWidth: 0,
-  },
-  totalsLabel: {
-    fontSize: 10,
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  totalsValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-    marginTop: 2,
-  },
-  completedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 2,
-  },
-  completedLabel: {
-    fontSize: 12,
-    color: colors.textMuted,
-    fontWeight: '600',
-  },
-  completedValue: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  assignCustomer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 4,
-    paddingVertical: 4,
-    alignSelf: 'flex-start',
-  },
-  assignCustomerLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.primary,
-    textDecorationLine: 'underline',
   },
   scheduleCard: {
     flexDirection: 'row',

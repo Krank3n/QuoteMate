@@ -228,6 +228,7 @@ export function SendDocumentDialog({
         onDismiss={closeAll}
         title={isInvoice ? 'Send Invoice' : 'Send Quote'}
         options={sendOptions}
+        dismissOnSelect={false}
       />
 
       <DocumentEmailPreviewModal

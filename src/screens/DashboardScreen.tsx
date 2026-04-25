@@ -23,6 +23,8 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
 import { WebContainer } from '../components/WebContainer';
 import { JobCard } from '../components/JobCard';
+import { JobStageSheet } from '../components/JobStageSheet';
+import type { Job, JobStage } from '../../shared/job/types';
 import { quoteToDocument } from '../types/documentAdapter';
 import { AlertModal } from '../components/AlertModal';
 import { updateActivityTimestamp } from '../services/emailService';
@@ -360,6 +362,7 @@ export function DashboardScreen() {
   // Recent jobs (last 3) — Phase 12 replaces the "Recent Quotes" card on
   // the dashboard. Jobs are the new primary object.
   const jobs = useJobStore((s) => s.jobs);
+  const saveJob = useJobStore((s) => s.saveJob);
   const recentJobs = useMemo(
     () =>
       [...jobs]
@@ -367,6 +370,19 @@ export function DashboardScreen() {
         .slice(0, 3),
     [jobs],
   );
+
+  const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
+  const handleJobStagePress = (job: Job) => setStageSheetJob(job);
+  const handleJobStageSelect = async (target: JobStage) => {
+    if (!stageSheetJob) return;
+    const job = stageSheetJob;
+    setStageSheetJob(null);
+    try {
+      await saveJob({ ...job, stage: target });
+    } catch {
+      Alert.alert('Error', 'Failed to update stage. Please try again.');
+    }
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -756,6 +772,7 @@ export function DashboardScreen() {
                   <JobCard
                     job={job}
                     onPress={(jobId) => navigation.navigate('ViewJob', { jobId })}
+                    onStagePress={handleJobStagePress}
                     onMenuPress={jobActions.open}
                   />
                 </View>
@@ -800,6 +817,15 @@ export function DashboardScreen() {
         }}
         doc={selectedDoc}
         onSelect={handleStageSelect}
+      />
+    )}
+
+    {stageSheetJob && (
+      <JobStageSheet
+        visible={!!stageSheetJob}
+        onDismiss={() => setStageSheetJob(null)}
+        job={stageSheetJob}
+        onSelect={handleJobStageSelect}
       />
     )}
 
