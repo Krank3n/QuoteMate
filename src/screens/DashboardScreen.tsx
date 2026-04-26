@@ -24,6 +24,7 @@ import { Quote } from '../types';
 import { WebContainer } from '../components/WebContainer';
 import { JobCard } from '../components/JobCard';
 import { JobStageSheet } from '../components/JobStageSheet';
+import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import type { Job, JobStage } from '../../shared/job/types';
 import { quoteToDocument } from '../types/documentAdapter';
 import { AlertModal } from '../components/AlertModal';
@@ -372,6 +373,7 @@ export function DashboardScreen() {
   );
 
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
+  const [scheduleSheetJob, setScheduleSheetJob] = useState<Job | null>(null);
   const handleJobStagePress = (job: Job) => setStageSheetJob(job);
   const handleJobStageSelect = async (target: JobStage) => {
     if (!stageSheetJob) return;
@@ -826,6 +828,19 @@ export function DashboardScreen() {
         onDismiss={() => setStageSheetJob(null)}
         job={stageSheetJob}
         onSelect={handleJobStageSelect}
+        onSchedule={() => {
+          const job = stageSheetJob;
+          setStageSheetJob(null);
+          setScheduleSheetJob(job);
+        }}
+      />
+    )}
+
+    {scheduleSheetJob && (
+      <ScheduleJobSheet
+        visible={!!scheduleSheetJob}
+        onDismiss={() => setScheduleSheetJob(null)}
+        job={scheduleSheetJob}
       />
     )}
 

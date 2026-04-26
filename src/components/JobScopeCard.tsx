@@ -2,13 +2,13 @@
  * JobScopeCard — inline scope editor on ViewJob.
  *
  * Replaces the compact "Documents" row that used to sit on ViewJob.
- * Surfaces the primary doc's guts (description, materials, labor,
+ * Surfaces the primary doc's guts (materials, labor,
  * markup) as tappable subsections — each jumps straight to the right
  * wizard step. The Job screen becomes the single place to *both*
  * understand the job AND edit its scope.
  *
- * Collapsed (default): compact summary — description, materials
- * (count + subtotal), labour (hours / markup), total.
+ * Collapsed (default): compact summary — materials
+ * (count + subtotal), labour (hours / markup).
  * Expanded: full quote-preview layout — Job, Materials, Pricing,
  * Totals — each section editable (matches the old quote preview).
  * Customer details remain editable from the customer header above.
@@ -122,13 +122,15 @@ export function JobScopeCard({
   onPaymentPress,
 }: JobScopeCardProps) {
   const meta = STAGE_META[doc.stage];
+  // Doc stage chip is mostly redundant noise — payment state lives in
+  // PaymentChip and the job-level timeline above tells the "where is
+  // it" story. Keep the chip only for the terminal-paid state.
+  const showStageChip = doc.stage === 'paid';
   const isInvoice = doc.type === 'invoice';
   const typeLabel = isInvoice ? 'Invoice' : 'Quote';
   const lineCount = countLineItems(doc);
   const materialsTotal = sumMaterials(doc);
   const laborTotal = Number(doc.laborTotal ?? 0);
-  const total = Number(doc.total ?? 0);
-  const description = doc.job?.description?.trim() ?? '';
 
   const businessSettings = useStore((s) => s.businessSettings);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
@@ -180,7 +182,7 @@ export function JobScopeCard({
           </View>
         </View>
         <View style={styles.headerRight}>
-          {onStagePress ? (
+          {showStageChip && onStagePress ? (
             <Pressable
               onPress={() => {
                 selectionTap();
@@ -231,14 +233,6 @@ export function JobScopeCard({
       ) : (
         <>
           <ScopeRow
-            icon="text-long"
-            label="Job description"
-            body={description || 'Tap to add a description for the customer'}
-            muted={!description}
-            onPress={() => onEdit(doc, 'job')}
-          />
-
-          <ScopeRow
             icon="package-variant"
             label="Materials"
             body={
@@ -258,11 +252,6 @@ export function JobScopeCard({
             rightLabel={laborTotal > 0 ? formatCurrency(laborTotal) : undefined}
             onPress={() => onEdit(doc, 'labor')}
           />
-
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>{formatCurrency(total)}</Text>
-          </View>
         </>
       )}
 
@@ -535,26 +524,6 @@ const styles = StyleSheet.create({
   rowRight: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.text,
-  },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginTop: 2,
-  },
-  totalLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  totalValue: {
-    fontSize: 18,
-    fontWeight: '800',
     color: colors.text,
   },
   previewButton: {

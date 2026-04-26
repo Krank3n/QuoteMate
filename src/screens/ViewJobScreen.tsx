@@ -35,6 +35,7 @@ import {
 import { JobPhotoStrip } from '../components/JobPhotoStrip';
 import { JobChecklist } from '../components/JobChecklist';
 import { PaymentSheet } from '../components/PaymentSheet';
+import { derivePaymentState } from '../components/PaymentChip';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import {
   StickyJobActionBar,
@@ -47,12 +48,7 @@ import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { applyStageChange } from '../utils/applyStageChange';
-import {
-  formatScheduledDateLong,
-  formatScheduledDateTime,
-  formatScheduledDuration,
-} from '../utils/formatSchedule';
-import { deriveDuration } from '../utils/deriveDuration';
+import { formatScheduledDateLong } from '../utils/formatSchedule';
 import { selectionTap, lightTap } from '../utils/haptics';
 
 export function ViewJobScreen() {
@@ -145,14 +141,6 @@ export function ViewJobScreen() {
   const primaryDoc = job.primaryDocumentId
     ? documents.find((d) => d.id === job.primaryDocumentId) ?? actionableDoc
     : actionableDoc;
-  const { durationDays, hoursPerDay } = deriveDuration(primaryDoc);
-  const scheduled = formatScheduledDateTime(job.scheduledStartDate);
-  const duration =
-    scheduled && (durationDays > 1 || hoursPerDay !== 8)
-      ? formatScheduledDuration(durationDays, hoursPerDay)
-      : null;
-  const scheduledFull =
-    scheduled && duration ? `${scheduled} · ${duration}` : scheduled;
   const completedAt = formatScheduledDateLong(job.completedDate);
 
   const applyStageTransition = async (target: JobStage) => {
@@ -222,6 +210,18 @@ export function ViewJobScreen() {
     if (days < 4) return 'gentle';
     if (days < 7) return 'firm';
     return 'overdue';
+  };
+
+  // Chip tap routing: an unpaid doc with a real total has nothing useful to
+  // show in the history sheet, so jump straight to TakePaymentSheet. Anything
+  // already paid (or a $0 draft) falls through to the history view.
+  const handlePaymentChipPress = (doc: Document) => {
+    const state = derivePaymentState(doc);
+    if (state === 'unpaid' && Number(doc.total) > 0) {
+      openTakePaymentForDoc(doc);
+      return;
+    }
+    setPaymentSheetDoc(doc);
   };
 
   const openTakePaymentForDoc = (doc: Document) => {
@@ -602,9 +602,17 @@ export function ViewJobScreen() {
             completedAt={completedAt}
             onCustomerEdit={openCustomerEditor}
             onMenu={() => setActionsSheetVisible(true)}
-            scheduledLabel={scheduledFull}
-            showScheduleChip={!!primaryDoc}
-            onSchedulePress={() => setScheduleSheetVisible(true)}
+            onStagePress={() => setStageSheetVisible(true)}
+            onJobEdit={() => {
+              if (primaryDoc) {
+                openEditorForDoc(primaryDoc, 'job');
+                return;
+              }
+              navigation.navigate('NewJob', {
+                screen: 'Details',
+                params: { jobId: job.id, editing: true },
+              });
+            }}
           />
         </WebContainer>
 
@@ -617,7 +625,7 @@ export function ViewJobScreen() {
             secondaryDocs={attachedDocs.filter((d) => d.id !== primaryDoc?.id)}
             onEdit={openEditorForDoc}
             onStagePress={setDocStageSheetDoc}
-            onPaymentPress={setPaymentSheetDoc}
+            onPaymentPress={handlePaymentChipPress}
           />
         ) : null}
 
@@ -636,7 +644,7 @@ export function ViewJobScreen() {
             secondaryDocs={attachedDocs.filter((d) => d.id !== primaryDoc?.id)}
             onEdit={openEditorForDoc}
             onStagePress={setDocStageSheetDoc}
-            onPaymentPress={setPaymentSheetDoc}
+            onPaymentPress={handlePaymentChipPress}
           />
         ) : null}
 
@@ -675,6 +683,10 @@ export function ViewJobScreen() {
         job={job}
         depositPaid={depositHasBeenPaid(primaryDoc)}
         onSelect={handleStageSelect}
+        onSchedule={() => {
+          setStageSheetVisible(false);
+          setScheduleSheetVisible(true);
+        }}
       />
 
       {docStageSheetDoc ? (

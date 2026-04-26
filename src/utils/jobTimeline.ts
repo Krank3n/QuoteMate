@@ -12,8 +12,9 @@
  * for "Job created") so the timeline isn't empty on day-one.
  */
 
-import type { Job } from '../../shared/job/types';
+import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
+import { formatScheduledDate, formatScheduledTime } from './formatSchedule';
 
 export type TimelineEventKind =
   | 'job_created'
@@ -280,4 +281,123 @@ export function deriveTimelineEvents(
 export function formatEventAmount(amount?: number): string {
   if (amount == null || !Number.isFinite(amount) || amount <= 0) return '';
   return fmtCurrency(amount);
+}
+
+/**
+ * The 5 slots a Job's lifecycle gets bucketed into for the on-card
+ * timeline pill. Each slot can render multiple sub-statuses (e.g. the
+ * "quote" slot covers Draft → Quote → Quote Sent) which getJobSubStatus
+ * picks between based on the current stage and primary doc.
+ */
+export type JobSubStatusSlot =
+  | 'quote'
+  | 'accepted'
+  | 'scheduled'
+  | 'in_progress'
+  | 'paid';
+
+export interface JobSubStatus {
+  slot: JobSubStatusSlot;
+  label: string;
+  icon: string;
+}
+
+/**
+ * Compute the live label + icon for the active timeline pill. Pulls
+ * cues from the job stage, the primary doc's stage (sent / accepted /
+ * invoice_sent / partial), the deposit ledger, and the scheduled
+ * start datetime so the pill reads "Quote Sent" / "Deposit Paid" /
+ * "Wed 23 Apr · 9am" rather than just the bare stage name.
+ *
+ * Returns a default for terminal stages (closed/cancelled) — callers
+ * should hide the timeline in those cases anyway.
+ */
+export function getJobSubStatus(
+  job: Job,
+  primaryDoc?: Document | null,
+): JobSubStatus {
+  const stage = job.stage;
+  const docStage = primaryDoc?.stage;
+  const depositPaid =
+    Number(primaryDoc?.depositPaid) > 0 ||
+    (primaryDoc?.payments || []).some((p) => p.kind === 'deposit');
+
+  if (stage === 'inquiry') {
+    return { slot: 'quote', label: 'Draft', icon: 'file-document-edit-outline' };
+  }
+  if (stage === 'quoted') {
+    if (docStage === 'quote_sent' || docStage === 'quote_accepted') {
+      return { slot: 'quote', label: 'Quote Sent', icon: 'send' };
+    }
+    return { slot: 'quote', label: 'Quote', icon: 'file-send-outline' };
+  }
+  if (stage === 'accepted') {
+    if (depositPaid) {
+      return { slot: 'accepted', label: 'Deposit Paid', icon: 'cash-check' };
+    }
+    return { slot: 'accepted', label: 'Accepted', icon: 'handshake-outline' };
+  }
+  if (stage === 'scheduled') {
+    const ms = job.scheduledStartDate;
+    const date = formatScheduledDate(ms);
+    const time = formatScheduledTime(ms);
+    if (date && time) {
+      // "9:00 am" → "9am" so the pill stays compact on small screens.
+      const compactTime = time.replace(/^(\d+):00\s/, '$1');
+      return { slot: 'scheduled', label: `${date} · ${compactTime}`, icon: 'calendar-clock' };
+    }
+    if (date) {
+      return { slot: 'scheduled', label: date, icon: 'calendar-check-outline' };
+    }
+    return { slot: 'scheduled', label: 'Scheduled', icon: 'calendar-check-outline' };
+  }
+  if (stage === 'in_progress') {
+    if (docStage === 'invoice_sent' || docStage === 'partially_paid') {
+      return { slot: 'in_progress', label: 'Invoice Sent', icon: 'send' };
+    }
+    return { slot: 'in_progress', label: 'In Progress', icon: 'hammer-wrench' };
+  }
+  if (stage === 'completed') {
+    return { slot: 'paid', label: 'Completed', icon: 'flag-checkered' };
+  }
+  if (stage === 'paid') {
+    return { slot: 'paid', label: 'Paid', icon: 'check-decagram-outline' };
+  }
+
+  return { slot: 'quote', label: 'Draft', icon: 'file-document-edit-outline' };
+}
+
+/** Ordinal of the earliest job stage that fills each slot's micro-dot. */
+const SLOT_MIN_STAGE_ORDINAL: Record<JobSubStatusSlot, number> = {
+  quote: 1,         // STAGE_ORDER['quoted']
+  accepted: 2,      // STAGE_ORDER['accepted']
+  scheduled: 3,     // STAGE_ORDER['scheduled']
+  in_progress: 4,   // STAGE_ORDER['in_progress']
+  paid: 6,          // STAGE_ORDER['paid']
+};
+
+const STAGE_ORDINAL: Record<JobStage, number> = {
+  inquiry: 0,
+  quoted: 1,
+  accepted: 2,
+  scheduled: 3,
+  in_progress: 4,
+  completed: 5,
+  paid: 6,
+  closed: 7,
+  cancelled: -1,
+};
+
+/** Write-once stamps line up with slots so a stage-leap still lights the dot. */
+const SLOT_STAMP: Record<JobSubStatusSlot, keyof Job> = {
+  quote: 'quotedAt',
+  accepted: 'acceptedAt',
+  scheduled: 'scheduledAt',
+  in_progress: 'inProgressAt',
+  paid: 'paidAt',
+};
+
+export function isSlotReached(job: Job, slot: JobSubStatusSlot): boolean {
+  if (job[SLOT_STAMP[slot]]) return true;
+  return STAGE_ORDINAL[job.stage] >= SLOT_MIN_STAGE_ORDINAL[slot];
 }

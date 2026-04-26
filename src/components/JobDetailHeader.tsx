@@ -7,17 +7,13 @@
  * subtle icon-prefixed contact rows, low-profile totals strip, and a
  * horizontal stage stepper at the bottom.
  *
- * Tapping the stepper expands the activity log inline (the same
- * JobTimeline component used elsewhere on this screen), so the
- * historical activity is one tap away from where the user already
- * looks for "where is this job at".
- *
- * Stage-change interaction lives on the kebab (JobActionsSheet) — the
- * top-right pill that used to open the stage sheet has been retired in
- * favour of the active step in the bottom timeline.
+ * Tapping the active pill in the stepper opens the JobStageSheet so the
+ * tradie can override the auto-derived stage. The activity log expand /
+ * collapse moved to a small chevron in the bottom-right corner so the
+ * pill tap is reserved for stage editing.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -30,13 +26,20 @@ import {
 } from 'react-native';
 import { Text, Card } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import * as Clipboard from 'expo-clipboard';
 
-import type { Job, JobStage } from '../../shared/job/types';
+import type { Job, JobDocument } from '../../shared/job/types';
 import type { Document } from '../types/document';
+import { computeJobAggregates } from '../../shared/job/aggregate';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { selectionTap } from '../utils/haptics';
+import { selectionTap, lightTap } from '../utils/haptics';
 import { JobTimeline } from './JobTimeline';
+import {
+  getJobSubStatus,
+  isSlotReached,
+  type JobSubStatusSlot,
+} from '../utils/jobTimeline';
 
 if (
   Platform.OS === 'android' &&
@@ -45,43 +48,13 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const TIMELINE_STEPS: Array<{ stage: JobStage; icon: string; label: string }> = [
-  { stage: 'quoted', icon: 'send-outline', label: 'Quote' },
-  { stage: 'accepted', icon: 'handshake-outline', label: 'Accepted' },
-  { stage: 'scheduled', icon: 'calendar-check-outline', label: 'Scheduled' },
-  { stage: 'in_progress', icon: 'hammer-wrench', label: 'In Progress' },
-  { stage: 'paid', icon: 'check-decagram-outline', label: 'Paid' },
+const TIMELINE_SLOTS: Array<{ slot: JobSubStatusSlot }> = [
+  { slot: 'quote' },
+  { slot: 'accepted' },
+  { slot: 'scheduled' },
+  { slot: 'in_progress' },
+  { slot: 'paid' },
 ];
-
-const STAGE_ORDER: Record<JobStage, number> = {
-  inquiry: 0,
-  quoted: 1,
-  accepted: 2,
-  scheduled: 3,
-  in_progress: 4,
-  completed: 5,
-  paid: 6,
-  closed: 7,
-  cancelled: -1,
-};
-
-const STAGE_STAMP: Record<JobStage, keyof Job | null> = {
-  inquiry: null,
-  quoted: 'quotedAt',
-  accepted: 'acceptedAt',
-  scheduled: 'scheduledAt',
-  in_progress: 'inProgressAt',
-  completed: 'completedAt',
-  paid: 'paidAt',
-  closed: 'closedAt',
-  cancelled: 'cancelledAt',
-};
-
-function isStageReached(job: Job, step: JobStage): boolean {
-  const key = STAGE_STAMP[step];
-  if (key && job[key]) return true;
-  return STAGE_ORDER[job.stage] >= STAGE_ORDER[step];
-}
 
 function openMapsFor(address: string) {
   const url =
@@ -100,14 +73,11 @@ interface JobDetailHeaderProps {
   completedAt: string | null;
   onCustomerEdit: () => void;
   onMenu: () => void;
-  /**
-   * Pre-formatted schedule string (e.g. "Wed, 12 May · 8:00 AM · 4h").
-   * When null, the chip flips to the "+ Add Schedule" call-to-action.
-   */
-  scheduledLabel?: string | null;
-  /** Shows the schedule chip; gated by ViewJob (e.g. only after a doc exists). */
-  showScheduleChip?: boolean;
-  onSchedulePress?: () => void;
+  /** Tap on the active timeline pill — opens the JobStageSheet. */
+  onStagePress?: () => void;
+  /** Tap on the job title or description — navigates to the full
+   *  Edit Job screen (wizard's JobDetails step). */
+  onJobEdit?: () => void;
 }
 
 export function JobDetailHeader({
@@ -117,26 +87,64 @@ export function JobDetailHeader({
   completedAt,
   onCustomerEdit,
   onMenu,
-  scheduledLabel,
-  showScheduleChip,
-  onSchedulePress,
+  onStagePress,
+  onJobEdit,
 }: JobDetailHeaderProps) {
   const [activityOpen, setActivityOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const isTerminal = job.stage === 'cancelled' || job.stage === 'closed';
-  // Headline figure that goes next to the customer name on line one —
-  // mirrors JobCard.pickHeadlineAmount: balance once invoiced, paid
-  // once cleared, otherwise quoted.
+  const primaryDoc = documents.find((d) => d.id === job.primaryDocumentId)
+    ?? documents.find((d) => d.jobId === job.id)
+    ?? null;
+
+  // Headline figure (single green number, top-right) — live-derived so a
+  // draft quote shows its running total immediately, no waiting on the
+  // server-side aggregate trigger. Same precedence as the old totals
+  // strip: balance owed once invoiced, paid once cleared, otherwise the
+  // quoted total.
+  const totals = useMemo(
+    () => computeJobAggregates(
+      { id: job.id },
+      documents as unknown as JobDocument[],
+    ),
+    [job.id, documents],
+  );
   const headlineAmount =
-    job.totalInvoiced > 0
-      ? job.balanceDue > 0
-        ? job.balanceDue
-        : job.totalPaid
-      : job.totalQuoted;
+    totals.totalInvoiced > 0
+      ? totals.balanceDue > 0
+        ? totals.balanceDue
+        : totals.totalPaid
+      : totals.totalQuoted;
+
+  // Description was previously buried inside JobScopeCard. Surface it
+  // up here as a read-first summary; the "Show more" toggle below
+  // expands it AND reveals the raw phone/email strings.
+  const description = (
+    primaryDoc?.job?.description ??
+    job.description ??
+    ''
+  ).trim();
+
+  const descriptionLong = description.length > 90;
+  const hasContacts = !!(job.customerPhone || job.customerEmail);
+  const canExpandDetails = descriptionLong || hasContacts;
 
   const toggleActivity = () => {
     selectionTap();
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setActivityOpen((v) => !v);
+  };
+
+  const toggleDetails = () => {
+    selectionTap();
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setDetailsOpen((v) => !v);
+  };
+
+  const handleEditJob = () => {
+    if (!onJobEdit) return;
+    selectionTap();
+    onJobEdit();
   };
 
   return (
@@ -187,15 +195,93 @@ export function JobDetailHeader({
               ) : null}
             </View>
             <View style={styles.titleSubRow}>
-              <Text style={styles.jobName}>
-                {job.name || 'Untitled job'}
-              </Text>
+              <Pressable
+                onPress={handleEditJob}
+                hitSlop={4}
+                style={({ pressed }) => [
+                  styles.jobNamePress,
+                  pressed && { opacity: 0.7 },
+                ]}
+                accessibilityLabel="Edit job"
+              >
+                <Text style={styles.jobName}>
+                  {job.name || 'Untitled job'}
+                </Text>
+              </Pressable>
               <InlineContactActions
                 phone={job.customerPhone}
                 email={job.customerEmail}
                 address={job.jobAddress}
               />
             </View>
+            {description ? (
+              <Pressable
+                onPress={handleEditJob}
+                hitSlop={4}
+                accessibilityLabel="Edit job description"
+              >
+                <Text
+                  style={styles.description}
+                  numberOfLines={detailsOpen ? undefined : 2}
+                >
+                  {description}
+                </Text>
+              </Pressable>
+            ) : null}
+            {detailsOpen && hasContacts ? (
+              <View style={styles.contactStringsBlock}>
+                {job.customerPhone ? (
+                  <View style={styles.contactStringRow}>
+                    <MaterialCommunityIcons
+                      name={'phone-outline' as any}
+                      size={13}
+                      color={colors.textMuted}
+                    />
+                    <Text style={styles.contactStringText} selectable>
+                      {job.customerPhone}
+                    </Text>
+                  </View>
+                ) : null}
+                {job.customerEmail ? (
+                  <View style={styles.contactStringRow}>
+                    <MaterialCommunityIcons
+                      name={'email-outline' as any}
+                      size={13}
+                      color={colors.textMuted}
+                    />
+                    <Text
+                      style={styles.contactStringText}
+                      selectable
+                      numberOfLines={1}
+                    >
+                      {job.customerEmail}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            {canExpandDetails ? (
+              <Pressable
+                onPress={toggleDetails}
+                hitSlop={6}
+                accessibilityLabel={
+                  detailsOpen ? 'Show less' : 'Show more details'
+                }
+                style={({ pressed }) => [
+                  styles.detailsToggle,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Text style={styles.detailsToggleLabel}>
+                  {detailsOpen ? 'Show less' : 'Show more'}
+                </Text>
+                <MaterialCommunityIcons
+                  name={(detailsOpen ? 'chevron-up' : 'chevron-down') as any}
+                  size={16}
+                  color={colors.primary}
+                />
+              </Pressable>
+            ) : null}
           </View>
 
           <Pressable
@@ -218,8 +304,10 @@ export function JobDetailHeader({
           </Pressable>
         </View>
 
-        {/* Subtle icon-prefixed contact rows — replaces the underlined
-            green hyperlink and stacked text lines. */}
+        {/* Address stays as a row — it doubles as the "where am I going"
+            context that an icon alone can't convey. Phone + email rows
+            were removed; the action icons in the title row already cover
+            tap-to-call / sms / email, with long-press to copy. */}
         {job.jobAddress ? (
           <Pressable
             onPress={() => {
@@ -242,47 +330,6 @@ export function JobDetailHeader({
           </Pressable>
         ) : null}
 
-        {job.customerPhone ? (
-          <View style={styles.inlineRow}>
-            <MaterialCommunityIcons
-              name={'phone-outline' as any}
-              size={13}
-              color={colors.textMuted}
-            />
-            <Text style={styles.inlineText} numberOfLines={1}>
-              {job.customerPhone}
-            </Text>
-          </View>
-        ) : null}
-
-        {job.customerEmail ? (
-          <View style={styles.inlineRow}>
-            <MaterialCommunityIcons
-              name={'email-outline' as any}
-              size={13}
-              color={colors.textMuted}
-            />
-            <Text style={styles.inlineText} numberOfLines={1}>
-              {job.customerEmail}
-            </Text>
-          </View>
-        ) : null}
-
-        {/* Low-profile totals strip — four cells with hairline dividers. */}
-        <View style={styles.totalsRow}>
-          <Totals label="Quoted" value={job.totalQuoted} />
-          <View style={styles.totalsDivider} />
-          <Totals label="Invoiced" value={job.totalInvoiced} />
-          <View style={styles.totalsDivider} />
-          <Totals label="Paid" value={job.totalPaid} />
-          <View style={styles.totalsDivider} />
-          <Totals
-            label="Balance"
-            value={job.balanceDue}
-            accent={job.balanceDue > 0}
-          />
-        </View>
-
         {completedAt ? (
           <View style={styles.completedRow}>
             <MaterialCommunityIcons
@@ -294,74 +341,52 @@ export function JobDetailHeader({
           </View>
         ) : null}
 
-        {/* Status & Schedule strip — sits directly above the timeline so
-            the active stage and the planned date read as a single
-            "where is this job at" signal. Tapping the chip opens the
-            schedule sheet (no middle card needed). */}
-        {showScheduleChip && onSchedulePress && !isTerminal ? (
-          <View style={styles.scheduleChipRow}>
-            <Pressable
-              onPress={() => {
-                selectionTap();
-                onSchedulePress();
-              }}
-              hitSlop={6}
-              style={({ pressed }) => [
-                styles.scheduleChip,
-                scheduledLabel
-                  ? styles.scheduleChipSet
-                  : styles.scheduleChipUnset,
-                pressed && { opacity: 0.7 },
-              ]}
-              accessibilityLabel={
-                scheduledLabel ? 'Edit schedule' : 'Add schedule'
-              }
-            >
-              <MaterialCommunityIcons
-                name={
-                  (scheduledLabel
-                    ? 'calendar-clock'
-                    : 'calendar-plus') as any
-                }
-                size={14}
-                color={scheduledLabel ? colors.primary : colors.textMuted}
-              />
-              <Text
-                style={[
-                  styles.scheduleChipLabel,
-                  scheduledLabel
-                    ? styles.scheduleChipLabelSet
-                    : styles.scheduleChipLabelUnset,
-                ]}
-                numberOfLines={1}
-              >
-                {scheduledLabel || '+ Add Schedule'}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {/* Horizontal stepper. Whole row tappable; toggles the inline
-            activity log below. The active step is rendered as a pill
-            (matches the JobCard summary card). */}
+        {/* Horizontal stepper. Tap on the active pill opens the
+            JobStageSheet so the tradie can override the auto-derived
+            stage. The activity-log expand/collapse moved to the small
+            chevron in the bottom-right corner. */}
         {!isTerminal ? (
-          <Pressable
-            onPress={toggleActivity}
-            hitSlop={4}
-            accessibilityLabel={
-              activityOpen ? 'Hide activity log' : 'Show activity log'
-            }
-            style={({ pressed }) => [pressed && { opacity: 0.85 }]}
-          >
-            <JobStageTimeline job={job} expanded={activityOpen} />
-          </Pressable>
+          <JobStageTimeline
+            job={job}
+            primaryDoc={primaryDoc}
+            onActivePress={onStagePress}
+          />
         ) : null}
 
         {activityOpen ? (
           <View style={styles.activityWrap}>
-            <JobTimeline job={job} documents={documents} />
+            <JobTimeline
+              job={job}
+              documents={documents}
+              collapsedCount={Number.MAX_SAFE_INTEGER}
+            />
           </View>
         ) : null}
+
+        {/* Activity log toggle — sits in the bottom-right corner so the
+            timeline pill above is reserved for tap-to-edit-stage. */}
+        <View style={styles.activityToggleRow}>
+          <Pressable
+            onPress={toggleActivity}
+            hitSlop={8}
+            accessibilityLabel={
+              activityOpen ? 'Hide activity log' : 'Show activity log'
+            }
+            style={({ pressed }) => [
+              styles.activityToggleBtn,
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            <Text style={styles.activityToggleLabel}>
+              {activityOpen ? 'Hide activity' : 'Activity'}
+            </Text>
+            <MaterialCommunityIcons
+              name={(activityOpen ? 'chevron-up' : 'chevron-down') as any}
+              size={16}
+              color={colors.textMuted}
+            />
+          </Pressable>
+        </View>
       </View>
     </Card>
   );
@@ -408,26 +433,51 @@ function InlineContactActions({
     openMapsFor(address);
   };
 
+  // Long-press a contact icon → copy the underlying string. The on-screen
+  // text rows are gone now (icons-only), so this is the recovery path
+  // when the tradie wants to paste the number/email somewhere else.
+  const copyToClipboard = async (value: string, label: string) => {
+    try {
+      await Clipboard.setStringAsync(value);
+      lightTap();
+      Alert.alert('', `${label} copied`);
+    } catch {
+      Alert.alert("Couldn't copy", value);
+    }
+  };
+
   return (
     <View style={styles.inlineActions}>
       {hasPhone ? (
-        <InlineIcon icon="phone" color={colors.success} onPress={tap(call)} />
+        <InlineIcon
+          icon="phone"
+          color={colors.success}
+          onPress={tap(call)}
+          onLongPress={() => copyToClipboard(phone!, 'Phone')}
+        />
       ) : null}
       {hasPhone ? (
         <InlineIcon
           icon="message-text"
           color={colors.info}
           onPress={tap(sms)}
+          onLongPress={() => copyToClipboard(phone!, 'Phone')}
         />
       ) : null}
       {hasEmail ? (
-        <InlineIcon icon="email" color={colors.warning} onPress={tap(mail)} />
+        <InlineIcon
+          icon="email"
+          color={colors.warning}
+          onPress={tap(mail)}
+          onLongPress={() => copyToClipboard(email!, 'Email')}
+        />
       ) : null}
       {hasAddress ? (
         <InlineIcon
           icon="map-marker"
           color={colors.primary}
           onPress={tap(map)}
+          onLongPress={() => copyToClipboard(address!, 'Address')}
         />
       ) : null}
     </View>
@@ -438,14 +488,18 @@ function InlineIcon({
   icon,
   color,
   onPress,
+  onLongPress,
 }: {
   icon: string;
   color: string;
   onPress: () => void;
+  onLongPress?: () => void;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={400}
       hitSlop={6}
       style={({ pressed }) => [
         styles.inlineIconBtn,
@@ -459,37 +513,58 @@ function InlineIcon({
 
 function JobStageTimeline({
   job,
-  expanded,
+  primaryDoc,
+  onActivePress,
 }: {
   job: Job;
-  expanded: boolean;
+  primaryDoc?: Document | null;
+  onActivePress?: () => void;
 }) {
+  const subStatus = getJobSubStatus(job, primaryDoc);
   return (
     <View style={styles.timelineRow}>
-      {TIMELINE_STEPS.map((step, i) => {
-        const reached = isStageReached(job, step.stage);
-        const isCurrent = job.stage === step.stage;
+      {TIMELINE_SLOTS.map((step, i) => {
+        const reached = isSlotReached(job, step.slot);
+        const isCurrent = subStatus.slot === step.slot;
         const nextReached =
-          i < TIMELINE_STEPS.length - 1 &&
-          isStageReached(job, TIMELINE_STEPS[i + 1].stage);
+          i < TIMELINE_SLOTS.length - 1 &&
+          isSlotReached(job, TIMELINE_SLOTS[i + 1].slot);
         return (
-          <React.Fragment key={step.stage}>
+          <React.Fragment key={step.slot}>
             {isCurrent ? (
-              <View style={styles.timelineActivePill}>
-                <MaterialCommunityIcons
-                  name={step.icon as any}
-                  size={14}
-                  color={colors.success}
-                />
-                <Text style={styles.timelineActiveLabel} numberOfLines={1}>
-                  {step.label}
-                </Text>
-                <MaterialCommunityIcons
-                  name={(expanded ? 'chevron-up' : 'chevron-down') as any}
-                  size={12}
-                  color={colors.success}
-                />
-              </View>
+              onActivePress ? (
+                <Pressable
+                  onPress={() => {
+                    selectionTap();
+                    onActivePress();
+                  }}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.timelineActivePill,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name={subStatus.icon as any}
+                    size={14}
+                    color={colors.success}
+                  />
+                  <Text style={styles.timelineActiveLabel} numberOfLines={1}>
+                    {subStatus.label}
+                  </Text>
+                </Pressable>
+              ) : (
+                <View style={styles.timelineActivePill}>
+                  <MaterialCommunityIcons
+                    name={subStatus.icon as any}
+                    size={14}
+                    color={colors.success}
+                  />
+                  <Text style={styles.timelineActiveLabel} numberOfLines={1}>
+                    {subStatus.label}
+                  </Text>
+                </View>
+              )
             ) : (
               <View style={styles.timelineMicroSlot}>
                 <View
@@ -500,7 +575,7 @@ function JobStageTimeline({
                 />
               </View>
             )}
-            {i < TIMELINE_STEPS.length - 1 ? (
+            {i < TIMELINE_SLOTS.length - 1 ? (
               <View
                 style={[
                   styles.timelineConnector,
@@ -511,31 +586,6 @@ function JobStageTimeline({
           </React.Fragment>
         );
       })}
-    </View>
-  );
-}
-
-function Totals({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: number;
-  accent?: boolean;
-}) {
-  return (
-    <View style={styles.totalsCell}>
-      <Text style={styles.totalsLabel}>{label}</Text>
-      <Text
-        style={[
-          styles.totalsValue,
-          accent ? { color: colors.warning } : undefined,
-        ]}
-        numberOfLines={1}
-      >
-        {formatCurrency(value)}
-      </Text>
     </View>
   );
 }
@@ -560,11 +610,47 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  jobName: {
+  jobNamePress: {
     flex: 1,
+    minWidth: 0,
+  },
+  jobName: {
     fontSize: 15,
     fontWeight: '500',
     color: colors.onSurface,
+  },
+  description: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textMuted,
+    marginTop: 4,
+  },
+  detailsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 2,
+    marginTop: 4,
+    paddingVertical: 2,
+  },
+  detailsToggleLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  contactStringsBlock: {
+    marginTop: 6,
+    gap: 4,
+  },
+  contactStringRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  contactStringText: {
+    fontSize: 13,
+    color: colors.text,
+    flexShrink: 1,
   },
   titleHeadRow: {
     flexDirection: 'row',
@@ -590,6 +676,8 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '800',
     color: colors.success,
+    marginLeft: 'auto',
+    textAlign: 'right',
   },
   assignCustomer: {
     flexDirection: 'row',
@@ -606,6 +694,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     marginLeft: 'auto',
+    // Breathing room from the green headlinePrice that sits directly
+    // above on the title head row.
+    marginTop: 6,
   },
   inlineIconBtn: {
     width: 28,
@@ -638,39 +729,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     flexShrink: 1,
   },
-  totalsRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    marginTop: 4,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    backgroundColor: colors.surfaceDark,
-    borderRadius: 10,
-  },
-  totalsCell: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 4,
-    minWidth: 0,
-  },
-  totalsLabel: {
-    fontSize: 9,
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    fontWeight: '600',
-  },
-  totalsValue: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-    marginTop: 2,
-  },
-  totalsDivider: {
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border,
-    marginVertical: 2,
-  },
   completedRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -681,42 +739,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textMuted,
     fontStyle: 'italic',
-  },
-  scheduleChipRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  scheduleChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: 1,
-    flexShrink: 1,
-    minWidth: 0,
-  },
-  scheduleChipSet: {
-    backgroundColor: colors.primaryBg + '55',
-    borderColor: colors.primary + '55',
-  },
-  scheduleChipUnset: {
-    backgroundColor: 'transparent',
-    borderColor: colors.border,
-    borderStyle: 'dashed',
-  },
-  scheduleChipLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    flexShrink: 1,
-  },
-  scheduleChipLabelSet: {
-    color: colors.primary,
-  },
-  scheduleChipLabelUnset: {
-    color: colors.textMuted,
   },
   // Timeline styles mirror JobCard so the visual language matches
   // exactly between the list view and the detail view.
@@ -773,5 +795,24 @@ const styles = StyleSheet.create({
   },
   activityWrap: {
     marginTop: 4,
+  },
+  activityToggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    marginBottom: -4,
+    marginRight: -4,
+  },
+  activityToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  activityToggleLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
   },
 });

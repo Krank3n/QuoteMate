@@ -46,6 +46,11 @@ export function DocumentRow({
   const meta = STAGE_META[doc.stage];
   const label = stageShortLabel(doc.stage);
   const hasQuickActions = !!(onSend || onTakePayment);
+  // Doc stage chip is mostly redundant noise on the row — payment state
+  // already lives in PaymentChip, and the job-level timeline above tells
+  // the "where is it" story. Keep the chip only for the terminal-paid
+  // state so a closed-out doc still calls itself out.
+  const showStageChip = doc.stage === 'paid';
 
   return (
     <Pressable
@@ -72,16 +77,28 @@ export function DocumentRow({
         </View>
 
         <View style={styles.chipRow}>
-          {onStagePress ? (
-            <Pressable
-              onPress={(e) => {
-                e.stopPropagation();
-                selectionTap();
-                onStagePress(doc);
-              }}
-              hitSlop={6}
-              style={({ pressed }) => [pressed && { opacity: 0.7 }]}
-            >
+          {showStageChip ? (
+            onStagePress ? (
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation();
+                  selectionTap();
+                  onStagePress(doc);
+                }}
+                hitSlop={6}
+                style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+              >
+                <View
+                  style={[
+                    styles.stageChip,
+                    { backgroundColor: meta.bgColor, borderColor: meta.color + '44' },
+                  ]}
+                >
+                  <MaterialCommunityIcons name={meta.icon as any} size={12} color={meta.color} />
+                  <Text style={[styles.stageLabel, { color: meta.color }]}>{label}</Text>
+                </View>
+              </Pressable>
+            ) : (
               <View
                 style={[
                   styles.stageChip,
@@ -91,18 +108,8 @@ export function DocumentRow({
                 <MaterialCommunityIcons name={meta.icon as any} size={12} color={meta.color} />
                 <Text style={[styles.stageLabel, { color: meta.color }]}>{label}</Text>
               </View>
-            </Pressable>
-          ) : (
-            <View
-              style={[
-                styles.stageChip,
-                { backgroundColor: meta.bgColor, borderColor: meta.color + '44' },
-              ]}
-            >
-              <MaterialCommunityIcons name={meta.icon as any} size={12} color={meta.color} />
-              <Text style={[styles.stageLabel, { color: meta.color }]}>{label}</Text>
-            </View>
-          )}
+            )
+          ) : null}
 
           <PaymentChip doc={doc} onPress={onPaymentPress} />
         </View>

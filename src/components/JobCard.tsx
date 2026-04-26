@@ -30,6 +30,12 @@ import { deriveDuration } from '../utils/deriveDuration';
 import { JOB_STAGE_META } from './JobStageSheet';
 import { ShimmerOverlay } from './ShimmerOverlay';
 import { selectionTap } from '../utils/haptics';
+import {
+  getJobSubStatus,
+  isSlotReached,
+  type JobSubStatusSlot,
+} from '../utils/jobTimeline';
+import type { Document } from '../types/document';
 
 // Small circular icon buttons for the contact quick-taps (call / text /
 // email / map). Keep these close at hand so cleaners on the list can
@@ -44,47 +50,18 @@ function openMaps(address: string) {
   });
 }
 
-// Happy-path lifecycle shown as a 5-step mini progress tracker on the card.
-// Skips "inquiry" (pre-quote) and "completed" (ambiguous vs paid) to keep the
-// row short. Terminal states (cancelled/closed) suppress the tracker entirely.
-const TIMELINE_STEPS: Array<{ stage: JobStage; icon: string; label: string }> = [
-  { stage: 'quoted', icon: 'send-outline', label: 'Quote' },
-  { stage: 'accepted', icon: 'handshake-outline', label: 'Accepted' },
-  { stage: 'scheduled', icon: 'calendar-check-outline', label: 'Scheduled' },
-  { stage: 'in_progress', icon: 'hammer-wrench', label: 'In Progress' },
-  { stage: 'paid', icon: 'check-decagram-outline', label: 'Paid' },
+// Happy-path lifecycle shown as a 5-slot mini progress tracker on the card.
+// Each slot can render multiple sub-statuses (Draft/Quote/Quote Sent in the
+// quote slot; Completed/Paid in the final slot) — getJobSubStatus picks the
+// label + icon for whichever slot is currently active. Terminal states
+// (cancelled/closed) suppress the tracker entirely.
+const TIMELINE_SLOTS: Array<{ slot: JobSubStatusSlot }> = [
+  { slot: 'quote' },
+  { slot: 'accepted' },
+  { slot: 'scheduled' },
+  { slot: 'in_progress' },
+  { slot: 'paid' },
 ];
-
-const STAGE_ORDER: Record<JobStage, number> = {
-  inquiry: 0,
-  quoted: 1,
-  accepted: 2,
-  scheduled: 3,
-  in_progress: 4,
-  completed: 5,
-  paid: 6,
-  closed: 7,
-  cancelled: -1,
-};
-
-function isStageReached(job: Job, step: JobStage): boolean {
-  // Prefer explicit timestamps (write-once, stamped by the trigger) when
-  // present, fall back to ordinal comparison against the current stage.
-  const stampKey: Record<JobStage, keyof Job | null> = {
-    inquiry: null,
-    quoted: 'quotedAt',
-    accepted: 'acceptedAt',
-    scheduled: 'scheduledAt',
-    in_progress: 'inProgressAt',
-    completed: 'completedAt',
-    paid: 'paidAt',
-    closed: 'closedAt',
-    cancelled: 'cancelledAt',
-  };
-  const key = stampKey[step];
-  if (key && job[key]) return true;
-  return STAGE_ORDER[job.stage] >= STAGE_ORDER[step];
-}
 
 interface JobCardProps {
   job: Job;
@@ -209,11 +186,10 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
     : null;
   const status = pickStageStatus(job);
   const terminal = job.stage === 'cancelled' || job.stage === 'closed';
-  // Chip is redundant when the timeline's active pill already names
-  // the stage — only render it for stages that fall outside the
-  // five-step happy path (inquiry, completed, cancelled, closed).
-  const stageInTimeline = TIMELINE_STEPS.some((s) => s.stage === job.stage);
-  const showStageChip = !stageInTimeline;
+  // The timeline's active pill now covers every non-terminal stage
+  // (including inquiry → "Draft" and completed → "Completed"), so the
+  // stage chip is only needed for the terminal stages we don't render.
+  const showStageChip = terminal;
 
   return (
     <Animated.View
@@ -348,7 +324,11 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
         </View>
 
         {!terminal ? (
-          <JobStageTimeline job={job} onActivePress={onStagePress} />
+          <JobStageTimeline
+            job={job}
+            primaryDoc={primaryDoc}
+            onActivePress={onStagePress}
+          />
         ) : null}
         </View>
       </Card>
@@ -442,21 +422,24 @@ function InlineIcon({
 
 function JobStageTimeline({
   job,
+  primaryDoc,
   onActivePress,
 }: {
   job: Job;
+  primaryDoc?: Document | null;
   onActivePress?: (job: Job) => void;
 }) {
+  const subStatus = getJobSubStatus(job, primaryDoc);
   return (
     <View style={styles.timelineRow}>
-      {TIMELINE_STEPS.map((step, i) => {
-        const reached = isStageReached(job, step.stage);
-        const isCurrent = job.stage === step.stage;
+      {TIMELINE_SLOTS.map((step, i) => {
+        const reached = isSlotReached(job, step.slot);
+        const isCurrent = subStatus.slot === step.slot;
         const nextReached =
-          i < TIMELINE_STEPS.length - 1 &&
-          isStageReached(job, TIMELINE_STEPS[i + 1].stage);
+          i < TIMELINE_SLOTS.length - 1 &&
+          isSlotReached(job, TIMELINE_SLOTS[i + 1].slot);
         return (
-          <React.Fragment key={step.stage}>
+          <React.Fragment key={step.slot}>
             {isCurrent ? (
               onActivePress ? (
                 <Pressable
@@ -472,23 +455,23 @@ function JobStageTimeline({
                   ]}
                 >
                   <MaterialCommunityIcons
-                    name={step.icon as any}
+                    name={subStatus.icon as any}
                     size={14}
                     color={colors.success}
                   />
                   <Text style={styles.timelineActiveLabel} numberOfLines={1}>
-                    {step.label}
+                    {subStatus.label}
                   </Text>
                 </Pressable>
               ) : (
                 <View style={styles.timelineActivePill}>
                   <MaterialCommunityIcons
-                    name={step.icon as any}
+                    name={subStatus.icon as any}
                     size={14}
                     color={colors.success}
                   />
                   <Text style={styles.timelineActiveLabel} numberOfLines={1}>
-                    {step.label}
+                    {subStatus.label}
                   </Text>
                 </View>
               )
@@ -502,7 +485,7 @@ function JobStageTimeline({
                 />
               </View>
             )}
-            {i < TIMELINE_STEPS.length - 1 ? (
+            {i < TIMELINE_SLOTS.length - 1 ? (
               <View
                 style={[
                   styles.timelineConnector,

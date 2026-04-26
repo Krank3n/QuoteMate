@@ -24,6 +24,15 @@ interface JobStageSheetProps {
    *  by the shared state machine to gate `accepted → quoted`. */
   depositPaid?: boolean;
   onSelect: (targetStage: JobStage) => void;
+  /**
+   * Schedule action — when supplied, a dedicated "Schedule…" row sits
+   * above the regular stage list and the implicit `scheduled` target is
+   * dropped from the legal-transition list (so it doesn't appear twice).
+   * Schedule isn't a plain stage flip — the picker writes the date and
+   * lets the save path bump the stage — so it lives outside the
+   * canTransition graph.
+   */
+  onSchedule?: () => void;
   title?: string;
 }
 
@@ -62,7 +71,7 @@ export const JOB_STAGE_META: Record<JobStage, StageMeta> = {
   },
   scheduled: {
     chipLabel: 'Scheduled',
-    actionLabel: 'Mark as Scheduled',
+    actionLabel: 'Schedule…',
     icon: 'calendar-clock-outline',
     color: colors.info,
     bgColor: colors.infoBg,
@@ -116,37 +125,96 @@ const ALL_STAGES: JobStage[] = [
   'cancelled',
 ];
 
+// Stages where penciling in a date doesn't make sense — once the work
+// is done or the job is dead, hide "Schedule…".
+const SCHEDULE_HIDDEN_STAGES: ReadonlySet<JobStage> = new Set([
+  'completed',
+  'paid',
+  'closed',
+  'cancelled',
+]);
+
 export function JobStageSheet({
   visible,
   onDismiss,
   job,
   depositPaid,
   onSelect,
+  onSchedule,
   title = 'Update Stage',
 }: JobStageSheetProps) {
+  const showSchedule = !!onSchedule && !SCHEDULE_HIDDEN_STAGES.has(job.stage);
+
   // Only offer legal transitions from the shared state machine. This
   // changed in Phase-17 — the UI used to show every stage (trusting the
   // server to reject illegal edges), but that meant tradies could tap a
   // stage and hit a silent failure. Better to hide what you can't do.
+  // 'scheduled' is dropped here when the dedicated Schedule row is
+  // showing so the same action doesn't appear twice.
   const targets = React.useMemo<JobStage[]>(() => {
-    return ALL_STAGES.filter((s) =>
-      s !== job.stage && canTransition(job.stage, s, { depositPaid }),
+    return ALL_STAGES.filter(
+      (s) =>
+        s !== job.stage &&
+        canTransition(job.stage, s, { depositPaid }) &&
+        !(showSchedule && s === 'scheduled'),
     );
-  }, [job.stage, depositPaid]);
+  }, [job.stage, depositPaid, showSchedule]);
 
-  const anims = useStaggeredEntrance(targets.length, visible, 100, 40);
+  const totalRows = targets.length + (showSchedule ? 1 : 0);
+  const anims = useStaggeredEntrance(totalRows, visible, 100, 40);
 
   const handleSelect = (target: JobStage) => {
     selectionTap();
     onSelect(target);
   };
 
+  const handleSchedule = () => {
+    selectionTap();
+    onSchedule?.();
+  };
+
   return (
     <BottomSheet visible={visible} onDismiss={onDismiss} title={title}>
       <View style={styles.optionsContainer}>
+        {showSchedule ? (
+          <Animated.View
+            style={{
+              opacity: anims[0],
+              transform: [
+                { translateY: anims[0].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) },
+                { scale: anims[0].interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) },
+              ],
+            }}
+          >
+            <Pressable
+              style={({ pressed }) => [
+                styles.option,
+                pressed && styles.optionPressed,
+              ]}
+              onPress={handleSchedule}
+            >
+              <View style={[styles.iconCircle, { backgroundColor: colors.infoBg }]}>
+                <MaterialCommunityIcons
+                  name={'calendar-clock-outline' as any}
+                  size={22}
+                  color={colors.info}
+                />
+              </View>
+              <View style={styles.labelContainer}>
+                <Text style={styles.optionLabel}>Schedule…</Text>
+              </View>
+              <MaterialCommunityIcons
+                name="chevron-right"
+                size={20}
+                color={colors.inactive}
+              />
+            </Pressable>
+          </Animated.View>
+        ) : null}
         {targets.map((target, index) => {
           const meta = JOB_STAGE_META[target];
-          const anim = anims[index];
+          // Offset by 1 when the schedule row owns the first stagger slot.
+          const anim = anims[index + (showSchedule ? 1 : 0)];
 
           return (
             <Animated.View

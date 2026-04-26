@@ -29,6 +29,7 @@ import {
 import { buildGoogleCalendarUrl } from '../utils/gcalUrl';
 import { deriveDuration } from '../utils/deriveDuration';
 import { useGoogleCalendarAuth } from '../services/googleCalendarAuth';
+import { AlertModal } from './AlertModal';
 
 interface ScheduleJobSheetProps {
   visible: boolean;
@@ -88,6 +89,10 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
     minutesFromTimestamp(job.scheduledStartDate),
   );
   const [saving, setSaving] = useState(false);
+  // When an in-progress job is rescheduled into the future, ask the tradie
+  // whether they're returning to it (keep stage) or undoing a wrong start
+  // (drop back to scheduled + clear actualStartDate).
+  const [demoteConfirm, setDemoteConfirm] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -130,7 +135,16 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
     setPendingDay(day.dateString);
   };
 
-  const handleSave = async (): Promise<Job | null> => {
+  // True when the chosen day+time is in the future relative to "now". Used
+  // to decide whether an in-progress job needs the demote-confirm prompt.
+  const pendingIsInFuture = (() => {
+    if (!pendingDay) return false;
+    return combineDayAndMinutes(pendingDay, pendingMinutes) > Date.now();
+  })();
+
+  type SaveOptions = { demote?: boolean };
+
+  const handleSave = async (opts: SaveOptions = {}): Promise<Job | null> => {
     if (!pendingDay) return null;
     setSaving(true);
     try {
@@ -138,11 +152,21 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
       // Setting a date should advance an Accepted job to Scheduled so the
       // stage matches the date now sitting on it — mirrors handleClear,
       // which demotes scheduled → accepted when the date is removed.
-      // Never moves backward from later stages (in_progress / completed /
-      // paid / closed / cancelled): editing the date there is fine, but
-      // shouldn't reset progress.
-      const stage: Job['stage'] = job.stage === 'accepted' ? 'scheduled' : job.stage;
-      const updated: Job = { ...job, scheduledStartDate: next, stage };
+      // For in-progress jobs being pushed into the future, the caller
+      // decides via opts.demote whether to drop back to Scheduled (and
+      // clear actualStartDate) or keep the in-progress stamp intact.
+      let stage: Job['stage'] = job.stage === 'accepted' ? 'scheduled' : job.stage;
+      let actualStartDate = job.actualStartDate;
+      if (opts.demote && job.stage === 'in_progress') {
+        stage = 'scheduled';
+        actualStartDate = undefined;
+      }
+      const updated: Job = {
+        ...job,
+        scheduledStartDate: next,
+        stage,
+        actualStartDate,
+      };
       await saveJob(updated);
       return updated;
     } finally {
@@ -151,7 +175,23 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   };
 
   const handleSaveAndClose = async () => {
+    if (job.stage === 'in_progress' && pendingDay && pendingIsInFuture) {
+      setDemoteConfirm(true);
+      return;
+    }
     const updated = await handleSave();
+    if (updated) onDismiss();
+  };
+
+  const handleConfirmKeepInProgress = async () => {
+    setDemoteConfirm(false);
+    const updated = await handleSave({ demote: false });
+    if (updated) onDismiss();
+  };
+
+  const handleConfirmDemote = async () => {
+    setDemoteConfirm(false);
+    const updated = await handleSave({ demote: true });
     if (updated) onDismiss();
   };
 
@@ -292,6 +332,19 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
           ) : null}
         </View>
       </View>
+
+      <AlertModal
+        visible={demoteConfirm}
+        onDismiss={() => setDemoteConfirm(false)}
+        type="warning"
+        title="Reschedule Job?"
+        message="This job is marked as in progress. Do you want to move it back to 'Scheduled' and clear your start time?"
+        primaryButtonText="Keep in Progress"
+        primaryButtonAction={handleConfirmKeepInProgress}
+        secondaryButtonText="Move to Scheduled"
+        secondaryButtonAction={handleConfirmDemote}
+        secondaryButtonLoading={saving}
+      />
     </BottomSheet>
   );
 }

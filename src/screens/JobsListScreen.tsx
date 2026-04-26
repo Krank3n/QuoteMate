@@ -22,6 +22,7 @@ import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { JobCard } from '../components/JobCard';
 import { JobStageSheet } from '../components/JobStageSheet';
+import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
@@ -72,6 +73,7 @@ export function JobsListScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(jobsLoaded || jobs.length > 0);
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
+  const [scheduleSheetJob, setScheduleSheetJob] = useState<Job | null>(null);
 
   // Shared Actions sheet host (see useJobActionsSheet for the whole
   // menu → dispatcher wiring including linked dialogs/sheets).
@@ -267,6 +269,19 @@ export function JobsListScreen() {
           onDismiss={() => setStageSheetJob(null)}
           job={stageSheetJob}
           onSelect={handleStageSelect}
+          onSchedule={() => {
+            const job = stageSheetJob;
+            setStageSheetJob(null);
+            setScheduleSheetJob(job);
+          }}
+        />
+      )}
+
+      {scheduleSheetJob && (
+        <ScheduleJobSheet
+          visible={!!scheduleSheetJob}
+          onDismiss={() => setScheduleSheetJob(null)}
+          job={scheduleSheetJob}
         />
       )}
 
