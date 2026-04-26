@@ -34,6 +34,7 @@ import {
   documentToQuote,
 } from '../types/documentAdapter';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
+import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 
 interface UseJobActionsSheetOptions {
   /** Optional callback fired after a job is duplicated, before navigating
@@ -48,6 +49,8 @@ export function useJobActionsSheet(
 ) {
   const { jobs, saveJob, deleteJob, duplicateJob } = useJobStore();
   const documents = useStore((s) => s.documents);
+  const deleteQuote = useStore((s) => s.deleteQuote);
+  const deleteInvoice = useStore((s) => s.deleteInvoice);
   const businessSettings = useStore((s) => s.businessSettings);
   const xeroConnection = useStore((s) => s.xeroConnection);
   const pushInvoiceToXero = useStore((s) => s.pushInvoiceToXero);
@@ -201,21 +204,31 @@ export function useJobActionsSheet(
         break;
       case 'delete': {
         const attached = documents.filter((d) => d.jobId === job.id);
-        if (attached.length > 0) {
+        const paidDocs = pickPaidDocs(attached);
+        if (paidDocs.length > 0) {
           Alert.alert(
-            'Can’t delete — docs attached',
-            'Delete or reassign the attached quotes and invoices first, then try again.',
+            'Can’t delete — paid invoice attached',
+            'This job has paid or partially-paid documents that belong in your records. Archive the job instead.',
           );
           return;
         }
-        Alert.alert('Delete job?', 'This cannot be undone.', [
+        const docCount = attached.length;
+        const message =
+          docCount === 0
+            ? 'This cannot be undone.'
+            : `This will also delete ${docCount} attached ${docCount === 1 ? 'document' : 'documents'}. This cannot be undone.`;
+        Alert.alert('Delete job?', message, [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Delete',
             style: 'destructive',
             onPress: async () => {
               try {
-                await deleteJob(job.id);
+                await cascadeDeleteJob(job, attached, {
+                  deleteQuote,
+                  deleteInvoice,
+                  deleteJob,
+                });
               } catch {
                 Alert.alert('Delete failed', 'Try again in a moment.');
               }
