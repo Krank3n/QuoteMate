@@ -398,6 +398,20 @@ export function JobPreviewScreen() {
     return null;
   }, [workingDoc?.id, documents, currentInvoice, currentQuote]);
 
+  // After a Quote → Invoice convert, liveDoc.type flips to 'invoice' and
+  // liveDoc.number gets the new INV-NNN. The route param `mode` and the
+  // initial refNumber state were captured at mount and don't follow, so
+  // the badge would stay stuck on the old quote number / placeholder.
+  // Treat liveDoc as the source of truth for both.
+  const liveIsInvoice = liveDoc?.type === 'invoice' || isInvoiceMode;
+  useEffect(() => {
+    if (isEditingNumber) return;
+    const liveNumber = liveDoc?.number;
+    if (liveNumber && liveNumber !== refNumber) {
+      setRefNumber(liveNumber);
+    }
+  }, [liveDoc?.number, isEditingNumber, refNumber]);
+
   const handleViewPDF = async () => {
     if (!liveDoc) return;
     setIsPdfLoading(true);
@@ -456,7 +470,7 @@ export function JobPreviewScreen() {
                   onChangeText={setRefNumber}
                   onBlur={() => setIsEditingNumber(false)}
                   onSubmitEditing={() => setIsEditingNumber(false)}
-                  placeholder={isInvoiceMode ? 'e.g. INV-001' : 'e.g. Q-001'}
+                  placeholder={liveIsInvoice ? 'e.g. INV-001' : 'e.g. Q-001'}
                   autoFocus
                   style={styles.quoteNumberInput}
                   mode="flat"
@@ -469,7 +483,11 @@ export function JobPreviewScreen() {
                   activeOpacity={0.7}
                 >
                   <View style={styles.quoteNumberBadge}>
-                    <MaterialCommunityIcons name="file-document-outline" size={14} color={colors.primary} />
+                    <MaterialCommunityIcons
+                      name={(liveIsInvoice ? 'receipt' : 'file-document-outline') as any}
+                      size={14}
+                      color={colors.primary}
+                    />
                     <Text style={styles.quoteNumber}>
                       {refNumber || predictedRefNumber}
                     </Text>
