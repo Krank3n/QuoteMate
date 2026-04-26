@@ -2,9 +2,9 @@
  * JobCard — compact card shown in the Jobs list.
  *
  * Simpler than DocumentCard. Shows the customer, address, stage chip,
- * money summary (quoted / invoiced / paid / balance), and a status line
- * with the most recent stage event (e.g. "Quote sent 2h ago").
- * Tap → ViewJobScreen.
+ * a single right-aligned headline price (matches ViewJob's header), and
+ * a status line with the most recent stage event (e.g. "Quote sent 2h
+ * ago"). Tap → ViewJobScreen.
  */
 
 import React, { useRef, useEffect } from 'react';
@@ -71,16 +71,6 @@ interface JobCardProps {
   onMenuPress?: (job: Job) => void;
 }
 
-// Top-line money depends on where the job is. Before an invoice is raised we
-// lead with the quoted total; after, we lead with the outstanding balance.
-function pickHeadlineAmount(job: Job): { label: string; value: string } {
-  if (job.totalInvoiced > 0) {
-    if (job.balanceDue > 0) return { label: 'Balance', value: formatCurrency(job.balanceDue) };
-    return { label: 'Paid', value: formatCurrency(job.totalPaid) };
-  }
-  if (job.totalQuoted > 0) return { label: 'Quoted', value: formatCurrency(job.totalQuoted) };
-  return { label: '', value: '' };
-}
 
 function formatUpdatedAt(ms: number): string {
   if (!ms) return '';
@@ -124,7 +114,29 @@ function pickStageStatus(job: Job): { label: string; ms: number } {
 
 export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress, onMenuPress }: JobCardProps) {
   const meta = JOB_STAGE_META[job.stage];
-  const headline = pickHeadlineAmount(job);
+  // Live-derive the headline price from attached docs so a draft quote
+  // shows its running total here without waiting on the server-side
+  // syncJobAggregates trigger. Mirrors the precedence used on
+  // JobDetailHeader: outstanding balance once invoiced, paid once
+  // cleared, otherwise the quoted total. Selector returns a primitive
+  // so the memo'd card only re-renders when the number itself moves.
+  const headlineValue = useStore((s) => {
+    const docs = s.documents.filter(
+      (d) => d.jobId === job.id && d.stage !== 'cancelled',
+    );
+    const totalQuoted = docs
+      .filter((d) => d.type === 'quote')
+      .reduce((sum, d) => sum + (Number(d.total) || 0), 0);
+    const totalInvoiced = docs
+      .filter((d) => d.type === 'invoice')
+      .reduce((sum, d) => sum + (Number(d.total) || 0), 0);
+    const totalPaid = docs.reduce((sum, d) => sum + (Number(d.paidTotal) || 0), 0);
+    const balanceDue = docs.reduce((sum, d) => sum + (Number(d.balanceDue) || 0), 0);
+    if (totalInvoiced > 0) {
+      return balanceDue > 0 ? balanceDue : totalPaid;
+    }
+    return totalQuoted;
+  });
 
   // Idle bob + tilt — ported from the old DocumentCard so the list
   // feels alive rather than static. Each card picks its own duration
@@ -220,9 +232,9 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
               <Text style={styles.customer} numberOfLines={1}>
                 {job.customerName || 'Unknown customer'}
               </Text>
-              {headline.value ? (
+              {headlineValue > 0 ? (
                 <Text style={styles.headlinePrice} numberOfLines={1}>
-                  {headline.value}
+                  {formatCurrency(headlineValue)}
                 </Text>
               ) : null}
             </View>
@@ -548,12 +560,17 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '800',
     color: colors.success,
+    marginLeft: 'auto',
+    textAlign: 'right',
   },
   inlineActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     marginLeft: 'auto',
+    // Mirror JobDetailHeader: breathing room from the green headlinePrice
+    // sitting directly above on the title head row.
+    marginTop: 6,
   },
   inlineIconBtn: {
     width: 28,
