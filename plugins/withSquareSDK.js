@@ -99,11 +99,20 @@ function withSquareIOSInfoPlist(config) {
 function withSquareIOSBuildPhase(config) {
   return withXcodeProject(config, (config) => {
     const xcodeProject = config.modResults;
+    // Square's `setup` script strips unused architectures, but ASC validation
+    // rejects bundles that contain the script itself (unsigned executable in a
+    // framework) or any nested `Frameworks/` dir Square's setup leaves behind.
+    // Clean both the XCFrameworkIntermediates source (which `[CP] Embed Pods
+    // Frameworks` rsyncs into the .app) and the embedded copy as a safety net.
     const SHELL_SCRIPT =
-      'SETUP_SCRIPT=${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}"/SquareMobilePaymentsSDK.framework/setup"\n' +
-      'if [ -f "$SETUP_SCRIPT" ]; then\n' +
-      '  "$SETUP_SCRIPT"\n' +
-      'fi\n';
+      'clean_framework() {\n' +
+      '  local dir="$1"\n' +
+      '  [ -d "$dir" ] || return 0\n' +
+      '  if [ -f "$dir/setup" ]; then "$dir/setup"; rm -f "$dir/setup"; fi\n' +
+      '  rm -rf "$dir/Frameworks"\n' +
+      '}\n' +
+      'clean_framework "${BUILT_PRODUCTS_DIR}/XCFrameworkIntermediates/SquareMobilePaymentsSDK/SquareMobilePaymentsSDK.framework"\n' +
+      'clean_framework "${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}/SquareMobilePaymentsSDK.framework"\n';
     const PHASE_NAME = 'Square Mobile Payments SDK Setup';
 
     // Skip if already added.
@@ -266,7 +275,9 @@ function withSquareSDK(config, props = {}) {
   config = withSquareIOSAppDelegate(config, applicationId);
   config = withSquareIOSInfoPlist(config);
   config = withSquareIOSBuildPhase(config);
-  config = withSquareIOSTapToPayEntitlement(config);
+  // Re-enable once Apple approves the Tap to Pay on iPhone entitlement
+  // request for team 5GHUTAV35B. Without approval, ASC rejects the upload.
+  // config = withSquareIOSTapToPayEntitlement(config);
 
   config = withSquareAndroidRootGradle(config);
   config = withSquareAndroidAppGradle(config);
