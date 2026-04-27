@@ -2112,7 +2112,11 @@ export const useStore = create<AppState>((set, get) => ({
     const optimistic: Document = {
       ...existing,
       type: 'invoice',
-      stage: 'invoice_sent',
+      // Convert flips type but the invoice hasn't actually been sent
+      // yet — keep the doc as a draft so the tradie still has to hit
+      // "Send Invoice" to actually deliver it. sendDocumentEmail
+      // transitions draft → invoice_sent on send.
+      stage: 'draft',
       number: invoiceNumber,
       invoicedAt: now,
       issueDate: now,

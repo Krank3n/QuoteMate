@@ -215,7 +215,7 @@ export const onInvoiceWritten = functions.firestore
 // updatedAt skip short-circuits unchanged docs).
 // ---------------------------------------------------------------------------
 
-interface BackfillSummary {
+export interface BackfillSummary {
   usersProcessed: number;
   quotesMirrored: number;
   invoicesMirrored: number;
@@ -227,7 +227,7 @@ interface BackfillSummary {
 const USER_PAGE_SIZE = 50;
 const SUBCOLLECTION_PAGE_SIZE = 200;
 
-async function mirrorAllForUser(userId: string, summary: BackfillSummary): Promise<void> {
+export async function mirrorAllForUser(userId: string, summary: BackfillSummary): Promise<void> {
   const userRef = db().collection('users').doc(userId);
 
   // Pre-collect invoice sourceQuoteIds so the quote pass knows which quotes

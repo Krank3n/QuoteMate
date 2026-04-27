@@ -1420,11 +1420,15 @@ export const convertDocumentToInvoice = functions.https.onCall(
     const depositCredit = Math.max(0, Number(existing.depositPaid) || 0);
     const adjustedTotal = Math.max(0, (Number(existing.total) || 0) - depositCredit);
 
+    // Convert flips type to invoice but the doc hasn't been sent yet —
+    // keep it in 'draft' until sendDocumentEmail actually delivers it.
+    // Stage was force-stamped invoice_sent here, which surprised
+    // customers with "sent" history they hadn't authorised.
     await setDocumentStage({
       uid,
       docId,
       fromStage: existing.stage,
-      toStage: 'invoice_sent',
+      toStage: 'draft',
       reason: 'manual_convert',
       extraUpdates: {
         type: 'invoice',

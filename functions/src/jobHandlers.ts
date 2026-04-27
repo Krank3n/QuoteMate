@@ -241,7 +241,7 @@ interface BackfillRequest {
   commit?: boolean;
 }
 
-interface BackfillGroupReport {
+export interface BackfillGroupReport {
   proposedJobId: string;
   key: string;
   customerName: string;
@@ -254,13 +254,13 @@ interface BackfillGroupReport {
   documentIds: string[];
 }
 
-interface BackfillConflict {
+export interface BackfillConflict {
   key: string;
   reason: string;
   docIds: string[];
 }
 
-interface BackfillResult {
+export interface BackfillResult {
   userId: string;
   commit: boolean;
   groupCount: number;
@@ -290,7 +290,7 @@ export const backfillJobsFromDocuments = functions
     return runBackfill({ userId, commit });
   });
 
-async function runBackfill(opts: {
+export async function runBackfill(opts: {
   userId: string;
   commit: boolean;
 }): Promise<BackfillResult> {
@@ -378,7 +378,6 @@ async function runBackfill(opts: {
   for (const report of reports) {
     const entries = groups.get(report.key)!;
     await db().runTransaction(async (tx) => {
-      const now = Date.now();
       const jobRef = db()
         .collection('users').doc(userId)
         .collection('jobs').doc(report.proposedJobId);
@@ -402,6 +401,13 @@ async function runBackfill(opts: {
         return true;
       });
 
+      // Inherit timestamps from the attached docs so a migrated job
+      // shows its real history rather than "created just now". Earliest
+      // doc.createdAt anchors the Job; latest doc.updatedAt mirrors the
+      // most recent activity.
+      const createdAt = Math.min(...entries.map((e) => e.createdAtMs).filter((n) => n > 0)) || Date.now();
+      const updatedAt = Math.max(...entries.map((e) => toMillis(e.data.updatedAt)).filter((n) => n > 0)) || createdAt;
+
       const newJob: Job = {
         id: report.proposedJobId,
         userId,
@@ -418,8 +424,8 @@ async function runBackfill(opts: {
         totalPaid: aggregates.totalPaid,
         balanceDue: aggregates.balanceDue,
         photos: uniquePhotos.length > 0 ? uniquePhotos : undefined,
-        createdAt: now,
-        updatedAt: now,
+        createdAt,
+        updatedAt,
       };
 
       tx.set(jobRef, stripUndefined(newJob));
