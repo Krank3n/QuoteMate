@@ -191,12 +191,15 @@ export function DocumentEmailPreviewModal({
   const insets = useSafeAreaInsets();
   // RN's <Modal> renders in its own native view hierarchy, so the root
   // SafeAreaProvider doesn't reach inside — useSafeAreaInsets().bottom
-  // returns 0 here and the footer ends up sitting on top of the gesture/nav
-  // bar. initialWindowMetrics is a module-level value captured at app startup
-  // from the native side, so it gives us the real device bottom inset
-  // regardless of where in the tree we read it.
+  // returns 0 on iOS and the footer ends up sitting on top of the home
+  // indicator. initialWindowMetrics is captured at app startup from native,
+  // giving the real bottom inset regardless of tree position. On Android
+  // the system already pushes the modal above the nav bar, so adding the
+  // inset there would double-pad the footer.
   const fallbackBottom = initialWindowMetrics?.insets.bottom ?? 0;
-  const bottomInset = Math.max(insets.bottom, fallbackBottom, 16);
+  const bottomInset = Platform.OS === 'ios'
+    ? Math.max(insets.bottom, fallbackBottom, 16)
+    : 16;
 
   const isInvoice = doc.type === 'invoice';
   const { quotes } = useStore();

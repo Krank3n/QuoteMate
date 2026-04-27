@@ -41,9 +41,11 @@ export function SendDocumentButton({
     buttonLabel ??
     (isInvoice ? 'Send Invoice' : quote.status === 'sent' ? 'Resend' : 'Send');
 
-  const buttonContentStyle = isInvoice
-    ? styles.buttonContentInvoice
-    : styles.buttonContent;
+  // Same content padding for both types — JobPreviewScreen pairs this
+  // button with a Back button using the same paddingVertical, so the two
+  // need to render at the same height. The old quote-side `height: 48`
+  // was leftover from a screen that no longer uses this component.
+  const buttonContentStyle = styles.buttonContent;
 
   return (
     <>
@@ -70,9 +72,6 @@ export function SendDocumentButton({
 
 const styles = StyleSheet.create({
   buttonContent: {
-    height: 48,
-  },
-  buttonContentInvoice: {
     paddingVertical: 8,
   },
   buttonLabel: {

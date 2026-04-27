@@ -16,7 +16,7 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, Pressable, Alert } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
 import { Text, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -26,6 +26,7 @@ import { useStore } from '../store/useStore';
 import { colors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { SendDocumentButton } from './SendDocumentButton';
+import { AlertModal } from './AlertModal';
 
 interface SendTypePillProps {
   doc: Document;
@@ -44,6 +45,9 @@ export function SendTypePill({ doc, style }: SendTypePillProps) {
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
   const quotes = useStore((s) => s.quotes);
   const [converting, setConverting] = useState(false);
+  const [confirmConvertVisible, setConfirmConvertVisible] = useState(false);
+  const [lockedAlertVisible, setLockedAlertVisible] = useState(false);
+  const [errorAlertVisible, setErrorAlertVisible] = useState(false);
 
   // Pill state is derived from current doc type — no ephemeral UI state.
   // Flipping to "invoice" IS the conversion, and the conversion bumps
@@ -51,52 +55,37 @@ export function SendTypePill({ doc, style }: SendTypePillProps) {
   const mode: SendMode = doc.type;
   const lockedToInvoice = doc.type === 'invoice';
 
+  const runConvert = async () => {
+    setConverting(true);
+    try {
+      // Prefer convertDocumentToInvoice if the unified doc has already
+      // been mirrored in. If not (just saved — mirror trigger hasn't
+      // caught up yet), fall back to the legacy createInvoiceFromQuote
+      // path, which itself calls convertDocumentToInvoice internally
+      // once the mirror's ready. Either way the client gets a shaped
+      // Invoice.
+      const legacyQuote: Quote | undefined = quotes.find((q) => q.id === doc.id);
+      if (legacyQuote) {
+        await createInvoiceFromQuote(legacyQuote);
+      } else {
+        await convertDocumentToInvoice(doc.id);
+      }
+    } catch {
+      setErrorAlertVisible(true);
+    } finally {
+      setConverting(false);
+    }
+  };
+
   const handlePillPress = (target: SendMode) => {
     if (target === mode) return;
     if (target === 'quote') {
       // Forward-only — state machine has no invoice → quote edge.
-      Alert.alert(
-        'Already invoiced',
-        'Once a job is invoiced it stays an invoice. You can still re-send it, but it won’t go out as a quote again.',
-      );
+      setLockedAlertVisible(true);
       return;
     }
     // target === 'invoice' and current is quote → confirm then convert.
-    Alert.alert(
-      'Turn this into an invoice?',
-      `"${doc.job?.name || 'This job'}" becomes an invoice and can’t be sent as a quote again.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Convert',
-          style: 'destructive',
-          onPress: async () => {
-            setConverting(true);
-            try {
-              // Prefer convertDocumentToInvoice if the unified doc has
-              // already been mirrored in. If not (just saved — mirror
-              // trigger hasn't caught up yet), fall back to the legacy
-              // createInvoiceFromQuote path, which itself calls
-              // convertDocumentToInvoice internally once the mirror's
-              // ready. Either way the client gets a shaped Invoice.
-              const legacyQuote: Quote | undefined = quotes.find((q) => q.id === doc.id);
-              if (legacyQuote) {
-                await createInvoiceFromQuote(legacyQuote);
-              } else {
-                await convertDocumentToInvoice(doc.id);
-              }
-            } catch {
-              Alert.alert(
-                'Could not convert',
-                'Save the quote first, then try again.',
-              );
-            } finally {
-              setConverting(false);
-            }
-          },
-        },
-      ],
-    );
+    setConfirmConvertVisible(true);
   };
 
   return (
@@ -123,6 +112,41 @@ export function SendTypePill({ doc, style }: SendTypePillProps) {
           <Text style={styles.convertingLabel}>Converting…</Text>
         </View>
       ) : null}
+
+      <AlertModal
+        visible={confirmConvertVisible}
+        onDismiss={() => setConfirmConvertVisible(false)}
+        type="warning"
+        title="Turn this into an invoice?"
+        message={`"${doc.job?.name || 'This job'}" becomes an invoice and can't be sent as a quote again.`}
+        primaryButtonText="Convert"
+        primaryButtonAction={() => {
+          setConfirmConvertVisible(false);
+          runConvert();
+        }}
+        secondaryButtonText="Cancel"
+        secondaryButtonAction={() => setConfirmConvertVisible(false)}
+      />
+
+      <AlertModal
+        visible={lockedAlertVisible}
+        onDismiss={() => setLockedAlertVisible(false)}
+        type="info"
+        title="Already invoiced"
+        message="Once a job is invoiced it stays an invoice. You can still re-send it, but it won't go out as a quote again."
+        primaryButtonText="Got it"
+        primaryButtonAction={() => setLockedAlertVisible(false)}
+      />
+
+      <AlertModal
+        visible={errorAlertVisible}
+        onDismiss={() => setErrorAlertVisible(false)}
+        type="error"
+        title="Could not convert"
+        message="Save the quote first, then try again."
+        primaryButtonText="OK"
+        primaryButtonAction={() => setErrorAlertVisible(false)}
+      />
     </View>
   );
 }

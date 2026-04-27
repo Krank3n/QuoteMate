@@ -27,9 +27,12 @@ import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { formatScheduledDateTime, formatScheduledDuration } from '../utils/formatSchedule';
 import { deriveDuration } from '../utils/deriveDuration';
+import { useNavigation } from '@react-navigation/native';
+
 import { JOB_STAGE_META } from './JobStageSheet';
 import { ShimmerOverlay } from './ShimmerOverlay';
 import { selectionTap } from '../utils/haptics';
+import { openJobPreview } from '../utils/openJobPreview';
 import {
   getJobSubStatus,
   isSlotReached,
@@ -185,6 +188,15 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
       ? s.documents.find((d) => d.id === job.primaryDocumentId)
       : s.documents.find((d) => d.jobId === job.id),
   );
+  const setCurrentQuote = useStore((s) => s.setCurrentQuote);
+  const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
+  const navigation = useNavigation<any>();
+  const handlePricePress = (e: any) => {
+    e.stopPropagation();
+    if (!primaryDoc) return;
+    selectionTap();
+    openJobPreview(primaryDoc, { navigation, setCurrentQuote, setCurrentInvoice });
+  };
   const { durationDays, hoursPerDay } = deriveDuration(primaryDoc);
   const scheduled = formatScheduledDateTime(job.scheduledStartDate);
   const duration =
@@ -233,9 +245,19 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
                 {job.customerName || 'Unknown customer'}
               </Text>
               {headlineValue > 0 ? (
-                <Text style={styles.headlinePrice} numberOfLines={1}>
-                  {formatCurrency(headlineValue)}
-                </Text>
+                <Pressable
+                  onPress={handlePricePress}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.headlinePricePress,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                  accessibilityLabel="View job preview"
+                >
+                  <Text style={styles.headlinePrice} numberOfLines={1}>
+                    {formatCurrency(headlineValue)}
+                  </Text>
+                </Pressable>
               ) : null}
             </View>
             <View style={styles.titleSubRow}>
@@ -556,11 +578,13 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 2,
   },
+  headlinePricePress: {
+    marginLeft: 'auto',
+  },
   headlinePrice: {
     fontSize: 17,
     fontWeight: '800',
     color: colors.success,
-    marginLeft: 'auto',
     textAlign: 'right',
   },
   inlineActions: {

@@ -19,7 +19,7 @@ import {
   Menu,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import { useStore } from '../../store/useStore';
 import { useDocumentMode } from '../../utils/documentMode';
@@ -87,7 +87,13 @@ function createConfettiPieces(): ConfettiPiece[] {
 
 export function JobPreviewScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const mode = useDocumentMode();
+  // `viewing: true` means we landed here from a price tap on an
+  // existing job (JobCard / JobDetailHeader), not from finishing the
+  // wizard. Suppresses the "Quote saved!" celebration + auto-save so
+  // re-entering doesn't bump updatedAt or replay the success banner.
+  const viewing = route.params?.viewing === true;
   const {
     currentQuote,
     currentInvoice,
@@ -196,10 +202,12 @@ export function JobPreviewScreen() {
   const checkScale = useRef(new Animated.Value(0)).current;
   const subtitleOpacity = useRef(new Animated.Value(0)).current;
 
-  // Auto-save on mount (skip during unified tour — dummy doc shouldn't be saved)
+  // Auto-save on mount (skip during unified tour — dummy doc shouldn't
+  // be saved — and skip when re-entering as a viewer from a price tap).
   useEffect(() => {
     if (!workingDoc) return;
     if (unifiedTourActive) return;
+    if (viewing) return;
 
     // Start celebration immediately — don't wait for save
     setShowSuccess(true);
@@ -713,11 +721,11 @@ export function JobPreviewScreen() {
             onPress={handleBackToDashboard}
             loading={isSaving}
             disabled={isSaving}
-            icon="view-dashboard"
+            icon="content-save-outline"
             style={styles.bottomButtonHalf}
             contentStyle={styles.bottomButtonContent}
           >
-            Back
+            Done
           </Button>
           <View ref={sendButtonRef} style={styles.bottomButtonHalf}>
             {liveDoc ? (

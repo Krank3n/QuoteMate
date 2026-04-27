@@ -27,6 +27,7 @@ import {
 import { Text, Card } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Clipboard from 'expo-clipboard';
+import { useNavigation } from '@react-navigation/native';
 
 import type { Job, JobDocument } from '../../shared/job/types';
 import type { Document } from '../types/document';
@@ -40,6 +41,8 @@ import {
   isSlotReached,
   type JobSubStatusSlot,
 } from '../utils/jobTimeline';
+import { openJobPreview } from '../utils/openJobPreview';
+import { useStore } from '../store/useStore';
 
 if (
   Platform.OS === 'android' &&
@@ -116,6 +119,17 @@ export function JobDetailHeader({
         : totals.totalPaid
       : totals.totalQuoted;
 
+  // Tap the green headline price → wizard's JobPreviewScreen in
+  // viewing mode. Single tap to land on the customer-facing summary.
+  const setCurrentQuote = useStore((s) => s.setCurrentQuote);
+  const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
+  const navigation = useNavigation<any>();
+  const handlePricePress = () => {
+    if (!primaryDoc) return;
+    selectionTap();
+    openJobPreview(primaryDoc, { navigation, setCurrentQuote, setCurrentInvoice });
+  };
+
   // Description was previously buried inside JobScopeCard. Surface it
   // up here as a read-first summary; the "Show more" toggle below
   // expands it AND reveals the raw phone/email strings.
@@ -189,9 +203,19 @@ export function JobDetailHeader({
                 </Pressable>
               )}
               {headlineAmount > 0 ? (
-                <Text style={styles.headlinePrice} numberOfLines={1}>
-                  {formatCurrency(headlineAmount)}
-                </Text>
+                <Pressable
+                  onPress={handlePricePress}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.headlinePricePress,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                  accessibilityLabel="View job preview"
+                >
+                  <Text style={styles.headlinePrice} numberOfLines={1}>
+                    {formatCurrency(headlineAmount)}
+                  </Text>
+                </Pressable>
               ) : null}
             </View>
             <View style={styles.titleSubRow}>
@@ -672,11 +696,13 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.text,
   },
+  headlinePricePress: {
+    marginLeft: 'auto',
+  },
   headlinePrice: {
     fontSize: 20,
     fontWeight: '800',
     color: colors.success,
-    marginLeft: 'auto',
     textAlign: 'right',
   },
   assignCustomer: {
