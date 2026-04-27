@@ -597,30 +597,33 @@ export function DocumentEmailPreviewModal({
         <View style={[styles.footer, { paddingBottom: bottomInset }]}>
           <View style={styles.footerButtons}>
             {ownerEmail ? (
-              <Button
-                mode="outlined"
-                onPress={handleTestSend}
-                loading={sendingTest}
-                disabled={sendingTest || sending || !emailBody.trim() || isRegenerating}
-                style={styles.testButton}
-                contentStyle={styles.sendButtonContent}
-                icon="email-check-outline"
-                compact
-              >
-                {sendingTest ? 'Sending...' : 'Test Send'}
-              </Button>
+              <View style={styles.footerButtonHalfWrapper}>
+                <Button
+                  mode="outlined"
+                  onPress={handleTestSend}
+                  loading={sendingTest}
+                  disabled={sendingTest || sending || !emailBody.trim() || isRegenerating}
+                  style={styles.footerButtonFlex}
+                  contentStyle={styles.sendButtonContent}
+                  icon="email-check-outline"
+                >
+                  {sendingTest ? 'Sending...' : 'Test Send'}
+                </Button>
+              </View>
             ) : null}
-            <Button
-              mode="contained"
-              onPress={handleSend}
-              loading={sending}
-              disabled={sending || sendingTest || !emailBody.trim() || !!validateEmail(recipientEmail) || isRegenerating}
-              style={styles.sendButton}
-              contentStyle={styles.sendButtonContent}
-              icon="send"
-            >
-              {sending ? 'Sending...' : sendButtonLabel}
-            </Button>
+            <View style={styles.footerButtonHalfWrapper}>
+              <Button
+                mode="contained"
+                onPress={handleSend}
+                loading={sending}
+                disabled={sending || sendingTest || !emailBody.trim() || !!validateEmail(recipientEmail) || isRegenerating}
+                style={styles.footerButtonFlex}
+                contentStyle={styles.sendButtonContent}
+                icon="send"
+              >
+                {sending ? 'Sending...' : sendButtonLabel}
+              </Button>
+            </View>
           </View>
         </View>
       ) : null}
@@ -880,15 +883,16 @@ const styles = StyleSheet.create({
   },
   footerButtons: {
     flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
     gap: 12,
   },
-  testButton: {
-    borderRadius: 12,
-    borderColor: colors.surfaceLight,
-  },
-  sendButton: {
+  footerButtonHalfWrapper: {
     flex: 1,
-    borderRadius: 12,
+  },
+  footerButtonFlex: {
+    width: '100%',
+    margin: 0,
   },
   sendButtonContent: {
     paddingVertical: 8,

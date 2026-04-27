@@ -34,6 +34,7 @@ export const PDF_TEMPLATES: PdfTemplateInfo[] = [
 
 /** Print media CSS shared across all templates */
 export const printMediaCSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
   html, body {
     min-height: 100%;
     margin: 0;
@@ -53,14 +54,16 @@ export const printMediaCSS = `
     color: #666666;
     text-align: center;
   }
+  @page {
+    size: A4;
+    margin: 40px;
+  }
   @media print {
     @page {
-      margin-top: 40px;
-      margin-bottom: 40px;
-      margin-left: 40px;
-      margin-right: 40px;
+      size: A4;
+      margin: 40px;
     }
-    .header, .info-section, .summary, .section-wrapper {
+    .header, .info-section, .summary, .section-wrapper, .payment-methods-section, .payment-method {
       page-break-inside: avoid;
       break-inside: avoid;
     }
@@ -101,7 +104,7 @@ export const printMediaCSS = `
 
 const professionalCSS = `
   body {
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
     padding: 40px;
     color: #1a1a1a;
   }
@@ -263,7 +266,7 @@ const cleanCSS = `
     border-bottom: 1px solid #111827;
   }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, sans-serif;
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, sans-serif;
     padding: 64px 56px;
     color: #111827;
     line-height: 1.65;
@@ -466,7 +469,7 @@ const boldCSS = `
     padding-left: 14px;
   }
   body {
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
     padding: 0;
     color: #111827;
     background-color: #FFFFFF;
