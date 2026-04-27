@@ -39,7 +39,7 @@ import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityF
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
-import { searchReeceMaterialPrice } from '../../services/reeceApi';
+import { searchReeceMaterialPrice, getReeceConnectionStatus } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
@@ -387,6 +387,30 @@ export function MaterialsListScreen() {
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   const [initialMaterialCount, setInitialMaterialCount] = useState(0);
   const [cancelGeneration, setCancelGeneration] = useState(false);
+
+  // Whether the user has connected their Reece account. Drives the Reece
+  // pricing branch in fetchPrices() and the "Connect Reece" banner shown
+  // when Reece is selected as the store but no connection exists yet.
+  const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
+  const [reeceReauthNeeded, setReeceReauthNeeded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (businessSettings?.selectedStore === 'reece') {
+      getReeceConnectionStatus()
+        .then((status) => {
+          if (!cancelled) setReeceConnected(!!status.connected);
+        })
+        .catch(() => {
+          if (!cancelled) setReeceConnected(false);
+        });
+    } else {
+      setReeceConnected(null);
+      setReeceReauthNeeded(false);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [businessSettings?.selectedStore, isFocused]);
 
   // ─────────────────────────────────────────────────────────────────────
   // Unsaved-changes guard
@@ -1042,12 +1066,14 @@ export function MaterialsListScreen() {
     const materialsToFetch = materials.filter(m => !(m.price > 0 && !m.manualPriceOverride));
     setFetchProgress({ current: 0, total: materialsToFetch.length });
 
-    // Determine which pricing method to use
-    const useReeceApi = false; // Disabled - API coming soon
-    const useScraperApi = true; // Always available via Firebase proxy
-
     // Get selected store (single store only now)
     const selectedStore = businessSettings?.selectedStore || 'bunnings';
+
+    // Determine which pricing method to use. Reece is gated on the user
+    // actually having connected their maX account — without that, the
+    // backend returns reece_not_connected and we'd hit no real prices.
+    const useReeceApi = selectedStore === 'reece' && reeceConnected === true;
+    const useScraperApi = !useReeceApi; // Bunnings + everything else still go via the scraper proxy
     const storeUrl = selectedStore === 'bunnings' ? 'bunnings.com.au' :
                      selectedStore === 'mitre10' ? 'mitre10.com.au' :
                      selectedStore === 'reece' ? 'reece.com.au' : 'bunnings.com.au';
@@ -1332,7 +1358,13 @@ export function MaterialsListScreen() {
           // Use Reece API for plumbing supplies
           const result = await withCancel(searchReeceMaterialPrice(searchTerm));
 
-          if (result.price) {
+          if (result.reauthRequired) {
+            // Token has been revoked — surface a reconnect banner once and
+            // stop hammering the API for the rest of this batch.
+            setReeceReauthNeeded(true);
+            setReeceConnected(false);
+            failedCount++;
+          } else if (result.price) {
             material.price = result.price;
             material.totalPrice = material.price * material.quantity;
             material.manualPriceOverride = false;
@@ -2072,6 +2104,29 @@ export function MaterialsListScreen() {
           scrollEnabled={!tourActive}
       >
         <WebContainer>
+        {/* Reece-not-connected banner. Shows when the user picked Reece as
+            their store but never finished onboarding, OR when their saved
+            customer token has been revoked and we hit a 401 mid-fetch. */}
+        {businessSettings?.selectedStore === 'reece' && (reeceConnected === false || reeceReauthNeeded) ? (
+          <TouchableOpacity
+            style={styles.reeceBanner}
+            onPress={() => navigation.navigate('ReeceIntegration' as never)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="link-variant-off" size={20} color={colors.primary} />
+            <View style={styles.reeceBannerText}>
+              <Text style={styles.reeceBannerTitle}>
+                {reeceReauthNeeded ? 'Reconnect Reece' : 'Connect your Reece account'}
+              </Text>
+              <Text style={styles.reeceBannerSubtitle}>
+                {reeceReauthNeeded
+                  ? 'Your Reece sign-in expired. Reconnect to keep getting trade prices.'
+                  : 'Get your real Reece trade prices flowing into every quote.'}
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : null}
         {isAiAnalyzing ? (
             <AiAnalyzingState />
         ) : materials.length === 0 && !templatesLoaded ? (
@@ -3256,6 +3311,30 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  reeceBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.primaryBg,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  reeceBannerText: {
+    flex: 1,
+  },
+  reeceBannerTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  reeceBannerSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   emptyActionIconWrap: {
     width: 52,

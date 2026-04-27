@@ -9,12 +9,13 @@ allowed-tools: Bash, Read, Edit, Glob, Grep, WebFetch
 
 Quick reference for working on the Reece API integration in QuoteMate.
 
-## Current Status (as of 2026-03-19)
+## Current Status (as of 2026-04-28)
 
-- **OAuth2 token acquisition**: WORKING. Credentials are valid.
-- **Customer onboarding**: BLOCKED. maX test account 3204941 registration fails ("We've hit a blockage"). Waiting on Christie Howard to fix.
-- **Product search, pricing, invoicing, etc.**: BLOCKED. All require a `Customer-Token` or working `Customer-Number`, which requires completing onboarding first.
-- **IP whitelist**: May need updating. Last sent to Christie: `122.150.250.38` on 2026-03-13. Check current IP with `curl ifconfig.me`.
+- **End-to-end on prod**: WORKING. OAuth2, request-token, customer-token exchange, product search, and pricing all return 200/201 against `auth.api.reecegroup.com.au` and `open.api.reecegroup.com.au`. Confirmed with maX customer 3204941 ("QUOTEMATE (INTEGRATION)", Plumbing Burwood).
+- **Auth model**: app-level `client_credentials` OAuth wraps every call; per-user `Customer-Token` (NOT `Customer-Number` — prod strictly rejects it) gates customer-specific data and pricing. Tokens are stored encrypted in Firestore at `users/{uid}/integrations/reece` (AES-256-GCM via `REECE_TOKEN_ENC_KEY`, mirroring Square's pattern).
+- **Onboarding UI**: per-user. Each plumber completes `request-token → maX consent → customer-token` once. Surfaces: `src/screens/settings/ReeceIntegrationScreen.tsx` and the optional plumber-only step in `NewOnboardingScreen.tsx`. The shared connect helper is `src/services/reeceConnect.ts`.
+- **Materials integration**: gated on `selectedStore === 'reece' && reeceConnected` — toggles the Reece pricing branch in both `MaterialsListScreen` and `AddMaterialScreen`. `reece_not_connected` and `reece_reauth_required` errors flow back from the backend so the UI can show a reconnect banner instead of silently falling back to estimation.
+- **Inventory**: Reece public API has no real stock endpoint; backend reports `quantityAvailable: -1` (exists, level unknown).
 
 ## Contact
 
@@ -24,20 +25,26 @@ Quick reference for working on the Reece API integration in QuoteMate.
 ## Environment & Credentials
 
 ```
-# Test environment (currently in use)
+# Production (default — REECE_USE_TEST_ENV=false)
+Auth URL:  https://auth.api.reecegroup.com.au/oauth2/token
+API URL:   https://open.api.reecegroup.com.au
+Consent:   https://reece.com.au/link-application/account-select
+
+# Test environment (REECE_USE_TEST_ENV=true) — only weekdays 5am–8pm AEST
 Auth URL:  https://auth.api.test.reecegroup.com.au/oauth2/token
 API URL:   https://open.api.test.reecegroup.com.au
 Stage web: https://stage.reece.com.au/
 
-# Production (for later)
-Auth URL:  https://auth.api.reecegroup.com.au/oauth2/token
-API URL:   https://open.api.reecegroup.com.au
+# Functions env
+REECE_CLIENT_ID         — OAuth client (Christie@reece.com.au issued)
+REECE_CLIENT_SECRET     — OAuth client secret
+REECE_TOKEN_ENC_KEY     — base64(32-byte) AES-256-GCM key for at-rest customer tokens
+REECE_CALLBACK_URL      — public "you can close this tab" page (default: hansendev.com.au/quotemate/reece-callback)
+REECE_REGION            — defaults to "au"
+REECE_USE_TEST_ENV      — defaults to "false"
 
-# Credentials (in .env)
-Client ID:       REECE_CLIENT_ID
-Client Secret:   REECE_CLIENT_SECRET
-Customer Number: REECE_CUSTOMER_NUMBER (3204941 for test)
-Region:          REECE_REGION (au)
+# DEPRECATED — do NOT set in prod, the header is rejected:
+REECE_CUSTOMER_NUMBER
 ```
 
 Test environment is only available weekdays 5am–8pm Melbourne time (AEST/AEDT).

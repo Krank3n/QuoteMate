@@ -3,7 +3,7 @@
  * Trade categories, niches, and hardware store selection
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -18,6 +18,7 @@ import {
   Chip,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
@@ -29,17 +30,39 @@ import {
   TRADE_CATEGORIES,
   getTradeCategoryById,
 } from '../../constants/tradeCategories';
+import { getReeceConnectionStatus } from '../../services/reeceApi';
 
 export function TradePricingScreen() {
   const { businessSettings, setBusinessSettings } = useStore();
 
+  const navigation = useNavigation();
+
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [selectedNiches, setSelectedNiches] = useState<string[]>([]);
   const [selectedStore, setSelectedStore] = useState<string>('bunnings');
+  const [reeceConnected, setReeceConnected] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const initialSnapshotRef = useRef<string | null>(null);
+
+  // Re-check Reece connection every time the screen is focused so returning
+  // from ReeceIntegrationScreen instantly reflects the new state.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      getReeceConnectionStatus()
+        .then((status) => {
+          if (!cancelled) setReeceConnected(!!status.connected);
+        })
+        .catch(() => {
+          if (!cancelled) setReeceConnected(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
 
   useEffect(() => {
     if (businessSettings) {
@@ -278,21 +301,41 @@ export function TradePricingScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.storeRadioOption, styles.storeRadioOptionDisabled]}
-                disabled={true}
+                style={[
+                  styles.storeRadioOption,
+                  selectedStore === 'reece' && styles.storeRadioOptionSelected,
+                ]}
+                onPress={() => {
+                  if (reeceConnected) {
+                    handleStoreSelect('reece');
+                  } else {
+                    navigation.navigate('ReeceIntegration' as never);
+                  }
+                }}
               >
                 <View style={styles.storeRadioLeft}>
-                  <View style={styles.radioButton}>
-                    <View style={styles.radioButtonDisabled} />
+                  <View style={[
+                    styles.radioButton,
+                    selectedStore === 'reece' && reeceConnected && styles.radioButtonSelected,
+                  ]}>
+                    {selectedStore === 'reece' && reeceConnected ? (
+                      <View style={styles.radioButtonInner} />
+                    ) : null}
                   </View>
                   <View style={styles.storeInfo}>
-                    <Text style={[styles.storeName, styles.storeNameDisabled]}>Reece</Text>
-                    <Text style={styles.storeMethod}>API Integration</Text>
+                    <Text style={styles.storeName}>Reece</Text>
+                    <Text style={styles.storeMethod}>
+                      {reeceConnected ? 'Your real trade prices' : 'Plumbing supplier — connect your maX account'}
+                    </Text>
                   </View>
                 </View>
-                <View style={styles.comingSoonBadge}>
-                  <Text style={styles.comingSoonText}>Coming Soon</Text>
-                </View>
+                {reeceConnected ? (
+                  <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
+                ) : (
+                  <View style={styles.connectBadge}>
+                    <Text style={styles.connectBadgeText}>Connect</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             </View>
 
@@ -346,7 +389,9 @@ export function TradePricingScreen() {
             <View style={styles.infoBox}>
               <MaterialCommunityIcons name="information" size={20} color={colors.primary} />
               <Text style={styles.infoBoxText}>
-                {selectedStore === 'bunnings'
+                {selectedStore === 'reece'
+                  ? "Reece is selected. Quotes will use your real maX trade prices."
+                  : selectedStore === 'bunnings'
                   ? "Bunnings is selected. Real prices will be fetched using the Bunnings web search when available."
                   : "Using estimated typical product pricing."
                 }
@@ -582,6 +627,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: colors.primary,
+  },
+  connectBadge: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  connectBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.surface,
+    letterSpacing: 0.4,
   },
   infoBox: {
     flexDirection: 'row',

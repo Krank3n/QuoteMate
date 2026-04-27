@@ -13,6 +13,10 @@ export interface OnboardingStep {
   id: number;
   label: string;
   icon: string;
+  // Stable identifier for routing render logic — independent of `id` so
+  // dynamic step lists (e.g. plumber-only Reece step) don't break a switch
+  // statement keyed on position.
+  key?: string;
 }
 
 interface OnboardingProgressProps {

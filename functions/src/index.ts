@@ -2095,20 +2095,27 @@ Example:
 
 /**
  * Reece API Endpoints
- * Integration with Reece Group API for plumbing supplies
- * API Docs: https://docs.api.reecegroup.com.au/latest/index.html#tag/Pricing
+ * Integration with Reece Group API for plumbing supplies.
+ * API docs: https://docs.api.reecegroup.com.au/latest/index.html
  *
- * Setup instructions:
- * 1. Register for API access at https://developers.reecegroup.com.au/
- * 2. Obtain API credentials (client_id, client_secret)
- * 3. Set up Firebase config: firebase functions:config:set reece.client_id="xxx" reece.client_secret="xxx"
+ * Auth model: app-level OAuth (client_credentials) wraps every request, but
+ * Reece prod strictly rejects the Customer-Number header — every plumber must
+ * complete the per-user maX onboarding flow which yields a long-lived
+ * Customer-Token. We store that token (encrypted at rest) per user in
+ * Firestore and pass it on every product/price/inventory call.
+ *
+ * Required env: REECE_CLIENT_ID, REECE_CLIENT_SECRET, REECE_TOKEN_ENC_KEY,
+ * REECE_CALLBACK_URL. REECE_USE_TEST_ENV=true switches to Reece's test
+ * environment (where the Customer-Number trick still works for smoke tests).
  */
 
-// Token cache to avoid requesting a new token on every call
+// Token cache to avoid requesting a new app-level token on every call
 let reeceTokenCache: { token: string; expiresAt: number } | null = null;
 
-// Reece API environment configuration
-const REECE_USE_TEST_ENV = (process.env.REECE_USE_TEST_ENV || 'true') === 'true';
+// Reece API environment configuration. Default to PROD now that the per-user
+// onboarding flow is shipping — the test env was only useful while we were
+// validating the Customer-Number shortcut, which doesn't work in prod anyway.
+const REECE_USE_TEST_ENV = (process.env.REECE_USE_TEST_ENV || 'false') === 'true';
 const REECE_AUTH_BASE_URL = REECE_USE_TEST_ENV
   ? 'https://auth.api.test.reecegroup.com.au'
   : 'https://auth.api.reecegroup.com.au';
@@ -2116,6 +2123,12 @@ const REECE_API_BASE_URL = REECE_USE_TEST_ENV
   ? 'https://open.api.test.reecegroup.com.au'
   : 'https://open.api.reecegroup.com.au';
 const REECE_REGION = process.env.REECE_REGION || 'au';
+// Public page the maX consent flow redirects to once the user approves
+// QuoteMate. Reece doesn't append any query params — the redirect itself is
+// the only completion signal — so this just needs to be a stable URL that
+// renders a "you can close this tab" message.
+const REECE_CALLBACK_URL =
+  process.env.REECE_CALLBACK_URL || 'https://quotemateapp.au/reece/callback';
 
 /**
  * Get OAuth token for Reece API
@@ -2172,6 +2185,103 @@ async function getReeceAuthToken(): Promise<string | null> {
   }
 }
 
+// ---- Customer-token at-rest encryption -----------------------------------
+// Reece customer tokens are stored encrypted in Firestore so a database leak
+// alone doesn't expose every plumber's trade-pricing entitlement to Reece.
+// Format on disk: `enc:v1:base64(iv ‖ authTag ‖ ciphertext)` (AES-256-GCM).
+// Mirrors the Square pattern below at squareTokenEnc helpers.
+const REECE_TOKEN_ENC_PREFIX = 'enc:v1:';
+function getReeceEncKey(): Buffer | null {
+  const raw = process.env.REECE_TOKEN_ENC_KEY || '';
+  if (!raw) return null;
+  try {
+    const buf = Buffer.from(raw, 'base64');
+    if (buf.length !== 32) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+function encryptReeceToken(plaintext: string): string {
+  const key = getReeceEncKey();
+  if (!key) {
+    console.warn('[reece] REECE_TOKEN_ENC_KEY not set — storing token in plaintext');
+    return plaintext;
+  }
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return REECE_TOKEN_ENC_PREFIX + Buffer.concat([iv, authTag, ciphertext]).toString('base64');
+}
+
+function decryptReeceToken(value: string | undefined | null): string | null {
+  if (!value) return null;
+  if (!value.startsWith(REECE_TOKEN_ENC_PREFIX)) {
+    return value;
+  }
+  const key = getReeceEncKey();
+  if (!key) {
+    console.error('[reece] REECE_TOKEN_ENC_KEY missing — cannot decrypt token');
+    return null;
+  }
+  try {
+    const packed = Buffer.from(value.slice(REECE_TOKEN_ENC_PREFIX.length), 'base64');
+    const iv = packed.subarray(0, 12);
+    const authTag = packed.subarray(12, 28);
+    const ciphertext = packed.subarray(28);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+  } catch (err: any) {
+    console.error('[reece] token decrypt failed', { message: err?.message });
+    return null;
+  }
+}
+
+/**
+ * Read + decrypt the user's Reece customer token from Firestore. Returns
+ * null when the user hasn't completed onboarding or their record is unreadable.
+ */
+async function getReeceCustomerToken(uid: string): Promise<{
+  customerToken: string;
+  customerNumber: string;
+  homeBranch?: string;
+  displayName?: string;
+} | null> {
+  try {
+    const doc = await admin.firestore().doc(`users/${uid}/integrations/reece`).get();
+    if (!doc.exists) return null;
+    const data = doc.data()!;
+    const enc = data.customerTokenEnc as string | undefined;
+    const customerToken = decryptReeceToken(enc);
+    if (!customerToken || !data.customerNumber) return null;
+    return {
+      customerToken,
+      customerNumber: String(data.customerNumber),
+      homeBranch: data.homeBranch,
+      displayName: data.displayName,
+    };
+  } catch (err: any) {
+    console.error('[reece] failed to load customer token', { uid, message: err?.message });
+    return null;
+  }
+}
+
+/**
+ * Clear the user's stored Reece connection — typically called when Reece
+ * returns 401, signalling the customer token has been revoked or expired.
+ */
+async function clearReeceConnection(uid: string, reason: string): Promise<void> {
+  try {
+    await admin.firestore().doc(`users/${uid}/integrations/reece`).delete();
+    console.warn('[reece] cleared connection', { uid, reason });
+  } catch (err: any) {
+    console.error('[reece] failed to clear connection', { uid, message: err?.message });
+  }
+}
+
 /**
  * Check if Reece API is available and configured
  */
@@ -2192,7 +2302,8 @@ export const checkReeceApi = functions.https.onRequest((req, res) => {
 });
 
 /**
- * Search for a product in Reece catalog
+ * Search for a product in Reece catalog using the calling user's customer
+ * token. Returns trade-discounted pricing inline in the product result.
  */
 export const searchReeceProduct = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -2212,16 +2323,18 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Get OAuth token
       const token = await getReeceAuthToken();
       if (!token) {
         res.status(200).json({ product: null });
         return;
       }
 
-      // Search for product using the product-gateway/search endpoint
-      // Requires Customer-Token or Customer-Number header
-      const customerNumber = process.env.REECE_CUSTOMER_NUMBER;
+      const userToken = await getReeceCustomerToken(decodedToken.uid);
+      if (!userToken) {
+        res.status(200).json({ product: null, error: 'reece_not_connected' });
+        return;
+      }
+
       const searchResponse = await fetch(
         `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(productName)}&pageNumber=1&pageSize=5`,
         {
@@ -2229,10 +2342,16 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
-            ...(customerNumber ? { 'Customer-Number': customerNumber } : {}),
+            'Customer-Token': userToken.customerToken,
           },
         }
       );
+
+      if (searchResponse.status === 401) {
+        await clearReeceConnection(decodedToken.uid, 'search_401');
+        res.status(200).json({ product: null, error: 'reece_reauth_required' });
+        return;
+      }
 
       if (!searchResponse.ok) {
         await searchResponse.text();
@@ -2242,7 +2361,6 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
 
       const searchData = await searchResponse.json();
 
-      // Return the first matching product if found
       if (searchData.products && searchData.products.length > 0) {
         const product = searchData.products[0];
 
@@ -2264,7 +2382,10 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
 });
 
 /**
- * Get price for a Reece product
+ * Get price for a Reece product. Pricing comes inline with the product
+ * search response (the dedicated price-file endpoint is a bulk dump, not a
+ * per-item lookup), so this handler is structurally identical to
+ * searchReeceProduct but extracts the price field instead of the description.
  */
 export const getReecePrice = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -2284,19 +2405,18 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Get OAuth token
       const token = await getReeceAuthToken();
       if (!token) {
         res.status(200).json({ price: null });
         return;
       }
 
-      // Get pricing using price-gateway/price-file endpoint (MAX_JSON format)
-      // Note: Price file is a bulk download of all customer prices, not per-item lookup.
-      // For now we search the product to get inline pricing from the product search results.
-      const customerNumber = process.env.REECE_CUSTOMER_NUMBER;
+      const userToken = await getReeceCustomerToken(decodedToken.uid);
+      if (!userToken) {
+        res.status(200).json({ price: null, error: 'reece_not_connected' });
+        return;
+      }
 
-      // Search by product ID to get price info from product results
       const priceResponse = await fetch(
         `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(itemNumber)}&pageNumber=1&pageSize=1`,
         {
@@ -2304,10 +2424,16 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
-            ...(customerNumber ? { 'Customer-Number': customerNumber } : {}),
+            'Customer-Token': userToken.customerToken,
           },
         }
       );
+
+      if (priceResponse.status === 401) {
+        await clearReeceConnection(decodedToken.uid, 'price_401');
+        res.status(200).json({ price: null, error: 'reece_reauth_required' });
+        return;
+      }
 
       if (!priceResponse.ok) {
         await priceResponse.text();
@@ -2317,7 +2443,6 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
 
       const priceData = await priceResponse.json();
 
-      // Extract price from product search results
       if (priceData.products && priceData.products.length > 0) {
         const product = priceData.products[0];
         const uom = product.unitOfMeasures?.[0];
@@ -2343,7 +2468,10 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
 });
 
 /**
- * Get inventory for a Reece product
+ * Get inventory for a Reece product. The Reece public API has no direct
+ * stock-level endpoint, so we use product search as an existence probe and
+ * report quantityAvailable: -1 (meaning "exists, level unknown"). Punchout
+ * cart is the only path to real-time stock per Reece docs.
  */
 export const getReeceInventory = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -2363,19 +2491,18 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Get OAuth token
       const token = await getReeceAuthToken();
       if (!token) {
         res.status(200).json({ inventory: null });
         return;
       }
 
-      // Note: Reece API doesn't have a direct inventory/stock level endpoint.
-      // Inventory availability is shown through the product search results or punchout cart.
-      // For now, we return null - this will need to be revisited once we have full API access.
-      const customerNumber = process.env.REECE_CUSTOMER_NUMBER;
+      const userToken = await getReeceCustomerToken(decodedToken.uid);
+      if (!userToken) {
+        res.status(200).json({ inventory: null, error: 'reece_not_connected' });
+        return;
+      }
 
-      // Use product search to check if item exists (basic availability check)
       const inventoryResponse = await fetch(
         `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(itemNumber)}&pageNumber=1&pageSize=1`,
         {
@@ -2383,10 +2510,16 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
-            ...(customerNumber ? { 'Customer-Number': customerNumber } : {}),
+            'Customer-Token': userToken.customerToken,
           },
         }
       );
+
+      if (inventoryResponse.status === 401) {
+        await clearReeceConnection(decodedToken.uid, 'inventory_401');
+        res.status(200).json({ inventory: null, error: 'reece_reauth_required' });
+        return;
+      }
 
       if (!inventoryResponse.ok) {
         await inventoryResponse.text();
@@ -2401,8 +2534,8 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
         res.status(200).json({
           inventory: {
             itemNumber: String(product.productId),
-            branchCode: branchCode || 'unknown',
-            quantityAvailable: -1, // -1 indicates availability unknown, product exists
+            branchCode: branchCode || userToken.homeBranch || 'unknown',
+            quantityAvailable: -1,
           },
         });
       } else {
@@ -2410,6 +2543,217 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
       }
     } catch (error: any) {
       res.status(200).json({ inventory: null });
+    }
+  });
+});
+
+/**
+ * Start Reece per-user onboarding — exchange the app-level OAuth token for a
+ * shortlived requestToken, then return the maX consent URL the user opens in
+ * a browser. After the user approves, Reece redirects to REECE_CALLBACK_URL
+ * (no params), the client closes the tab and calls reeceExchangeCustomerToken.
+ */
+export const reeceRequestToken = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    try {
+      const token = await getReeceAuthToken();
+      if (!token) {
+        res.status(500).json({ error: 'Reece API not configured' });
+        return;
+      }
+
+      const requestTokenResponse = await fetch(
+        `${REECE_API_BASE_URL}/${REECE_REGION}/customer-application-onboarding-gateway/request-token`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        }
+      );
+
+      if (!requestTokenResponse.ok) {
+        const body = await requestTokenResponse.text().catch(() => '');
+        console.error('[reece] request-token failed', {
+          uid: decodedToken.uid,
+          status: requestTokenResponse.status,
+          body: body.slice(0, 300),
+        });
+        res.status(502).json({ error: 'Could not start Reece connection. Please try again.' });
+        return;
+      }
+
+      const data: any = await requestTokenResponse.json();
+      const requestToken = data.requestToken || data.request_token;
+      if (!requestToken) {
+        res.status(502).json({ error: 'Reece returned an unexpected response.' });
+        return;
+      }
+
+      // Reece's consent UI lives on reece.com.au, NOT on the API host.
+      const params = new URLSearchParams({
+        request_token: requestToken,
+        callback_url: REECE_CALLBACK_URL,
+      });
+      const authUrl = `https://reece.com.au/link-application/account-select?${params.toString()}`;
+
+      res.status(200).json({ requestToken, authUrl });
+    } catch (error: any) {
+      console.error('[reece] request-token error', { message: error?.message });
+      res.status(500).json({ error: 'Reece connection failed. Please try again.' });
+    }
+  });
+});
+
+/**
+ * Complete Reece onboarding — once the user has approved QuoteMate inside the
+ * maX consent flow, the client posts the requestToken back here. We exchange
+ * it for the long-lived customerToken and store the full record (encrypted)
+ * on the user's integrations doc.
+ */
+export const reeceExchangeCustomerToken = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    try {
+      const { requestToken } = req.body;
+      if (!isNonEmptyString(requestToken)) {
+        res.status(400).json({ error: 'Missing requestToken' });
+        return;
+      }
+
+      const token = await getReeceAuthToken();
+      if (!token) {
+        res.status(500).json({ error: 'Reece API not configured' });
+        return;
+      }
+
+      const exchangeResponse = await fetch(
+        `${REECE_API_BASE_URL}/${REECE_REGION}/customer-application-onboarding-gateway/customer-token`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ requestToken }),
+        }
+      );
+
+      if (!exchangeResponse.ok) {
+        const body = await exchangeResponse.text().catch(() => '');
+        console.error('[reece] customer-token exchange failed', {
+          uid: decodedToken.uid,
+          status: exchangeResponse.status,
+          body: body.slice(0, 300),
+        });
+        // Most common case: user closed the tab before approving. Surface a
+        // user-friendly message rather than the upstream 4xx.
+        res.status(400).json({ error: 'Reece account not approved yet. Try connecting again.' });
+        return;
+      }
+
+      const data: any = await exchangeResponse.json();
+      const customerToken = data.customerToken || data.customer_token;
+      const customerNumber = data.customerNumber || data.customer_number;
+      const displayName = data.displayName || data.display_name;
+      const homeBranch = data.homeBranch?.name || data.home_branch?.name || data.homeBranch || data.home_branch;
+
+      if (!customerToken || !customerNumber) {
+        res.status(502).json({ error: 'Reece returned an unexpected response.' });
+        return;
+      }
+
+      await admin.firestore().doc(`users/${decodedToken.uid}/integrations/reece`).set({
+        customerNumber: String(customerNumber),
+        displayName: displayName ? String(displayName) : null,
+        homeBranch: homeBranch ? String(homeBranch) : null,
+        customerTokenEnc: encryptReeceToken(customerToken),
+        connectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      res.status(200).json({
+        connected: true,
+        customerNumber: String(customerNumber),
+        displayName: displayName ? String(displayName) : null,
+        homeBranch: homeBranch ? String(homeBranch) : null,
+      });
+    } catch (error: any) {
+      console.error('[reece] exchange error', { message: error?.message });
+      res.status(500).json({ error: 'Could not finish connecting Reece. Please try again.' });
+    }
+  });
+});
+
+/**
+ * Report whether the calling user has a stored Reece connection. Used by the
+ * settings screen and the materials list to gate UI without exposing the
+ * encrypted token to the client.
+ */
+export const reeceConnectionStatus = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    try {
+      const doc = await admin.firestore().doc(`users/${decodedToken.uid}/integrations/reece`).get();
+      if (!doc.exists) {
+        res.status(200).json({ connected: false });
+        return;
+      }
+      const data = doc.data()!;
+      res.status(200).json({
+        connected: true,
+        customerNumber: data.customerNumber || null,
+        displayName: data.displayName || null,
+        homeBranch: data.homeBranch || null,
+        connectedAt: data.connectedAt?.toDate?.()?.toISOString?.() || null,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Could not check Reece connection.' });
+    }
+  });
+});
+
+/**
+ * Disconnect Reece for the calling user. Reece has no documented revoke
+ * endpoint, so we just delete the local record — the user's existing maX
+ * consent goes dormant on Reece's side until they reconnect.
+ */
+export const reeceDisconnect = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    try {
+      await admin.firestore().doc(`users/${decodedToken.uid}/integrations/reece`).delete();
+      res.status(200).json({ disconnected: true });
+    } catch (error: any) {
+      console.error('[reece] disconnect failed', { message: error?.message });
+      res.status(500).json({ error: 'Could not disconnect Reece.' });
     }
   });
 });

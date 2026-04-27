@@ -96,6 +96,15 @@ export function SettingsScreen() {
           badgeColor: colors.primary,
         },
         {
+          id: 'reece',
+          title: 'Reece Plumbing',
+          subtitle: 'Pull your real Reece trade prices into every quote',
+          icon: 'pipe',
+          screen: 'ReeceIntegration',
+          badge: 'NEW',
+          badgeColor: colors.primary,
+        },
+        {
           id: 'googleCalendar',
           title: 'Google Calendar',
           subtitle: 'Push scheduled jobs to your calendar',

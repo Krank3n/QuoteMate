@@ -10,7 +10,7 @@
  * 6. Payments - Square connection (skippable)
  */
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -49,21 +49,22 @@ import { AlertModal } from '../components/AlertModal';
 import { TRADE_CATEGORIES } from '../constants/tradeCategories';
 import { auth, storage } from '../config/firebase';
 import * as squareService from '../services/squareService';
+import { runReeceConnectFlow } from '../services/reeceConnect';
 import { compressLogo } from '../services/photoService';
 import { lightTap, successTap, errorTap, selectionTap } from '../utils/haptics';
 
 const STORAGE_KEY = 'onboarding:draft';
 
-const ONBOARDING_STEPS: OnboardingStep[] = [
-  { id: 1, label: 'Company', icon: 'office-building' },
-  { id: 2, label: 'Trade', icon: 'hammer-wrench' },
-  { id: 3, label: 'Contact', icon: 'card-account-details' },
-  { id: 4, label: 'Branding', icon: 'palette' },
-  { id: 5, label: 'Rates', icon: 'currency-usd' },
-  { id: 6, label: 'Payments', icon: 'credit-card-outline' },
+// The static base of the onboarding flow. The Reece step is inserted
+// dynamically inside the component when the user picks plumbing, so it isn't
+// shown to other trades.
+const BASE_STEPS: Array<Omit<OnboardingStep, 'id'> & { key: string }> = [
+  { key: 'company', label: 'Company', icon: 'office-building' },
+  { key: 'trade', label: 'Trade', icon: 'hammer-wrench' },
+  { key: 'contact', label: 'Contact', icon: 'card-account-details' },
+  { key: 'branding', label: 'Branding', icon: 'palette' },
+  { key: 'rates', label: 'Rates', icon: 'currency-usd' },
 ];
-
-const TOTAL_STEPS = ONBOARDING_STEPS.length;
 
 export function NewOnboardingScreen() {
   const { setBusinessSettings, setOnboarded } = useStore();
@@ -98,6 +99,24 @@ export function NewOnboardingScreen() {
   const [squareConnecting, setSquareConnecting] = useState(false);
   const [squareConnected, setSquareConnected] = useState(false);
   const [squareError, setSquareError] = useState<string | null>(null);
+
+  // Optional Reece step — only included in the flow when the user picks
+  // plumbing, since maX integration is plumber-specific.
+  const [reeceConnecting, setReeceConnecting] = useState(false);
+  const [reeceConnected, setReeceConnected] = useState(false);
+  const [reeceError, setReeceError] = useState<string | null>(null);
+
+  const ONBOARDING_STEPS: OnboardingStep[] = useMemo(() => {
+    const items = [...BASE_STEPS];
+    if (selectedCategories.includes('plumbing')) {
+      items.push({ key: 'reece', label: 'Reece', icon: 'pipe' });
+    }
+    items.push({ key: 'payments', label: 'Payments', icon: 'credit-card-outline' });
+    return items.map((s, i) => ({ id: i + 1, key: s.key, label: s.label, icon: s.icon }));
+  }, [selectedCategories]);
+
+  const TOTAL_STEPS = ONBOARDING_STEPS.length;
+  const currentStepKey = ONBOARDING_STEPS[currentStep - 1]?.key;
 
   // Inline validation (replaces Alert popups)
   const [showBusinessNameError, setShowBusinessNameError] = useState(false);
@@ -256,7 +275,7 @@ export function NewOnboardingScreen() {
   const handleSkip = () => {
     if (currentStep < 3) return;
     // Skipping Square is costly (revenue), so nudge the user once before letting them through.
-    if (currentStep === TOTAL_STEPS && !squareConnected) {
+    if (currentStepKey === 'payments' && !squareConnected) {
       setSquareSkipModalVisible(true);
       return;
     }
@@ -448,25 +467,118 @@ export function NewOnboardingScreen() {
     await setOnboarded(true);
   };
 
-  // Render step content
+  // Render step content. Keyed on the dynamic step list's `key` field, not
+  // the numeric position, since plumbers and other trades have different
+  // step counts.
   const renderStepContent = () => {
-    switch (currentStep) {
-      case 1:
+    switch (currentStepKey) {
+      case 'company':
         return renderStep1CompanyName();
-      case 2:
+      case 'trade':
         return renderStep2TradeCategory();
-      case 3:
+      case 'contact':
         return renderStep3Contact();
-      case 4:
+      case 'branding':
         return renderStep4Branding();
-      case 5:
+      case 'rates':
         return renderStep5Rates();
-      case 6:
+      case 'reece':
+        return renderStepReece();
+      case 'payments':
         return renderStep6Payments();
       default:
         return null;
     }
   };
+
+  const handleConnectReece = async () => {
+    setReeceError(null);
+    setReeceConnecting(true);
+    try {
+      const outcome = await runReeceConnectFlow();
+      if (outcome.kind === 'connected') {
+        setReeceConnected(true);
+      } else if (outcome.kind === 'failed') {
+        setReeceError(outcome.message);
+      }
+      // Cancelled: leave the user on the screen so they can retry or skip.
+    } finally {
+      setReeceConnecting(false);
+    }
+  };
+
+  // Plumber-only step: connect a Reece maX account so QuoteMate can fetch
+  // real trade prices. Always skippable — connecting can be done later from
+  // Settings.
+  const renderStepReece = () => (
+    <View style={styles.stepContainer}>
+      <View style={styles.stepHeader}>
+        <MaterialCommunityIcons
+          name="pipe"
+          size={64}
+          color={colors.primary}
+          style={styles.stepIcon}
+        />
+        <Title style={styles.stepTitle}>Real Reece trade prices</Title>
+        <Paragraph style={styles.stepDescription}>
+          Connect your Reece maX account so every quote uses your real trade-discounted pricing — not a guess.
+        </Paragraph>
+      </View>
+
+      <Surface style={styles.card}>
+        {reeceConnected ? (
+          <View style={styles.squareConnectedContainer}>
+            <MaterialCommunityIcons
+              name="check-circle"
+              size={56}
+              color={colors.success}
+            />
+            <Text style={styles.squareConnectedTitle}>Reece connected</Text>
+            <Text style={styles.squareConnectedSubtitle}>
+              Your trade prices will flow into every quote. Tap Next to continue.
+            </Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.squareFeatureRow}>
+              <MaterialCommunityIcons name="cash-multiple" size={22} color={colors.primary} />
+              <Text style={styles.squareFeatureText}>Quotes pull your real maX trade-discounted price for each item</Text>
+            </View>
+            <View style={styles.squareFeatureRow}>
+              <MaterialCommunityIcons name="lock-outline" size={22} color={colors.primary} />
+              <Text style={styles.squareFeatureText}>Sign in directly with Reece — we never see your maX password</Text>
+            </View>
+            <View style={styles.squareFeatureRow}>
+              <MaterialCommunityIcons name="clock-fast" size={22} color={colors.primary} />
+              <Text style={styles.squareFeatureText}>Takes about a minute. You can also skip and connect later from Settings</Text>
+            </View>
+
+            {reeceError ? (
+              <View style={styles.errorBox}>
+                <MaterialCommunityIcons name="alert-circle-outline" size={18} color={colors.error} />
+                <Text style={styles.errorText}>{reeceError}</Text>
+              </View>
+            ) : null}
+
+            <Button
+              mode="contained"
+              onPress={handleConnectReece}
+              style={styles.connectSquareButton}
+              loading={reeceConnecting}
+              disabled={reeceConnecting}
+              icon="pipe"
+            >
+              {reeceConnecting ? 'Connecting…' : 'Connect Reece'}
+            </Button>
+
+            <Text style={styles.squareFinePrint}>
+              You'll be redirected to reece.com.au to sign in to maX and approve QuoteMate.
+            </Text>
+          </>
+        )}
+      </Surface>
+    </View>
+  );
 
   // Step 1: Company Name
   const renderStep1CompanyName = () => (

@@ -49,6 +49,10 @@ import {
   type ScraperSearchResponse,
 } from '../../services/bunningsScraperClient';
 import {
+  searchReeceMaterialPrice,
+  getReeceConnectionStatus,
+} from '../../services/reeceApi';
+import {
   loadFavoritesFromLocal,
   saveFavoriteProduct,
   removeFavoriteProduct,
@@ -135,6 +139,27 @@ export function AddMaterialScreen() {
   const [hasSearched, setHasSearched] = useState(false);
   const [manualEntrySheetVisible, setManualEntrySheetVisible] = useState(false);
   const searchCancelledRef = useRef(false);
+
+  // Whether the user has connected their Reece account. Drives the Reece
+  // search step in handleSearch when their preferred store is Reece.
+  const [reeceConnected, setReeceConnected] = useState<boolean>(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (businessSettings?.selectedStore === 'reece') {
+      getReeceConnectionStatus()
+        .then((status) => {
+          if (!cancelled) setReeceConnected(!!status.connected);
+        })
+        .catch(() => {
+          if (!cancelled) setReeceConnected(false);
+        });
+    } else {
+      setReeceConnected(false);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [businessSettings?.selectedStore]);
 
   // Manual entry state - initialize with editing material if in edit mode
   const [manualName, setManualName] = useState(prefillMaterial?.name || '');
@@ -851,7 +876,41 @@ export function AddMaterialScreen() {
 
       let remoteResults: any[] = [];
 
-      if (shouldTryBunnings) {
+      // ── Step 2 (Reece priority): plumber's connected maX account ──
+      // When the user picked Reece as their store and is connected, fetch
+      // their trade-discounted price first. Reece returns one best-match
+      // result, so this short-circuits the Bunnings/web-scrape chain when
+      // we get a hit.
+      if (
+        businessSettings?.selectedStore === 'reece' &&
+        reeceConnected &&
+        !scopedToOne
+      ) {
+        try {
+          const reeceResult = await searchReeceMaterialPrice(searchQuery);
+          if (searchCancelledRef.current) return;
+          if (reeceResult.reauthRequired) {
+            setReeceConnected(false);
+          } else if (reeceResult.price && reeceResult.itemNumber) {
+            remoteResults = [{
+              productName: reeceResult.productName || searchQuery,
+              description: 'Reece trade price',
+              itemNumber: reeceResult.itemNumber,
+              brand: '',
+              price: reeceResult.price,
+              productUrl: '',
+              imageUrl: '',
+              store: reeceResult.store || 'Reece Plumbing',
+              isScraperResult: true,
+            }];
+          }
+        } catch {
+          // Reece miss — fall through to the existing chain.
+        }
+      }
+      if (searchCancelledRef.current) return;
+
+      if (remoteResults.length === 0 && shouldTryBunnings) {
         // searchBunningsProducts throws on error; preserve the old null-on-
         // error contract so the fallback flow still kicks in.
         let scraperResponse: ScraperSearchResponse | null = null;
