@@ -99,20 +99,37 @@ function withSquareIOSInfoPlist(config) {
 function withSquareIOSBuildPhase(config) {
   return withXcodeProject(config, (config) => {
     const xcodeProject = config.modResults;
-    // Square's `setup` script strips unused architectures, but ASC validation
-    // rejects bundles that contain the script itself (unsigned executable in a
-    // framework) or any nested `Frameworks/` dir Square's setup leaves behind.
-    // Clean both the XCFrameworkIntermediates source (which `[CP] Embed Pods
-    // Frameworks` rsyncs into the .app) and the embedded copy as a safety net.
+    // Square ships LCRCore/SquareReader/CorePaymentCard nested inside
+    // SquareMobilePaymentsSDK.framework/Frameworks/. ASC rejects nested bundles
+    // (`fd8d3fe2-...` validation), but dyld needs those frameworks at runtime
+    // — so we hoist them up to the .app's top-level Frameworks/ instead of
+    // deleting. We also strip the unsigned `setup` executable that ASC rejects
+    // with `Invalid Signature ... not properly signed`.
+    //
+    // Runs before [CP] Embed Pods Frameworks. Source = XCFrameworkIntermediates,
+    // which is what [CP] Embed rsyncs into the .app. Destination handling is a
+    // safety net for builds where order differs.
     const SHELL_SCRIPT =
-      'clean_framework() {\n' +
-      '  local dir="$1"\n' +
-      '  [ -d "$dir" ] || return 0\n' +
-      '  if [ -f "$dir/setup" ]; then "$dir/setup"; rm -f "$dir/setup"; fi\n' +
-      '  rm -rf "$dir/Frameworks"\n' +
+      'flatten_square() {\n' +
+      '  local fw_dir="$1"\n' +
+      '  local app_fw="$2"\n' +
+      '  [ -d "$fw_dir" ] || return 0\n' +
+      '  if [ -f "$fw_dir/setup" ]; then "$fw_dir/setup"; rm -f "$fw_dir/setup"; fi\n' +
+      '  [ -d "$fw_dir/Frameworks" ] || return 0\n' +
+      '  mkdir -p "$app_fw"\n' +
+      '  for nested in "$fw_dir/Frameworks"/*; do\n' +
+      '    [ -d "$nested" ] || continue\n' +
+      '    local name; name=$(basename "$nested")\n' +
+      '    rsync -a --delete "$nested/" "$app_fw/$name/"\n' +
+      '    if [ -n "$EXPANDED_CODE_SIGN_IDENTITY" ]; then\n' +
+      '      /usr/bin/codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" --preserve-metadata=identifier,entitlements,flags "$app_fw/$name"\n' +
+      '    fi\n' +
+      '  done\n' +
+      '  rm -rf "$fw_dir/Frameworks"\n' +
       '}\n' +
-      'clean_framework "${BUILT_PRODUCTS_DIR}/XCFrameworkIntermediates/SquareMobilePaymentsSDK/SquareMobilePaymentsSDK.framework"\n' +
-      'clean_framework "${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}/SquareMobilePaymentsSDK.framework"\n';
+      'APP_FW="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}"\n' +
+      'flatten_square "${BUILT_PRODUCTS_DIR}/XCFrameworkIntermediates/SquareMobilePaymentsSDK/SquareMobilePaymentsSDK.framework" "$APP_FW"\n' +
+      'flatten_square "$APP_FW/SquareMobilePaymentsSDK.framework" "$APP_FW"\n';
     const PHASE_NAME = 'Square Mobile Payments SDK Setup';
 
     // Skip if already added.
