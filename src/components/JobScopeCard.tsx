@@ -19,7 +19,6 @@ import {
   View,
   StyleSheet,
   Pressable,
-  Alert,
   LayoutAnimation,
   Platform,
   UIManager,
@@ -36,6 +35,7 @@ import { PaymentChip } from './PaymentChip';
 import { selectionTap } from '../utils/haptics';
 import { previewDocumentPDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
+import { useAlertModal } from '../hooks/useAlertModal';
 import {
   JobSection,
   MaterialsSection,
@@ -141,6 +141,7 @@ export function JobScopeCard({
 
   const [expanded, setExpanded] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const { showAlert, alertNode } = useAlertModal();
 
   const handleToggle = () => {
     selectionTap();
@@ -154,10 +155,11 @@ export function JobScopeCard({
     try {
       await previewDocumentPDF(doc, businessSettings, { isPro });
     } catch {
-      Alert.alert(
-        'Preview failed',
-        "Couldn't open the PDF. Try again in a moment.",
-      );
+      showAlert({
+        type: 'error',
+        title: 'Preview failed',
+        message: "Couldn't open the PDF. Try again in a moment.",
+      });
     } finally {
       setPreviewing(false);
     }
@@ -275,6 +277,8 @@ export function JobScopeCard({
         )}
         <Text style={styles.actionLabel}>Preview PDF</Text>
       </Pressable>
+
+      {alertNode}
     </View>
   );
 }

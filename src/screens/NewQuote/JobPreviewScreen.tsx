@@ -10,6 +10,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity, Animated } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
   Button,
@@ -391,6 +392,20 @@ export function JobPreviewScreen() {
     navigation,
   ]);
 
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={handleBackToDashboard}
+          disabled={isSaving}
+          style={styles.headerDoneButton}
+        >
+          <Text style={styles.headerDoneLabel}>Done</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, handleBackToDashboard, isSaving]);
+
   // Pull the live unified Document from the documents collection. Used for
   // the PDF preview + SendSwitcher so they reflect the latest canonical
   // state (e.g. after a convert-to-invoice). Falls back to an adapter
@@ -460,13 +475,22 @@ export function JobPreviewScreen() {
   }
 
   return (
-    <View style={styles.outerContainer}>
+    <KeyboardAvoidingView
+      style={styles.outerContainer}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <ScrollView
         ref={scrollRef}
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
       >
         <WebContainer>
+        {liveDoc ? (
+          <View style={styles.topPillRow}>
+            <SendTypePill doc={liveDoc} fullWidth />
+          </View>
+        ) : null}
         <DocumentSentBanner doc={liveDoc} />
         {/* Ref number + date (+ payment terms / due date for invoice mode) */}
         <Surface style={styles.headerCard}>
@@ -707,27 +731,51 @@ export function JobPreviewScreen() {
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        {/* Pill sits on its own row above the buttons so it's clearly
-            the modifier for Send, not a sibling of Back. Right-aligned
-            under the send column so the grouping is unambiguous. */}
-        {liveDoc ? (
-          <View style={styles.bottomPillRow}>
-            <SendTypePill doc={liveDoc} />
-          </View>
-        ) : null}
         <View style={styles.bottomButtonsRow}>
-          <Button
-            mode="outlined"
-            onPress={handleBackToDashboard}
-            loading={isSaving}
-            disabled={isSaving}
-            icon="content-save-outline"
-            style={styles.bottomButtonHalf}
-            contentStyle={styles.bottomButtonContent}
-          >
-            Done
-          </Button>
-          <View ref={sendButtonRef} style={styles.bottomButtonHalf}>
+          {/* Take Payment — in-person capture path. Same shared sheet
+              the ViewJob sticky bar uses: quote → deposit (or full),
+              invoice → balance. Lets the tradie tap a card before the
+              customer walks off. */}
+          {liveDoc ? (
+            <View style={styles.bottomButtonHalfWrapper}>
+              <Button
+                mode="outlined"
+                icon="credit-card-outline"
+                onPress={() => {
+                  if (liveDoc.type === 'invoice') {
+                    setTakePaymentTarget({
+                      kind: 'invoice',
+                      invoiceId: liveDoc.id,
+                      total: Number(liveDoc.total ?? 0),
+                      paidAmount: Number(liveDoc.paidTotal ?? 0),
+                      jobName: liveDoc.job?.name,
+                      invoiceNumber: liveDoc.number,
+                      terms: liveDoc.termsSnapshot ?? null,
+                    });
+                  } else {
+                    setTakePaymentTarget({
+                      kind: 'quote_deposit',
+                      quoteId: liveDoc.id,
+                      depositAmount: Number(liveDoc.depositAmount ?? 0),
+                      depositPaid: Number(liveDoc.depositPaid ?? 0),
+                      total: Number(liveDoc.total ?? 0),
+                      jobName: liveDoc.job?.name,
+                      terms: liveDoc.termsSnapshot ?? null,
+                    });
+                  }
+                }}
+                style={styles.bottomButtonFlex}
+                contentStyle={styles.bottomButtonContent}
+              >
+                {liveDoc.type === 'invoice'
+                  ? 'Take Payment'
+                  : (liveDoc.depositAmount ?? 0) > 0
+                    ? 'Take Deposit'
+                    : 'Tap to Pay'}
+              </Button>
+            </View>
+          ) : null}
+          <View ref={sendButtonRef} style={styles.bottomButtonHalfWrapper}>
             {liveDoc ? (
               <SendDocumentButton
                 doc={liveDoc}
@@ -735,51 +783,11 @@ export function JobPreviewScreen() {
                 buttonMode="contained"
                 buttonLabel={liveDoc.type === 'invoice' ? 'Send Invoice' : 'Send Quote'}
                 buttonIcon="send"
+                buttonStyle={styles.bottomButtonFlex}
               />
             ) : null}
           </View>
         </View>
-        {/* Take Payment — in-person capture path. Same shared sheet the
-            ViewJob sticky bar uses: quote → deposit (or full), invoice
-            → balance. Lets the tradie tap a card before the customer
-            walks off. */}
-        {liveDoc ? (
-          <Button
-            mode="outlined"
-            icon="credit-card-outline"
-            onPress={() => {
-              if (liveDoc.type === 'invoice') {
-                setTakePaymentTarget({
-                  kind: 'invoice',
-                  invoiceId: liveDoc.id,
-                  total: Number(liveDoc.total ?? 0),
-                  paidAmount: Number(liveDoc.paidTotal ?? 0),
-                  jobName: liveDoc.job?.name,
-                  invoiceNumber: liveDoc.number,
-                  terms: liveDoc.termsSnapshot ?? null,
-                });
-              } else {
-                setTakePaymentTarget({
-                  kind: 'quote_deposit',
-                  quoteId: liveDoc.id,
-                  depositAmount: Number(liveDoc.depositAmount ?? 0),
-                  depositPaid: Number(liveDoc.depositPaid ?? 0),
-                  total: Number(liveDoc.total ?? 0),
-                  jobName: liveDoc.job?.name,
-                  terms: liveDoc.termsSnapshot ?? null,
-                });
-              }
-            }}
-            style={styles.bottomButtonFull}
-            contentStyle={styles.bottomButtonContent}
-          >
-            {liveDoc.type === 'invoice'
-              ? 'Take Payment'
-              : (liveDoc.depositAmount ?? 0) > 0
-                ? 'Take Deposit'
-                : 'Tap to Pay'}
-          </Button>
-        ) : null}
       </View>
 
       <TakePaymentSheet
@@ -867,7 +875,7 @@ export function JobPreviewScreen() {
         stepOffset={PHASE_STEP_OFFSETS.quotePreview}
         globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
       />}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -1071,22 +1079,34 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  bottomPillRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingRight: 2,
+  topPillRow: {
+    marginBottom: 12,
+    alignItems: 'stretch',
   },
   bottomButtonsRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
     gap: 12,
   },
-  bottomButtonHalf: {
+  bottomButtonHalfWrapper: {
     flex: 1,
   },
-  bottomButtonFull: {
-    marginTop: 8,
+  bottomButtonFlex: {
+    width: '100%',
+    margin: 0,
   },
   bottomButtonContent: {
     paddingVertical: 8,
+  },
+  headerDoneButton: {
+    marginRight: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  headerDoneLabel: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

@@ -17,6 +17,7 @@ import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
+import { KeyboardProvider, KeyboardToolbar } from 'react-native-keyboard-controller';
 
 import { useStore } from './src/store/useStore';
 import { useJobStore } from './src/store/useJobStore';
@@ -302,19 +303,22 @@ export default function App() {
   return (
     <GestureHandlerRootView style={appStyles.flex}>
       <SafeAreaProvider>
-        <PaperProvider theme={theme}>
-          <NavigationContainer key="main" theme={navigationTheme} linking={linking} ref={navigationRef}>
-            <StatusBar style="light" />
-            {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
-          </NavigationContainer>
-          {showUpdateSheet && updateInfo && (
-            <AppUpdateSheet
-              visible={showUpdateSheet}
-              onDismiss={() => setShowUpdateSheet(false)}
-              info={updateInfo}
-            />
-          )}
-        </PaperProvider>
+        <KeyboardProvider>
+          <PaperProvider theme={theme}>
+            <NavigationContainer key="main" theme={navigationTheme} linking={linking} ref={navigationRef}>
+              <StatusBar style="light" />
+              {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
+            </NavigationContainer>
+            {Platform.OS === 'ios' && <KeyboardToolbar />}
+            {showUpdateSheet && updateInfo && (
+              <AppUpdateSheet
+                visible={showUpdateSheet}
+                onDismiss={() => setShowUpdateSheet(false)}
+                info={updateInfo}
+              />
+            )}
+          </PaperProvider>
+        </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

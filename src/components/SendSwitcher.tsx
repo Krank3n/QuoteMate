@@ -32,6 +32,8 @@ interface SendTypePillProps {
   doc: Document;
   /** Style for the wrapping view. */
   style?: any;
+  /** Stretch the pill to fill its parent and split options 50/50. */
+  fullWidth?: boolean;
 }
 
 interface SendSwitcherProps extends SendTypePillProps {
@@ -40,7 +42,7 @@ interface SendSwitcherProps extends SendTypePillProps {
 
 type SendMode = 'quote' | 'invoice';
 
-export function SendTypePill({ doc, style }: SendTypePillProps) {
+export function SendTypePill({ doc, style, fullWidth }: SendTypePillProps) {
   const convertDocumentToInvoice = useStore((s) => s.convertDocumentToInvoice);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
   const quotes = useStore((s) => s.quotes);
@@ -89,14 +91,15 @@ export function SendTypePill({ doc, style }: SendTypePillProps) {
   };
 
   return (
-    <View style={[styles.pillWrapper, style]}>
-      <View style={styles.pillRow}>
+    <View style={[styles.pillWrapper, fullWidth && styles.pillWrapperFull, style]}>
+      <View style={[styles.pillRow, fullWidth && styles.pillRowFull]}>
         <PillOption
           label="Quote"
           icon="file-document-outline"
           active={mode === 'quote'}
           disabled={lockedToInvoice}
           onPress={() => handlePillPress('quote')}
+          fullWidth={fullWidth}
         />
         <PillOption
           label="Invoice"
@@ -104,6 +107,7 @@ export function SendTypePill({ doc, style }: SendTypePillProps) {
           active={mode === 'invoice'}
           disabled={false}
           onPress={() => handlePillPress('invoice')}
+          fullWidth={fullWidth}
         />
       </View>
       {converting ? (
@@ -173,12 +177,14 @@ function PillOption({
   active,
   disabled,
   onPress,
+  fullWidth,
 }: {
   label: string;
   icon: string;
   active: boolean;
   disabled: boolean;
   onPress: () => void;
+  fullWidth?: boolean;
 }) {
   return (
     <Pressable
@@ -189,6 +195,7 @@ function PillOption({
       }}
       style={({ pressed }) => [
         styles.pill,
+        fullWidth && styles.pillFull,
         active && styles.pillActive,
         disabled && !active && styles.pillDisabled,
         pressed && !disabled && { opacity: 0.8 },
@@ -221,6 +228,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  pillWrapperFull: {
+    alignSelf: 'stretch',
+  },
   pillRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -229,6 +239,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceGray3,
     gap: 2,
   },
+  pillRowFull: {
+    flex: 1,
+  },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -236,6 +249,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
+  },
+  pillFull: {
+    flex: 1,
+    justifyContent: 'center',
   },
   pillActive: {
     backgroundColor: colors.primary,

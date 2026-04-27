@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { View, StyleSheet, Alert, Pressable, Linking, Platform } from 'react-native';
+import { View, StyleSheet, Pressable, Linking, Platform } from 'react-native';
 import { NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { Text, Card, Button, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -51,6 +51,7 @@ import { applyStageChange } from '../utils/applyStageChange';
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { formatScheduledDateLong } from '../utils/formatSchedule';
 import { selectionTap, lightTap } from '../utils/haptics';
+import { useAlertModal } from '../hooks/useAlertModal';
 
 export function ViewJobScreen() {
   const navigation = useNavigation<any>();
@@ -95,6 +96,7 @@ export function ViewJobScreen() {
     tone: FollowUpTone;
   } | null>(null);
   const [pendingAction, setPendingAction] = useState<JobActionId | null>(null);
+  const { showAlert, alertNode } = useAlertModal();
   const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
   const [notesDirty, setNotesDirty] = useState(false);
   const [notesEditing, setNotesEditing] = useState(false);
@@ -167,7 +169,11 @@ export function ViewJobScreen() {
       await saveJob({ ...job, ...patch });
     } catch (err) {
       console.error('[ViewJob] applyStageTransition failed', err);
-      Alert.alert('Error', 'Failed to update stage. Please try again.');
+      showAlert({
+        type: 'error',
+        title: 'Stage update failed',
+        message: 'Something went wrong updating the stage. Please try again.',
+      });
     }
   };
 
@@ -180,10 +186,15 @@ export function ViewJobScreen() {
         target === 'quoted'
           ? 'This will also mark the quote as "sent" again so the customer-facing state matches. Continue?'
           : 'This will reactivate the job back to inquiry. Continue?';
-      Alert.alert('Heads up', message, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Continue', onPress: () => applyStageTransition(target) },
-      ]);
+      showAlert({
+        type: 'warning',
+        title: 'Heads up',
+        message,
+        primaryButtonText: 'Continue',
+        primaryButtonAction: () => applyStageTransition(target),
+        secondaryButtonText: 'Cancel',
+        secondaryButtonAction: () => {},
+      });
       return;
     }
     await applyStageTransition(target);
@@ -366,59 +377,68 @@ export function ViewJobScreen() {
           break;
       }
     } catch {
-      Alert.alert('Error', "That didn't go through. Try again?");
+      showAlert({
+        type: 'error',
+        title: 'Something went wrong',
+        message: "That didn't go through. Try again?",
+      });
     } finally {
       setPendingAction(null);
     }
   };
 
   const handleArchive = () => {
-    Alert.alert('Archive job?', 'Archived jobs move to the Archived filter.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Archive',
-        style: 'destructive',
-        onPress: async () => {
-          await saveJob({ ...job, archivedAt: Date.now() });
-        },
+    showAlert({
+      type: 'warning',
+      title: 'Archive job?',
+      message: 'Archived jobs move to the Archived filter.',
+      primaryButtonText: 'Archive',
+      primaryButtonAction: async () => {
+        await saveJob({ ...job, archivedAt: Date.now() });
       },
-    ]);
+      secondaryButtonText: 'Cancel',
+      secondaryButtonAction: () => {},
+    });
   };
 
   const handleDuplicate = () => {
-    Alert.alert(
-      'Duplicate this job?',
-      'Customer details, scope, and checklist get copied into a new Accepted job. Schedule, photos, and money state reset. Handy for recurring cleans or repeat fences.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Duplicate',
-          onPress: async () => {
-            try {
-              // Create the cloned job first (without a primary doc), then
-              // clone the doc into it, then patch the job with the new
-              // doc id. Two-step so the trigger's aggregate recomputation
-              // has a valid job to target.
-              const clonedJob = await duplicateJob(job.id);
-              if (primaryDoc) {
-                const clonedDoc = await duplicateDocumentForJob(
-                  primaryDoc.id,
-                  clonedJob.id,
-                );
-                await saveJob({
-                  ...clonedJob,
-                  primaryDocumentId: clonedDoc.id,
-                  documentIds: [clonedDoc.id],
-                });
-              }
-              navigation.replace('ViewJob', { jobId: clonedJob.id });
-            } catch (e) {
-              Alert.alert('Duplicate failed', 'Try again in a moment.');
-            }
-          },
-        },
-      ],
-    );
+    showAlert({
+      type: 'info',
+      title: 'Duplicate this job?',
+      message:
+        'Customer details, scope, and checklist get copied into a new Accepted job. Schedule, photos, and money state reset. Handy for recurring cleans or repeat fences.',
+      primaryButtonText: 'Duplicate',
+      primaryKeepsOpen: true,
+      primaryButtonAction: async () => {
+        try {
+          // Create the cloned job first (without a primary doc), then
+          // clone the doc into it, then patch the job with the new
+          // doc id. Two-step so the trigger's aggregate recomputation
+          // has a valid job to target.
+          const clonedJob = await duplicateJob(job.id);
+          if (primaryDoc) {
+            const clonedDoc = await duplicateDocumentForJob(
+              primaryDoc.id,
+              clonedJob.id,
+            );
+            await saveJob({
+              ...clonedJob,
+              primaryDocumentId: clonedDoc.id,
+              documentIds: [clonedDoc.id],
+            });
+          }
+          navigation.replace('ViewJob', { jobId: clonedJob.id });
+        } catch (e) {
+          showAlert({
+            type: 'error',
+            title: 'Duplicate failed',
+            message: 'Try again in a moment.',
+          });
+        }
+      },
+      secondaryButtonText: 'Cancel',
+      secondaryButtonAction: () => {},
+    });
   };
 
   const handleDelete = () => {
@@ -426,10 +446,12 @@ export function ViewJobScreen() {
     // record. Refuse delete and steer the tradie to Archive.
     const paidDocs = pickPaidDocs(attachedDocs);
     if (paidDocs.length > 0) {
-      Alert.alert(
-        'Can’t delete — paid invoice attached',
-        'This job has paid or partially-paid documents that belong in your records. Archive the job instead.',
-      );
+      showAlert({
+        type: 'warning',
+        title: 'Can’t delete — paid invoice attached',
+        message:
+          'This job has paid or partially-paid documents that belong in your records. Archive the job instead.',
+      });
       return;
     }
     const docCount = attachedDocs.length;
@@ -437,25 +459,31 @@ export function ViewJobScreen() {
       docCount === 0
         ? 'This cannot be undone.'
         : `This will also delete ${docCount} attached ${docCount === 1 ? 'document' : 'documents'}. This cannot be undone.`;
-    Alert.alert('Delete job?', message, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await cascadeDeleteJob(job, attachedDocs, {
-              deleteQuote,
-              deleteInvoice,
-              deleteJob,
-            });
-            navigation.goBack();
-          } catch {
-            Alert.alert('Delete failed', 'Try again in a moment.');
-          }
-        },
+    showAlert({
+      type: 'error',
+      title: 'Delete job?',
+      message,
+      primaryButtonText: 'Delete',
+      primaryKeepsOpen: true,
+      primaryButtonAction: async () => {
+        try {
+          await cascadeDeleteJob(job, attachedDocs, {
+            deleteQuote,
+            deleteInvoice,
+            deleteJob,
+          });
+          navigation.goBack();
+        } catch {
+          showAlert({
+            type: 'error',
+            title: 'Delete failed',
+            message: 'Try again in a moment.',
+          });
+        }
       },
-    ]);
+      secondaryButtonText: 'Cancel',
+      secondaryButtonAction: () => {},
+    });
   };
 
   const handleDocRecordPayment = (doc: Document) => {
@@ -495,7 +523,11 @@ export function ViewJobScreen() {
               isPro,
             });
           } catch {
-            Alert.alert('Export failed', 'Try again in a moment.');
+            showAlert({
+              type: 'error',
+              title: 'Export failed',
+              message: 'Try again in a moment.',
+            });
           }
         }
         break;
@@ -503,9 +535,17 @@ export function ViewJobScreen() {
         if (primaryDoc?.type === 'invoice') {
           try {
             await pushInvoiceToXero(documentToInvoice(primaryDoc));
-            Alert.alert('Pushed to Xero', 'Invoice synced successfully.');
+            showAlert({
+              type: 'success',
+              title: 'Pushed to Xero',
+              message: 'Invoice synced successfully.',
+            });
           } catch (e: any) {
-            Alert.alert('Xero sync failed', e?.message ?? 'Try again in a moment.');
+            showAlert({
+              type: 'error',
+              title: 'Xero sync failed',
+              message: e?.message ?? 'Try again in a moment.',
+            });
           }
         }
         break;
@@ -593,7 +633,11 @@ export function ViewJobScreen() {
         navigation,
       });
     } catch {
-      Alert.alert('Error', 'Failed to update stage. Please try again.');
+      showAlert({
+        type: 'error',
+        title: 'Stage update failed',
+        message: 'Something went wrong updating the stage. Please try again.',
+      });
     }
   };
 
@@ -736,7 +780,9 @@ export function ViewJobScreen() {
         visible={!!takePaymentTarget}
         target={takePaymentTarget}
         onDismiss={() => setTakePaymentTarget(null)}
-        onError={(message) => Alert.alert('Payment error', message)}
+        onError={(message) =>
+          showAlert({ type: 'error', title: 'Payment error', message })
+        }
       />
 
       {sendDialogDoc ? (
@@ -761,6 +807,8 @@ export function ViewJobScreen() {
           jobName={job.name || 'the job'}
         />
       ) : null}
+
+      {alertNode}
 
     </View>
   );

@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, StyleSheet, Linking, Alert } from 'react-native';
+import { View, StyleSheet, Linking } from 'react-native';
 import { Text, Button } from 'react-native-paper';
 import { Calendar, DateData } from 'react-native-calendars';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -30,6 +30,7 @@ import { buildGoogleCalendarUrl } from '../utils/gcalUrl';
 import { deriveDuration } from '../utils/deriveDuration';
 import { useGoogleCalendarAuth } from '../services/googleCalendarAuth';
 import { AlertModal } from './AlertModal';
+import { useAlertModal } from '../hooks/useAlertModal';
 
 interface ScheduleJobSheetProps {
   visible: boolean;
@@ -93,6 +94,7 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   // whether they're returning to it (keep stage) or undoing a wrong start
   // (drop back to scheduled + clear actualStartDate).
   const [demoteConfirm, setDemoteConfirm] = useState(false);
+  const { showAlert, alertNode } = useAlertModal();
 
   useEffect(() => {
     if (visible) {
@@ -200,13 +202,21 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
     // matches what's on the job.
     const target: Job = dirty && pendingDay ? ((await handleSave()) ?? job) : job;
     if (!target.scheduledStartDate) {
-      Alert.alert('Pick a date first', 'Choose a day before opening Google Calendar.');
+      showAlert({
+        type: 'info',
+        title: 'Pick a date first',
+        message: 'Choose a day before opening Google Calendar.',
+      });
       return;
     }
     const url = buildGoogleCalendarUrl(target, primaryDoc);
     const supported = await Linking.canOpenURL(url);
     if (!supported) {
-      Alert.alert("Couldn't open Google Calendar", 'Copy the link from the URL bar instead.');
+      showAlert({
+        type: 'error',
+        title: "Couldn't open Google Calendar",
+        message: 'Copy the link from the URL bar instead.',
+      });
       return;
     }
     await Linking.openURL(url);
@@ -345,6 +355,8 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
         secondaryButtonAction={handleConfirmDemote}
         secondaryButtonLoading={saving}
       />
+
+      {alertNode}
     </BottomSheet>
   );
 }

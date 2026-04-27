@@ -435,7 +435,8 @@ export function DocumentEmailPreviewModal({
         style={[styles.header, { paddingTop: insets.top + 12 }]}
       >
         <TouchableOpacity onPress={onDismiss} style={styles.headerButton}>
-          <Text style={styles.cancelText}>Cancel</Text>
+          <MaterialCommunityIcons name="chevron-left" size={26} color={colors.white} />
+          <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{headerTitle}</Text>
         <View style={styles.headerButton} />
@@ -677,11 +678,14 @@ const styles = StyleSheet.create({
   },
   headerButton: {
     minWidth: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  cancelText: {
+  backText: {
     fontSize: 16,
     color: colors.white,
     fontWeight: '600',
+    marginLeft: -2,
   },
   headerTitle: {
     fontSize: 17,
