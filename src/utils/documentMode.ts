@@ -18,9 +18,16 @@ export function useDocumentMode(): DocumentMode {
 }
 
 /**
- * Unified document type that works for both quotes and invoices
+ * Unified document type that works for both quotes and invoices.
+ *
+ * Quote.status and Invoice.status no longer overlap (quote payment statuses
+ * were stripped — paid/partial/overdue belong on the invoice). Shared screens
+ * pass spreads of currentDocument to saveDraft (typed as Quote), so we widen
+ * status to Quote['status']. At runtime the mode gate ensures only Quotes go
+ * through quote-shaped branches.
  */
 export type UnifiedDocument = (Quote | Invoice) & {
+  status: Quote['status'];
   // Common fields that exist on both
   id: string;
   customerName: string;
@@ -95,8 +102,11 @@ export function getDocumentTypeLabel(mode: DocumentMode): string {
 }
 
 /**
- * Get the navigation target for the preview screen based on mode
+ * Get the navigation target for the preview screen. Both quote and
+ * invoice wizard flows land on the same `JobPreview` route now — the
+ * mode param on the stack's earlier screens disambiguates. Old callers
+ * passing `mode` are retained for API compatibility.
  */
-export function getPreviewScreenName(mode: DocumentMode): string {
-  return mode === 'invoice' ? 'InvoicePreview' : 'QuotePreview';
+export function getPreviewScreenName(_mode: DocumentMode): string {
+  return 'JobPreview';
 }

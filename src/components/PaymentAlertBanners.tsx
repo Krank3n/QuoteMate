@@ -7,7 +7,7 @@
  */
 
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -81,6 +81,47 @@ export function DisputeBanner({ status, disputeId }: DisputeProps) {
       </View>
     </View>
   );
+}
+
+interface InvoicedProps {
+  invoicedAt?: Date | string | number | null;
+  onPress?: () => void;
+}
+
+export function InvoicedBanner({ invoicedAt, onPress }: InvoicedProps) {
+  const dateLabel = formatInvoicedDate(invoicedAt);
+  const Wrapper: any = onPress ? Pressable : View;
+  return (
+    <Wrapper
+      onPress={onPress}
+      style={[styles.banner, { backgroundColor: colors.successBg, borderLeftColor: colors.success }]}
+    >
+      <MaterialCommunityIcons name="receipt" size={20} color={colors.success} style={styles.icon} />
+      <View style={styles.textWrap}>
+        <Text style={[styles.title, { color: colors.success }]}>
+          {dateLabel ? `Invoiced ${dateLabel}` : 'Invoiced'}
+        </Text>
+        {onPress ? (
+          <Text style={styles.body}>Tap to view the invoice.</Text>
+        ) : null}
+      </View>
+      {onPress ? (
+        <MaterialCommunityIcons
+          name="chevron-right"
+          size={22}
+          color={colors.success}
+          style={{ alignSelf: 'center' }}
+        />
+      ) : null}
+    </Wrapper>
+  );
+}
+
+function formatInvoicedDate(value: InvoicedProps['invoicedAt']): string | null {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value as any);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 const styles = StyleSheet.create({

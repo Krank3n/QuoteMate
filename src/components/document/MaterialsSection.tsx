@@ -14,6 +14,7 @@ interface MaterialsSectionProps {
   emptyMessage?: string;
   markupPercent?: number;
   rollMarkupIntoMaterials?: boolean;
+  style?: any;
 }
 
 export function MaterialsSection({
@@ -23,13 +24,14 @@ export function MaterialsSection({
   emptyMessage = 'No materials required - Labor only',
   markupPercent = 0,
   rollMarkupIntoMaterials = false,
+  style,
 }: MaterialsSectionProps) {
   const multiplier = rollMarkupIntoMaterials && markupPercent > 0 ? (1 + markupPercent / 100) : 1;
   const showMarkedUp = multiplier > 1;
   const displaySubtotal = materialsSubtotal * multiplier;
 
   const content = (
-    <Surface style={styles.section}>
+    <Surface style={[styles.section, style]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionHeaderLeft}>
           <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>

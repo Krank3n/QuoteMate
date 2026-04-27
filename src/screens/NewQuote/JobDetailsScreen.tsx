@@ -1413,6 +1413,7 @@ export function JobDetailsScreen() {
             (useCustomMode && !jobDescription.trim()) ||
             (!useCustomMode && !selectedTemplate)
           }
+          disableKeyboardSticky
         />
         </View>
       </KeyboardAvoidingView>

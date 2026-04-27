@@ -1,9 +1,13 @@
 /**
  * Invoice Calculator Utility
- * Helper functions for invoice calculations and formatting
+ *
+ * Invoice-specific helpers — dates, statuses, payment terms. Generic
+ * helpers (formatCurrency, etc.) live in documentCalculator and are
+ * re-exported here for convenience.
  */
 
 import { Invoice, PaymentTerms } from '../types';
+export { formatCurrency } from './documentCalculator';
 
 /**
  * Calculate due date based on issue date and payment terms

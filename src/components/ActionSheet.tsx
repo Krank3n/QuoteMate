@@ -56,6 +56,15 @@ interface ActionSheetProps {
   onDismiss: () => void;
   title?: string;
   options: ActionSheetOption[];
+  /**
+   * When true (default), tapping an option auto-dismisses the sheet via
+   * `onDismiss` and defers `option.onPress` by 300ms so the exit animation
+   * can finish first. Set to false when the caller needs to keep the
+   * surrounding surface mounted while swapping to a follow-up modal — the
+   * option handler then owns dismissal, typically by flipping its own
+   * `visible` state.
+   */
+  dismissOnSelect?: boolean;
 }
 
 export function ActionSheet({
@@ -63,13 +72,18 @@ export function ActionSheet({
   onDismiss,
   title,
   options,
+  dismissOnSelect = true,
 }: ActionSheetProps) {
   const optionAnims = useStaggeredEntrance(options.length, visible, 80, 35);
 
   const handleSelect = (option: ActionSheetOption) => {
     selectionTap();
-    onDismiss();
-    setTimeout(() => option.onPress(), 300);
+    if (dismissOnSelect) {
+      onDismiss();
+      setTimeout(() => option.onPress(), 300);
+    } else {
+      option.onPress();
+    }
   };
 
   const footer = (

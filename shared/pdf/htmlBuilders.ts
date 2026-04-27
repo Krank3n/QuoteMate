@@ -7,6 +7,11 @@ import { PdfMaterial, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplate
 import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const formatMultiline = (s: string) => escapeHtml(s).replace(/\n/g, '<br>');
+
 /**
  * Render the T&Cs section at the end of a quote/invoice PDF. Preserves
  * paragraph breaks by splitting on blank lines and wrapping each in <p>.
@@ -14,11 +19,9 @@ import { printMediaCSS, getTemplateCSS } from './templates';
  */
 export function buildTermsHTML(terms: string | undefined): string {
   if (!terms || !terms.trim()) return '';
-  const escape = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const paras = terms
     .split(/\n\s*\n/)
-    .map((p) => escape(p.trim()).replace(/\n/g, '<br>'))
+    .map((p) => escapeHtml(p.trim()).replace(/\n/g, '<br>'))
     .filter(Boolean)
     .map((p) => `<p style="margin: 0 0 8px 0;">${p}</p>`)
     .join('');
@@ -404,8 +407,8 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
 
       <div class="info-section">
         <h3>Job Details</h3>
-        <p><strong>${quote.job.name}</strong></p>
-        <p>${quote.job.description}</p>
+        <p><strong>${escapeHtml(quote.job.name)}</strong></p>
+        <p>${formatMultiline(quote.job.description)}</p>
       </div>
 
       <div class="section-wrapper">
@@ -493,8 +496,8 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
 
       <div class="info-section">
         <h3>Job Details</h3>
-        <p><strong>${invoice.job.name}</strong></p>
-        <p>${invoice.job.description}</p>
+        <p><strong>${escapeHtml(invoice.job.name)}</strong></p>
+        <p>${formatMultiline(invoice.job.description)}</p>
       </div>
 
       <div class="section-wrapper">

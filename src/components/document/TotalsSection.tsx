@@ -17,6 +17,7 @@ interface TotalsSectionProps {
   balanceDue?: number;
   travelAdjustmentAmount?: number;
   travelAdjustmentPercent?: number;
+  style?: any;
 }
 
 export function TotalsSection({
@@ -31,12 +32,13 @@ export function TotalsSection({
   balanceDue,
   travelAdjustmentAmount = 0,
   travelAdjustmentPercent = 0,
+  style,
 }: TotalsSectionProps) {
   const showMarkup = hideMarkup ? false : (hideZeroMarkup ? markup > 0 : true);
   const showTravel = travelAdjustmentAmount > 0;
 
   return (
-    <Surface style={documentStyles.totalSection}>
+    <Surface style={[documentStyles.totalSection, style]}>
       <View style={documentStyles.summaryRow}>
         <Text style={documentStyles.summaryLabel}>Subtotal</Text>
         <Text style={documentStyles.summaryValue}>{formatCurrency(subtotal)}</Text>

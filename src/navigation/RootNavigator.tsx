@@ -13,12 +13,10 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DashboardScreen } from '../screens/DashboardScreen';
-import { QuotesListScreen } from '../screens/QuotesListScreen';
-import { InvoicesListScreen } from '../screens/InvoicesListScreen';
+import { JobsListScreen } from '../screens/JobsListScreen';
+import { ViewJobScreen } from '../screens/ViewJobScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
-import { ViewQuoteScreen } from '../screens/ViewQuoteScreen';
-import { ViewInvoiceScreen } from '../screens/ViewInvoiceScreen';
 import { RecordPaymentScreen } from '../screens/RecordPaymentScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
 
@@ -36,6 +34,7 @@ import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen';
 import { SquareIntegrationScreen } from '../screens/settings/SquareIntegrationScreen';
+import { GoogleCalendarIntegrationScreen } from '../screens/settings/GoogleCalendarIntegrationScreen';
 import { SectionTemplatesScreen } from '../screens/settings/SectionTemplatesScreen';
 import { JobTemplateEditorScreen } from '../screens/settings/JobTemplateEditorScreen';
 import { EditSupplierScreen } from '../screens/settings/EditSupplierScreen';
@@ -47,8 +46,7 @@ import { CustomerDetailsScreen } from '../screens/NewQuote/CustomerDetailsScreen
 import { MaterialsListScreen } from '../screens/NewQuote/MaterialsListScreen';
 import { AddMaterialScreen } from '../screens/NewQuote/AddMaterialScreen';
 import { LaborMarkupScreen } from '../screens/NewQuote/LaborMarkupScreen';
-import { QuotePreviewScreen } from '../screens/NewQuote/QuotePreviewScreen';
-import { InvoicePreviewScreen } from '../screens/NewQuote/InvoicePreviewScreen';
+import { JobPreviewScreen } from '../screens/NewQuote/JobPreviewScreen';
 
 import { colors } from '../theme';
 import { TourRefsProvider } from '../components/tour/useTourRefs';
@@ -58,19 +56,17 @@ import { useStore } from '../store/useStore';
 // Type definitions for navigation
 export type RootTabParamList = {
   Dashboard: undefined;
-  Quotes: undefined;
-  Invoices: undefined;
+  Jobs: undefined;
   Settings: undefined;
 };
 
 export type NewQuoteStackParamList = {
-  JobDetails: { mode?: 'quote' | 'invoice' } | undefined;
+  Details: { mode?: 'quote' | 'invoice' } | undefined;
   CustomerDetails: { mode?: 'quote' | 'invoice' } | undefined;
   MaterialsList: { mode?: 'quote' | 'invoice' } | undefined;
   AddMaterial: { materialId?: string; mode?: 'quote' | 'invoice' } | undefined;
   LaborMarkup: { mode?: 'quote' | 'invoice' } | undefined;
-  QuotePreview: undefined;
-  InvoicePreview: undefined;
+  JobPreview: undefined;
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -90,11 +86,18 @@ function NewQuoteNavigator() {
           shadowOpacity: 0,
         },
         headerBackground: () => (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.primary }]} />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: colors.primary,
+              },
+            ]}
+          />
         ),
         headerTintColor: colors.white,
         headerTitleStyle: {
-          fontWeight: 'bold',
+          fontWeight: '700',
         },
         cardStyle: { backgroundColor: colors.background },
         ...(Platform.OS === 'web' && {
@@ -104,9 +107,9 @@ function NewQuoteNavigator() {
       }}
     >
       <NewQuoteStack.Screen
-        name="JobDetails"
+        name="Details"
         component={JobDetailsScreen}
-        options={{ title: 'New Quote - Job Details' }}
+        options={{ title: 'New Job - Details' }}
       />
       <NewQuoteStack.Screen
         name="CustomerDetails"
@@ -129,9 +132,9 @@ function NewQuoteNavigator() {
         options={{ title: 'Pricing' }}
       />
       <NewQuoteStack.Screen
-        name="QuotePreview"
-        component={QuotePreviewScreen}
-        options={{ title: 'Quote Preview' }}
+        name="JobPreview"
+        component={JobPreviewScreen}
+        options={{ title: 'Job Preview' }}
       />
     </NewQuoteStack.Navigator>
   );
@@ -150,11 +153,18 @@ function NewInvoiceNavigator() {
           shadowOpacity: 0,
         },
         headerBackground: () => (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.primary }]} />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: colors.primary,
+              },
+            ]}
+          />
         ),
         headerTintColor: colors.white,
         headerTitleStyle: {
-          fontWeight: 'bold',
+          fontWeight: '700',
         },
         cardStyle: { backgroundColor: colors.background },
         ...(Platform.OS === 'web' && {
@@ -164,9 +174,9 @@ function NewInvoiceNavigator() {
       }}
     >
       <NewQuoteStack.Screen
-        name="JobDetails"
+        name="Details"
         component={JobDetailsScreen}
-        options={{ title: 'New Invoice - Job Details' }}
+        options={{ title: 'New Job - Details' }}
         initialParams={{ mode: 'invoice' }}
       />
       <NewQuoteStack.Screen
@@ -194,9 +204,9 @@ function NewInvoiceNavigator() {
         initialParams={{ mode: 'invoice' }}
       />
       <NewQuoteStack.Screen
-        name="InvoicePreview"
-        component={InvoicePreviewScreen}
-        options={{ title: 'Invoice Preview' }}
+        name="JobPreview"
+        component={JobPreviewScreen}
+        options={{ title: 'Job Preview' }}
       />
     </NewQuoteStack.Navigator>
   );
@@ -204,8 +214,7 @@ function NewInvoiceNavigator() {
 
 const TAB_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
   Dashboard: 'home',
-  Quotes: 'file-document-multiple',
-  Invoices: 'receipt',
+  Jobs: 'briefcase',
   Settings: 'cog',
 };
 
@@ -390,16 +399,18 @@ function MainTabs() {
       tabBar={(props) => <LiquidTabBar {...props} />}
       screenOptions={{
         headerBackground: () => (
-          <LinearGradient
-            colors={['#00785a', colors.primary, '#00b07a']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFill}
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: colors.primary,
+              },
+            ]}
           />
         ),
         headerTintColor: colors.white,
         headerTitleStyle: {
-          fontWeight: 'bold',
+          fontWeight: '700',
         },
       }}
     >
@@ -409,14 +420,9 @@ function MainTabs() {
         options={{ title: 'QuoteMate' }}
       />
       <Tab.Screen
-        name="Quotes"
-        component={QuotesListScreen}
-        options={{ title: 'My Quotes' }}
-      />
-      <Tab.Screen
-        name="Invoices"
-        component={InvoicesListScreen}
-        options={{ title: 'Invoices' }}
+        name="Jobs"
+        component={JobsListScreen}
+        options={{ title: 'Jobs' }}
       />
       <Tab.Screen
         name="Settings"
@@ -473,19 +479,17 @@ export function RootNavigator() {
     >
       <RootStack.Screen name="Main" component={MainTabs} />
       <RootStack.Screen
-        name="ViewQuote"
-        component={ViewQuoteScreen}
+        name="ViewJob"
+        component={ViewJobScreen}
         options={{
           presentation: 'card',
-          headerShown: false,
-        }}
-      />
-      <RootStack.Screen
-        name="ViewInvoice"
-        component={ViewInvoiceScreen}
-        options={{
-          presentation: 'card',
-          headerShown: false,
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
+          headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Job',
         }}
       />
       <RootStack.Screen
@@ -494,8 +498,11 @@ export function RootNavigator() {
         options={{
           presentation: 'modal',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Record Payment',
         }}
       />
@@ -505,13 +512,16 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Insights',
         }}
       />
       <RootStack.Screen
-        name="NewQuote"
+        name="NewJob"
         component={NewQuoteNavigator}
         options={{
           presentation: 'card',
@@ -530,8 +540,11 @@ export function RootNavigator() {
         options={{
           presentation: 'modal',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Upgrade to Pro',
           ...(Platform.OS === 'web' && {
             contentStyle: {
@@ -548,8 +561,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Business Details',
         }}
       />
@@ -559,8 +575,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Business Defaults',
         }}
       />
@@ -570,8 +589,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Payment Methods',
         }}
       />
@@ -581,8 +603,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Trade & Pricing',
         }}
       />
@@ -592,8 +617,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Subscription',
         }}
       />
@@ -603,8 +631,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Account',
         }}
       />
@@ -614,8 +645,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'PDF Templates',
         }}
       />
@@ -625,8 +659,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Job Templates',
         }}
       />
@@ -636,8 +673,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Job Template',
         }}
       />
@@ -647,8 +687,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Add Material',
         }}
       />
@@ -658,8 +701,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Edit Supplier',
         }}
       />
@@ -669,8 +715,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Refer a Friend',
         }}
       />
@@ -680,8 +729,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Notifications',
         }}
       />
@@ -691,8 +743,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Xero Integration',
         }}
       />
@@ -702,9 +757,26 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Square Payments',
+        }}
+      />
+      <RootStack.Screen
+        name="GoogleCalendarIntegration"
+        component={GoogleCalendarIntegrationScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
+          headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Google Calendar',
         }}
       />
       <RootStack.Screen
@@ -713,8 +785,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Feedback',
         }}
       />
@@ -724,8 +799,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'About',
         }}
       />
@@ -735,8 +813,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Contacts',
         }}
       />
@@ -746,8 +827,11 @@ export function RootNavigator() {
         options={{
           presentation: 'card',
           headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
           headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
           title: 'Supplier Partners',
         }}
       />

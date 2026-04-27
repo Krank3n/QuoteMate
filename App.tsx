@@ -17,8 +17,10 @@ import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
+import { KeyboardProvider, KeyboardToolbar } from 'react-native-keyboard-controller';
 
 import { useStore } from './src/store/useStore';
+import { useJobStore } from './src/store/useJobStore';
 import { theme, colors } from './src/theme';
 
 // Custom navigation theme to match our dark theme
@@ -41,6 +43,7 @@ import { subscriptionSyncService } from './src/services/subscriptionSyncService'
 import { auth } from './src/config/firebase';
 import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
+import { documentService } from './src/services/documentService';
 import { notificationService } from './src/services/notificationService';
 import { checkForUpdate, AppUpdateInfo } from './src/services/appUpdateService';
 import { checkDeferredLink } from './src/services/supplierDiscoveryService';
@@ -62,7 +65,7 @@ export default function App() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [userDataLoaded, setUserDataLoaded] = useState(false);
-  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, checkTourStatus, loadXeroConnection, loadContacts } = useStore();
+  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, checkTourStatus, loadXeroConnection, loadContacts, loadDocuments, listenToDocuments } = useStore();
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [showUpdateSheet, setShowUpdateSheet] = useState(false);
 
@@ -79,6 +82,8 @@ export default function App() {
 
         await Promise.all([
           loadQuotes(),
+          loadDocuments(),
+          useJobStore.getState().loadJobs(),
           loadBusinessSettings(),
           checkOnboarding(),
           loadSubscription(),
@@ -130,6 +135,18 @@ export default function App() {
           useStore.getState().mergeRemoteInvoices(invoices);
         });
 
+        // Phase-5: real-time listener for the unified Document collection.
+        // Coexists with the legacy listeners during the cutover — server-side
+        // mirror keeps both projections in sync, the legacy slices are still
+        // referenced by older edit/save flows.
+        listenToDocuments();
+
+        // Phase-8: real-time listener for the Jobs collection. Aggregates on
+        // each Job are written by the onDocumentWriteSyncJob trigger, so the
+        // listener is the only way the client stays in sync with those
+        // server-side updates.
+        useJobStore.getState().listenToJobs();
+
         firestoreService.listenToBusinessSettings((settings) => {
           if (settings) {
             useStore.setState({ businessSettings: settings });
@@ -148,6 +165,8 @@ export default function App() {
       } else {
         // User signed out, clean up listeners and notification token
         firestoreService.cleanup();
+        documentService.cleanup();
+        useJobStore.getState().cleanup();
         notificationService.removeNotificationListeners();
         setUserDataLoaded(false);
       }
@@ -194,6 +213,7 @@ export default function App() {
     return () => {
       subscriptionSyncService.cleanup();
       firestoreService.cleanup();
+      documentService.cleanup();
       notificationService.removeNotificationListeners();
     };
   }, []);
@@ -283,19 +303,22 @@ export default function App() {
   return (
     <GestureHandlerRootView style={appStyles.flex}>
       <SafeAreaProvider>
-        <PaperProvider theme={theme}>
-          <NavigationContainer key="main" theme={navigationTheme} linking={linking} ref={navigationRef}>
-            <StatusBar style="light" />
-            {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
-          </NavigationContainer>
-          {showUpdateSheet && updateInfo && (
-            <AppUpdateSheet
-              visible={showUpdateSheet}
-              onDismiss={() => setShowUpdateSheet(false)}
-              info={updateInfo}
-            />
-          )}
-        </PaperProvider>
+        <KeyboardProvider>
+          <PaperProvider theme={theme}>
+            <NavigationContainer key="main" theme={navigationTheme} linking={linking} ref={navigationRef}>
+              <StatusBar style="light" />
+              {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
+            </NavigationContainer>
+            {Platform.OS === 'ios' && <KeyboardToolbar />}
+            {showUpdateSheet && updateInfo && (
+              <AppUpdateSheet
+                visible={showUpdateSheet}
+                onDismiss={() => setShowUpdateSheet(false)}
+                info={updateInfo}
+              />
+            )}
+          </PaperProvider>
+        </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

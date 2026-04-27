@@ -1027,74 +1027,134 @@ function stripAbnFromBody(body: string): string {
     .trim();
 }
 
-export function buildQuoteEmailHtml(data: QuoteEmailData): string {
-  const accent = data.business.brandColor || '#059669';
-  const esc = escapeHtml;
+// ----- shared building blocks for client-facing document emails -----
 
-  // Email body paragraphs
-  const bodyHtml = esc(stripAbnFromBody(data.emailBody))
+interface DocEmailBusiness {
+  name: string;
+  abn?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  logoUrl?: string;
+  brandColor?: string;
+}
+
+function renderEmailBodyHtml(emailBody: string): string {
+  return escapeHtml(stripAbnFromBody(emailBody))
     .replace(/\n\n/g, '</p><p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">')
     .replace(/\n/g, '<br/>');
+}
 
-  // Photos section — only embed http(s) URLs; legacy quotes may hold local
-  // file:// or blob: URIs that the recipient's mail client cannot resolve.
-  let photosSection = '';
-  const remotePhotoUrls = (data.photoUrls || []).filter(url => /^https?:\/\//i.test(url));
-  if (remotePhotoUrls.length) {
-    const photoImgs = remotePhotoUrls.map(url =>
-      `<td style="padding:4px;"><img src="${esc(url)}" width="160" style="display:block;width:160px;height:120px;object-fit:cover;border-radius:8px;" /></td>`
-    ).join('');
-    photosSection = `
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;">
-        <tr><td style="padding:0 0 8px;"><p style="color:#6b7280;font-size:13px;font-weight:600;margin:0;">Site Photos</p></td></tr>
-        <tr><td>
-          <table role="presentation" cellpadding="0" cellspacing="0"><tr>${photoImgs}</tr></table>
-        </td></tr>
-      </table>`;
-  }
+function renderBusinessFooter(business: DocEmailBusiness, accent: string): string {
+  const esc = escapeHtml;
+  const footerParts: string[] = [];
+  if (business.abn) footerParts.push(`ABN: ${esc(business.abn)}`);
+  if (business.phone) footerParts.push(esc(business.phone));
+  if (business.email) footerParts.push(`<a href="mailto:${esc(business.email)}" style="color:${accent};text-decoration:none;">${esc(business.email)}</a>`);
+  if (business.address) footerParts.push(esc(business.address));
+  if (!footerParts.length) return '';
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 0;border-top:1px solid #e5e7eb;padding-top:16px;">
+      <tr><td style="text-align:center;">
+        <p style="color:#6b7280;font-size:13px;line-height:1.8;margin:0;">${footerParts.join(' &bull; ')}</p>
+      </td></tr>
+    </table>`;
+}
 
-  // Pricing table (light theme)
-  const pricingRows = `
+interface PricingRowsInput {
+  materialsSubtotal: number;
+  laborTotal: number;
+  subtotal: number;
+  gst: number;
+  total: number;
+  accent: string;
+  // When set and > 0, render a "Deposit already paid" line and rename the
+  // total label to "Balance due". Invoice-only.
+  depositCredit?: number;
+}
+
+function renderPricingRows(input: PricingRowsInput): string {
+  const { materialsSubtotal, laborTotal, subtotal, gst, total, accent, depositCredit } = input;
+  const hasDeposit = !!(depositCredit && depositCredit > 0);
+  return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;margin:20px 0;">
       <tr>
         <td style="padding:16px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr>
               <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Materials</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.materialsSubtotal.toFixed(2)}</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${materialsSubtotal.toFixed(2)}</td>
             </tr>
             <tr>
               <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Labour</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.laborTotal.toFixed(2)}</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${laborTotal.toFixed(2)}</td>
             </tr>
             <tr>
               <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Subtotal</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.subtotal.toFixed(2)}</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${subtotal.toFixed(2)}</td>
             </tr>
             <tr>
               <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">GST</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.gst.toFixed(2)}</td>
+              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${gst.toFixed(2)}</td>
             </tr>
+            ${hasDeposit ? `
             <tr>
-              <td style="padding:10px 0;color:#1f2937;font-size:16px;font-weight:700;">Total (inc GST)</td>
-              <td style="padding:10px 0;color:${accent};font-size:18px;font-weight:700;text-align:right;">$${data.total.toFixed(2)}</td>
+              <td style="padding:8px 0;color:#059669;font-size:14px;border-bottom:1px solid #e5e7eb;">Deposit already paid</td>
+              <td style="padding:8px 0;color:#059669;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">−$${depositCredit!.toFixed(2)}</td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding:10px 0;color:#1f2937;font-size:16px;font-weight:700;">${hasDeposit ? 'Balance due' : 'Total (inc GST)'}</td>
+              <td style="padding:10px 0;color:${accent};font-size:18px;font-weight:700;text-align:right;">$${total.toFixed(2)}</td>
             </tr>
           </table>
         </td>
       </tr>
     </table>`;
+}
+
+function renderPhotosSection(photoUrls: string[] | undefined): string {
+  const esc = escapeHtml;
+  // Only embed http(s) URLs; legacy quotes may hold local file:// or blob:
+  // URIs that the recipient's mail client cannot resolve.
+  const remotePhotoUrls = (photoUrls || []).filter(url => /^https?:\/\//i.test(url));
+  if (!remotePhotoUrls.length) return '';
+  const photoImgs = remotePhotoUrls.map(url =>
+    `<td style="padding:4px;"><img src="${esc(url)}" width="160" style="display:block;width:160px;height:120px;object-fit:cover;border-radius:8px;" /></td>`
+  ).join('');
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;">
+      <tr><td style="padding:0 0 8px;"><p style="color:#6b7280;font-size:13px;font-weight:600;margin:0;">Site Photos</p></td></tr>
+      <tr><td>
+        <table role="presentation" cellpadding="0" cellspacing="0"><tr>${photoImgs}</tr></table>
+      </td></tr>
+    </table>`;
+}
+
+interface QuoteCtaInput {
+  acceptanceUrl?: string;
+  depositAmount?: number;
+  depositPercentage?: number;
+  depositPayNowUrl?: string;
+  hasTerms?: boolean;
+  accent: string;
+}
+
+function renderQuoteCta(input: QuoteCtaInput): string {
+  if (!input.acceptanceUrl) return '';
+  const esc = escapeHtml;
+  const { acceptanceUrl, depositAmount, depositPercentage, depositPayNowUrl, hasTerms, accent } = input;
 
   // Deposit notice — shown above the CTA so the customer knows what they'll
   // be asked to pay. Copy changes depending on whether we mint a Pay Now link
   // up front (one-click Accept & Pay) or fall back to the two-step flow.
-  const depositNoticeSection = (data.depositAmount && data.depositAmount > 0)
+  const depositNoticeSection = (depositAmount && depositAmount > 0)
     ? `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 0;">
         <tr>
           <td style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;text-align:center;">
             <div style="color:#92400e;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Deposit to lock it in</div>
-            <div style="color:#78350f;font-size:18px;font-weight:700;">$${data.depositAmount.toFixed(2)}${data.depositPercentage ? ` (${data.depositPercentage}%)` : ''}</div>
-            <div style="color:#92400e;font-size:13px;margin-top:4px;">${data.depositPayNowUrl
+            <div style="color:#78350f;font-size:18px;font-weight:700;">$${depositAmount.toFixed(2)}${depositPercentage ? ` (${depositPercentage}%)` : ''}</div>
+            <div style="color:#92400e;font-size:13px;margin-top:4px;">${depositPayNowUrl
               ? `Pay your deposit securely below to accept this quote. The remainder is invoiced when the job's done.`
               : `You'll be asked to pay this after accepting. The remainder is invoiced when the job's done.`}</div>
           </td>
@@ -1103,103 +1163,181 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
     : '';
 
   // Primary CTA + decline link.
-  // - With a Square deposit link: primary is "Accept & Pay Deposit ($X)" → Square.
+  // - With a Square deposit link: primary is "Accept & Pay Deposit" → Square.
   //   Paying = accepting (the Square webhook flips the quote to 'accepted' and
   //   fires the same side-effects as the Accept page).
-  // - Without: today's behaviour, primary is "Accept Quote" → acceptance page.
-  let ctaSection = '';
-  if (data.acceptanceUrl) {
-    const acceptUrl = data.acceptanceUrl + (data.acceptanceUrl.includes('?') ? '&' : '?') + 'action=accept';
-    const declineUrl = data.acceptanceUrl + (data.acceptanceUrl.includes('?') ? '&' : '?') + 'action=decline';
-    const primaryHref = data.depositPayNowUrl ? data.depositPayNowUrl : acceptUrl;
-    // Amount + percentage are already surfaced in the deposit notice block
-    // above — keep the button label clean so the hero number doesn't repeat.
-    const primaryLabel = data.depositPayNowUrl && data.depositAmount
-      ? 'Accept &amp; Pay Deposit'
-      : 'Accept Quote';
-    ctaSection = depositNoticeSection + `
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
-        <tr>
-          <td align="center">
-            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
-              <tr>
-                <td style="background:${accent};border-radius:10px;text-align:center;">
-                  <a href="${esc(primaryHref)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">${primaryLabel}</a>
-                </td>
-              </tr>
-              ${data.depositPayNowUrl && data.hasTerms ? `<tr>
-                <td style="text-align:center;padding-top:6px;">
-                  <span style="color:#6b7280;font-size:11px;">By paying you accept the Terms &amp; Conditions in the attached quote.</span>
-                </td>
-              </tr>` : ''}
-              <tr>
-                <td height="12" style="font-size:12px;line-height:12px;">&nbsp;</td>
-              </tr>
-              <tr>
-                <td style="text-align:center;">
-                  <a href="${esc(declineUrl)}" target="_blank" style="color:#9ca3af;font-size:14px;text-decoration:underline;">Decline quote</a>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>`;
-  }
+  // - Without: primary is "Accept Quote" → acceptance page.
+  const acceptUrl = acceptanceUrl + (acceptanceUrl.includes('?') ? '&' : '?') + 'action=accept';
+  const declineUrl = acceptanceUrl + (acceptanceUrl.includes('?') ? '&' : '?') + 'action=decline';
+  const primaryHref = depositPayNowUrl ? depositPayNowUrl : acceptUrl;
+  // Amount + percentage are surfaced in the deposit notice block — keep the
+  // button label clean so the hero number doesn't repeat.
+  const primaryLabel = depositPayNowUrl && depositAmount
+    ? 'Accept &amp; Pay Deposit'
+    : 'Accept Quote';
+  return depositNoticeSection + `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+            <tr>
+              <td style="background:${accent};border-radius:10px;text-align:center;">
+                <a href="${esc(primaryHref)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">${primaryLabel}</a>
+              </td>
+            </tr>
+            ${depositPayNowUrl && hasTerms ? `<tr>
+              <td style="text-align:center;padding-top:6px;">
+                <span style="color:#6b7280;font-size:11px;">By paying you accept the Terms &amp; Conditions in the attached quote.</span>
+              </td>
+            </tr>` : ''}
+            <tr>
+              <td height="12" style="font-size:12px;line-height:12px;">&nbsp;</td>
+            </tr>
+            <tr>
+              <td style="text-align:center;">
+                <a href="${esc(declineUrl)}" target="_blank" style="color:#9ca3af;font-size:14px;text-decoration:underline;">Decline quote</a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>`;
+}
 
-  // Business contact footer
-  const footerParts: string[] = [];
-  if (data.business.abn) footerParts.push(`ABN: ${esc(data.business.abn)}`);
-  if (data.business.phone) footerParts.push(esc(data.business.phone));
-  if (data.business.email) footerParts.push(`<a href="mailto:${esc(data.business.email)}" style="color:${accent};text-decoration:none;">${esc(data.business.email)}</a>`);
-  if (data.business.address) footerParts.push(esc(data.business.address));
+function renderInvoicePayNowCta(payNowUrl: string | undefined, hasTerms: boolean | undefined, accent: string): string {
+  if (!payNowUrl) return '';
+  const esc = escapeHtml;
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 20px;">
+      <tr>
+        <td align="center">
+          <a href="${esc(payNowUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;background:${accent};color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;border-radius:8px;">
+            Pay Now
+          </a>
+          <p style="color:#6b7280;font-size:12px;margin:8px 0 0;">Secure card payment via Square</p>
+          ${hasTerms ? `<p style="color:#6b7280;font-size:11px;margin:6px 0 0;">By paying you accept the Terms &amp; Conditions in the attached invoice.</p>` : ''}
+        </td>
+      </tr>
+    </table>`;
+}
 
-  const businessFooter = footerParts.length ? `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 0;border-top:1px solid #e5e7eb;padding-top:16px;">
-      <tr><td style="text-align:center;">
-        <p style="color:#6b7280;font-size:13px;line-height:1.8;margin:0;">${footerParts.join(' &bull; ')}</p>
-      </td></tr>
-    </table>` : '';
+// ----- unified document email builder -----
+
+export type DocumentEmailData =
+  | ({ type: 'quote' } & QuoteEmailData)
+  | ({ type: 'invoice' } & InvoiceEmailData);
+
+/**
+ * Unified entry point for client-facing document emails. Branches on `type`
+ * for the doc-specific bits (header copy, accept-vs-pay CTA, photos vs
+ * deposit-credit, preheader) and reuses shared component helpers for the
+ * 80% in common (body, pricing rows, business footer, wrapper template).
+ */
+export function buildDocumentEmailHtml(data: DocumentEmailData): string {
+  const accent = data.business.brandColor || '#059669';
+  const esc = escapeHtml;
+  const isInvoice = data.type === 'invoice';
+  const typeLabel = isInvoice ? 'Invoice' : 'Quote';
+  const headerLabel = isInvoice ? 'Invoice' : 'Quotation';
+
+  // Type-specific blocks. The framing (header / greeting / body / pricing /
+  // attachment notice / sign-off / business footer) is identical between
+  // quote and invoice — only the middle inserts and the closing copy differ.
+  const subHeader = isInvoice && data.invoiceNumber
+    ? `<p style="color:#6b7280;font-size:13px;margin:0 0 16px;">Invoice #${esc(data.invoiceNumber)}</p>`
+    : '';
+
+  const preBodyExtras = !isInvoice ? renderPhotosSection(data.photoUrls) : '';
+
+  const pricingRows = renderPricingRows({
+    materialsSubtotal: data.materialsSubtotal,
+    laborTotal: data.laborTotal,
+    subtotal: data.subtotal,
+    gst: data.gst,
+    total: data.total,
+    accent,
+    depositCredit: isInvoice ? data.depositCredit : undefined,
+  });
+
+  const postPricingCta = isInvoice
+    ? renderInvoicePayNowCta(data.payNowUrl, data.hasTerms, accent)
+    : '';
+
+  // For quotes the accept/decline CTA sits below the "PDF attached" line; for
+  // invoices the Pay Now button sits above it, so the post-attachment slot
+  // takes the quote CTA only.
+  const postAttachmentCta = !isInvoice
+    ? renderQuoteCta({
+        acceptanceUrl: data.acceptanceUrl,
+        depositAmount: data.depositAmount,
+        depositPercentage: data.depositPercentage,
+        depositPayNowUrl: data.depositPayNowUrl,
+        hasTerms: data.hasTerms,
+        accent,
+      })
+    : '';
+
+  const closingNotice = isInvoice
+    ? `<p style="color:#374151;font-size:14px;font-weight:600;line-height:1.6;margin:16px 0 0;">
+      Payment is due by ${new Date(data.dueDate).toLocaleDateString('en-AU', {
+        day: 'numeric', month: 'long', year: 'numeric',
+      })}.
+    </p>
+
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:16px 0 0;">
+      If you have any questions, please don't hesitate to get in touch.
+    </p>`
+    : `<p style="color:#6b7280;font-size:14px;line-height:1.6;margin:24px 0 0;">
+      This quote is valid for 30 days. If you have any questions, please don't hesitate to get in touch.
+    </p>`;
 
   const content = `
     <h1 style="color:#1f2937;font-size:24px;font-weight:700;margin:0 0 8px;line-height:1.3;">
-      Quotation for ${esc(data.jobName)}
+      ${headerLabel} for ${esc(data.jobName)}
     </h1>
+    ${subHeader}
     <p style="color:#6b7280;font-size:14px;margin:0 0 24px;">
       Hi ${esc(data.customerName)},
     </p>
 
     <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
-      ${bodyHtml}
+      ${renderEmailBodyHtml(data.emailBody)}
     </p>
 
-    ${photosSection}
+    ${preBodyExtras}
 
     ${pricingRows}
 
+    ${postPricingCta}
+
     <p style="color:#6b7280;font-size:13px;font-style:italic;margin:0 0 4px;">
-      A detailed PDF quote is attached for your records.
+      A detailed PDF ${typeLabel.toLowerCase()} is attached for your records.
     </p>
 
-    ${ctaSection}
+    ${postAttachmentCta}
 
-    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:24px 0 0;">
-      This quote is valid for 30 days. If you have any questions, please don't hesitate to get in touch.
-    </p>
+    ${closingNotice}
 
     <p style="color:#6b7280;font-size:14px;margin:16px 0 0;">
       Kind regards,<br/>
       <strong style="color:#1f2937;">${esc(data.business.name)}</strong>
     </p>
 
-    ${businessFooter}
+    ${renderBusinessFooter(data.business, accent)}
   `;
 
   return wrapQuoteEmailTemplate(content, {
     brandColor: accent,
     businessName: data.business.name,
     logoUrl: data.business.logoUrl,
-    preheader: `Quote for ${data.jobName} - $${data.total.toFixed(2)} from ${data.business.name}`,
+    preheader: `${typeLabel} for ${data.jobName} - $${data.total.toFixed(2)} from ${data.business.name}`,
   });
+}
+
+// ----- legacy wrappers — kept for callers that still build per-type payloads -----
+
+export function buildQuoteEmailHtml(data: QuoteEmailData): string {
+  return buildDocumentEmailHtml({ type: 'quote', ...data });
 }
 
 // ============================================================
@@ -1225,138 +1363,11 @@ interface InvoiceEmailData {
   // Deposit credit carried over from a quote that had a deposit paid. Rendered
   // as a "Deposit already paid" line above the total.
   depositCredit?: number;
-  business: {
-    name: string;
-    abn?: string;
-    phone?: string;
-    email?: string;
-    address?: string;
-    logoUrl?: string;
-    brandColor?: string;
-  };
+  business: DocEmailBusiness;
 }
 
 export function buildInvoiceEmailHtml(data: InvoiceEmailData): string {
-  const accent = data.business.brandColor || '#059669';
-  const esc = escapeHtml;
-
-  // Email body paragraphs — strip any standalone ABN line so it doesn't
-  // duplicate the footer render.
-  const bodyHtml = esc(stripAbnFromBody(data.emailBody))
-    .replace(/\n\n/g, '</p><p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">')
-    .replace(/\n/g, '<br/>');
-
-  // Format due date
-  const dueDateFormatted = new Date(data.dueDate).toLocaleDateString('en-AU', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-
-  // Pricing table (light theme)
-  const pricingRows = `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;margin:20px 0;">
-      <tr>
-        <td style="padding:16px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Materials</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.materialsSubtotal.toFixed(2)}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Labour</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.laborTotal.toFixed(2)}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Subtotal</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.subtotal.toFixed(2)}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">GST</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${data.gst.toFixed(2)}</td>
-            </tr>
-            ${(data.depositCredit && data.depositCredit > 0) ? `
-            <tr>
-              <td style="padding:8px 0;color:#059669;font-size:14px;border-bottom:1px solid #e5e7eb;">Deposit already paid</td>
-              <td style="padding:8px 0;color:#059669;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">−$${data.depositCredit.toFixed(2)}</td>
-            </tr>` : ''}
-            <tr>
-              <td style="padding:10px 0;color:#1f2937;font-size:16px;font-weight:700;">${(data.depositCredit && data.depositCredit > 0) ? 'Balance due' : 'Total (inc GST)'}</td>
-              <td style="padding:10px 0;color:${accent};font-size:18px;font-weight:700;text-align:right;">$${data.total.toFixed(2)}</td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>`;
-
-  // Business contact footer
-  const footerParts: string[] = [];
-  if (data.business.abn) footerParts.push(`ABN: ${esc(data.business.abn)}`);
-  if (data.business.phone) footerParts.push(esc(data.business.phone));
-  if (data.business.email) footerParts.push(`<a href="mailto:${esc(data.business.email)}" style="color:${accent};text-decoration:none;">${esc(data.business.email)}</a>`);
-  if (data.business.address) footerParts.push(esc(data.business.address));
-
-  const businessFooter = footerParts.length ? `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 0;border-top:1px solid #e5e7eb;padding-top:16px;">
-      <tr><td style="text-align:center;">
-        <p style="color:#6b7280;font-size:13px;line-height:1.8;margin:0;">${footerParts.join(' &bull; ')}</p>
-      </td></tr>
-    </table>` : '';
-
-  const content = `
-    <h1 style="color:#1f2937;font-size:24px;font-weight:700;margin:0 0 8px;line-height:1.3;">
-      Invoice for ${esc(data.jobName)}
-    </h1>
-    ${data.invoiceNumber ? `<p style="color:#6b7280;font-size:13px;margin:0 0 16px;">Invoice #${esc(data.invoiceNumber)}</p>` : ''}
-    <p style="color:#6b7280;font-size:14px;margin:0 0 24px;">
-      Hi ${esc(data.customerName)},
-    </p>
-
-    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
-      ${bodyHtml}
-    </p>
-
-    ${pricingRows}
-
-    ${data.payNowUrl ? `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 20px;">
-      <tr>
-        <td align="center">
-          <a href="${esc(data.payNowUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;background:${accent};color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;border-radius:8px;">
-            Pay Now
-          </a>
-          <p style="color:#6b7280;font-size:12px;margin:8px 0 0;">Secure card payment via Square</p>
-          ${data.hasTerms ? `<p style="color:#6b7280;font-size:11px;margin:6px 0 0;">By paying you accept the Terms &amp; Conditions in the attached invoice.</p>` : ''}
-        </td>
-      </tr>
-    </table>` : ''}
-
-    <p style="color:#6b7280;font-size:13px;font-style:italic;margin:0 0 4px;">
-      A detailed PDF invoice is attached for your records.
-    </p>
-
-    <p style="color:#374151;font-size:14px;font-weight:600;line-height:1.6;margin:16px 0 0;">
-      Payment is due by ${dueDateFormatted}.
-    </p>
-
-    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:16px 0 0;">
-      If you have any questions, please don't hesitate to get in touch.
-    </p>
-
-    <p style="color:#6b7280;font-size:14px;margin:16px 0 0;">
-      Kind regards,<br/>
-      <strong style="color:#1f2937;">${esc(data.business.name)}</strong>
-    </p>
-
-    ${businessFooter}
-  `;
-
-  return wrapQuoteEmailTemplate(content, {
-    brandColor: accent,
-    businessName: data.business.name,
-    logoUrl: data.business.logoUrl,
-    preheader: `Invoice for ${data.jobName} - $${data.total.toFixed(2)} from ${data.business.name}`,
-  });
+  return buildDocumentEmailHtml({ type: 'invoice', ...data });
 }
 
 // ============================================================

@@ -8,6 +8,7 @@ import React, { useEffect, useRef, forwardRef } from 'react';
 import { View, StyleSheet, Platform, Animated, Easing, TouchableOpacity } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { colors } from '../theme';
 import { lightTap } from '../utils/haptics';
 
@@ -44,6 +45,10 @@ interface FixedBottomButtonProps {
   disableSolidBackground?: boolean;
   /** Ref forwarded to the secondary button wrapper for tour targeting */
   secondaryRef?: React.Ref<View>;
+  /** Opt out of the iOS keyboard-sticky wrapper. Set to true when the screen
+   *  already handles keyboard avoidance itself (e.g. wraps in
+   *  KeyboardAvoidingView), to avoid double-translating the bar. */
+  disableKeyboardSticky?: boolean;
 }
 
 /**
@@ -196,8 +201,14 @@ export function FixedBottomButton({
   secondaryLoadingOnPress,
   disableSolidBackground = false,
   secondaryRef,
+  disableKeyboardSticky = false,
 }: FixedBottomButtonProps) {
   const insets = useSafeAreaInsets();
+
+  // On iOS, KeyboardStickyView translates the bar above the keyboard.
+  // On Android, soft-input "adjustResize" already handles it; on web it's static.
+  const useSticky = Platform.OS === 'ios' && !disableKeyboardSticky;
+  const Container: any = useSticky ? KeyboardStickyView : View;
 
   return (
     <>
@@ -206,7 +217,8 @@ export function FixedBottomButton({
         <View style={[styles.solidBackground, { height: 60 + insets.bottom }]} />
       )}
 
-      <View
+      <Container
+        offset={useSticky ? { closed: 0, opened: insets.bottom } : undefined}
         style={[
           styles.bottomActions,
           Platform.OS === 'web'
@@ -250,7 +262,7 @@ export function FixedBottomButton({
             {loading ? '' : label}
           </Button>
         </View>
-      </View>
+      </Container>
     </>
   );
 }

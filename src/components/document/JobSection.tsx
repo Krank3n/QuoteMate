@@ -3,14 +3,15 @@ import { View, TouchableOpacity } from 'react-native';
 import { Text, Title, Surface, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../../theme';
-import { Job } from '../../types';
+import { JobSpec } from '../../types';
 import { documentStyles as styles } from './documentStyles';
 
 interface JobSectionProps {
-  job: Job;
+  job: JobSpec;
   onEdit?: () => void;
   isEditing?: boolean;
-  onJobChange?: (job: Job) => void;
+  onJobChange?: (job: JobSpec) => void;
+  style?: any;
 }
 
 export function JobSection({
@@ -18,13 +19,14 @@ export function JobSection({
   onEdit,
   isEditing,
   onJobChange,
+  style,
 }: JobSectionProps) {
   const content = (
-    <Surface style={styles.section}>
+    <Surface style={[styles.section, style]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionHeaderLeft}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
-            <MaterialCommunityIcons name="hammer-wrench" size={18} color={colors.secondary} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
+            <MaterialCommunityIcons name="text-long" size={18} color={colors.primary} />
           </View>
           <Title style={styles.sectionTitle}>Job</Title>
         </View>

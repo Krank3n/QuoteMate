@@ -93,7 +93,8 @@ export default {
       buildNumber: "17",
       associatedDomains: ["applinks:quotemateapp.au"],
       infoPlist: {
-        ITSAppUsesNonExemptEncryption: false
+        ITSAppUsesNonExemptEncryption: false,
+        NSBluetoothAlwaysUsageDescription: "QuoteMate uses Bluetooth to pair Square card readers for in-person payments."
       }
     },
     android: {

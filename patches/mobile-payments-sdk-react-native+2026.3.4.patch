@@ -1,0 +1,1864 @@
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/10efb2c8f85e300f3599cdb7740b9390/results.bin b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/10efb2c8f85e300f3599cdb7740b9390/results.bin
+new file mode 100644
+index 0000000..0d259dd
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/10efb2c8f85e300f3599cdb7740b9390/results.bin
+@@ -0,0 +1 @@
++o/classes
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/10efb2c8f85e300f3599cdb7740b9390/transformed/classes/classes_dex/classes.dex b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/10efb2c8f85e300f3599cdb7740b9390/transformed/classes/classes_dex/classes.dex
+new file mode 100644
+index 0000000..781c3ff
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/10efb2c8f85e300f3599cdb7740b9390/transformed/classes/classes_dex/classes.dex differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/results.bin b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/results.bin
+new file mode 100644
+index 0000000..e1640c9
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/results.bin
+@@ -0,0 +1 @@
++o/bundleLibRuntimeToDirRelease
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/BuildConfig.dex b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/BuildConfig.dex
+new file mode 100644
+index 0000000..5309b6a
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/BuildConfig.dex differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.dex b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.dex
+new file mode 100644
+index 0000000..576ba61
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.dex differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.dex b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.dex
+new file mode 100644
+index 0000000..b0894fb
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.dex differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.dex b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.dex
+new file mode 100644
+index 0000000..97cb259
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.dex differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.dex b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.dex
+new file mode 100644
+index 0000000..23b255e
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.dex differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.dex b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.dex
+new file mode 100644
+index 0000000..1c58786
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.dex differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/UtilsKt.dex b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/UtilsKt.dex
+new file mode 100644
+index 0000000..a1d12cb
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/bundleLibRuntimeToDirRelease_dex/com/mobilepaymentssdkreactnative/UtilsKt.dex differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/desugar_graph.bin b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/desugar_graph.bin
+new file mode 100644
+index 0000000..601f245
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/203298104e3b8129ba8ad7495bb92151/transformed/bundleLibRuntimeToDirRelease/desugar_graph.bin differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/6d3538365a119a09abc072b7268aaa8d/results.bin b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/6d3538365a119a09abc072b7268aaa8d/results.bin
+new file mode 100644
+index 0000000..0d259dd
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/6d3538365a119a09abc072b7268aaa8d/results.bin
+@@ -0,0 +1 @@
++o/classes
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/6d3538365a119a09abc072b7268aaa8d/transformed/classes/classes_dex/classes.dex b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/6d3538365a119a09abc072b7268aaa8d/transformed/classes/classes_dex/classes.dex
+new file mode 100644
+index 0000000..781c3ff
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/6d3538365a119a09abc072b7268aaa8d/transformed/classes/classes_dex/classes.dex differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/7508186f767940de187a01c6409ff4c5/results.bin b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/7508186f767940de187a01c6409ff4c5/results.bin
+new file mode 100644
+index 0000000..0d259dd
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/7508186f767940de187a01c6409ff4c5/results.bin
+@@ -0,0 +1 @@
++o/classes
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/7508186f767940de187a01c6409ff4c5/transformed/classes/classes_dex/classes.dex b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/7508186f767940de187a01c6409ff4c5/transformed/classes/classes_dex/classes.dex
+new file mode 100644
+index 0000000..153651f
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/.transforms/7508186f767940de187a01c6409ff4c5/transformed/classes/classes_dex/classes.dex differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/buildConfig/debug/com/mobilepaymentssdkreactnative/BuildConfig.java b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/buildConfig/debug/com/mobilepaymentssdkreactnative/BuildConfig.java
+new file mode 100644
+index 0000000..278cf77
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/buildConfig/debug/com/mobilepaymentssdkreactnative/BuildConfig.java
+@@ -0,0 +1,10 @@
++/**
++ * Automatically generated file. DO NOT MODIFY
++ */
++package com.mobilepaymentssdkreactnative;
++
++public final class BuildConfig {
++  public static final boolean DEBUG = Boolean.parseBoolean("true");
++  public static final String LIBRARY_PACKAGE_NAME = "com.mobilepaymentssdkreactnative";
++  public static final String BUILD_TYPE = "debug";
++}
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/buildConfig/release/com/mobilepaymentssdkreactnative/BuildConfig.java b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/buildConfig/release/com/mobilepaymentssdkreactnative/BuildConfig.java
+new file mode 100644
+index 0000000..f4c7f55
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/buildConfig/release/com/mobilepaymentssdkreactnative/BuildConfig.java
+@@ -0,0 +1,10 @@
++/**
++ * Automatically generated file. DO NOT MODIFY
++ */
++package com.mobilepaymentssdkreactnative;
++
++public final class BuildConfig {
++  public static final boolean DEBUG = false;
++  public static final String LIBRARY_PACKAGE_NAME = "com.mobilepaymentssdkreactnative";
++  public static final String BUILD_TYPE = "release";
++}
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/CMakeLists.txt b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/CMakeLists.txt
+new file mode 100644
+index 0000000..70c6462
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/CMakeLists.txt
+@@ -0,0 +1,36 @@
++# Copyright (c) Meta Platforms, Inc. and affiliates.
++#
++# This source code is licensed under the MIT license found in the
++# LICENSE file in the root directory of this source tree.
++
++cmake_minimum_required(VERSION 3.13)
++set(CMAKE_VERBOSE_MAKEFILE on)
++
++file(GLOB react_codegen_SRCS CONFIGURE_DEPENDS *.cpp react/renderer/components/MobilePaymentsSdkReactNativeSpec/*.cpp)
++
++add_library(
++  react_codegen_MobilePaymentsSdkReactNativeSpec
++  OBJECT
++  ${react_codegen_SRCS}
++)
++
++target_include_directories(react_codegen_MobilePaymentsSdkReactNativeSpec PUBLIC . react/renderer/components/MobilePaymentsSdkReactNativeSpec)
++
++target_link_libraries(
++  react_codegen_MobilePaymentsSdkReactNativeSpec
++  fbjni
++  jsi
++  # We need to link different libraries based on whether we are building rncore or not, that's necessary
++  # because we want to break a circular dependency between react_codegen_rncore and reactnative
++  reactnative
++)
++
++target_compile_options(
++  react_codegen_MobilePaymentsSdkReactNativeSpec
++  PRIVATE
++  -DLOG_TAG=\"ReactNative\"
++  -fexceptions
++  -frtti
++  -std=c++20
++  -Wall
++)
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/MobilePaymentsSdkReactNativeSpec-generated.cpp b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/MobilePaymentsSdkReactNativeSpec-generated.cpp
+new file mode 100644
+index 0000000..d5272a9
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/MobilePaymentsSdkReactNativeSpec-generated.cpp
+@@ -0,0 +1,22 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateModuleJniCpp.js
++ */
++
++#include "MobilePaymentsSdkReactNativeSpec.h"
++
++namespace facebook::react {
++
++
++
++std::shared_ptr<TurboModule> MobilePaymentsSdkReactNativeSpec_ModuleProvider(const std::string &moduleName, const JavaTurboModule::InitParams &params) {
++
++  return nullptr;
++}
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/MobilePaymentsSdkReactNativeSpec.h b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/MobilePaymentsSdkReactNativeSpec.h
+new file mode 100644
+index 0000000..736c0aa
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/MobilePaymentsSdkReactNativeSpec.h
+@@ -0,0 +1,24 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateModuleJniH.js
++ */
++
++#pragma once
++
++#include <ReactCommon/JavaTurboModule.h>
++#include <ReactCommon/TurboModule.h>
++#include <jsi/jsi.h>
++
++namespace facebook::react {
++
++
++
++JSI_EXPORT
++std::shared_ptr<TurboModule> MobilePaymentsSdkReactNativeSpec_ModuleProvider(const std::string &moduleName, const JavaTurboModule::InitParams &params);
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ComponentDescriptors.cpp b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ComponentDescriptors.cpp
+new file mode 100644
+index 0000000..98df8b3
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ComponentDescriptors.cpp
+@@ -0,0 +1,22 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateComponentDescriptorCpp.js
++ */
++
++#include <react/renderer/components/MobilePaymentsSdkReactNativeSpec/ComponentDescriptors.h>
++#include <react/renderer/core/ConcreteComponentDescriptor.h>
++#include <react/renderer/componentregistry/ComponentDescriptorProviderRegistry.h>
++
++namespace facebook::react {
++
++void MobilePaymentsSdkReactNativeSpec_registerComponentDescriptorsFromCodegen(
++  std::shared_ptr<const ComponentDescriptorProviderRegistry> registry) {
++
++}
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ComponentDescriptors.h b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ComponentDescriptors.h
+new file mode 100644
+index 0000000..ae1b7a0
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ComponentDescriptors.h
+@@ -0,0 +1,24 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateComponentDescriptorH.js
++ */
++
++#pragma once
++
++#include <react/renderer/components/MobilePaymentsSdkReactNativeSpec/ShadowNodes.h>
++#include <react/renderer/core/ConcreteComponentDescriptor.h>
++#include <react/renderer/componentregistry/ComponentDescriptorProviderRegistry.h>
++
++namespace facebook::react {
++
++
++
++void MobilePaymentsSdkReactNativeSpec_registerComponentDescriptorsFromCodegen(
++  std::shared_ptr<const ComponentDescriptorProviderRegistry> registry);
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/EventEmitters.cpp b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/EventEmitters.cpp
+new file mode 100644
+index 0000000..6ae75c4
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/EventEmitters.cpp
+@@ -0,0 +1,16 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateEventEmitterCpp.js
++ */
++
++#include <react/renderer/components/MobilePaymentsSdkReactNativeSpec/EventEmitters.h>
++
++
++namespace facebook::react {
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/EventEmitters.h b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/EventEmitters.h
+new file mode 100644
+index 0000000..2845a63
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/EventEmitters.h
+@@ -0,0 +1,17 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateEventEmitterH.js
++ */
++#pragma once
++
++#include <react/renderer/components/view/ViewEventEmitter.h>
++
++
++namespace facebook::react {
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/MobilePaymentsSdkReactNativeSpecJSI-generated.cpp b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/MobilePaymentsSdkReactNativeSpecJSI-generated.cpp
+new file mode 100644
+index 0000000..c1f844b
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/MobilePaymentsSdkReactNativeSpecJSI-generated.cpp
+@@ -0,0 +1,17 @@
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateModuleCpp.js
++ */
++
++#include "MobilePaymentsSdkReactNativeSpecJSI.h"
++
++namespace facebook::react {
++
++
++
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/MobilePaymentsSdkReactNativeSpecJSI.h b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/MobilePaymentsSdkReactNativeSpecJSI.h
+new file mode 100644
+index 0000000..ec16260
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/MobilePaymentsSdkReactNativeSpecJSI.h
+@@ -0,0 +1,19 @@
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateModuleH.js
++ */
++
++#pragma once
++
++#include <ReactCommon/TurboModule.h>
++#include <react/bridging/Bridging.h>
++
++namespace facebook::react {
++
++
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/Props.cpp b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/Props.cpp
+new file mode 100644
+index 0000000..f8e8425
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/Props.cpp
+@@ -0,0 +1,19 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GeneratePropsCpp.js
++ */
++
++#include <react/renderer/components/MobilePaymentsSdkReactNativeSpec/Props.h>
++#include <react/renderer/core/PropsParserContext.h>
++#include <react/renderer/core/propsConversions.h>
++
++namespace facebook::react {
++
++
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/Props.h b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/Props.h
+new file mode 100644
+index 0000000..870864b
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/Props.h
+@@ -0,0 +1,18 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GeneratePropsH.js
++ */
++#pragma once
++
++
++
++namespace facebook::react {
++
++
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ShadowNodes.cpp b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ShadowNodes.cpp
+new file mode 100644
+index 0000000..5211ac5
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ShadowNodes.cpp
+@@ -0,0 +1,17 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateShadowNodeCpp.js
++ */
++
++#include <react/renderer/components/MobilePaymentsSdkReactNativeSpec/ShadowNodes.h>
++
++namespace facebook::react {
++
++
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ShadowNodes.h b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ShadowNodes.h
+new file mode 100644
+index 0000000..e6716f9
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/ShadowNodes.h
+@@ -0,0 +1,23 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateShadowNodeH.js
++ */
++
++#pragma once
++
++#include <react/renderer/components/MobilePaymentsSdkReactNativeSpec/EventEmitters.h>
++#include <react/renderer/components/MobilePaymentsSdkReactNativeSpec/Props.h>
++#include <react/renderer/components/MobilePaymentsSdkReactNativeSpec/States.h>
++#include <react/renderer/components/view/ConcreteViewShadowNode.h>
++#include <jsi/jsi.h>
++
++namespace facebook::react {
++
++
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/States.cpp b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/States.cpp
+new file mode 100644
+index 0000000..3685efa
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/States.cpp
+@@ -0,0 +1,16 @@
++
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateStateCpp.js
++ */
++#include <react/renderer/components/MobilePaymentsSdkReactNativeSpec/States.h>
++
++namespace facebook::react {
++
++
++
++} // namespace facebook::react
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/States.h b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/States.h
+new file mode 100644
+index 0000000..c011ed8
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/jni/react/renderer/components/MobilePaymentsSdkReactNativeSpec/States.h
+@@ -0,0 +1,19 @@
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateStateH.js
++ */
++#pragma once
++
++#ifdef ANDROID
++#include <folly/dynamic.h>
++#endif
++
++namespace facebook::react {
++
++
++
++} // namespace facebook::react
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/schema.json b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/schema.json
+new file mode 100644
+index 0000000..43967f8
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/generated/source/codegen/schema.json
+@@ -0,0 +1 @@
++{"modules":{}}
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/AndroidManifest.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/AndroidManifest.xml
+new file mode 100644
+index 0000000..6095e18
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/AndroidManifest.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    package="com.mobilepaymentssdkreactnative" >
++
++    <uses-sdk android:minSdkVersion="28" />
++
++</manifest>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/output-metadata.json b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/output-metadata.json
+new file mode 100644
+index 0000000..ac6b6dd
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/output-metadata.json
+@@ -0,0 +1,18 @@
++{
++  "version": 3,
++  "artifactType": {
++    "type": "AAPT_FRIENDLY_MERGED_MANIFESTS",
++    "kind": "Directory"
++  },
++  "applicationId": "com.mobilepaymentssdkreactnative",
++  "variantName": "debug",
++  "elements": [
++    {
++      "type": "SINGLE",
++      "filters": [],
++      "attributes": [],
++      "outputFile": "AndroidManifest.xml"
++    }
++  ],
++  "elementType": "File"
++}
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/release/processReleaseManifest/aapt/AndroidManifest.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/release/processReleaseManifest/aapt/AndroidManifest.xml
+new file mode 100644
+index 0000000..6095e18
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/release/processReleaseManifest/aapt/AndroidManifest.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    package="com.mobilepaymentssdkreactnative" >
++
++    <uses-sdk android:minSdkVersion="28" />
++
++</manifest>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/release/processReleaseManifest/aapt/output-metadata.json b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/release/processReleaseManifest/aapt/output-metadata.json
+new file mode 100644
+index 0000000..0ffab57
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aapt_friendly_merged_manifests/release/processReleaseManifest/aapt/output-metadata.json
+@@ -0,0 +1,18 @@
++{
++  "version": 3,
++  "artifactType": {
++    "type": "AAPT_FRIENDLY_MERGED_MANIFESTS",
++    "kind": "Directory"
++  },
++  "applicationId": "com.mobilepaymentssdkreactnative",
++  "variantName": "release",
++  "elements": [
++    {
++      "type": "SINGLE",
++      "filters": [],
++      "attributes": [],
++      "outputFile": "AndroidManifest.xml"
++    }
++  ],
++  "elementType": "File"
++}
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aar_metadata/debug/writeDebugAarMetadata/aar-metadata.properties b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aar_metadata/debug/writeDebugAarMetadata/aar-metadata.properties
+new file mode 100644
+index 0000000..1211b1e
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aar_metadata/debug/writeDebugAarMetadata/aar-metadata.properties
+@@ -0,0 +1,6 @@
++aarFormatVersion=1.0
++aarMetadataVersion=1.0
++minCompileSdk=1
++minCompileSdkExtension=0
++minAndroidGradlePluginVersion=1.0.0
++coreLibraryDesugaringEnabled=false
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aar_metadata/release/writeReleaseAarMetadata/aar-metadata.properties b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aar_metadata/release/writeReleaseAarMetadata/aar-metadata.properties
+new file mode 100644
+index 0000000..1211b1e
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/aar_metadata/release/writeReleaseAarMetadata/aar-metadata.properties
+@@ -0,0 +1,6 @@
++aarFormatVersion=1.0
++aarMetadataVersion=1.0
++minCompileSdk=1
++minCompileSdkExtension=0
++minAndroidGradlePluginVersion=1.0.0
++coreLibraryDesugaringEnabled=false
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/annotation_processor_list/debug/javaPreCompileDebug/annotationProcessors.json b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/annotation_processor_list/debug/javaPreCompileDebug/annotationProcessors.json
+new file mode 100644
+index 0000000..9e26dfe
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/annotation_processor_list/debug/javaPreCompileDebug/annotationProcessors.json
+@@ -0,0 +1 @@
++{}
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/annotation_processor_list/release/javaPreCompileRelease/annotationProcessors.json b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/annotation_processor_list/release/javaPreCompileRelease/annotationProcessors.json
+new file mode 100644
+index 0000000..9e26dfe
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/annotation_processor_list/release/javaPreCompileRelease/annotationProcessors.json
+@@ -0,0 +1 @@
++{}
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar
+new file mode 100644
+index 0000000..1791090
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_library_classes_jar/release/bundleLibCompileToJarRelease/classes.jar b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_library_classes_jar/release/bundleLibCompileToJarRelease/classes.jar
+new file mode 100644
+index 0000000..a84fd76
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_library_classes_jar/release/bundleLibCompileToJarRelease/classes.jar differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar
+new file mode 100644
+index 0000000..0572fef
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_r_class_jar/release/generateReleaseRFile/R.jar b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_r_class_jar/release/generateReleaseRFile/R.jar
+new file mode 100644
+index 0000000..0572fef
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_r_class_jar/release/generateReleaseRFile/R.jar differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_symbol_list/debug/generateDebugRFile/R.txt b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_symbol_list/debug/generateDebugRFile/R.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_symbol_list/release/generateReleaseRFile/R.txt b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/compile_symbol_list/release/generateReleaseRFile/R.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/debug/packageDebugResources/compile-file-map.properties b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/debug/packageDebugResources/compile-file-map.properties
+new file mode 100644
+index 0000000..3fb5781
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/debug/packageDebugResources/compile-file-map.properties
+@@ -0,0 +1 @@
++#Wed Apr 15 23:14:17 AEST 2026
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/debug/packageDebugResources/merger.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/debug/packageDebugResources/merger.xml
+new file mode 100644
+index 0000000..6e0f980
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/debug/packageDebugResources/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="main$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="main" generated-set="main$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="debug$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/debug/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="debug" generated-set="debug$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/debug/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="generated$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/build/generated/res/resValues/debug"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="generated" generated-set="generated$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/build/generated/res/resValues/debug"/></dataSet><mergedItems/></merger>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeDebugJniLibFolders/merger.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeDebugJniLibFolders/merger.xml
+new file mode 100644
+index 0000000..4038125
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeDebugJniLibFolders/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/jniLibs"/></dataSet><dataSet config="debug" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/debug/jniLibs"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeDebugShaders/merger.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeDebugShaders/merger.xml
+new file mode 100644
+index 0000000..bae196c
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeDebugShaders/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/shaders"/></dataSet><dataSet config="debug" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/debug/shaders"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeReleaseJniLibFolders/merger.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeReleaseJniLibFolders/merger.xml
+new file mode 100644
+index 0000000..f751dce
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeReleaseJniLibFolders/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/jniLibs"/></dataSet><dataSet config="release" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/release/jniLibs"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeReleaseShaders/merger.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeReleaseShaders/merger.xml
+new file mode 100644
+index 0000000..7c65d79
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/mergeReleaseShaders/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/shaders"/></dataSet><dataSet config="release" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/release/shaders"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/packageDebugAssets/merger.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/packageDebugAssets/merger.xml
+new file mode 100644
+index 0000000..91c9bba
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/packageDebugAssets/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/assets"/></dataSet><dataSet config="debug" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/debug/assets"/></dataSet><dataSet config="generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/shader_assets/debug/compileDebugShaders/out"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/packageReleaseAssets/merger.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/packageReleaseAssets/merger.xml
+new file mode 100644
+index 0000000..684506b
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/packageReleaseAssets/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/assets"/></dataSet><dataSet config="release" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/release/assets"/></dataSet><dataSet config="generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/shader_assets/release/compileReleaseShaders/out"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/release/packageReleaseResources/compile-file-map.properties b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/release/packageReleaseResources/compile-file-map.properties
+new file mode 100644
+index 0000000..5a8f74d
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/release/packageReleaseResources/compile-file-map.properties
+@@ -0,0 +1 @@
++#Wed Apr 22 16:11:17 AEST 2026
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/release/packageReleaseResources/merger.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/release/packageReleaseResources/merger.xml
+new file mode 100644
+index 0000000..3f541f3
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/incremental/release/packageReleaseResources/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="main$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="main" generated-set="main$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="release$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/release/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="release" generated-set="release$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/release/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="generated$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/build/generated/res/resValues/release"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="generated" generated-set="generated$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/build/generated/res/resValues/release"/></dataSet><mergedItems/></merger>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/java_res/debug/processDebugJavaRes/out/META-INF/mobile-payments-sdk-react-native_debug.kotlin_module b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/java_res/debug/processDebugJavaRes/out/META-INF/mobile-payments-sdk-react-native_debug.kotlin_module
+new file mode 100644
+index 0000000..7983244
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/java_res/debug/processDebugJavaRes/out/META-INF/mobile-payments-sdk-react-native_debug.kotlin_module differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/java_res/release/processReleaseJavaRes/out/META-INF/mobile-payments-sdk-react-native_release.kotlin_module b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/java_res/release/processReleaseJavaRes/out/META-INF/mobile-payments-sdk-react-native_release.kotlin_module
+new file mode 100644
+index 0000000..7983244
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/java_res/release/processReleaseJavaRes/out/META-INF/mobile-payments-sdk-react-native_release.kotlin_module differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/com/mobilepaymentssdkreactnative/BuildConfig.class b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/com/mobilepaymentssdkreactnative/BuildConfig.class
+new file mode 100644
+index 0000000..f528e40
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/com/mobilepaymentssdkreactnative/BuildConfig.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/javac/release/compileReleaseJavaWithJavac/classes/com/mobilepaymentssdkreactnative/BuildConfig.class b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/javac/release/compileReleaseJavaWithJavac/classes/com/mobilepaymentssdkreactnative/BuildConfig.class
+new file mode 100644
+index 0000000..bdc4dda
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/javac/release/compileReleaseJavaWithJavac/classes/com/mobilepaymentssdkreactnative/BuildConfig.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/local_only_symbol_list/debug/parseDebugLocalResources/R-def.txt b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/local_only_symbol_list/debug/parseDebugLocalResources/R-def.txt
+new file mode 100644
+index 0000000..78ac5b8
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/local_only_symbol_list/debug/parseDebugLocalResources/R-def.txt
+@@ -0,0 +1,2 @@
++R_DEF: Internal format may change without notice
++local
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/local_only_symbol_list/release/parseReleaseLocalResources/R-def.txt b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/local_only_symbol_list/release/parseReleaseLocalResources/R-def.txt
+new file mode 100644
+index 0000000..78ac5b8
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/local_only_symbol_list/release/parseReleaseLocalResources/R-def.txt
+@@ -0,0 +1,2 @@
++R_DEF: Internal format may change without notice
++local
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/manifest_merge_blame_file/debug/processDebugManifest/manifest-merger-blame-debug-report.txt b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/manifest_merge_blame_file/debug/processDebugManifest/manifest-merger-blame-debug-report.txt
+new file mode 100644
+index 0000000..356b47c
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/manifest_merge_blame_file/debug/processDebugManifest/manifest-merger-blame-debug-report.txt
+@@ -0,0 +1,7 @@
++1<?xml version="1.0" encoding="utf-8"?>
++2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++3    package="com.mobilepaymentssdkreactnative" >
++4
++5    <uses-sdk android:minSdkVersion="28" />
++6
++7</manifest>
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/manifest_merge_blame_file/release/processReleaseManifest/manifest-merger-blame-release-report.txt b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/manifest_merge_blame_file/release/processReleaseManifest/manifest-merger-blame-release-report.txt
+new file mode 100644
+index 0000000..356b47c
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/manifest_merge_blame_file/release/processReleaseManifest/manifest-merger-blame-release-report.txt
+@@ -0,0 +1,7 @@
++1<?xml version="1.0" encoding="utf-8"?>
++2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++3    package="com.mobilepaymentssdkreactnative" >
++4
++5    <uses-sdk android:minSdkVersion="28" />
++6
++7</manifest>
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/merged_manifest/debug/processDebugManifest/AndroidManifest.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/merged_manifest/debug/processDebugManifest/AndroidManifest.xml
+new file mode 100644
+index 0000000..6095e18
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/merged_manifest/debug/processDebugManifest/AndroidManifest.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    package="com.mobilepaymentssdkreactnative" >
++
++    <uses-sdk android:minSdkVersion="28" />
++
++</manifest>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/merged_manifest/release/processReleaseManifest/AndroidManifest.xml b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/merged_manifest/release/processReleaseManifest/AndroidManifest.xml
+new file mode 100644
+index 0000000..6095e18
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/merged_manifest/release/processReleaseManifest/AndroidManifest.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    package="com.mobilepaymentssdkreactnative" >
++
++    <uses-sdk android:minSdkVersion="28" />
++
++</manifest>
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/navigation_json/debug/extractDeepLinksDebug/navigation.json b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/navigation_json/debug/extractDeepLinksDebug/navigation.json
+new file mode 100644
+index 0000000..0637a08
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/navigation_json/debug/extractDeepLinksDebug/navigation.json
+@@ -0,0 +1 @@
++[]
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/navigation_json/release/extractDeepLinksRelease/navigation.json b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/navigation_json/release/extractDeepLinksRelease/navigation.json
+new file mode 100644
+index 0000000..0637a08
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/navigation_json/release/extractDeepLinksRelease/navigation.json
+@@ -0,0 +1 @@
++[]
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/nested_resources_validation_report/debug/generateDebugResources/nestedResourcesValidationReport.txt b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/nested_resources_validation_report/debug/generateDebugResources/nestedResourcesValidationReport.txt
+new file mode 100644
+index 0000000..08f4ebe
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/nested_resources_validation_report/debug/generateDebugResources/nestedResourcesValidationReport.txt
+@@ -0,0 +1 @@
++0 Warning/Error
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/nested_resources_validation_report/release/generateReleaseResources/nestedResourcesValidationReport.txt b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/nested_resources_validation_report/release/generateReleaseResources/nestedResourcesValidationReport.txt
+new file mode 100644
+index 0000000..08f4ebe
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/nested_resources_validation_report/release/generateReleaseResources/nestedResourcesValidationReport.txt
+@@ -0,0 +1 @@
++0 Warning/Error
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/META-INF/mobile-payments-sdk-react-native_release.kotlin_module b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/META-INF/mobile-payments-sdk-react-native_release.kotlin_module
+new file mode 100644
+index 0000000..7983244
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/META-INF/mobile-payments-sdk-react-native_release.kotlin_module differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/BuildConfig.class b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/BuildConfig.class
+new file mode 100644
+index 0000000..bdc4dda
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/BuildConfig.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.class b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.class
+new file mode 100644
+index 0000000..ff6fca1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.class b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.class
+new file mode 100644
+index 0000000..aefada9
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.class b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.class
+new file mode 100644
+index 0000000..d1627a5
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.class b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.class
+new file mode 100644
+index 0000000..cbeab80
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.class b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.class
+new file mode 100644
+index 0000000..e4a79e1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/UtilsKt.class b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/UtilsKt.class
+new file mode 100644
+index 0000000..7ca0763
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_dir/release/bundleLibRuntimeToDirRelease/com/mobilepaymentssdkreactnative/UtilsKt.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar
+new file mode 100644
+index 0000000..116e503
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_jar/release/bundleLibRuntimeToJarRelease/classes.jar b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_jar/release/bundleLibRuntimeToJarRelease/classes.jar
+new file mode 100644
+index 0000000..1771980
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/runtime_library_classes_jar/release/bundleLibRuntimeToJarRelease/classes.jar differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/symbol_list_with_package_name/debug/generateDebugRFile/package-aware-r.txt b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/symbol_list_with_package_name/debug/generateDebugRFile/package-aware-r.txt
+new file mode 100644
+index 0000000..a6c8f96
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/symbol_list_with_package_name/debug/generateDebugRFile/package-aware-r.txt
+@@ -0,0 +1 @@
++com.mobilepaymentssdkreactnative
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/symbol_list_with_package_name/release/generateReleaseRFile/package-aware-r.txt b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/symbol_list_with_package_name/release/generateReleaseRFile/package-aware-r.txt
+new file mode 100644
+index 0000000..a6c8f96
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/intermediates/symbol_list_with_package_name/release/generateReleaseRFile/package-aware-r.txt
+@@ -0,0 +1 @@
++com.mobilepaymentssdkreactnative
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab
+new file mode 100644
+index 0000000..3fee8c7
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream
+new file mode 100644
+index 0000000..02e9545
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream.len
+new file mode 100644
+index 0000000..9b00474
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.values.at
+new file mode 100644
+index 0000000..78bef0c
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i
+new file mode 100644
+index 0000000..47f1baf
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab
+new file mode 100644
+index 0000000..337ce5f
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream
+new file mode 100644
+index 0000000..7f2c2bd
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream.len
+new file mode 100644
+index 0000000..ab1f3a3
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.values.at
+new file mode 100644
+index 0000000..fe23964
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i
+new file mode 100644
+index 0000000..242aedb
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab
+new file mode 100644
+index 0000000..1641114
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream
+new file mode 100644
+index 0000000..7f2c2bd
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream.len
+new file mode 100644
+index 0000000..ab1f3a3
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.values.at
+new file mode 100644
+index 0000000..7d82dd0
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i
+new file mode 100644
+index 0000000..242aedb
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab
+new file mode 100644
+index 0000000..bdf584a
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream
+new file mode 100644
+index 0000000..333eafa
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream.len
+new file mode 100644
+index 0000000..762b014
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.len
+new file mode 100644
+index 0000000..2a17e6e
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.values.at
+new file mode 100644
+index 0000000..d674048
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i
+new file mode 100644
+index 0000000..716c056
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab
+new file mode 100644
+index 0000000..730263b
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream
+new file mode 100644
+index 0000000..c4fd4d6
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream.len
+new file mode 100644
+index 0000000..07129a9
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.len
+new file mode 100644
+index 0000000..9e27f73
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.values.at
+new file mode 100644
+index 0000000..fe94a3d
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i
+new file mode 100644
+index 0000000..a38e88e
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab
+new file mode 100644
+index 0000000..bdf584a
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream
+new file mode 100644
+index 0000000..e992bee
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream.len
+new file mode 100644
+index 0000000..209b35b
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.len
+new file mode 100644
+index 0000000..2a17e6e
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.values.at
+new file mode 100644
+index 0000000..46d6744
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i
+new file mode 100644
+index 0000000..adc6c70
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab
+new file mode 100644
+index 0000000..c4c271e
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream
+new file mode 100644
+index 0000000..119dd6b
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream.len
+new file mode 100644
+index 0000000..bff9925
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.len
+new file mode 100644
+index 0000000..ec8f944
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.values.at
+new file mode 100644
+index 0000000..0deb49e
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i
+new file mode 100644
+index 0000000..31fdfce
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab
+new file mode 100644
+index 0000000..ec20d20
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream
+new file mode 100644
+index 0000000..02e9545
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream.len
+new file mode 100644
+index 0000000..9b00474
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.values.at
+new file mode 100644
+index 0000000..f886296
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i
+new file mode 100644
+index 0000000..47f1baf
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab
+new file mode 100644
+index 0000000..e3fe687
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream
+new file mode 100644
+index 0000000..b425921
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream.len
+new file mode 100644
+index 0000000..1cf91b4
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.len
+new file mode 100644
+index 0000000..01bdaa1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.values.at
+new file mode 100644
+index 0000000..96a794f
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i
+new file mode 100644
+index 0000000..13aca7b
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab
+new file mode 100644
+index 0000000..fb41bcc
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream
+new file mode 100644
+index 0000000..91125ab
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream.len
+new file mode 100644
+index 0000000..701a27c
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.len
+new file mode 100644
+index 0000000..01bdaa1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.values.at
+new file mode 100644
+index 0000000..fdc18fe
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i
+new file mode 100644
+index 0000000..ad08bc0
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/counters.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/counters.tab
+new file mode 100644
+index 0000000..c393a51
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/counters.tab
+@@ -0,0 +1,2 @@
++3
++0
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab
+new file mode 100644
+index 0000000..49e29a1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream
+new file mode 100644
+index 0000000..02e9545
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream.len
+new file mode 100644
+index 0000000..9b00474
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.values.at
+new file mode 100644
+index 0000000..9f383b5
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i
+new file mode 100644
+index 0000000..47f1baf
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab
+new file mode 100644
+index 0000000..628f7cd
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream
+new file mode 100644
+index 0000000..636f34a
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream.len
+new file mode 100644
+index 0000000..29ce11c
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.values.at
+new file mode 100644
+index 0000000..23c6bfb
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i
+new file mode 100644
+index 0000000..e9905b3
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab
+new file mode 100644
+index 0000000..5bc5892
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream
+new file mode 100644
+index 0000000..4d413d7
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream.len
+new file mode 100644
+index 0000000..a40a3cd
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.len
+new file mode 100644
+index 0000000..73d50d0
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.values.at
+new file mode 100644
+index 0000000..dca264d
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i
+new file mode 100644
+index 0000000..e2c614a
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/last-build.bin b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/last-build.bin
+new file mode 100644
+index 0000000..ab668cb
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/cacheable/last-build.bin differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/classpath-snapshot/shrunk-classpath-snapshot.bin b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/classpath-snapshot/shrunk-classpath-snapshot.bin
+new file mode 100644
+index 0000000..9c0b63f
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileDebugKotlin/classpath-snapshot/shrunk-classpath-snapshot.bin differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab
+new file mode 100644
+index 0000000..e972704
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream
+new file mode 100644
+index 0000000..02e9545
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream.len
+new file mode 100644
+index 0000000..9b00474
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.values.at
+new file mode 100644
+index 0000000..e7fa226
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i
+new file mode 100644
+index 0000000..47f1baf
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab
+new file mode 100644
+index 0000000..337ce5f
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream
+new file mode 100644
+index 0000000..7f2c2bd
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream.len
+new file mode 100644
+index 0000000..ab1f3a3
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.values.at
+new file mode 100644
+index 0000000..fe23964
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i
+new file mode 100644
+index 0000000..242aedb
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab
+new file mode 100644
+index 0000000..1641114
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream
+new file mode 100644
+index 0000000..7f2c2bd
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream.len
+new file mode 100644
+index 0000000..ab1f3a3
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.values.at
+new file mode 100644
+index 0000000..7d82dd0
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i
+new file mode 100644
+index 0000000..242aedb
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab
+new file mode 100644
+index 0000000..bdf584a
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream
+new file mode 100644
+index 0000000..333eafa
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream.len
+new file mode 100644
+index 0000000..762b014
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.len
+new file mode 100644
+index 0000000..2a17e6e
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.values.at
+new file mode 100644
+index 0000000..d674048
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i
+new file mode 100644
+index 0000000..716c056
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab
+new file mode 100644
+index 0000000..730263b
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream
+new file mode 100644
+index 0000000..c4fd4d6
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream.len
+new file mode 100644
+index 0000000..07129a9
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.len
+new file mode 100644
+index 0000000..9e27f73
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.values.at
+new file mode 100644
+index 0000000..fe94a3d
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i
+new file mode 100644
+index 0000000..a38e88e
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab
+new file mode 100644
+index 0000000..bdf584a
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream
+new file mode 100644
+index 0000000..e992bee
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream.len
+new file mode 100644
+index 0000000..209b35b
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.len
+new file mode 100644
+index 0000000..2a17e6e
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.values.at
+new file mode 100644
+index 0000000..46d6744
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i
+new file mode 100644
+index 0000000..adc6c70
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/package-parts.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab
+new file mode 100644
+index 0000000..f13c826
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream
+new file mode 100644
+index 0000000..119dd6b
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream.len
+new file mode 100644
+index 0000000..bff9925
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.len
+new file mode 100644
+index 0000000..ec8f944
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.values.at
+new file mode 100644
+index 0000000..2d136a2
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i
+new file mode 100644
+index 0000000..31fdfce
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab
+new file mode 100644
+index 0000000..ec20d20
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream
+new file mode 100644
+index 0000000..02e9545
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream.len
+new file mode 100644
+index 0000000..9b00474
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.values.at
+new file mode 100644
+index 0000000..f886296
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i
+new file mode 100644
+index 0000000..47f1baf
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab
+new file mode 100644
+index 0000000..e3fe687
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream
+new file mode 100644
+index 0000000..b425921
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream.len
+new file mode 100644
+index 0000000..1cf91b4
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.len
+new file mode 100644
+index 0000000..01bdaa1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.values.at
+new file mode 100644
+index 0000000..96a794f
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i
+new file mode 100644
+index 0000000..13aca7b
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab
+new file mode 100644
+index 0000000..fb41bcc
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream
+new file mode 100644
+index 0000000..91125ab
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream.len
+new file mode 100644
+index 0000000..701a27c
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.len
+new file mode 100644
+index 0000000..01bdaa1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.values.at
+new file mode 100644
+index 0000000..fdc18fe
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i
+new file mode 100644
+index 0000000..ad08bc0
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/counters.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/counters.tab
+new file mode 100644
+index 0000000..c393a51
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/counters.tab
+@@ -0,0 +1,2 @@
++3
++0
+\ No newline at end of file
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab
+new file mode 100644
+index 0000000..49e29a1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream
+new file mode 100644
+index 0000000..02e9545
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream.len
+new file mode 100644
+index 0000000..9b00474
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.values.at
+new file mode 100644
+index 0000000..9f383b5
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i
+new file mode 100644
+index 0000000..47f1baf
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab
+new file mode 100644
+index 0000000..628f7cd
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream
+new file mode 100644
+index 0000000..636f34a
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream.len
+new file mode 100644
+index 0000000..29ce11c
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.values.at
+new file mode 100644
+index 0000000..23c6bfb
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i
+new file mode 100644
+index 0000000..e9905b3
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab
+new file mode 100644
+index 0000000..5bc5892
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream
+new file mode 100644
+index 0000000..4d413d7
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream.len
+new file mode 100644
+index 0000000..a40a3cd
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.len
+new file mode 100644
+index 0000000..73d50d0
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.values.at b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.values.at
+new file mode 100644
+index 0000000..dca264d
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab.values.at differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab_i b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab_i
+new file mode 100644
+index 0000000..e2c614a
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab_i differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab_i.len b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/caches-jvm/lookups/lookups.tab_i.len differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/last-build.bin b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/last-build.bin
+new file mode 100644
+index 0000000..a1b23c7
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/cacheable/last-build.bin differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/classpath-snapshot/shrunk-classpath-snapshot.bin b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/classpath-snapshot/shrunk-classpath-snapshot.bin
+new file mode 100644
+index 0000000..9c5d549
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/kotlin/compileReleaseKotlin/classpath-snapshot/shrunk-classpath-snapshot.bin differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/outputs/logs/manifest-merger-debug-report.txt b/node_modules/mobile-payments-sdk-react-native/android/build/outputs/logs/manifest-merger-debug-report.txt
+new file mode 100644
+index 0000000..27707b1
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/outputs/logs/manifest-merger-debug-report.txt
+@@ -0,0 +1,16 @@
++-- Merging decision tree log ---
++manifest
++ADDED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml:1:1-2:12
++INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml:1:1-2:12
++	package
++		INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml
++	xmlns:android
++		ADDED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml:1:11-69
++uses-sdk
++INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml reason: use-sdk injection requested
++INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml
++INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml
++	android:targetSdkVersion
++		INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml
++	android:minSdkVersion
++		INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/outputs/logs/manifest-merger-release-report.txt b/node_modules/mobile-payments-sdk-react-native/android/build/outputs/logs/manifest-merger-release-report.txt
+new file mode 100644
+index 0000000..27707b1
+--- /dev/null
++++ b/node_modules/mobile-payments-sdk-react-native/android/build/outputs/logs/manifest-merger-release-report.txt
+@@ -0,0 +1,16 @@
++-- Merging decision tree log ---
++manifest
++ADDED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml:1:1-2:12
++INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml:1:1-2:12
++	package
++		INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml
++	xmlns:android
++		ADDED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml:1:11-69
++uses-sdk
++INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml reason: use-sdk injection requested
++INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml
++INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml
++	android:targetSdkVersion
++		INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml
++	android:minSdkVersion
++		INJECTED from /Users/tom/Documents/GitHub/QuoteMate/node_modules/mobile-payments-sdk-react-native/android/src/main/AndroidManifestNew.xml
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/compileDebugJavaWithJavac/previous-compilation-data.bin b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/compileDebugJavaWithJavac/previous-compilation-data.bin
+new file mode 100644
+index 0000000..e410a16
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/compileDebugJavaWithJavac/previous-compilation-data.bin differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/compileReleaseJavaWithJavac/previous-compilation-data.bin b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/compileReleaseJavaWithJavac/previous-compilation-data.bin
+new file mode 100644
+index 0000000..0802f66
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/compileReleaseJavaWithJavac/previous-compilation-data.bin differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/META-INF/mobile-payments-sdk-react-native_debug.kotlin_module b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/META-INF/mobile-payments-sdk-react-native_debug.kotlin_module
+new file mode 100644
+index 0000000..7983244
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/META-INF/mobile-payments-sdk-react-native_debug.kotlin_module differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.class
+new file mode 100644
+index 0000000..98ec5cd
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.class
+new file mode 100644
+index 0000000..aefada9
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.class
+new file mode 100644
+index 0000000..b0a5300
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.class
+new file mode 100644
+index 0000000..5ca1d94
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.class
+new file mode 100644
+index 0000000..e4a79e1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/UtilsKt.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/UtilsKt.class
+new file mode 100644
+index 0000000..1676727
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/debug/com/mobilepaymentssdkreactnative/UtilsKt.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/META-INF/mobile-payments-sdk-react-native_release.kotlin_module b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/META-INF/mobile-payments-sdk-react-native_release.kotlin_module
+new file mode 100644
+index 0000000..7983244
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/META-INF/mobile-payments-sdk-react-native_release.kotlin_module differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.class
+new file mode 100644
+index 0000000..ff6fca1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$Companion.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.class
+new file mode 100644
+index 0000000..aefada9
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule$WhenMappings.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.class
+new file mode 100644
+index 0000000..d1627a5
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativeModule.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.class
+new file mode 100644
+index 0000000..cbeab80
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/MobilePaymentsSdkReactNativePackage.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.class
+new file mode 100644
+index 0000000..e4a79e1
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/UtilsKt$WhenMappings.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/UtilsKt.class b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/UtilsKt.class
+new file mode 100644
+index 0000000..7ca0763
+Binary files /dev/null and b/node_modules/mobile-payments-sdk-react-native/android/build/tmp/kotlin-classes/release/com/mobilepaymentssdkreactnative/UtilsKt.class differ
+diff --git a/node_modules/mobile-payments-sdk-react-native/ios/MobilePaymentsSdkReactNative.swift b/node_modules/mobile-payments-sdk-react-native/ios/MobilePaymentsSdkReactNative.swift
+index 440d16e..91a7486 100644
+--- a/node_modules/mobile-payments-sdk-react-native/ios/MobilePaymentsSdkReactNative.swift
++++ b/node_modules/mobile-payments-sdk-react-native/ios/MobilePaymentsSdkReactNative.swift
+@@ -1,7 +1,6 @@
+ 
+ import UIKit
+ import SquareMobilePaymentsSDK
+-import MockReaderUI
+ import React
+ 
+ @objc(MobilePaymentsSdkReactNative)
+@@ -226,52 +225,17 @@ class MobilePaymentsSdkReactNative: RCTEventEmitter {
+         return resolve(mobilePaymentsSDK.readerManager.tapToPaySettings.isDeviceCapable)
+     }
+ 
+-    /// Mock Readers, available only in Sandbox: https://developer.squareup.com/docs/mobile-payments-sdk/ios#mock-readers
+-    private lazy var mockReaderUI: MockReaderUI? = {
+-        guard mobilePaymentsSDK.settingsManager.sdkSettings.environment == .sandbox else {
+-            return nil
+-        }
+-        do {
+-            return try MockReaderUI(for: mobilePaymentsSDK)
+-        } catch {
+-            assertionFailure("Could not instantiate a mock reader UI: \(error.localizedDescription)")
+-            return nil
+-        }
+-    }()
+-
++    /// MockReaderUI is removed from production builds — its framework triggers
++    /// ITMS-90338 (private API `initWithDelegateQueue:`) on App Store upload.
++    /// The JS API surface is preserved but always rejects.
+     @objc(showMockReaderUI:withRejecter:)
+     func showMockReaderUI(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+-        DispatchQueue.main.async { [weak self] in
+-            guard let self = self else { return }
+-            if let mockReaderUI = self.mockReaderUI {
+-                do {
+-                    try mockReaderUI.present()
+-                    resolve("Mock Reader presented successfully.")
+-                } catch {
+-                    let anError = error as NSError
+-                    reject("MOCK_READER_ERROR", "Can't show mock reader. Error: \(error.localizedDescription).", anError.reactNativeError)
+-                }
+-            } else {
+-                reject("MOCK_READER_ERROR", "Can't show mock reader. Check your environment.", nil)
+-            }
+-        }
++        reject("MOCK_READER_ERROR", "Mock Reader UI is not available in this build.", nil)
+     }
+ 
+     @objc(hideMockReaderUI:withRejecter:)
+     func hideMockReaderUI(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+-        DispatchQueue.main.async { [weak self] in
+-            guard let self = self else {
+-                reject("HIDE_MOCK_READER_UI_ERROR", "Failed to hide Mock Reader UI: Self is nil", nil)
+-                return
+-            }
+-
+-            if let mockReaderUI = self.mockReaderUI {
+-                mockReaderUI.dismiss()
+-                resolve("Mock Reader UI hidden successfully")
+-            } else {
+-                reject("HIDE_MOCK_READER_UI_ERROR", "Mock Reader UI is not presented", nil)
+-            }
+-        }
++        reject("HIDE_MOCK_READER_UI_ERROR", "Mock Reader UI is not available in this build.", nil)
+     }
+ 
+     /// Start Payment: https://developer.squareup.com/docs/mobile-payments-sdk/ios/take-payments
+diff --git a/node_modules/mobile-payments-sdk-react-native/mobile-payments-sdk-react-native.podspec b/node_modules/mobile-payments-sdk-react-native/mobile-payments-sdk-react-native.podspec
+index d2a1077..a253f00 100644
+--- a/node_modules/mobile-payments-sdk-react-native/mobile-payments-sdk-react-native.podspec
++++ b/node_modules/mobile-payments-sdk-react-native/mobile-payments-sdk-react-native.podspec
+@@ -14,7 +14,8 @@ Pod::Spec.new do |s|
+   s.platforms    = { :ios => "16" }
+   s.source       = { :git => "https://github.com/square//mobile-payments-sdk-react-native.git", :tag => "#{s.version}" }
+ 
+-  s.dependency "MockReaderUI", "~> 2.4.0"
++  # MockReaderUI removed: its framework references private API initWithDelegateQueue:
++  # which triggers ITMS-90338 on App Store upload.
+   s.dependency "SquareMobilePaymentsSDK", "~> 2.4.0"
+ 
+   s.source_files = "ios/**/*.{h,m,mm,swift}"

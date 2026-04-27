@@ -78,18 +78,18 @@ export function getScreenForPhase(phase: TourPhase): { screen: string; nested?: 
     case 'dashboardComplete':
       return { screen: 'Main' };
     case 'jobDetails':
-      return { screen: 'NewQuote', nested: 'JobDetails' };
+      return { screen: 'NewJob', nested: 'Details' };
     case 'customerDetails':
-      return { screen: 'NewQuote', nested: 'CustomerDetails' };
+      return { screen: 'NewJob', nested: 'CustomerDetails' };
     case 'materialsList':
     case 'materialsListItems':
     case 'materialsListAdded':
-      return { screen: 'NewQuote', nested: 'MaterialsList' };
+      return { screen: 'NewJob', nested: 'MaterialsList' };
     case 'addMaterial':
-      return { screen: 'NewQuote', nested: 'AddMaterial' };
+      return { screen: 'NewJob', nested: 'AddMaterial' };
     case 'laborMarkup':
-      return { screen: 'NewQuote', nested: 'LaborMarkup' };
+      return { screen: 'NewJob', nested: 'LaborMarkup' };
     case 'quotePreview':
-      return { screen: 'NewQuote', nested: 'QuotePreview' };
+      return { screen: 'NewJob', nested: 'JobPreview' };
   }
 }

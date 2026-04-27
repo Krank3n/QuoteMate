@@ -120,8 +120,8 @@ export function UnifiedTourController() {
     switch (next) {
       case 'jobDetails':
         // Dashboard complete → navigate into quote flow
-        navigation.navigate('NewQuote', {
-          screen: 'JobDetails',
+        navigation.navigate('NewJob', {
+          screen: 'Details',
           params: { fromTour: true },
         });
         setUnifiedTourPhase('jobDetails');
@@ -201,7 +201,7 @@ export function UnifiedTourController() {
 
       case 'quotePreview':
         // Labor complete → navigate to preview
-        navigation.navigate('QuotePreview');
+        navigation.navigate('JobPreview');
         setUnifiedTourPhase('quotePreview');
         break;
 

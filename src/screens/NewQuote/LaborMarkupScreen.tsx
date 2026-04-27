@@ -1026,6 +1026,7 @@ export function LaborMarkupScreen() {
         <FixedBottomButton
           label={isEditFromPreview ? 'Save' : (mode === 'invoice' ? "Next: Preview Invoice" : "Next: Preview Quote")}
           onPress={isEditFromPreview ? handleSaveAndReturn : handleNext}
+          disableKeyboardSticky
         />
       </View>
 

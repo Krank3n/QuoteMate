@@ -21,6 +21,31 @@ import {
 import { auth, db } from '../config/firebase';
 import { Quote, BusinessSettings, SubscriptionStatus, Invoice, ReferralInfo, Contact } from '../types';
 
+/**
+ * Map any legacy invoice-style status that lived on a quote (back when Quote
+ * had paid/partial/overdue in its enum) onto the closest current quote status.
+ * One-shot read-time normalisation — we don't migrate the docs, we just stop
+ * the bad values reaching the typed Quote shape.
+ */
+function normalizeQuoteStatus(status: any): Quote['status'] {
+  switch (status) {
+    case 'paid':
+    case 'partial':
+      return 'completed';
+    case 'overdue':
+      return 'sent';
+    case 'draft':
+    case 'sent':
+    case 'accepted':
+    case 'rejected':
+    case 'completed':
+    case 'cancelled':
+      return status;
+    default:
+      return 'draft';
+  }
+}
+
 /** Recursively strip undefined values from an object (Firestore rejects them) */
 function stripUndefined(obj: any): any {
   if (obj === null || obj === undefined || typeof obj !== 'object') return obj;
@@ -120,6 +145,7 @@ class FirestoreService {
         acceptanceToken: quote.acceptanceToken || null,
         respondedBy: quote.respondedBy || null,
         clientNotes: quote.clientNotes || null,
+        invoicedAt: safeIsoString(quote.invoicedAt),
         syncedAt: new Date().toISOString(),
       };
       const tokenCreatedAtIso = safeIsoString(quote.acceptanceTokenCreatedAt);
@@ -153,6 +179,8 @@ class FirestoreService {
           ...data,
           createdAt,
           updatedAt: toDate(data.updatedAt) || createdAt,
+          status: normalizeQuoteStatus(data.status),
+          invoicedAt: toDate(data.invoicedAt),
           // Handle new quote acceptance fields
           acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
           respondedAt: toDate(data.respondedAt),
@@ -432,6 +460,8 @@ class FirestoreService {
             ...data,
             createdAt,
             updatedAt: toDate(data.updatedAt) || createdAt,
+            status: normalizeQuoteStatus(data.status),
+            invoicedAt: toDate(data.invoicedAt),
             // Handle new quote acceptance fields
             acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
             respondedAt: toDate(data.respondedAt),

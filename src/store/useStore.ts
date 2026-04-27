@@ -7,10 +7,14 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
+import { Document } from '../types/document';
 import { TourPhase } from '../components/tour/tourFlow';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
+import { reconcileNextNumber } from '../utils/nextNumber';
 import { firestoreService } from '../services/firestoreService';
+import { documentService } from '../services/documentService';
+import { ensureJobForDocument, ensureJobForQuote } from './useJobStore';
 import { auth } from '../config/firebase';
 
 /**
@@ -107,7 +111,7 @@ interface AppState {
 
   // Invoice operations
   createNewInvoice: () => void;
-  createInvoiceFromQuote: (quote: Quote) => Invoice;
+  createInvoiceFromQuote: (quote: Quote) => Promise<Invoice>;
   setCurrentInvoice: (invoice: Invoice | null) => void;
   updateInvoice: (invoice: Invoice) => void;
   saveInvoice: (invoice: Invoice) => Promise<void>;
@@ -163,6 +167,28 @@ interface AppState {
   pushPaymentToXero: (invoiceId: string, xeroInvoiceId: string, amount: number, date: Date, method?: string) => Promise<void>;
   xeroBulkSync: (invoiceIds: string[]) => Promise<{ successCount: number; totalCount: number }>;
 
+  // Unified Documents (phase-5 client cutover) — reads from
+  // users/{uid}/documents and writes both there AND to the legacy collection
+  // via the canonical adapter so older app builds still see live data.
+  documents: Document[];
+  documentsLoaded: boolean;
+  loadDocuments: () => Promise<void>;
+  listenToDocuments: () => void;
+  saveDocument: (doc: Document) => Promise<void>;
+  getDocumentById: (id: string) => Document | undefined;
+  getDocumentByLegacyId: (legacyId: string) => Document | undefined;
+  convertDocumentToInvoice: (documentId: string) => Promise<Document>;
+  /**
+   * Clone a Document for a new Job (Duplicate flow). Keeps scope/labor/
+   * materials/terms; resets stage to quote_accepted, money state to zero,
+   * pay-link fields to undefined, and reassigns jobId to the new Job.
+   * Returns the cloned Document.
+   */
+  duplicateDocumentForJob: (
+    sourceDocumentId: string,
+    newJobId: string,
+  ) => Promise<Document>;
+
   // Cleanup
   clearAllData: () => Promise<void>;
 }
@@ -210,6 +236,25 @@ const getMonthEnd = () => {
   return new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 };
 
+// Cached map keyed on the documents array identity. Rebuilt whenever the
+// store swaps in a new array (every set({ documents })), so lookups stay
+// O(1) during the hot path (screen focus, preview paint).
+let legacyDocIndexCache: { docs: Document[]; map: Map<string, Document> } | null = null;
+function buildLegacyDocIndex(docs: Document[]): Map<string, Document> {
+  if (legacyDocIndexCache && legacyDocIndexCache.docs === docs) {
+    return legacyDocIndexCache.map;
+  }
+  const map = new Map<string, Document>();
+  for (const d of docs) {
+    // Doc id itself is the common case — invoiceId/quoteId lookups go here.
+    if (!map.has(d.id)) map.set(d.id, d);
+    if (d.legacyQuoteId && !map.has(d.legacyQuoteId)) map.set(d.legacyQuoteId, d);
+    if (d.legacyInvoiceId && !map.has(d.legacyInvoiceId)) map.set(d.legacyInvoiceId, d);
+  }
+  legacyDocIndexCache = { docs, map };
+  return map;
+}
+
 // Create the store
 export const useStore = create<AppState>((set, get) => ({
   // Initial state
@@ -240,6 +285,8 @@ export const useStore = create<AppState>((set, get) => ({
   unifiedTourActive: false,
   unifiedTourPhase: null,
   unifiedTourQuoteId: null,
+  documents: [],
+  documentsLoaded: false,
 
   // Business settings
   setBusinessSettings: async (settings: BusinessSettings) => {
@@ -341,8 +388,12 @@ export const useStore = create<AppState>((set, get) => ({
   saveDraft: async (quote: Quote) => {
     try {
       const { quotes } = get();
+      // Phase-8: ensure a Job exists before the legacy quote hits Firestore —
+      // the mirror carries jobId into the unified Document, and the trigger
+      // needs an existing Job to update aggregates against.
+      const withJob = await ensureJobForQuote(quote);
       const calculatedQuote = updateQuoteCalculations({
-        ...quote,
+        ...withJob,
         updatedAt: new Date(),
       });
 
@@ -448,7 +499,16 @@ export const useStore = create<AppState>((set, get) => ({
       return bTs - aTs;
     });
 
-    set({ quotes: merged });
+    // Reconcile the predicted next quote number against the merged set so
+    // the preview header doesn't predict a value that collides with
+    // Firestore. Cheap — one scan over the array.
+    const reconciledNextNumber = reconcileNextNumber({
+      items: merged,
+      field: (q) => q.quoteNumber,
+      prefix: 'Q',
+      cached: get().nextQuoteNumber,
+    });
+    set({ quotes: merged, nextQuoteNumber: reconciledNextNumber });
   },
 
   // Save quote to storage
@@ -456,10 +516,13 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const { quotes, getNextQuoteNumber, subscriptionStatus } = get();
 
+      // Phase-8: auto-create a Job on first save if one isn't linked already.
+      const withJob = await ensureJobForQuote(quote);
+
       // Update or add quote
-      const existingIndex = quotes.findIndex((q) => q.id === quote.id);
+      const existingIndex = quotes.findIndex((q) => q.id === withJob.id);
       const isNewQuote = existingIndex < 0;
-      let calculatedQuote = updateQuoteCalculations(quote);
+      let calculatedQuote = updateQuoteCalculations(withJob);
 
       // For new quotes, enforce quota server-side (atomic check + increment)
       if (isNewQuote && auth.currentUser) {
@@ -667,7 +730,13 @@ export const useStore = create<AppState>((set, get) => ({
             STORAGE_KEYS.QUOTES,
             JSON.stringify(backfilled)
           );
-          set({ quotes: backfilled });
+          const reconciledNextNumber = reconcileNextNumber({
+            items: backfilled,
+            field: (q) => q.quoteNumber,
+            prefix: 'Q',
+            cached: get().nextQuoteNumber,
+          });
+          set({ quotes: backfilled, nextQuoteNumber: reconciledNextNumber });
           return;
         }
       }
@@ -686,7 +755,13 @@ export const useStore = create<AppState>((set, get) => ({
         const quotes = parsed.map((q) =>
           q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q
         );
-        set({ quotes });
+        const reconciledNextNumber = reconcileNextNumber({
+          items: quotes,
+          field: (q) => q.quoteNumber,
+          prefix: 'Q',
+          cached: get().nextQuoteNumber,
+        });
+        set({ quotes, nextQuoteNumber: reconciledNextNumber });
 
         // Sync to cloud if user is signed in but no cloud data exists
         if (auth.currentUser && quotes.length > 0) {
@@ -1033,11 +1108,20 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   getNextQuoteNumber: async () => {
-    const { nextQuoteNumber } = get();
-    const quoteNumber = `Q-${String(nextQuoteNumber).padStart(3, '0')}`;
+    // Reconcile against the actually-persisted quote numbers so a fresh
+    // install / second device doesn't restart the counter from Q-001
+    // (see utils/nextNumber.ts for the why).
+    const { nextQuoteNumber: cached, quotes } = get();
+    const next = reconcileNextNumber({
+      items: quotes,
+      field: (q) => q.quoteNumber,
+      prefix: 'Q',
+      cached,
+    });
+    const quoteNumber = `Q-${String(next).padStart(3, '0')}`;
 
     // Increment and save for next time
-    const newNextQuoteNumber = nextQuoteNumber + 1;
+    const newNextQuoteNumber = next + 1;
     await AsyncStorage.setItem(STORAGE_KEYS.NEXT_QUOTE_NUMBER, String(newNextQuoteNumber));
     set({ nextQuoteNumber: newNextQuoteNumber });
 
@@ -1080,7 +1164,37 @@ export const useStore = create<AppState>((set, get) => ({
     set({ currentInvoice: newInvoice });
   },
 
-  createInvoiceFromQuote: (quote: Quote) => {
+  createInvoiceFromQuote: async (quote: Quote) => {
+    // Phase-5: prefer the unified convertDocumentToInvoice path when a
+    // matching document exists (server canonicalises via setDocumentStage,
+    // mirror trigger projects to the legacy invoices collection).
+    const matchingDoc = get().getDocumentByLegacyId(quote.id);
+    if (matchingDoc && matchingDoc.type === 'quote' && !matchingDoc.invoicedAt) {
+      try {
+        const converted = await get().convertDocumentToInvoice(matchingDoc.id);
+        const invoice: Invoice = (await import('../types/documentAdapter')).documentToInvoice(converted);
+        set({ currentInvoice: invoice });
+        return invoice;
+      } catch {
+        // Fall through to the legacy path on failure.
+      }
+    }
+
+    // Idempotency: if this quote has already been invoiced, return the
+    // existing invoice instead of minting a duplicate. Tapping Convert twice
+    // (or doing it on two devices) used to spawn two invoices and the
+    // customer would receive two payment links for the same job.
+    if (quote.invoiceId) {
+      const { invoices } = get();
+      const existing = invoices.find((i) => i.id === quote.invoiceId);
+      if (existing) {
+        set({ currentInvoice: existing });
+        return existing;
+      }
+      // invoiceId set but the invoice is gone (deleted) — fall through and
+      // mint a fresh one. The back-reference will be overwritten below.
+    }
+
     const now = new Date();
     // If the customer paid a deposit against this quote, deduct it from the
     // invoice total. The deposit is rendered as a credit line on the PDF/email
@@ -1129,6 +1243,27 @@ export const useStore = create<AppState>((set, get) => ({
     };
 
     set({ currentInvoice: newInvoice });
+
+    // Stamp the back-reference on the source quote so subsequent convert
+    // taps short-circuit. Use the existing saveQuote so AsyncStorage +
+    // Firestore + the realtime listener stay consistent.
+    const { saveQuote } = get();
+    const sourceQuote = get().quotes.find((q) => q.id === quote.id);
+    if (sourceQuote) {
+      try {
+        await saveQuote({
+          ...sourceQuote,
+          invoiceId: newInvoice.id,
+          invoicedAt: now,
+          updatedAt: now,
+        });
+      } catch {
+        // Non-fatal — the invoice is still created locally; the back-ref
+        // can re-stamp on the next save. Re-converting before the back-ref
+        // lands will create a duplicate, but that's the existing behaviour.
+      }
+    }
+
     return newInvoice;
   },
 
@@ -1171,9 +1306,14 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const { invoices, getNextInvoiceNumber } = get();
 
-      const existingIndex = invoices.findIndex((i) => i.id === invoice.id);
+      // Phase-8: auto-create a Job on first save if one isn't linked already.
+      // Converted-from-quote invoices already carry jobId, so this is a no-op
+      // for that common path.
+      const withJob = await ensureJobForQuote(invoice);
+
+      const existingIndex = invoices.findIndex((i) => i.id === withJob.id);
       const isNewInvoice = existingIndex < 0;
-      let updatedInvoice = { ...invoice, updatedAt: new Date() };
+      let updatedInvoice = { ...withJob, updatedAt: new Date() };
 
       // Assign invoice number for new invoices that don't have one
       if (isNewInvoice && !updatedInvoice.invoiceNumber) {
@@ -1270,7 +1410,13 @@ export const useStore = create<AppState>((set, get) => ({
       return bTs - aTs;
     });
 
-    set({ invoices: merged });
+    const reconciledNextNumber = reconcileNextNumber({
+      items: merged,
+      field: (i) => i.invoiceNumber,
+      prefix: 'INV',
+      cached: get().nextInvoiceNumber,
+    });
+    set({ invoices: merged, nextInvoiceNumber: reconciledNextNumber });
   },
 
   deleteInvoice: async (invoiceId: string) => {
@@ -1313,7 +1459,13 @@ export const useStore = create<AppState>((set, get) => ({
             STORAGE_KEYS.INVOICES,
             JSON.stringify(backfilled)
           );
-          set({ invoices: backfilled });
+          const reconciledNextNumber = reconcileNextNumber({
+            items: backfilled,
+            field: (i) => i.invoiceNumber,
+            prefix: 'INV',
+            cached: get().nextInvoiceNumber,
+          });
+          set({ invoices: backfilled, nextInvoiceNumber: reconciledNextNumber });
           return;
         }
       }
@@ -1338,7 +1490,13 @@ export const useStore = create<AppState>((set, get) => ({
         const invoices = parsed.map((i) =>
           i.laborMarkup === undefined ? { ...i, laborMarkup: i.markup } : i
         );
-        set({ invoices });
+        const reconciledNextNumber = reconcileNextNumber({
+          items: invoices,
+          field: (i) => i.invoiceNumber,
+          prefix: 'INV',
+          cached: get().nextInvoiceNumber,
+        });
+        set({ invoices, nextInvoiceNumber: reconciledNextNumber });
 
         // Sync to cloud if user is signed in but no cloud data exists
         if (auth.currentUser && invoices.length > 0) {
@@ -1365,11 +1523,19 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   getNextInvoiceNumber: async () => {
-    const { nextInvoiceNumber } = get();
-    const invoiceNumber = `INV-${String(nextInvoiceNumber).padStart(3, '0')}`;
+    // Reconcile against the actually-persisted invoice numbers —
+    // mirror of getNextQuoteNumber's handling.
+    const { nextInvoiceNumber: cached, invoices } = get();
+    const next = reconcileNextNumber({
+      items: invoices,
+      field: (i) => i.invoiceNumber,
+      prefix: 'INV',
+      cached,
+    });
+    const invoiceNumber = `INV-${String(next).padStart(3, '0')}`;
 
     // Increment and save for next time
-    const newNextInvoiceNumber = nextInvoiceNumber + 1;
+    const newNextInvoiceNumber = next + 1;
     await AsyncStorage.setItem(STORAGE_KEYS.NEXT_INVOICE_NUMBER, String(newNextInvoiceNumber));
     set({ nextInvoiceNumber: newNextInvoiceNumber });
 
@@ -1875,6 +2041,171 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  // Unified Documents
+  loadDocuments: async () => {
+    if (!auth.currentUser) return;
+    try {
+      const docs = await documentService.loadDocuments();
+      set({ documents: docs, documentsLoaded: true });
+    } catch {
+      set({ documentsLoaded: true });
+    }
+  },
+
+  listenToDocuments: () => {
+    if (!auth.currentUser) return;
+    documentService.listenToDocuments((documents) => {
+      set({ documents, documentsLoaded: true });
+    });
+  },
+
+  saveDocument: async (document: Document) => {
+    // Phase-8: auto-create a Job if this doc isn't linked to one yet. The
+    // server trigger (onDocumentWriteSyncJob) needs an existing Job before
+    // aggregates can land — so we create it client-side before the save.
+    const withJob = await ensureJobForDocument(document);
+    const next = { ...withJob, updatedAt: Date.now() };
+    // Optimistic local update
+    set((state) => {
+      const existing = state.documents.findIndex((d) => d.id === next.id);
+      const documents = existing >= 0
+        ? state.documents.map((d, i) => (i === existing ? next : d))
+        : [...state.documents, next];
+      return { documents };
+    });
+    if (auth.currentUser) {
+      try {
+        await documentService.saveDocument(next);
+      } catch (err) {
+        logSyncError(next.type === 'invoice' ? 'invoice' : 'quote', next.id, err);
+      }
+    }
+  },
+
+  getDocumentById: (id: string) => {
+    return get().documents.find((d) => d.id === id);
+  },
+
+  getDocumentByLegacyId: (legacyId: string) => {
+    const docs = get().documents;
+    const index = buildLegacyDocIndex(docs);
+    return index.get(legacyId);
+  },
+
+  convertDocumentToInvoice: async (documentId: string) => {
+    const existing = get().getDocumentById(documentId);
+    if (!existing) {
+      throw new Error('Document not found');
+    }
+    // Idempotent: already an invoice — short-circuit before any RPC.
+    if (existing.type === 'invoice' || existing.invoicedAt) {
+      return existing;
+    }
+    // Stamp client-side first so the UI updates immediately, then ask the
+    // server to canonicalise via setDocumentStage. The server is the source
+    // of truth for the stage transition; the optimistic update keeps the
+    // dashboard responsive on slow connections.
+    const now = Date.now();
+    const depositCredit = Math.max(0, Number(existing.depositPaid) || 0);
+    const adjustedTotal = Math.max(0, (existing.total || 0) - depositCredit);
+    const invoiceNumber = await get().getNextInvoiceNumber();
+    const optimistic: Document = {
+      ...existing,
+      type: 'invoice',
+      // Convert flips type but the invoice hasn't actually been sent
+      // yet — keep the doc as a draft so the tradie still has to hit
+      // "Send Invoice" to actually deliver it. sendDocumentEmail
+      // transitions draft → invoice_sent on send.
+      stage: 'draft',
+      number: invoiceNumber,
+      invoicedAt: now,
+      issueDate: now,
+      dueDate: calculateDueDate(new Date(now), 'net_14').getTime(),
+      paymentTerms: 'net_14',
+      total: adjustedTotal,
+      legacyInvoiceId: existing.id,
+      updatedAt: now,
+    };
+    set((state) => ({
+      documents: state.documents.map((d) => (d.id === documentId ? optimistic : d)),
+    }));
+    if (auth.currentUser) {
+      try {
+        const { httpsCallable, getFunctions } = await import('firebase/functions');
+        const fn = httpsCallable(getFunctions(), 'convertDocumentToInvoice');
+        await fn({ documentId, invoiceNumber });
+      } catch (err) {
+        // Server failed — keep the optimistic state but log so the user can
+        // retry. Mirror trigger will reconcile on the next legacy write.
+        logSyncError('invoice', documentId, err);
+      }
+    }
+    return optimistic;
+  },
+
+  duplicateDocumentForJob: async (sourceDocumentId: string, newJobId: string) => {
+    const source = get().getDocumentById(sourceDocumentId);
+    if (!source) throw new Error('Source document not found');
+    const now = Date.now();
+    // Fresh quote number for the new visit — the source's number still
+    // refers to the original.
+    const nextNumber = await get().getNextQuoteNumber();
+    // Regenerate ids on nested collections so nothing aliases back to the
+    // original; reset money + pay-link state so the new visit starts clean.
+    const clone: Document = {
+      ...source,
+      id: generateId(),
+      jobId: newJobId,
+      type: 'quote',
+      stage: 'quote_accepted',
+      number: nextNumber,
+      // Fresh lifecycle timestamps — the old ones refer to the old visit.
+      createdAt: now,
+      updatedAt: now,
+      sentAt: undefined,
+      acceptedAt: now,
+      invoicedAt: undefined,
+      issueDate: undefined,
+      dueDate: undefined,
+      // Money state — nothing has moved yet on this new visit.
+      depositPaid: 0,
+      depositPaidAt: undefined,
+      paidTotal: 0,
+      paidInFullAt: undefined,
+      payments: [],
+      // Pay-link state — new visit needs new links.
+      depositPaymentLinkId: undefined,
+      depositPaymentLinkUrl: undefined,
+      depositPaymentLinkCreatedAt: undefined,
+      depositSquarePaymentId: undefined,
+      squarePaymentLinkId: undefined,
+      squarePaymentLinkUrl: undefined,
+      squarePaymentId: undefined,
+      squarePaidAt: undefined,
+      activePaymentLink: undefined,
+      archivedPaymentLinks: undefined,
+      // Xero state belongs to the source invoice, not to this new visit.
+      xeroInvoiceId: undefined,
+      xeroSyncStatus: undefined,
+      xeroSyncedAt: undefined,
+      xeroSyncError: undefined,
+      legacyInvoiceId: undefined,
+      legacyQuoteId: undefined,
+      // Re-id nested rows so edits on one don't splash onto the other.
+      materials: (source.materials ?? []).map((m) => ({ ...m, id: generateId() })),
+      sections: (source.sections ?? []).map((s) => ({
+        ...s,
+        id: generateId(),
+      })),
+      // Photos are visit-specific; drop them.
+      photos: [],
+      // Draft email body — stale for a new visit.
+      draftEmailBody: undefined,
+    };
+    await get().saveDocument(clone);
+    return clone;
+  },
+
   // Clear all data (for logout)
   clearAllData: async () => {
     try {
@@ -1912,6 +2243,8 @@ export const useStore = create<AppState>((set, get) => ({
         contacts: [],
         contactsLoaded: false,
         xeroContacts: [],
+        documents: [],
+        documentsLoaded: false,
       });
     } catch (error) {
       throw error;

@@ -17,19 +17,27 @@ import { useNavigation, useScrollToTop, useIsFocused } from '@react-navigation/n
 import { format } from 'date-fns';
 
 import { useStore } from '../store/useStore';
+import { useJobStore } from '../store/useJobStore';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
 import { WebContainer } from '../components/WebContainer';
-import { QuoteCard } from '../components/QuoteCard';
+import { JobCard } from '../components/JobCard';
+import { JobStageSheet } from '../components/JobStageSheet';
+import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
+import type { Job, JobStage } from '../../shared/job/types';
+import { quoteToDocument } from '../types/documentAdapter';
 import { AlertModal } from '../components/AlertModal';
 import { updateActivityTimestamp } from '../services/emailService';
 import { AnimatedNumber } from '../components/AnimatedNumber';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
-import { StatusSheet, QUOTE_STATUS_OPTIONS } from '../components/StatusSheet';
+import { StageSheet } from '../components/StageSheet';
+import { applyStageChange } from '../utils/applyStageChange';
+import type { Document, DocumentStage } from '../types/document';
 import { SwipeableCard } from '../components/SwipeableCard';
+import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap, successTap } from '../utils/haptics';
 import { TrialBanner } from '../components/TrialBanner';
 import { SyncErrorBanner } from '../components/SyncErrorBanner';
@@ -251,6 +259,7 @@ export function DashboardScreen() {
     }
   }, []);
   const navigation = useNavigation<any>();
+  const jobActions = useJobActionsSheet(navigation);
   const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft, hasSeenTour, unifiedTourActive, unifiedTourPhase, startUnifiedTour } = useStore();
   const { registerRef } = useTourRefs();
   const [tourActive, setTourActive] = useState(false);
@@ -273,11 +282,8 @@ export function DashboardScreen() {
     if (recentQuoteCardRef.current) registerRef('recentQuoteCard', recentQuoteCardRef.current);
   });
 
-  const [statusSheetVisible, setStatusSheetVisible] = useState(false);
-  const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
-  const [convertModalVisible, setConvertModalVisible] = useState(false);
-  const [quoteToConvert, setQuoteToConvert] = useState<Quote | null>(null);
-  const [isConverting, setIsConverting] = useState(false);
+  const [stageSheetVisible, setStageSheetVisible] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(quotes.length > 0);
   useEffect(() => {
@@ -348,10 +354,37 @@ export function DashboardScreen() {
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] || null;
   }, [quotes]);
 
-  // Recent quotes (last 3)
+  // Recent quotes (last 3) — kept so the existing quote-scoped logic
+  // (tour dummy data) still resolves.
   const recentQuotes = [...quotes]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 3);
+
+  // Recent jobs (last 3) — Phase 12 replaces the "Recent Quotes" card on
+  // the dashboard. Jobs are the new primary object.
+  const jobs = useJobStore((s) => s.jobs);
+  const saveJob = useJobStore((s) => s.saveJob);
+  const recentJobs = useMemo(
+    () =>
+      [...jobs]
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, 3),
+    [jobs],
+  );
+
+  const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
+  const [scheduleSheetJob, setScheduleSheetJob] = useState<Job | null>(null);
+  const handleJobStagePress = (job: Job) => setStageSheetJob(job);
+  const handleJobStageSelect = async (target: JobStage) => {
+    if (!stageSheetJob) return;
+    const job = stageSheetJob;
+    setStageSheetJob(null);
+    try {
+      await saveJob({ ...job, stage: target });
+    } catch {
+      Alert.alert('Error', 'Failed to update stage. Please try again.');
+    }
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -365,7 +398,7 @@ export function DashboardScreen() {
   const handleContinueDraft = (draft: Quote) => {
     lightTap();
     setCurrentQuote(draft);
-    navigation.navigate('NewQuote' as never, { screen: draft.draftStep || 'JobDetails' } as never);
+    navigation.navigate('NewJob' as never, { screen: draft.draftStep || 'Details' } as never);
   };
 
   const handleDeleteDraft = () => {
@@ -383,20 +416,46 @@ export function DashboardScreen() {
     setDeleteDraftModalVisible(false);
   };
 
-  const handleNewQuote = () => {
-    // Check if user can create a new quote
+  // The "New Job" button on the dashboard funnels straight into the quote
+  // wizard. Customer + address + job title get captured on the wizard's
+  // existing screens, and saveDraft's ensureJobForQuote auto-creates the
+  // top-level Job once those fields have something in them — no extra
+  // intermediate sheet.
+  const handleNewJob = () => {
     if (!canCreateQuote()) {
       navigation.navigate('Paywall' as never);
       return;
     }
-
     lightTap();
     createNewQuote();
-    navigation.navigate('NewQuote' as never);
+    navigation.navigate('NewJob' as never);
   };
 
+  // Alias retained for the resume-draft and tour callsites that already
+  // referenced this name.
+  const handleNewQuote = handleNewJob;
+
   const handleViewQuote = (quoteId: string) => {
-    navigation.navigate('ViewQuote' as never, { quoteId } as never);
+    // Post-UX-collapse: ViewQuote/ViewInvoice are gone. Look up the
+    // job that this quote is attached to and navigate to ViewJob. The
+    // quote↔job link lives on quote.jobId (Phase-8+), with a fallback
+    // via jobs.find for legacy docs.
+    const q = quotes.find((x) => x.id === quoteId);
+    const jobId = (q as any)?.jobId;
+    if (jobId) {
+      navigation.navigate('ViewJob' as never, { jobId } as never);
+      return;
+    }
+    // No linked job — open the scope editor instead so the user can
+    // work with the quote directly. ensureJobForQuote will fire on
+    // next save and stitch things together.
+    if (q) {
+      setCurrentQuote(q);
+      navigation.navigate('NewJob' as never, {
+        screen: 'MaterialsList',
+        params: { editing: true },
+      } as never);
+    }
   };
 
   const handleEditQuote = (quote: Quote, section?: 'customer' | 'job' | 'materials' | 'labor') => {
@@ -406,13 +465,13 @@ export function DashboardScreen() {
     if (section) {
       const screenMap = {
         customer: 'CustomerDetails',
-        job: 'JobDetails',
+        job: 'Details',
         materials: 'MaterialsList',
         labor: 'LaborMarkup',
       };
-      navigation.navigate('NewQuote' as never, { screen: screenMap[section] } as never);
+      navigation.navigate('NewJob' as never, { screen: screenMap[section] } as never);
     } else {
-      navigation.navigate('NewQuote' as never);
+      navigation.navigate('NewJob' as never);
     }
   };
 
@@ -428,30 +487,6 @@ export function DashboardScreen() {
       setDuplicateSuccessVisible(true);
     } catch (error) {
       Alert.alert('Error', 'Failed to duplicate quote. Please try again.');
-    }
-  };
-
-  const handleConvertToInvoice = (quote: Quote) => {
-    if (!isPro) {
-      navigation.navigate('Paywall' as never);
-      return;
-    }
-    setQuoteToConvert(quote);
-    setConvertModalVisible(true);
-  };
-
-  const handleConfirmConvert = async () => {
-    if (!quoteToConvert) return;
-    setIsConverting(true);
-    try {
-      const invoice = createInvoiceFromQuote(quoteToConvert);
-      await saveInvoice(invoice);
-      setConvertModalVisible(false);
-      setQuoteToConvert(null);
-      navigation.navigate('ViewInvoice' as never, { invoiceId: invoice.id } as never);
-    } catch (error) {
-    } finally {
-      setIsConverting(false);
     }
   };
 
@@ -476,51 +511,34 @@ export function DashboardScreen() {
     setQuoteToDelete(null);
   };
 
-  const handleOpenStatusSheet = (quote: Quote) => {
-    setSelectedQuote(quote);
-    setStatusSheetVisible(true);
+  const handleOpenStageSheet = (doc: Document) => {
+    setSelectedDoc(doc);
+    setStageSheetVisible(true);
   };
 
-  const handleStatusSelect = async (newStatus: string) => {
-    if (!selectedQuote) return;
-    try {
-      const updatedQuote = {
-        ...selectedQuote,
-        status: newStatus as Quote['status'],
-        updatedAt: new Date(),
-      };
-      await saveQuote(updatedQuote);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update quote status. Please try again.');
+  const handleStageSelect = async (target: DocumentStage) => {
+    if (!selectedDoc) return;
+    setStageSheetVisible(false);
+    if (target === 'invoice_sent' && selectedDoc.type === 'quote' && !isPro) {
+      navigation.navigate('Paywall' as never);
+      setSelectedDoc(null);
+      return;
     }
-    setStatusSheetVisible(false);
-    setSelectedQuote(null);
+    try {
+      await applyStageChange(selectedDoc, target, {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
+      });
+    } catch {
+      Alert.alert('Error', 'Failed to update stage. Please try again.');
+    }
+    setSelectedDoc(null);
   };
 
   return (
     <>
-      {/* Convert to Invoice Modal */}
-      <AlertModal
-        visible={convertModalVisible}
-        onDismiss={() => {
-          setConvertModalVisible(false);
-          setQuoteToConvert(null);
-        }}
-        type="info"
-        icon="file-replace"
-        title="Convert to Invoice"
-        message={quoteToConvert ? `Create an invoice from this quote for ${quoteToConvert.customerName}?` : ''}
-        showConfetti={false}
-        primaryButtonText="Convert"
-        primaryButtonAction={handleConfirmConvert}
-        secondaryButtonText="Cancel"
-        secondaryButtonAction={() => {
-          setConvertModalVisible(false);
-          setQuoteToConvert(null);
-        }}
-        secondaryButtonLoading={isConverting}
-      />
-
       {/* Duplicate Success */}
       <AlertModal
         visible={duplicateSuccessVisible}
@@ -658,12 +676,12 @@ export function DashboardScreen() {
           <Button
             mode="contained"
             icon="plus-circle"
-            onPress={handleNewQuote}
+            onPress={handleNewJob}
             style={styles.newQuoteButton}
             contentStyle={styles.newQuoteButtonContent}
-            accessibilityLabel="Create a new quote"
+            accessibilityLabel="Start a new job"
           >
-            New Quote
+            New Job
           </Button>
         </View>
         </View>
@@ -704,7 +722,7 @@ export function DashboardScreen() {
         </AnimatedListItem>
 
         <AnimatedListItem index={2} style={styles.statCardWrapper}>
-          <TapRipple onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'sent' }); }} accessibilityRole="button" accessibilityLabel={`${sentQuotes} quotes sent`} rippleColor="rgba(207,161,83,0.25)">
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Jobs'); }} accessibilityRole="button" accessibilityLabel={`${sentQuotes} quotes sent`} rippleColor="rgba(207,161,83,0.25)">
             <RNAnimated.View style={{ transform: [{ scale: cardBreath3 }, { rotate: cardTilt3.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
               <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.warningBg, transform: [{ translateY: iconFloat3 }, { scale: iconScale3 }] }]}>
@@ -720,7 +738,7 @@ export function DashboardScreen() {
         </AnimatedListItem>
 
         <AnimatedListItem index={3} style={styles.statCardWrapper}>
-          <TapRipple onPress={() => { lightTap(); navigation.navigate('Quotes', { filter: 'accepted' }); }} accessibilityRole="button" accessibilityLabel={`${acceptedQuotes} jobs won`} rippleColor="rgba(0,200,151,0.25)">
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Jobs'); }} accessibilityRole="button" accessibilityLabel={`${acceptedQuotes} jobs won`} rippleColor="rgba(0,200,151,0.25)">
             <RNAnimated.View style={{ transform: [{ scale: cardBreath4 }, { rotate: cardTilt4.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
               <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.successBg, transform: [{ translateY: iconFloat4 }, { scale: iconScale4 }] }]}>
@@ -736,51 +754,45 @@ export function DashboardScreen() {
         </AnimatedListItem>
       </View>
 
-      {/* Recent Quotes */}
+      {/* Recent Jobs — Phase 12 replaces "Recent Quotes" */}
       <SkeletonCrossfade
         loaded={initialLoaded}
         skeleton={
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Recent Quotes</Text>
+            <Text style={styles.sectionTitle}>Recent Jobs</Text>
             <SkeletonCardList count={3} />
           </View>
         }
       >
-        {recentQuotes.length > 0 ? (
+        {recentJobs.length > 0 ? (
           <View ref={recentRef} style={styles.section}>
-            <Text style={styles.sectionTitle}>Recent Quotes</Text>
+            <Text style={styles.sectionTitle}>Recent Jobs</Text>
 
-            {recentQuotes.map((quote, index) => (
-              <AnimatedListItem key={quote.id} index={index}>
+            {recentJobs.map((job, index) => (
+              <AnimatedListItem key={job.id} index={index}>
                 <View ref={index === 0 ? recentQuoteCardRef : undefined}>
-                <QuoteCard
-                  quote={quote}
-                  businessSettings={businessSettings}
-                  onView={handleViewQuote}
-                  onEdit={handleEditQuote}
-                  onDelete={handleDeleteQuote}
-                  onDuplicate={handleDuplicateQuote}
-                  onSave={saveQuote}
-                  onStatusChange={handleOpenStatusSheet}
-                  onConvertToInvoice={handleConvertToInvoice}
-                  swipeableRef={index === 0 ? firstQuoteSwipeRef : undefined}
-                />
+                  <JobCard
+                    job={job}
+                    onPress={(jobId) => navigation.navigate('ViewJob', { jobId })}
+                    onStagePress={handleJobStagePress}
+                    onMenuPress={jobActions.open}
+                  />
                 </View>
               </AnimatedListItem>
             ))}
 
             <Button
               mode="text"
-              onPress={() => navigation.navigate('Quotes')}
+              onPress={() => navigation.navigate('Jobs')}
               style={styles.viewAllButton}
             >
-              View All Quotes
+              View All Jobs
             </Button>
           </View>
         ) : null}
       </SkeletonCrossfade>
 
-      {recentQuotes.length === 0 && initialLoaded && (
+      {recentJobs.length === 0 && initialLoaded && (
         <View style={styles.emptyState}>
           <RNAnimated.View style={[styles.emptyIconCircle, { transform: [{ translateY: emptyFloat }] }]}>
             <MaterialCommunityIcons name="hard-hat" size={36} color={colors.primary} />
@@ -790,24 +802,49 @@ export function DashboardScreen() {
             Knock off early or get cracking
           </Text>
           <Text style={styles.emptySubtext}>
-            Hit "New Quote" and she'll be right
+            Hit "New Job" and she'll be right
           </Text>
         </View>
       )}
       </WebContainer>
     </ScrollView>
 
-    {/* Status Sheet */}
-    <StatusSheet
-      visible={statusSheetVisible}
-      onDismiss={() => {
-        setStatusSheetVisible(false);
-        setSelectedQuote(null);
-      }}
-      currentStatus={selectedQuote?.status || 'draft'}
-      onSelect={handleStatusSelect}
-      options={QUOTE_STATUS_OPTIONS}
-    />
+    {/* Stage Sheet */}
+    {selectedDoc && (
+      <StageSheet
+        visible={stageSheetVisible}
+        onDismiss={() => {
+          setStageSheetVisible(false);
+          setSelectedDoc(null);
+        }}
+        doc={selectedDoc}
+        onSelect={handleStageSelect}
+      />
+    )}
+
+    {stageSheetJob && (
+      <JobStageSheet
+        visible={!!stageSheetJob}
+        onDismiss={() => setStageSheetJob(null)}
+        job={stageSheetJob}
+        onSelect={handleJobStageSelect}
+        onSchedule={() => {
+          const job = stageSheetJob;
+          setStageSheetJob(null);
+          setScheduleSheetJob(job);
+        }}
+      />
+    )}
+
+    {scheduleSheetJob && (
+      <ScheduleJobSheet
+        visible={!!scheduleSheetJob}
+        onDismiss={() => setScheduleSheetJob(null)}
+        job={scheduleSheetJob}
+      />
+    )}
+
+    {jobActions.element}
 
     {/* Spotlight Tour — only active during 'dashboard' phase, not 'dashboardComplete' */}
     <SpotlightTour
@@ -820,7 +857,7 @@ export function DashboardScreen() {
         } else {
           // Legacy standalone dashboard tour
           createNewQuote();
-          navigation.navigate('NewQuote' as never, { screen: 'JobDetails', params: { fromTour: true } } as never);
+          navigation.navigate('NewJob' as never, { screen: 'Details', params: { fromTour: true } } as never);
         }
       }}
       onSkip={unifiedTourActive ? () => notifySkipRequest() : undefined}
