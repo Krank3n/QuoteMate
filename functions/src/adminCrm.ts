@@ -178,6 +178,27 @@ async function fetchAllSquareConnections(): Promise<Map<string, any>> {
   return map;
 }
 
+// Per-user admin-note summary used by the user list to power "Contacted /
+// Not contacted / Recently contacted" filters. One collection-group pass
+// instead of N per-user reads.
+async function fetchAllAdminNoteSummaries(): Promise<Map<string, { count: number; lastAt: number | null }>> {
+  const snap = await db().collectionGroup('adminNotes').get();
+  const map = new Map<string, { count: number; lastAt: number | null }>();
+  for (const d of snap.docs) {
+    const uid = d.ref.parent.parent?.id;
+    if (!uid) continue;
+    const at = (d.data() as any)?.createdAt?.toMillis?.() ?? null;
+    const cur = map.get(uid);
+    if (!cur) {
+      map.set(uid, { count: 1, lastAt: at });
+    } else {
+      cur.count += 1;
+      if (at && (!cur.lastAt || at > cur.lastAt)) cur.lastAt = at;
+    }
+  }
+  return map;
+}
+
 async function listAllAuthUsers(): Promise<admin.auth.UserRecord[]> {
   const all: admin.auth.UserRecord[] = [];
   let nextPageToken: string | undefined;
@@ -390,6 +411,8 @@ interface UserListRow {
   appVersion: string | null;
   appPlatform: string | null;
   appVersionSeenAt: number | null;
+  noteCount: number;
+  lastNoteAt: number | null;
 }
 
 export const adminListUsers = functions
@@ -411,10 +434,12 @@ export const adminListUsers = functions
     const userDocMap = new Map<string, any>();
     for (const d of userDocsSnap.docs) userDocMap.set(d.id, d.data());
 
-    // Prefetch subscriptions + Square connections in single collection-group passes
-    const [subsMap, squareMap] = await Promise.all([
+    // Prefetch subscriptions + Square connections + admin-note summaries in
+    // single collection-group passes
+    const [subsMap, squareMap, notesSummaryMap] = await Promise.all([
       fetchAllSubscriptions(),
       fetchAllSquareConnections(),
+      fetchAllAdminNoteSummaries(),
     ]);
 
     const rows: UserListRow[] = await Promise.all(
@@ -465,6 +490,8 @@ export const adminListUsers = functions
           appVersion: emailState.appVersion || null,
           appPlatform: emailState.appPlatform || null,
           appVersionSeenAt: emailState.appVersionSeenAt?.toMillis?.() || null,
+          noteCount: notesSummaryMap.get(uid)?.count || 0,
+          lastNoteAt: notesSummaryMap.get(uid)?.lastAt || null,
         };
       })
     );
