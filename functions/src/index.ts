@@ -2363,6 +2363,11 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
 
       if (searchData.products && searchData.products.length > 0) {
         const product = searchData.products[0];
+        // Pull the first unit of measure — that's the smallest sellable unit
+        // (e.g. "LEN" for a length of pipe). The order-gateway requires both
+        // the unit and the matching ex-GST price echoed back, so we surface
+        // them now rather than re-fetching at order time.
+        const uom = product.unitOfMeasures?.[0];
 
         res.status(200).json({
           product: {
@@ -2370,6 +2375,9 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
             description: product.productTitle,
             brand: product.brand,
             category: product.category,
+            unitOfMeasure: uom?.pack || null,
+            unitPriceExcludingGst: uom?.unitPriceExcludingGST ?? null,
+            unitPriceIncludingGst: uom?.unitPriceIncludingGST ?? null,
           },
         });
       } else {
@@ -2665,9 +2673,14 @@ export const reeceExchangeCustomerToken = functions.https.onRequest((req, res) =
           status: exchangeResponse.status,
           body: body.slice(0, 300),
         });
-        // Most common case: user closed the tab before approving. Surface a
-        // user-friendly message rather than the upstream 4xx.
-        res.status(400).json({ error: 'Reece account not approved yet. Try connecting again.' });
+        // Most common case: user landed on the maX consent page but didn't
+        // tap Approve/Link before closing the tab — Reece responds with
+        // "Invalid request token" because the token never moved to an
+        // approved state. The message below tells them exactly what to do.
+        res.status(400).json({
+          error:
+            "Reece sign-in didn't complete. Tap Connect again, sign in to maX, and tap the Approve / Link button on the consent page before closing the tab.",
+        });
         return;
       }
 
@@ -2675,7 +2688,36 @@ export const reeceExchangeCustomerToken = functions.https.onRequest((req, res) =
       const customerToken = data.customerToken || data.customer_token;
       const customerNumber = data.customerNumber || data.customer_number;
       const displayName = data.displayName || data.display_name;
-      const homeBranch = data.homeBranch?.name || data.home_branch?.name || data.homeBranch || data.home_branch;
+
+      // Reece returns `homeBranch` as an object — confirmed shape:
+      // { branchNumber: "3032", name: "Plumbing Burwood", shortName, address,
+      //   geographicalCoordinates, managerName, telephone, ... }. Earlier
+      // versions of this code stringified the object, leaving "[object Object]"
+      // in Firestore. Now we extract a stable display name and the branch
+      // number separately.
+      const homeBranchRaw = data.homeBranch || data.home_branch;
+      const homeBranchName =
+        homeBranchRaw?.name ||
+        homeBranchRaw?.branchName ||
+        homeBranchRaw?.shortName ||
+        (typeof homeBranchRaw === 'string' ? homeBranchRaw : null);
+      const homeBranchNumber =
+        homeBranchRaw?.branchNumber ||
+        homeBranchRaw?.branch_number ||
+        homeBranchRaw?.number ||
+        null;
+
+      // One-shot diagnostic: dump raw shape (without the customerToken) so we
+      // can spot future field renames without re-running the manual flow.
+      console.log('[reece] customer-token exchange success', {
+        uid: decodedToken.uid,
+        customerNumberType: typeof customerNumber,
+        homeBranchType: typeof homeBranchRaw,
+        homeBranchKeys: homeBranchRaw && typeof homeBranchRaw === 'object'
+          ? Object.keys(homeBranchRaw)
+          : null,
+        topLevelKeys: Object.keys(data),
+      });
 
       if (!customerToken || !customerNumber) {
         res.status(502).json({ error: 'Reece returned an unexpected response.' });
@@ -2685,7 +2727,8 @@ export const reeceExchangeCustomerToken = functions.https.onRequest((req, res) =
       await admin.firestore().doc(`users/${decodedToken.uid}/integrations/reece`).set({
         customerNumber: String(customerNumber),
         displayName: displayName ? String(displayName) : null,
-        homeBranch: homeBranch ? String(homeBranch) : null,
+        homeBranch: homeBranchName,
+        homeBranchNumber: homeBranchNumber ? String(homeBranchNumber) : null,
         customerTokenEnc: encryptReeceToken(customerToken),
         connectedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
@@ -2694,7 +2737,8 @@ export const reeceExchangeCustomerToken = functions.https.onRequest((req, res) =
         connected: true,
         customerNumber: String(customerNumber),
         displayName: displayName ? String(displayName) : null,
-        homeBranch: homeBranch ? String(homeBranch) : null,
+        homeBranch: homeBranchName,
+        homeBranchNumber: homeBranchNumber ? String(homeBranchNumber) : null,
       });
     } catch (error: any) {
       console.error('[reece] exchange error', { message: error?.message });
@@ -2725,6 +2769,7 @@ export const reeceConnectionStatus = functions.https.onRequest((req, res) => {
         customerNumber: data.customerNumber || null,
         displayName: data.displayName || null,
         homeBranch: data.homeBranch || null,
+        homeBranchNumber: data.homeBranchNumber || null,
         connectedAt: data.connectedAt?.toDate?.()?.toISOString?.() || null,
       });
     } catch (error: any) {
@@ -2755,6 +2800,373 @@ export const reeceDisconnect = functions.https.onRequest((req, res) => {
       console.error('[reece] disconnect failed', { message: error?.message });
       res.status(500).json({ error: 'Could not disconnect Reece.' });
     }
+  });
+});
+
+// ----- Reece order-gateway -------------------------------------------------
+// Endpoints below let a connected plumber preview, validate, and place orders
+// against their Reece trade account directly from a QuoteMate quote. Reece
+// invoices the plumber on their normal trade terms; QuoteMate never handles
+// money or fulfilment. Order shape was verified end-to-end against prod on
+// 2026-04-28 — see .claude/skills/reece-api/SKILL.md for the full schema.
+
+interface ReeceProduct {
+  productId: number;
+  quantity: number;
+  unitOfMeasure: string;
+  unitPriceExcludingGst: number;
+  quoteNumber?: string | null;
+  quoteLineNumber?: number | null;
+}
+
+interface ReeceFulfillment {
+  type: 'PICKUP' | 'DELIVERY';
+  pickupBranch?: string;            // branchNumber (string) for PICKUP
+  deliveryDetails?: {                // for DELIVERY
+    contactName: string;
+    deliveryAddress: {
+      addressLine1: string;
+      addressLine2?: string;
+      suburb?: string;
+      state?: string;
+      postCode: string;
+    };
+  };
+}
+
+interface ReeceOrderRequest {
+  orderByName: string;
+  orderByPhone?: string;
+  orderByEmail?: string;
+  jobName?: string;
+  orderNumber?: string;             // PO / reference echoed to Reece
+  comment?: string;
+  requiredByDateTime: string;        // yyyy-MM-dd'T'HH:mm:ss (no Z suffix)
+  fulfillment: ReeceFulfillment;
+  products: ReeceProduct[];
+}
+
+// Branch list cache: {uid -> {branches, expiresAt}}. The Reece /branches list
+// is identical for all customers (it's a global directory) but the endpoint
+// requires a Customer-Token, so we still fetch per-user the first time. ~1
+// hour TTL is generous given how rarely Reece adds/closes branches.
+const reeceBranchesCache: Map<string, { branches: any[]; expiresAt: number }> = new Map();
+
+/**
+ * List Reece branches. Used by the order modal's branch picker — the user
+ * defaults to their home branch but can change it. Backend caches the
+ * response for an hour to avoid hammering Reece on every modal open.
+ */
+export const reeceListBranches = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    try {
+      const cached = reeceBranchesCache.get(decodedToken.uid);
+      if (cached && cached.expiresAt > Date.now()) {
+        res.status(200).json({ branches: cached.branches });
+        return;
+      }
+
+      const token = await getReeceAuthToken();
+      const userToken = await getReeceCustomerToken(decodedToken.uid);
+      if (!token || !userToken) {
+        res.status(200).json({ branches: [], error: 'reece_not_connected' });
+        return;
+      }
+
+      const response = await fetch(`${REECE_API_BASE_URL}/${REECE_REGION}/branches`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+          'Customer-Token': userToken.customerToken,
+        },
+      });
+
+      if (response.status === 401) {
+        await clearReeceConnection(decodedToken.uid, 'branches_401');
+        res.status(200).json({ branches: [], error: 'reece_reauth_required' });
+        return;
+      }
+      if (!response.ok) {
+        await response.text();
+        res.status(200).json({ branches: [] });
+        return;
+      }
+
+      const data = await response.json();
+      const branches = data.branches || [];
+      reeceBranchesCache.set(decodedToken.uid, {
+        branches,
+        expiresAt: Date.now() + 60 * 60 * 1000,
+      });
+      res.status(200).json({ branches });
+    } catch (error: any) {
+      console.error('[reece] list branches failed', { message: error?.message });
+      res.status(200).json({ branches: [] });
+    }
+  });
+});
+
+/**
+ * Internal helper: forward an order request to Reece's preview or check
+ * endpoint. Both endpoints take the same body shape — they differ only in
+ * what they validate and return. Returns the raw upstream response (status +
+ * body) so the calling handler can decide how to surface it.
+ */
+async function callReeceOrderEndpoint(
+  uid: string,
+  endpoint: 'preview' | 'check' | 'orders',
+  request: ReeceOrderRequest,
+): Promise<{ status: number; body: any; error?: 'reece_not_connected' | 'reece_reauth_required' }> {
+  const token = await getReeceAuthToken();
+  const userToken = await getReeceCustomerToken(uid);
+  if (!token || !userToken) {
+    return { status: 200, body: null, error: 'reece_not_connected' };
+  }
+
+  const response = await fetch(
+    `${REECE_API_BASE_URL}/${REECE_REGION}/order-gateway/${endpoint}`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Customer-Token': userToken.customerToken,
+      },
+      body: JSON.stringify(request),
+    },
+  );
+
+  if (response.status === 401) {
+    await clearReeceConnection(uid, `order_${endpoint}_401`);
+    return { status: 200, body: null, error: 'reece_reauth_required' };
+  }
+
+  const text = await response.text();
+  let body: any = null;
+  try { body = text ? JSON.parse(text) : null; } catch { body = { raw: text }; }
+  return { status: response.status, body };
+}
+
+function validateOrderRequest(req: any): ReeceOrderRequest | { error: string } {
+  if (!req || typeof req !== 'object') return { error: 'Missing order body' };
+  if (!isNonEmptyString(req.orderByName)) return { error: 'orderByName is required' };
+  if (!isNonEmptyString(req.requiredByDateTime)) return { error: 'requiredByDateTime is required' };
+  if (!Array.isArray(req.products) || req.products.length === 0) {
+    return { error: 'At least one product is required' };
+  }
+  if (!req.fulfillment || (req.fulfillment.type !== 'PICKUP' && req.fulfillment.type !== 'DELIVERY')) {
+    return { error: 'fulfillment.type must be PICKUP or DELIVERY' };
+  }
+  if (req.fulfillment.type === 'PICKUP' && !isNonEmptyString(req.fulfillment.pickupBranch)) {
+    return { error: 'fulfillment.pickupBranch is required for PICKUP' };
+  }
+  if (req.fulfillment.type === 'DELIVERY') {
+    const dd = req.fulfillment.deliveryDetails;
+    if (!dd || !isNonEmptyString(dd.contactName)) {
+      return { error: 'deliveryDetails.contactName is required for DELIVERY' };
+    }
+    if (!dd.deliveryAddress || !isNonEmptyString(dd.deliveryAddress.addressLine1)) {
+      return { error: 'deliveryAddress.addressLine1 is required for DELIVERY' };
+    }
+    if (!isNonEmptyString(dd.deliveryAddress.postCode)) {
+      return { error: 'deliveryAddress.postCode is required for DELIVERY' };
+    }
+  }
+  for (const p of req.products) {
+    if (!Number.isFinite(p.productId) || p.productId <= 0) return { error: 'product.productId is required' };
+    if (!Number.isFinite(p.quantity) || p.quantity <= 0) return { error: 'product.quantity must be > 0' };
+    if (!isNonEmptyString(p.unitOfMeasure)) return { error: 'product.unitOfMeasure is required' };
+    if (!Number.isFinite(p.unitPriceExcludingGst) || p.unitPriceExcludingGst < 0) {
+      return { error: 'product.unitPriceExcludingGst is required' };
+    }
+  }
+  return req as ReeceOrderRequest;
+}
+
+/**
+ * Preview a Reece order — returns the line items + total + cartage with no
+ * side effects. The order modal calls this on open and again whenever the
+ * user changes branch / delivery so the totals stay live.
+ */
+export const reeceOrderPreview = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const validated = validateOrderRequest(req.body);
+    if ('error' in validated) {
+      res.status(400).json({ error: validated.error });
+      return;
+    }
+
+    const { status, body, error } = await callReeceOrderEndpoint(decodedToken.uid, 'preview', validated);
+    if (error) {
+      res.status(200).json({ preview: null, error });
+      return;
+    }
+    if (status >= 400) {
+      // Reece's 4xx envelope is { violations: [{fieldName, message}] } or
+      // { errors: [{url, message}] }. Forward verbatim so the client can
+      // render specific field-level feedback in the order modal.
+      res.status(200).json({ preview: null, status, ...body });
+      return;
+    }
+    res.status(200).json({ preview: body });
+  });
+});
+
+/**
+ * Run Reece's order /check on the same payload as preview. Used as a final
+ * gate inside reeceOrderPlace before actually creating the order.
+ */
+export const reeceOrderCheck = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const validated = validateOrderRequest(req.body);
+    if ('error' in validated) {
+      res.status(400).json({ error: validated.error });
+      return;
+    }
+
+    const { status, body, error } = await callReeceOrderEndpoint(decodedToken.uid, 'check', validated);
+    if (error) {
+      res.status(200).json({ check: null, error });
+      return;
+    }
+    if (status >= 400) {
+      res.status(200).json({ check: null, status, ...body });
+      return;
+    }
+    res.status(200).json({ check: body });
+  });
+});
+
+/**
+ * Place a Reece order against the user's trade account.
+ *
+ * Sequence:
+ *   1. Validate the request body shape.
+ *   2. Run /check first (as a stock + entitlement gate). Bail on any
+ *      violation rather than placing a half-broken order — Reece can't
+ *      easily undo on their side and we don't want to email plumbers to
+ *      cancel a shipment.
+ *   3. POST to /orders. On success, append a ReeceOrder snapshot to the
+ *      originating quote so the user can see history.
+ *
+ * Side effects: Firestore write to quotes/{quoteId}.reeceOrders. Reece
+ * processes the order on their side.
+ */
+export const reeceOrderPlace = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { quoteId, ...orderBody } = req.body || {};
+
+    const validated = validateOrderRequest(orderBody);
+    if ('error' in validated) {
+      res.status(400).json({ error: validated.error });
+      return;
+    }
+
+    // Step 1: /check (stock + entitlement gate)
+    const checkResult = await callReeceOrderEndpoint(decodedToken.uid, 'check', validated);
+    if (checkResult.error) {
+      res.status(200).json({ order: null, error: checkResult.error });
+      return;
+    }
+    if (checkResult.status >= 400) {
+      res.status(200).json({ order: null, stage: 'check', status: checkResult.status, ...checkResult.body });
+      return;
+    }
+
+    // Step 2: place the order
+    const placeResult = await callReeceOrderEndpoint(decodedToken.uid, 'orders', validated);
+    if (placeResult.error) {
+      res.status(200).json({ order: null, error: placeResult.error });
+      return;
+    }
+    if (placeResult.status >= 400) {
+      res.status(200).json({ order: null, stage: 'place', status: placeResult.status, ...placeResult.body });
+      return;
+    }
+
+    const placed = placeResult.body;
+    const reeceOrderNumber = String(placed?.orderNumber || placed?.id || '');
+
+    // Step 3: append the order to the originating quote (best-effort — we
+    // already placed the order at Reece, so a Firestore failure here is a
+    // user-visible "order placed but history didn't save" rather than a
+    // hard failure. Log and continue.
+    if (quoteId && isNonEmptyString(quoteId) && reeceOrderNumber) {
+      try {
+        const totalIncGst = Number(placed?.totalIncludingGst ?? placed?.total ?? 0);
+        const totalExGst = Number(placed?.totalExcludingGst ?? 0);
+        const cartageFee = Number(placed?.cartageFee ?? 0);
+        const orderRecord = {
+          reeceOrderNumber,
+          placedAt: new Date().toISOString(),
+          itemCount: validated.products.length,
+          totalIncGst,
+          totalExGst,
+          cartageFee,
+          fulfilmentMode: validated.fulfillment.type,
+          branchNumber: validated.fulfillment.pickupBranch || null,
+          branchName: placed?.fulfillment?.pickupBranchName || null,
+          deliveryAddress: validated.fulfillment.deliveryDetails
+            ? [
+                validated.fulfillment.deliveryDetails.deliveryAddress.addressLine1,
+                validated.fulfillment.deliveryDetails.deliveryAddress.suburb,
+                validated.fulfillment.deliveryDetails.deliveryAddress.state,
+                validated.fulfillment.deliveryDetails.deliveryAddress.postCode,
+              ].filter(Boolean).join(', ')
+            : null,
+          reference: validated.orderNumber || null,
+        };
+        await admin.firestore()
+          .doc(`users/${decodedToken.uid}/quotes/${quoteId}`)
+          .update({
+            reeceOrders: admin.firestore.FieldValue.arrayUnion(orderRecord),
+          });
+      } catch (err: any) {
+        console.error('[reece] failed to record order on quote', {
+          uid: decodedToken.uid,
+          quoteId,
+          reeceOrderNumber,
+          message: err?.message,
+        });
+        // Fall through — the order is already placed at Reece.
+      }
+    }
+
+    res.status(200).json({
+      order: {
+        reeceOrderNumber,
+        raw: placed,
+      },
+    });
   });
 });
 

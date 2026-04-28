@@ -76,9 +76,23 @@ export function ReeceIntegrationScreen() {
           `You’re signed in as ${outcome.status.displayName || 'your Reece account'}. Your trade prices will now flow into every quote.`,
         );
       } else if (outcome.kind === 'failed') {
-        showAlert('error', 'Connection failed', outcome.message);
+        // Race: the backend can write the customer token to Firestore but the
+        // client never receives the response (Android in-app browser drops the
+        // socket on its way out). Before showing a failure, ask the server
+        // whether we're actually connected — if yes, treat the round trip as
+        // a success.
+        const status = await getReeceConnectionStatus();
+        if (status.connected) {
+          setConnection(status);
+          showAlert(
+            'success',
+            'Reece connected',
+            `You’re signed in as ${status.displayName || 'your Reece account'}. Your trade prices will now flow into every quote.`,
+          );
+        } else {
+          showAlert('error', 'Connection failed', outcome.message);
+        }
       }
-      // If cancelled, just refresh quietly — the user closed the tab.
       await refresh();
     } finally {
       setLoading(false);

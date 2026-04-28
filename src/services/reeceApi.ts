@@ -21,6 +21,12 @@ export interface ReeceProduct {
   description: string;
   brand?: string;
   category?: string;
+  // Smallest sellable unit (e.g. "LEN", "MTR"). Required to build a valid
+  // /au/order-gateway/orders payload. May be null for products with no
+  // unit-of-measure metadata.
+  unitOfMeasure?: string | null;
+  unitPriceExcludingGst?: number | null;
+  unitPriceIncludingGst?: number | null;
 }
 
 export interface ReecePrice {
@@ -41,6 +47,7 @@ export interface ReeceConnectionStatus {
   customerNumber?: string | null;
   displayName?: string | null;
   homeBranch?: string | null;
+  homeBranchNumber?: string | null;
   connectedAt?: string | null;
 }
 
@@ -49,6 +56,10 @@ interface PriceSearchResult {
   productName?: string;
   store?: string;
   itemNumber?: string;
+  // Required later for order placement — captured at price-search time so we
+  // don't need a second API round trip when the user taps "Order from Reece".
+  unitOfMeasure?: string | null;
+  unitPriceExcludingGst?: number | null;
   /**
    * Set when the backend reports the user's customer token has been revoked
    * or expired. Callers should surface a "reconnect Reece" prompt instead of
@@ -152,6 +163,8 @@ export async function searchReeceMaterialPrice(
       productName: product.description,
       store: 'Reece Plumbing',
       itemNumber: product.itemNumber,
+      unitOfMeasure: product.unitOfMeasure || null,
+      unitPriceExcludingGst: product.unitPriceExcludingGst ?? null,
     };
   } catch {
     return { price: null };
@@ -254,5 +267,166 @@ export async function disconnectReece(): Promise<void> {
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || 'Could not disconnect Reece.');
+  }
+}
+
+// ---------- Order gateway ---------------------------------------------------
+
+export interface ReeceBranch {
+  branchNumber: string;
+  name: string;
+  shortName?: string;
+  address?: {
+    streetAddress?: string;
+    suburb?: string;
+    state?: string;
+    postCode?: string;
+  };
+  geographicalCoordinates?: {
+    latitude: number;
+    longitude: number;
+  };
+  managerName?: string;
+  telephone?: string;
+  emailAddress?: string;
+  timeZone?: string;
+}
+
+export interface ReeceOrderProductInput {
+  productId: number;
+  quantity: number;
+  unitOfMeasure: string;
+  unitPriceExcludingGst: number;
+  /** QuoteMate's quote line id, surfaced back via Reece for audit only. */
+  quoteNumber?: string | null;
+  quoteLineNumber?: number | null;
+}
+
+export type ReeceFulfillmentInput =
+  | { type: 'PICKUP'; pickupBranch: string }
+  | {
+      type: 'DELIVERY';
+      deliveryDetails: {
+        contactName: string;
+        deliveryAddress: {
+          addressLine1: string;
+          addressLine2?: string;
+          suburb?: string;
+          state?: string;
+          postCode: string;
+        };
+      };
+    };
+
+export interface ReeceOrderRequestInput {
+  orderByName: string;
+  requiredByDateTime: string;        // yyyy-MM-dd'T'HH:mm:ss (no Z suffix)
+  fulfillment: ReeceFulfillmentInput;
+  products: ReeceOrderProductInput[];
+  orderByPhone?: string;
+  orderByEmail?: string;
+  jobName?: string;
+  /** Tradie's PO / job reference, echoed onto the printed order. */
+  orderNumber?: string;
+  /** Free-text note to branch staff. */
+  comment?: string;
+}
+
+interface ReeceOrderViolation {
+  fieldName: string;
+  message: string;
+}
+
+interface ReeceOrderError {
+  url: string;
+  message: string;
+}
+
+export interface ReeceOrderPreviewResult {
+  preview: any | null;
+  /** Set when the user no longer has a valid customer token. */
+  reauthRequired?: boolean;
+  /** Set when the user hasn't completed Reece onboarding. */
+  notConnected?: boolean;
+  /** Field-level validation feedback from Reece (4xx). */
+  violations?: ReeceOrderViolation[];
+  /** Generic upstream errors (parse, 5xx). */
+  errors?: ReeceOrderError[];
+}
+
+export interface ReecePlaceOrderResult {
+  reeceOrderNumber?: string;
+  raw?: any;
+  reauthRequired?: boolean;
+  notConnected?: boolean;
+  /** Which step failed, if either /check or /orders rejected. */
+  stage?: 'check' | 'place';
+  violations?: ReeceOrderViolation[];
+  errors?: ReeceOrderError[];
+}
+
+export async function listReeceBranches(): Promise<{
+  branches: ReeceBranch[];
+  reauthRequired?: boolean;
+  notConnected?: boolean;
+}> {
+  try {
+    const response = await authedFetch('reeceListBranches', { method: 'GET' });
+    if (!response.ok) return { branches: [] };
+    const data = await response.json();
+    if (data.error === 'reece_reauth_required') return { branches: [], reauthRequired: true };
+    if (data.error === 'reece_not_connected') return { branches: [], notConnected: true };
+    return { branches: data.branches || [] };
+  } catch {
+    return { branches: [] };
+  }
+}
+
+function decodeOrderResponse(data: any): {
+  violations?: ReeceOrderViolation[];
+  errors?: ReeceOrderError[];
+  reauthRequired?: boolean;
+  notConnected?: boolean;
+} {
+  const out: ReturnType<typeof decodeOrderResponse> = {};
+  if (data?.error === 'reece_reauth_required') out.reauthRequired = true;
+  if (data?.error === 'reece_not_connected') out.notConnected = true;
+  if (Array.isArray(data?.violations) && data.violations.length > 0) out.violations = data.violations;
+  if (Array.isArray(data?.errors) && data.errors.length > 0) out.errors = data.errors;
+  return out;
+}
+
+export async function previewReeceOrder(
+  request: ReeceOrderRequestInput,
+): Promise<ReeceOrderPreviewResult> {
+  try {
+    const response = await authedFetch('reeceOrderPreview', { body: request });
+    if (!response.ok) {
+      return { preview: null, errors: [{ url: 'reeceOrderPreview', message: `Request failed (${response.status})` }] };
+    }
+    const data = await response.json();
+    return { preview: data.preview ?? null, ...decodeOrderResponse(data) };
+  } catch (e: any) {
+    return { preview: null, errors: [{ url: 'reeceOrderPreview', message: e?.message || 'Network error' }] };
+  }
+}
+
+export async function placeReeceOrder(
+  request: ReeceOrderRequestInput & { quoteId?: string },
+): Promise<ReecePlaceOrderResult> {
+  try {
+    const response = await authedFetch('reeceOrderPlace', { body: request });
+    if (!response.ok) {
+      return { errors: [{ url: 'reeceOrderPlace', message: `Request failed (${response.status})` }] };
+    }
+    const data = await response.json();
+    return {
+      reeceOrderNumber: data.order?.reeceOrderNumber,
+      raw: data.order?.raw,
+      stage: data.stage,
+      ...decodeOrderResponse(data),
+    };
+  } catch (e: any) {
+    return { errors: [{ url: 'reeceOrderPlace', message: e?.message || 'Network error' }] };
   }
 }

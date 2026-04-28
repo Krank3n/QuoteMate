@@ -142,24 +142,23 @@ export function AddMaterialScreen() {
 
   // Whether the user has connected their Reece account. Drives the Reece
   // search step in handleSearch when their preferred store is Reece.
+  // Reece is now always-on when connected (no longer gated on a single
+  // selectedStore), so we check connection state once on mount and use it
+  // alongside Bunnings throughout the search chain.
   const [reeceConnected, setReeceConnected] = useState<boolean>(false);
   useEffect(() => {
     let cancelled = false;
-    if (businessSettings?.selectedStore === 'reece') {
-      getReeceConnectionStatus()
-        .then((status) => {
-          if (!cancelled) setReeceConnected(!!status.connected);
-        })
-        .catch(() => {
-          if (!cancelled) setReeceConnected(false);
-        });
-    } else {
-      setReeceConnected(false);
-    }
+    getReeceConnectionStatus()
+      .then((status) => {
+        if (!cancelled) setReeceConnected(!!status.connected);
+      })
+      .catch(() => {
+        if (!cancelled) setReeceConnected(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [businessSettings?.selectedStore]);
+  }, []);
 
   // Manual entry state - initialize with editing material if in edit mode
   const [manualName, setManualName] = useState(prefillMaterial?.name || '');
@@ -876,16 +875,14 @@ export function AddMaterialScreen() {
 
       let remoteResults: any[] = [];
 
-      // ── Step 2 (Reece priority): plumber's connected maX account ──
-      // When the user picked Reece as their store and is connected, fetch
-      // their trade-discounted price first. Reece returns one best-match
-      // result, so this short-circuits the Bunnings/web-scrape chain when
-      // we get a hit.
-      if (
-        businessSettings?.selectedStore === 'reece' &&
-        reeceConnected &&
-        !scopedToOne
-      ) {
+      // ── Step 2 (Reece priority when connected): plumber's maX account ──
+      // Reece runs alongside the Bunnings backbone. If the user has connected
+      // their maX account, we fetch their trade-discounted price first. Reece
+      // returns one best-match result, so this short-circuits the rest of the
+      // chain when we get a hit; otherwise we fall through to Bunnings as
+      // normal. Skipped when the user scoped the search to a specific
+      // supplier chip — they're explicitly asking for that supplier's catalog.
+      if (reeceConnected && !scopedToOne) {
         try {
           const reeceResult = await searchReeceMaterialPrice(searchQuery);
           if (searchCancelledRef.current) return;
@@ -902,6 +899,10 @@ export function AddMaterialScreen() {
               imageUrl: '',
               store: reeceResult.store || 'Reece Plumbing',
               isScraperResult: true,
+              // Surface so the eventual Material write picks up Reece-specific
+              // order identifiers without needing a re-query at order time.
+              reeceItemNumber: reeceResult.itemNumber,
+              reeceUnitOfMeasure: reeceResult.unitOfMeasure || null,
             }];
           }
         } catch {
@@ -1032,17 +1033,22 @@ export function AddMaterialScreen() {
         description: item.description,
       };
     } else if (item.isScraperResult) {
+      // Reece-sourced rows carry both Bunnings-style metadata AND Reece order
+      // identifiers — discriminator is `reeceItemNumber` being present.
+      const isReeceResult = !!item.reeceItemNumber;
       newMaterial = {
         id: generateId(),
         name: item.productName,
         quantity: 1,
         unit: 'each',
-        bunningsItemNumber: item.itemNumber,
+        bunningsItemNumber: isReeceResult ? undefined : item.itemNumber,
+        reeceItemNumber: isReeceResult ? item.reeceItemNumber : undefined,
+        reeceUnitOfMeasure: isReeceResult ? (item.reeceUnitOfMeasure || undefined) : undefined,
         price: item.price || 0,
         totalPrice: item.price || 0,
         manualPriceOverride: false,
         searchTerm: item.productName,
-        pricingSource: 'scraper',
+        pricingSource: isReeceResult ? 'api' : 'scraper',
         // Preserve scraper confidence so the UI can flag low-confidence
         // results (Claude-guessed fallback) as "Est. — verify price".
         priceConfidence: item.confidence,

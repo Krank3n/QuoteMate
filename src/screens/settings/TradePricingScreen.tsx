@@ -35,11 +35,10 @@ import { getReeceConnectionStatus } from '../../services/reeceApi';
 export function TradePricingScreen() {
   const { businessSettings, setBusinessSettings } = useStore();
 
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
 
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [selectedNiches, setSelectedNiches] = useState<string[]>([]);
-  const [selectedStore, setSelectedStore] = useState<string>('bunnings');
   const [reeceConnected, setReeceConnected] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -68,11 +67,9 @@ export function TradePricingScreen() {
     if (businessSettings) {
       const cats = businessSettings.tradeCategories || (businessSettings.tradeCategory ? [businessSettings.tradeCategory] : []);
       const niches = businessSettings.tradeNiches || (businessSettings.tradeNiche ? [businessSettings.tradeNiche] : []);
-      const store = businessSettings.selectedStore || 'bunnings';
       setSelectedCategories(cats);
       setSelectedNiches(niches);
-      setSelectedStore(store);
-      initialSnapshotRef.current = JSON.stringify({ cats: [...cats].sort(), niches: [...niches].sort(), store });
+      initialSnapshotRef.current = JSON.stringify({ cats: [...cats].sort(), niches: [...niches].sort() });
     }
   }, [businessSettings]);
 
@@ -81,10 +78,9 @@ export function TradePricingScreen() {
     const current = JSON.stringify({
       cats: [...selectedCategories].sort(),
       niches: [...selectedNiches].sort(),
-      store: selectedStore,
     });
     return current !== initialSnapshotRef.current;
-  }, [selectedCategories, selectedNiches, selectedStore]);
+  }, [selectedCategories, selectedNiches]);
 
   const handleCategoryToggle = (categoryId: string) => {
     setSelectedCategories(prev => {
@@ -129,10 +125,6 @@ export function TradePricingScreen() {
     return category?.niches.map(niche => ({ ...niche, categoryId: catId })) || [];
   });
 
-  const handleStoreSelect = (storeId: string) => {
-    setSelectedStore(storeId);
-  };
-
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
       setIsLoading(true);
@@ -140,12 +132,10 @@ export function TradePricingScreen() {
         ...businessSettings!,
         tradeCategories: selectedCategories.length > 0 ? selectedCategories : undefined,
         tradeNiches: selectedNiches.length > 0 ? selectedNiches : undefined,
-        selectedStore: selectedStore,
       });
       initialSnapshotRef.current = JSON.stringify({
         cats: [...selectedCategories].sort(),
         niches: [...selectedNiches].sort(),
-        store: selectedStore,
       });
       if (!opts?.silent) setShowSuccessModal(true);
       return true;
@@ -261,142 +251,72 @@ export function TradePricingScreen() {
 
           {/* Hardware Store Selection */}
           <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Hardware Store</Title>
+            <Title style={styles.sectionTitle}>Hardware Stores</Title>
             <Text style={styles.helperText}>
-              Select your preferred hardware store for pricing
+              Quotes search Bunnings as the default backbone. When Reece is connected, plumbing supplies are priced from Reece first and fall back to Bunnings if there's no match.
             </Text>
 
-            {/* Accurate Pricing Section */}
-            <View style={styles.storeCategory}>
-              <View style={styles.storeCategoryHeader}>
-                <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
-                <Text style={styles.storeCategoryTitle}>More Accurate Pricing</Text>
+            {/* Bunnings — always on, not selectable */}
+            <View style={[styles.storeRadioOption, styles.storeRadioOptionSelected]}>
+              <View style={styles.storeRadioLeft}>
+                <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} style={{ marginRight: 12 }} />
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Bunnings</Text>
+                  <Text style={styles.storeMethod}>Always on — searched on every quote</Text>
+                </View>
               </View>
-              <Text style={styles.storeCategoryDescription}>
-                Stores with more reliable web search pricing or API access.
-              </Text>
-
-              <TouchableOpacity
-                style={[
-                  styles.storeRadioOption,
-                  selectedStore === 'bunnings' && styles.storeRadioOptionSelected
-                ]}
-                onPress={() => handleStoreSelect('bunnings')}
-              >
-                <View style={styles.storeRadioLeft}>
-                  <View style={[
-                    styles.radioButton,
-                    selectedStore === 'bunnings' && styles.radioButtonSelected
-                  ]}>
-                    {selectedStore === 'bunnings' && (
-                      <View style={styles.radioButtonInner} />
-                    )}
-                  </View>
-                  <View style={styles.storeInfo}>
-                    <Text style={styles.storeName}>Bunnings</Text>
-                    <Text style={styles.storeMethod}>Web Search</Text>
-                  </View>
-                </View>
-                <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.storeRadioOption,
-                  selectedStore === 'reece' && styles.storeRadioOptionSelected,
-                ]}
-                onPress={() => {
-                  if (reeceConnected) {
-                    handleStoreSelect('reece');
-                  } else {
-                    navigation.navigate('ReeceIntegration' as never);
-                  }
-                }}
-              >
-                <View style={styles.storeRadioLeft}>
-                  <View style={[
-                    styles.radioButton,
-                    selectedStore === 'reece' && reeceConnected && styles.radioButtonSelected,
-                  ]}>
-                    {selectedStore === 'reece' && reeceConnected ? (
-                      <View style={styles.radioButtonInner} />
-                    ) : null}
-                  </View>
-                  <View style={styles.storeInfo}>
-                    <Text style={styles.storeName}>Reece</Text>
-                    <Text style={styles.storeMethod}>
-                      {reeceConnected ? 'Your real trade prices' : 'Plumbing supplier — connect your maX account'}
-                    </Text>
-                  </View>
-                </View>
-                {reeceConnected ? (
-                  <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
-                ) : (
-                  <View style={styles.connectBadge}>
-                    <Text style={styles.connectBadgeText}>Connect</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
             </View>
 
-            {/* Guestimates Section */}
-            <View style={styles.storeCategory}>
-              <View style={styles.storeCategoryHeader}>
-                <MaterialCommunityIcons name="approximately-equal" size={20} color="#FF9800" />
-                <Text style={styles.storeCategoryTitle}>Guestimates</Text>
-              </View>
-              <Text style={styles.storeCategoryDescription}>
-                Estimated pricing based on typical product costs
-              </Text>
-
-              {['mitre10', 'hth', 'totaltools', 'flexihire', 'sydneysolvents'].map((storeId) => {
-                const storeNames: Record<string, string> = {
-                  mitre10: 'Mitre 10',
-                  hth: 'Home Timber & Hardware',
-                  totaltools: 'Total Tools',
-                  flexihire: 'Flexihire',
-                  sydneysolvents: 'Sydney Solvents',
-                };
-                return (
-                  <TouchableOpacity
-                    key={storeId}
-                    style={[
-                      styles.storeRadioOption,
-                      selectedStore === storeId && styles.storeRadioOptionSelected
-                    ]}
-                    onPress={() => handleStoreSelect(storeId)}
-                  >
-                    <View style={styles.storeRadioLeft}>
-                      <View style={[
-                        styles.radioButton,
-                        selectedStore === storeId && styles.radioButtonSelected
-                      ]}>
-                        {selectedStore === storeId && (
-                          <View style={styles.radioButtonInner} />
-                        )}
-                      </View>
-                      <View style={styles.storeInfo}>
-                        <Text style={styles.storeName}>{storeNames[storeId]}</Text>
-                        <Text style={styles.storeMethod}>Price Estimate</Text>
-                      </View>
-                    </View>
-                    <MaterialCommunityIcons name="approximately-equal" size={20} color="#FF9800" />
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <View style={styles.infoBox}>
-              <MaterialCommunityIcons name="information" size={20} color={colors.primary} />
-              <Text style={styles.infoBoxText}>
-                {selectedStore === 'reece'
-                  ? "Reece is selected. Quotes will use your real maX trade prices."
-                  : selectedStore === 'bunnings'
-                  ? "Bunnings is selected. Real prices will be fetched using the Bunnings web search when available."
-                  : "Using estimated typical product pricing."
+            {/* Reece — always on when connected, otherwise tap to connect */}
+            <TouchableOpacity
+              style={[
+                styles.storeRadioOption,
+                reeceConnected && styles.storeRadioOptionSelected,
+              ]}
+              onPress={() => {
+                if (!reeceConnected) {
+                  navigation.navigate('ReeceIntegration' as never);
                 }
-              </Text>
-            </View>
+              }}
+              activeOpacity={reeceConnected ? 1 : 0.7}
+            >
+              <View style={styles.storeRadioLeft}>
+                <MaterialCommunityIcons
+                  name={reeceConnected ? 'check-circle' : 'pipe'}
+                  size={22}
+                  color={reeceConnected ? colors.success : colors.primary}
+                  style={{ marginRight: 12 }}
+                />
+                <View style={styles.storeInfo}>
+                  <Text style={styles.storeName}>Reece</Text>
+                  <Text style={styles.storeMethod}>
+                    {reeceConnected
+                      ? 'Always on — your trade prices are preferred for plumbing'
+                      : 'Plumbing supplier — connect your maX account for trade prices'}
+                  </Text>
+                </View>
+              </View>
+              {reeceConnected ? null : (
+                <View style={styles.connectBadge}>
+                  <Text style={styles.connectBadgeText}>Connect</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.addSupplierButton}
+              onPress={() => navigation.navigate('AddMaterialStandalone', { supplierBookOnly: true })}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons name="plus-circle-outline" size={20} color={colors.primary} />
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.addSupplierTitle}>Add another supplier</Text>
+                <Text style={styles.addSupplierSubtitle}>
+                  Drop in your own price list — opens the Supplier Book.
+                </Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
           </Surface>
         </WebContainer>
       </ScrollView>
@@ -639,6 +559,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.surface,
     letterSpacing: 0.4,
+  },
+  addSupplierButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginTop: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+  },
+  addSupplierTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  addSupplierSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 16,
   },
   infoBox: {
     flexDirection: 'row',

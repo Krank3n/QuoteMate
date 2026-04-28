@@ -61,16 +61,17 @@ export async function runReeceConnectFlow(): Promise<ReeceConnectOutcome> {
     const status = await completeReeceConnect(requestToken);
     return { kind: 'connected', status };
   } catch (error: any) {
-    // The most common failure here is the user closing the tab before
-    // approving QuoteMate — Reece returns a 4xx and we surface the
-    // backend's user-friendly message.
-    const message = error?.message || '';
-    if (/not approved/i.test(message)) {
-      return { kind: 'cancelled' };
-    }
+    // We used to silently treat "not approved" as `cancelled` — but that left
+    // users with no feedback when they thought they'd connected. Reece's
+    // "Invalid request token" response means the user landed on the consent
+    // page but didn't actually tap Approve/Link, which is identical to a
+    // genuine cancel from the user's perspective. Surface it as a failure
+    // either way so they know they need to retry and click through.
     return {
       kind: 'failed',
-      message: message || 'Could not finish connecting Reece. Please try again.',
+      message:
+        error?.message ||
+        'Could not finish connecting Reece. Please try again and tap Approve on the Reece consent page.',
     };
   }
 }

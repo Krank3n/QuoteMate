@@ -18,6 +18,12 @@ export interface Material {
   quantity: number;
   unit: 'each' | 'm' | 'm²' | 'm³' | 'L' | 'kg' | 'box' | 'pack';
   bunningsItemNumber?: string;
+  // Reece-specific identifiers, populated when pricingSource is the Reece API.
+  // Both are required to build a valid /au/order-gateway/orders payload, so
+  // the "Order from Reece" button only enables when these are present on at
+  // least one material.
+  reeceItemNumber?: string;       // matches productId from Reece's product-gateway/search
+  reeceUnitOfMeasure?: string;    // e.g. "LEN", "MTR" — matches the pack from search.unitOfMeasures[]
   price: number; // per unit
   totalPrice: number;
   manualPriceOverride: boolean;
@@ -36,6 +42,24 @@ export interface Material {
   category?: string; // Trade category ID (e.g., 'carpentry', 'electrical', 'plumbing')
   section?: string; // Work section within a job (e.g., 'Concreting', 'Timber Framing')
   templateBaseQuantity?: number; // Per-unit qty from template/AI (e.g. 2 posts per bay). quantity = templateBaseQuantity * section.multiplier
+}
+
+// Snapshot of a Reece order placed from QuoteMate against the user's trade
+// account. Stored as a sub-array on the originating quote so the user can see
+// "I ordered these parts on this date" history. Reece bills the user directly
+// — QuoteMate never touches money or fulfilment.
+export interface ReeceOrder {
+  reeceOrderNumber: string;       // Reece's order identifier from /order-gateway/orders
+  placedAt: string;               // ISO timestamp
+  itemCount: number;
+  totalIncGst: number;
+  totalExGst: number;
+  cartageFee: number;
+  fulfilmentMode: 'PICKUP' | 'DELIVERY';
+  branchNumber?: string;          // for PICKUP
+  branchName?: string;
+  deliveryAddress?: string;       // for DELIVERY, single-line summary
+  reference?: string;             // PO / job reference echoed to Reece
 }
 
 export interface FavoriteProductMapping {
@@ -266,6 +290,12 @@ export interface Quote {
   // — re-tapping Convert returns the existing invoice instead of duplicating.
   invoiceId?: string;
   invoicedAt?: Date;
+
+  // Reece orders placed against this quote's materials. Each entry is a
+  // confirmed order — Reece bills the user via their trade account, QuoteMate
+  // never touches the money. Append-only history; cancelling an order is done
+  // through Reece's website, not QuoteMate.
+  reeceOrders?: ReeceOrder[];
 }
 
 export type SquareDisputeStatus =

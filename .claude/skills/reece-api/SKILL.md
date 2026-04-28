@@ -86,12 +86,55 @@ All endpoints are prefixed with `/{au|nz}/` (e.g., `/au/product-gateway/search`)
 | `/invoice-gateway/invoice-headers?documentTypes=...&fromDate=...&toDate=...` | GET | List invoices |
 | `/invoice-gateway/invoices?documentNumbers=...` | GET | Invoice details |
 | `/invoice-gateway/invoice-documents?documentNumbers=...` | GET | Invoice PDF |
-| `/order-gateway/orders` | POST | Create order |
-| `/order-gateway/preview` | POST | Preview order |
-| `/order-gateway/check` | POST | Check order validity |
-| `/branches` | GET | List all branches |
+| `/order-gateway/orders` | POST | Create order — places it against the customer's trade account |
+| `/order-gateway/preview` | POST | Preview order — returns total + cartage with no side effects |
+| `/order-gateway/check` | POST | Check order validity (stock, entitlement). Same body as preview. |
+| `/branches` | GET | List all branches. Requires Customer-Token (NOT public). |
 | `/punch-out-catalog/gateway?clientId=...&hookUrl=...&customerToken=...` | GET | Punchout to maX cart |
 | `/punch-out-cart/cart/{cartToken}` | GET | Fetch punchout cart |
+
+### Order-gateway request shape (verified 2026-04-28 against prod)
+
+```json
+{
+  "orderByName": "Thomas Hansen",                       // REQUIRED
+  "requiredByDateTime": "2026-04-29T02:58:08",          // REQUIRED — yyyy-MM-dd'T'HH:mm:ss, no Z
+  "fulfillment": {                                      // REQUIRED — note US spelling
+    "type": "PICKUP",                                   // or "DELIVERY"
+    "pickupBranch": "3032",                             // STRING for PICKUP (branchNumber)
+    "deliveryDetails": {                                // for DELIVERY:
+      "contactName": "...",                             // REQUIRED
+      "deliveryAddress": {
+        "addressLine1": "...",                          // REQUIRED — at least 1 line
+        "addressLine2": "...",
+        "suburb": "...",
+        "state": "VIC",
+        "postCode": "3125"                              // REQUIRED
+      }
+    }
+  },
+  "products": [                                         // REQUIRED — non-empty
+    {
+      "productId": 9800762,                             // number, from product-gateway/search.products[].productId
+      "quantity": 1,
+      "unitOfMeasure": "LEN",                           // matches search result unitOfMeasures[].pack
+      "unitPriceExcludingGst": 162.32,                  // client echoes back the price from search
+      "quoteNumber": null,                              // optional — links to a Reece-side quote (NOT QuoteMate quote)
+      "quoteLineNumber": null
+    }
+  ],
+  "orderByPhone": "0407 594 911",                       // optional — pre-filled from customer record on response
+  "orderByEmail": null,
+  "jobName": null,                                      // optional — appears on the printed order
+  "orderNumber": null,                                  // optional — your PO / reference
+  "comment": null                                       // optional — note for branch staff
+}
+```
+
+Validation envelope on 4xx: `{ "violations": [{ "fieldName": "...", "message": "..." }] }`.
+Other errors (parse / 5xx): `{ "errors": [{ "url": "...", "message": "..." }] }`.
+
+Preview response includes `cartageFee` (delivery / handling charge — observed nonzero even on PICKUP, worth confirming with Christie) and `newIdentityCardCreated`.
 
 ## Codebase Files
 

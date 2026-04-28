@@ -40,6 +40,7 @@ import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice, getReeceConnectionStatus } from '../../services/reeceApi';
+import { ReeceOrderModal } from '../../components/ReeceOrderModal';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
@@ -393,24 +394,23 @@ export function MaterialsListScreen() {
   // when Reece is selected as the store but no connection exists yet.
   const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
   const [reeceReauthNeeded, setReeceReauthNeeded] = useState(false);
+  const [reeceOrderModalVisible, setReeceOrderModalVisible] = useState(false);
+  // Reece is now an always-on overlay for any user who has connected — not
+  // gated on a single hardware-store setting. Refresh on focus so returning
+  // from the Reece settings screen reflects the new connection state.
   useEffect(() => {
     let cancelled = false;
-    if (businessSettings?.selectedStore === 'reece') {
-      getReeceConnectionStatus()
-        .then((status) => {
-          if (!cancelled) setReeceConnected(!!status.connected);
-        })
-        .catch(() => {
-          if (!cancelled) setReeceConnected(false);
-        });
-    } else {
-      setReeceConnected(null);
-      setReeceReauthNeeded(false);
-    }
+    getReeceConnectionStatus()
+      .then((status) => {
+        if (!cancelled) setReeceConnected(!!status.connected);
+      })
+      .catch(() => {
+        if (!cancelled) setReeceConnected(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [businessSettings?.selectedStore, isFocused]);
+  }, [isFocused]);
 
   // ─────────────────────────────────────────────────────────────────────
   // Unsaved-changes guard
@@ -1066,24 +1066,13 @@ export function MaterialsListScreen() {
     const materialsToFetch = materials.filter(m => !(m.price > 0 && !m.manualPriceOverride));
     setFetchProgress({ current: 0, total: materialsToFetch.length });
 
-    // Get selected store (single store only now)
-    const selectedStore = businessSettings?.selectedStore || 'bunnings';
-
-    // Determine which pricing method to use. Reece is gated on the user
-    // actually having connected their maX account — without that, the
-    // backend returns reece_not_connected and we'd hit no real prices.
-    const useReeceApi = selectedStore === 'reece' && reeceConnected === true;
-    const useScraperApi = !useReeceApi; // Bunnings + everything else still go via the scraper proxy
-    const storeUrl = selectedStore === 'bunnings' ? 'bunnings.com.au' :
-                     selectedStore === 'mitre10' ? 'mitre10.com.au' :
-                     selectedStore === 'reece' ? 'reece.com.au' : 'bunnings.com.au';
-
-    const hardwareStores = [storeUrl]; // Single store array for backwards compatibility
-
-    let methodName = 'AI estimation';
-    if (useScraperApi && selectedStore === 'bunnings') {
-      methodName = 'Bunnings';
-    }
+    // Pricing model: Bunnings is the always-on backbone. Reece, when the
+    // user has connected, runs as a per-item pre-pass — any material it
+    // matches gets the trade-discounted price and is skipped by the Bunnings
+    // batch. Items Reece doesn't have fall through to Bunnings as normal.
+    const useReeceApi = reeceConnected === true;
+    const hardwareStores = ['bunnings.com.au']; // backbone, always
+    const methodName = useReeceApi ? 'Reece + Bunnings' : 'Bunnings';
 
     const updatedMaterials = [...materials];
 
@@ -1122,18 +1111,61 @@ export function MaterialsListScreen() {
       // Best-effort — fall through to remote on any failure.
     }
 
+    // ── Reece pre-pass (when connected) ──
+    // Reece's API gives us trade-discounted prices a Bunnings scrape can't
+    // match, so we let it run first per item. Hits are excluded from the
+    // Bunnings batch below. Misses fall through to Bunnings as normal —
+    // Reece doesn't carry every product, especially non-plumbing.
+    const reecePricedTerms = new Set<string>();
+    if (useReeceApi) {
+      for (let i = 0; i < updatedMaterials.length; i++) {
+        if (cancelFetchRef.current) break;
+        const m = updatedMaterials[i];
+        if (m.price > 0 && !m.manualPriceOverride) continue;
+        const term = m.searchTerm || m.name;
+        if (locallyPricedTerms.has(term)) continue;
+
+        let result;
+        try {
+          result = await withCancel(searchReeceMaterialPrice(term));
+        } catch (err: any) {
+          if (err?.message === '__FETCH_CANCELLED__') throw err;
+          continue;
+        }
+        if (result.reauthRequired) {
+          // Token revoked — surface the banner once, stop the Reece pass,
+          // and let Bunnings handle everything below.
+          setReeceReauthNeeded(true);
+          setReeceConnected(false);
+          break;
+        }
+        if (!result.price || !result.itemNumber) continue;
+
+        m.price = result.price;
+        m.totalPrice = result.price * m.quantity;
+        m.manualPriceOverride = false;
+        m.pricingSource = 'api';
+        m.reeceItemNumber = result.itemNumber;
+        if (result.unitOfMeasure) m.reeceUnitOfMeasure = result.unitOfMeasure;
+        if (result.productName) m.name = result.productName;
+        if (result.store) m.description = `Available at ${result.store}`;
+        fetchedCount++;
+        reecePricedTerms.add(term);
+        triggerPriceFlash(m.id);
+      }
+    }
+
     try {
 
       // --- BATCH FETCH: Progressive chunking (3 items at a time) ---
       let batchResults: Map<string, ScraperProduct | null> | null = null;
       const batchSucceededTerms = new Set<string>();
-      // Skip terms we just filled from local sources — no point asking
-      // the scraper for prices we already have. If everything was priced
-      // locally, the batch is skipped entirely.
+      // Skip terms we just filled from local sources or Reece — no point
+      // asking the scraper for prices we already have.
       const remainingTerms = materialsToFetch
         .map(m => m.searchTerm || m.name)
-        .filter(term => !locallyPricedTerms.has(term));
-      if (useScraperApi && remainingTerms.length > 0) {
+        .filter(term => !locallyPricedTerms.has(term) && !reecePricedTerms.has(term));
+      if (remainingTerms.length > 0) {
         try {
           const searchTermsToFetch = remainingTerms;
           const chunkSize = 3;
@@ -1277,236 +1309,80 @@ export function MaterialsListScreen() {
 
         const searchTerm = material.searchTerm || material.name;
 
-        if (useScraperApi) {
-          // Use Bunnings Scraper API (Priority #1 - Real Prices)
-          // Try batch result first (instant), fall back to individual search
-          try {
-            let product = batchResults?.get(searchTerm) ?? null;
+        // Bunnings backbone — runs for every item that wasn't priced by
+        // local sources or the Reece pre-pass. Hits scraper batch first
+        // (already populated above), falls back to individual scraper
+        // search, then AI estimation as a last resort.
+        try {
+          let product = batchResults?.get(searchTerm) ?? null;
 
-            if (!product) {
-              // Batch missed this one — try individual search
-              product = await withCancel(findBestMatchForMaterial(searchTerm));
-            }
-
-            if (product && product.price > 0) {
-              material.price = product.price;
-              material.totalPrice = product.price * material.quantity;
-              material.manualPriceOverride = false;
-              material.pricingSource = 'scraper';
-
-              if (product.itemNumber) {
-                material.bunningsItemNumber = product.itemNumber;
-              }
-
-              if (product.productUrl) {
-                material.productUrl = product.productUrl;
-              }
-
-              if (product.imageUrl) {
-                material.imageUrl = product.imageUrl;
-              }
-
-              if (product.description) {
-                material.description = product.description;
-              }
-
-              // Only save brand if it's not just the store name
-              if (product.brand &&
-                  product.brand.toLowerCase() !== 'bunnings' &&
-                  product.brand.toLowerCase() !== 'bunnings.com.au') {
-                material.brand = product.brand;
-              }
-
-              if (product.stockCheckedAt) {
-                material.stockCheckedAt = product.stockCheckedAt;
-              }
-
-              fetchedCount++;
-              triggerPriceFlash(material.id);
-            } else {
-              throw new Error('No product found with price');
-            }
-          } catch (error: any) {
-            // Re-throw cancellation so the outer catch handles it instantly
-            if (error?.message === '__FETCH_CANCELLED__') throw error;
-            // Scraper missed — fall back to AI estimation directly. The dead
-            // bunningsApi.findAndPriceMaterial path used to sit in between
-            // here; it's been removed because we never had working creds.
-            const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
-
-            if (aiResult.price) {
-              material.price = aiResult.price;
-              material.totalPrice = material.price * material.quantity;
-              material.manualPriceOverride = false;
-              material.pricingSource = 'ai';
-              material.priceConfidence = aiResult.confidence || 'medium';
-
-              if (aiResult.productName) {
-                material.name = aiResult.productName;
-              }
-              if (aiResult.store) {
-                material.description = `AI reckons about this much`;
-              }
-
-              fetchedCount++;
-              triggerPriceFlash(material.id);
-            } else {
-              failedCount++;
-            }
+          if (!product) {
+            // Batch missed this one — try individual search
+            product = await withCancel(findBestMatchForMaterial(searchTerm));
           }
-        } else if (useReeceApi) {
-          // Use Reece API for plumbing supplies
-          const result = await withCancel(searchReeceMaterialPrice(searchTerm));
 
-          if (result.reauthRequired) {
-            // Token has been revoked — surface a reconnect banner once and
-            // stop hammering the API for the rest of this batch.
-            setReeceReauthNeeded(true);
-            setReeceConnected(false);
-            failedCount++;
-          } else if (result.price) {
-            material.price = result.price;
+          if (product && product.price > 0) {
+            material.price = product.price;
+            material.totalPrice = product.price * material.quantity;
+            material.manualPriceOverride = false;
+            material.pricingSource = 'scraper';
+
+            if (product.itemNumber) {
+              material.bunningsItemNumber = product.itemNumber;
+            }
+
+            if (product.productUrl) {
+              material.productUrl = product.productUrl;
+            }
+
+            if (product.imageUrl) {
+              material.imageUrl = product.imageUrl;
+            }
+
+            if (product.description) {
+              material.description = product.description;
+            }
+
+            // Only save brand if it's not just the store name
+            if (product.brand &&
+                product.brand.toLowerCase() !== 'bunnings' &&
+                product.brand.toLowerCase() !== 'bunnings.com.au') {
+              material.brand = product.brand;
+            }
+
+            if (product.stockCheckedAt) {
+              material.stockCheckedAt = product.stockCheckedAt;
+            }
+
+            fetchedCount++;
+            triggerPriceFlash(material.id);
+          } else {
+            throw new Error('No product found with price');
+          }
+        } catch (error: any) {
+          // Re-throw cancellation so the outer catch handles it instantly
+          if (error?.message === '__FETCH_CANCELLED__') throw error;
+          // Scraper missed — fall back to AI estimation directly.
+          const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
+
+          if (aiResult.price) {
+            material.price = aiResult.price;
             material.totalPrice = material.price * material.quantity;
             material.manualPriceOverride = false;
-            material.pricingSource = 'api';
+            material.pricingSource = 'ai';
+            material.priceConfidence = aiResult.confidence || 'medium';
 
-            // Store additional info if available
-            if (result.productName) {
-              material.name = result.productName;
+            if (aiResult.productName) {
+              material.name = aiResult.productName;
             }
-            if (result.store) {
-              material.description = `Available at ${result.store}`;
+            if (aiResult.store) {
+              material.description = `AI reckons about this much`;
             }
 
             fetchedCount++;
             triggerPriceFlash(material.id);
           } else {
             failedCount++;
-          }
-        } else {
-          // Use Web Scraping with Favorites (NEW METHOD)
-
-          // 1. Check for saved favorite first
-          const favorite = await withCancel(getFavoriteProduct(material.name, material.searchTerm));
-
-          if (favorite) {
-            // Use favorite product's last known price (user can manually update if needed)
-            material.favoriteProduct = favorite;
-            // Note: Favorite stores the product info but not price (prices change)
-            // So we still need to search, but we'll auto-select the favorite
-          }
-
-          // 2. Search hardware stores with web scraping
-          const results = await withCancel(searchMaterialWithWebScraping(
-            material.name,
-            searchTerm,
-            material.quantity,
-            material.unit,
-            hardwareStores
-          ));
-
-          if (results.length > 0 && results[0].matches.length > 0) {
-            const allMatches = results.flatMap(r => r.matches);
-            const quantityAdj = results[0].quantityAdjustment;
-
-            // 3. Check if we have a favorite match in results
-            let selectedMatch: ProductMatch | null = null;
-
-            if (favorite) {
-              // Try to find the favorite product in matches
-              selectedMatch = allMatches.find(
-                m =>
-                  m.productName === favorite.productName ||
-                  m.itemNumber === favorite.itemNumber
-              ) || null;
-            }
-
-            // 4. If no favorite or favorite not found, get best match
-            if (!selectedMatch) {
-              selectedMatch = getBestMatch(results);
-            }
-
-            // 5. If multiple high-confidence matches and no favorite, prompt user
-            const highConfidenceMatches = allMatches.filter(m => m.confidence === 'high');
-            if (!favorite && highConfidenceMatches.length > 1 && !selectedMatch) {
-              // Pause and ask user to select
-              setPendingMatches(highConfidenceMatches);
-              setPendingMaterialIndex(i);
-              setPendingMaterialName(material.name);
-              setMatchSelectorVisible(true);
-
-              // Wait for user selection before continuing
-              // (This will be handled by the modal callback)
-              stopFetchCountdown();
-              setCurrentFetchingName('');
-              setIsFetchingPrices(false);
-              setFetchPhase('idle');
-              return; // Exit early, user will resume after selection
-            }
-
-            // 6. Apply selected product to material
-            if (selectedMatch) {
-              material.price = selectedMatch.price;
-              material.totalPrice = selectedMatch.price * material.quantity;
-              material.manualPriceOverride = false;
-              material.pricingSource = 'scraper';
-
-              // Apply quantity adjustment if needed
-              if (quantityAdj && quantityAdj.adjustedQuantity !== material.quantity) {
-                material.quantity = quantityAdj.adjustedQuantity;
-                material.totalPrice = selectedMatch.price * material.quantity;
-              }
-
-              // Store product details
-              if (selectedMatch.itemNumber) {
-                material.bunningsItemNumber = selectedMatch.itemNumber;
-              }
-              if (selectedMatch.productUrl) {
-                material.productUrl = selectedMatch.productUrl;
-              }
-              if (selectedMatch.description) {
-                material.description = selectedMatch.description;
-              }
-              // Only save brand if it's not just the store name
-              if (selectedMatch.brand &&
-                  selectedMatch.brand.toLowerCase() !== 'bunnings' &&
-                  selectedMatch.brand.toLowerCase() !== 'bunnings.com.au' &&
-                  selectedMatch.brand.toLowerCase() !== 'reece' &&
-                  selectedMatch.brand.toLowerCase() !== 'mitre 10') {
-                material.brand = selectedMatch.brand;
-              }
-              if (selectedMatch.stockCheckedAt) {
-                material.stockCheckedAt = selectedMatch.stockCheckedAt;
-              }
-
-              fetchedCount++;
-              triggerPriceFlash(material.id);
-            } else {
-              failedCount++;
-            }
-          } else {
-            // Web scraping failed, fall back to AI estimation
-            const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
-
-            if (aiResult.price) {
-              material.price = aiResult.price;
-              material.totalPrice = material.price * material.quantity;
-              material.manualPriceOverride = false;
-              material.pricingSource = 'ai';
-              material.priceConfidence = aiResult.confidence || 'medium';
-
-              if (aiResult.productName) {
-                material.name = aiResult.productName;
-              }
-              if (aiResult.store) {
-                material.description = `AI reckons about this much`;
-              }
-
-              fetchedCount++;
-              triggerPriceFlash(material.id);
-            } else {
-              failedCount++;
-            }
           }
         }
 
@@ -2104,10 +1980,12 @@ export function MaterialsListScreen() {
           scrollEnabled={!tourActive}
       >
         <WebContainer>
-        {/* Reece-not-connected banner. Shows when the user picked Reece as
-            their store but never finished onboarding, OR when their saved
-            customer token has been revoked and we hit a 401 mid-fetch. */}
-        {businessSettings?.selectedStore === 'reece' && (reeceConnected === false || reeceReauthNeeded) ? (
+        {/* Reece-not-connected banner. Shown to plumbers who haven't yet
+            connected (so they get nudged to plug in their trade-pricing) and
+            to anyone who hit a 401 mid-fetch (token revoked). Hidden once
+            connected. */}
+        {(businessSettings?.tradeCategories?.includes('plumbing') || reeceReauthNeeded) &&
+         (reeceConnected === false || reeceReauthNeeded) ? (
           <TouchableOpacity
             style={styles.reeceBanner}
             onPress={() => navigation.navigate('ReeceIntegration' as never)}
@@ -2599,10 +2477,39 @@ export function MaterialsListScreen() {
           </View>
         )}
 
+        {/* "Order from Reece" entry — shows only when the user is connected
+            AND at least one material has Reece order identifiers. */}
+        {reeceConnected === true && materials.some((m) => !!m.reeceItemNumber && !!m.reeceUnitOfMeasure) ? (
+          <TouchableOpacity
+            style={styles.reeceOrderButton}
+            onPress={() => setReeceOrderModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="cart-outline" size={20} color={colors.primary} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.reeceOrderButtonTitle}>Order from Reece</Text>
+              <Text style={styles.reeceOrderButtonSubtitle}>
+                Place this list against your trade account — Reece bills you, no money through QuoteMate.
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : null}
+
         {/* Spacer for fixed bottom button */}
         <View style={{ height: 120 }} />
         </WebContainer>
        </NestableScrollContainer>
+
+      <ReeceOrderModal
+        visible={reeceOrderModalVisible}
+        onDismiss={() => setReeceOrderModalVisible(false)}
+        materials={materials}
+        quoteId={currentQuote?.id}
+        quoteReference={(currentQuote as any)?.quoteNumber || (currentQuote as any)?.invoiceNumber}
+        jobAddress={currentQuote?.jobAddress}
+        jobContactName={currentQuote?.customerName}
+      />
 
       <FixedBottomButton
         label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labor & Markup")}
@@ -3322,6 +3229,27 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.primary,
+  },
+  reeceOrderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  reeceOrderButtonTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  reeceOrderButtonSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 16,
   },
   reeceBannerText: {
     flex: 1,

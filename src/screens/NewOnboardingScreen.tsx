@@ -50,6 +50,7 @@ import { TRADE_CATEGORIES } from '../constants/tradeCategories';
 import { auth, storage } from '../config/firebase';
 import * as squareService from '../services/squareService';
 import { runReeceConnectFlow } from '../services/reeceConnect';
+import { getReeceConnectionStatus } from '../services/reeceApi';
 import { compressLogo } from '../services/photoService';
 import { lightTap, successTap, errorTap, selectionTap } from '../utils/haptics';
 
@@ -499,9 +500,16 @@ export function NewOnboardingScreen() {
       if (outcome.kind === 'connected') {
         setReeceConnected(true);
       } else if (outcome.kind === 'failed') {
-        setReeceError(outcome.message);
+        // Race: backend can write to Firestore while the client loses the
+        // response (see ReeceIntegrationScreen.handleConnect for context).
+        // Confirm via a fresh status check before surfacing a failure.
+        const status = await getReeceConnectionStatus();
+        if (status.connected) {
+          setReeceConnected(true);
+        } else {
+          setReeceError(outcome.message);
+        }
       }
-      // Cancelled: leave the user on the screen so they can retry or skip.
     } finally {
       setReeceConnecting(false);
     }
