@@ -2395,15 +2395,18 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Reece's search is strict token-AND, so a 4+ word query with one
-      // off-catalog term ("neutral cure silicone clear") returns 0 even
-      // when Reece sells the thing. Fall back to the last two tokens —
-      // typically the noun + qualifier, which is how Reece titles its
-      // catalog ("Bostik...Silicone Clear"). One retry only; we'd rather
-      // miss than overshoot to a wrong-variant product.
+      // Reece's search is strict token-AND, so long descriptive queries with
+      // one off-catalog token ("neutral cure silicone clear", "double bowl
+      // kitchen sink") return 0 even when Reece sells the thing. Fall back
+      // by progressively dropping leading descriptors and keeping the
+      // noun-tail — that's where Reece anchors its catalog titles
+      // ("Greens Marketti...Sink Mixer Tap"). Try original → last 3 → last 2,
+      // stopping at the first variant that returns hits.
       const tokens = productName.trim().split(/\s+/);
-      const variants =
-        tokens.length >= 3 ? [productName, tokens.slice(-2).join(' ')] : [productName];
+      const candidates = [productName];
+      if (tokens.length >= 4) candidates.push(tokens.slice(-3).join(' '));
+      if (tokens.length >= 3) candidates.push(tokens.slice(-2).join(' '));
+      const variants = Array.from(new Set(candidates));
 
       const fetchVariant = (variant: string) =>
         fetch(
