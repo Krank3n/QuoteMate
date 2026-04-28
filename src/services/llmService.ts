@@ -805,7 +805,7 @@ export async function cleanupTranscriptionAndGenerateTitle(
           },
           body: JSON.stringify({
             model: 'claude-sonnet-4-5-20250929',
-            max_tokens: 1500,
+            max_tokens: 4000,
             temperature: 0.2,
             messages: [
               {
@@ -911,7 +911,7 @@ async function cleanupViaGemini(
       ],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: 1000,
+        maxOutputTokens: 3000,
       },
     }),
   });
@@ -954,19 +954,23 @@ Include in your response:
 If no templates are relevant, return "templateSuggestions": []`;
   }
 
-  return `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title. The cleaned description will appear on an invoice sent to the customer, so it must be written professionally. Do NOT add any details, claims, or information that are not present in the original text.
+  return `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title. The cleaned description will appear on an invoice sent to the customer, so it must read professionally. Do NOT add any details, claims, or information that are not present in the original text.
 
 Transcribed Text: "${transcribedText}"
 
 Tasks:
-1. Fix any transcription errors or unclear phrases
-2. Rewrite the description in a professional, customer-facing tone suitable for an invoice
-3. Keep all important details (measurements, materials, locations, etc.) but do not invent or add any new details
-4. Generate a short, professional job title (3-7 words)${templateSection}
+1. Fix transcription errors, slang, filler words ("yeah", "so", "like", "reckon"), and unclear phrases
+2. Preserve EVERY detail from the original — measurements, materials, locations, conditions, causes, customer remarks. Do NOT shorten, summarise, omit, or merge details. If the input is long, the cleaned output should be similarly long. Your job is grammar, readability, and structure — not compression.
+3. Format for readability on an invoice:
+   - Use short paragraphs separated by blank lines for distinct phases or topics (e.g. existing condition, scope of work, materials, finish).
+   - Where the work has a list of discrete items (multiple tasks, materials, or fixtures), use a bullet list with "- " at the start of each line.
+   - Keep sentences plain and factual.
+4. Do not invent details, do not add warranties, claims, or assurances that were not in the original.
+5. Generate a short, professional job title (3-7 words)${templateSection}
 
 Provide a JSON response with this structure:
 {
-  "cleanedDescription": "The cleaned and formatted description",
+  "cleanedDescription": "The cleaned and formatted description (use \\n for line breaks and \\n\\n between paragraphs)",
   "suggestedTitle": "Short Job Title"${templates && templates.length > 0 ? ',\n  "templateSuggestions": [{ "templateId": "...", "suggestedQuantity": 1, "reasoning": "..." }]' : ''}
 }
 

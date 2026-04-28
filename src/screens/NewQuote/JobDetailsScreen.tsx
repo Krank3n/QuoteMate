@@ -41,7 +41,7 @@ try {
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
 import { JOB_TEMPLATES } from '../../data/jobTemplates';
-import { NICHE_TEMPLATES, getTemplatesForNiche, getNicheTemplateById, NicheJobTemplate } from '../../data/nicheTemplates';
+import { NICHE_TEMPLATES, getTemplatesForNiche, getNicheTemplateById, NicheJobTemplate, getDescriptionPlaceholder, getVoicePromptHint } from '../../data/nicheTemplates';
 import { getTradeCategoryById, getTradeNicheById, PRICING_METHODS } from '../../constants/tradeCategories';
 import { createJobFromTemplate } from '../../utils/materialsEstimator';
 import { colors } from '../../theme';
@@ -49,6 +49,7 @@ import { JobTemplate, QuotePhoto } from '../../types';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials, cleanupTranscriptionAndGenerateTitle, TemplateMatchInput } from '../../services/llmService';
 import { loadTemplates } from '../../services/sectionTemplateService';
 import { generateId } from '../../utils/generateId';
+import { getRecentJobTypeIds, recordJobTypeUsed, sortByRecency } from '../../utils/recentJobTypes';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { ProBadge } from '../../components/ProBadge';
@@ -88,11 +89,27 @@ export function JobDetailsScreen() {
   const [useCustomMode, setUseCustomMode] = useState(true); // Default to custom (AI) mode
   const [jobPhotos, setJobPhotos] = useState<QuotePhoto[]>([]);
   const [includePhotosInAi, setIncludePhotosInAi] = useState(true);
+  // Snapshot taken right before cleanup runs; while non-null the user can
+  // undo the cleanup and restore the original description + title.
+  const [preCleanupSnapshot, setPreCleanupSnapshot] = useState<{ description: string; title: string } | null>(null);
+  // Most-recently-used job-type chip ids, loaded once on mount. Drives the
+  // chip ordering so frequent picks float to the front. Captured at mount
+  // time only — we don't reorder mid-screen, which would jump chips around
+  // under the user's finger as they tap.
+  const [recentJobTypeIds, setRecentJobTypeIds] = useState<string[]>([]);
+  const [recentJobTypeIdsLoaded, setRecentJobTypeIdsLoaded] = useState(false);
+  useEffect(() => {
+    getRecentJobTypeIds().then(ids => {
+      setRecentJobTypeIds(ids);
+      setRecentJobTypeIdsLoaded(true);
+    });
+  }, []);
 
   // Tour refs
   const { registerRef } = useTourRefs();
   const descriptionRef = useRef<View>(null);
   const descriptionCleanedRef = useRef<View>(null);
+  const descriptionInputRef = useRef<any>(null);
   const micButtonRef = useRef<View>(null);
   const jobPhotosRef = useRef<View>(null);
   const jobPhotoThumbnailRef = useRef<View>(null);
@@ -135,23 +152,69 @@ export function JobDetailsScreen() {
   const rotateAnim = useState(new Animated.Value(0))[0];
   const webRecognitionRef = useRef<any>(null);
 
-  // Template carousel expand/collapse state
-  const [isTemplateCarouselExpanded, setIsTemplateCarouselExpanded] = useState(false);
-  const carouselHeightAnim = useRef(new Animated.Value(0)).current; // 0 = collapsed, 1 = expanded
-
-  // Animate carousel expand/collapse
-  useEffect(() => {
-    Animated.timing(carouselHeightAnim, {
-      toValue: isTemplateCarouselExpanded ? 1 : 0,
-      duration: 120,
-      useNativeDriver: false,
-    }).start();
-  }, [isTemplateCarouselExpanded]);
-
   // Keep ref in sync with state
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
+
+  // Templates available to this user, derived from their selected trade
+  // categories/niches. Drives the chip row at the top of the screen.
+  // Per-category fallback: if a category has no matching niche selected,
+  // surface every template for that category — otherwise picking two
+  // categories but only niches from one would hide the other entirely.
+  const availableTemplates = React.useMemo<NicheJobTemplate[]>(() => {
+    if (!businessSettings) return [];
+    const all: NicheJobTemplate[] = [];
+    const userNiches = businessSettings.tradeNiches || [];
+    if (businessSettings.tradeCategories && businessSettings.tradeCategories.length > 0) {
+      businessSettings.tradeCategories.forEach(catId => {
+        const cat = getTradeCategoryById(catId);
+        if (!cat) return;
+        const before = all.length;
+        // Niche 'all' is a meta-niche meaning "everything in this category" —
+        // filter it out so we hit the broaden-to-category fallback below.
+        const categoryNicheIds = new Set(cat.niches.map(n => n.id));
+        const nichesForThisCategory = userNiches.filter(n => categoryNicheIds.has(n) && n !== 'all');
+        nichesForThisCategory.forEach(nicheId => {
+          all.push(...getTemplatesForNiche(catId, nicheId));
+        });
+        // If user's selections produced no templates for this category
+        // (no niches picked, picked 'all', or picked niches without templates),
+        // surface every template for the category instead of hiding it.
+        if (all.length === before) {
+          cat.niches.forEach(n => all.push(...getTemplatesForNiche(catId, n.id)));
+        }
+      });
+    } else if (businessSettings.tradeCategory) {
+      const cat = getTradeCategoryById(businessSettings.tradeCategory);
+      const before = all.length;
+      if (businessSettings.tradeNiche && businessSettings.tradeNiche !== 'all') {
+        all.push(...getTemplatesForNiche(businessSettings.tradeCategory, businessSettings.tradeNiche));
+      }
+      if (all.length === before && cat) {
+        cat.niches.forEach(n => all.push(...getTemplatesForNiche(businessSettings.tradeCategory!, n.id)));
+      }
+    }
+    const deduped = Array.from(new Map(all.map(t => [t.id, t])).values());
+    return sortByRecency(deduped, recentJobTypeIds);
+  }, [businessSettings, recentJobTypeIds]);
+
+  // Header title — "New <niche> job" when a single niche is selected, else
+  // "New job". Keeps the entity word "job" since it persists through the
+  // quote-to-completion lifecycle.
+  const screenHeaderTitle = React.useMemo<string>(() => {
+    if (!businessSettings) return 'New job';
+    const niches = businessSettings.tradeNiches?.length
+      ? businessSettings.tradeNiches
+      : (businessSettings.tradeNiche ? [businessSettings.tradeNiche] : []);
+    const cats = businessSettings.tradeCategories?.length
+      ? businessSettings.tradeCategories
+      : (businessSettings.tradeCategory ? [businessSettings.tradeCategory] : []);
+    if (niches.length !== 1 || cats.length !== 1) return 'New job';
+    const niche = getTradeNicheById(cats[0], niches[0]);
+    if (!niche || niche.id === 'all') return 'New job';
+    return `New ${niche.name.toLowerCase()} job`;
+  }, [businessSettings]);
 
 
   // Check if editing an existing document (by checking if it exists in saved quotes/invoices)
@@ -376,6 +439,20 @@ export function JobDetailsScreen() {
     }
   }, [currentQuote]);
 
+  // Cold-start default: pre-select the first available template chip so the
+  // description placeholder feels trade-specific from second one. Skips when
+  // editing an existing job or when the user already has a chip selected.
+  // Wait for the MRU list to load first so the default reflects the user's
+  // most-recent pick rather than the alphabetical first template.
+  useEffect(() => {
+    if (isEditingExisting) return;
+    if (selectedTemplate) return;
+    if (!recentJobTypeIdsLoaded) return;
+    if (availableTemplates.length > 0) {
+      setSelectedTemplate(availableTemplates[0]);
+    }
+  }, [availableTemplates, isEditingExisting, recentJobTypeIdsLoaded]);
+
   // Save changes when navigating back. updateQuote keeps currentQuote in sync,
   // saveDraft persists to AsyncStorage + Firestore. Both are needed — without
   // saveDraft, a gesture-back only updates memory and the edit can be lost.
@@ -568,6 +645,14 @@ export function JobDetailsScreen() {
     setTranscript('');
     startingDescriptionRef.current = '';
     lastTranscriptRef.current = '';
+    setPreCleanupSnapshot(null);
+  };
+
+  const handleUndoCleanup = () => {
+    if (!preCleanupSnapshot) return;
+    setJobDescription(preCleanupSnapshot.description);
+    setJobName(preCleanupSnapshot.title);
+    setPreCleanupSnapshot(null);
   };
 
   const handleCleanupDescription = async () => {
@@ -575,6 +660,9 @@ export function JobDetailsScreen() {
       Alert.alert('No Description', 'Please enter or record a job description first');
       return;
     }
+
+    // Snapshot current values so the user can undo the cleanup.
+    const snapshot = { description: jobDescription, title: jobName };
 
     setIsProcessingVoice(true);
     try {
@@ -595,6 +683,8 @@ export function JobDetailsScreen() {
       if (result.suggestedTitle && !jobName) {
         setJobName(result.suggestedTitle);
       }
+      // Cleanup succeeded — record the pre-cleanup state so the user can revert.
+      setPreCleanupSnapshot(snapshot);
       // Store template suggestions on the quote for the materials screen
       if (result.templateSuggestions && result.templateSuggestions.length > 0 && currentQuote) {
         updateQuote({
@@ -624,6 +714,21 @@ export function JobDetailsScreen() {
       defaults[param.key] = param.defaultValue || 0;
     });
     setCustomParams(defaults);
+  };
+
+  // Chip-row handler: select template and pop the keyboard so the
+  // template's question prompts (rendered as the placeholder) are visible
+  // and the tradie can start typing immediately.
+  const handleSelectTemplate = (template: JobTemplate | NicheJobTemplate | null) => {
+    setSelectedTemplate(template);
+    if (template?.id) {
+      // Fire-and-forget — affects ordering on the next visit, not this one.
+      recordJobTypeUsed(template.id);
+    }
+    if (isProcessingVoice || isRecording) return;
+    // TextInput remounts on template change (key={template.id}), so defer
+    // focus until after the next render.
+    setTimeout(() => descriptionInputRef.current?.focus(), 50);
   };
 
   const handleParamChange = (key: string, value: string) => {
@@ -738,6 +843,19 @@ export function JobDetailsScreen() {
             }
           }
         }
+      }
+
+      // Selected job-type chip — sharper signal than the broader niche.
+      // Surfaces the chosen template's name + suggested materials to the LLM.
+      const nicheTemplate = selectedTemplate as NicheJobTemplate | null;
+      if (nicheTemplate?.name) {
+        nicheNames.unshift(nicheTemplate.name);
+      }
+      if (nicheTemplate?.suggestedMaterials?.length) {
+        allSuggestedMaterials.unshift(...nicheTemplate.suggestedMaterials);
+      }
+      if (nicheTemplate?.pricingMethod && !pricingMethod) {
+        pricingMethod = (PRICING_METHODS as any)[nicheTemplate.pricingMethod]?.label || nicheTemplate.pricingMethod;
       }
 
       // Remove duplicates from suggested materials
@@ -948,218 +1066,75 @@ export function JobDetailsScreen() {
           scrollEnabled={true}
         >
           <WebContainer>
-      {/* Niche-Specific Quick Templates */}
-      {businessSettings && !isEditingExisting && (() => {
-        // Get all templates from user's selected categories and niches
-        const allTemplates: NicheJobTemplate[] = [];
-
-        // First, try to get templates from new multi-select fields
-        if (businessSettings.tradeCategories && businessSettings.tradeCategories.length > 0) {
-          businessSettings.tradeCategories.forEach(categoryId => {
-            if (businessSettings.tradeNiches && businessSettings.tradeNiches.length > 0) {
-              // Get templates for each selected niche
-              businessSettings.tradeNiches.forEach(nicheId => {
-                const templates = getTemplatesForNiche(categoryId, nicheId);
-                allTemplates.push(...templates);
-              });
-            } else {
-              // No niches selected, get all templates for this category
-              const category = getTradeCategoryById(categoryId);
-              if (category) {
-                category.niches.forEach(niche => {
-                  const templates = getTemplatesForNiche(categoryId, niche.id);
-                  allTemplates.push(...templates);
-                });
-              }
-            }
-          });
-        } else if (businessSettings.tradeCategory && businessSettings.tradeNiche) {
-          // Fallback: Use legacy single-select fields
-          allTemplates.push(...getTemplatesForNiche(businessSettings.tradeCategory, businessSettings.tradeNiche));
-        }
-
-        // Remove duplicates by ID
-        const uniqueTemplates = Array.from(new Map(allTemplates.map(t => [t.id, t])).values());
-
-        if (uniqueTemplates.length === 0) return null;
-
-        const hasSelection = useCustomMode || selectedTemplate;
-        const selectedName = useCustomMode ? 'Custom Job' : selectedTemplate?.name || '';
-        const selectedIcon = useCustomMode ? 'pencil-outline' : (selectedTemplate?.icon as any) || 'briefcase-outline';
-
-        return (
-          <Surface style={[styles.paramsSection, styles.firstSection, styles.templateSection]}>
-            {/* Header row — always visible, tappable to toggle */}
-            <TouchableOpacity
-              style={styles.selectedTemplateSummary}
-              onPress={() => setIsTemplateCarouselExpanded(!isTemplateCarouselExpanded)}
-              activeOpacity={0.7}
-            >
-              {hasSelection && !isTemplateCarouselExpanded ? (
-                <>
-                  <MaterialCommunityIcons name={selectedIcon} size={22} color={colors.primary} />
-                  <Text style={styles.selectedTemplateName} numberOfLines={1}>{selectedName}</Text>
-                  <View style={styles.changeIconButton}>
-                    <MaterialCommunityIcons name="swap-horizontal" size={20} color={colors.primary} />
-                  </View>
-                </>
-              ) : (
-                <View style={styles.sectionTitleRow}>
-                  <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
-                    <MaterialCommunityIcons name="briefcase-outline" size={20} color={colors.secondary} />
-                  </View>
-                  <Title style={styles.sectionTitle}>
-                    {isTemplateCarouselExpanded ? 'Select Job Type' : `${uniqueTemplates.length + 1} Job Types Available`}
-                  </Title>
-                  <MaterialCommunityIcons
-                    name={isTemplateCarouselExpanded ? "chevron-up" : "chevron-down"}
-                    size={24}
-                    color={colors.primary}
-                    style={styles.expandIcon}
-                  />
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* Carousel — animated height */}
-            <Animated.View style={{
-              height: carouselHeightAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, 160],
-              }),
-              opacity: carouselHeightAnim,
-              overflow: 'hidden',
-            }}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.templateScroll}
-              >
-              {/* Custom Job Card (first option) */}
-              <TouchableOpacity
-                style={[
-                  styles.quickTemplateCard,
-                  useCustomMode && styles.quickTemplateCardSelected,
-                ]}
-                onPress={() => {
-                  setUseCustomMode(true);
-                  setSelectedTemplate(null);
-                  setCustomParams({});
-                  setJobName('');
-                  setJobDescription('');
-                  setTimeout(() => setIsTemplateCarouselExpanded(false), 300);
-                }}
-              >
-                <View style={styles.quickTemplateHeader}>
-                  <MaterialCommunityIcons
-                    name="pencil-outline"
-                    size={28}
-                    color={useCustomMode ? colors.primary : colors.textMuted}
-                  />
-                  <Text style={[
-                    styles.quickTemplateName,
-                    useCustomMode && styles.quickTemplateNameSelected,
-                  ]}>Custom Job</Text>
-                </View>
-                <Text style={styles.quickTemplateDesc}>Describe your own job</Text>
-                <View style={styles.quickTemplateBadge}>
-                  <MaterialCommunityIcons name="brain" size={12} color={colors.secondary} />
-                  <Text style={styles.quickTemplateBadgeText}>AI Powered</Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* Template Cards */}
-              {uniqueTemplates.map((template) => (
-              <TouchableOpacity
-                key={template.id}
-                style={[
-                  styles.quickTemplateCard,
-                  selectedTemplate?.id === template.id && styles.quickTemplateCardSelected,
-                ]}
-                onPress={() => {
-                  setUseCustomMode(false);
-                  setSelectedTemplate(template);
-                  setJobName(template.name);
-                  setJobDescription(template.description);
-
-                  if (template.requiredParams && template.requiredParams.length > 0) {
-                    const params: Record<string, number> = {};
-                    template.requiredParams.forEach(param => {
-                      params[param.key] = param.defaultValue || 0;
-                    });
-                    setCustomParams(params);
-                  }
-
-                  setTimeout(() => setIsTemplateCarouselExpanded(false), 300);
-                }}
-              >
-                <View style={styles.quickTemplateHeader}>
-                  <MaterialCommunityIcons
-                    name={template.icon as any}
-                    size={28}
-                    color={selectedTemplate?.id === template.id ? colors.primary : colors.textMuted}
-                  />
-                  <Text style={[
-                    styles.quickTemplateName,
-                    selectedTemplate?.id === template.id && styles.quickTemplateNameSelected,
-                  ]}>{template.name}</Text>
-                </View>
-                <Text style={styles.quickTemplateDesc}>{template.description}</Text>
-                <View style={styles.quickTemplateBadge}>
-                  <MaterialCommunityIcons name="lightning-bolt" size={12} color={colors.secondary} />
-                  <Text style={styles.quickTemplateBadgeText}>{(PRICING_METHODS as any)[template.pricingMethod]?.label || template.pricingMethod}</Text>
-                </View>
-              </TouchableOpacity>
-              ))}
-              </ScrollView>
-            </Animated.View>
-          </Surface>
-        );
-      })()}
-
-      {/* Template Parameters OR Custom Job Description */}
-      {!useCustomMode && selectedTemplate && (selectedTemplate as NicheJobTemplate).requiredParams && (selectedTemplate as NicheJobTemplate).requiredParams.length > 0 ? (
-        // TEMPLATE MODE: Show parameter inputs
-        <Surface style={styles.paramsSection}>
-          <View style={styles.sectionTitleContainer}>
-            <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
-              <MaterialCommunityIcons name="format-list-numbered" size={20} color={colors.primary} />
-            </View>
-            <Title style={styles.sectionTitle}>Job Details</Title>
-          </View>
-          <Text style={styles.helperText}>
-            Enter the measurements for this {selectedTemplate.name.toLowerCase()} job.
-          </Text>
-
-          {(selectedTemplate as NicheJobTemplate).requiredParams.map((param) => (
-            <View key={param.key} style={styles.paramInputContainer}>
-              <TextInput
-                label={param.label}
-                value={customParams[param.key]?.toString() || ''}
-                onChangeText={(text) => {
-                  const value = parseFloat(text) || 0;
-                  setCustomParams({ ...customParams, [param.key]: value });
-                }}
-                mode="outlined"
-                keyboardType="decimal-pad"
-                style={styles.paramInput}
-                right={param.unit ? <TextInput.Affix text={param.unit} /> : undefined}
-              />
-            </View>
-          ))}
-        </Surface>
-      ) : (
-        // CUSTOM MODE: Show voice/text input (merged into one Surface)
-        <Surface style={styles.paramsSection}>
+      {/* Job-type chip row — drives the description placeholder + voice cue. */}
+      {availableTemplates.length > 0 && !isEditingExisting && (
+        <Surface style={[styles.paramsSection, styles.firstSection, styles.templateSection]}>
           <View style={styles.sectionTitleContainer}>
             <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
-              <MaterialCommunityIcons name="hammer-wrench" size={20} color={colors.secondary} />
+              <MaterialCommunityIcons name="briefcase-outline" size={20} color={colors.secondary} />
             </View>
-            <Title style={styles.sectionTitle}>Job Description</Title>
+            <Title style={styles.sectionTitle}>{screenHeaderTitle}</Title>
           </View>
-          <Text style={styles.helperText}>
-            Hit the mic and tell us what needs doing, or bash it out on the keyboard.
-          </Text>
+          <Text style={styles.helperText}>What kind of job is this?</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipRow}
+            keyboardShouldPersistTaps="handled"
+          >
+            {availableTemplates.map((t) => {
+              const isSelected = selectedTemplate?.id === t.id;
+              const iconColor = isSelected ? colors.surface : colors.onSurface;
+              return (
+                <Chip
+                  key={t.id}
+                  selected={isSelected}
+                  onPress={() => handleSelectTemplate(t)}
+                  icon={() => (
+                    <MaterialCommunityIcons name={t.icon as any} size={18} color={iconColor} />
+                  )}
+                  style={[styles.jobTypeChip, isSelected && styles.jobTypeChipSelected]}
+                  textStyle={isSelected ? styles.jobTypeChipTextSelected : styles.jobTypeChipText}
+                  showSelectedCheck={false}
+                >
+                  {t.name}
+                </Chip>
+              );
+            })}
+            {(() => {
+              const isSelected = selectedTemplate === null;
+              const iconColor = isSelected ? colors.surface : colors.onSurface;
+              return (
+                <Chip
+                  selected={isSelected}
+                  onPress={() => handleSelectTemplate(null)}
+                  icon={() => (
+                    <MaterialCommunityIcons name="dots-horizontal" size={18} color={iconColor} />
+                  )}
+                  style={[styles.jobTypeChip, isSelected && styles.jobTypeChipSelected]}
+                  textStyle={isSelected ? styles.jobTypeChipTextSelected : styles.jobTypeChipText}
+                  showSelectedCheck={false}
+                >
+                  Other
+                </Chip>
+              );
+            })()}
+          </ScrollView>
+        </Surface>
+      )}
+
+      {/* Job description — voice + text. The placeholder, voice cue, and
+          AI context are all shaped by the selected template chip above. */}
+      <Surface style={styles.paramsSection}>
+        <View style={styles.sectionTitleContainer}>
+          <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
+            <MaterialCommunityIcons name="hammer-wrench" size={20} color={colors.secondary} />
+          </View>
+          <Title style={styles.sectionTitle}>Job Description</Title>
+        </View>
+        <Text style={styles.helperText}>
+          {getVoicePromptHint(selectedTemplate)}
+        </Text>
 
         {/* Beautiful Record Button */}
         {(
@@ -1304,14 +1279,16 @@ export function JobDetailsScreen() {
         <View ref={descriptionCleanedRef}>
         <View ref={descriptionRef}>
         <TextInput
+          ref={descriptionInputRef}
+          key={selectedTemplate?.id || 'freeform'}
           label="Job Description *"
           value={jobDescription}
           onChangeText={setJobDescription}
           mode="outlined"
           style={styles.input}
           multiline
-          numberOfLines={6}
-          placeholder="e.g., Build a 5x4 meter outdoor deck with 10 steps leading down to the garden. Need to replace old timber and add handrails."
+          numberOfLines={10}
+          placeholder={getDescriptionPlaceholder(selectedTemplate)}
           disabled={isProcessingVoice}
         />
 
@@ -1399,8 +1376,7 @@ export function JobDetailsScreen() {
             )}
           </>
         )}
-        </Surface>
-      )}
+      </Surface>
 
           </WebContainer>
         </ScrollView>
@@ -1783,6 +1759,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.onSurface,
     marginBottom: 12,
+  },
+  chipRow: {
+    paddingVertical: 4,
+    paddingRight: 8,
+    gap: 8,
+  },
+  jobTypeChip: {
+    marginRight: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.primary + '33',
+  },
+  jobTypeChipSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  jobTypeChipText: {
+    color: colors.onSurface,
+  },
+  jobTypeChipTextSelected: {
+    color: colors.surface,
+    fontWeight: '600',
   },
   analyzingContainer: {
     flexDirection: 'row',

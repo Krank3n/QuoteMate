@@ -298,6 +298,13 @@ export interface JobTemplate {
   defaultMaterials: TemplateMaterial[];
   estimatedHoursFormula: string; // e.g., "steps * 0.5"
   requiredParams: TemplateParam[]; // e.g., [{ key: 'steps', label: 'Number of steps', unit: '' }]
+  // Trade-specific copy that shapes the job description input.
+  // questionsLine: short prompt of the variables that matter for this job type.
+  // exampleLines: a filled-in example using this trade's vocabulary.
+  // voicePromptHint: short sub-label under the record button.
+  questionsLine?: string;
+  exampleLines?: string;
+  voicePromptHint?: string;
 }
 
 export interface TemplateMaterial {
