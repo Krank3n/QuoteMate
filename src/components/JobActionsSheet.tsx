@@ -11,7 +11,7 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, Pressable } from 'react-native';
+import { Platform, View, StyleSheet, Pressable } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -66,7 +66,11 @@ const ROWS: RowDef[] = [
     label: 'Take Payment',
     sub: 'Tap to pay or share the Square link',
     icon: 'credit-card-outline',
-    when: ({ primaryDoc }) => !!primaryDoc,
+    // iOS payments are gated off until Tap to Pay is approved and a Square
+    // reader is available for App Review demo. Re-enable by removing the
+    // Platform.OS check here and restoring the iOS usage strings in
+    // plugins/withSquareSDK.js IOS_USAGE_STRINGS.
+    when: ({ primaryDoc }) => !!primaryDoc && Platform.OS === 'android',
   },
   {
     id: 'followUp',

@@ -73,15 +73,15 @@ function withSquareIOSAppDelegate(config, applicationId) {
   });
 }
 
+// NFC / Bluetooth / Location strings are intentionally omitted while iOS
+// payments are gated off in-app. Apple flags NFCReaderUsageDescription as a
+// "needs hardware demo video" review issue (Guideline 2.1) — restore these
+// when Tap to Pay is approved AND we can demo a Square reader on iOS.
 const IOS_USAGE_STRINGS = {
   NSCameraUsageDescription:
-    'QuoteMate uses the camera for site photos, supplier price-list capture, and to power Tap to Pay card-entry fallback.',
+    'QuoteMate uses the camera for site photos and supplier price-list capture.',
   NSMicrophoneUsageDescription:
     'QuoteMate uses the microphone for voice-to-text job descriptions.',
-  NSLocationWhenInUseUsageDescription:
-    'Square requires location access to take in-person card payments.',
-  NFCReaderUsageDescription:
-    'QuoteMate uses NFC to accept Tap to Pay contactless card payments.',
 };
 
 function withSquareIOSInfoPlist(config) {

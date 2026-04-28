@@ -27,7 +27,7 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, Pressable } from 'react-native';
+import { Platform, View, StyleSheet, Pressable } from 'react-native';
 import { Text, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -192,6 +192,19 @@ export function resolveJobActions(
   }
   if (isInvoiceUnpaid || (isInvoice && invoiceBalanceOwed(primaryDoc))) {
     const followUp = invoiceFollowUp(primaryDoc.sentAt, primaryDoc.dueDate);
+    // iOS gating: takeFinalPayment is hidden until Tap to Pay is approved
+    // and a Square reader is available for App Review demo. On iOS, surface
+    // the followUp as the primary action (or a generic Send Reminder).
+    if (Platform.OS === 'ios') {
+      return [
+        {
+          id: 'followUpInvoice',
+          label: followUp ? followUpLabel(followUp, primaryDoc.sentAt) : 'Send Reminder',
+          icon: followUp === 'overdue' ? 'alert-circle-outline' : 'bell-outline',
+          tone: followUp ? toneForFollowUp(followUp) : 'primary',
+        },
+      ];
+    }
     const primary: ActionSpec = isPartiallyPaid
       ? { id: 'takeFinalPayment', label: 'Take Remaining', icon: 'credit-card-outline', tone: 'primary' }
       : { id: 'takeFinalPayment', label: 'Take Payment', icon: 'credit-card-outline', tone: 'primary' };
@@ -220,18 +233,24 @@ export function resolveJobActions(
     ];
   }
 
-  // Quote is the primary doc.
+  // Quote is the primary doc. iOS gating: hide tapToPayDraft / takeDeposit
+  // until Tap to Pay is approved and a Square reader is available for App
+  // Review demo. Fall back to Mark Approved / Resend.
+  const isIos = Platform.OS === 'ios';
   if (isDraft) {
     return [
       { id: 'sendQuote', label: 'Send Quote', icon: 'send-outline', tone: 'primary' },
-      { id: 'tapToPayDraft', label: 'Tap to Pay', icon: 'credit-card-outline', tone: 'ghost' },
+      ...(isIos
+        ? []
+        : [{ id: 'tapToPayDraft', label: 'Tap to Pay', icon: 'credit-card-outline', tone: 'ghost' } as ActionSpec]),
     ];
   }
   if (isQuoteSent) {
     const followUp = quoteFollowUp(primaryDoc.sentAt);
+    const showDeposit = !isIos && depositOwed(primaryDoc);
     // Fresh (< 2 days) — no follow-up yet; lead with the approval path.
     if (!followUp) {
-      if (depositOwed(primaryDoc)) {
+      if (showDeposit) {
         return [
           { id: 'takeDeposit', label: 'Take Deposit', icon: 'credit-card-outline', tone: 'primary' },
           { id: 'markApproved', label: 'Mark Approved', icon: 'check-circle-outline', tone: 'ghost' },
@@ -250,7 +269,7 @@ export function resolveJobActions(
         icon: followUp === 'overdue' ? 'alert-circle-outline' : 'bell-outline',
         tone: toneForFollowUp(followUp),
       },
-      depositOwed(primaryDoc)
+      showDeposit
         ? { id: 'takeDeposit', label: 'Take Deposit', icon: 'credit-card-outline', tone: 'ghost' }
         : { id: 'markApproved', label: 'Mark Approved', icon: 'check-circle-outline', tone: 'ghost' },
     ];
