@@ -41,6 +41,7 @@ import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalcu
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice, getReeceConnectionStatus } from '../../services/reeceApi';
 import { ReeceOrderModal } from '../../components/ReeceOrderModal';
+import { shouldRunReeceFirst } from '../../services/supplierPriority';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
@@ -1067,12 +1068,14 @@ export function MaterialsListScreen() {
     setFetchProgress({ current: 0, total: materialsToFetch.length });
 
     // Pricing model: Bunnings is the always-on backbone. Reece, when the
-    // user has connected, runs as a per-item pre-pass — any material it
-    // matches gets the trade-discounted price and is skipped by the Bunnings
-    // batch. Items Reece doesn't have fall through to Bunnings as normal.
+    // user has connected, runs either BEFORE or AFTER the Bunnings batch
+    // depending on the user's saved supplier priority order. If Reece is
+    // above Bunnings, do the Reece pre-pass (trade-discounted prices win).
+    // If Bunnings is above Reece, do the Bunnings batch first and only ask
+    // Reece for items Bunnings missed.
     const useReeceApi = reeceConnected === true;
+    const reeceFirst = useReeceApi && shouldRunReeceFirst(businessSettings?.supplierPriority);
     const hardwareStores = ['bunnings.com.au']; // backbone, always
-    const methodName = useReeceApi ? 'Reece + Bunnings' : 'Bunnings';
 
     const updatedMaterials = [...materials];
 
@@ -1111,19 +1114,21 @@ export function MaterialsListScreen() {
       // Best-effort — fall through to remote on any failure.
     }
 
-    // ── Reece pre-pass (when connected) ──
-    // Reece's API gives us trade-discounted prices a Bunnings scrape can't
-    // match, so we let it run first per item. Hits are excluded from the
-    // Bunnings batch below. Misses fall through to Bunnings as normal —
-    // Reece doesn't carry every product, especially non-plumbing.
+    // ── Reece pass (when connected) ──
+    // Runs as a pre-pass when the user has placed Reece above Bunnings in
+    // their supplier priority (the trade-pricing-first preference). When
+    // Bunnings is above Reece, this pass runs AFTER the Bunnings batch
+    // below — we only ask Reece for items Bunnings missed.
     const reecePricedTerms = new Set<string>();
-    if (useReeceApi) {
+    const reecePass = async (eligibleTerms: Set<string> | null = null) => {
       for (let i = 0; i < updatedMaterials.length; i++) {
         if (cancelFetchRef.current) break;
         const m = updatedMaterials[i];
         if (m.price > 0 && !m.manualPriceOverride) continue;
         const term = m.searchTerm || m.name;
         if (locallyPricedTerms.has(term)) continue;
+        if (reecePricedTerms.has(term)) continue;
+        if (eligibleTerms && !eligibleTerms.has(term)) continue;
 
         let result;
         try {
@@ -1133,8 +1138,6 @@ export function MaterialsListScreen() {
           continue;
         }
         if (result.reauthRequired) {
-          // Token revoked — surface the banner once, stop the Reece pass,
-          // and let Bunnings handle everything below.
           setReeceReauthNeeded(true);
           setReeceConnected(false);
           break;
@@ -1153,6 +1156,10 @@ export function MaterialsListScreen() {
         reecePricedTerms.add(term);
         triggerPriceFlash(m.id);
       }
+    };
+
+    if (reeceFirst) {
+      await reecePass();
     }
 
     try {
@@ -1284,6 +1291,20 @@ export function MaterialsListScreen() {
           batchResults = null;
           setBatchItemStatuses(new Map());
           setFetchPhase('individual');
+        }
+      }
+
+      // ── Reece post-pass — only when the user has placed Bunnings above
+      // Reece in their priority order. Reece picks up anything Bunnings
+      // missed. Skipped entirely when Reece ran as the pre-pass earlier.
+      if (useReeceApi && !reeceFirst) {
+        const unpriced = new Set<string>();
+        for (const m of updatedMaterials) {
+          if (m.price > 0 && !m.manualPriceOverride) continue;
+          unpriced.add(m.searchTerm || m.name);
+        }
+        if (unpriced.size > 0) {
+          await reecePass(unpriced);
         }
       }
 

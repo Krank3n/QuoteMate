@@ -7,8 +7,8 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   View,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
+  Pressable,
   Platform,
 } from 'react-native';
 import {
@@ -19,6 +19,11 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import {
+  NestableScrollContainer,
+  NestableDraggableFlatList,
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
 
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
@@ -31,6 +36,9 @@ import {
   getTradeCategoryById,
 } from '../../constants/tradeCategories';
 import { getReeceConnectionStatus } from '../../services/reeceApi';
+import { loadGroups } from '../../services/supplierGroupService';
+import { composeSupplierList, type SupplierEntry } from '../../services/supplierPriority';
+import type { SupplierGroup } from '../../types';
 
 export function TradePricingScreen() {
   const { businessSettings, setBusinessSettings } = useStore();
@@ -40,10 +48,24 @@ export function TradePricingScreen() {
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [selectedNiches, setSelectedNiches] = useState<string[]>([]);
   const [reeceConnected, setReeceConnected] = useState<boolean>(false);
+  const [supplierGroups, setSupplierGroups] = useState<SupplierGroup[]>([]);
+  const [supplierPriority, setSupplierPriority] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const initialSnapshotRef = useRef<string | null>(null);
+
+  // Compose the unified ordered supplier list any time inputs change. Drives
+  // both the visible list and the saved priority that gets persisted.
+  const orderedSuppliers: SupplierEntry[] = useMemo(
+    () =>
+      composeSupplierList({
+        savedPriority: supplierPriority,
+        reeceConnected,
+        localGroups: supplierGroups,
+      }),
+    [supplierPriority, reeceConnected, supplierGroups],
+  );
 
   // Re-check Reece connection every time the screen is focused so returning
   // from ReeceIntegrationScreen instantly reflects the new state.
@@ -67,20 +89,46 @@ export function TradePricingScreen() {
     if (businessSettings) {
       const cats = businessSettings.tradeCategories || (businessSettings.tradeCategory ? [businessSettings.tradeCategory] : []);
       const niches = businessSettings.tradeNiches || (businessSettings.tradeNiche ? [businessSettings.tradeNiche] : []);
+      const priority = businessSettings.supplierPriority || [];
       setSelectedCategories(cats);
       setSelectedNiches(niches);
-      initialSnapshotRef.current = JSON.stringify({ cats: [...cats].sort(), niches: [...niches].sort() });
+      setSupplierPriority(priority);
+      initialSnapshotRef.current = JSON.stringify({
+        cats: [...cats].sort(),
+        niches: [...niches].sort(),
+        priority,
+      });
     }
   }, [businessSettings]);
+
+  // Load the user's local supplier groups (for the draggable list). Refresh
+  // on focus so adding/editing a supplier in the Supplier Book reflects
+  // immediately when the user comes back.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      loadGroups()
+        .then((groups) => {
+          if (!cancelled) setSupplierGroups(groups || []);
+        })
+        .catch(() => {
+          if (!cancelled) setSupplierGroups([]);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
 
   const isDirty = useMemo(() => {
     if (!initialSnapshotRef.current) return false;
     const current = JSON.stringify({
       cats: [...selectedCategories].sort(),
       niches: [...selectedNiches].sort(),
+      priority: supplierPriority,
     });
     return current !== initialSnapshotRef.current;
-  }, [selectedCategories, selectedNiches]);
+  }, [selectedCategories, selectedNiches, supplierPriority]);
 
   const handleCategoryToggle = (categoryId: string) => {
     setSelectedCategories(prev => {
@@ -132,10 +180,12 @@ export function TradePricingScreen() {
         ...businessSettings!,
         tradeCategories: selectedCategories.length > 0 ? selectedCategories : undefined,
         tradeNiches: selectedNiches.length > 0 ? selectedNiches : undefined,
+        supplierPriority: supplierPriority.length > 0 ? supplierPriority : undefined,
       });
       initialSnapshotRef.current = JSON.stringify({
         cats: [...selectedCategories].sort(),
         niches: [...selectedNiches].sort(),
+        priority: supplierPriority,
       });
       if (!opts?.silent) setShowSuccessModal(true);
       return true;
@@ -147,14 +197,76 @@ export function TradePricingScreen() {
     }
   };
 
+  // Drag-end handler for the supplier priority list. The composed list is
+  // canonical (already accounts for connection + new groups), so we capture
+  // its IDs in their new order.
+  const handleSupplierReorder = useCallback((data: SupplierEntry[]) => {
+    setSupplierPriority(data.map((entry) => entry.id));
+  }, []);
+
   const { unsavedModalProps } = useUnsavedChangesGuard({
     isDirty,
     onSave: () => handleSave({ silent: true }),
   });
 
+  const renderSupplierItem = ({ item, drag, isActive }: RenderItemParams<SupplierEntry>) => {
+    const iconName: any =
+      item.kind === 'bunnings' ? 'hammer-wrench'
+      : item.kind === 'reece' ? 'pipe'
+      : 'storefront-outline';
+    const iconColor =
+      item.kind === 'reece' ? colors.success
+      : item.kind === 'bunnings' ? colors.warning
+      : colors.primary;
+
+    const tapAction = () => {
+      if (item.kind === 'reece' && !reeceConnected) {
+        navigation.navigate('ReeceIntegration');
+      } else if (item.kind === 'local' && item.group) {
+        navigation.navigate('EditSupplier', { groupId: item.group.id });
+      }
+    };
+    const isTappable = (item.kind === 'reece' && !reeceConnected) || item.kind === 'local';
+
+    return (
+      <View style={[styles.supplierRow, isActive && styles.supplierRowActive]}>
+        {/* Drag handle. Using Pressable (not TouchableOpacity) to match the
+            JobChecklist pattern — TouchableOpacity's tap-feedback animation
+            bubbles up to the parent NestableScrollContainer and triggers a
+            scroll-to-top when the handle is tapped without a long-press. */}
+        <Pressable
+          onLongPress={drag}
+          delayLongPress={150}
+          disabled={isActive}
+          style={styles.supplierDragHandle}
+          hitSlop={6}
+        >
+          <MaterialCommunityIcons name="drag-vertical" size={20} color={colors.textMuted} />
+        </Pressable>
+        <MaterialCommunityIcons name={iconName} size={22} color={iconColor} style={{ marginRight: 12 }} />
+        {/* Body — tap to navigate where applicable; built-in always-on
+            suppliers (Bunnings, connected Reece) just sit there. */}
+        <TouchableOpacity
+          style={{ flex: 1 }}
+          activeOpacity={isTappable ? 0.7 : 1}
+          onPress={isTappable ? tapAction : undefined}
+          disabled={!isTappable}
+        >
+          <Text style={styles.supplierName}>{item.name}</Text>
+          <Text style={styles.supplierSubtitle}>{item.subtitle}</Text>
+        </TouchableOpacity>
+        {item.kind === 'reece' && !reeceConnected ? (
+          <TouchableOpacity onPress={tapAction} style={styles.connectBadge}>
+            <Text style={styles.connectBadgeText}>Connect</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
-      <ScrollView
+      <NestableScrollContainer
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
@@ -249,59 +361,12 @@ export function TradePricingScreen() {
             </Surface>
           )}
 
-          {/* Hardware Store Selection */}
+          {/* Hardware Store Priority */}
           <Surface style={styles.card}>
             <Title style={styles.sectionTitle}>Hardware Stores</Title>
             <Text style={styles.helperText}>
-              Quotes search Bunnings as the default backbone. When Reece is connected, plumbing supplies are priced from Reece first and fall back to Bunnings if there's no match.
+              Quotes search these suppliers in order. Long-press and drag to change priority — whoever's at the top is tried first.
             </Text>
-
-            {/* Bunnings — always on, not selectable */}
-            <View style={[styles.storeRadioOption, styles.storeRadioOptionSelected]}>
-              <View style={styles.storeRadioLeft}>
-                <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} style={{ marginRight: 12 }} />
-                <View style={styles.storeInfo}>
-                  <Text style={styles.storeName}>Bunnings</Text>
-                  <Text style={styles.storeMethod}>Always on — searched on every quote</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Reece — always on when connected, otherwise tap to connect */}
-            <TouchableOpacity
-              style={[
-                styles.storeRadioOption,
-                reeceConnected && styles.storeRadioOptionSelected,
-              ]}
-              onPress={() => {
-                if (!reeceConnected) {
-                  navigation.navigate('ReeceIntegration' as never);
-                }
-              }}
-              activeOpacity={reeceConnected ? 1 : 0.7}
-            >
-              <View style={styles.storeRadioLeft}>
-                <MaterialCommunityIcons
-                  name={reeceConnected ? 'check-circle' : 'pipe'}
-                  size={22}
-                  color={reeceConnected ? colors.success : colors.primary}
-                  style={{ marginRight: 12 }}
-                />
-                <View style={styles.storeInfo}>
-                  <Text style={styles.storeName}>Reece</Text>
-                  <Text style={styles.storeMethod}>
-                    {reeceConnected
-                      ? 'Always on — your trade prices are preferred for plumbing'
-                      : 'Plumbing supplier — connect your maX account for trade prices'}
-                  </Text>
-                </View>
-              </View>
-              {reeceConnected ? null : (
-                <View style={styles.connectBadge}>
-                  <Text style={styles.connectBadgeText}>Connect</Text>
-                </View>
-              )}
-            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.addSupplierButton}
@@ -317,9 +382,18 @@ export function TradePricingScreen() {
               </View>
               <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
             </TouchableOpacity>
+
+            <NestableDraggableFlatList
+              data={orderedSuppliers}
+              keyExtractor={(item) => item.id}
+              renderItem={renderSupplierItem}
+              onDragEnd={({ data }) => handleSupplierReorder(data)}
+              activationDistance={8}
+              containerStyle={{ marginTop: 12 }}
+            />
           </Surface>
         </WebContainer>
-      </ScrollView>
+      </NestableScrollContainer>
 
       <FixedBottomButton
         mode="contained"
@@ -565,11 +639,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 14,
-    marginTop: 12,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
     borderStyle: 'dashed',
+  },
+  supplierRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: 12,
+    paddingLeft: 4,
+    paddingRight: 12,
+    marginBottom: 8,
+  },
+  supplierDragHandle: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    marginRight: 4,
+  },
+  supplierRowActive: {
+    borderColor: colors.primary,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  supplierName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  supplierSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   addSupplierTitle: {
     fontSize: 14,

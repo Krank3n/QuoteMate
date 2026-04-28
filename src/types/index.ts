@@ -417,7 +417,14 @@ export interface BusinessSettings {
   tradeNiche?: string;
   // Price fetching settings
   useReeceApi?: boolean; // If true and tradeType is plumber, use Reece API for plumbing supplies
-  selectedStore?: string; // Single selected hardware store (e.g., 'bunnings', 'mitre10')
+  selectedStore?: string; // DEPRECATED — kept for legacy reads. Hardware store routing now uses supplierPriority.
+  // User-controlled supplier priority for material price lookups. Higher in
+  // the list = tried first. Entries are either built-in identifiers
+  // ('bunnings', 'reece') or a SupplierGroup.id from the user's saved local
+  // suppliers. Bunnings is the always-on backbone — if it's missing from
+  // this list, treat it as appended at the end. Reece is only honoured
+  // when the user has connected (the integration screen flips that on).
+  supplierPriority?: string[];
   // Quote display settings
   showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)
   showMarkup?: boolean; // If true, show markup line on documents. Default: true (show markup)
