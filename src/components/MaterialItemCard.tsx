@@ -73,7 +73,7 @@ export function MaterialItemCard({
     material.brand.toLowerCase() !== 'bunnings.com.au' &&
     material.brand.toLowerCase() !== 'reece' &&
     material.brand.toLowerCase() !== 'mitre 10';
-  const hasDetails = material.imageUrl || material.description || hasMeaningfulBrand || material.stockCheckedAt || material.bunningsItemNumber;
+  const hasDetails = material.imageUrl || material.description || hasMeaningfulBrand || material.stockCheckedAt || material.bunningsItemNumber || material.reeceItemNumber;
   const showLink = material.pricingSource === 'scraper' || material.pricingSource === 'api';
   // Show "Est." badge for:
   //  - materials priced by the LLM fallback (pricingSource === 'ai')
@@ -83,6 +83,12 @@ export function MaterialItemCard({
   // scrape against the actual Bunnings product page.
   const isEstimate =
     material.pricingSource === 'ai' || material.priceConfidence === 'low';
+
+  const supplierLabel = material.reeceItemNumber
+    ? { name: 'Reece', color: '#1f4e8e' }
+    : material.bunningsItemNumber
+      ? { name: 'Bunnings', color: '#0d7c3f' }
+      : null;
 
   const qty = localQuantity ?? material.quantity;
 
@@ -125,6 +131,11 @@ export function MaterialItemCard({
                 fontWeight: '600',
               }}>
                 {'  ·  Est. — verify price'}
+              </Text>
+            ) : ''}
+            {supplierLabel ? (
+              <Text style={{ color: supplierLabel.color, fontWeight: '600' }}>
+                {`  ·  ${supplierLabel.name}`}
               </Text>
             ) : ''}
           </Text>
@@ -324,10 +335,10 @@ export function MaterialItemCard({
                     <Text style={styles.detailValue}>{formatTimeAgo(material.stockCheckedAt)}</Text>
                   </View>
                 )}
-                {material.bunningsItemNumber && (
+                {(material.bunningsItemNumber || material.reeceItemNumber) && (
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Item #:</Text>
-                    <Text style={styles.detailValue}>{material.bunningsItemNumber}</Text>
+                    <Text style={styles.detailValue}>{material.bunningsItemNumber || material.reeceItemNumber}</Text>
                   </View>
                 )}
               </View>

@@ -2302,6 +2302,66 @@ export const checkReeceApi = functions.https.onRequest((req, res) => {
 });
 
 /**
+ * Pull the best image URL out of a Reece product-gateway product object.
+ * Tries the SAP Commerce images[] envelope first (Reece runs Hybris), then
+ * common flat field names. Relative URLs are prefixed with the Reece host so
+ * they render in <Image> on the client.
+ */
+function extractReeceImageUrl(product: any): string | null {
+  if (!product) return null;
+
+  const candidates: Array<string | undefined> = [];
+
+  // Reece's product-gateway returns images on `productImages`. Older docs
+  // and other Hybris endpoints sometimes use plain `images`, so we check
+  // both — the inner shape is tried with several common conventions
+  // (Hybris `format`, generic `imageType`, plain `.url`/`.imageUrl`/string).
+  for (const arr of [product.productImages, product.images]) {
+    if (!Array.isArray(arr) || arr.length === 0) continue;
+    const pick = (img: any): string | undefined =>
+      typeof img === 'string' ? img : img?.url || img?.imageUrl || img?.href;
+    const byFormat = (fmt: string) =>
+      pick(arr.find((img: any) => img?.format === fmt));
+    const byImageType = (t: string) =>
+      pick(arr.find((img: any) => img?.imageType === t));
+    candidates.push(byFormat('product'), byFormat('zoom'), byFormat('thumbnail'));
+    candidates.push(byImageType('PRIMARY'), byImageType('GALLERY'));
+    candidates.push(pick(arr[0]));
+  }
+
+  if (Array.isArray(product.media)) {
+    candidates.push(product.media[0]?.url);
+  } else if (product.media && typeof product.media === 'object') {
+    candidates.push(product.media.primary?.url, product.media.url, product.media.primary);
+  }
+
+  if (Array.isArray(product.assets)) {
+    candidates.push(
+      product.assets.find((a: any) => a?.type === 'IMAGE')?.url,
+      product.assets[0]?.url,
+    );
+  }
+
+  candidates.push(
+    product.imageUrl,
+    product.productImage,
+    product.productImageUrl,
+    product.thumbnailUrl,
+    product.thumbnail,
+    product.image,
+  );
+
+  const found = candidates.find(
+    (c): c is string => typeof c === 'string' && c.length > 0,
+  );
+  if (!found) return null;
+
+  if (/^https?:\/\//i.test(found)) return found;
+  if (found.startsWith('//')) return `https:${found}`;
+  return `https://www.reece.com.au${found.startsWith('/') ? '' : '/'}${found}`;
+}
+
+/**
  * Search for a product in Reece catalog using the calling user's customer
  * token. Returns trade-discounted pricing inline in the product result.
  */
@@ -2361,6 +2421,22 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
 
       const searchData = await searchResponse.json();
 
+      // Temporary diagnostic returned inline in the response — Cloud Logging
+      // was swallowing console.log for this function, so we pass the shape
+      // through to the client where it can hit Metro. Drop once Reece
+      // coverage is dialed in.
+      const _debug = {
+        query: productName,
+        productCount: searchData.products?.length ?? 0,
+        topTitle: searchData.products?.[0]?.productTitle ?? null,
+        topProductId: searchData.products?.[0]?.productId ?? null,
+        topHasUom: !!searchData.products?.[0]?.unitOfMeasures?.[0],
+        topUnitPriceIncGst: searchData.products?.[0]?.unitOfMeasures?.[0]?.unitPriceIncludingGST ?? null,
+        topUnitPriceExGst: searchData.products?.[0]?.unitOfMeasures?.[0]?.unitPriceExcludingGST ?? null,
+        topProductKeys: searchData.products?.[0] ? Object.keys(searchData.products[0]) : null,
+        topProductImages: searchData.products?.[0]?.productImages ?? null,
+      };
+
       if (searchData.products && searchData.products.length > 0) {
         const product = searchData.products[0];
         // Pull the first unit of measure — that's the smallest sellable unit
@@ -2368,6 +2444,8 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
         // the unit and the matching ex-GST price echoed back, so we surface
         // them now rather than re-fetching at order time.
         const uom = product.unitOfMeasures?.[0];
+
+        const imageUrl = extractReeceImageUrl(product);
 
         res.status(200).json({
           product: {
@@ -2378,10 +2456,12 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
             unitOfMeasure: uom?.pack || null,
             unitPriceExcludingGst: uom?.unitPriceExcludingGST ?? null,
             unitPriceIncludingGst: uom?.unitPriceIncludingGST ?? null,
+            imageUrl,
           },
+          _debug: { ..._debug, imageExtracted: !!imageUrl, imageUrl },
         });
       } else {
-        res.status(200).json({ product: null });
+        res.status(200).json({ product: null, _debug });
       }
     } catch (error: any) {
       res.status(200).json({ product: null });

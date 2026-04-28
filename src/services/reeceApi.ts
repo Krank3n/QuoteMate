@@ -27,6 +27,7 @@ export interface ReeceProduct {
   unitOfMeasure?: string | null;
   unitPriceExcludingGst?: number | null;
   unitPriceIncludingGst?: number | null;
+  imageUrl?: string | null;
 }
 
 export interface ReecePrice {
@@ -56,6 +57,8 @@ interface PriceSearchResult {
   productName?: string;
   store?: string;
   itemNumber?: string;
+  imageUrl?: string | null;
+  productUrl?: string;
   // Required later for order placement — captured at price-search time so we
   // don't need a second API round trip when the user taps "Order from Reece".
   unitOfMeasure?: string | null;
@@ -120,9 +123,14 @@ export async function getReecePrice(itemNumber: string): Promise<number | null> 
 }
 
 /**
- * Composite: search by name then return the matched product's trade price.
+ * Composite: search by name and return the matched product's trade price.
  * Surfaces structured `reauthRequired` / `notConnected` flags so the caller
  * can route the user to the right UI without parsing error strings.
+ *
+ * Pricing is returned inline by the product search — Reece has no per-item
+ * price endpoint (their price-file endpoint is a bulk dump). We prefer the
+ * inc-GST price to stay consistent with how Bunnings quotes are stored;
+ * fall back to ex-GST if that's all the product carries.
  */
 export async function searchReeceMaterialPrice(
   materialName: string,
@@ -134,6 +142,12 @@ export async function searchReeceMaterialPrice(
     if (!searchResponse.ok) return { price: null };
     const searchData = await searchResponse.json();
 
+    // Temporary: print the inline diagnostic to Metro so we can see what
+    // Reece returned for each query. Remove once coverage is dialed in.
+    if (searchData._debug) {
+      console.log('[reece search]', searchData._debug);
+    }
+
     if (searchData.error === 'reece_reauth_required') {
       return { price: null, reauthRequired: true };
     }
@@ -144,25 +158,18 @@ export async function searchReeceMaterialPrice(
     const product = searchData.product;
     if (!product) return { price: null };
 
-    const priceResponse = await authedFetch('getReecePrice', {
-      body: { itemNumber: product.itemNumber },
-    });
-    if (!priceResponse.ok) return { price: null };
-    const priceData = await priceResponse.json();
-
-    if (priceData.error === 'reece_reauth_required') {
-      return { price: null, reauthRequired: true };
-    }
-    if (priceData.error === 'reece_not_connected') {
-      return { price: null, notConnected: true };
-    }
-    if (priceData.price == null) return { price: null };
+    const price = product.unitPriceIncludingGst ?? product.unitPriceExcludingGst;
+    if (price == null) return { price: null };
 
     return {
-      price: priceData.price,
+      price,
       productName: product.description,
       store: 'Reece Plumbing',
       itemNumber: product.itemNumber,
+      imageUrl: product.imageUrl ?? null,
+      // Reece's product detail URL needs a slug we don't have, so fall back to
+      // a search by item number — lands the user on the right product page.
+      productUrl: `https://www.reece.com.au/search?query=${encodeURIComponent(product.itemNumber)}`,
       unitOfMeasure: product.unitOfMeasure || null,
       unitPriceExcludingGst: product.unitPriceExcludingGst ?? null,
     };

@@ -453,7 +453,7 @@ export const TRADE_CATEGORIES: TradeCategory[] = [
         id: 'residential',
         name: 'Residential Cleaning',
         description: 'Homes, end of lease',
-        icon: 'home-clean',
+        icon: 'home-variant',
         pricingMethods: [PRICING_METHODS.FIXED, PRICING_METHODS.HOURLY],
         commonServices: ['End-of-Lease Clean', 'Regular Clean', 'Deep Clean', 'Spring Clean'],
       },

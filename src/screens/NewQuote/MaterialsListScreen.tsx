@@ -1152,6 +1152,8 @@ export function MaterialsListScreen() {
         if (result.unitOfMeasure) m.reeceUnitOfMeasure = result.unitOfMeasure;
         if (result.productName) m.name = result.productName;
         if (result.store) m.description = `Available at ${result.store}`;
+        if (result.imageUrl) m.imageUrl = result.imageUrl;
+        if (result.productUrl) m.productUrl = result.productUrl;
         fetchedCount++;
         reecePricedTerms.add(term);
         triggerPriceFlash(m.id);
@@ -1858,14 +1860,19 @@ export function MaterialsListScreen() {
     const stores = businessSettings?.hardwareStores || ['bunnings.com.au'];
     const firstStore = stores[0];
 
-    // Determine search term
-    const searchTerm = material.searchTerm || material.name;
+    // Determine search term — prefer the Reece item number when present so the
+    // Reece search lands on the exact product, not a category page.
+    const searchTerm = material.reeceItemNumber || material.searchTerm || material.name;
     const encodedSearch = encodeURIComponent(searchTerm);
 
-    // Generate store URL based on the store domain
+    // Generate store URL based on the store domain. Reece items always go to
+    // Reece regardless of the user's primary hardware store — the supplier is
+    // intrinsic to the item, not a user setting.
     let storeUrl = '';
 
-    if (firstStore.includes('bunnings.com.au')) {
+    if (material.reeceItemNumber) {
+      storeUrl = `https://www.reece.com.au/search?query=${encodedSearch}`;
+    } else if (firstStore.includes('bunnings.com.au')) {
       storeUrl = `https://www.bunnings.com.au/search/products?q=${encodedSearch}`;
     } else if (firstStore.includes('reece.com.au')) {
       storeUrl = `https://www.reece.com.au/search?q=${encodedSearch}`;

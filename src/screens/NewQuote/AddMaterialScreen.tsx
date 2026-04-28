@@ -895,8 +895,8 @@ export function AddMaterialScreen() {
               itemNumber: reeceResult.itemNumber,
               brand: '',
               price: reeceResult.price,
-              productUrl: '',
-              imageUrl: '',
+              productUrl: reeceResult.productUrl || '',
+              imageUrl: reeceResult.imageUrl || '',
               store: reeceResult.store || 'Reece Plumbing',
               isScraperResult: true,
               // Surface so the eventual Material write picks up Reece-specific
