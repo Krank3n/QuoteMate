@@ -34,6 +34,7 @@ import { SendTypePill } from '../../components/SendSwitcher';
 import { SendDocumentButton } from '../../components/SendDocumentButton';
 import { DocumentSentBanner } from '../../components/DocumentSentBanner';
 import { TakePaymentSheet, type TakePaymentTarget } from '../../components/TakePaymentSheet';
+import { getReeceConnectionStatus } from '../../services/reeceApi';
 import { reconcileNextNumber } from '../../utils/nextNumber';
 import { successTap } from '../../utils/haptics';
 import { WebContainer } from '../../components/WebContainer';
@@ -133,6 +134,15 @@ export function JobPreviewScreen() {
 
   const [notes, setNotes] = useState(workingDoc?.notes || '');
   const [takePaymentTarget, setTakePaymentTarget] = useState<TakePaymentTarget | null>(null);
+  const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getReeceConnectionStatus()
+      .then((status) => { if (!cancelled) setReeceConnected(!!status.connected); })
+      .catch(() => { if (!cancelled) setReeceConnected(false); });
+    return () => { cancelled = true; };
+  }, []);
   const savedNotesRef = useRef(workingDoc?.notes || '');
   const [refNumber, setRefNumber] = useState<string>(
     isInvoiceMode
@@ -717,6 +727,26 @@ export function JobPreviewScreen() {
           />
         </Surface>
 
+        {/* "Order from Reece" — tradie can place this list against their
+            maX trade account. Only shows when connected AND the quote has
+            at least one Reece-priced material with order identifiers. */}
+        {reeceConnected === true && workingDoc?.materials?.some((m) => !!m.reeceItemNumber && !!m.reeceUnitOfMeasure) ? (
+          <TouchableOpacity
+            style={styles.reeceOrderButton}
+            onPress={() => navigation.navigate('ReeceOrder', { docId: workingDoc?.id })}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="cart-outline" size={20} color={colors.primary} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.reeceOrderButtonTitle}>Order from Reece</Text>
+              <Text style={styles.reeceOrderButtonSubtitle}>
+                Place this list against your trade account — Reece bills you, no money through QuoteMate.
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : null}
+
         <Button
           mode="outlined"
           onPress={handleViewPDF}
@@ -729,6 +759,7 @@ export function JobPreviewScreen() {
         </Button>
         </WebContainer>
       </ScrollView>
+
 
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
         <View style={styles.bottomButtonsRow}>
@@ -1054,6 +1085,28 @@ const styles = StyleSheet.create({
   },
   viewPdfButton: {
     marginBottom: 16,
+  },
+  reeceOrderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 4,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  reeceOrderButtonTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  reeceOrderButtonSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 16,
   },
   bottomBar: {
     flexDirection: 'column',

@@ -2395,17 +2395,23 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Reece's search is strict token-AND, so long descriptive queries with
-      // one off-catalog token ("neutral cure silicone clear", "double bowl
-      // kitchen sink") return 0 even when Reece sells the thing. Fall back
-      // by progressively dropping leading descriptors and keeping the
-      // noun-tail — that's where Reece anchors its catalog titles
-      // ("Greens Marketti...Sink Mixer Tap"). Try original → last 3 → last 2,
-      // stopping at the first variant that returns hits.
+      // Reece's search is strict token-AND, so a query whose noun-phrase is
+      // surrounded by brand prefix or trailing size/color descriptors
+      // ("Atomik Priming Fluid PVC Clear 500ml") returns 0 even when Reece
+      // sells the thing. Generate variants by trimming tokens from the
+      // front, back, and both ends, plus the existing last-N anchors. Try
+      // them in order, stop at the first variant that returns hits.
       const tokens = productName.trim().split(/\s+/);
+      const n = tokens.length;
       const candidates = [productName];
-      if (tokens.length >= 4) candidates.push(tokens.slice(-3).join(' '));
-      if (tokens.length >= 3) candidates.push(tokens.slice(-2).join(' '));
+      if (n >= 4) {
+        candidates.push(tokens.slice(0, -1).join(' ')); // drop trailing descriptor
+        candidates.push(tokens.slice(1).join(' '));      // drop leading brand prefix
+        candidates.push(tokens.slice(1, -1).join(' '));  // drop both ends
+      }
+      if (n >= 4) candidates.push(tokens.slice(-3).join(' ')); // noun-tail (3)
+      if (n >= 3) candidates.push(tokens.slice(-2).join(' ')); // noun-tail (2)
+      if (n >= 3) candidates.push(tokens.slice(0, 2).join(' ')); // noun-head (2)
       const variants = Array.from(new Set(candidates));
 
       const fetchVariant = (variant: string) =>

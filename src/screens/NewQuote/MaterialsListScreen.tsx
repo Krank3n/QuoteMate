@@ -40,7 +40,6 @@ import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice, getReeceConnectionStatus } from '../../services/reeceApi';
-import { ReeceOrderModal } from '../../components/ReeceOrderModal';
 import { shouldRunReeceFirst } from '../../services/supplierPriority';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
@@ -395,7 +394,6 @@ export function MaterialsListScreen() {
   // when Reece is selected as the store but no connection exists yet.
   const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
   const [reeceReauthNeeded, setReeceReauthNeeded] = useState(false);
-  const [reeceOrderModalVisible, setReeceOrderModalVisible] = useState(false);
   // Reece is now an always-on overlay for any user who has connected — not
   // gated on a single hardware-store setting. Refresh on focus so returning
   // from the Reece settings screen reflects the new connection state.
@@ -2520,39 +2518,10 @@ export function MaterialsListScreen() {
           </View>
         )}
 
-        {/* "Order from Reece" entry — shows only when the user is connected
-            AND at least one material has Reece order identifiers. */}
-        {reeceConnected === true && materials.some((m) => !!m.reeceItemNumber && !!m.reeceUnitOfMeasure) ? (
-          <TouchableOpacity
-            style={styles.reeceOrderButton}
-            onPress={() => setReeceOrderModalVisible(true)}
-            activeOpacity={0.7}
-          >
-            <MaterialCommunityIcons name="cart-outline" size={20} color={colors.primary} />
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.reeceOrderButtonTitle}>Order from Reece</Text>
-              <Text style={styles.reeceOrderButtonSubtitle}>
-                Place this list against your trade account — Reece bills you, no money through QuoteMate.
-              </Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
-          </TouchableOpacity>
-        ) : null}
-
         {/* Spacer for fixed bottom button */}
         <View style={{ height: 120 }} />
         </WebContainer>
        </NestableScrollContainer>
-
-      <ReeceOrderModal
-        visible={reeceOrderModalVisible}
-        onDismiss={() => setReeceOrderModalVisible(false)}
-        materials={materials}
-        quoteId={currentQuote?.id}
-        quoteReference={(currentQuote as any)?.quoteNumber || (currentQuote as any)?.invoiceNumber}
-        jobAddress={currentQuote?.jobAddress}
-        jobContactName={currentQuote?.customerName}
-      />
 
       <FixedBottomButton
         label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labor & Markup")}
@@ -3272,27 +3241,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.primary,
-  },
-  reeceOrderButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  reeceOrderButtonTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  reeceOrderButtonSubtitle: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 2,
-    lineHeight: 16,
   },
   reeceBannerText: {
     flex: 1,

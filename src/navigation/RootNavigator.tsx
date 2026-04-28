@@ -48,6 +48,7 @@ import { MaterialsListScreen } from '../screens/NewQuote/MaterialsListScreen';
 import { AddMaterialScreen } from '../screens/NewQuote/AddMaterialScreen';
 import { LaborMarkupScreen } from '../screens/NewQuote/LaborMarkupScreen';
 import { JobPreviewScreen } from '../screens/NewQuote/JobPreviewScreen';
+import { ReeceOrderScreen } from '../screens/ReeceOrderScreen';
 
 import { colors } from '../theme';
 import { TourRefsProvider } from '../components/tour/useTourRefs';
@@ -505,6 +506,20 @@ export function RootNavigator() {
           headerTintColor: colors.white,
           headerTitleStyle: { fontWeight: '700' },
           title: 'Record Payment',
+        }}
+      />
+      <RootStack.Screen
+        name="ReeceOrder"
+        component={ReeceOrderScreen}
+        options={{
+          presentation: 'modal',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
+          headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Order from Reece',
         }}
       />
       <RootStack.Screen
