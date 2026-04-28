@@ -1120,11 +1120,23 @@ export function MaterialsListScreen() {
     // Bunnings is above Reece, this pass runs AFTER the Bunnings batch
     // below — we only ask Reece for items Bunnings missed.
     const reecePricedTerms = new Set<string>();
-    const reecePass = async (eligibleTerms: Set<string> | null = null) => {
+    // overrideExisting: when Reece is the preferred supplier (pre-pass), we
+    // upgrade items already priced by Bunnings/local — the user explicitly
+    // ranked Reece higher, so a Bunnings price shouldn't block a Reece one.
+    // The post-pass leaves it false so Reece only fills gaps Bunnings missed.
+    const reecePass = async (
+      eligibleTerms: Set<string> | null = null,
+      overrideExisting = false,
+    ) => {
       for (let i = 0; i < updatedMaterials.length; i++) {
         if (cancelFetchRef.current) break;
         const m = updatedMaterials[i];
-        if (m.price > 0 && !m.manualPriceOverride) continue;
+        // User-edited prices are sacred — never auto-replace.
+        if (m.manualPriceOverride) continue;
+        // Already priced from Reece in a prior run — nothing to upgrade.
+        if (m.reeceItemNumber && m.pricingSource === 'api') continue;
+        // Post-pass mode: leave Bunnings/local prices alone, only fill gaps.
+        if (!overrideExisting && m.price > 0) continue;
         const term = m.searchTerm || m.name;
         if (locallyPricedTerms.has(term)) continue;
         if (reecePricedTerms.has(term)) continue;
@@ -1148,6 +1160,9 @@ export function MaterialsListScreen() {
         m.totalPrice = result.price * m.quantity;
         m.manualPriceOverride = false;
         m.pricingSource = 'api';
+        // Clear stale Bunnings-only state when upgrading to Reece.
+        m.bunningsItemNumber = undefined;
+        m.priceConfidence = undefined;
         m.reeceItemNumber = result.itemNumber;
         if (result.unitOfMeasure) m.reeceUnitOfMeasure = result.unitOfMeasure;
         if (result.productName) m.name = result.productName;
@@ -1161,7 +1176,7 @@ export function MaterialsListScreen() {
     };
 
     if (reeceFirst) {
-      await reecePass();
+      await reecePass(null, true);
     }
 
     try {

@@ -335,10 +335,10 @@ export function MaterialItemCard({
                     <Text style={styles.detailValue}>{formatTimeAgo(material.stockCheckedAt)}</Text>
                   </View>
                 )}
-                {(material.bunningsItemNumber || material.reeceItemNumber) && (
+                {(material.reeceItemNumber || material.bunningsItemNumber) && (
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Item #:</Text>
-                    <Text style={styles.detailValue}>{material.bunningsItemNumber || material.reeceItemNumber}</Text>
+                    <Text style={styles.detailValue}>{material.reeceItemNumber || material.bunningsItemNumber}</Text>
                   </View>
                 )}
               </View>

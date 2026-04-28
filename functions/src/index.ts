@@ -2395,31 +2395,50 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
         return;
       }
 
-      const searchResponse = await fetch(
-        `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(productName)}&pageNumber=1&pageSize=5`,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-            'Customer-Token': userToken.customerToken,
+      // Reece's search is strict token-AND, so a 4+ word query with one
+      // off-catalog term ("neutral cure silicone clear") returns 0 even
+      // when Reece sells the thing. Fall back to the last two tokens —
+      // typically the noun + qualifier, which is how Reece titles its
+      // catalog ("Bostik...Silicone Clear"). One retry only; we'd rather
+      // miss than overshoot to a wrong-variant product.
+      const tokens = productName.trim().split(/\s+/);
+      const variants =
+        tokens.length >= 3 ? [productName, tokens.slice(-2).join(' ')] : [productName];
+
+      const fetchVariant = (variant: string) =>
+        fetch(
+          `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(variant)}&pageNumber=1&pageSize=5`,
+          {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+              'Customer-Token': userToken.customerToken,
+            },
           },
+        );
+
+      let searchData: any = null;
+      let usedVariant = productName;
+      for (const variant of variants) {
+        const response = await fetchVariant(variant);
+        if (response.status === 401) {
+          await clearReeceConnection(decodedToken.uid, 'search_401');
+          res.status(200).json({ product: null, error: 'reece_reauth_required' });
+          return;
         }
-      );
-
-      if (searchResponse.status === 401) {
-        await clearReeceConnection(decodedToken.uid, 'search_401');
-        res.status(200).json({ product: null, error: 'reece_reauth_required' });
-        return;
+        if (!response.ok) {
+          await response.text();
+          continue;
+        }
+        const data = await response.json();
+        if (data.products && data.products.length > 0) {
+          searchData = data;
+          usedVariant = variant;
+          break;
+        }
+        searchData = data; // keep last (empty) so _debug has a shape if every variant misses
       }
-
-      if (!searchResponse.ok) {
-        await searchResponse.text();
-        res.status(200).json({ product: null });
-        return;
-      }
-
-      const searchData = await searchResponse.json();
 
       // Temporary diagnostic returned inline in the response — Cloud Logging
       // was swallowing console.log for this function, so we pass the shape
@@ -2427,17 +2446,19 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
       // coverage is dialed in.
       const _debug = {
         query: productName,
-        productCount: searchData.products?.length ?? 0,
-        topTitle: searchData.products?.[0]?.productTitle ?? null,
-        topProductId: searchData.products?.[0]?.productId ?? null,
-        topHasUom: !!searchData.products?.[0]?.unitOfMeasures?.[0],
-        topUnitPriceIncGst: searchData.products?.[0]?.unitOfMeasures?.[0]?.unitPriceIncludingGST ?? null,
-        topUnitPriceExGst: searchData.products?.[0]?.unitOfMeasures?.[0]?.unitPriceExcludingGST ?? null,
-        topProductKeys: searchData.products?.[0] ? Object.keys(searchData.products[0]) : null,
-        topProductImages: searchData.products?.[0]?.productImages ?? null,
+        usedVariant,
+        retried: usedVariant !== productName,
+        productCount: searchData?.products?.length ?? 0,
+        topTitle: searchData?.products?.[0]?.productTitle ?? null,
+        topProductId: searchData?.products?.[0]?.productId ?? null,
+        topHasUom: !!searchData?.products?.[0]?.unitOfMeasures?.[0],
+        topUnitPriceIncGst: searchData?.products?.[0]?.unitOfMeasures?.[0]?.unitPriceIncludingGST ?? null,
+        topUnitPriceExGst: searchData?.products?.[0]?.unitOfMeasures?.[0]?.unitPriceExcludingGST ?? null,
+        topProductKeys: searchData?.products?.[0] ? Object.keys(searchData.products[0]) : null,
+        topProductImages: searchData?.products?.[0]?.productImages ?? null,
       };
 
-      if (searchData.products && searchData.products.length > 0) {
+      if (searchData?.products && searchData.products.length > 0) {
         const product = searchData.products[0];
         // Pull the first unit of measure — that's the smallest sellable unit
         // (e.g. "LEN" for a length of pipe). The order-gateway requires both
