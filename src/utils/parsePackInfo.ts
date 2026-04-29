@@ -82,3 +82,26 @@ export function isLikelyBulkItem(name: string | undefined | null): boolean {
   const lower = name.toLowerCase();
   return BULK_KEYWORDS.some(kw => lower.includes(kw));
 }
+
+/**
+ * Hard upper bound on per-unit price for small fasteners and consumables. A
+ * single screw, nail, or clip almost never costs more than $5; if the price
+ * search returns $79/each (the bug pattern: matched a decking board as a
+ * "fascia screw"), the SKU match is wrong, not the pack maths. Used by the
+ * pricing pipeline to flag confidence='low' so the row shows the verify-price
+ * badge and the tradie knows to double-check.
+ */
+const SMALL_FASTENER_KEYWORDS = [
+  'screw', 'nail', 'clip', 'fastener', 'bolt', 'nut', 'washer', 'rivet', 'staple',
+];
+
+const SMALL_FASTENER_MAX_UNIT_PRICE = 20;
+
+export function isImplausibleUnitPrice(name: string | undefined | null, unitPrice: number): boolean {
+  if (!name || !isFinite(unitPrice) || unitPrice <= 0) return false;
+  const lower = name.toLowerCase();
+  if (SMALL_FASTENER_KEYWORDS.some(kw => lower.includes(kw))) {
+    return unitPrice > SMALL_FASTENER_MAX_UNIT_PRICE;
+  }
+  return false;
+}

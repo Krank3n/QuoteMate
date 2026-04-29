@@ -38,7 +38,7 @@ import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapp
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
-import { parsePackInfo, isLikelyBulkItem } from '../../utils/parsePackInfo';
+import { parsePackInfo, isLikelyBulkItem, isImplausibleUnitPrice } from '../../utils/parsePackInfo';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
@@ -195,6 +195,13 @@ function applyPackAwarePricing(
     }
   }
   material.totalPrice = material.quantity * material.price;
+
+  // Catch obvious wrong-SKU matches — e.g. "Composite Fascia Screws" priced
+  // at $79/each (which is actually the decking-board price). Force the row to
+  // low confidence so the tradie sees the verify-price badge.
+  if (isImplausibleUnitPrice(material.name, material.price)) {
+    material.priceConfidence = 'low';
+  }
 }
 
 // AI Analysis Loading State with Lottie Animation and scrolling progress steps
