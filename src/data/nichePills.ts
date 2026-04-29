@@ -47,45 +47,78 @@ const SQM_WORDS = [
  * where no niche template is selected. Niche-specific pills with the same
  * jsonField take precedence (see getPillsForNiche), so a niche's tailored
  * "Access" entry will replace the generic one rather than appearing twice.
+ *
+ * Custom path is the only place a tradie has zero niche guidance, so the
+ * pills here lean toward "did you say what the job actually is" rather than
+ * niche-specific specifics.
  */
 export const UNIVERSAL_PILLS: PillSpec[] = [
   {
+    id: 'universal_what',
+    label: 'What',
+    keywords: [
+      'install', 'repair', 'replace', 'fix', 'build', 'remove', 'paint', 'clean',
+      'service', 'upgrade', 'demolish', 'connect', 'mount', 'hang', 'fit',
+      'rip out', 'pull out', 'put in', 'set up',
+    ],
+    jsonField: 'what',
+  },
+  {
+    id: 'universal_where',
+    label: 'Where',
+    keywords: [
+      'kitchen', 'bathroom', 'laundry', 'garage', 'bedroom', 'lounge', 'living',
+      'hallway', 'roof', 'backyard', 'front yard', 'driveway', 'upstairs',
+      'downstairs', 'outside', 'inside', 'garden', 'shed', 'fence line',
+      'yard', 'patio', 'deck', 'eaves', 'attic',
+    ],
+    jsonField: 'where',
+  },
+  {
     id: 'universal_area',
-    label: 'Area / size',
+    label: 'Size / how many',
     keywords: [
       // Number followed by any size unit, in either word order.
       // Matches "100m2", "100 sqm", "100 metres", "100 meters square", etc.
-      /\b\d+\s*(m2|m²|sqm|square|metre|meter)/i,
+      /\b\d+\s*(m2|m²|sqm|square|metre|meter|mm|cm|kw|litre|liter)/i,
+      // Spelled-out small counts as whole words (avoids "stone"/"alone" hits).
+      /\b(one|two|three|four|five|six|seven|eight|nine|ten|dozen)\b/i,
       ...SQM_WORDS,
+      'how many', 'a couple', 'a few', 'several', 'small', 'medium', 'large',
+      'about', 'roughly', 'around', 'approx',
     ],
-    jsonField: 'area',
+    jsonField: 'sizeOrCount',
   },
   {
-    id: 'universal_timing',
-    label: 'Timing',
+    id: 'universal_supply',
+    label: 'Who supplies',
     keywords: [
-      /\bin\s+\d+\s*(day|week|month)/i,
-      /\bnext\s+(week|month)/i,
-      'urgent', 'asap', 'this week', 'next week', 'deadline', 'before', 'flexible', 'when can',
+      'customer supply', 'customer supplied', 'customer to supply',
+      'we supply', 'supply only', 'supplied by', 'tradie supply',
+      "i'll supply", 'i will supply', 'bring', 'provide', 'i bring', 'they bring',
     ],
-    jsonField: 'timing',
+    jsonField: 'supply',
   },
   {
     id: 'universal_access',
     label: 'Access',
     keywords: [
-      'access', 'parking', 'narrow', 'tight', 'gate', 'driveway', 'side path', 'stairs', 'lift',
+      'access', 'parking', 'narrow', 'tight', 'gate', 'driveway', 'side path',
+      'stairs', 'lift', 'easy access', 'hard to reach', 'tight spot',
     ],
     jsonField: 'access',
   },
   {
-    id: 'universal_supply',
-    label: 'Supply',
+    id: 'universal_deadline',
+    label: 'Deadline',
     keywords: [
-      'customer supply', 'customer supplied', 'customer to supply',
-      'we supply', 'supply only', 'supplied by', 'tradie supply', "i'll supply", 'i will supply',
+      /\bin\s+\d+\s*(day|week|month)/i,
+      /\bnext\s+(week|month)/i,
+      /\bby\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i,
+      'urgent', 'asap', 'this week', 'next week', 'deadline',
+      'before', 'rush', 'need it done', 'when can', 'as soon as', 'by then',
     ],
-    jsonField: 'supply',
+    jsonField: 'deadline',
   },
 ];
 
