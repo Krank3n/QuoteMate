@@ -777,24 +777,32 @@ export interface TemplateSuggestionResult {
   reasoning: string;
 }
 
+export interface PillSpecInput {
+  id: string;
+  label: string;
+}
+
+export type PillStateResult = Record<string, boolean>;
+
 export async function cleanupTranscriptionAndGenerateTitle(
   transcribedText: string,
-  templates?: TemplateMatchInput[]
-): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[] }> {
+  templates?: TemplateMatchInput[],
+  pillSpec?: PillSpecInput[]
+): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[]; pills?: PillStateResult }> {
   // On web, use Firebase Functions
   if (Platform.OS === 'web') {
-    return cleanupViaFirebaseFunction(transcribedText);
+    return cleanupViaFirebaseFunction(transcribedText, pillSpec);
   }
 
   // On mobile, try Gemini Flash Lite first (fast + cheap), then Claude as fallback
   try {
-    return await cleanupViaGemini(transcribedText, templates, true);
+    return await cleanupViaGemini(transcribedText, templates, true, pillSpec);
   } catch (geminiError) {
 
     // Try Claude as fallback
     if (ANTHROPIC_API_KEY) {
       try {
-        const prompt = createCleanupPrompt(transcribedText, templates);
+        const prompt = createCleanupPrompt(transcribedText, templates, pillSpec);
 
         const response = await fetch(ANTHROPIC_API_URL, {
           method: 'POST',
@@ -841,8 +849,9 @@ export async function cleanupTranscriptionAndGenerateTitle(
  * Clean up transcription via Firebase Cloud Function (for web)
  */
 async function cleanupViaFirebaseFunction(
-  transcribedText: string
-): Promise<{ cleanedDescription: string; suggestedTitle: string }> {
+  transcribedText: string,
+  pillSpec?: PillSpecInput[]
+): Promise<{ cleanedDescription: string; suggestedTitle: string; pills?: PillStateResult }> {
   try {
     const idToken = await auth.currentUser?.getIdToken();
     const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/cleanupTranscription`, {
@@ -851,7 +860,7 @@ async function cleanupViaFirebaseFunction(
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${idToken}`,
       },
-      body: JSON.stringify({ transcribedText }),
+      body: JSON.stringify({ transcribedText, pillSpec }),
     });
 
     if (!response.ok) {
@@ -863,11 +872,12 @@ async function cleanupViaFirebaseFunction(
     return {
       cleanedDescription: data.cleanedDescription || transcribedText,
       suggestedTitle: data.suggestedTitle || '',
+      pills: data.pills,
     };
   } catch (error) {
     // Try Gemini as fallback
     try {
-      return await cleanupViaGemini(transcribedText);
+      return await cleanupViaGemini(transcribedText, undefined, false, pillSpec);
     } catch (geminiError) {
       // Gemini fallback also failed
     }
@@ -885,13 +895,14 @@ async function cleanupViaFirebaseFunction(
 async function cleanupViaGemini(
   transcribedText: string,
   templates?: TemplateMatchInput[],
-  useLiteModel: boolean = false
-): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[] }> {
+  useLiteModel: boolean = false,
+  pillSpec?: PillSpecInput[]
+): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[]; pills?: PillStateResult }> {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API key not configured');
   }
 
-  const prompt = createCleanupPrompt(transcribedText, templates);
+  const prompt = createCleanupPrompt(transcribedText, templates, pillSpec);
   const apiUrl = useLiteModel ? GEMINI_LITE_API_URL : GEMINI_API_URL;
 
   const response = await fetch(`${apiUrl}?key=${GEMINI_API_KEY}`, {
@@ -934,7 +945,7 @@ async function cleanupViaGemini(
 /**
  * Create the prompt for text cleanup and title generation
  */
-function createCleanupPrompt(transcribedText: string, templates?: TemplateMatchInput[]): string {
+function createCleanupPrompt(transcribedText: string, templates?: TemplateMatchInput[], pillSpec?: PillSpecInput[]): string {
   let templateSection = '';
   if (templates && templates.length > 0) {
     const templateList = templates.map((t, i) =>
@@ -954,6 +965,20 @@ Include in your response:
 If no templates are relevant, return "templateSuggestions": []`;
   }
 
+  let pillSection = '';
+  if (pillSpec && pillSpec.length > 0) {
+    const pillList = pillSpec.map((p, i) => `${i + 1}. id="${p.id}" — ${p.label}`).join('\n');
+    pillSection = `
+
+The tradie's checklist for this job type:
+${pillList}
+
+For each checklist item, decide whether the transcript supports it being part of THIS job. Mark true ONLY if the transcript clearly mentions the item or scope. Mark false if the tradie excludes it ("no oven", "skip windows", "not the bathroom") or doesn't mention it. Return one entry per checklist id.
+
+Include in your response:
+"pills": { "id_1": true|false, "id_2": true|false, ... }`;
+  }
+
   return `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title. The cleaned description will appear on an invoice sent to the customer, so it must read professionally. Do NOT add any details, claims, or information that are not present in the original text.
 
 Transcribed Text: "${transcribedText}"
@@ -966,12 +991,12 @@ Tasks:
    - Where the work has a list of discrete items (multiple tasks, materials, or fixtures), use a bullet list with "- " at the start of each line.
    - Keep sentences plain and factual.
 4. Do not invent details, do not add warranties, claims, or assurances that were not in the original.
-5. Generate a short, professional job title (3-7 words)${templateSection}
+5. Generate a short, professional job title (3-7 words)${templateSection}${pillSection}
 
 Provide a JSON response with this structure:
 {
   "cleanedDescription": "The cleaned and formatted description (use \\n for line breaks and \\n\\n between paragraphs)",
-  "suggestedTitle": "Short Job Title"${templates && templates.length > 0 ? ',\n  "templateSuggestions": [{ "templateId": "...", "suggestedQuantity": 1, "reasoning": "..." }]' : ''}
+  "suggestedTitle": "Short Job Title"${templates && templates.length > 0 ? ',\n  "templateSuggestions": [{ "templateId": "...", "suggestedQuantity": 1, "reasoning": "..." }]' : ''}${pillSpec && pillSpec.length > 0 ? ',\n  "pills": { "id_1": true, "id_2": false }' : ''}
 }
 
 Return ONLY valid JSON, no other text.`;
@@ -980,7 +1005,7 @@ Return ONLY valid JSON, no other text.`;
 /**
  * Parse the cleanup response
  */
-function parseCleanupResponse(content: string): { cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[] } {
+function parseCleanupResponse(content: string): { cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[]; pills?: PillStateResult } {
   try {
     let jsonStr = content.trim();
     if (jsonStr.startsWith('```json')) {
@@ -1004,10 +1029,19 @@ function parseCleanupResponse(content: string): { cleanedDescription: string; su
         }));
     }
 
+    let pills: PillStateResult | undefined;
+    if (parsed.pills && typeof parsed.pills === 'object' && !Array.isArray(parsed.pills)) {
+      pills = {};
+      for (const [k, v] of Object.entries(parsed.pills)) {
+        pills[k] = !!v;
+      }
+    }
+
     return {
       cleanedDescription: parsed.cleanedDescription || '',
       suggestedTitle: parsed.suggestedTitle || '',
       templateSuggestions,
+      pills,
     };
   } catch (error) {
     throw new Error('Invalid response from LLM');

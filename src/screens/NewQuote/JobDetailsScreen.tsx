@@ -26,6 +26,7 @@ import {
   ActivityIndicator,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute } from '@react-navigation/native';
 // Safe import — native module may not be available if dev client wasn't rebuilt
 let ExpoSpeechRecognitionModule: any = null;
@@ -42,6 +43,9 @@ import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
 import { JOB_TEMPLATES } from '../../data/jobTemplates';
 import { NICHE_TEMPLATES, getTemplatesForNiche, getNicheTemplateById, NicheJobTemplate, getDescriptionPlaceholder, getVoicePromptHint } from '../../data/nicheTemplates';
+import { getPillsForNiche } from '../../data/nichePills';
+import { ListeningPills } from '../../components/ListeningPills';
+import { usePillMatcher, PillState } from '../../hooks/usePillMatcher';
 import { getTradeCategoryById, getTradeNicheById, PRICING_METHODS } from '../../constants/tradeCategories';
 import { createJobFromTemplate } from '../../utils/materialsEstimator';
 import { colors } from '../../theme';
@@ -114,6 +118,11 @@ export function JobDetailsScreen() {
   const jobPhotosRef = useRef<View>(null);
   const jobPhotoThumbnailRef = useRef<View>(null);
   const analyzeRef = useRef<View>(null);
+  const descriptionCardRef = useRef<View>(null);
+  // Y position of the description card inside the ScrollView's content,
+  // captured via onLayout. measureLayout against the inner scroll node was
+  // flaky (worked first tap then drifted), this is the reliable signal.
+  const descriptionCardYRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
   const [tourActive, setTourActive] = useState(false);
   const [tourAnnotatorOpen, setTourAnnotatorOpen] = useState(false);
@@ -136,6 +145,21 @@ export function JobDetailsScreen() {
       if (typewriterRef.current) clearInterval(typewriterRef.current);
     };
   }, []);
+
+  // Listening pills — passive checklist that ticks itself off as the user
+  // dictates. Pills come from the selected template's niche; serverState is
+  // set once the cleanup LLM round-trip returns its authoritative map.
+  const nichePills = React.useMemo(() => {
+    const t = selectedTemplate as NicheJobTemplate | null;
+    if (!t?.categoryId || !t?.nicheId) return [];
+    return getPillsForNiche(t.categoryId, t.nicheId);
+  }, [selectedTemplate]);
+  const [pillServerState, setPillServerState] = useState<PillState | null>(null);
+  const pillState = usePillMatcher({
+    transcript: jobDescription,
+    pills: nichePills,
+    serverState: pillServerState,
+  });
 
   // Voice recording states
   const [isRecording, setIsRecording] = useState(false);
@@ -646,6 +670,7 @@ export function JobDetailsScreen() {
     startingDescriptionRef.current = '';
     lastTranscriptRef.current = '';
     setPreCleanupSnapshot(null);
+    setPillServerState(null);
   };
 
   const handleUndoCleanup = () => {
@@ -678,10 +703,18 @@ export function JobDetailsScreen() {
           }))
         : undefined;
 
-      const result = await cleanupTranscriptionAndGenerateTitle(jobDescription, templateInputs);
+      const pillSpecInput = nichePills.length > 0
+        ? nichePills.map(p => ({ id: p.id, label: p.label }))
+        : undefined;
+      const result = await cleanupTranscriptionAndGenerateTitle(jobDescription, templateInputs, pillSpecInput);
       setJobDescription(result.cleanedDescription);
       if (result.suggestedTitle && !jobName) {
         setJobName(result.suggestedTitle);
+      }
+      // Authoritative pill state from the LLM. Replaces any client-side
+      // keyword guesses (handles negation like "no oven" correctly).
+      if (result.pills) {
+        setPillServerState(result.pills);
       }
       // Cleanup succeeded — record the pre-cleanup state so the user can revert.
       setPreCleanupSnapshot(snapshot);
@@ -721,14 +754,23 @@ export function JobDetailsScreen() {
   // and the tradie can start typing immediately.
   const handleSelectTemplate = (template: JobTemplate | NicheJobTemplate | null) => {
     setSelectedTemplate(template);
+    // Different niche → different pill checklist. Old server state belongs
+    // to a different set of ids; clear so we start from a fresh slate.
+    setPillServerState(null);
     if (template?.id) {
       // Fire-and-forget — affects ordering on the next visit, not this one.
       recordJobTypeUsed(template.id);
     }
-    if (isProcessingVoice || isRecording) return;
-    // TextInput remounts on template change (key={template.id}), so defer
-    // focus until after the next render.
-    setTimeout(() => descriptionInputRef.current?.focus(), 50);
+    // Scroll the description card to the top of the viewport so the user's
+    // eye lands on the description input. We deliberately do NOT focus the
+    // input — popping the keyboard on chip tap was disorienting; let the
+    // user tap into the field themselves when they're ready to type.
+    if (descriptionCardYRef.current > 0) {
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, descriptionCardYRef.current - 8),
+        animated: true,
+      });
+    }
   };
 
   const handleParamChange = (key: string, value: string) => {
@@ -1076,56 +1118,73 @@ export function JobDetailsScreen() {
             <Title style={styles.sectionTitle}>{screenHeaderTitle}</Title>
           </View>
           <Text style={styles.helperText}>What kind of job is this?</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipRow}
-            keyboardShouldPersistTaps="handled"
-          >
-            {availableTemplates.map((t) => {
-              const isSelected = selectedTemplate?.id === t.id;
-              const iconColor = isSelected ? colors.surface : colors.onSurface;
-              return (
-                <Chip
-                  key={t.id}
-                  selected={isSelected}
-                  onPress={() => handleSelectTemplate(t)}
-                  icon={() => (
-                    <MaterialCommunityIcons name={t.icon as any} size={18} color={iconColor} />
-                  )}
-                  style={[styles.jobTypeChip, isSelected && styles.jobTypeChipSelected]}
-                  textStyle={isSelected ? styles.jobTypeChipTextSelected : styles.jobTypeChipText}
-                  showSelectedCheck={false}
-                >
-                  {t.name}
-                </Chip>
-              );
-            })}
-            {(() => {
-              const isSelected = selectedTemplate === null;
-              const iconColor = isSelected ? colors.surface : colors.onSurface;
-              return (
-                <Chip
-                  selected={isSelected}
-                  onPress={() => handleSelectTemplate(null)}
-                  icon={() => (
-                    <MaterialCommunityIcons name="dots-horizontal" size={18} color={iconColor} />
-                  )}
-                  style={[styles.jobTypeChip, isSelected && styles.jobTypeChipSelected]}
-                  textStyle={isSelected ? styles.jobTypeChipTextSelected : styles.jobTypeChipText}
-                  showSelectedCheck={false}
-                >
-                  Other
-                </Chip>
-              );
-            })()}
-          </ScrollView>
+          <View style={styles.chipScrollWrapper}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}
+              keyboardShouldPersistTaps="handled"
+            >
+              {availableTemplates.map((t) => {
+                const isSelected = selectedTemplate?.id === t.id;
+                const iconColor = isSelected ? colors.surface : colors.onSurface;
+                return (
+                  <Chip
+                    key={t.id}
+                    selected={isSelected}
+                    onPress={() => handleSelectTemplate(t)}
+                    icon={() => (
+                      <MaterialCommunityIcons name={t.icon as any} size={18} color={iconColor} />
+                    )}
+                    style={[styles.jobTypeChip, isSelected && styles.jobTypeChipSelected]}
+                    textStyle={isSelected ? styles.jobTypeChipTextSelected : styles.jobTypeChipText}
+                    showSelectedCheck={false}
+                  >
+                    {t.name}
+                  </Chip>
+                );
+              })}
+              {(() => {
+                const isSelected = selectedTemplate === null;
+                const iconColor = isSelected ? colors.surface : colors.onSurface;
+                return (
+                  <Chip
+                    selected={isSelected}
+                    onPress={() => handleSelectTemplate(null)}
+                    icon={() => (
+                      <MaterialCommunityIcons name="dots-horizontal" size={18} color={iconColor} />
+                    )}
+                    style={[styles.jobTypeChip, isSelected && styles.jobTypeChipSelected]}
+                    textStyle={isSelected ? styles.jobTypeChipTextSelected : styles.jobTypeChipText}
+                    showSelectedCheck={false}
+                  >
+                    Other
+                  </Chip>
+                );
+              })()}
+            </ScrollView>
+            {/* Right-edge fade — depth cue that more chips scroll off-screen.
+                Fades to the surface charcoal so chips dissolve into the card. */}
+            <LinearGradient
+              pointerEvents="none"
+              colors={['rgba(30,41,59,0)', colors.surface]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={styles.chipFadeRight}
+            />
+          </View>
         </Surface>
       )}
 
       {/* Job description — voice + text. The placeholder, voice cue, and
           AI context are all shaped by the selected template chip above. */}
-      <Surface style={styles.paramsSection}>
+      <Surface
+        ref={descriptionCardRef}
+        style={styles.paramsSection}
+        onLayout={(e) => {
+          descriptionCardYRef.current = e.nativeEvent.layout.y;
+        }}
+      >
         <View style={styles.sectionTitleContainer}>
           <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
             <MaterialCommunityIcons name="hammer-wrench" size={20} color={colors.secondary} />
@@ -1278,6 +1337,9 @@ export function JobDetailsScreen() {
         {/* Job Description + Clean-up Button + Title (wrapped for tour highlights) */}
         <View ref={descriptionCleanedRef}>
         <View ref={descriptionRef}>
+        {nichePills.length > 0 && (
+          <ListeningPills pills={nichePills} state={pillState} />
+        )}
         <TextInput
           ref={descriptionInputRef}
           key={selectedTemplate?.id || 'freeform'}
@@ -1759,6 +1821,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.onSurface,
     marginBottom: 12,
+  },
+  chipScrollWrapper: {
+    position: 'relative',
+  },
+  chipFadeRight: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 40,
   },
   chipRow: {
     paddingVertical: 4,

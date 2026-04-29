@@ -2513,7 +2513,7 @@ export const cleanupTranscription = functions.https.onRequest((req, res) => {
     if (!decodedToken) return;
 
     try {
-      const { transcribedText } = req.body;
+      const { transcribedText, pillSpec } = req.body;
 
       if (!isNonEmptyString(transcribedText)) {
         res.status(400).json({ error: 'Missing or invalid transcribedText' });
@@ -2531,6 +2531,26 @@ export const cleanupTranscription = functions.https.onRequest((req, res) => {
         return;
       }
 
+      // Validate optional pillSpec — array of {id, label} pairs.
+      const validPillSpec: { id: string; label: string }[] = Array.isArray(pillSpec)
+        ? pillSpec
+            .filter((p: any) => p && isNonEmptyString(p.id) && isNonEmptyString(p.label))
+            .slice(0, 30)
+        : [];
+
+      let pillSection = '';
+      let pillJsonField = '';
+      if (validPillSpec.length > 0) {
+        const pillList = validPillSpec.map((p, i) => `${i + 1}. id="${p.id}" — ${p.label}`).join('\n');
+        pillSection = `
+
+The tradie's checklist for this job type:
+${pillList}
+
+For each checklist item, decide whether the transcript supports it being part of THIS job. Mark true ONLY if the transcript clearly mentions the item or scope. Mark false if the tradie excludes it ("no oven", "skip windows", "not the bathroom") or doesn't mention it. Return one entry per checklist id.`;
+        pillJsonField = ',\n  "pills": { "id_1": true, "id_2": false }';
+      }
+
       const prompt = `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title. The cleaned description will appear on an invoice sent to the customer, so it must be written professionally. Do NOT add any details, claims, or information that are not present in the original text.
 
 Transcribed Text: "${transcribedText}"
@@ -2539,12 +2559,12 @@ Tasks:
 1. Fix any transcription errors or unclear phrases
 2. Rewrite the description in a professional, customer-facing tone suitable for an invoice
 3. Keep all important details (measurements, materials, locations, etc.) but do not invent or add any new details
-4. Generate a short, professional job title (3-7 words)
+4. Generate a short, professional job title (3-7 words)${pillSection}
 
 Provide a JSON response with this structure:
 {
   "cleanedDescription": "The cleaned and formatted description",
-  "suggestedTitle": "Short Job Title"
+  "suggestedTitle": "Short Job Title"${pillJsonField}
 }
 
 Return ONLY valid JSON, no other text.`;
@@ -2588,9 +2608,20 @@ Return ONLY valid JSON, no other text.`;
 
       const parsed = JSON.parse(jsonStr);
 
+      // Coerce pills response to {[id]: bool} only if pillSpec was provided.
+      let pills: Record<string, boolean> | undefined;
+      if (validPillSpec.length > 0 && parsed.pills && typeof parsed.pills === 'object' && !Array.isArray(parsed.pills)) {
+        pills = {};
+        const allowedIds = new Set(validPillSpec.map((p) => p.id));
+        for (const [k, v] of Object.entries(parsed.pills)) {
+          if (allowedIds.has(k)) pills[k] = !!v;
+        }
+      }
+
       res.status(200).json({
         cleanedDescription: parsed.cleanedDescription || transcribedText,
         suggestedTitle: parsed.suggestedTitle || '',
+        ...(pills ? { pills } : {}),
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
