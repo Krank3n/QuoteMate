@@ -149,9 +149,13 @@ async function analyzeViaFirebaseFunction(
   }
 
   const data = await response.json();
+  // Apply the same client-side validation we run on the Gemini fallback path.
+  // The server doesn't dedupe or sanity-check sectionMultiplier values, so
+  // without this pass a sentinel-equal-quantity multiplier (e.g. 100 for "100
+  // bags concrete") would slip through and blow up section labour totals.
   return {
-    materials: data.materials || [],
-    estimatedHours: data.estimatedHours || 8,
+    materials: validateMaterials(data.materials || []),
+    estimatedHours: Math.max(1, Math.min(data.estimatedHours || 8, 200)),
     jobSummary: data.jobSummary || '',
   };
 }
@@ -296,6 +300,18 @@ Provide a JSON response with the following structure:
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
 
+CRITICAL — emit quantities in the SMALLEST INDIVIDUAL UNIT, not in guessed packs:
+- Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
+- Concrete / sand / cement → emit the count of bags and unit "each" (e.g. 20 each for 20 bags).
+- Timber / decking / fascia → emit linear metres and unit "m" (e.g. 75 m).
+- Tape / membrane / sarking → emit linear metres and unit "m" (e.g. 150 m).
+- Paint / oil / sealer → emit total litres and unit "L" (e.g. 8 L).
+The pricing layer reads pack/length size from the product page (e.g. "Box of 500", "5.4m length", "20m roll") and computes how many packs to buy. If you guess pack counts yourself you will get them wrong — you have no way to know how many clips are in a pack.
+
+DO NOT use units "pack" or "box" in the materials output unless the item is genuinely sold and counted as discrete packs (e.g. one mixed wall-plug pack). Default to "each", "m", "kg", or "L".
+
+DO NOT set sectionMultiplier equal to a material's own quantity — sectionMultiplier is the count of repeating WORK UNITS (bays, footings, square metres of deck), not the count of items.
+
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
 - For each section, specify materials with PER-UNIT quantities and a "sectionMultiplier" for how many units the job needs. Example: a 20m fence with 2.4m bays → each material has per-bay quantity, sectionMultiplier = 9.
@@ -379,15 +395,25 @@ function validateMaterials(materials: LLMMaterial[]): LLMMaterial[] {
       unit: VALID_UNITS.includes(m.unit) ? m.unit : 'each',
     }));
 
-  // Enforce consistent multiplier per section
+  // Enforce consistent multiplier per section.
+  //
+  // The LLM occasionally duplicates a material's quantity into its
+  // sectionMultiplier (e.g. emits "100 bags concrete" with multiplier=100),
+  // which then gets picked up as the section's "how many work units" count.
+  // That blew up section labour by 10×–100× in real quotes, so drop any
+  // sectionMultiplier value that exactly equals its own quantity before
+  // taking the mode.
   const sectionMultipliers = new Map<string, number>();
   for (const m of filtered) {
     if (!m.section) continue;
     const existing = sectionMultipliers.get(m.section);
     if (!existing) {
       const sectionMats = filtered.filter(x => x.section === m.section);
-      const multipliers = sectionMats.map(x => x.sectionMultiplier || 1);
-      sectionMultipliers.set(m.section, mode(multipliers));
+      const validVotes = sectionMats
+        .filter(x => !(x.sectionMultiplier && x.sectionMultiplier === x.quantity))
+        .map(x => x.sectionMultiplier || 1);
+      const votes = validVotes.length > 0 ? validVotes : [1];
+      sectionMultipliers.set(m.section, mode(votes));
     }
   }
 

@@ -17,6 +17,16 @@ export interface Material {
   name: string;
   quantity: number;
   unit: 'each' | 'm' | 'm²' | 'm³' | 'L' | 'kg' | 'box' | 'pack';
+  // True underlying requirement before pack rounding. When the priced product
+  // is sold in packs (e.g. box of 500 screws, 5.4m timber length), the LLM
+  // emits the per-unit need here and `quantity` is the rounded-up pack count
+  // the tradie actually buys. totalPrice = quantity * price stays correct.
+  requiredQty?: number;
+  // Set when a priced product is a multi-unit pack/length. packSize is in
+  // packUnit (e.g. 500 each, 5.4 m, 20 m). Used to recompute quantity from
+  // requiredQty whenever the price source changes.
+  packSize?: number;
+  packUnit?: Material['unit'];
   bunningsItemNumber?: string;
   price: number; // per unit
   totalPrice: number;

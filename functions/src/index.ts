@@ -1627,6 +1627,18 @@ Provide a JSON response with the following structure:
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
 
+CRITICAL — emit quantities in the SMALLEST INDIVIDUAL UNIT, not in guessed packs:
+- Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
+- Concrete / sand / cement → emit the count of bags and unit "each" (e.g. 20 each for 20 bags).
+- Timber / decking / fascia → emit linear metres and unit "m" (e.g. 75 m).
+- Tape / membrane / sarking → emit linear metres and unit "m" (e.g. 150 m).
+- Paint / oil / sealer → emit total litres and unit "L" (e.g. 8 L).
+The pricing layer reads pack/length size from the product page (e.g. "Box of 500", "5.4m length", "20m roll") and computes how many packs to buy. If you guess pack counts yourself you will get them wrong — you have no way to know how many clips are in a pack.
+
+DO NOT use units "pack" or "box" in the materials output unless the item is genuinely sold and counted as discrete packs (e.g. one mixed wall-plug pack). Default to "each", "m", "kg", or "L".
+
+DO NOT set sectionMultiplier equal to a material's own quantity — sectionMultiplier is the count of repeating WORK UNITS (bays, footings, square metres of deck), not the count of items.
+
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
 - For each section, specify materials with PER-UNIT quantities and a "sectionMultiplier" for how many units the job needs. Example: a 20m fence with 2.4m bays → each material has per-bay quantity, sectionMultiplier = 9.

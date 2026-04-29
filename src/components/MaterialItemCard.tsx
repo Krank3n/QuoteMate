@@ -115,6 +115,9 @@ export function MaterialItemCard({
               return `${material.templateBaseQuantity}/${unitWord} · `;
             })() : ''}{formatCurrency(material.price)}
             {readOnly && material.unit ? ` / ${material.unit}` : ' ea.'}
+            {material.packSize && material.packUnit && material.requiredQty
+              ? `  ·  ${material.packSize} ${material.packUnit}/pack (need ${material.requiredQty} ${material.packUnit})`
+              : ''}
             {readOnly && material.favoriteProduct?.coveragePerUnit && material.favoriteProduct?.coverageUnit
               ? `  ·  covers ${material.favoriteProduct.coveragePerUnit} ${material.favoriteProduct.coverageUnit}`
               : ''}

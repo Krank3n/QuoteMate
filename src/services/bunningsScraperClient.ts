@@ -25,6 +25,12 @@ export interface ScraperProduct {
   productUrl: string;
   imageUrl?: string;
   confidence: 'high' | 'medium' | 'low';
+  // Optional pack/length size the price covers (e.g. 500 each, 5.4 m, 20 m).
+  // When present, callers should compute packs-needed = ceil(required / packSize)
+  // before multiplying by price. Server may populate, otherwise client parses
+  // it out of productName via parsePackInfo().
+  packSize?: number;
+  packUnit?: string;
 }
 
 export interface ScraperSearchResponse {

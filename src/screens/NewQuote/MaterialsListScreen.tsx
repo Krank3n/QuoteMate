@@ -38,6 +38,7 @@ import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapp
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
+import { parsePackInfo, isLikelyBulkItem } from '../../utils/parsePackInfo';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
@@ -128,6 +129,73 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
+
+/**
+ * Recompute material qty/total from a priced product, dividing by pack size
+ * when the product is sold as a pack/length/roll. Without this, a quote that
+ * needs 750 individual screws and pulls back the price of a 500-pack
+ * multiplies $73 × 750 — the bug that turned a $20k deck into $200k.
+ *
+ * Captures the original requirement into `requiredQty` on first pricing so
+ * subsequent re-prices can recompute pack counts from the true need rather
+ * than from a stale pack count.
+ *
+ * Only applies pack division when the requirement unit is compatible with the
+ * pack unit (each↔each, m↔m, kg↔kg, L↔L). Without this guard, a "60 each"
+ * concrete-bag requirement priced against a "20kg" SKU would divide 60/20=3
+ * bags — wrong, because "60 each" already means 60 bags.
+ */
+const PACK_UNIT_EQUIVALENT: Partial<Record<Material['unit'], Material['unit']>> = {
+  each: 'each',
+  pack: 'each',
+  box: 'each',
+  m: 'm',
+  kg: 'kg',
+  L: 'L',
+};
+
+function applyPackAwarePricing(
+  material: Material,
+  product: { productName?: string; packSize?: number; packUnit?: string }
+): void {
+  if (material.requiredQty === undefined) {
+    material.requiredQty = material.quantity;
+  }
+  const required = material.requiredQty;
+
+  let packSize = product.packSize;
+  let packUnit = product.packUnit as Material['unit'] | undefined;
+  if (!packSize || !packUnit) {
+    const parsed = parsePackInfo(product.productName);
+    if (parsed) {
+      packSize = parsed.packSize;
+      packUnit = parsed.packUnit;
+    }
+  }
+
+  const requiredUnitNormalised = PACK_UNIT_EQUIVALENT[material.unit];
+  const packUnitNormalised = packUnit ? PACK_UNIT_EQUIVALENT[packUnit] : undefined;
+  const unitsCompatible =
+    !!requiredUnitNormalised &&
+    !!packUnitNormalised &&
+    requiredUnitNormalised === packUnitNormalised;
+
+  if (packSize && packSize > 1 && packUnit && unitsCompatible) {
+    const packsNeeded = Math.max(1, Math.ceil(required / packSize));
+    material.quantity = packsNeeded;
+    material.unit = packUnit === 'm' ? 'each' : 'pack';
+    material.packSize = packSize;
+    material.packUnit = packUnit;
+  } else {
+    material.quantity = required;
+    material.packSize = undefined;
+    material.packUnit = undefined;
+    if (isLikelyBulkItem(material.name) && material.priceConfidence !== 'high') {
+      material.priceConfidence = 'low';
+    }
+  }
+  material.totalPrice = material.quantity * material.price;
+}
 
 // AI Analysis Loading State with Lottie Animation and scrolling progress steps
 const AI_STEPS = [
@@ -781,9 +849,16 @@ export function MaterialsListScreen() {
         ? quotePhotos.map((p: any) => p.storageUrl).filter(Boolean)
         : undefined;
 
-      // Pass existing materials so AI doesn't duplicate them (gap-fill mode)
+      // Pass existing materials so AI doesn't duplicate them (gap-fill mode).
+      // Use requiredQty when present so the LLM sees the underlying need (e.g.
+      // "1100 each clips") rather than the pack count after pricing ("11 pack").
       const existingMatsForAi = currentQuote.materials.length > 0
-        ? currentQuote.materials.map(m => ({ name: m.name, quantity: m.quantity, unit: m.unit, section: m.section }))
+        ? currentQuote.materials.map(m => ({
+            name: m.name,
+            quantity: m.requiredQty ?? m.quantity,
+            unit: (m.packUnit ?? m.unit) as Material['unit'],
+            section: m.section,
+          }))
         : undefined;
 
       // Pass saved templates so AI can reuse their section names and materials
@@ -1082,12 +1157,12 @@ export function MaterialsListScreen() {
         if (hits.length === 0) continue;
         const top = hits[0];
         m.price = top.price;
-        m.totalPrice = top.price * m.quantity;
         m.manualPriceOverride = false;
         m.pricingSource = 'manual';
         if (top.productUrl) m.productUrl = top.productUrl;
         if (top.imageUrl) m.imageUrl = top.imageUrl;
         if (top.unit) m.unit = top.unit as Material['unit'];
+        applyPackAwarePricing(m, { productName: top.productName });
         fetchedCount++;
         locallyPricedTerms.add(term);
         triggerPriceFlash(m.id);
@@ -1126,7 +1201,6 @@ export function MaterialsListScreen() {
           // Helper to apply a scraper product to a material
           const applyProduct = (material: any, product: any) => {
             material.price = product.price;
-            material.totalPrice = product.price * material.quantity;
             material.manualPriceOverride = false;
             material.pricingSource = 'scraper';
             // Preserve scraper confidence so low-confidence results (Claude
@@ -1142,6 +1216,11 @@ export function MaterialsListScreen() {
               material.brand = product.brand;
             }
             if (product.stockCheckedAt) material.stockCheckedAt = product.stockCheckedAt;
+            applyPackAwarePricing(material, {
+              productName: product.productName,
+              packSize: product.packSize,
+              packUnit: product.packUnit,
+            });
           };
 
           batchResults = await withCancel(batchFindBestMatchesProgressive(
@@ -1264,7 +1343,6 @@ export function MaterialsListScreen() {
 
             if (product && product.price > 0) {
               material.price = product.price;
-              material.totalPrice = product.price * material.quantity;
               material.manualPriceOverride = false;
               material.pricingSource = 'scraper';
 
@@ -1295,6 +1373,12 @@ export function MaterialsListScreen() {
                 material.stockCheckedAt = product.stockCheckedAt;
               }
 
+              applyPackAwarePricing(material, {
+                productName: product.productName,
+                packSize: (product as any).packSize,
+                packUnit: (product as any).packUnit,
+              });
+
               fetchedCount++;
               triggerPriceFlash(material.id);
             } else {
@@ -1310,7 +1394,6 @@ export function MaterialsListScreen() {
 
             if (aiResult.price) {
               material.price = aiResult.price;
-              material.totalPrice = material.price * material.quantity;
               material.manualPriceOverride = false;
               material.pricingSource = 'ai';
               material.priceConfidence = aiResult.confidence || 'medium';
@@ -1321,6 +1404,8 @@ export function MaterialsListScreen() {
               if (aiResult.store) {
                 material.description = `AI reckons about this much`;
               }
+
+              applyPackAwarePricing(material, { productName: aiResult.productName });
 
               fetchedCount++;
               triggerPriceFlash(material.id);
@@ -1334,7 +1419,6 @@ export function MaterialsListScreen() {
 
           if (result.price) {
             material.price = result.price;
-            material.totalPrice = material.price * material.quantity;
             material.manualPriceOverride = false;
             material.pricingSource = 'api';
 
@@ -1345,6 +1429,8 @@ export function MaterialsListScreen() {
             if (result.store) {
               material.description = `Available at ${result.store}`;
             }
+
+            applyPackAwarePricing(material, { productName: result.productName });
 
             fetchedCount++;
             triggerPriceFlash(material.id);
@@ -1415,14 +1501,14 @@ export function MaterialsListScreen() {
             // 6. Apply selected product to material
             if (selectedMatch) {
               material.price = selectedMatch.price;
-              material.totalPrice = selectedMatch.price * material.quantity;
               material.manualPriceOverride = false;
               material.pricingSource = 'scraper';
 
-              // Apply quantity adjustment if needed
+              // Apply quantity adjustment if needed (resets requirement so pack
+              // math derives off the adjusted requirement, not the original).
               if (quantityAdj && quantityAdj.adjustedQuantity !== material.quantity) {
                 material.quantity = quantityAdj.adjustedQuantity;
-                material.totalPrice = selectedMatch.price * material.quantity;
+                material.requiredQty = quantityAdj.adjustedQuantity;
               }
 
               // Store product details
@@ -1447,6 +1533,12 @@ export function MaterialsListScreen() {
                 material.stockCheckedAt = selectedMatch.stockCheckedAt;
               }
 
+              applyPackAwarePricing(material, {
+                productName: selectedMatch.productName,
+                packSize: (selectedMatch as any).packSize,
+                packUnit: (selectedMatch as any).packUnit,
+              });
+
               fetchedCount++;
               triggerPriceFlash(material.id);
             } else {
@@ -1458,7 +1550,6 @@ export function MaterialsListScreen() {
 
             if (aiResult.price) {
               material.price = aiResult.price;
-              material.totalPrice = material.price * material.quantity;
               material.manualPriceOverride = false;
               material.pricingSource = 'ai';
               material.priceConfidence = aiResult.confidence || 'medium';
@@ -1469,6 +1560,8 @@ export function MaterialsListScreen() {
               if (aiResult.store) {
                 material.description = `AI reckons about this much`;
               }
+
+              applyPackAwarePricing(material, { productName: aiResult.productName });
 
               fetchedCount++;
               triggerPriceFlash(material.id);
