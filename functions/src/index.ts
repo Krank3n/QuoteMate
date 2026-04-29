@@ -1639,15 +1639,11 @@ DO NOT use units "pack" or "box" in the materials output unless the item is genu
 
 DO NOT set sectionMultiplier equal to a material's own quantity — sectionMultiplier is the count of repeating WORK UNITS (bays, footings, square metres of deck), not the count of items.
 
-Reference quantities (sanity-check your numbers against these — over-spec by 10-15% for waste, but don't 5× them):
-- Concrete bags (20kg) for deck/fence post footings: ~2-3 bags per post hole. A 0.3m × 0.3m × 0.6m footing takes ~3 bags.
-- Hidden decking clips: ~17 clips per square metre of decking (joists at 450mm centres, 137mm-wide boards).
-- Decking face-fix screws (when used): ~30-40 screws per square metre of decking. With hidden clips, you only need a small box for board ends.
-- Joist hanger nails / framing screws: 3-5 per joist hanger. A typical deck has one hanger per joist end.
-- Joist protector tape: linear metres roughly equal to total bearer + joist length combined.
-- Decking board (137mm wide): linear metres needed ≈ deck-area-in-m² ÷ 0.137. A 50 m² deck needs ~365 lm of board.
-- Composite fascia: linear metres equal to the deck's exposed perimeter (excluding any side against the house).
-- Framing timber (90x45 H3): joists at 450mm centres, bearers at 1.8-2.4m centres. A 50 m² deck needs roughly 100-130 lm of joist timber.
+SANITY-CHECK fastener and consumable counts before returning. Common over-spec mistakes that produce absurd quotes:
+- Estimating thousands of screws/clips/nails when the real count is hundreds. Tie your fastener count to a structural anchor — joists, bays, fixings per board, fixings per metre of trim — and multiply, don't guess.
+- Estimating linear metres of tape, sarking, or membrane far in excess of the surface area it actually covers.
+- Estimating bags of concrete/sand far in excess of the footing volume × bag yield.
+After listing each fastener or consumable, ask yourself: "Does this match the structural count (e.g. 3 nails per hanger × N hangers) or have I just guessed?" Reduce if guessed. Round up by 10-15% for waste, not by 5-10×.
 
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
