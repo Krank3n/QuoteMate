@@ -78,13 +78,19 @@ export function LaborSection({
             const sRateLabel = sUnit === 'days' ? '/day' : '/hr';
             const sDisplayRate = section.laborRate * laborMultiplier;
             const sDisplayTotal = section.laborTotal * laborMultiplier;
+            // Show TOTAL hours/days for the section, not the per-unit value.
+            // Per-unit was confusing: a 50 m² deck section with 0.076 days/m²
+            // displays "0.076 days × $800/day = $3,040" which doesn't reconcile.
+            // Total = laborHours × multiplier rounds to a sane number.
+            const sMultiplier = section.multiplier || 1;
+            const sTotalUnits = Math.round(section.laborHours * sMultiplier * 100) / 100;
             return (
               <View key={section.id} style={styles.itemRow}>
                 <View style={styles.itemInfo}>
                   <Text style={styles.itemName}>{section.name}</Text>
                   {showLaborHours && (
                     <Text style={styles.itemDetails}>
-                      {section.laborHours} {sUnitLabel} × {formatCurrency(sDisplayRate)}{sRateLabel}
+                      {sTotalUnits} {sUnitLabel} × {formatCurrency(sDisplayRate)}{sRateLabel}
                     </Text>
                   )}
                 </View>

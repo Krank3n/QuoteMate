@@ -118,7 +118,16 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     laborUnit: s.laborUnit,
     laborTotal: Number(s.laborTotal ?? 0),
     laborExtraHours: s.laborExtraHours,
-    sections: s.sections,
+    // Inline section laborHours × multiplier so PDFs/HTML show the total
+    // hours for the section, not the per-unit value (e.g. "3.8 days" for
+    // a 50 m² deck section, not "0.076 days").
+    sections: s.sections?.map((sec: any) => ({
+      ...sec,
+      laborHours:
+        Math.round(
+          Number(sec.laborHours ?? 0) * Number(sec.multiplier ?? 1) * 100,
+        ) / 100,
+    })),
     materialsSubtotal: Number(s.materialsSubtotal ?? 0),
     markup: Number(s.markup ?? 0),
     laborMarkup: s.laborMarkup,
