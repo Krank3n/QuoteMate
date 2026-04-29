@@ -42,7 +42,6 @@ import { parsePackInfo } from '../../utils/parsePackInfo';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice, getReeceConnectionStatus } from '../../services/reeceApi';
 import { shouldRunReeceFirst } from '../../services/supplierPriority';
-import { searchReeceMaterialPrice } from '../../services/reeceApi';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials, reconcilePricedMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
@@ -1148,6 +1147,7 @@ export function MaterialsListScreen() {
     // Reece for items Bunnings missed.
     const useReeceApi = reeceConnected === true;
     const reeceFirst = useReeceApi && shouldRunReeceFirst(businessSettings?.supplierPriority);
+    const useScraperApi = true; // Bunnings backbone via Firebase proxy
     const hardwareStores = ['bunnings.com.au']; // backbone, always
 
     const updatedMaterials = [...materials];
@@ -1449,69 +1449,44 @@ export function MaterialsListScreen() {
               // Batch missed this one — try individual candidate search
               candidates = await withCancel(findCandidatesForMaterial(searchTerm));
             }
-        // Bunnings backbone — runs for every item that wasn't priced by
-        // local sources or the Reece pre-pass. Hits scraper batch first
-        // (already populated above), falls back to individual scraper
-        // search, then AI estimation as a last resort.
-        try {
-          let product = batchResults?.get(searchTerm) ?? null;
 
-          if (!product) {
-            // Batch missed this one — try individual search
-            product = await withCancel(findBestMatchForMaterial(searchTerm));
-          }
             if (candidates.length > 0) {
               candidatesByMaterialId.set(material.id, candidates);
             }
             const product = candidates[0] || null;
 
-          if (product && product.price > 0) {
-            material.price = product.price;
-            material.totalPrice = product.price * material.quantity;
-            material.manualPriceOverride = false;
-            material.pricingSource = 'scraper';
             if (product && product.price > 0) {
               material.price = product.price;
               material.manualPriceOverride = false;
               material.pricingSource = 'scraper';
 
-            if (product.itemNumber) {
-              material.bunningsItemNumber = product.itemNumber;
-            }
+              if (product.itemNumber) {
+                material.bunningsItemNumber = product.itemNumber;
+              }
 
-            if (product.productUrl) {
-              material.productUrl = product.productUrl;
-            }
+              if (product.productUrl) {
+                material.productUrl = product.productUrl;
+              }
 
-            if (product.imageUrl) {
-              material.imageUrl = product.imageUrl;
-            }
+              if (product.imageUrl) {
+                material.imageUrl = product.imageUrl;
+              }
 
-            if (product.description) {
-              material.description = product.description;
-            }
+              if (product.description) {
+                material.description = product.description;
+              }
 
-            // Only save brand if it's not just the store name
-            if (product.brand &&
-                product.brand.toLowerCase() !== 'bunnings' &&
-                product.brand.toLowerCase() !== 'bunnings.com.au') {
-              material.brand = product.brand;
-            }
+              // Only save brand if it's not just the store name
+              if (product.brand &&
+                  product.brand.toLowerCase() !== 'bunnings' &&
+                  product.brand.toLowerCase() !== 'bunnings.com.au') {
+                material.brand = product.brand;
+              }
 
-            if (product.stockCheckedAt) {
-              material.stockCheckedAt = product.stockCheckedAt;
-            }
+              if (product.stockCheckedAt) {
+                material.stockCheckedAt = product.stockCheckedAt;
+              }
 
-            fetchedCount++;
-            triggerPriceFlash(material.id);
-          } else {
-            throw new Error('No product found with price');
-          }
-        } catch (error: any) {
-          // Re-throw cancellation so the outer catch handles it instantly
-          if (error?.message === '__FETCH_CANCELLED__') throw error;
-          // Scraper missed — fall back to AI estimation directly.
-          const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
               applyPackAwarePricing(material, {
                 productName: product.productName,
                 packSize: (product as any).packSize,
@@ -1687,29 +1662,19 @@ export function MaterialsListScreen() {
             // Web scraping failed, fall back to AI estimation
             const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
-          if (aiResult.price) {
-            material.price = aiResult.price;
-            material.totalPrice = material.price * material.quantity;
-            material.manualPriceOverride = false;
-            material.pricingSource = 'ai';
-            material.priceConfidence = aiResult.confidence || 'medium';
             if (aiResult.price) {
               material.price = aiResult.price;
               material.manualPriceOverride = false;
               material.pricingSource = 'ai';
               material.priceConfidence = aiResult.confidence || 'medium';
 
-            if (aiResult.productName) {
-              material.name = aiResult.productName;
-            }
-            if (aiResult.store) {
-              material.description = `AI reckons about this much`;
-            }
+              if (aiResult.productName) {
+                material.name = aiResult.productName;
+              }
+              if (aiResult.store) {
+                material.description = `AI reckons about this much`;
+              }
 
-            fetchedCount++;
-            triggerPriceFlash(material.id);
-          } else {
-            failedCount++;
               applyPackAwarePricing(material, { productName: aiResult.productName });
 
               fetchedCount++;
