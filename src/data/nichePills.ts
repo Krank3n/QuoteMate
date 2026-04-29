@@ -33,7 +33,61 @@ const KEY = (categoryId: string, nicheId: string) => `${categoryId}:${nicheId}`;
 // Common keyword fragments reused across many niches. Defined as substrings
 // (not regexes) so they catch "metres", "metropolitan-only" etc via includes.
 const M_WORDS = ['metre', 'meter'];          // matches metre/metres/meter/meters
-const SQM_WORDS = ['sqm', 'm2', 'm²', 'square metre', 'square meter'];
+// Includes both word orders — voice transcription of "100 meters square"
+// produces unit-before-"square", which doesn't match "square metre".
+const SQM_WORDS = [
+  'sqm', 'm2', 'm²',
+  'square metre', 'square meter',
+  'metres squared', 'meters squared', 'metre squared', 'meter squared',
+  'metres square', 'meters square', 'metre square', 'meter square',
+];
+
+/**
+ * Universal pills shown for every job — including the "Other" / custom path
+ * where no niche template is selected. Niche-specific pills with the same
+ * jsonField take precedence (see getPillsForNiche), so a niche's tailored
+ * "Access" entry will replace the generic one rather than appearing twice.
+ */
+export const UNIVERSAL_PILLS: PillSpec[] = [
+  {
+    id: 'universal_area',
+    label: 'Area / size',
+    keywords: [
+      // Number followed by any size unit, in either word order.
+      // Matches "100m2", "100 sqm", "100 metres", "100 meters square", etc.
+      /\b\d+\s*(m2|m²|sqm|square|metre|meter)/i,
+      ...SQM_WORDS,
+    ],
+    jsonField: 'area',
+  },
+  {
+    id: 'universal_timing',
+    label: 'Timing',
+    keywords: [
+      /\bin\s+\d+\s*(day|week|month)/i,
+      /\bnext\s+(week|month)/i,
+      'urgent', 'asap', 'this week', 'next week', 'deadline', 'before', 'flexible', 'when can',
+    ],
+    jsonField: 'timing',
+  },
+  {
+    id: 'universal_access',
+    label: 'Access',
+    keywords: [
+      'access', 'parking', 'narrow', 'tight', 'gate', 'driveway', 'side path', 'stairs', 'lift',
+    ],
+    jsonField: 'access',
+  },
+  {
+    id: 'universal_supply',
+    label: 'Supply',
+    keywords: [
+      'customer supply', 'customer supplied', 'customer to supply',
+      'we supply', 'supply only', 'supplied by', 'tradie supply', "i'll supply", 'i will supply',
+    ],
+    jsonField: 'supply',
+  },
+];
 
 export const NICHE_PILLS: Record<string, PillSpec[]> = {
   // ============================================
@@ -343,9 +397,12 @@ export const NICHE_PILLS: Record<string, PillSpec[]> = {
 
 /**
  * Look up the pill checklist for a given (categoryId, nicheId).
- * Returns an empty array when the niche has no pill spec — callers
- * should hide the pill row in that case rather than show an empty bar.
+ *
+ * When no niche is selected (the Custom job path), returns UNIVERSAL_PILLS
+ * so the user still gets a baseline checklist. Niche-specific selections
+ * return only their own pills — no universals merged in.
  */
-export function getPillsForNiche(categoryId: string, nicheId: string): PillSpec[] {
+export function getPillsForNiche(categoryId?: string, nicheId?: string): PillSpec[] {
+  if (!categoryId || !nicheId) return UNIVERSAL_PILLS;
   return NICHE_PILLS[KEY(categoryId, nicheId)] || [];
 }

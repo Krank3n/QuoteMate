@@ -13,6 +13,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
+  findNodeHandle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -66,6 +67,10 @@ import { TOUR_STEPS, INTRO_TOUR_TOTAL_STEPS } from '../../components/tour/tourSt
 import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
 import { getTourPhoto, getTourPhotoAnnotated } from '../../components/tour/tourDummyData';
 import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
+
+// Sentinel id for the Custom chip so it participates in MRU sorting alongside
+// niche template ids. Recorded via recordJobTypeUsed(CUSTOM_CHIP_ID) on tap.
+const CUSTOM_CHIP_ID = 'custom';
 
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
@@ -151,8 +156,7 @@ export function JobDetailsScreen() {
   // set once the cleanup LLM round-trip returns its authoritative map.
   const nichePills = React.useMemo(() => {
     const t = selectedTemplate as NicheJobTemplate | null;
-    if (!t?.categoryId || !t?.nicheId) return [];
-    return getPillsForNiche(t.categoryId, t.nicheId);
+    return getPillsForNiche(t?.categoryId, t?.nicheId);
   }, [selectedTemplate]);
   const [pillServerState, setPillServerState] = useState<PillState | null>(null);
   const pillState = usePillMatcher({
@@ -222,6 +226,16 @@ export function JobDetailsScreen() {
     const deduped = Array.from(new Map(all.map(t => [t.id, t])).values());
     return sortByRecency(deduped, recentJobTypeIds);
   }, [businessSettings, recentJobTypeIds]);
+
+  // Unified chip row — niche templates plus a sentinel "Custom" entry that
+  // participates in the same MRU ordering. Custom sits first by default
+  // (cold-start fallback), but once the tradie picks a niche that niche
+  // floats to the front; once they pick Custom, Custom floats back.
+  type ChipItem = NicheJobTemplate | { id: typeof CUSTOM_CHIP_ID; kind: 'custom' };
+  const chipItems = React.useMemo<ChipItem[]>(() => {
+    const customSentinel: ChipItem = { id: CUSTOM_CHIP_ID, kind: 'custom' };
+    return sortByRecency<ChipItem>([customSentinel, ...availableTemplates], recentJobTypeIds);
+  }, [availableTemplates, recentJobTypeIds]);
 
   // Header title — "New <niche> job" when a single niche is selected, else
   // "New job". Keeps the entity word "job" since it persists through the
@@ -463,19 +477,22 @@ export function JobDetailsScreen() {
     }
   }, [currentQuote]);
 
-  // Cold-start default: pre-select the first available template chip so the
-  // description placeholder feels trade-specific from second one. Skips when
-  // editing an existing job or when the user already has a chip selected.
-  // Wait for the MRU list to load first so the default reflects the user's
-  // most-recent pick rather than the alphabetical first template.
+  // Cold-start default: pre-select the first chip in the unified list so the
+  // description placeholder feels trade-specific from second one. The first
+  // chip may be Custom (no MRU yet, or Custom is the most-recent pick) — in
+  // that case selectedTemplate stays null, which is the Custom state.
+  // Skips when editing an existing job or when the user already has a chip
+  // selected. Waits for the MRU list to load so the default reflects the
+  // user's most-recent pick rather than the alphabetical first template.
   useEffect(() => {
     if (isEditingExisting) return;
     if (selectedTemplate) return;
     if (!recentJobTypeIdsLoaded) return;
-    if (availableTemplates.length > 0) {
-      setSelectedTemplate(availableTemplates[0]);
-    }
-  }, [availableTemplates, isEditingExisting, recentJobTypeIdsLoaded]);
+    const first = chipItems[0];
+    if (!first) return;
+    if (first.id === CUSTOM_CHIP_ID) return; // null is already the Custom state
+    setSelectedTemplate(first as NicheJobTemplate);
+  }, [chipItems, isEditingExisting, recentJobTypeIdsLoaded]);
 
   // Save changes when navigating back. updateQuote keeps currentQuote in sync,
   // saveDraft persists to AsyncStorage + Firestore. Both are needed — without
@@ -757,10 +774,9 @@ export function JobDetailsScreen() {
     // Different niche → different pill checklist. Old server state belongs
     // to a different set of ids; clear so we start from a fresh slate.
     setPillServerState(null);
-    if (template?.id) {
-      // Fire-and-forget — affects ordering on the next visit, not this one.
-      recordJobTypeUsed(template.id);
-    }
+    // Fire-and-forget — affects ordering on the next visit, not this one.
+    // Custom uses its own sentinel id so it floats in MRU like any niche.
+    recordJobTypeUsed(template?.id || CUSTOM_CHIP_ID);
     // Scroll the description card to the top of the viewport so the user's
     // eye lands on the description input. We deliberately do NOT focus the
     // input — popping the keyboard on chip tap was disorienting; let the
@@ -771,6 +787,28 @@ export function JobDetailsScreen() {
         animated: true,
       });
     }
+  };
+
+  // Scroll the pills row to the top of the viewport when the description
+  // input is focused — gives the user a clean view of "what's left to
+  // mention" the moment they start typing. Uses measureLayout because the
+  // pills are nested inside the Surface, so the View's own onLayout y is
+  // relative to the Surface, not the scroll container.
+  const handleDescriptionFocus = () => {
+    // Small delay so any keyboard-driven auto-scroll resolves first; we
+    // want the final scroll position to be ours, not the keyboard's.
+    setTimeout(() => {
+      const scrollNode = scrollRef.current ? findNodeHandle(scrollRef.current as any) : null;
+      const target = descriptionRef.current as any;
+      if (!scrollNode || !target?.measureLayout) return;
+      target.measureLayout(
+        scrollNode,
+        (_x: number, y: number) => {
+          scrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
+        },
+        () => {}
+      );
+    }, 80);
   };
 
   const handleParamChange = (key: string, value: string) => {
@@ -1125,43 +1163,28 @@ export function JobDetailsScreen() {
               contentContainerStyle={styles.chipRow}
               keyboardShouldPersistTaps="handled"
             >
-              {availableTemplates.map((t) => {
-                const isSelected = selectedTemplate?.id === t.id;
+              {chipItems.map((item) => {
+                const isCustom = item.id === CUSTOM_CHIP_ID;
+                const isSelected = isCustom ? selectedTemplate === null : selectedTemplate?.id === item.id;
                 const iconColor = isSelected ? colors.surface : colors.onSurface;
+                const iconName = isCustom ? 'dots-horizontal' : ((item as NicheJobTemplate).icon as any);
+                const label = isCustom ? 'Custom' : (item as NicheJobTemplate).name;
                 return (
                   <Chip
-                    key={t.id}
+                    key={item.id}
                     selected={isSelected}
-                    onPress={() => handleSelectTemplate(t)}
+                    onPress={() => handleSelectTemplate(isCustom ? null : (item as NicheJobTemplate))}
                     icon={() => (
-                      <MaterialCommunityIcons name={t.icon as any} size={18} color={iconColor} />
+                      <MaterialCommunityIcons name={iconName} size={18} color={iconColor} />
                     )}
                     style={[styles.jobTypeChip, isSelected && styles.jobTypeChipSelected]}
                     textStyle={isSelected ? styles.jobTypeChipTextSelected : styles.jobTypeChipText}
                     showSelectedCheck={false}
                   >
-                    {t.name}
+                    {label}
                   </Chip>
                 );
               })}
-              {(() => {
-                const isSelected = selectedTemplate === null;
-                const iconColor = isSelected ? colors.surface : colors.onSurface;
-                return (
-                  <Chip
-                    selected={isSelected}
-                    onPress={() => handleSelectTemplate(null)}
-                    icon={() => (
-                      <MaterialCommunityIcons name="dots-horizontal" size={18} color={iconColor} />
-                    )}
-                    style={[styles.jobTypeChip, isSelected && styles.jobTypeChipSelected]}
-                    textStyle={isSelected ? styles.jobTypeChipTextSelected : styles.jobTypeChipText}
-                    showSelectedCheck={false}
-                  >
-                    Other
-                  </Chip>
-                );
-              })()}
             </ScrollView>
             {/* Right-edge fade — depth cue that more chips scroll off-screen.
                 Fades to the surface charcoal so chips dissolve into the card. */}
@@ -1340,19 +1363,36 @@ export function JobDetailsScreen() {
         {nichePills.length > 0 && (
           <ListeningPills pills={nichePills} state={pillState} />
         )}
-        <TextInput
-          ref={descriptionInputRef}
-          key={selectedTemplate?.id || 'freeform'}
-          label="Job Description *"
-          value={jobDescription}
-          onChangeText={setJobDescription}
-          mode="outlined"
-          style={styles.input}
-          multiline
-          numberOfLines={10}
-          placeholder={getDescriptionPlaceholder(selectedTemplate)}
-          disabled={isProcessingVoice}
-        />
+        <View style={styles.descriptionInputWrapper}>
+          <TextInput
+            ref={descriptionInputRef}
+            key={selectedTemplate?.id || 'freeform'}
+            label="Job Description *"
+            value={jobDescription}
+            onChangeText={setJobDescription}
+            onFocus={handleDescriptionFocus}
+            mode="outlined"
+            style={styles.input}
+            multiline
+            numberOfLines={10}
+            placeholder={getDescriptionPlaceholder(selectedTemplate)}
+            disabled={isProcessingVoice}
+          />
+          {preCleanupSnapshot && !isProcessingVoice && !isRecording && (
+            <TouchableOpacity
+              onPress={handleUndoCleanup}
+              style={styles.undoCleanupChip}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <MaterialCommunityIcons
+                name="undo-variant"
+                size={13}
+                color={colors.onSurface}
+              />
+              <Text style={styles.undoCleanupChipText}>Undo</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* Clean-up Button below Job Description */}
         {jobDescription.trim() && !isRecording && (
@@ -1709,6 +1749,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.primary,
     marginLeft: 6,
+  },
+  descriptionInputWrapper: {
+    position: 'relative',
+  },
+  undoCleanupChip: {
+    position: 'absolute',
+    top: -2,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 1,
+    paddingHorizontal: 6,
+    backgroundColor: colors.background,
+    zIndex: 2,
+  },
+  undoCleanupChipText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.onSurface,
+    marginLeft: 3,
   },
   clearButton: {
     flexDirection: 'row',

@@ -985,7 +985,7 @@ Transcribed Text: "${transcribedText}"
 
 Tasks:
 1. Fix transcription errors, slang, filler words ("yeah", "so", "like", "reckon"), and unclear phrases
-2. Preserve EVERY detail from the original — measurements, materials, locations, conditions, causes, customer remarks. Do NOT shorten, summarise, omit, or merge details. If the input is long, the cleaned output should be similarly long. Your job is grammar, readability, and structure — not compression.
+2. Preserve EVERY detail from the original — measurements, materials, locations, conditions, causes, customer remarks, brand names, colours, quantities, timeframes mentioned, and any qualifiers ("if", "when", "subject to"). Do NOT shorten, summarise, omit, or merge details. If the input is long, the cleaned output should be similarly long or longer. Word count is NOT a goal — completeness is. Your job is grammar, readability, and structure — not compression.
 3. Format for readability on an invoice:
    - Use short paragraphs separated by blank lines for distinct phases or topics (e.g. existing condition, scope of work, materials, finish).
    - Where the work has a list of discrete items (multiple tasks, materials, or fixtures), use a bullet list with "- " at the start of each line.
