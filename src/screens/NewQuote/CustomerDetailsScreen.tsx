@@ -22,6 +22,7 @@ import {
   Chip,
   Card,
   Divider,
+  HelperText,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -39,6 +40,21 @@ import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/t
 import { useUnifiedContactSearch, SOURCE_COLORS } from '../../hooks/useUnifiedContactSearch';
 import { SearchableContact } from '../../types';
 import { AlertModal } from '../../components/AlertModal';
+
+const validateEmail = (email: string): string => {
+  const trimmed = email.trim();
+  if (!trimmed) return '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return 'Please enter a valid email address';
+  return '';
+};
+
+const validatePhone = (phone: string): string => {
+  const trimmed = phone.trim();
+  if (!trimmed) return '';
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length < 6) return 'Please enter a valid phone number';
+  return '';
+};
 
 export function CustomerDetailsScreen() {
   const navigation = useNavigation<any>();
@@ -90,6 +106,10 @@ export function CustomerDetailsScreen() {
   const [jobAddress, setJobAddress] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState<string | undefined>(currentDocument?.contactId);
+  const [emailError, setEmailError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [phoneTouched, setPhoneTouched] = useState(false);
 
   // Unified contact search across all sources
   const {
@@ -125,10 +145,22 @@ export function CustomerDetailsScreen() {
   // and must NOT re-run, as they would wipe tour demo data (Davo).
   useEffect(() => {
     if (currentQuote) {
+      const email = currentQuote.customerEmail || '';
+      const phone = currentQuote.customerPhone || '';
       setCustomerName(currentQuote.customerName || '');
-      setCustomerEmail(currentQuote.customerEmail || '');
-      setCustomerPhone(currentQuote.customerPhone || '');
+      setCustomerEmail(email);
+      setCustomerPhone(phone);
       setJobAddress(currentQuote.jobAddress || '');
+      const emailErr = validateEmail(email);
+      const phoneErr = validatePhone(phone);
+      if (emailErr) {
+        setEmailError(emailErr);
+        setEmailTouched(true);
+      }
+      if (phoneErr) {
+        setPhoneError(phoneErr);
+        setPhoneTouched(true);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -162,11 +194,20 @@ export function CustomerDetailsScreen() {
   }, [navigation, currentQuote, customerName, customerEmail, customerPhone, jobAddress, selectedContactId, updateQuote, saveDraft]);
 
   const handleSelectCustomer = (customer: SearchableContact | { name: string; email?: string; phone?: string; address?: string; searchSource?: string; id?: string }) => {
+    const email = customer.email || '';
+    const phone = customer.phone || '';
     setCustomerName(customer.name);
-    setCustomerEmail(customer.email || '');
-    setCustomerPhone(customer.phone || '');
+    setCustomerEmail(email);
+    setCustomerPhone(phone);
     setJobAddress(customer.address || '');
     setShowSuggestions(false);
+    // Validate auto-filled values so users see errors on bad data from contacts/Xero/phone
+    const emailErr = validateEmail(email);
+    const phoneErr = validatePhone(phone);
+    setEmailError(emailErr);
+    setPhoneError(phoneErr);
+    if (emailErr) setEmailTouched(true);
+    if (phoneErr) setPhoneTouched(true);
     // Link to saved contact if it's from the saved source
     const source = 'searchSource' in customer ? customer.searchSource : undefined;
     if (source === 'saved' && 'id' in customer && customer.id) {
@@ -181,7 +222,33 @@ export function CustomerDetailsScreen() {
     setShowSuggestions(text.length > 0);
   };
 
+  const handleSearchIconPress = () => {
+    customerNameRef.current?.focus();
+    setShowSuggestions(customerName.length > 0);
+  };
+
+  const handleEmailChange = (text: string) => {
+    setCustomerEmail(text);
+    if (emailTouched) setEmailError(validateEmail(text));
+  };
+
+  const handleEmailBlur = () => {
+    setEmailTouched(true);
+    setEmailError(validateEmail(customerEmail));
+  };
+
+  const handlePhoneChange = (text: string) => {
+    setCustomerPhone(text);
+    if (phoneTouched) setPhoneError(validatePhone(text));
+  };
+
+  const handlePhoneBlur = () => {
+    setPhoneTouched(true);
+    setPhoneError(validatePhone(customerPhone));
+  };
+
   const hasContactMethod = customerEmail.trim().length > 0 || customerPhone.trim().length > 0;
+  const hasValidationErrors = !!validateEmail(customerEmail) || !!validatePhone(customerPhone);
 
   const handleSaveAndReturn = () => {
     if (!currentQuote || !customerName.trim() || !hasContactMethod) return;
@@ -335,6 +402,14 @@ export function CustomerDetailsScreen() {
               style={styles.input}
               autoCapitalize="words"
               error={!customerName.trim()}
+              right={
+                <TextInput.Icon
+                  icon="magnify"
+                  color={colors.placeholder}
+                  size={20}
+                  onPress={handleSearchIconPress}
+                />
+              }
             />
 
             {/* Auto-complete Suggestions */}
@@ -431,21 +506,35 @@ export function CustomerDetailsScreen() {
             <TextInput
               label="Email"
               value={customerEmail}
-              onChangeText={setCustomerEmail}
+              onChangeText={handleEmailChange}
+              onBlur={handleEmailBlur}
               mode="outlined"
-              style={styles.input}
+              style={emailError ? styles.inputWithError : styles.input}
               keyboardType="email-address"
               autoCapitalize="none"
+              error={!!emailError}
             />
+            {!!emailError && (
+              <HelperText type="error" visible={true} style={styles.errorHelper}>
+                {emailError}
+              </HelperText>
+            )}
 
             <TextInput
               label="Phone"
               value={customerPhone}
-              onChangeText={setCustomerPhone}
+              onChangeText={handlePhoneChange}
+              onBlur={handlePhoneBlur}
               mode="outlined"
-              style={styles.input}
+              style={phoneError ? styles.inputWithError : styles.input}
               keyboardType="phone-pad"
+              error={!!phoneError}
             />
+            {!!phoneError && (
+              <HelperText type="error" visible={true} style={styles.errorHelper}>
+                {phoneError}
+              </HelperText>
+            )}
 
             <TextInput
               ref={jobAddressRef}
@@ -464,7 +553,7 @@ export function CustomerDetailsScreen() {
       <FixedBottomButton
         label={isEditFromPreview ? 'Save' : 'Next: Materials'}
         onPress={isEditFromPreview ? handleSaveAndReturn : handleNext}
-        disabled={!customerName.trim() || !hasContactMethod}
+        disabled={!customerName.trim() || !hasContactMethod || hasValidationErrors}
       />
 
       {unifiedTourActive && unifiedTourPhase === 'customerDetails' && (
@@ -565,6 +654,13 @@ const styles = StyleSheet.create({
   },
   input: {
     marginBottom: 16,
+  },
+  inputWithError: {
+    marginBottom: 0,
+  },
+  errorHelper: {
+    marginTop: -4,
+    marginBottom: 8,
   },
   contactHint: {
     fontSize: 13,

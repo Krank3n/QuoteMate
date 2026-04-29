@@ -38,10 +38,12 @@ import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapp
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
+import { parsePackInfo } from '../../utils/parsePackInfo';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice, getReeceConnectionStatus } from '../../services/reeceApi';
 import { shouldRunReeceFirst } from '../../services/supplierPriority';
-import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
+import { searchReeceMaterialPrice } from '../../services/reeceApi';
+import { analyzeJobDescription, convertLLMMaterialsToMaterials, reconcilePricedMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
 import { NestableScrollContainer, NestableDraggableFlatList, RenderItemParams } from 'react-native-draggable-flatlist';
@@ -122,6 +124,7 @@ import { loadGroups as loadSupplierGroups } from '../../services/supplierGroupSe
 import MaterialMatchSelector from '../../components/MaterialMatchSelector';
 import {
   findBestMatchForMaterial,
+  findCandidatesForMaterial,
   ScraperProduct,
   batchFindBestMatchesProgressive,
 } from '../../services/bunningsScraperClient';
@@ -129,6 +132,70 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
+
+/**
+ * Recompute material qty/total from a priced product, dividing by pack size
+ * when the product is sold as a pack/length/roll. Without this, a quote that
+ * needs 750 individual screws and pulls back the price of a 500-pack
+ * multiplies $73 × 750 — the bug that turned a $20k deck into $200k.
+ *
+ * Captures the original requirement into `requiredQty` on first pricing so
+ * subsequent re-prices can recompute pack counts from the true need rather
+ * than from a stale pack count.
+ *
+ * Only applies pack division when the requirement unit is compatible with the
+ * pack unit (each↔each, m↔m, kg↔kg, L↔L). Without this guard, a "60 each"
+ * concrete-bag requirement priced against a "20kg" SKU would divide 60/20=3
+ * bags — wrong, because "60 each" already means 60 bags.
+ */
+const PACK_UNIT_EQUIVALENT: Partial<Record<Material['unit'], Material['unit']>> = {
+  each: 'each',
+  pack: 'each',
+  box: 'each',
+  m: 'm',
+  kg: 'kg',
+  L: 'L',
+};
+
+function applyPackAwarePricing(
+  material: Material,
+  product: { productName?: string; packSize?: number; packUnit?: string }
+): void {
+  if (material.requiredQty === undefined) {
+    material.requiredQty = material.quantity;
+  }
+  const required = material.requiredQty;
+
+  let packSize = product.packSize;
+  let packUnit = product.packUnit as Material['unit'] | undefined;
+  if (!packSize || !packUnit) {
+    const parsed = parsePackInfo(product.productName);
+    if (parsed) {
+      packSize = parsed.packSize;
+      packUnit = parsed.packUnit;
+    }
+  }
+
+  const requiredUnitNormalised = PACK_UNIT_EQUIVALENT[material.unit];
+  const packUnitNormalised = packUnit ? PACK_UNIT_EQUIVALENT[packUnit] : undefined;
+  const unitsCompatible =
+    !!requiredUnitNormalised &&
+    !!packUnitNormalised &&
+    requiredUnitNormalised === packUnitNormalised;
+
+  if (packSize && packSize > 1 && packUnit && unitsCompatible) {
+    const packsNeeded = Math.max(1, Math.ceil(required / packSize));
+    material.quantity = packsNeeded;
+    material.unit = packUnit === 'm' ? 'each' : 'pack';
+    material.packSize = packSize;
+    material.packUnit = packUnit;
+  } else {
+    material.quantity = required;
+    material.packSize = undefined;
+    material.packUnit = undefined;
+  }
+  material.totalPrice = material.quantity * material.price;
+}
 
 // AI Analysis Loading State with Lottie Animation and scrolling progress steps
 const AI_STEPS = [
@@ -804,9 +871,16 @@ export function MaterialsListScreen() {
         ? quotePhotos.map((p: any) => p.storageUrl).filter(Boolean)
         : undefined;
 
-      // Pass existing materials so AI doesn't duplicate them (gap-fill mode)
+      // Pass existing materials so AI doesn't duplicate them (gap-fill mode).
+      // Use requiredQty when present so the LLM sees the underlying need (e.g.
+      // "1100 each clips") rather than the pack count after pricing ("11 pack").
       const existingMatsForAi = currentQuote.materials.length > 0
-        ? currentQuote.materials.map(m => ({ name: m.name, quantity: m.quantity, unit: m.unit, section: m.section }))
+        ? currentQuote.materials.map(m => ({
+            name: m.name,
+            quantity: m.requiredQty ?? m.quantity,
+            unit: (m.packUnit ?? m.unit) as Material['unit'],
+            section: m.section,
+          }))
         : undefined;
 
       // Pass saved templates so AI can reuse their section names and materials
@@ -928,6 +1002,7 @@ export function MaterialsListScreen() {
             name: sectionName,
             multiplier,
             laborHours: laborHoursValue,
+            laborHoursTotal: Math.round(laborHoursValue * multiplier * 100) / 100,
             laborRate,
             laborUnit: useDays ? 'days' : 'hours',
             laborTotal: laborHoursValue * laborRate * multiplier,
@@ -1098,12 +1173,12 @@ export function MaterialsListScreen() {
         if (hits.length === 0) continue;
         const top = hits[0];
         m.price = top.price;
-        m.totalPrice = top.price * m.quantity;
         m.manualPriceOverride = false;
         m.pricingSource = 'manual';
         if (top.productUrl) m.productUrl = top.productUrl;
         if (top.imageUrl) m.imageUrl = top.imageUrl;
         if (top.unit) m.unit = top.unit as Material['unit'];
+        applyPackAwarePricing(m, { productName: top.productName });
         fetchedCount++;
         locallyPricedTerms.add(term);
         triggerPriceFlash(m.id);
@@ -1180,7 +1255,12 @@ export function MaterialsListScreen() {
     try {
 
       // --- BATCH FETCH: Progressive chunking (3 items at a time) ---
-      let batchResults: Map<string, ScraperProduct | null> | null = null;
+      // batchResults now holds the full candidate list per term so the
+      // reconciliation pass at the end can pick across alternatives.
+      let batchResults: Map<string, ScraperProduct[]> | null = null;
+      // Per-material candidate cache, keyed by material.id, used by the
+      // reconciliation pass once the fetch loop finishes.
+      const candidatesByMaterialId = new Map<string, ScraperProduct[]>();
       const batchSucceededTerms = new Set<string>();
       // Skip terms we just filled from local sources or Reece — no point
       // asking the scraper for prices we already have.
@@ -1206,7 +1286,6 @@ export function MaterialsListScreen() {
           // Helper to apply a scraper product to a material
           const applyProduct = (material: any, product: any) => {
             material.price = product.price;
-            material.totalPrice = product.price * material.quantity;
             material.manualPriceOverride = false;
             material.pricingSource = 'scraper';
             // Preserve scraper confidence so low-confidence results (Claude
@@ -1222,20 +1301,33 @@ export function MaterialsListScreen() {
               material.brand = product.brand;
             }
             if (product.stockCheckedAt) material.stockCheckedAt = product.stockCheckedAt;
+            applyPackAwarePricing(material, {
+              productName: product.productName,
+              packSize: product.packSize,
+              packUnit: product.packUnit,
+            });
           };
 
           batchResults = await withCancel(batchFindBestMatchesProgressive(
             searchTermsToFetch,
             5,
             chunkSize,
-            (chunkResults: Map<string, ScraperProduct | null>, chunkTerms: string[], chunkIndex: number, totalChunks: number) => {
-              // Apply prices from this chunk immediately
-              for (const [searchTerm, product] of chunkResults) {
+            (chunkResults: Map<string, ScraperProduct[]>, chunkTerms: string[], chunkIndex: number, totalChunks: number) => {
+              // Apply prices from this chunk immediately. Use the top
+              // candidate now so the UI shows something fast; the
+              // reconciliation pass at the end of the loop may swap in a
+              // different candidate from the same list.
+              for (const [searchTerm, candidates] of chunkResults) {
                 const matIndex = updatedMaterials.findIndex(
                   m => (m.searchTerm || m.name) === searchTerm
                 );
                 if (matIndex === -1) continue;
                 const material = updatedMaterials[matIndex];
+                const product = candidates[0] || null;
+
+                if (candidates.length > 0) {
+                  candidatesByMaterialId.set(material.id, candidates);
+                }
 
                 if (product && product.price > 0) {
                   applyProduct(material, product);
@@ -1248,7 +1340,8 @@ export function MaterialsListScreen() {
               // Update statuses: mark this chunk done/failed, next chunk searching
               setBatchItemStatuses(prev => {
                 const next = new Map(prev);
-                for (const [term, product] of chunkResults) {
+                for (const [term, candidates] of chunkResults) {
+                  const product = candidates[0] || null;
                   next.set(term, product && product.price > 0 ? 'done' : 'failed');
                 }
                 // Mark next chunk as searching
@@ -1266,7 +1359,8 @@ export function MaterialsListScreen() {
               setCurrentFetchingName(`Searching batch ${Math.min(chunkIndex + 2, totalChunks)} of ${totalChunks}...`);
 
               // Add completed items to the fetched list
-              for (const [term, product] of chunkResults) {
+              for (const [term, candidates] of chunkResults) {
+                const product = candidates[0] || null;
                 setFetchedItemNames(prev => [...prev, {
                   name: term,
                   success: !!(product && product.price > 0),
@@ -1345,6 +1439,16 @@ export function MaterialsListScreen() {
 
         const searchTerm = material.searchTerm || material.name;
 
+        if (useScraperApi) {
+          // Use Bunnings Scraper API (Priority #1 - Real Prices)
+          // Try batch result first (instant), fall back to individual search
+          try {
+            let candidates = batchResults?.get(searchTerm) ?? [];
+
+            if (!candidates || candidates.length === 0) {
+              // Batch missed this one — try individual candidate search
+              candidates = await withCancel(findCandidatesForMaterial(searchTerm));
+            }
         // Bunnings backbone — runs for every item that wasn't priced by
         // local sources or the Reece pre-pass. Hits scraper batch first
         // (already populated above), falls back to individual scraper
@@ -1356,12 +1460,20 @@ export function MaterialsListScreen() {
             // Batch missed this one — try individual search
             product = await withCancel(findBestMatchForMaterial(searchTerm));
           }
+            if (candidates.length > 0) {
+              candidatesByMaterialId.set(material.id, candidates);
+            }
+            const product = candidates[0] || null;
 
           if (product && product.price > 0) {
             material.price = product.price;
             material.totalPrice = product.price * material.quantity;
             material.manualPriceOverride = false;
             material.pricingSource = 'scraper';
+            if (product && product.price > 0) {
+              material.price = product.price;
+              material.manualPriceOverride = false;
+              material.pricingSource = 'scraper';
 
             if (product.itemNumber) {
               material.bunningsItemNumber = product.itemNumber;
@@ -1400,6 +1512,180 @@ export function MaterialsListScreen() {
           if (error?.message === '__FETCH_CANCELLED__') throw error;
           // Scraper missed — fall back to AI estimation directly.
           const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
+              applyPackAwarePricing(material, {
+                productName: product.productName,
+                packSize: (product as any).packSize,
+                packUnit: (product as any).packUnit,
+              });
+
+              fetchedCount++;
+              triggerPriceFlash(material.id);
+            } else {
+              throw new Error('No product found with price');
+            }
+          } catch (error: any) {
+            // Re-throw cancellation so the outer catch handles it instantly
+            if (error?.message === '__FETCH_CANCELLED__') throw error;
+            // Scraper missed — fall back to AI estimation directly. The dead
+            // bunningsApi.findAndPriceMaterial path used to sit in between
+            // here; it's been removed because we never had working creds.
+            const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
+
+            if (aiResult.price) {
+              material.price = aiResult.price;
+              material.manualPriceOverride = false;
+              material.pricingSource = 'ai';
+              material.priceConfidence = aiResult.confidence || 'medium';
+
+              if (aiResult.productName) {
+                material.name = aiResult.productName;
+              }
+              if (aiResult.store) {
+                material.description = `AI reckons about this much`;
+              }
+
+              applyPackAwarePricing(material, { productName: aiResult.productName });
+
+              fetchedCount++;
+              triggerPriceFlash(material.id);
+            } else {
+              failedCount++;
+            }
+          }
+        } else if (useReeceApi) {
+          // Use Reece API for plumbing supplies
+          const result = await withCancel(searchReeceMaterialPrice(searchTerm));
+
+          if (result.price) {
+            material.price = result.price;
+            material.manualPriceOverride = false;
+            material.pricingSource = 'api';
+
+            // Store additional info if available
+            if (result.productName) {
+              material.name = result.productName;
+            }
+            if (result.store) {
+              material.description = `Available at ${result.store}`;
+            }
+
+            applyPackAwarePricing(material, { productName: result.productName });
+
+            fetchedCount++;
+            triggerPriceFlash(material.id);
+          } else {
+            failedCount++;
+          }
+        } else {
+          // Use Web Scraping with Favorites (NEW METHOD)
+
+          // 1. Check for saved favorite first
+          const favorite = await withCancel(getFavoriteProduct(material.name, material.searchTerm));
+
+          if (favorite) {
+            // Use favorite product's last known price (user can manually update if needed)
+            material.favoriteProduct = favorite;
+            // Note: Favorite stores the product info but not price (prices change)
+            // So we still need to search, but we'll auto-select the favorite
+          }
+
+          // 2. Search hardware stores with web scraping
+          const results = await withCancel(searchMaterialWithWebScraping(
+            material.name,
+            searchTerm,
+            material.quantity,
+            material.unit,
+            hardwareStores
+          ));
+
+          if (results.length > 0 && results[0].matches.length > 0) {
+            const allMatches = results.flatMap(r => r.matches);
+            const quantityAdj = results[0].quantityAdjustment;
+
+            // 3. Check if we have a favorite match in results
+            let selectedMatch: ProductMatch | null = null;
+
+            if (favorite) {
+              // Try to find the favorite product in matches
+              selectedMatch = allMatches.find(
+                m =>
+                  m.productName === favorite.productName ||
+                  m.itemNumber === favorite.itemNumber
+              ) || null;
+            }
+
+            // 4. If no favorite or favorite not found, get best match
+            if (!selectedMatch) {
+              selectedMatch = getBestMatch(results);
+            }
+
+            // 5. If multiple high-confidence matches and no favorite, prompt user
+            const highConfidenceMatches = allMatches.filter(m => m.confidence === 'high');
+            if (!favorite && highConfidenceMatches.length > 1 && !selectedMatch) {
+              // Pause and ask user to select
+              setPendingMatches(highConfidenceMatches);
+              setPendingMaterialIndex(i);
+              setPendingMaterialName(material.name);
+              setMatchSelectorVisible(true);
+
+              // Wait for user selection before continuing
+              // (This will be handled by the modal callback)
+              stopFetchCountdown();
+              setCurrentFetchingName('');
+              setIsFetchingPrices(false);
+              setFetchPhase('idle');
+              return; // Exit early, user will resume after selection
+            }
+
+            // 6. Apply selected product to material
+            if (selectedMatch) {
+              material.price = selectedMatch.price;
+              material.manualPriceOverride = false;
+              material.pricingSource = 'scraper';
+
+              // Apply quantity adjustment if needed (resets requirement so pack
+              // math derives off the adjusted requirement, not the original).
+              if (quantityAdj && quantityAdj.adjustedQuantity !== material.quantity) {
+                material.quantity = quantityAdj.adjustedQuantity;
+                material.requiredQty = quantityAdj.adjustedQuantity;
+              }
+
+              // Store product details
+              if (selectedMatch.itemNumber) {
+                material.bunningsItemNumber = selectedMatch.itemNumber;
+              }
+              if (selectedMatch.productUrl) {
+                material.productUrl = selectedMatch.productUrl;
+              }
+              if (selectedMatch.description) {
+                material.description = selectedMatch.description;
+              }
+              // Only save brand if it's not just the store name
+              if (selectedMatch.brand &&
+                  selectedMatch.brand.toLowerCase() !== 'bunnings' &&
+                  selectedMatch.brand.toLowerCase() !== 'bunnings.com.au' &&
+                  selectedMatch.brand.toLowerCase() !== 'reece' &&
+                  selectedMatch.brand.toLowerCase() !== 'mitre 10') {
+                material.brand = selectedMatch.brand;
+              }
+              if (selectedMatch.stockCheckedAt) {
+                material.stockCheckedAt = selectedMatch.stockCheckedAt;
+              }
+
+              applyPackAwarePricing(material, {
+                productName: selectedMatch.productName,
+                packSize: (selectedMatch as any).packSize,
+                packUnit: (selectedMatch as any).packUnit,
+              });
+
+              fetchedCount++;
+              triggerPriceFlash(material.id);
+            } else {
+              failedCount++;
+            }
+          } else {
+            // Web scraping failed, fall back to AI estimation
+            const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
           if (aiResult.price) {
             material.price = aiResult.price;
@@ -1407,6 +1693,11 @@ export function MaterialsListScreen() {
             material.manualPriceOverride = false;
             material.pricingSource = 'ai';
             material.priceConfidence = aiResult.confidence || 'medium';
+            if (aiResult.price) {
+              material.price = aiResult.price;
+              material.manualPriceOverride = false;
+              material.pricingSource = 'ai';
+              material.priceConfidence = aiResult.confidence || 'medium';
 
             if (aiResult.productName) {
               material.name = aiResult.productName;
@@ -1419,6 +1710,13 @@ export function MaterialsListScreen() {
             triggerPriceFlash(material.id);
           } else {
             failedCount++;
+              applyPackAwarePricing(material, { productName: aiResult.productName });
+
+              fetchedCount++;
+              triggerPriceFlash(material.id);
+            } else {
+              failedCount++;
+            }
           }
         }
 
@@ -1458,6 +1756,128 @@ export function MaterialsListScreen() {
         } else {
           // Brief delay so UI can render each item update
           await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
+      // ── Reconciliation pass ─────────────────────────────────────────────
+      // For every row that has scraper candidates, ask Gemini Flash Lite to
+      // pick the best-fitting candidate (or reject all of them) and compute
+      // the correct purchase count + total. The price-search returned the
+      // top candidate to the UI for fast feedback; reconciliation may swap
+      // in a different candidate from the same ranked list. Catches
+      // wrong-SKU matches and pack-as-unit-price bugs uniformly across
+      // trades, where regex parsing of pack info from titles can't.
+      if (!cancelFetchRef.current) {
+        const reconcileItems = updatedMaterials
+          .filter(m => {
+            if (m.manualPriceOverride) return false;
+            if (m.pricingSource === 'manual') return false;
+            const cands = candidatesByMaterialId.get(m.id);
+            return !!cands && cands.length > 0;
+          })
+          .map(m => {
+            const cands = candidatesByMaterialId.get(m.id) || [];
+            return {
+              id: m.id,
+              name: m.name,
+              requirement: m.requiredQty ?? m.quantity,
+              requirementUnit: (m.packUnit ?? m.unit) as string,
+              candidates: cands.slice(0, 5).map(c => ({
+                name: c.productName,
+                price: c.price,
+                url: c.productUrl,
+                description: c.description,
+              })),
+            };
+          });
+
+        if (reconcileItems.length > 0) {
+          try {
+            setCurrentFetchingName('Reconciling pack sizes...');
+            const results = await reconcilePricedMaterials(reconcileItems);
+            const byId = new Map(results.map(r => [r.id, r]));
+            for (const m of updatedMaterials) {
+              const r = byId.get(m.id);
+              if (!r) continue;
+              if (r.decision === 'reject') {
+                m.price = 0;
+                m.totalPrice = 0;
+                m.priceConfidence = 'low';
+                m.description = r.rejectReason || 'Product mismatch — verify before sending';
+                continue;
+              }
+              if (
+                r.decision === 'estimate' &&
+                typeof r.estimatedUnitPrice === 'number' &&
+                r.estimatedUnitPrice > 0 &&
+                typeof r.purchaseCount === 'number' &&
+                r.purchaseCount > 0
+              ) {
+                // No candidate matched but the LLM gave a sensible price guess
+                // from general knowledge. Apply it as a low-confidence estimate
+                // — the row gets a starting price the tradie can verify with
+                // their supplier instead of a $0 hole. Don't swap in product
+                // info; there's no real candidate to point at.
+                if (m.requiredQty === undefined) m.requiredQty = m.quantity;
+                m.quantity = r.purchaseCount;
+                if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
+                m.price = r.estimatedUnitPrice;
+                m.totalPrice =
+                  typeof r.totalPrice === 'number' && r.totalPrice > 0
+                    ? r.totalPrice
+                    : r.estimatedUnitPrice * r.purchaseCount;
+                m.priceConfidence = 'low';
+                m.pricingSource = 'ai';
+                m.description = r.coverageNote || r.reasoning || 'Estimated — verify with supplier';
+                // Strip ALL product references from the rejected candidate —
+                // the estimate isn't tied to a real SKU and showing a wrong
+                // image/brand alongside an estimate ("Galintel Outdoors"
+                // retaining-wall image next to "estimated $15 per post
+                // stirrup") is misleading.
+                m.bunningsItemNumber = undefined;
+                m.productUrl = undefined;
+                m.imageUrl = undefined;
+                m.brand = undefined;
+                m.stockCheckedAt = undefined;
+                continue;
+              }
+              if (r.decision === 'apply' && typeof r.purchaseCount === 'number' && r.purchaseCount > 0) {
+                // Swap in the chosen candidate's product info if it differs
+                // from the one we showed during the fetch loop.
+                const cands = candidatesByMaterialId.get(m.id) || [];
+                const idx = typeof r.chosenIndex === 'number' ? r.chosenIndex : 0;
+                const chosen = cands[idx];
+                if (chosen) {
+                  if (chosen.itemNumber) m.bunningsItemNumber = chosen.itemNumber;
+                  if (chosen.productUrl) m.productUrl = chosen.productUrl;
+                  if (chosen.imageUrl) m.imageUrl = chosen.imageUrl;
+                  if (chosen.description) m.description = chosen.description;
+                  if (
+                    chosen.brand &&
+                    chosen.brand.toLowerCase() !== 'bunnings' &&
+                    chosen.brand.toLowerCase() !== 'bunnings.com.au'
+                  ) {
+                    m.brand = chosen.brand;
+                  }
+                  if (chosen.stockCheckedAt) m.stockCheckedAt = chosen.stockCheckedAt;
+                }
+
+                if (m.requiredQty === undefined) m.requiredQty = m.quantity;
+                m.quantity = r.purchaseCount;
+                if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
+                if (typeof r.totalPrice === 'number' && r.totalPrice > 0) {
+                  m.totalPrice = r.totalPrice;
+                  // Keep price as the per-purchase price so display stays consistent.
+                  m.price = r.totalPrice / r.purchaseCount;
+                }
+                if (r.confidence) m.priceConfidence = r.confidence;
+                if (r.coverageNote) m.description = r.coverageNote;
+              }
+            }
+          } catch (err) {
+            // Reconciliation is best-effort — if it fails, fall back to
+            // whatever pack-aware regex worked out. Don't block the quote.
+          }
         }
       }
 
@@ -2084,6 +2504,16 @@ export function MaterialsListScreen() {
                 </Text>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.skipMaterialsButton}
+              onPress={handleNext}
+              activeOpacity={0.6}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+            >
+              <Text style={styles.skipMaterialsText}>Labour only · skip materials</Text>
+              <MaterialCommunityIcons name="arrow-right" size={16} color={colors.primary} />
             </TouchableOpacity>
           </View>
         ) : (
@@ -3282,6 +3712,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textMuted,
     lineHeight: 18,
+  },
+  skipMaterialsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginTop: 4,
+  },
+  skipMaterialsText: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
   generateButton: {
     marginTop: 8,

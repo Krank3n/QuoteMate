@@ -766,8 +766,10 @@ export function JobPreviewScreen() {
           {/* Take Payment — in-person capture path. Same shared sheet
               the ViewJob sticky bar uses: quote → deposit (or full),
               invoice → balance. Lets the tradie tap a card before the
-              customer walks off. */}
-          {liveDoc ? (
+              customer walks off.
+              iOS gating: hidden until Tap to Pay is approved and a Square
+              reader is available for App Review demo. */}
+          {liveDoc && Platform.OS === 'android' ? (
             <View style={styles.bottomButtonHalfWrapper}>
               <Button
                 mode="outlined"

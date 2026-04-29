@@ -6,6 +6,7 @@
 
 import { Platform } from 'react-native';
 import { KIMI_API_KEY, KIMI_PROJECT_ID } from '@env';
+import { parsePackInfo } from '../utils/parsePackInfo';
 
 const KIMI_API_BASE_URL = 'https://api.moonshot.ai/v1';
 const KIMI_MODEL = 'kimi-k2-turbo-preview'; // 60-100 tokens/s, 256K context
@@ -25,6 +26,10 @@ export interface KimiK2ProductMatch {
   citations?: string[];
   priceUnavailable?: boolean;
   priceNote?: string;
+  // Pack/length size the price covers (e.g. 500 for "Box of 500 screws",
+  // 5.4 for a 5.4m length, 20 for a 20m roll). Omit when sold per-unit.
+  packSize?: number;
+  packUnit?: string;
 }
 
 export interface KimiK2PricingResult {
@@ -211,8 +216,20 @@ For products WITH price:
   "store": "Store Name",
   "sourceUrl": "https://...",
   "imageUrl": "https://...",
-  "confidence": "high"
+  "confidence": "high",
+  "packSize": 500,
+  "packUnit": "each"
 }
+
+CRITICAL — extract packSize/packUnit when the price covers a pack, length, roll, or volume (NOT a single unit):
+- "Box of 500 screws" → packSize: 500, packUnit: "each"
+- "100 pack clips" → packSize: 100, packUnit: "each"
+- "Treated Pine 90x45 5.4m length" → packSize: 5.4, packUnit: "m"
+- "Joist tape 50mm x 20m roll" → packSize: 20, packUnit: "m"
+- "Concrete mix 20kg bag" → packSize: 20, packUnit: "kg"
+- "Decking oil 4L" → packSize: 4, packUnit: "L"
+OMIT both fields when the product is genuinely sold per single unit (one tap, one toilet, one drill).
+Cross-section dimensions ("90x45mm", "137x23mm") are NOT pack info — they're the product spec.
 
 For products WITHOUT price (but found):
 {
@@ -289,6 +306,21 @@ Start your web search now and return the JSON result.`,
         continue;
       }
 
+      // Prefer model-supplied pack info; fall back to a regex parse of the
+      // product title so older / less obedient responses still get pack-aware
+      // pricing downstream.
+      let packSize: number | undefined =
+        parsed.packSize && Number(parsed.packSize) > 0 ? Number(parsed.packSize) : undefined;
+      let packUnit: string | undefined =
+        typeof parsed.packUnit === 'string' && parsed.packUnit ? parsed.packUnit : undefined;
+      if (!packSize) {
+        const parsedPack = parsePackInfo(parsed.productName || requestedName);
+        if (parsedPack) {
+          packSize = parsedPack.packSize;
+          packUnit = parsedPack.packUnit;
+        }
+      }
+
       const match: KimiK2ProductMatch = {
         productName: parsed.productName || requestedName,
         description: parsed.description,
@@ -302,6 +334,8 @@ Start your web search now and return the JSON result.`,
         imageUrl: parsed.imageUrl,
         priceUnavailable: parsed.priceUnavailable || !hasPrice,
         priceNote: parsed.priceNote || (hasPrice ? undefined : 'Price not visible in search results'),
+        packSize,
+        packUnit,
       };
 
       if (match.price > 0) {

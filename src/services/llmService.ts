@@ -149,9 +149,13 @@ async function analyzeViaFirebaseFunction(
   }
 
   const data = await response.json();
+  // Apply the same client-side validation we run on the Gemini fallback path.
+  // The server doesn't dedupe or sanity-check sectionMultiplier values, so
+  // without this pass a sentinel-equal-quantity multiplier (e.g. 100 for "100
+  // bags concrete") would slip through and blow up section labour totals.
   return {
-    materials: data.materials || [],
-    estimatedHours: data.estimatedHours || 8,
+    materials: validateMaterials(data.materials || []),
+    estimatedHours: Math.max(1, Math.min(data.estimatedHours || 8, 200)),
     jobSummary: data.jobSummary || '',
   };
 }
@@ -296,6 +300,29 @@ Provide a JSON response with the following structure:
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
 
+CRITICAL — emit quantities in the SMALLEST INDIVIDUAL UNIT, not in guessed packs:
+- Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
+- Concrete / sand / cement → emit the count of bags and unit "each" (e.g. 20 each for 20 bags).
+- Timber / decking / fascia → emit linear metres and unit "m" (e.g. 75 m).
+- Tape / membrane / sarking → emit linear metres and unit "m" (e.g. 150 m).
+- Paint / oil / sealer → emit total litres and unit "L" (e.g. 8 L).
+The pricing layer reads pack/length size from the product page (e.g. "Box of 500", "5.4m length", "20m roll") and computes how many packs to buy. If you guess pack counts yourself you will get them wrong — you have no way to know how many clips are in a pack.
+
+DO NOT use units "pack" or "box" in the materials output unless the item is genuinely sold and counted as discrete packs (e.g. one mixed wall-plug pack). Default to "each", "m", "kg", or "L".
+
+DO NOT set sectionMultiplier equal to a material's own quantity — sectionMultiplier is the count of repeating WORK UNITS (bays, footings, square metres of deck), not the count of items.
+
+SANITY-CHECK every quantity before returning. The most common failure is over-spec'ing repeating elements by 3-10×. For ANY job in ANY trade, derive each quantity from a structural anchor — never guess:
+
+- REPEATING LINEAR ELEMENTS (deck joists, fence posts, wall studs, ceiling battens, roof rafters): count = ceil(span / centres) + 1. A 5m-wide deck with joists at 450mm = 12 joists, NOT 60. A 30m fence at 2.4m bays = 13 posts, NOT 30.
+- PER-AREA ELEMENTS (decking clips, tiles, plasterboard sheets, paving, downlights, GPOs): count = area × density. Hidden deck clips ~17/m². 600x600 tiles ~2.78/m². Don't multiply density by 5.
+- LINEAR MATERIAL FROM AREA (decking boards, weatherboard, cladding): linear metres = area / board_width. 50m² of 137mm decking = ~365 lm, NOT 1000+.
+- ONE-PER-UNIT ITEMS (hinges per door, taps per basin, downpipes per roof side, post stirrups per post): count = N units × items_per_unit (usually 1-3).
+- FASTENERS / CONSUMABLES: tie to a structural anchor too — nails per joist hanger × hangers, screws per metre of trim × metres, sealer at coverage rate × area. Never invent thousands.
+- VOLUMETRIC (concrete bags, sand, gravel): bags = volume / bag_yield. A 0.054m³ footing = 3 × 20kg bags, NOT 12.
+
+Round up by 10-15% for waste, not by 5-10×. After listing each material ask yourself: "Did I derive this from a structural anchor or did I guess?" If guessed, redo it.
+
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
 - For each section, specify materials with PER-UNIT quantities and a "sectionMultiplier" for how many units the job needs. Example: a 20m fence with 2.4m bays → each material has per-bay quantity, sectionMultiplier = 9.
@@ -379,15 +406,25 @@ function validateMaterials(materials: LLMMaterial[]): LLMMaterial[] {
       unit: VALID_UNITS.includes(m.unit) ? m.unit : 'each',
     }));
 
-  // Enforce consistent multiplier per section
+  // Enforce consistent multiplier per section.
+  //
+  // The LLM occasionally duplicates a material's quantity into its
+  // sectionMultiplier (e.g. emits "100 bags concrete" with multiplier=100),
+  // which then gets picked up as the section's "how many work units" count.
+  // That blew up section labour by 10×–100× in real quotes, so drop any
+  // sectionMultiplier value that exactly equals its own quantity before
+  // taking the mode.
   const sectionMultipliers = new Map<string, number>();
   for (const m of filtered) {
     if (!m.section) continue;
     const existing = sectionMultipliers.get(m.section);
     if (!existing) {
       const sectionMats = filtered.filter(x => x.section === m.section);
-      const multipliers = sectionMats.map(x => x.sectionMultiplier || 1);
-      sectionMultipliers.set(m.section, mode(multipliers));
+      const validVotes = sectionMats
+        .filter(x => !(x.sectionMultiplier && x.sectionMultiplier === x.quantity))
+        .map(x => x.sectionMultiplier || 1);
+      const votes = validVotes.length > 0 ? validVotes : [1];
+      sectionMultipliers.set(m.section, mode(votes));
     }
   }
 
@@ -777,24 +814,32 @@ export interface TemplateSuggestionResult {
   reasoning: string;
 }
 
+export interface PillSpecInput {
+  id: string;
+  label: string;
+}
+
+export type PillStateResult = Record<string, boolean>;
+
 export async function cleanupTranscriptionAndGenerateTitle(
   transcribedText: string,
-  templates?: TemplateMatchInput[]
-): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[] }> {
+  templates?: TemplateMatchInput[],
+  pillSpec?: PillSpecInput[]
+): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[]; pills?: PillStateResult }> {
   // On web, use Firebase Functions
   if (Platform.OS === 'web') {
-    return cleanupViaFirebaseFunction(transcribedText);
+    return cleanupViaFirebaseFunction(transcribedText, pillSpec);
   }
 
   // On mobile, try Gemini Flash Lite first (fast + cheap), then Claude as fallback
   try {
-    return await cleanupViaGemini(transcribedText, templates, true);
+    return await cleanupViaGemini(transcribedText, templates, true, pillSpec);
   } catch (geminiError) {
 
     // Try Claude as fallback
     if (ANTHROPIC_API_KEY) {
       try {
-        const prompt = createCleanupPrompt(transcribedText, templates);
+        const prompt = createCleanupPrompt(transcribedText, templates, pillSpec);
 
         const response = await fetch(ANTHROPIC_API_URL, {
           method: 'POST',
@@ -805,7 +850,7 @@ export async function cleanupTranscriptionAndGenerateTitle(
           },
           body: JSON.stringify({
             model: 'claude-sonnet-4-5-20250929',
-            max_tokens: 1500,
+            max_tokens: 4000,
             temperature: 0.2,
             messages: [
               {
@@ -841,8 +886,9 @@ export async function cleanupTranscriptionAndGenerateTitle(
  * Clean up transcription via Firebase Cloud Function (for web)
  */
 async function cleanupViaFirebaseFunction(
-  transcribedText: string
-): Promise<{ cleanedDescription: string; suggestedTitle: string }> {
+  transcribedText: string,
+  pillSpec?: PillSpecInput[]
+): Promise<{ cleanedDescription: string; suggestedTitle: string; pills?: PillStateResult }> {
   try {
     const idToken = await auth.currentUser?.getIdToken();
     const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/cleanupTranscription`, {
@@ -851,7 +897,7 @@ async function cleanupViaFirebaseFunction(
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${idToken}`,
       },
-      body: JSON.stringify({ transcribedText }),
+      body: JSON.stringify({ transcribedText, pillSpec }),
     });
 
     if (!response.ok) {
@@ -863,11 +909,12 @@ async function cleanupViaFirebaseFunction(
     return {
       cleanedDescription: data.cleanedDescription || transcribedText,
       suggestedTitle: data.suggestedTitle || '',
+      pills: data.pills,
     };
   } catch (error) {
     // Try Gemini as fallback
     try {
-      return await cleanupViaGemini(transcribedText);
+      return await cleanupViaGemini(transcribedText, undefined, false, pillSpec);
     } catch (geminiError) {
       // Gemini fallback also failed
     }
@@ -885,13 +932,14 @@ async function cleanupViaFirebaseFunction(
 async function cleanupViaGemini(
   transcribedText: string,
   templates?: TemplateMatchInput[],
-  useLiteModel: boolean = false
-): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[] }> {
+  useLiteModel: boolean = false,
+  pillSpec?: PillSpecInput[]
+): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[]; pills?: PillStateResult }> {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API key not configured');
   }
 
-  const prompt = createCleanupPrompt(transcribedText, templates);
+  const prompt = createCleanupPrompt(transcribedText, templates, pillSpec);
   const apiUrl = useLiteModel ? GEMINI_LITE_API_URL : GEMINI_API_URL;
 
   const response = await fetch(`${apiUrl}?key=${GEMINI_API_KEY}`, {
@@ -911,7 +959,7 @@ async function cleanupViaGemini(
       ],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: 1000,
+        maxOutputTokens: 3000,
       },
     }),
   });
@@ -934,7 +982,7 @@ async function cleanupViaGemini(
 /**
  * Create the prompt for text cleanup and title generation
  */
-function createCleanupPrompt(transcribedText: string, templates?: TemplateMatchInput[]): string {
+function createCleanupPrompt(transcribedText: string, templates?: TemplateMatchInput[], pillSpec?: PillSpecInput[]): string {
   let templateSection = '';
   if (templates && templates.length > 0) {
     const templateList = templates.map((t, i) =>
@@ -954,20 +1002,38 @@ Include in your response:
 If no templates are relevant, return "templateSuggestions": []`;
   }
 
-  return `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title. The cleaned description will appear on an invoice sent to the customer, so it must be written professionally. Do NOT add any details, claims, or information that are not present in the original text.
+  let pillSection = '';
+  if (pillSpec && pillSpec.length > 0) {
+    const pillList = pillSpec.map((p, i) => `${i + 1}. id="${p.id}" — ${p.label}`).join('\n');
+    pillSection = `
+
+The tradie's checklist for this job type:
+${pillList}
+
+For each checklist item, decide whether the transcript supports it being part of THIS job. Mark true ONLY if the transcript clearly mentions the item or scope. Mark false if the tradie excludes it ("no oven", "skip windows", "not the bathroom") or doesn't mention it. Return one entry per checklist id.
+
+Include in your response:
+"pills": { "id_1": true|false, "id_2": true|false, ... }`;
+  }
+
+  return `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title. The cleaned description will appear on an invoice sent to the customer, so it must read professionally. Do NOT add any details, claims, or information that are not present in the original text.
 
 Transcribed Text: "${transcribedText}"
 
 Tasks:
-1. Fix any transcription errors or unclear phrases
-2. Rewrite the description in a professional, customer-facing tone suitable for an invoice
-3. Keep all important details (measurements, materials, locations, etc.) but do not invent or add any new details
-4. Generate a short, professional job title (3-7 words)${templateSection}
+1. Fix transcription errors, slang, filler words ("yeah", "so", "like", "reckon"), and unclear phrases
+2. Preserve EVERY detail from the original — measurements, materials, locations, conditions, causes, customer remarks, brand names, colours, quantities, timeframes mentioned, and any qualifiers ("if", "when", "subject to"). Do NOT shorten, summarise, omit, or merge details. If the input is long, the cleaned output should be similarly long or longer. Word count is NOT a goal — completeness is. Your job is grammar, readability, and structure — not compression.
+3. Format for readability on an invoice:
+   - Use short paragraphs separated by blank lines for distinct phases or topics (e.g. existing condition, scope of work, materials, finish).
+   - Where the work has a list of discrete items (multiple tasks, materials, or fixtures), use a bullet list with "- " at the start of each line.
+   - Keep sentences plain and factual.
+4. Do not invent details, do not add warranties, claims, or assurances that were not in the original.
+5. Generate a short, professional job title (3-7 words)${templateSection}${pillSection}
 
 Provide a JSON response with this structure:
 {
-  "cleanedDescription": "The cleaned and formatted description",
-  "suggestedTitle": "Short Job Title"${templates && templates.length > 0 ? ',\n  "templateSuggestions": [{ "templateId": "...", "suggestedQuantity": 1, "reasoning": "..." }]' : ''}
+  "cleanedDescription": "The cleaned and formatted description (use \\n for line breaks and \\n\\n between paragraphs)",
+  "suggestedTitle": "Short Job Title"${templates && templates.length > 0 ? ',\n  "templateSuggestions": [{ "templateId": "...", "suggestedQuantity": 1, "reasoning": "..." }]' : ''}${pillSpec && pillSpec.length > 0 ? ',\n  "pills": { "id_1": true, "id_2": false }' : ''}
 }
 
 Return ONLY valid JSON, no other text.`;
@@ -976,7 +1042,7 @@ Return ONLY valid JSON, no other text.`;
 /**
  * Parse the cleanup response
  */
-function parseCleanupResponse(content: string): { cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[] } {
+function parseCleanupResponse(content: string): { cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[]; pills?: PillStateResult } {
   try {
     let jsonStr = content.trim();
     if (jsonStr.startsWith('```json')) {
@@ -1000,10 +1066,19 @@ function parseCleanupResponse(content: string): { cleanedDescription: string; su
         }));
     }
 
+    let pills: PillStateResult | undefined;
+    if (parsed.pills && typeof parsed.pills === 'object' && !Array.isArray(parsed.pills)) {
+      pills = {};
+      for (const [k, v] of Object.entries(parsed.pills)) {
+        pills[k] = !!v;
+      }
+    }
+
     return {
       cleanedDescription: parsed.cleanedDescription || '',
       suggestedTitle: parsed.suggestedTitle || '',
       templateSuggestions,
+      pills,
     };
   } catch (error) {
     throw new Error('Invalid response from LLM');
@@ -1085,6 +1160,63 @@ Return ONLY valid JSON, no explanation text:
   } catch (error) {
     return [];
   }
+}
+
+// ---------------------------------------------------------------------------
+// Reconcile priced materials — given each row's requirement and the matched
+// product, ask Gemini Flash Lite to compute the right purchase count and
+// total. Catches wrong-SKU matches and pack-as-unit-price bugs uniformly
+// across trades, where regex parsing of pack info from titles can't.
+// ---------------------------------------------------------------------------
+
+export interface ReconcileCandidate {
+  name?: string;
+  price: number;
+  url?: string;
+  description?: string;
+}
+
+export interface ReconcileItem {
+  id: string;
+  name: string;
+  requirement: number;
+  requirementUnit: string;
+  /** Ranked candidates from the price search; reconciliation picks one (or rejects all). */
+  candidates: ReconcileCandidate[];
+}
+
+export interface ReconcileResult {
+  id: string;
+  decision: 'apply' | 'estimate' | 'reject';
+  chosenIndex?: number;
+  /** Per-purchase price when decision='estimate' (no candidate matched). */
+  estimatedUnitPrice?: number;
+  purchaseCount?: number;
+  purchaseUnit?: string;
+  totalPrice?: number;
+  coverageNote?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  reasoning?: string;
+  rejectReason?: string;
+}
+
+export async function reconcilePricedMaterials(items: ReconcileItem[]): Promise<ReconcileResult[]> {
+  if (!items || items.length === 0) return [];
+  const idToken = await auth.currentUser?.getIdToken();
+  const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/reconcilePricedMaterials`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ items }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `Reconcile API returned ${response.status}`);
+  }
+  const data = await response.json();
+  return Array.isArray(data.results) ? data.results : [];
 }
 
 /**

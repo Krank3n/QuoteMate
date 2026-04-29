@@ -5,8 +5,8 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Pressable, Image, Platform, TextInput as RNTextInput } from 'react-native';
-import { Text, ActivityIndicator } from 'react-native-paper';
+import { View, StyleSheet, TouchableOpacity, Pressable, Image, Platform, TextInput as RNTextInput, ActivityIndicator } from 'react-native';
+import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
@@ -121,6 +121,9 @@ export function MaterialItemCard({
               return `${material.templateBaseQuantity}/${unitWord} · `;
             })() : ''}{formatCurrency(material.price)}
             {readOnly && material.unit ? ` / ${material.unit}` : ' ea.'}
+            {material.packSize && material.packUnit && material.requiredQty
+              ? `  ·  ${material.packSize} ${material.packUnit}/pack (need ${material.requiredQty} ${material.packUnit})`
+              : ''}
             {readOnly && material.favoriteProduct?.coveragePerUnit && material.favoriteProduct?.coverageUnit
               ? `  ·  covers ${material.favoriteProduct.coveragePerUnit} ${material.favoriteProduct.coverageUnit}`
               : ''}

@@ -1627,6 +1627,29 @@ Provide a JSON response with the following structure:
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
 
+CRITICAL — emit quantities in the SMALLEST INDIVIDUAL UNIT, not in guessed packs:
+- Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
+- Concrete / sand / cement → emit the count of bags and unit "each" (e.g. 20 each for 20 bags).
+- Timber / decking / fascia → emit linear metres and unit "m" (e.g. 75 m).
+- Tape / membrane / sarking → emit linear metres and unit "m" (e.g. 150 m).
+- Paint / oil / sealer → emit total litres and unit "L" (e.g. 8 L).
+The pricing layer reads pack/length size from the product page (e.g. "Box of 500", "5.4m length", "20m roll") and computes how many packs to buy. If you guess pack counts yourself you will get them wrong — you have no way to know how many clips are in a pack.
+
+DO NOT use units "pack" or "box" in the materials output unless the item is genuinely sold and counted as discrete packs (e.g. one mixed wall-plug pack). Default to "each", "m", "kg", or "L".
+
+DO NOT set sectionMultiplier equal to a material's own quantity — sectionMultiplier is the count of repeating WORK UNITS (bays, footings, square metres of deck), not the count of items.
+
+SANITY-CHECK every quantity before returning. The most common failure is over-spec'ing repeating elements by 3-10×. For ANY job in ANY trade, derive each quantity from a structural anchor — never guess:
+
+- REPEATING LINEAR ELEMENTS (deck joists, fence posts, wall studs, ceiling battens, roof rafters): count = ceil(span / centres) + 1. A 5m-wide deck with joists at 450mm = 12 joists, NOT 60. A 30m fence at 2.4m bays = 13 posts, NOT 30.
+- PER-AREA ELEMENTS (decking clips, tiles, plasterboard sheets, paving, downlights, GPOs): count = area × density. Hidden deck clips ~17/m². 600x600 tiles ~2.78/m². Don't multiply density by 5.
+- LINEAR MATERIAL FROM AREA (decking boards, weatherboard, cladding): linear metres = area / board_width. 50m² of 137mm decking = ~365 lm, NOT 1000+.
+- ONE-PER-UNIT ITEMS (hinges per door, taps per basin, downpipes per roof side, post stirrups per post): count = N units × items_per_unit (usually 1-3).
+- FASTENERS / CONSUMABLES: tie to a structural anchor too — nails per joist hanger × hangers, screws per metre of trim × metres, sealer at coverage rate × area. Never invent thousands.
+- VOLUMETRIC (concrete bags, sand, gravel): bags = volume / bag_yield. A 0.054m³ footing = 3 × 20kg bags, NOT 12.
+
+Round up by 10-15% for waste, not by 5-10×. After listing each material ask yourself: "Did I derive this from a structural anchor or did I guess?" If guessed, redo it.
+
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
 - For each section, specify materials with PER-UNIT quantities and a "sectionMultiplier" for how many units the job needs. Example: a 20m fence with 2.4m bays → each material has per-bay quantity, sectionMultiplier = 9.
@@ -1691,8 +1714,27 @@ Return ONLY valid JSON, no other text.`;
         }
       }
 
+      // Quantity sanity-check pass — review the materials list against the
+      // job description and reduce any quantity that's clearly excessive
+      // (3-10× over for the job scope). Best-effort: if the call fails the
+      // materials list passes through unchanged.
+      const rawMaterials: any[] = Array.isArray(parsed.materials) ? parsed.materials : [];
+      let validatedMaterials = rawMaterials;
+      if (geminiApiKey && rawMaterials.length > 0) {
+        try {
+          validatedMaterials = await sanityCheckQuantities(
+            geminiApiKey,
+            jobDescription,
+            tradeContext,
+            rawMaterials,
+          );
+        } catch (err: any) {
+          console.warn('Quantity sanity-check failed, returning raw list:', err?.message);
+        }
+      }
+
       res.status(200).json({
-        materials: parsed.materials || [],
+        materials: validatedMaterials,
         estimatedHours: parsed.estimatedHours || 8,
         jobSummary: parsed.jobSummary || '',
       });
@@ -1706,6 +1748,231 @@ Return ONLY valid JSON, no other text.`;
       ).catch(() => {});
 
       res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+/**
+ * Reconcile priced materials — given each row's individual-unit requirement
+ * and the matched product, decide how many actual purchases (packs / lengths
+ * / rolls / tins) to charge for, and at what total price.
+ *
+ * The reconciliation pass exists because regex parsing of pack info from
+ * product titles is brittle across trades:
+ *   - "Galvanised Connector Nails 35mm 1kg Tub" — contains ~340 nails, but
+ *     "1kg" → "N nails" needs general knowledge.
+ *   - "Composite Fascia Screws" matched to "Composite Decking Board 5.4m" —
+ *     wrong SKU entirely; needs to be rejected.
+ *   - "10L Dulux Wash & Wear" for a paint-area requirement — needs to know
+ *     coverage per litre (typical: ~12 m²/L).
+ * A small Gemini Flash Lite call given the requirement + product can use
+ * general knowledge to handle all of these uniformly across trades.
+ */
+const GEMINI_RECONCILE_MODEL = 'gemini-3.1-flash-lite-preview';
+
+/**
+ * Quantity sanity-check pass — review the materials list emitted by the
+ * primary LLM and reduce any quantity that's clearly disproportionate to
+ * the job scope. Universal across trades; works against the job description
+ * + materials list using general structural-counting knowledge. Failures
+ * fall through and the original list is returned unchanged.
+ */
+async function sanityCheckQuantities(
+  apiKey: string,
+  jobDescription: string,
+  tradeContext: any,
+  materials: any[],
+): Promise<any[]> {
+  const tradeLine = tradeContext?.nicheName
+    ? `${tradeContext.categoryName || ''} / ${tradeContext.nicheName}`.trim()
+    : tradeContext?.categoryName || 'general trade';
+
+  // Tag each material with a stable index so the validator can refer back
+  // without us trusting it to repeat the full object.
+  const indexed = materials.map((m, i) => ({
+    index: i,
+    name: m.name,
+    quantity: m.quantity,
+    unit: m.unit,
+    section: m.section,
+    sectionMultiplier: m.sectionMultiplier,
+  }));
+
+  const prompt = `You are reviewing a materials list generated for an Australian tradie's job. The first-pass LLM sometimes over-spec's repeating elements by 3-10× (e.g. 60 deck joists when a 50m² deck only needs 12). Your job: review each material's quantity against the job scope and adjust any that are clearly excessive.
+
+Job description: "${jobDescription}"
+Trade: ${tradeLine}
+
+Materials list (with index):
+${JSON.stringify(indexed, null, 2)}
+
+For each material, decide:
+- "keep" — quantity is reasonable for the scope (within 30% over for waste is fine).
+- "adjust" — quantity is clearly excessive (roughly 2× or more over what the scope requires). Reduce to a sensible count.
+
+Use general structural-counting knowledge that applies across all trades:
+- Repeating linear elements (joists, studs, posts, rafters): count = ceil(span / centres) + 1.
+- Per-area elements (clips, tiles, sheets, downlights, GPOs): count = area × density.
+- Linear material from area (decking, weatherboard, cladding): linear metres = area / element_width.
+- One-per-unit items: count = N units × items_per_unit.
+- Volumetric (concrete bags, sand): bags = volume / yield.
+- If quantity has a sectionMultiplier (per-unit qty × multiplier), multiplier is the count of repeating WORK UNITS — sanity-check the multiplier itself against the scope.
+
+CRITICAL — be conservative. A 20-30% over-spec is normal for waste; do NOT adjust those. Only adjust when the count is clearly disproportionate. When in doubt, keep.
+
+Respond with ONLY valid JSON in this exact shape:
+{
+  "results": [
+    { "index": <number>, "decision": "keep" | "adjust", "newQuantity": <number when adjust>, "reasoning": "<one short sentence>" }
+  ]
+}`;
+
+  const parsed = await callGeminiLiteJson(apiKey, prompt);
+  const results = Array.isArray(parsed.results) ? parsed.results : [];
+  const adjustments = new Map<number, number>();
+  for (const r of results) {
+    if (
+      r &&
+      typeof r.index === 'number' &&
+      r.decision === 'adjust' &&
+      typeof r.newQuantity === 'number' &&
+      r.newQuantity > 0
+    ) {
+      adjustments.set(r.index, Math.round(r.newQuantity));
+    }
+  }
+  if (adjustments.size === 0) return materials;
+  return materials.map((m, i) => {
+    const adjusted = adjustments.get(i);
+    return adjusted !== undefined ? { ...m, quantity: adjusted } : m;
+  });
+}
+
+async function callGeminiLiteJson(apiKey: string, prompt: string): Promise<any> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_RECONCILE_MODEL}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8000,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini Lite returned ${response.status}: ${errorText}`);
+  }
+  const data = await response.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) throw new Error('No content in Gemini Lite response');
+  return parseLLMJson(content);
+}
+
+export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
+    if (!decodedToken) return;
+
+    try {
+      const { items } = req.body as {
+        items: Array<{
+          id: string;
+          name: string;
+          requirement: number;
+          requirementUnit: string;
+          // Top-N ranked candidates from the price search. Reconciliation
+          // picks the best fit by chosenIndex (or rejects all of them).
+          candidates: Array<{
+            name?: string;
+            price: number;
+            url?: string;
+            description?: string;
+          }>;
+        }>;
+      };
+
+      if (!Array.isArray(items) || items.length === 0) {
+        res.status(400).json({ error: 'Missing or empty items array' });
+        return;
+      }
+      if (items.length > 50) {
+        res.status(400).json({ error: 'Too many items in single request (max 50)' });
+        return;
+      }
+
+      const geminiApiKey = process.env.GEMINI_API_KEY;
+      if (!geminiApiKey) {
+        res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
+        return;
+      }
+
+      const prompt = `You are a pricing assistant for an Australian tradie quoting tool. For each material row, the tradie has stated their individual-unit requirement (e.g. "600 each nails", "150 m tape", "40 m² paint coverage") and the price-search has returned a RANKED LIST of candidate products (most likely first).
+
+Your job has two parts:
+1. Pick the candidate that best matches the requirement (chosenIndex into the candidates array, 0-based). If NONE of the candidates are the right product category, reject the whole row.
+2. For the chosen candidate, work out how many ACTUAL PURCHASES the tradie should buy, and the resulting total price. Use your general knowledge of Australian hardware and trade products.
+
+DECISION HIERARCHY — strongly prefer "apply" over "estimate" over "reject". The order matters: a real Bunnings candidate at the right price is ALWAYS more useful than your best guess, even when the candidate isn't a perfect match.
+
+For each item, return one of three decisions:
+- "apply" — pick this whenever ANY candidate could reasonably fulfil the requirement. This includes imperfect matches: different brand, slightly different size, alternative material, generic vs branded. Examples of valid applies:
+  - Exact: "600 nails" + candidates [(1kg tub @ $13.90)] → 340 nails per tub, buy 2, total $27.80, confidence='high'.
+  - Brand substitute: "Eco Deck composite fascia" + candidates include [(Ekodeck fascia 5.4m), (PermaTimber fascia 5.4m)] → apply the closest; confidence='medium'.
+  - Spec substitute: "Cup Head Bolt M12 x 150mm" + candidates include [(Cup Head Bolt M12 x 120mm), (Cup Head Bolt M10 x 150mm)] → apply the closest size; confidence='medium'.
+  - Length substitute: "Decking screws 50mm" + candidates include [(Decking screws 65mm box of 500)] → apply, confidence='medium'.
+  - Functional substitute: "Composite fascia 50m" + candidates include [(PVC trim 5.4m), (Modwood fascia 5.4m)] → apply Modwood (closer fit), or PVC trim if it's the only option; confidence='medium'.
+  An apply on an imperfect match is BETTER than an estimate, because the tradie can see the actual product and decide whether to swap.
+- "estimate" — ONLY when EVERY candidate is the wrong category (e.g. all candidates are decking boards when the requirement is decking screws, or all are retaining-wall posts when the requirement is post stirrups). In that case, return a reasonable per-purchase price from general AU pricing knowledge so the row isn't $0. Examples:
+  - "Eco Deck Starter Clips" + candidates all decking boards → estimate ~$12 per 15-pack, confidence='low'.
+  - "Composite Fascia Screws" + candidates all unrelated boards → estimate ~$25 per 100-pack, confidence='low'.
+  Always include a reasoning that flags it as an estimate (e.g. "All candidates were boards, not screws; estimate based on typical AU pricing — verify with supplier").
+- "reject" — last resort, only when ALL candidates are wrong AND you have no general-knowledge price for the product (genuinely unknown specialty item).
+
+CRITICAL — if a candidate is in the right product category but a different brand/size/spec, ALWAYS apply it. Do not estimate around real candidates. Reserve "estimate" for the situation where every candidate is in the wrong category.
+
+CRITICAL — units must be compatible with the chosen candidate. If requirement is in "each" (count of items) but the product is sold by length/weight/volume, work out the conversion (nails per kg, screws per box, paint coverage per litre) using general knowledge. If you can't confidently convert, set confidence: "low" and explain in reasoning.
+
+PREFER cheaper or smaller pack candidates when they cover the requirement adequately — don't pick the most expensive option just because it's first in the list.
+
+Respond with ONLY valid JSON in this exact shape:
+{
+  "results": [
+    {
+      "id": "<material id>",
+      "decision": "apply" | "estimate" | "reject",
+      "chosenIndex": <number — 0-based index into the candidates array; only when decision=apply>,
+      "estimatedUnitPrice": <number — only when decision=estimate; the per-purchase price you're estimating>,
+      "purchaseCount": <number — how many to buy; required for apply and estimate>,
+      "purchaseUnit": "<one of: pack, each, m, m², L, kg>",
+      "totalPrice": <number — purchaseCount × unit price>,
+      "coverageNote": "<one short sentence: what one purchase covers (e.g. '500 screws per box', '5.4m per length', '10L covers ~120 m²', 'estimated 15 clips per pack')>",
+      "confidence": "high" | "medium" | "low",
+      "reasoning": "<one short sentence justifying the choice and the maths>",
+      "rejectReason": "<only when decision=reject: one sentence on why no estimate could be made>"
+    }
+  ]
+}
+
+Items to reconcile:
+${JSON.stringify(items, null, 2)}
+
+Return ONLY the JSON object, no other text.`;
+
+      const parsed = await callGeminiLiteJson(geminiApiKey, prompt);
+      const results = Array.isArray(parsed.results) ? parsed.results : [];
+      res.status(200).json({ results });
+    } catch (error: any) {
+      console.error('reconcilePricedMaterials error:', error?.message);
+      res.status(500).json({ error: error?.message || 'Reconciliation failed' });
     }
   });
 });
@@ -3379,7 +3646,7 @@ export const cleanupTranscription = functions.https.onRequest((req, res) => {
     if (!decodedToken) return;
 
     try {
-      const { transcribedText } = req.body;
+      const { transcribedText, pillSpec } = req.body;
 
       if (!isNonEmptyString(transcribedText)) {
         res.status(400).json({ error: 'Missing or invalid transcribedText' });
@@ -3397,20 +3664,44 @@ export const cleanupTranscription = functions.https.onRequest((req, res) => {
         return;
       }
 
-      const prompt = `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title. The cleaned description will appear on an invoice sent to the customer, so it must be written professionally. Do NOT add any details, claims, or information that are not present in the original text.
+      // Validate optional pillSpec — array of {id, label} pairs.
+      const validPillSpec: { id: string; label: string }[] = Array.isArray(pillSpec)
+        ? pillSpec
+            .filter((p: any) => p && isNonEmptyString(p.id) && isNonEmptyString(p.label))
+            .slice(0, 30)
+        : [];
+
+      let pillSection = '';
+      let pillJsonField = '';
+      if (validPillSpec.length > 0) {
+        const pillList = validPillSpec.map((p, i) => `${i + 1}. id="${p.id}" — ${p.label}`).join('\n');
+        pillSection = `
+
+The tradie's checklist for this job type:
+${pillList}
+
+For each checklist item, decide whether the transcript supports it being part of THIS job. Mark true ONLY if the transcript clearly mentions the item or scope. Mark false if the tradie excludes it ("no oven", "skip windows", "not the bathroom") or doesn't mention it. Return one entry per checklist id.`;
+        pillJsonField = ',\n  "pills": { "id_1": true, "id_2": false }';
+      }
+
+      const prompt = `You are a helpful assistant for Australian tradies. Clean up the following voice-transcribed job description and generate a concise job title. The cleaned description will appear on an invoice sent to the customer, so it must read professionally. Do NOT add any details, claims, or information that are not present in the original text.
 
 Transcribed Text: "${transcribedText}"
 
 Tasks:
-1. Fix any transcription errors or unclear phrases
-2. Rewrite the description in a professional, customer-facing tone suitable for an invoice
-3. Keep all important details (measurements, materials, locations, etc.) but do not invent or add any new details
-4. Generate a short, professional job title (3-7 words)
+1. Fix transcription errors, slang, filler words ("yeah", "so", "like", "reckon"), and unclear phrases
+2. Preserve EVERY detail from the original — measurements, materials, locations, conditions, causes, customer remarks. Do NOT shorten, summarise, omit, or merge details. If the input is long, the cleaned output should be similarly long. Your job is grammar, readability, and structure — not compression.
+3. Format for readability on an invoice:
+   - Use short paragraphs separated by blank lines for distinct phases or topics (e.g. existing condition, scope of work, materials, finish).
+   - Where the work has a list of discrete items (multiple tasks, materials, or fixtures), use a bullet list with "- " at the start of each line.
+   - Keep sentences plain and factual.
+4. Do not invent details, do not add warranties, claims, or assurances that were not in the original.
+5. Generate a short, professional job title (3-7 words)${pillSection}
 
 Provide a JSON response with this structure:
 {
-  "cleanedDescription": "The cleaned and formatted description",
-  "suggestedTitle": "Short Job Title"
+  "cleanedDescription": "The cleaned and formatted description (use \\n for line breaks and \\n\\n between paragraphs)",
+  "suggestedTitle": "Short Job Title"${pillJsonField}
 }
 
 Return ONLY valid JSON, no other text.`;
@@ -3454,9 +3745,20 @@ Return ONLY valid JSON, no other text.`;
 
       const parsed = JSON.parse(jsonStr);
 
+      // Coerce pills response to {[id]: bool} only if pillSpec was provided.
+      let pills: Record<string, boolean> | undefined;
+      if (validPillSpec.length > 0 && parsed.pills && typeof parsed.pills === 'object' && !Array.isArray(parsed.pills)) {
+        pills = {};
+        const allowedIds = new Set(validPillSpec.map((p) => p.id));
+        for (const [k, v] of Object.entries(parsed.pills)) {
+          if (allowedIds.has(k)) pills[k] = !!v;
+        }
+      }
+
       res.status(200).json({
         cleanedDescription: parsed.cleanedDescription || transcribedText,
         suggestedTitle: parsed.suggestedTitle || '',
+        ...(pills ? { pills } : {}),
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

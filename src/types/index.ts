@@ -17,6 +17,16 @@ export interface Material {
   name: string;
   quantity: number;
   unit: 'each' | 'm' | 'm²' | 'm³' | 'L' | 'kg' | 'box' | 'pack';
+  // True underlying requirement before pack rounding. When the priced product
+  // is sold in packs (e.g. box of 500 screws, 5.4m timber length), the LLM
+  // emits the per-unit need here and `quantity` is the rounded-up pack count
+  // the tradie actually buys. totalPrice = quantity * price stays correct.
+  requiredQty?: number;
+  // Set when a priced product is a multi-unit pack/length. packSize is in
+  // packUnit (e.g. 500 each, 5.4 m, 20 m). Used to recompute quantity from
+  // requiredQty whenever the price source changes.
+  packSize?: number;
+  packUnit?: Material['unit'];
   bunningsItemNumber?: string;
   // Reece-specific identifiers, populated when pricingSource is the Reece API.
   // Both are required to build a valid /au/order-gateway/orders payload, so
@@ -100,6 +110,13 @@ export interface QuoteSection {
   multiplier: number;          // How many units (e.g. 8 bays) — default 1
   sourceTemplateId?: string;   // Which template this came from (if any)
   laborHours: number;          // Per-unit labor hours/days
+  // Total labor hours/days for the section (laborHours × multiplier).
+  // Persisted so consumers that don't know about multipliers (admin
+  // dashboard, third-party integrations) can render the right number
+  // without any math. The mobile app reads this for display; pricing
+  // still derives from laborHours × multiplier × laborRate to match how
+  // the editor adjusts per-unit values.
+  laborHoursTotal?: number;
   laborRate: number;           // $/hour or $/day
   laborUnit: LaborUnit;        // 'hours' | 'days'
   laborTotal: number;          // calculated: laborHours * laborRate * multiplier
@@ -328,6 +345,13 @@ export interface JobTemplate {
   defaultMaterials: TemplateMaterial[];
   estimatedHoursFormula: string; // e.g., "steps * 0.5"
   requiredParams: TemplateParam[]; // e.g., [{ key: 'steps', label: 'Number of steps', unit: '' }]
+  // Trade-specific copy that shapes the job description input.
+  // questionsLine: short prompt of the variables that matter for this job type.
+  // exampleLines: a filled-in example using this trade's vocabulary.
+  // voicePromptHint: short sub-label under the record button.
+  questionsLine?: string;
+  exampleLines?: string;
+  voicePromptHint?: string;
 }
 
 export interface TemplateMaterial {

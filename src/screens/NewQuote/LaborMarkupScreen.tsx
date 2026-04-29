@@ -261,6 +261,7 @@ export function LaborMarkupScreen() {
             return {
               ...s,
               laborHours: perUnitHoursRounded,
+              laborHoursTotal: Math.round(perUnitHoursRounded * mul * 100) / 100,
               laborRate: rate,
               laborUnit: unit,
               laborTotal: Math.round(perUnitHoursRounded * rate * mul * 100) / 100,
@@ -348,6 +349,7 @@ export function LaborMarkupScreen() {
         return {
           ...s,
           laborHours: perUnitHours,
+          laborHoursTotal: Math.round(perUnitHours * mul * 100) / 100,
           laborRate: rate,
           laborUnit: effectiveLaborUnit,
           laborTotal: perUnitHours * rate * mul,
