@@ -312,11 +312,16 @@ DO NOT use units "pack" or "box" in the materials output unless the item is genu
 
 DO NOT set sectionMultiplier equal to a material's own quantity — sectionMultiplier is the count of repeating WORK UNITS (bays, footings, square metres of deck), not the count of items.
 
-SANITY-CHECK fastener and consumable counts before returning. Common over-spec mistakes that produce absurd quotes:
-- Estimating thousands of screws/clips/nails when the real count is hundreds. Tie your fastener count to a structural anchor — joists, bays, fixings per board, fixings per metre of trim — and multiply, don't guess.
-- Estimating linear metres of tape, sarking, or membrane far in excess of the surface area it actually covers.
-- Estimating bags of concrete/sand far in excess of the footing volume × bag yield.
-After listing each fastener or consumable, ask yourself: "Does this match the structural count (e.g. 3 nails per hanger × N hangers) or have I just guessed?" Reduce if guessed. Round up by 10-15% for waste, not by 5-10×.
+SANITY-CHECK every quantity before returning. The most common failure is over-spec'ing repeating elements by 3-10×. For ANY job in ANY trade, derive each quantity from a structural anchor — never guess:
+
+- REPEATING LINEAR ELEMENTS (deck joists, fence posts, wall studs, ceiling battens, roof rafters): count = ceil(span / centres) + 1. A 5m-wide deck with joists at 450mm = 12 joists, NOT 60. A 30m fence at 2.4m bays = 13 posts, NOT 30.
+- PER-AREA ELEMENTS (decking clips, tiles, plasterboard sheets, paving, downlights, GPOs): count = area × density. Hidden deck clips ~17/m². 600x600 tiles ~2.78/m². Don't multiply density by 5.
+- LINEAR MATERIAL FROM AREA (decking boards, weatherboard, cladding): linear metres = area / board_width. 50m² of 137mm decking = ~365 lm, NOT 1000+.
+- ONE-PER-UNIT ITEMS (hinges per door, taps per basin, downpipes per roof side, post stirrups per post): count = N units × items_per_unit (usually 1-3).
+- FASTENERS / CONSUMABLES: tie to a structural anchor too — nails per joist hanger × hangers, screws per metre of trim × metres, sealer at coverage rate × area. Never invent thousands.
+- VOLUMETRIC (concrete bags, sand, gravel): bags = volume / bag_yield. A 0.054m³ footing = 3 × 20kg bags, NOT 12.
+
+Round up by 10-15% for waste, not by 5-10×. After listing each material ask yourself: "Did I derive this from a structural anchor or did I guess?" If guessed, redo it.
 
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).

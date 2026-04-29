@@ -1639,11 +1639,16 @@ DO NOT use units "pack" or "box" in the materials output unless the item is genu
 
 DO NOT set sectionMultiplier equal to a material's own quantity — sectionMultiplier is the count of repeating WORK UNITS (bays, footings, square metres of deck), not the count of items.
 
-SANITY-CHECK fastener and consumable counts before returning. Common over-spec mistakes that produce absurd quotes:
-- Estimating thousands of screws/clips/nails when the real count is hundreds. Tie your fastener count to a structural anchor — joists, bays, fixings per board, fixings per metre of trim — and multiply, don't guess.
-- Estimating linear metres of tape, sarking, or membrane far in excess of the surface area it actually covers.
-- Estimating bags of concrete/sand far in excess of the footing volume × bag yield.
-After listing each fastener or consumable, ask yourself: "Does this match the structural count (e.g. 3 nails per hanger × N hangers) or have I just guessed?" Reduce if guessed. Round up by 10-15% for waste, not by 5-10×.
+SANITY-CHECK every quantity before returning. The most common failure is over-spec'ing repeating elements by 3-10×. For ANY job in ANY trade, derive each quantity from a structural anchor — never guess:
+
+- REPEATING LINEAR ELEMENTS (deck joists, fence posts, wall studs, ceiling battens, roof rafters): count = ceil(span / centres) + 1. A 5m-wide deck with joists at 450mm = 12 joists, NOT 60. A 30m fence at 2.4m bays = 13 posts, NOT 30.
+- PER-AREA ELEMENTS (decking clips, tiles, plasterboard sheets, paving, downlights, GPOs): count = area × density. Hidden deck clips ~17/m². 600x600 tiles ~2.78/m². Don't multiply density by 5.
+- LINEAR MATERIAL FROM AREA (decking boards, weatherboard, cladding): linear metres = area / board_width. 50m² of 137mm decking = ~365 lm, NOT 1000+.
+- ONE-PER-UNIT ITEMS (hinges per door, taps per basin, downpipes per roof side, post stirrups per post): count = N units × items_per_unit (usually 1-3).
+- FASTENERS / CONSUMABLES: tie to a structural anchor too — nails per joist hanger × hangers, screws per metre of trim × metres, sealer at coverage rate × area. Never invent thousands.
+- VOLUMETRIC (concrete bags, sand, gravel): bags = volume / bag_yield. A 0.054m³ footing = 3 × 20kg bags, NOT 12.
+
+Round up by 10-15% for waste, not by 5-10×. After listing each material ask yourself: "Did I derive this from a structural anchor or did I guess?" If guessed, redo it.
 
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
@@ -1709,8 +1714,27 @@ Return ONLY valid JSON, no other text.`;
         }
       }
 
+      // Quantity sanity-check pass — review the materials list against the
+      // job description and reduce any quantity that's clearly excessive
+      // (3-10× over for the job scope). Best-effort: if the call fails the
+      // materials list passes through unchanged.
+      const rawMaterials: any[] = Array.isArray(parsed.materials) ? parsed.materials : [];
+      let validatedMaterials = rawMaterials;
+      if (geminiApiKey && rawMaterials.length > 0) {
+        try {
+          validatedMaterials = await sanityCheckQuantities(
+            geminiApiKey,
+            jobDescription,
+            tradeContext,
+            rawMaterials,
+          );
+        } catch (err: any) {
+          console.warn('Quantity sanity-check failed, returning raw list:', err?.message);
+        }
+      }
+
       res.status(200).json({
-        materials: parsed.materials || [],
+        materials: validatedMaterials,
         estimatedHours: parsed.estimatedHours || 8,
         jobSummary: parsed.jobSummary || '',
       });
@@ -1745,6 +1769,84 @@ Return ONLY valid JSON, no other text.`;
  * general knowledge to handle all of these uniformly across trades.
  */
 const GEMINI_RECONCILE_MODEL = 'gemini-3.1-flash-lite-preview';
+
+/**
+ * Quantity sanity-check pass — review the materials list emitted by the
+ * primary LLM and reduce any quantity that's clearly disproportionate to
+ * the job scope. Universal across trades; works against the job description
+ * + materials list using general structural-counting knowledge. Failures
+ * fall through and the original list is returned unchanged.
+ */
+async function sanityCheckQuantities(
+  apiKey: string,
+  jobDescription: string,
+  tradeContext: any,
+  materials: any[],
+): Promise<any[]> {
+  const tradeLine = tradeContext?.nicheName
+    ? `${tradeContext.categoryName || ''} / ${tradeContext.nicheName}`.trim()
+    : tradeContext?.categoryName || 'general trade';
+
+  // Tag each material with a stable index so the validator can refer back
+  // without us trusting it to repeat the full object.
+  const indexed = materials.map((m, i) => ({
+    index: i,
+    name: m.name,
+    quantity: m.quantity,
+    unit: m.unit,
+    section: m.section,
+    sectionMultiplier: m.sectionMultiplier,
+  }));
+
+  const prompt = `You are reviewing a materials list generated for an Australian tradie's job. The first-pass LLM sometimes over-spec's repeating elements by 3-10× (e.g. 60 deck joists when a 50m² deck only needs 12). Your job: review each material's quantity against the job scope and adjust any that are clearly excessive.
+
+Job description: "${jobDescription}"
+Trade: ${tradeLine}
+
+Materials list (with index):
+${JSON.stringify(indexed, null, 2)}
+
+For each material, decide:
+- "keep" — quantity is reasonable for the scope (within 30% over for waste is fine).
+- "adjust" — quantity is clearly excessive (roughly 2× or more over what the scope requires). Reduce to a sensible count.
+
+Use general structural-counting knowledge that applies across all trades:
+- Repeating linear elements (joists, studs, posts, rafters): count = ceil(span / centres) + 1.
+- Per-area elements (clips, tiles, sheets, downlights, GPOs): count = area × density.
+- Linear material from area (decking, weatherboard, cladding): linear metres = area / element_width.
+- One-per-unit items: count = N units × items_per_unit.
+- Volumetric (concrete bags, sand): bags = volume / yield.
+- If quantity has a sectionMultiplier (per-unit qty × multiplier), multiplier is the count of repeating WORK UNITS — sanity-check the multiplier itself against the scope.
+
+CRITICAL — be conservative. A 20-30% over-spec is normal for waste; do NOT adjust those. Only adjust when the count is clearly disproportionate. When in doubt, keep.
+
+Respond with ONLY valid JSON in this exact shape:
+{
+  "results": [
+    { "index": <number>, "decision": "keep" | "adjust", "newQuantity": <number when adjust>, "reasoning": "<one short sentence>" }
+  ]
+}`;
+
+  const parsed = await callGeminiLiteJson(apiKey, prompt);
+  const results = Array.isArray(parsed.results) ? parsed.results : [];
+  const adjustments = new Map<number, number>();
+  for (const r of results) {
+    if (
+      r &&
+      typeof r.index === 'number' &&
+      r.decision === 'adjust' &&
+      typeof r.newQuantity === 'number' &&
+      r.newQuantity > 0
+    ) {
+      adjustments.set(r.index, Math.round(r.newQuantity));
+    }
+  }
+  if (adjustments.size === 0) return materials;
+  return materials.map((m, i) => {
+    const adjusted = adjustments.get(i);
+    return adjusted !== undefined ? { ...m, quantity: adjusted } : m;
+  });
+}
 
 async function callGeminiLiteJson(apiKey: string, prompt: string): Promise<any> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_RECONCILE_MODEL}:generateContent?key=${apiKey}`;
