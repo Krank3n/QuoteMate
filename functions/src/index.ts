@@ -1820,14 +1820,17 @@ Your job has two parts:
 2. For the chosen candidate, work out how many ACTUAL PURCHASES the tradie should buy, and the resulting total price. Use your general knowledge of Australian hardware and trade products.
 
 For each item, return one of two decisions:
-- "apply" — at least one candidate is correct. Set chosenIndex and compute purchase count + total. Examples:
-  - "600 nails" + candidates [(box of 100 @ $14, "wrong size"), (1kg tub @ $13.90)] → chosenIndex 1, ~340 nails per kg tub, buy 2 tubs, total $27.80.
-  - "150 m tape" + candidates [(20m roll @ $36.31), (50m roll @ $80)] → chosenIndex 1, ceil(150/50) = 3 rolls, total $240.
-  - "40 m² paint" + candidates [(4L @ $39), (10L @ $89.95)] → chosenIndex 1, 10L covers ~120 m² over 2 coats, 1 tin = $89.95.
-- "reject" — none of the candidates match the requirement category. Examples:
-  - "Post Support Stirrup 90mm" + candidates all turn out to be retaining-wall posts → reject.
-  - "Copper pipe 15mm" + candidates all are copper fittings/elbows → reject.
-  - "Composite Fascia Screws" + candidates all are composite boards → reject.
+- "apply" — at least one candidate either matches OR is a reasonable functional substitute. Pick it. Examples of valid applies:
+  - Exact: "600 nails" + candidates [(1kg tub @ $13.90)] → 340 nails per tub, buy 2, total $27.80.
+  - Brand substitute: "Eco Deck composite fascia" + candidates [(Ekodeck fascia 5.4m), (PermaTimber fascia 5.4m)] → pick whichever; note "Ekodeck used as Eco Deck substitute" in coverageNote, confidence='medium'.
+  - Material substitute: "composite fascia 50m" + candidates [(PVC trim/moulding 5.4m), (Modwood fascia 5.4m)] → prefer Modwood (closer match), but PVC trim is acceptable if it's the only option — note "PVC trim substituted for composite fascia" and confidence='medium'.
+  - Spec substitute: "Decking screws 50mm" + candidates [(Decking screws 65mm box of 500)] → close enough on length, accept with confidence='medium'.
+- "reject" — ONLY when no candidate serves the requirement's CATEGORY. Examples of valid rejects:
+  - "Composite Fascia Screws" + candidates all are composite boards → reject (board ≠ screw).
+  - "Copper pipe 15mm" + candidates all are fittings/elbows/valves → reject (fitting ≠ pipe).
+  - "Post stirrup" + candidates all are retaining-wall posts → reject (post ≠ post-anchor bracket).
+
+CRITICAL — be GENEROUS with apply. The tradie wants a starting price they can verify with their supplier; they don't want every brand-or-spec mismatch zeroed out. Reject ONLY for clear category mismatch where no substitute could fulfill the role. A different brand, slightly different size, or alternative material is normally fine — just flag confidence='medium' and note the substitution.
 
 CRITICAL — units must be compatible with the chosen candidate. If requirement is in "each" (count of items) but the product is sold by length/weight/volume, work out the conversion (nails per kg, screws per box, paint coverage per litre) using general knowledge. If you can't confidently convert, set confidence: "low" and explain in reasoning.
 
