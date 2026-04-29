@@ -1157,6 +1157,57 @@ Return ONLY valid JSON, no explanation text:
   }
 }
 
+// ---------------------------------------------------------------------------
+// Reconcile priced materials — given each row's requirement and the matched
+// product, ask Gemini Flash Lite to compute the right purchase count and
+// total. Catches wrong-SKU matches and pack-as-unit-price bugs uniformly
+// across trades, where regex parsing of pack info from titles can't.
+// ---------------------------------------------------------------------------
+
+export interface ReconcileItem {
+  id: string;
+  name: string;
+  requirement: number;
+  requirementUnit: string;
+  product: {
+    name?: string;
+    price: number;
+    url?: string;
+    description?: string;
+  };
+}
+
+export interface ReconcileResult {
+  id: string;
+  decision: 'apply' | 'reject';
+  purchaseCount?: number;
+  purchaseUnit?: string;
+  totalPrice?: number;
+  coverageNote?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  reasoning?: string;
+  rejectReason?: string;
+}
+
+export async function reconcilePricedMaterials(items: ReconcileItem[]): Promise<ReconcileResult[]> {
+  if (!items || items.length === 0) return [];
+  const idToken = await auth.currentUser?.getIdToken();
+  const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/reconcilePricedMaterials`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ items }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `Reconcile API returned ${response.status}`);
+  }
+  const data = await response.json();
+  return Array.isArray(data.results) ? data.results : [];
+}
+
 /**
  * Extract supplier price list from PDF or photos via Firebase Function.
  * Mirrors the proxy / retry pattern used by analyzeJobDescription.

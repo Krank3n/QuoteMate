@@ -38,10 +38,10 @@ import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapp
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
-import { parsePackInfo, isLikelyBulkItem, isImplausibleUnitPrice } from '../../utils/parsePackInfo';
+import { parsePackInfo } from '../../utils/parsePackInfo';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice } from '../../services/reeceApi';
-import { analyzeJobDescription, convertLLMMaterialsToMaterials } from '../../services/llmService';
+import { analyzeJobDescription, convertLLMMaterialsToMaterials, reconcilePricedMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
 import { NestableScrollContainer, NestableDraggableFlatList, RenderItemParams } from 'react-native-draggable-flatlist';
@@ -190,18 +190,8 @@ function applyPackAwarePricing(
     material.quantity = required;
     material.packSize = undefined;
     material.packUnit = undefined;
-    if (isLikelyBulkItem(material.name) && material.priceConfidence !== 'high') {
-      material.priceConfidence = 'low';
-    }
   }
   material.totalPrice = material.quantity * material.price;
-
-  // Catch obvious wrong-SKU matches — e.g. "Composite Fascia Screws" priced
-  // at $79/each (which is actually the decking-board price). Force the row to
-  // low confidence so the tradie sees the verify-price badge.
-  if (isImplausibleUnitPrice(material.name, material.price)) {
-    material.priceConfidence = 'low';
-  }
 }
 
 // AI Analysis Loading State with Lottie Animation and scrolling progress steps
@@ -1614,6 +1604,69 @@ export function MaterialsListScreen() {
         } else {
           // Brief delay so UI can render each item update
           await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
+      // ── Reconciliation pass ─────────────────────────────────────────────
+      // For every row we successfully priced, ask Gemini Flash Lite to check
+      // the matched product against the requirement and compute the correct
+      // purchase count + total. This catches wrong-SKU matches (e.g. fascia
+      // screws priced as decking boards) and pack-as-unit-price bugs (e.g.
+      // a 1kg tub of nails treated as $13.90 per nail) uniformly across all
+      // trades — regex parsing of pack info from titles can't.
+      if (!cancelFetchRef.current) {
+        const reconcileItems = updatedMaterials
+          .filter(m =>
+            m.price > 0 &&
+            !m.manualPriceOverride &&
+            m.pricingSource !== 'manual' &&
+            (m.description || m.productUrl || m.name)
+          )
+          .map(m => ({
+            id: m.id,
+            name: m.name,
+            requirement: m.requiredQty ?? m.quantity,
+            requirementUnit: (m.packUnit ?? m.unit) as string,
+            product: {
+              name: m.name,
+              price: m.price,
+              url: m.productUrl,
+              description: m.description,
+            },
+          }));
+
+        if (reconcileItems.length > 0) {
+          try {
+            setCurrentFetchingName('Reconciling pack sizes...');
+            const results = await reconcilePricedMaterials(reconcileItems);
+            const byId = new Map(results.map(r => [r.id, r]));
+            for (const m of updatedMaterials) {
+              const r = byId.get(m.id);
+              if (!r) continue;
+              if (r.decision === 'reject') {
+                m.price = 0;
+                m.totalPrice = 0;
+                m.priceConfidence = 'low';
+                m.description = r.rejectReason || 'Product mismatch — verify before sending';
+                continue;
+              }
+              if (r.decision === 'apply' && typeof r.purchaseCount === 'number' && r.purchaseCount > 0) {
+                if (m.requiredQty === undefined) m.requiredQty = m.quantity;
+                m.quantity = r.purchaseCount;
+                if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
+                if (typeof r.totalPrice === 'number' && r.totalPrice > 0) {
+                  m.totalPrice = r.totalPrice;
+                  // Keep price as the per-purchase price so display stays consistent.
+                  m.price = r.totalPrice / r.purchaseCount;
+                }
+                if (r.confidence) m.priceConfidence = r.confidence;
+                if (r.coverageNote) m.description = r.coverageNote;
+              }
+            }
+          } catch (err) {
+            // Reconciliation is best-effort — if it fails, fall back to
+            // whatever pack-aware regex worked out. Don't block the quote.
+          }
         }
       }
 

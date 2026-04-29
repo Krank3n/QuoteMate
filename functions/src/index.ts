@@ -1728,6 +1728,137 @@ Return ONLY valid JSON, no other text.`;
   });
 });
 
+/**
+ * Reconcile priced materials — given each row's individual-unit requirement
+ * and the matched product, decide how many actual purchases (packs / lengths
+ * / rolls / tins) to charge for, and at what total price.
+ *
+ * The reconciliation pass exists because regex parsing of pack info from
+ * product titles is brittle across trades:
+ *   - "Galvanised Connector Nails 35mm 1kg Tub" — contains ~340 nails, but
+ *     "1kg" → "N nails" needs general knowledge.
+ *   - "Composite Fascia Screws" matched to "Composite Decking Board 5.4m" —
+ *     wrong SKU entirely; needs to be rejected.
+ *   - "10L Dulux Wash & Wear" for a paint-area requirement — needs to know
+ *     coverage per litre (typical: ~12 m²/L).
+ * A small Gemini Flash Lite call given the requirement + product can use
+ * general knowledge to handle all of these uniformly across trades.
+ */
+const GEMINI_RECONCILE_MODEL = 'gemini-3.1-flash-lite-preview';
+
+async function callGeminiLiteJson(apiKey: string, prompt: string): Promise<any> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_RECONCILE_MODEL}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8000,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini Lite returned ${response.status}: ${errorText}`);
+  }
+  const data = await response.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) throw new Error('No content in Gemini Lite response');
+  return parseLLMJson(content);
+}
+
+export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
+    if (!decodedToken) return;
+
+    try {
+      const { items } = req.body as {
+        items: Array<{
+          id: string;
+          name: string;
+          requirement: number;
+          requirementUnit: string;
+          product: {
+            name?: string;
+            price: number;
+            url?: string;
+            description?: string;
+          };
+        }>;
+      };
+
+      if (!Array.isArray(items) || items.length === 0) {
+        res.status(400).json({ error: 'Missing or empty items array' });
+        return;
+      }
+      if (items.length > 50) {
+        res.status(400).json({ error: 'Too many items in single request (max 50)' });
+        return;
+      }
+
+      const geminiApiKey = process.env.GEMINI_API_KEY;
+      if (!geminiApiKey) {
+        res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
+        return;
+      }
+
+      const prompt = `You are a pricing assistant for an Australian tradie quoting tool. For each material row, the tradie has stated their individual-unit requirement (e.g. "600 each nails", "150 m tape", "40 m² paint coverage") and the price-search has returned a matched product.
+
+Your job: figure out how many ACTUAL PURCHASES of that product the tradie should buy and the resulting total price. Use your general knowledge of Australian hardware and trade products.
+
+For each item, return one of two decisions:
+- "apply" — the matched product is correct for the requirement. Compute how many purchases are needed and the total. Examples:
+  - "600 nails" + "Galvanised Connector Nails 35mm 1kg Tub @ $13.90" → ~340 nails per kg tub, buy 2 tubs, total $27.80.
+  - "150 m tape" + "Joist Tape 50mm × 20m Roll @ $36.31" → ceil(150/20) = 8 rolls, total $290.48.
+  - "40 m² paint" + "Dulux Wash & Wear 10L @ $89.95" → 10L covers ~120 m² (2 coats over 60 m²), so 1 tin = $89.95.
+  - "1100 clips" + "Klever Klip 50 Pack @ $25" → 22 packs, total $550.
+- "reject" — the matched product is the wrong category for the requirement. Examples:
+  - "Composite Fascia Screws" matched to "Composite Decking Board 5.4m" → reject (board, not screws).
+  - "Copper pipe 15mm" matched to "Copper fitting 15mm elbow" → reject (fitting, not pipe).
+
+CRITICAL — units must be compatible. If requirement is in "each" (count of items) but the product is sold by length/weight/volume, work out the conversion (e.g. nails per kg) using general knowledge. If you can't determine the conversion confidently, set confidence: "low" and reasoning explaining why.
+
+Respond with ONLY valid JSON in this exact shape:
+{
+  "results": [
+    {
+      "id": "<material id>",
+      "decision": "apply" | "reject",
+      "purchaseCount": <number — how many of this product to buy>,
+      "purchaseUnit": "<one of: pack, each, m, m², L, kg>",
+      "totalPrice": <number — purchaseCount × productPrice>,
+      "coverageNote": "<one short sentence: what one purchase covers (e.g. '500 screws per box', '5.4m per length', '10L covers ~120 m²')>",
+      "confidence": "high" | "medium" | "low",
+      "reasoning": "<one short sentence justifying the maths>",
+      "rejectReason": "<only when decision=reject: one sentence on why the product is wrong>"
+    }
+  ]
+}
+
+Items to reconcile:
+${JSON.stringify(items, null, 2)}
+
+Return ONLY the JSON object, no other text.`;
+
+      const parsed = await callGeminiLiteJson(geminiApiKey, prompt);
+      const results = Array.isArray(parsed.results) ? parsed.results : [];
+      res.status(200).json({ results });
+    } catch (error: any) {
+      console.error('reconcilePricedMaterials error:', error?.message);
+      res.status(500).json({ error: error?.message || 'Reconciliation failed' });
+    }
+  });
+});
+
 // ----------------------------------------------------------------------------
 // Supplier Price List extraction — multimodal wrappers + endpoint
 // ----------------------------------------------------------------------------
