@@ -80,13 +80,17 @@ export function healBrokenLabourSections<T extends { sections?: QuoteSection[]; 
 
   const perUnitHours = (quote.laborHours || 0) / sumMul;
   const rate = quote.laborRate || 0;
-  const healedSections = quote.sections.map((s) => ({
-    ...s,
-    laborHours: perUnitHours,
-    laborRate: rate,
-    laborUnit: s.laborUnit || 'hours',
-    laborTotal: roundToTwoDecimals(perUnitHours * rate * (s.multiplier || 1)),
-  }));
+  const healedSections = quote.sections.map((s) => {
+    const mul = s.multiplier || 1;
+    return {
+      ...s,
+      laborHours: perUnitHours,
+      laborHoursTotal: roundToTwoDecimals(perUnitHours * mul),
+      laborRate: rate,
+      laborUnit: s.laborUnit || 'hours',
+      laborTotal: roundToTwoDecimals(perUnitHours * rate * mul),
+    };
+  });
 
   return { ...quote, sections: healedSections };
 }

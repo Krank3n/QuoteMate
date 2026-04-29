@@ -978,6 +978,7 @@ export function MaterialsListScreen() {
             name: sectionName,
             multiplier,
             laborHours: laborHoursValue,
+            laborHoursTotal: Math.round(laborHoursValue * multiplier * 100) / 100,
             laborRate,
             laborUnit: useDays ? 'days' : 'hours',
             laborTotal: laborHoursValue * laborRate * multiplier,
@@ -1673,6 +1674,34 @@ export function MaterialsListScreen() {
                 m.totalPrice = 0;
                 m.priceConfidence = 'low';
                 m.description = r.rejectReason || 'Product mismatch — verify before sending';
+                continue;
+              }
+              if (
+                r.decision === 'estimate' &&
+                typeof r.estimatedUnitPrice === 'number' &&
+                r.estimatedUnitPrice > 0 &&
+                typeof r.purchaseCount === 'number' &&
+                r.purchaseCount > 0
+              ) {
+                // No candidate matched but the LLM gave a sensible price guess
+                // from general knowledge. Apply it as a low-confidence estimate
+                // — the row gets a starting price the tradie can verify with
+                // their supplier instead of a $0 hole. Don't swap in product
+                // info; there's no real candidate to point at.
+                if (m.requiredQty === undefined) m.requiredQty = m.quantity;
+                m.quantity = r.purchaseCount;
+                if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
+                m.price = r.estimatedUnitPrice;
+                m.totalPrice =
+                  typeof r.totalPrice === 'number' && r.totalPrice > 0
+                    ? r.totalPrice
+                    : r.estimatedUnitPrice * r.purchaseCount;
+                m.priceConfidence = 'low';
+                m.pricingSource = 'ai';
+                m.description = r.coverageNote || r.reasoning || 'Estimated — verify with supplier';
+                // Strip product references — the price isn't tied to a real SKU.
+                m.bunningsItemNumber = undefined;
+                m.productUrl = undefined;
                 continue;
               }
               if (r.decision === 'apply' && typeof r.purchaseCount === 'number' && r.purchaseCount > 0) {

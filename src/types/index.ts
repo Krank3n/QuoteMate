@@ -86,6 +86,13 @@ export interface QuoteSection {
   multiplier: number;          // How many units (e.g. 8 bays) — default 1
   sourceTemplateId?: string;   // Which template this came from (if any)
   laborHours: number;          // Per-unit labor hours/days
+  // Total labor hours/days for the section (laborHours × multiplier).
+  // Persisted so consumers that don't know about multipliers (admin
+  // dashboard, third-party integrations) can render the right number
+  // without any math. The mobile app reads this for display; pricing
+  // still derives from laborHours × multiplier × laborRate to match how
+  // the editor adjusts per-unit values.
+  laborHoursTotal?: number;
   laborRate: number;           // $/hour or $/day
   laborUnit: LaborUnit;        // 'hours' | 'days'
   laborTotal: number;          // calculated: laborHours * laborRate * multiplier

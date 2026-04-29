@@ -1187,8 +1187,10 @@ export interface ReconcileItem {
 
 export interface ReconcileResult {
   id: string;
-  decision: 'apply' | 'reject';
+  decision: 'apply' | 'estimate' | 'reject';
   chosenIndex?: number;
+  /** Per-purchase price when decision='estimate' (no candidate matched). */
+  estimatedUnitPrice?: number;
   purchaseCount?: number;
   purchaseUnit?: string;
   totalPrice?: number;

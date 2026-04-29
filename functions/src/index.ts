@@ -1921,18 +1921,20 @@ Your job has two parts:
 1. Pick the candidate that best matches the requirement (chosenIndex into the candidates array, 0-based). If NONE of the candidates are the right product category, reject the whole row.
 2. For the chosen candidate, work out how many ACTUAL PURCHASES the tradie should buy, and the resulting total price. Use your general knowledge of Australian hardware and trade products.
 
-For each item, return one of two decisions:
+For each item, return one of three decisions:
 - "apply" — at least one candidate either matches OR is a reasonable functional substitute. Pick it. Examples of valid applies:
   - Exact: "600 nails" + candidates [(1kg tub @ $13.90)] → 340 nails per tub, buy 2, total $27.80.
   - Brand substitute: "Eco Deck composite fascia" + candidates [(Ekodeck fascia 5.4m), (PermaTimber fascia 5.4m)] → pick whichever; note "Ekodeck used as Eco Deck substitute" in coverageNote, confidence='medium'.
   - Material substitute: "composite fascia 50m" + candidates [(PVC trim/moulding 5.4m), (Modwood fascia 5.4m)] → prefer Modwood (closer match), but PVC trim is acceptable if it's the only option — note "PVC trim substituted for composite fascia" and confidence='medium'.
   - Spec substitute: "Decking screws 50mm" + candidates [(Decking screws 65mm box of 500)] → close enough on length, accept with confidence='medium'.
-- "reject" — ONLY when no candidate serves the requirement's CATEGORY. Examples of valid rejects:
-  - "Composite Fascia Screws" + candidates all are composite boards → reject (board ≠ screw).
-  - "Copper pipe 15mm" + candidates all are fittings/elbows/valves → reject (fitting ≠ pipe).
-  - "Post stirrup" + candidates all are retaining-wall posts → reject (post ≠ post-anchor bracket).
+- "estimate" — none of the candidates match the requirement, BUT you have general knowledge of what this product typically costs in Australia. Return a reasonable per-purchase price + purchase count so the row gets a starting number instead of $0. The tradie verifies with their actual supplier. Examples of valid estimates:
+  - "Eco Deck Starter Clips" + candidates all wrong → estimate ~$12 per pack of 15 clips (Quickfix-style C-clips at Bunnings sit in this range), buy 7 packs for 100-clip requirement, total $84, confidence='low'.
+  - "Composite Fascia Screws" + candidates all wrong → estimate ~$25 per pack of 100 colour-matched fasteners, buy 1 pack, total $25, confidence='low'.
+  - "Specialty waterproofing primer 4L" + candidates all wrong → estimate ~$45 per 4L tin, total $45, confidence='low'.
+  Always include a coverageNote explaining what the estimate is based on AND a reasoning that flags it as an estimate ("Bunnings candidates were unrelated; estimate based on typical AU pricing — verify with composite-deck supplier").
+- "reject" — only when you genuinely have no idea what the product is or what it costs. This should be RARE — prefer "estimate" whenever you can give a sensible price range.
 
-CRITICAL — be GENEROUS with apply. The tradie wants a starting price they can verify with their supplier; they don't want every brand-or-spec mismatch zeroed out. Reject ONLY for clear category mismatch where no substitute could fulfill the role. A different brand, slightly different size, or alternative material is normally fine — just flag confidence='medium' and note the substitution.
+CRITICAL — be GENEROUS with apply, then with estimate. The tradie wants a starting price they can verify with their supplier; they don't want $0 holes in their quote. Reject only when you have no information at all — for everything else, estimate.
 
 CRITICAL — units must be compatible with the chosen candidate. If requirement is in "each" (count of items) but the product is sold by length/weight/volume, work out the conversion (nails per kg, screws per box, paint coverage per litre) using general knowledge. If you can't confidently convert, set confidence: "low" and explain in reasoning.
 
@@ -1943,15 +1945,16 @@ Respond with ONLY valid JSON in this exact shape:
   "results": [
     {
       "id": "<material id>",
-      "decision": "apply" | "reject",
+      "decision": "apply" | "estimate" | "reject",
       "chosenIndex": <number — 0-based index into the candidates array; only when decision=apply>,
-      "purchaseCount": <number — how many of the chosen candidate to buy>,
+      "estimatedUnitPrice": <number — only when decision=estimate; the per-purchase price you're estimating>,
+      "purchaseCount": <number — how many to buy; required for apply and estimate>,
       "purchaseUnit": "<one of: pack, each, m, m², L, kg>",
-      "totalPrice": <number — purchaseCount × chosen candidate price>,
-      "coverageNote": "<one short sentence: what one purchase covers (e.g. '500 screws per box', '5.4m per length', '10L covers ~120 m²')>",
+      "totalPrice": <number — purchaseCount × unit price>,
+      "coverageNote": "<one short sentence: what one purchase covers (e.g. '500 screws per box', '5.4m per length', '10L covers ~120 m²', 'estimated 15 clips per pack')>",
       "confidence": "high" | "medium" | "low",
       "reasoning": "<one short sentence justifying the choice and the maths>",
-      "rejectReason": "<only when decision=reject: one sentence on why no candidate matched>"
+      "rejectReason": "<only when decision=reject: one sentence on why no estimate could be made>"
     }
   ]
 }
