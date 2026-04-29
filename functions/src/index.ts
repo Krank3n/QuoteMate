@@ -1787,12 +1787,14 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
           name: string;
           requirement: number;
           requirementUnit: string;
-          product: {
+          // Top-N ranked candidates from the price search. Reconciliation
+          // picks the best fit by chosenIndex (or rejects all of them).
+          candidates: Array<{
             name?: string;
             price: number;
             url?: string;
             description?: string;
-          };
+          }>;
         }>;
       };
 
@@ -1811,21 +1813,25 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
         return;
       }
 
-      const prompt = `You are a pricing assistant for an Australian tradie quoting tool. For each material row, the tradie has stated their individual-unit requirement (e.g. "600 each nails", "150 m tape", "40 m² paint coverage") and the price-search has returned a matched product.
+      const prompt = `You are a pricing assistant for an Australian tradie quoting tool. For each material row, the tradie has stated their individual-unit requirement (e.g. "600 each nails", "150 m tape", "40 m² paint coverage") and the price-search has returned a RANKED LIST of candidate products (most likely first).
 
-Your job: figure out how many ACTUAL PURCHASES of that product the tradie should buy and the resulting total price. Use your general knowledge of Australian hardware and trade products.
+Your job has two parts:
+1. Pick the candidate that best matches the requirement (chosenIndex into the candidates array, 0-based). If NONE of the candidates are the right product category, reject the whole row.
+2. For the chosen candidate, work out how many ACTUAL PURCHASES the tradie should buy, and the resulting total price. Use your general knowledge of Australian hardware and trade products.
 
 For each item, return one of two decisions:
-- "apply" — the matched product is correct for the requirement. Compute how many purchases are needed and the total. Examples:
-  - "600 nails" + "Galvanised Connector Nails 35mm 1kg Tub @ $13.90" → ~340 nails per kg tub, buy 2 tubs, total $27.80.
-  - "150 m tape" + "Joist Tape 50mm × 20m Roll @ $36.31" → ceil(150/20) = 8 rolls, total $290.48.
-  - "40 m² paint" + "Dulux Wash & Wear 10L @ $89.95" → 10L covers ~120 m² (2 coats over 60 m²), so 1 tin = $89.95.
-  - "1100 clips" + "Klever Klip 50 Pack @ $25" → 22 packs, total $550.
-- "reject" — the matched product is the wrong category for the requirement. Examples:
-  - "Composite Fascia Screws" matched to "Composite Decking Board 5.4m" → reject (board, not screws).
-  - "Copper pipe 15mm" matched to "Copper fitting 15mm elbow" → reject (fitting, not pipe).
+- "apply" — at least one candidate is correct. Set chosenIndex and compute purchase count + total. Examples:
+  - "600 nails" + candidates [(box of 100 @ $14, "wrong size"), (1kg tub @ $13.90)] → chosenIndex 1, ~340 nails per kg tub, buy 2 tubs, total $27.80.
+  - "150 m tape" + candidates [(20m roll @ $36.31), (50m roll @ $80)] → chosenIndex 1, ceil(150/50) = 3 rolls, total $240.
+  - "40 m² paint" + candidates [(4L @ $39), (10L @ $89.95)] → chosenIndex 1, 10L covers ~120 m² over 2 coats, 1 tin = $89.95.
+- "reject" — none of the candidates match the requirement category. Examples:
+  - "Post Support Stirrup 90mm" + candidates all turn out to be retaining-wall posts → reject.
+  - "Copper pipe 15mm" + candidates all are copper fittings/elbows → reject.
+  - "Composite Fascia Screws" + candidates all are composite boards → reject.
 
-CRITICAL — units must be compatible. If requirement is in "each" (count of items) but the product is sold by length/weight/volume, work out the conversion (e.g. nails per kg) using general knowledge. If you can't determine the conversion confidently, set confidence: "low" and reasoning explaining why.
+CRITICAL — units must be compatible with the chosen candidate. If requirement is in "each" (count of items) but the product is sold by length/weight/volume, work out the conversion (nails per kg, screws per box, paint coverage per litre) using general knowledge. If you can't confidently convert, set confidence: "low" and explain in reasoning.
+
+PREFER cheaper or smaller pack candidates when they cover the requirement adequately — don't pick the most expensive option just because it's first in the list.
 
 Respond with ONLY valid JSON in this exact shape:
 {
@@ -1833,13 +1839,14 @@ Respond with ONLY valid JSON in this exact shape:
     {
       "id": "<material id>",
       "decision": "apply" | "reject",
-      "purchaseCount": <number — how many of this product to buy>,
+      "chosenIndex": <number — 0-based index into the candidates array; only when decision=apply>,
+      "purchaseCount": <number — how many of the chosen candidate to buy>,
       "purchaseUnit": "<one of: pack, each, m, m², L, kg>",
-      "totalPrice": <number — purchaseCount × productPrice>,
+      "totalPrice": <number — purchaseCount × chosen candidate price>,
       "coverageNote": "<one short sentence: what one purchase covers (e.g. '500 screws per box', '5.4m per length', '10L covers ~120 m²')>",
       "confidence": "high" | "medium" | "low",
-      "reasoning": "<one short sentence justifying the maths>",
-      "rejectReason": "<only when decision=reject: one sentence on why the product is wrong>"
+      "reasoning": "<one short sentence justifying the choice and the maths>",
+      "rejectReason": "<only when decision=reject: one sentence on why no candidate matched>"
     }
   ]
 }

@@ -132,57 +132,51 @@ export async function checkScraperHealth(): Promise<boolean> {
 }
 
 /**
- * Search and get the best match for a material
+ * Search and get the best match for a material (single-product convenience
+ * wrapper; new code should prefer findCandidatesForMaterial so the LLM
+ * reconciliation pass can pick across alternatives).
  */
 export async function findBestMatchForMaterial(
   materialName: string
 ): Promise<ScraperProduct | null> {
+  const candidates = await findCandidatesForMaterial(materialName);
+  return candidates.length > 0 ? candidates[0] : null;
+}
+
+/**
+ * Return up to `max` ranked candidates for a material. Reconciliation can
+ * then evaluate the full slate against the requirement instead of being
+ * stuck with the scraper's string-similarity best guess.
+ */
+export async function findCandidatesForMaterial(
+  materialName: string,
+  max: number = 5,
+): Promise<ScraperProduct[]> {
   try {
-    const response = await searchBunningsProducts(materialName, 5);
-
-    if (!response.success || response.results.length === 0) {
-      return null;
-    }
-
-    // Filter for high confidence matches with prices
-    const goodMatches = response.results.filter(
-      (p) => p.confidence === 'high' && p.price > 0
-    );
-
-    if (goodMatches.length > 0) {
-      return goodMatches[0]; // Return best match
-    }
-
-    // Fallback to medium confidence
-    const mediumMatches = response.results.filter(
-      (p) => p.confidence === 'medium' && p.price > 0
-    );
-
-    if (mediumMatches.length > 0) {
-      return mediumMatches[0];
-    }
-
-    // Last resort: return first result even if price is 0
-    return response.results[0];
-  } catch (error) {
-    return null;
+    const response = await searchBunningsProducts(materialName, max);
+    if (!response.success || response.results.length === 0) return [];
+    return rankCandidates(response.results).slice(0, max);
+  } catch {
+    return [];
   }
 }
 
 /**
- * Pick the best match from a list of scraper results, mirroring
- * findBestMatchForMaterial's filter logic (high → medium → first).
+ * Sort scraper results by usefulness for reconciliation: priced & high
+ * confidence first, then priced & medium, then anything else. Identical
+ * tier ordering to the previous pickBestMatch — just doesn't throw the
+ * runners-up away.
  */
-function pickBestMatch(results: ScraperProduct[]): ScraperProduct | null {
-  if (!results || results.length === 0) return null;
-
-  const highWithPrice = results.filter((p) => p.confidence === 'high' && p.price > 0);
-  if (highWithPrice.length > 0) return highWithPrice[0];
-
-  const mediumWithPrice = results.filter((p) => p.confidence === 'medium' && p.price > 0);
-  if (mediumWithPrice.length > 0) return mediumWithPrice[0];
-
-  return results[0];
+function rankCandidates(results: ScraperProduct[]): ScraperProduct[] {
+  if (!results || results.length === 0) return [];
+  const tier = (p: ScraperProduct): number => {
+    const hasPrice = p.price > 0;
+    if (p.confidence === 'high' && hasPrice) return 0;
+    if (p.confidence === 'medium' && hasPrice) return 1;
+    if (hasPrice) return 2;
+    return 3;
+  };
+  return [...results].sort((a, b) => tier(a) - tier(b));
 }
 
 /**
@@ -207,14 +201,14 @@ export async function batchFindBestMatchesProgressive(
   maxResultsPerTerm: number = 5,
   chunkSize: number = 3,
   onChunkComplete?: (
-    chunkResults: Map<string, ScraperProduct | null>,
+    chunkResults: Map<string, ScraperProduct[]>,
     chunkTerms: string[],
     chunkIndex: number,
     totalChunks: number,
   ) => void,
   isCancelled?: () => boolean,
-): Promise<Map<string, ScraperProduct | null>> {
-  const allResults = new Map<string, ScraperProduct | null>();
+): Promise<Map<string, ScraperProduct[]>> {
+  const allResults = new Map<string, ScraperProduct[]>();
 
   if (searchTerms.length === 0) {
     return allResults;
@@ -236,7 +230,7 @@ export async function batchFindBestMatchesProgressive(
     }
 
     const chunkTerms = chunks[chunkIndex];
-    const chunkResults = new Map<string, ScraperProduct | null>();
+    const chunkResults = new Map<string, ScraperProduct[]>();
 
     try {
       const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/bunningsScraperBatchSearch`, {
@@ -263,26 +257,27 @@ export async function batchFindBestMatchesProgressive(
         throw new Error(data.error || 'Batch search failed');
       }
 
-      // Map server results back to terms.
+      // Map server results back to terms — preserve the full ranked
+      // candidate list so reconciliation can evaluate alternatives.
       for (const item of data.results as Array<{
         searchTerm: string;
         success: boolean;
         results: ScraperProduct[];
       }>) {
-        const best = item.success ? pickBestMatch(item.results) : null;
-        chunkResults.set(item.searchTerm, best);
-        allResults.set(item.searchTerm, best);
+        const ranked = item.success ? rankCandidates(item.results) : [];
+        chunkResults.set(item.searchTerm, ranked);
+        allResults.set(item.searchTerm, ranked);
       }
 
-      // Any term the server didn't echo back gets null (defensive).
+      // Any term the server didn't echo back gets an empty array (defensive).
       for (const term of chunkTerms) {
         if (!chunkResults.has(term)) {
-          chunkResults.set(term, null);
-          allResults.set(term, null);
+          chunkResults.set(term, []);
+          allResults.set(term, []);
         }
       }
     } catch (error) {
-      // On chunk failure, mark every term in this chunk as null so the UI
+      // On chunk failure, mark every term in this chunk as empty so the UI
       // doesn't hang waiting on it. Fire the callback so the UI updates,
       // then continue to the next chunk instead of aborting the whole batch.
       // (Re-throw cancellation immediately.)
@@ -290,8 +285,8 @@ export async function batchFindBestMatchesProgressive(
         throw error;
       }
       for (const term of chunkTerms) {
-        chunkResults.set(term, null);
-        allResults.set(term, null);
+        chunkResults.set(term, []);
+        allResults.set(term, []);
       }
       // Don't throw — fire callback and continue to next chunk so a single
       // failed chunk doesn't kill the whole quote.

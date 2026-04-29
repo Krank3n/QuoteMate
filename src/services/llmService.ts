@@ -1164,22 +1164,26 @@ Return ONLY valid JSON, no explanation text:
 // across trades, where regex parsing of pack info from titles can't.
 // ---------------------------------------------------------------------------
 
+export interface ReconcileCandidate {
+  name?: string;
+  price: number;
+  url?: string;
+  description?: string;
+}
+
 export interface ReconcileItem {
   id: string;
   name: string;
   requirement: number;
   requirementUnit: string;
-  product: {
-    name?: string;
-    price: number;
-    url?: string;
-    description?: string;
-  };
+  /** Ranked candidates from the price search; reconciliation picks one (or rejects all). */
+  candidates: ReconcileCandidate[];
 }
 
 export interface ReconcileResult {
   id: string;
   decision: 'apply' | 'reject';
+  chosenIndex?: number;
   purchaseCount?: number;
   purchaseUnit?: string;
   totalPrice?: number;

@@ -122,6 +122,7 @@ import { loadGroups as loadSupplierGroups } from '../../services/supplierGroupSe
 import MaterialMatchSelector from '../../components/MaterialMatchSelector';
 import {
   findBestMatchForMaterial,
+  findCandidatesForMaterial,
   ScraperProduct,
   batchFindBestMatchesProgressive,
 } from '../../services/bunningsScraperClient';
@@ -1171,7 +1172,12 @@ export function MaterialsListScreen() {
     try {
 
       // --- BATCH FETCH: Progressive chunking (3 items at a time) ---
-      let batchResults: Map<string, ScraperProduct | null> | null = null;
+      // batchResults now holds the full candidate list per term so the
+      // reconciliation pass at the end can pick across alternatives.
+      let batchResults: Map<string, ScraperProduct[]> | null = null;
+      // Per-material candidate cache, keyed by material.id, used by the
+      // reconciliation pass once the fetch loop finishes.
+      const candidatesByMaterialId = new Map<string, ScraperProduct[]>();
       const batchSucceededTerms = new Set<string>();
       // Skip terms we just filled from local sources — no point asking
       // the scraper for prices we already have. If everything was priced
@@ -1224,14 +1230,22 @@ export function MaterialsListScreen() {
             searchTermsToFetch,
             5,
             chunkSize,
-            (chunkResults: Map<string, ScraperProduct | null>, chunkTerms: string[], chunkIndex: number, totalChunks: number) => {
-              // Apply prices from this chunk immediately
-              for (const [searchTerm, product] of chunkResults) {
+            (chunkResults: Map<string, ScraperProduct[]>, chunkTerms: string[], chunkIndex: number, totalChunks: number) => {
+              // Apply prices from this chunk immediately. Use the top
+              // candidate now so the UI shows something fast; the
+              // reconciliation pass at the end of the loop may swap in a
+              // different candidate from the same list.
+              for (const [searchTerm, candidates] of chunkResults) {
                 const matIndex = updatedMaterials.findIndex(
                   m => (m.searchTerm || m.name) === searchTerm
                 );
                 if (matIndex === -1) continue;
                 const material = updatedMaterials[matIndex];
+                const product = candidates[0] || null;
+
+                if (candidates.length > 0) {
+                  candidatesByMaterialId.set(material.id, candidates);
+                }
 
                 if (product && product.price > 0) {
                   applyProduct(material, product);
@@ -1244,7 +1258,8 @@ export function MaterialsListScreen() {
               // Update statuses: mark this chunk done/failed, next chunk searching
               setBatchItemStatuses(prev => {
                 const next = new Map(prev);
-                for (const [term, product] of chunkResults) {
+                for (const [term, candidates] of chunkResults) {
+                  const product = candidates[0] || null;
                   next.set(term, product && product.price > 0 ? 'done' : 'failed');
                 }
                 // Mark next chunk as searching
@@ -1262,7 +1277,8 @@ export function MaterialsListScreen() {
               setCurrentFetchingName(`Searching batch ${Math.min(chunkIndex + 2, totalChunks)} of ${totalChunks}...`);
 
               // Add completed items to the fetched list
-              for (const [term, product] of chunkResults) {
+              for (const [term, candidates] of chunkResults) {
+                const product = candidates[0] || null;
                 setFetchedItemNames(prev => [...prev, {
                   name: term,
                   success: !!(product && product.price > 0),
@@ -1331,12 +1347,17 @@ export function MaterialsListScreen() {
           // Use Bunnings Scraper API (Priority #1 - Real Prices)
           // Try batch result first (instant), fall back to individual search
           try {
-            let product = batchResults?.get(searchTerm) ?? null;
+            let candidates = batchResults?.get(searchTerm) ?? [];
 
-            if (!product) {
-              // Batch missed this one — try individual search
-              product = await withCancel(findBestMatchForMaterial(searchTerm));
+            if (!candidates || candidates.length === 0) {
+              // Batch missed this one — try individual candidate search
+              candidates = await withCancel(findCandidatesForMaterial(searchTerm));
             }
+
+            if (candidates.length > 0) {
+              candidatesByMaterialId.set(material.id, candidates);
+            }
+            const product = candidates[0] || null;
 
             if (product && product.price > 0) {
               material.price = product.price;
@@ -1608,32 +1629,36 @@ export function MaterialsListScreen() {
       }
 
       // ── Reconciliation pass ─────────────────────────────────────────────
-      // For every row we successfully priced, ask Gemini Flash Lite to check
-      // the matched product against the requirement and compute the correct
-      // purchase count + total. This catches wrong-SKU matches (e.g. fascia
-      // screws priced as decking boards) and pack-as-unit-price bugs (e.g.
-      // a 1kg tub of nails treated as $13.90 per nail) uniformly across all
-      // trades — regex parsing of pack info from titles can't.
+      // For every row that has scraper candidates, ask Gemini Flash Lite to
+      // pick the best-fitting candidate (or reject all of them) and compute
+      // the correct purchase count + total. The price-search returned the
+      // top candidate to the UI for fast feedback; reconciliation may swap
+      // in a different candidate from the same ranked list. Catches
+      // wrong-SKU matches and pack-as-unit-price bugs uniformly across
+      // trades, where regex parsing of pack info from titles can't.
       if (!cancelFetchRef.current) {
         const reconcileItems = updatedMaterials
-          .filter(m =>
-            m.price > 0 &&
-            !m.manualPriceOverride &&
-            m.pricingSource !== 'manual' &&
-            (m.description || m.productUrl || m.name)
-          )
-          .map(m => ({
-            id: m.id,
-            name: m.name,
-            requirement: m.requiredQty ?? m.quantity,
-            requirementUnit: (m.packUnit ?? m.unit) as string,
-            product: {
+          .filter(m => {
+            if (m.manualPriceOverride) return false;
+            if (m.pricingSource === 'manual') return false;
+            const cands = candidatesByMaterialId.get(m.id);
+            return !!cands && cands.length > 0;
+          })
+          .map(m => {
+            const cands = candidatesByMaterialId.get(m.id) || [];
+            return {
+              id: m.id,
               name: m.name,
-              price: m.price,
-              url: m.productUrl,
-              description: m.description,
-            },
-          }));
+              requirement: m.requiredQty ?? m.quantity,
+              requirementUnit: (m.packUnit ?? m.unit) as string,
+              candidates: cands.slice(0, 5).map(c => ({
+                name: c.productName,
+                price: c.price,
+                url: c.productUrl,
+                description: c.description,
+              })),
+            };
+          });
 
         if (reconcileItems.length > 0) {
           try {
@@ -1651,6 +1676,26 @@ export function MaterialsListScreen() {
                 continue;
               }
               if (r.decision === 'apply' && typeof r.purchaseCount === 'number' && r.purchaseCount > 0) {
+                // Swap in the chosen candidate's product info if it differs
+                // from the one we showed during the fetch loop.
+                const cands = candidatesByMaterialId.get(m.id) || [];
+                const idx = typeof r.chosenIndex === 'number' ? r.chosenIndex : 0;
+                const chosen = cands[idx];
+                if (chosen) {
+                  if (chosen.itemNumber) m.bunningsItemNumber = chosen.itemNumber;
+                  if (chosen.productUrl) m.productUrl = chosen.productUrl;
+                  if (chosen.imageUrl) m.imageUrl = chosen.imageUrl;
+                  if (chosen.description) m.description = chosen.description;
+                  if (
+                    chosen.brand &&
+                    chosen.brand.toLowerCase() !== 'bunnings' &&
+                    chosen.brand.toLowerCase() !== 'bunnings.com.au'
+                  ) {
+                    m.brand = chosen.brand;
+                  }
+                  if (chosen.stockCheckedAt) m.stockCheckedAt = chosen.stockCheckedAt;
+                }
+
                 if (m.requiredQty === undefined) m.requiredQty = m.quantity;
                 m.quantity = r.purchaseCount;
                 if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
