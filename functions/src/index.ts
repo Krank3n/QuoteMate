@@ -1921,20 +1921,23 @@ Your job has two parts:
 1. Pick the candidate that best matches the requirement (chosenIndex into the candidates array, 0-based). If NONE of the candidates are the right product category, reject the whole row.
 2. For the chosen candidate, work out how many ACTUAL PURCHASES the tradie should buy, and the resulting total price. Use your general knowledge of Australian hardware and trade products.
 
-For each item, return one of three decisions:
-- "apply" — at least one candidate either matches OR is a reasonable functional substitute. Pick it. Examples of valid applies:
-  - Exact: "600 nails" + candidates [(1kg tub @ $13.90)] → 340 nails per tub, buy 2, total $27.80.
-  - Brand substitute: "Eco Deck composite fascia" + candidates [(Ekodeck fascia 5.4m), (PermaTimber fascia 5.4m)] → pick whichever; note "Ekodeck used as Eco Deck substitute" in coverageNote, confidence='medium'.
-  - Material substitute: "composite fascia 50m" + candidates [(PVC trim/moulding 5.4m), (Modwood fascia 5.4m)] → prefer Modwood (closer match), but PVC trim is acceptable if it's the only option — note "PVC trim substituted for composite fascia" and confidence='medium'.
-  - Spec substitute: "Decking screws 50mm" + candidates [(Decking screws 65mm box of 500)] → close enough on length, accept with confidence='medium'.
-- "estimate" — none of the candidates match the requirement, BUT you have general knowledge of what this product typically costs in Australia. Return a reasonable per-purchase price + purchase count so the row gets a starting number instead of $0. The tradie verifies with their actual supplier. Examples of valid estimates:
-  - "Eco Deck Starter Clips" + candidates all wrong → estimate ~$12 per pack of 15 clips (Quickfix-style C-clips at Bunnings sit in this range), buy 7 packs for 100-clip requirement, total $84, confidence='low'.
-  - "Composite Fascia Screws" + candidates all wrong → estimate ~$25 per pack of 100 colour-matched fasteners, buy 1 pack, total $25, confidence='low'.
-  - "Specialty waterproofing primer 4L" + candidates all wrong → estimate ~$45 per 4L tin, total $45, confidence='low'.
-  Always include a coverageNote explaining what the estimate is based on AND a reasoning that flags it as an estimate ("Bunnings candidates were unrelated; estimate based on typical AU pricing — verify with composite-deck supplier").
-- "reject" — only when you genuinely have no idea what the product is or what it costs. This should be RARE — prefer "estimate" whenever you can give a sensible price range.
+DECISION HIERARCHY — strongly prefer "apply" over "estimate" over "reject". The order matters: a real Bunnings candidate at the right price is ALWAYS more useful than your best guess, even when the candidate isn't a perfect match.
 
-CRITICAL — be GENEROUS with apply, then with estimate. The tradie wants a starting price they can verify with their supplier; they don't want $0 holes in their quote. Reject only when you have no information at all — for everything else, estimate.
+For each item, return one of three decisions:
+- "apply" — pick this whenever ANY candidate could reasonably fulfil the requirement. This includes imperfect matches: different brand, slightly different size, alternative material, generic vs branded. Examples of valid applies:
+  - Exact: "600 nails" + candidates [(1kg tub @ $13.90)] → 340 nails per tub, buy 2, total $27.80, confidence='high'.
+  - Brand substitute: "Eco Deck composite fascia" + candidates include [(Ekodeck fascia 5.4m), (PermaTimber fascia 5.4m)] → apply the closest; confidence='medium'.
+  - Spec substitute: "Cup Head Bolt M12 x 150mm" + candidates include [(Cup Head Bolt M12 x 120mm), (Cup Head Bolt M10 x 150mm)] → apply the closest size; confidence='medium'.
+  - Length substitute: "Decking screws 50mm" + candidates include [(Decking screws 65mm box of 500)] → apply, confidence='medium'.
+  - Functional substitute: "Composite fascia 50m" + candidates include [(PVC trim 5.4m), (Modwood fascia 5.4m)] → apply Modwood (closer fit), or PVC trim if it's the only option; confidence='medium'.
+  An apply on an imperfect match is BETTER than an estimate, because the tradie can see the actual product and decide whether to swap.
+- "estimate" — ONLY when EVERY candidate is the wrong category (e.g. all candidates are decking boards when the requirement is decking screws, or all are retaining-wall posts when the requirement is post stirrups). In that case, return a reasonable per-purchase price from general AU pricing knowledge so the row isn't $0. Examples:
+  - "Eco Deck Starter Clips" + candidates all decking boards → estimate ~$12 per 15-pack, confidence='low'.
+  - "Composite Fascia Screws" + candidates all unrelated boards → estimate ~$25 per 100-pack, confidence='low'.
+  Always include a reasoning that flags it as an estimate (e.g. "All candidates were boards, not screws; estimate based on typical AU pricing — verify with supplier").
+- "reject" — last resort, only when ALL candidates are wrong AND you have no general-knowledge price for the product (genuinely unknown specialty item).
+
+CRITICAL — if a candidate is in the right product category but a different brand/size/spec, ALWAYS apply it. Do not estimate around real candidates. Reserve "estimate" for the situation where every candidate is in the wrong category.
 
 CRITICAL — units must be compatible with the chosen candidate. If requirement is in "each" (count of items) but the product is sold by length/weight/volume, work out the conversion (nails per kg, screws per box, paint coverage per litre) using general knowledge. If you can't confidently convert, set confidence: "low" and explain in reasoning.
 

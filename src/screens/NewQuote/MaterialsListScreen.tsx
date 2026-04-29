@@ -1699,9 +1699,16 @@ export function MaterialsListScreen() {
                 m.priceConfidence = 'low';
                 m.pricingSource = 'ai';
                 m.description = r.coverageNote || r.reasoning || 'Estimated — verify with supplier';
-                // Strip product references — the price isn't tied to a real SKU.
+                // Strip ALL product references from the rejected candidate —
+                // the estimate isn't tied to a real SKU and showing a wrong
+                // image/brand alongside an estimate ("Galintel Outdoors"
+                // retaining-wall image next to "estimated $15 per post
+                // stirrup") is misleading.
                 m.bunningsItemNumber = undefined;
                 m.productUrl = undefined;
+                m.imageUrl = undefined;
+                m.brand = undefined;
+                m.stockCheckedAt = undefined;
                 continue;
               }
               if (r.decision === 'apply' && typeof r.purchaseCount === 'number' && r.purchaseCount > 0) {

@@ -5,8 +5,8 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Pressable, Image, Platform, TextInput as RNTextInput } from 'react-native';
-import { Text, ActivityIndicator } from 'react-native-paper';
+import { View, StyleSheet, TouchableOpacity, Pressable, Image, Platform, TextInput as RNTextInput, ActivityIndicator } from 'react-native';
+import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
