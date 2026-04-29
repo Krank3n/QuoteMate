@@ -91,7 +91,7 @@ export const UNIVERSAL_PILLS: PillSpec[] = [
   },
   {
     id: 'universal_supply',
-    label: 'Who supplies',
+    label: 'Supplies',
     keywords: [
       'customer supply', 'customer supplied', 'customer to supply',
       'we supply', 'supply only', 'supplied by', 'tradie supply',
