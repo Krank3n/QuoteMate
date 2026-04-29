@@ -1167,16 +1167,16 @@ export function JobDetailsScreen() {
                 const isCustom = item.id === CUSTOM_CHIP_ID;
                 const isSelected = isCustom ? selectedTemplate === null : selectedTemplate?.id === item.id;
                 const iconColor = isSelected ? colors.surface : colors.onSurface;
-                const iconName = isCustom ? 'dots-horizontal' : ((item as NicheJobTemplate).icon as any);
+                const iconName = isCustom ? null : ((item as NicheJobTemplate).icon as any);
                 const label = isCustom ? 'Custom' : (item as NicheJobTemplate).name;
                 return (
                   <Chip
                     key={item.id}
                     selected={isSelected}
                     onPress={() => handleSelectTemplate(isCustom ? null : (item as NicheJobTemplate))}
-                    icon={() => (
+                    icon={iconName ? () => (
                       <MaterialCommunityIcons name={iconName} size={18} color={iconColor} />
-                    )}
+                    ) : undefined}
                     style={[styles.jobTypeChip, isSelected && styles.jobTypeChipSelected]}
                     textStyle={isSelected ? styles.jobTypeChipTextSelected : styles.jobTypeChipText}
                     showSelectedCheck={false}
