@@ -2111,6 +2111,16 @@ export function MaterialsListScreen() {
               </View>
               <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.skipMaterialsButton}
+              onPress={handleNext}
+              activeOpacity={0.6}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+            >
+              <Text style={styles.skipMaterialsText}>Labour only · skip materials</Text>
+              <MaterialCommunityIcons name="arrow-right" size={16} color={colors.primary} />
+            </TouchableOpacity>
           </View>
         ) : (
           <List.Section style={styles.listView}>
@@ -3284,6 +3294,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textMuted,
     lineHeight: 18,
+  },
+  skipMaterialsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginTop: 4,
+  },
+  skipMaterialsText: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
   generateButton: {
     marginTop: 8,
