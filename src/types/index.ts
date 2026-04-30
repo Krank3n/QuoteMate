@@ -463,14 +463,30 @@ export interface QuoteCalculation {
 }
 
 // Subscription
+//
+// Tier model:
+//   trial — 7 days of full Pro behaviour, no Square required.
+//   free  — unlimited use, but Square mandatory; only Square offered as a
+//           payment method; every delivered quote/invoice carries a Square
+//           pay link. Platform takes platformFeeBps (default 250 = 2.5%).
+//   pro   — paid; full payment-method choice, no delivery gating.
+//           Platform takes platformFeeBps (default 100 = 1%).
+//
+// `isPro` is kept for backwards compatibility and is treated as a derived
+// boolean equivalent to plan === 'pro'. The SubscriptionPlan type is defined
+// alongside the affiliate types further down — extended there to include
+// 'trial' so the on-ramp tier is part of the same union.
 export interface SubscriptionStatus {
   isPro: boolean;
+  plan?: SubscriptionPlan;
   quotesThisMonth: number;
   currentPeriodStart: Date;
   currentPeriodEnd: Date;
   freeQuotesLimit: number;
   trialStartedAt?: Date;
   trialExpired?: boolean;
+  dismissedUpgradeBanner?: boolean;
+  platformFeeBps?: number;
 }
 
 export interface ReferralInfo {
@@ -503,7 +519,7 @@ export interface AffiliateEarning {
   createdAt: Date;
 }
 
-export type SubscriptionPlan = 'free' | 'pro';
+export type SubscriptionPlan = 'trial' | 'free' | 'pro';
 
 // Invoice types
 export type PaymentTerms = 'due_on_receipt' | 'net_7' | 'net_14' | 'net_30' | 'custom';

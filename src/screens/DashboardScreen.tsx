@@ -40,6 +40,8 @@ import { SwipeableCard } from '../components/SwipeableCard';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap, successTap } from '../utils/haptics';
 import { TrialBanner } from '../components/TrialBanner';
+import { UpgradeBanner } from '../components/UpgradeBanner';
+import { TrialExpiredGate } from '../components/TrialExpiredGate';
 import { SyncErrorBanner } from '../components/SyncErrorBanner';
 import { ShimmerOverlay } from '../components/ShimmerOverlay';
 import { TapRipple } from '../components/TapRipple';
@@ -260,7 +262,7 @@ export function DashboardScreen() {
   }, []);
   const navigation = useNavigation<any>();
   const jobActions = useJobActionsSheet(navigation);
-  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft, hasSeenTour, unifiedTourActive, unifiedTourPhase, startUnifiedTour } = useStore();
+  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft, hasSeenTour, unifiedTourActive, unifiedTourPhase, startUnifiedTour, isTrialExpired, getEffectivePlan } = useStore();
   const { registerRef } = useTourRefs();
   const [tourActive, setTourActive] = useState(false);
 
@@ -539,6 +541,9 @@ export function DashboardScreen() {
 
   return (
     <>
+      {/* Trial-Expired Gate — blocks dashboard for free users without Square */}
+      <TrialExpiredGate />
+
       {/* Duplicate Success */}
       <AlertModal
         visible={duplicateSuccessVisible}
@@ -619,13 +624,16 @@ export function DashboardScreen() {
       {/* Sync Error Banner — warns if the latest quote/invoice didn't sync to cloud */}
       <SyncErrorBanner />
 
-      {/* Trial Status */}
-      {subscriptionStatus && !subscriptionStatus.isPro && subscriptionStatus.trialStartedAt && (
+      {/* Subscription banner — trial countdown while in 7-day trial,
+          dismissible "Upgrade to Pro" once on the free plan. */}
+      {subscriptionStatus && !subscriptionStatus.isPro && subscriptionStatus.trialStartedAt && !isTrialExpired() && (
         <TrialBanner
           trialStartedAt={subscriptionStatus.trialStartedAt}
           quoteCount={quotes.length}
         />
       )}
+      <UpgradeBanner />
+
 
       {/* Continue Draft Banner */}
       {inProgressDraft && (

@@ -27,6 +27,7 @@ import {
   InvoicePdfData,
   BusinessPdfData,
 } from '../../shared/pdf';
+import { useStore } from '../store/useStore';
 
 /**
  * Prepare the logo HTML tag from business settings (platform-specific)
@@ -120,6 +121,13 @@ export async function generateDocumentPDF(
   const logoHtml = await prepareLogoHtml(businessSettings, options?.isPro);
   const business = mapBusinessData(businessSettings, logoHtml);
 
+  // Plan is read from the store at render time so the PDF reflects the
+  // current tier (a free user's PDF must show only Square; Pro shows all
+  // payment methods). The Square pay-link URL travels on the doc itself —
+  // it's minted by the delivery guard before send and persisted there.
+  const plan = useStore.getState().getEffectivePlan();
+  const squarePaymentLinkUrl = doc.squarePaymentLinkUrl;
+
   if (doc.type === 'invoice') {
     const pdfData: InvoicePdfData = {
       customerName: doc.customerName,
@@ -167,6 +175,8 @@ export async function generateDocumentPDF(
       showLaborBreakdown: doc.showLaborBreakdown !== false,
       groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
       paymentMethods: businessSettings?.paymentMethods,
+      plan,
+      squarePaymentLinkUrl,
       terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
     };
     return buildInvoicePdfHtml(pdfData, business);
@@ -214,6 +224,8 @@ export async function generateDocumentPDF(
     showLaborBreakdown: doc.showLaborBreakdown !== false,
     groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
     paymentMethods: businessSettings?.paymentMethods,
+    plan,
+    squarePaymentLinkUrl,
     terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
   };
   return buildQuotePdfHtml(pdfData, business);

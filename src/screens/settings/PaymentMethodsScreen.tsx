@@ -8,6 +8,7 @@ import {
   View,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
 } from 'react-native';
 import {
   Text,
@@ -19,6 +20,7 @@ import {
   Chip,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useNavigation } from '@react-navigation/native';
 
 import { useStore } from '../../store/useStore';
 import { PaymentMethodSettings } from '../../types';
@@ -29,7 +31,9 @@ import { AlertModal } from '../../components/AlertModal';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
 export function PaymentMethodsScreen() {
-  const { businessSettings, setBusinessSettings } = useStore();
+  const { businessSettings, setBusinessSettings, getEffectivePlan } = useStore();
+  const navigation = useNavigation<any>();
+  const isFreeTier = getEffectivePlan() === 'free';
 
   const [showPaymentOnDocuments, setShowPaymentOnDocuments] = useState(false);
   // Bank Transfer
@@ -183,6 +187,29 @@ export function PaymentMethodsScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <WebContainer>
+          {isFreeTier && (
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Paywall' as never)}
+              activeOpacity={0.7}
+            >
+              <Surface style={styles.freeTierBanner} elevation={2}>
+                <MaterialCommunityIcons
+                  name="lock-outline"
+                  size={20}
+                  color={colors.primary}
+                  style={{ marginRight: 10 }}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.freeTierBannerTitle}>Pro unlocks all payment methods</Text>
+                  <Text style={styles.freeTierBannerSubtitle}>
+                    On the free plan, only Square is shown on documents. Tap to upgrade and offer bank, PayID, BPAY, PayPal too.
+                  </Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={colors.onSurface} />
+              </Surface>
+            </TouchableOpacity>
+          )}
+
           <Surface style={styles.card}>
             <Title style={styles.sectionTitle}>Display Settings</Title>
 
@@ -455,6 +482,27 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     elevation: 2,
     backgroundColor: colors.surface,
+  },
+  freeTierBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.primary + '40',
+  },
+  freeTierBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  freeTierBannerSubtitle: {
+    fontSize: 12,
+    color: colors.onSurface,
+    lineHeight: 16,
   },
   sectionTitle: {
     fontSize: 18,

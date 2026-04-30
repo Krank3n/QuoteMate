@@ -34,9 +34,11 @@ import type { SquareConnectionStatus } from '../../services/squareService';
 import { primeTapToPayOnDevice } from '../../services/squarePayments';
 
 export function SquareIntegrationScreen() {
-  const { subscriptionStatus } = useStore();
+  const { subscriptionStatus, getEffectivePlan } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
+  const plan = getEffectivePlan();
+  const isFreeTier = plan === 'free';
 
   const [connection, setConnection] = useState<SquareConnectionStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,15 +82,9 @@ export function SquareIntegrationScreen() {
   };
 
   const handleConnect = async () => {
-    if (!isPro) {
-      showAlert(
-        'info',
-        'Pro Feature',
-        'Square integration is available on the Pro plan. Upgrade to accept online payments on your invoices.',
-      );
-      return;
-    }
-
+    // Square is now available on every tier — connection is mandatory on the
+    // free plan and optional on Pro. Previously this was Pro-gated; that gate
+    // was removed when the freemium model shipped.
     setLoading(true);
     try {
       const { authUrl } = await squareService.getSquareAuthUrl();
@@ -192,6 +188,27 @@ export function SquareIntegrationScreen() {
           {connection?.connected && connection?.disconnectedReason ? (
             <SquareReconnectBanner reason={connection.disconnectedReason} />
           ) : null}
+
+          {/* Free-tier mandatory-connection callout. Free users can't send
+              quotes or invoices without a Square link embedded; this card
+              makes the requirement obvious before they hit a delivery gate. */}
+          {isFreeTier && !connection?.connected && (
+            <Surface style={styles.requiredCallout}>
+              <MaterialCommunityIcons
+                name="information-outline"
+                size={20}
+                color={colors.primary}
+                style={{ marginRight: 10, marginTop: 2 }}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.requiredCalloutTitle}>Required on the free plan</Text>
+                <Text style={styles.requiredCalloutBody}>
+                  Connect Square so customers can pay your quotes online. We take a 2.5% platform fee on the free plan — drops to 1% when you upgrade to Pro.
+                </Text>
+              </View>
+            </Surface>
+          )}
+
           {/* Header */}
           <Surface style={styles.card}>
             <View style={styles.headerRow}>
@@ -424,6 +441,28 @@ const styles = StyleSheet.create({
     padding: 20,
     marginBottom: 12,
     elevation: 2,
+  },
+  requiredCallout: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.primary + '40',
+    elevation: 1,
+  },
+  requiredCalloutTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  requiredCalloutBody: {
+    fontSize: 13,
+    color: colors.onSurface,
+    lineHeight: 18,
   },
   headerRow: { flexDirection: 'row', alignItems: 'center' },
   squareIcon: {

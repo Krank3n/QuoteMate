@@ -13,11 +13,13 @@ import React, { useMemo } from 'react';
 import { View, StyleSheet, Pressable, Linking, Platform, Share, Alert } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useNavigation } from '@react-navigation/native';
 
 import type { Document } from '../types/document';
 import { colors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
+import { ensureCanDeliver } from '../utils/quoteDeliveryGuard';
 
 export type FollowUpTone = 'gentle' | 'firm' | 'overdue';
 
@@ -86,6 +88,7 @@ export function FollowUpSheet({
   jobName,
   tone,
 }: FollowUpSheetProps) {
+  const navigation = useNavigation<any>();
   const payLink = useMemo(() => resolvePayLink(doc), [doc]);
   const message = useMemo(
     () =>
@@ -102,6 +105,41 @@ export function FollowUpSheet({
 
   const subtitle = doc.type === 'quote' ? 'Nudge on the quote' : 'Nudge on the invoice';
 
+  /**
+   * Free-tier delivery gate. Pro / trial users skip the network round-trip.
+   * Free users without a connected Square account get an Alert routing them
+   * to SquareIntegration before any follow-up message is composed.
+   */
+  const passesDeliveryGate = async (): Promise<boolean> => {
+    const gate = await ensureCanDeliver({
+      kind: doc.type === 'invoice' ? 'invoice' : 'quote',
+      doc: { id: doc.id, squarePaymentLinkUrl: payLink || undefined, requireDeposit: doc.requireDeposit, depositPercentage: doc.depositPercentage },
+    });
+    if (gate.ok) return true;
+    Alert.alert(
+      gate.reason === 'connect_square' ? 'Connect Square to follow up' : 'Square link unavailable',
+      gate.message,
+      [
+        { text: 'Not now', style: 'cancel', onPress: onDismiss },
+        gate.reason === 'connect_square' && {
+          text: 'Connect Square',
+          onPress: () => {
+            onDismiss();
+            navigation.navigate('SquareIntegration' as never);
+          },
+        },
+        {
+          text: 'Upgrade to Pro',
+          onPress: () => {
+            onDismiss();
+            navigation.navigate('Paywall' as never);
+          },
+        },
+      ].filter(Boolean) as any
+    );
+    return false;
+  };
+
   const handleSMS = async () => {
     selectionTap();
     const phone = (customerPhone || '').replace(/\s+/g, '');
@@ -109,6 +147,7 @@ export function FollowUpSheet({
       Alert.alert('No phone on file', 'Add a phone number to the customer to send an SMS.');
       return;
     }
+    if (!(await passesDeliveryGate())) return;
     const url =
       Platform.OS === 'ios'
         ? `sms:${phone}&body=${encodeURIComponent(message)}`
@@ -123,6 +162,7 @@ export function FollowUpSheet({
 
   const handleEmail = async () => {
     selectionTap();
+    if (!(await passesDeliveryGate())) return;
     if (!customerEmail) {
       // No email? Share sheet is the next best — works in WhatsApp /
       // Messenger / anything installed. We'll still draft the same body.

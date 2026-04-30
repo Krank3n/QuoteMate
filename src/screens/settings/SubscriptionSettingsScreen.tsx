@@ -26,7 +26,131 @@ import { TrialBanner } from '../../components/TrialBanner';
 
 export function SubscriptionSettingsScreen() {
   const navigation = useNavigation<any>();
-  const { subscriptionStatus, quotes } = useStore();
+  const { subscriptionStatus, quotes, getEffectivePlan } = useStore();
+  const plan = getEffectivePlan();
+
+  const renderPro = () => (
+    <>
+      <View style={styles.proBadge}>
+        <MaterialCommunityIcons name="crown" size={32} color={colors.secondary} />
+        <Text style={styles.proText}>Pro Member</Text>
+      </View>
+      <Text style={styles.proStatusText}>
+        Pro is active — thanks for your support.
+      </Text>
+
+      <View style={styles.benefitsList}>
+        <View style={styles.benefitItem}>
+          <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+          <Text style={styles.benefitText}>1% Square platform fee (vs 2.5% on free)</Text>
+        </View>
+        <View style={styles.benefitItem}>
+          <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+          <Text style={styles.benefitText}>All payment methods on quotes & invoices</Text>
+        </View>
+        <View style={styles.benefitItem}>
+          <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+          <Text style={styles.benefitText}>Send without a Square pay link required</Text>
+        </View>
+        <View style={styles.benefitItem}>
+          <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+          <Text style={styles.benefitText}>Priority support</Text>
+        </View>
+      </View>
+
+      <TouchableOpacity
+        onPress={() => navigation.navigate('Paywall' as never)}
+        style={styles.manageSubscriptionButton}
+      >
+        <Text style={styles.manageSubscriptionText}>Manage Subscription</Text>
+        <MaterialCommunityIcons name="chevron-right" size={20} color={colors.primary} />
+      </TouchableOpacity>
+    </>
+  );
+
+  const renderTrial = () => (
+    <>
+      <View style={styles.freeStatusContainer}>
+        <MaterialCommunityIcons name="clock-fast" size={32} color={colors.primary} />
+        <Text style={styles.freeStatusTitle}>Trial</Text>
+      </View>
+
+      <View style={styles.quotaInfo}>
+        {subscriptionStatus?.trialStartedAt ? (
+          <TrialBanner
+            trialStartedAt={subscriptionStatus.trialStartedAt}
+            quoteCount={quotes.length}
+            compact
+          />
+        ) : (
+          <>
+            <Text style={styles.quotaText}>
+              7-day free trial — starts when you create your first quote
+            </Text>
+            <View style={styles.progressBar}>
+              <View style={[styles.progressFill, { width: '0%' }]} />
+            </View>
+          </>
+        )}
+      </View>
+
+      <Text style={styles.upgradeDescription}>
+        You've got Pro features for the trial. After 7 days you'll move to the
+        free plan — connect Square so customers can pay your quotes online and
+        we take a 2.5% platform fee. Upgrade to Pro any time to drop that to 1%.
+      </Text>
+
+      <Button
+        mode="contained"
+        onPress={() => navigation.navigate('Paywall' as never)}
+        style={styles.upgradeButton}
+        contentStyle={styles.upgradeButtonContent}
+        icon="crown"
+      >
+        Upgrade to Pro
+      </Button>
+    </>
+  );
+
+  const renderFree = () => (
+    <>
+      <View style={styles.freeStatusContainer}>
+        <MaterialCommunityIcons name="account-outline" size={32} color={colors.onSurface} />
+        <Text style={styles.freeStatusTitle}>Free Plan</Text>
+      </View>
+
+      <View style={styles.benefitsList}>
+        <View style={styles.benefitItem}>
+          <MaterialCommunityIcons name="information-outline" size={20} color={colors.primary} />
+          <Text style={styles.benefitText}>2.5% platform fee on Square payments</Text>
+        </View>
+        <View style={styles.benefitItem}>
+          <MaterialCommunityIcons name="information-outline" size={20} color={colors.primary} />
+          <Text style={styles.benefitText}>Square is the only payment method shown to customers</Text>
+        </View>
+        <View style={styles.benefitItem}>
+          <MaterialCommunityIcons name="information-outline" size={20} color={colors.primary} />
+          <Text style={styles.benefitText}>Square link required on every quote & invoice</Text>
+        </View>
+      </View>
+
+      <Text style={styles.upgradeDescription}>
+        Upgrade to Pro to drop the platform fee from 2.5% to 1%, unlock bank
+        transfer / PayID / BPAY / PayPal on documents, and send without a Square
+        link required.
+      </Text>
+
+      <Button
+        mode="contained"
+        onPress={() => navigation.navigate('Paywall' as never)}
+        style={styles.upgradeButton}
+        contentStyle={styles.upgradeButtonContent}
+        icon="crown"
+      >
+        Upgrade to Pro
+      </Button>
+    </>
+  );
 
   return (
     <View style={styles.container}>
@@ -36,80 +160,7 @@ export function SubscriptionSettingsScreen() {
             <Title style={styles.sectionTitle}>Your Subscription</Title>
 
             <View style={styles.subscriptionInfo}>
-              {subscriptionStatus?.isPro ? (
-                <>
-                  <View style={styles.proBadge}>
-                    <MaterialCommunityIcons name="crown" size={32} color={colors.secondary} />
-                    <Text style={styles.proText}>Pro Member</Text>
-                  </View>
-                  <Text style={styles.proStatusText}>
-                    You have unlimited quote analyses. Thank you for your support!
-                  </Text>
-
-                  <View style={styles.benefitsList}>
-                    <View style={styles.benefitItem}>
-                      <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
-                      <Text style={styles.benefitText}>Unlimited quote analyses</Text>
-                    </View>
-                    <View style={styles.benefitItem}>
-                      <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
-                      <Text style={styles.benefitText}>Priority support</Text>
-                    </View>
-                    <View style={styles.benefitItem}>
-                      <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
-                      <Text style={styles.benefitText}>All future features</Text>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    onPress={() => navigation.navigate('Paywall' as never)}
-                    style={styles.manageSubscriptionButton}
-                  >
-                    <Text style={styles.manageSubscriptionText}>Manage Subscription</Text>
-                    <MaterialCommunityIcons name="chevron-right" size={20} color={colors.primary} />
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <View style={styles.freeStatusContainer}>
-                    <MaterialCommunityIcons name="account-outline" size={32} color={colors.onSurface} />
-                    <Text style={styles.freeStatusTitle}>Free Plan</Text>
-                  </View>
-
-                  <View style={styles.quotaInfo}>
-                    {subscriptionStatus?.trialStartedAt ? (
-                      <TrialBanner
-                        trialStartedAt={subscriptionStatus.trialStartedAt}
-                        quoteCount={quotes.length}
-                        compact
-                      />
-                    ) : (
-                      <>
-                        <Text style={styles.quotaText}>
-                          7-day free trial — starts when you create your first quote
-                        </Text>
-                        <View style={styles.progressBar}>
-                          <View style={[styles.progressFill, { width: '0%' }]} />
-                        </View>
-                      </>
-                    )}
-                  </View>
-
-                  <Text style={styles.upgradeDescription}>
-                    Upgrade to Pro for unlimited quote analyses, priority support, and all future features.
-                  </Text>
-
-                  <Button
-                    mode="contained"
-                    onPress={() => navigation.navigate('Paywall' as never)}
-                    style={styles.upgradeButton}
-                    contentStyle={styles.upgradeButtonContent}
-                    icon="crown"
-                  >
-                    Upgrade to Pro
-                  </Button>
-                </>
-              )}
+              {plan === 'pro' ? renderPro() : plan === 'trial' ? renderTrial() : renderFree()}
             </View>
           </Surface>
         </WebContainer>

@@ -28,6 +28,8 @@ function humanise(reason?: string | null): string {
       return 'Square has signed us out. Reconnect to keep taking card payments.';
     case 'revoked':
       return 'Square access was revoked. Reconnect to resume payments.';
+    case 'scope_upgrade':
+      return 'Square needs an updated permission to take payments through QuoteMate. Reconnect to fix it (takes 30 seconds).';
     default:
       return 'Your Square connection needs attention. Reconnect to resume payments.';
   }

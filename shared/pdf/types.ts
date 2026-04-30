@@ -64,6 +64,14 @@ export interface QuotePdfData {
   showLaborBreakdown?: boolean;
   groupMaterialsBySection?: boolean;
   paymentMethods?: any;
+  // Subscription plan. When 'free', `generatePaymentMethodsHTML` shows only
+  // the Square Pay Now button and hides bank/PayID/BPAY/PayPal/other —
+  // every paid quote on the free tier funnels through Square so the
+  // platform fee can be collected.
+  plan?: 'trial' | 'free' | 'pro';
+  // Square hosted-checkout URL. Rendered as a large "Pay Now" button when
+  // present. Threaded all the way from the doc → pdfGenerator → here.
+  squarePaymentLinkUrl?: string;
   // Terms & Conditions text. Rendered as its own section at the end of the
   // document. The business's current T&Cs are snapshotted to the quote/invoice
   // at send time and passed through here so later edits don't rewrite history.

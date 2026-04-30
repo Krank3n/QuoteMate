@@ -44,7 +44,9 @@ import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   QM_APP_FEE_PCT_ONLINE,
+  QM_APP_FEE_PCT_ONLINE_FREE,
   QM_APP_FEE_PCT_IN_PERSON,
+  QM_APP_FEE_PCT_IN_PERSON_FREE,
   PASSTHROUGH_SURCHARGE_PCT,
 } from './shared/pdf/squareFees';
 // (All resolve via the functions/src/shared symlink → shared/)
@@ -3347,6 +3349,12 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       return;
     }
 
+    const gate = await enforceFreeTierDeliveryGate(userId);
+    if (!gate.ok) {
+      res.status(gate.status).json({ error: gate.message, reason: gate.reason });
+      return;
+    }
+
     logShimInvocation('sendQuoteEmail', userId, { quoteId });
 
     try {
@@ -3420,6 +3428,12 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
 
     if (!invoiceId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: invoiceId, emailBody, recipientEmail' });
+      return;
+    }
+
+    const gate = await enforceFreeTierDeliveryGate(userId);
+    if (!gate.ok) {
+      res.status(gate.status).json({ error: gate.message, reason: gate.reason });
       return;
     }
 
@@ -9313,11 +9327,18 @@ const SQUARE_WEBHOOK_NOTIFICATION_URL =
   'https://us-central1-hansendev.cloudfunctions.net/squareWebhook';
 // OAuth scopes required for pay-by-link, reading merchant/location info, and
 // in-person Tap to Pay via the Mobile Payments SDK.
+//
+// PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS is the scope that lets us route a
+// platform fee (`app_fee_money`) from the merchant's payment to our developer
+// account. It's load-bearing for the freemium revenue model — without it, the
+// Square API rejects payment links that include `app_fee_money`. Existing
+// merchants connected before this scope was added will need to reconnect.
 const SQUARE_SCOPES = [
   'MERCHANT_PROFILE_READ',
   'PAYMENTS_READ',
   'PAYMENTS_WRITE',
   'PAYMENTS_WRITE_IN_PERSON',
+  'PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS',
   'ORDERS_READ',
   'ORDERS_WRITE',
 ];
@@ -9790,9 +9811,90 @@ export const squareDisconnect = functions.https.onRequest((req, res) => {
 });
 
 /**
+ * Free-tier delivery enforcement. Refuses send when the user is on the free
+ * plan without a connected Square account — without Square we have no way to
+ * collect the platform fee, which is the entire freemium revenue model.
+ *
+ * Trusts the client's quoteDeliveryGuard to have minted a payment link before
+ * dispatching the send. If something slipped through, this catches it.
+ */
+async function enforceFreeTierDeliveryGate(
+  userId: string,
+): Promise<{ ok: true } | { ok: false; status: number; reason: string; message: string }> {
+  const plan = await getUserPlanServerSide(userId);
+  if (plan !== 'free') return { ok: true };
+  const tokens = await getSquareTokens(userId);
+  if (!tokens) {
+    return {
+      ok: false,
+      status: 402, // Payment Required — semantically apt
+      reason: 'connect_square',
+      message: 'Connect Square to send quotes and invoices on the free plan.',
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Detect when a Square API failure is caused by the merchant's OAuth token
+ * missing the PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS scope (added when the
+ * freemium model shipped — existing connections need to reconnect for it).
+ * When this happens, flag the connection so SquareReconnectBanner can prompt
+ * the merchant to reconnect rather than the link silently failing forever.
+ */
+async function flagScopeUpgradeIfNeeded(
+  userId: string,
+  status: number,
+  body: string,
+): Promise<void> {
+  if (status !== 403) return;
+  if (!/PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS|OAuth scope|scope/i.test(body)) return;
+  try {
+    await admin
+      .firestore()
+      .doc(`users/${userId}/settings/squareConnection`)
+      .update({ disconnectedReason: 'scope_upgrade' });
+  } catch (error) {
+    console.error('[square] failed to flag scope_upgrade', { userId, error });
+  }
+}
+
+/**
+ * Resolve the user's effective subscription tier from their Firestore
+ * subscription doc. Source-of-truth on the server so the client cannot lie
+ * about being Pro to dodge the higher free-tier fee. Mirrors the migration
+ * logic in firestoreService.subscriptionFromSnapshotData.
+ */
+async function getUserPlanServerSide(userId: string): Promise<'trial' | 'free' | 'pro'> {
+  try {
+    const snap = await admin.firestore().doc(`users/${userId}/profile/subscription`).get();
+    if (!snap.exists) return 'trial';
+    const data = snap.data() || {};
+    if (data.plan === 'pro' || data.plan === 'free' || data.plan === 'trial') return data.plan;
+    if (data.isPro) return 'pro';
+    if (data.trialStartedAt) {
+      const trialMs = 7 * 24 * 60 * 60 * 1000;
+      const startedAt = data.trialStartedAt.toDate
+        ? data.trialStartedAt.toDate()
+        : new Date(data.trialStartedAt);
+      return Date.now() - startedAt.getTime() < trialMs ? 'trial' : 'free';
+    }
+    return 'trial';
+  } catch (error) {
+    console.error('[plan] failed to resolve user plan', { userId, error });
+    // Fail closed — assume free so a fee is taken rather than waived.
+    return 'free';
+  }
+}
+
+/**
  * Compute Square pricing for a payment: the amount charged to the customer
  * (incl. optional passthrough surcharge), the QuoteMate app fee we take via
  * Square's app_fee_money mechanism, and the surcharge portion for display.
+ *
+ * Pro users pay the lower platform fee; free users pay the higher rate (the
+ * freemium model's revenue source). Trial users get the Pro rate while in
+ * their 7-day window.
  *
  * All percentages are hardcoded in shared/pdf/squareFees.ts — not editable
  * per-tradie because the passthrough is bounded by ACCC cost-of-acceptance
@@ -9802,6 +9904,7 @@ function computeSquarePricing(
   baseDollars: number,
   business: any,
   channel: 'online' | 'in_person',
+  plan: 'trial' | 'free' | 'pro' = 'pro',
 ): {
   chargedDollars: number;
   surchargeDollars: number;
@@ -9817,9 +9920,10 @@ function computeSquarePricing(
 
   // App fee is computed off the CHARGED amount so we get our cut on the
   // surcharge portion too (which otherwise would only benefit Square).
+  const isFree = plan === 'free';
   const appFeePct = channel === 'in_person'
-    ? QM_APP_FEE_PCT_IN_PERSON
-    : QM_APP_FEE_PCT_ONLINE;
+    ? (isFree ? QM_APP_FEE_PCT_IN_PERSON_FREE : QM_APP_FEE_PCT_IN_PERSON)
+    : (isFree ? QM_APP_FEE_PCT_ONLINE_FREE : QM_APP_FEE_PCT_ONLINE);
   const appFeeCents = Math.max(0, dollarsToCents(
     centsToDollars(chargedCents) * (appFeePct / 100),
   ));
@@ -9857,8 +9961,9 @@ async function createSquarePaymentLinkInternal(
   // total + surcharge and Square's fee doesn't eat the tradie's margin.
   const businessDoc = await firestore.doc(`users/${userId}/settings/business`).get();
   const businessSettings = businessDoc.exists ? businessDoc.data() : {};
+  const plan = await getUserPlanServerSide(userId);
   const { chargedDollars, appFeeCents, surchargeSuffix } =
-    computeSquarePricing(total, businessSettings, 'online');
+    computeSquarePricing(total, businessSettings, 'online', plan);
 
   const amountCents = dollarsToCents(chargedDollars);
   const jobName = invoice.job?.name || 'Job';
@@ -9896,6 +10001,7 @@ async function createSquarePaymentLinkInternal(
     console.error('[square] createSquarePaymentLinkInternal failed', {
       userId, invoiceId, status: resp.status, body: errBody.slice(0, 500),
     });
+    await flagScopeUpgradeIfNeeded(userId, resp.status, errBody);
     return null;
   }
 
@@ -10103,8 +10209,9 @@ async function createSquareDepositPaymentLinkInternal(
 
   const businessDoc = await firestore.doc(`users/${userId}/settings/business`).get();
   const businessSettings = businessDoc.exists ? businessDoc.data() : {};
+  const plan = await getUserPlanServerSide(userId);
   const { chargedDollars, appFeeCents, surchargeSuffix } =
-    computeSquarePricing(depositAmount, businessSettings, 'online');
+    computeSquarePricing(depositAmount, businessSettings, 'online', plan);
 
   const amountCents = dollarsToCents(chargedDollars);
   const jobName = quote.job?.name || 'Job';
@@ -10138,6 +10245,7 @@ async function createSquareDepositPaymentLinkInternal(
     console.error('[square] createSquareDepositPaymentLinkInternal failed', {
       userId, quoteId, status: resp.status, body: errBody.slice(0, 500),
     });
+    await flagScopeUpgradeIfNeeded(userId, resp.status, errBody);
     return null;
   }
 
@@ -10229,8 +10337,9 @@ async function createSquareFullQuotePaymentLinkInternal(
 
   const businessDoc = await firestore.doc(`users/${userId}/settings/business`).get();
   const businessSettings = businessDoc.exists ? businessDoc.data() : {};
+  const plan = await getUserPlanServerSide(userId);
   const { chargedDollars, appFeeCents, surchargeSuffix } =
-    computeSquarePricing(amount, businessSettings, 'online');
+    computeSquarePricing(amount, businessSettings, 'online', plan);
 
   const amountCents = dollarsToCents(chargedDollars);
   const jobName = quote.job?.name || 'Job';
@@ -10264,6 +10373,7 @@ async function createSquareFullQuotePaymentLinkInternal(
     console.error('[square] createSquareFullQuotePaymentLinkInternal failed', {
       userId, quoteId, status: resp.status, body: errBody.slice(0, 500),
     });
+    await flagScopeUpgradeIfNeeded(userId, resp.status, errBody);
     return null;
   }
 
@@ -10467,7 +10577,11 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
       {
         const paidCents = Number(payment?.amount_money?.amount) || 0;
         const channel: 'in_person' | 'online' = idx.source === 'in_app' ? 'in_person' : 'online';
-        const feePct = channel === 'in_person' ? QM_APP_FEE_PCT_IN_PERSON : QM_APP_FEE_PCT_ONLINE;
+        const plan = await getUserPlanServerSide(userId);
+        const isFree = plan === 'free';
+        const feePct = channel === 'in_person'
+          ? (isFree ? QM_APP_FEE_PCT_IN_PERSON_FREE : QM_APP_FEE_PCT_IN_PERSON)
+          : (isFree ? QM_APP_FEE_PCT_ONLINE_FREE : QM_APP_FEE_PCT_ONLINE);
         const appFeeCents = Math.max(0, dollarsToCents(centsToDollars(paidCents) * (feePct / 100)));
         await firestore.doc(`squarePayments/${payment.id}`).set({
           userId,
@@ -10477,6 +10591,7 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
           amountCents: paidCents,
           appFeeCents,
           channel,
+          plan,
           currency: payment?.amount_money?.currency || 'AUD',
           paidAt: admin.firestore.FieldValue.serverTimestamp(),
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -10604,7 +10719,11 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
     {
       const paidCents = Number(payment?.amount_money?.amount) || 0;
       const channel: 'in_person' | 'online' = idx.source === 'in_app' ? 'in_person' : 'online';
-      const feePct = channel === 'in_person' ? QM_APP_FEE_PCT_IN_PERSON : QM_APP_FEE_PCT_ONLINE;
+      const plan = await getUserPlanServerSide(userId);
+      const isFree = plan === 'free';
+      const feePct = channel === 'in_person'
+        ? (isFree ? QM_APP_FEE_PCT_IN_PERSON_FREE : QM_APP_FEE_PCT_IN_PERSON)
+        : (isFree ? QM_APP_FEE_PCT_ONLINE_FREE : QM_APP_FEE_PCT_ONLINE);
       const appFeeCents = Math.max(0, dollarsToCents(centsToDollars(paidCents) * (feePct / 100)));
       await firestore.doc(`squarePayments/${payment.id}`).set({
         userId,
@@ -10614,6 +10733,7 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         amountCents: paidCents,
         appFeeCents,
         channel,
+        plan,
         currency: payment?.amount_money?.currency || 'AUD',
         paidAt: admin.firestore.FieldValue.serverTimestamp(),
         createdAt: admin.firestore.FieldValue.serverTimestamp(),

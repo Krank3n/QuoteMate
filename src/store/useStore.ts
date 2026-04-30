@@ -83,6 +83,18 @@ interface AppState {
   canCreateQuote: () => boolean;
   startTrialIfNeeded: () => Promise<void>;
   upgradeToProMock: () => Promise<void>;
+  /**
+   * Resolved tier: re-derives from `plan`/trial state at call time so an
+   * expired trial that hasn't yet been written back is reported as 'free'
+   * (without Square) or 'free' once Square is connected. Falls back to
+   * 'trial' when no subscription has loaded yet so first-render doesn't
+   * gate behaviour for new users.
+   */
+  getEffectivePlan: () => 'trial' | 'free' | 'pro';
+  /** True iff the trial window has elapsed and the user is not yet Pro. */
+  isTrialExpired: () => boolean;
+  /** Persist that the user closed the dashboard upgrade banner. */
+  dismissUpgradeBanner: () => Promise<void>;
 
   // Onboarding
   isOnboarded: boolean;
@@ -845,15 +857,18 @@ export const useStore = create<AppState>((set, get) => ({
           }
         }
       } else {
-        // Initialize subscription for first time
+        // Initialize subscription for first time. Plan defaults to 'trial'
+        // — startTrialIfNeeded() stamps trialStartedAt on the first quote.
         const newSubscription: SubscriptionStatus = {
           isPro: false,
+          plan: 'trial',
           quotesThisMonth: 0,
           currentPeriodStart: getMonthStart(),
           currentPeriodEnd: getMonthEnd(),
           freeQuotesLimit: 5,
           trialStartedAt: undefined,
           trialExpired: false,
+          dismissedUpgradeBanner: false,
         };
         await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(newSubscription));
         // Sync to Firestore if authenticated
@@ -890,19 +905,56 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   canCreateQuote: () => {
+    const plan = get().getEffectivePlan();
+    // Pro and free are both unlimited. Only 'trial' that has elapsed gates
+    // creation — that branch is handled by getEffectivePlan resolving to
+    // 'free' on its own once Square is connected; otherwise the dashboard
+    // shows the trial-expired modal before the user reaches a create button.
+    return plan === 'pro' || plan === 'free' || plan === 'trial';
+  },
+
+  getEffectivePlan: () => {
     const { subscriptionStatus } = get();
-    if (!subscriptionStatus) return true; // Allow if no status yet (trial not started)
-    if (subscriptionStatus.isPro) return true;
+    if (!subscriptionStatus) return 'trial';
+    if (subscriptionStatus.isPro || subscriptionStatus.plan === 'pro') return 'pro';
+    if (subscriptionStatus.plan === 'free') return 'free';
 
-    // If no trial started yet, allow (first quote will start the trial)
-    if (!subscriptionStatus.trialStartedAt) return true;
+    // Compute trial expiry on read so the moment the 7-day window elapses
+    // we report 'free' even if no save has happened yet.
+    if (subscriptionStatus.trialStartedAt) {
+      const trialStart = new Date(subscriptionStatus.trialStartedAt);
+      const trialMs = 7 * 24 * 60 * 60 * 1000;
+      if (Date.now() - trialStart.getTime() >= trialMs) return 'free';
+    }
+    return 'trial';
+  },
 
-    // Check if trial is still active (7 days)
+  isTrialExpired: () => {
+    const { subscriptionStatus } = get();
+    if (!subscriptionStatus) return false;
+    if (subscriptionStatus.isPro || subscriptionStatus.plan === 'pro') return false;
+    if (!subscriptionStatus.trialStartedAt) return false;
     const trialStart = new Date(subscriptionStatus.trialStartedAt);
-    const now = new Date();
-    const trialDays = 7;
-    const trialEnd = new Date(trialStart.getTime() + trialDays * 24 * 60 * 60 * 1000);
-    return now < trialEnd;
+    const trialMs = 7 * 24 * 60 * 60 * 1000;
+    return Date.now() - trialStart.getTime() >= trialMs;
+  },
+
+  dismissUpgradeBanner: async () => {
+    try {
+      const { subscriptionStatus } = get();
+      if (!subscriptionStatus) return;
+      const updated: SubscriptionStatus = {
+        ...subscriptionStatus,
+        dismissedUpgradeBanner: true,
+      };
+      await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updated));
+      set({ subscriptionStatus: updated });
+      if (auth.currentUser) {
+        firestoreService.saveSubscriptionStatus(updated).catch(() => {});
+      }
+    } catch (error) {
+      // silently ignore
+    }
   },
 
   // Start the trial period if not already started
@@ -916,6 +968,7 @@ export const useStore = create<AppState>((set, get) => ({
       const now = new Date();
       const updatedSubscription: SubscriptionStatus = {
         ...subscriptionStatus,
+        plan: 'trial',
         trialStartedAt: now,
       };
 
@@ -941,6 +994,7 @@ export const useStore = create<AppState>((set, get) => ({
       const updatedSubscription: SubscriptionStatus = {
         ...subscriptionStatus,
         isPro: true,
+        plan: 'pro',
       };
 
       await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updatedSubscription));

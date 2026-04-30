@@ -46,6 +46,44 @@ function normalizeQuoteStatus(status: any): Quote['status'] {
   }
 }
 
+/**
+ * Build a SubscriptionStatus from a raw Firestore snapshot, migrating legacy
+ * docs that predate the `plan` field. The Firestore field wins when present;
+ * otherwise we infer from isPro/trialStartedAt so users with old docs land in
+ * the right tier on their next load.
+ */
+function subscriptionFromSnapshotData(data: any): SubscriptionStatus {
+  const trialStartedAt = data.trialStartedAt
+    ? new Date(data.trialStartedAt.toDate ? data.trialStartedAt.toDate() : data.trialStartedAt)
+    : undefined;
+
+  let plan: SubscriptionStatus['plan'];
+  if (data.plan === 'trial' || data.plan === 'free' || data.plan === 'pro') {
+    plan = data.plan;
+  } else if (data.isPro) {
+    plan = 'pro';
+  } else if (trialStartedAt) {
+    const trialMs = 7 * 24 * 60 * 60 * 1000;
+    const elapsed = Date.now() - trialStartedAt.getTime();
+    plan = elapsed < trialMs ? 'trial' : 'free';
+  } else {
+    plan = 'trial';
+  }
+
+  return {
+    isPro: data.isPro,
+    plan,
+    quotesThisMonth: data.quotesThisMonth,
+    currentPeriodStart: new Date(data.currentPeriodStart),
+    currentPeriodEnd: new Date(data.currentPeriodEnd),
+    freeQuotesLimit: data.freeQuotesLimit,
+    trialStartedAt,
+    trialExpired: data.trialExpired || false,
+    dismissedUpgradeBanner: data.dismissedUpgradeBanner || false,
+    platformFeeBps: typeof data.platformFeeBps === 'number' ? data.platformFeeBps : undefined,
+  };
+}
+
 /** Recursively strip undefined values from an object (Firestore rejects them) */
 function stripUndefined(obj: any): any {
   if (obj === null || obj === undefined || typeof obj !== 'object') return obj;
@@ -394,12 +432,15 @@ class FirestoreService {
       const subscriptionRef = doc(db, 'users', userId, 'profile', 'subscription');
       await setDoc(subscriptionRef, {
         isPro: subscriptionStatus.isPro,
+        plan: subscriptionStatus.plan ?? null,
         quotesThisMonth: subscriptionStatus.quotesThisMonth,
         currentPeriodStart: subscriptionStatus.currentPeriodStart.toISOString(),
         currentPeriodEnd: subscriptionStatus.currentPeriodEnd.toISOString(),
         freeQuotesLimit: subscriptionStatus.freeQuotesLimit,
         trialStartedAt: subscriptionStatus.trialStartedAt ? new Date(subscriptionStatus.trialStartedAt).toISOString() : null,
         trialExpired: subscriptionStatus.trialExpired || false,
+        dismissedUpgradeBanner: subscriptionStatus.dismissedUpgradeBanner || false,
+        platformFeeBps: subscriptionStatus.platformFeeBps ?? null,
         syncedAt: new Date().toISOString(),
       });
     } catch (error) {
@@ -421,16 +462,7 @@ class FirestoreService {
       const snapshot = await getDoc(subscriptionRef);
 
       if (snapshot.exists()) {
-        const data = snapshot.data();
-        return {
-          isPro: data.isPro,
-          quotesThisMonth: data.quotesThisMonth,
-          currentPeriodStart: new Date(data.currentPeriodStart),
-          currentPeriodEnd: new Date(data.currentPeriodEnd),
-          freeQuotesLimit: data.freeQuotesLimit,
-          trialStartedAt: data.trialStartedAt ? new Date(data.trialStartedAt.toDate ? data.trialStartedAt.toDate() : data.trialStartedAt) : undefined,
-          trialExpired: data.trialExpired || false,
-        };
+        return subscriptionFromSnapshotData(snapshot.data());
       }
 
       return null;
@@ -548,16 +580,7 @@ class FirestoreService {
 
       this.subscriptionUnsubscribe = onSnapshot(subscriptionRef, (snapshot) => {
         if (snapshot.exists()) {
-          const data = snapshot.data();
-          callback({
-            isPro: data.isPro,
-            quotesThisMonth: data.quotesThisMonth,
-            currentPeriodStart: new Date(data.currentPeriodStart),
-            currentPeriodEnd: new Date(data.currentPeriodEnd),
-            freeQuotesLimit: data.freeQuotesLimit,
-            trialStartedAt: data.trialStartedAt ? new Date(data.trialStartedAt.toDate ? data.trialStartedAt.toDate() : data.trialStartedAt) : undefined,
-            trialExpired: data.trialExpired || false,
-          });
+          callback(subscriptionFromSnapshotData(snapshot.data()));
         } else {
           callback(null);
         }

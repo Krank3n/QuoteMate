@@ -141,68 +141,110 @@ export function generateMaterialsHTML(
 }
 
 /**
- * Generate HTML for payment methods section
+ * Generate HTML for the Square "Pay Now" block. Rendered above the rest of
+ * the payment methods when a hosted-checkout URL is available. The plain-text
+ * URL underneath the styled button is the printed-PDF fallback so paper-mail
+ * recipients can still type the link in.
  */
-export function generatePaymentMethodsHTML(pm: any): string {
-  if (!pm?.showOnDocuments) return '';
+function generateSquarePayNowHTML(url: string): string {
+  return `
+    <div class="payment-method square-pay-now">
+      <strong>Pay Online</strong><br>
+      <a href="${url}" class="square-pay-button" style="display: inline-block; margin-top: 6px; padding: 10px 18px; background: #006AFF; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 700;">
+        Pay with Square
+      </a>
+      <div style="margin-top: 6px; font-size: 11px; color: #555;">${url}</div>
+    </div>
+  `;
+}
+
+/**
+ * Generate HTML for payment methods section.
+ *
+ * On the free plan, only the Square "Pay Now" block renders — bank /
+ * PayID / BPAY / PayPal / other are intentionally suppressed so every paid
+ * quote funnels through Square (where the platform fee is collected).
+ */
+export function generatePaymentMethodsHTML(
+  pm: any,
+  options?: { plan?: 'trial' | 'free' | 'pro'; squarePaymentLinkUrl?: string }
+): string {
+  const plan = options?.plan;
+  const squareUrl = options?.squarePaymentLinkUrl;
+  const isFree = plan === 'free';
+
+  // showOnDocuments is the user's "render the payment-methods section" toggle.
+  // For free-tier docs we always need to render the Square block (that's how
+  // the platform fee is collected), even if the user hasn't enabled the
+  // section — so we override the toggle when on free + a Square link exists.
+  if (!pm?.showOnDocuments && !(isFree && squareUrl)) return '';
 
   const sections: string[] = [];
 
-  // Bank Transfer - check enabled and has at least one field with data
-  const bankHasData = pm.bankAccount?.accountName || pm.bankAccount?.bsb || pm.bankAccount?.accountNumber;
-  if (pm.bankAccount?.enabled && bankHasData) {
-    sections.push(`
-      <div class="payment-method">
-        <strong>Bank Transfer</strong><br>
-        ${pm.bankAccount.accountName ? `Account Name: ${pm.bankAccount.accountName}<br>` : ''}
-        ${pm.bankAccount.bsb ? `BSB: ${pm.bankAccount.bsb}<br>` : ''}
-        ${pm.bankAccount.accountNumber ? `Account: ${pm.bankAccount.accountNumber}` : ''}
-      </div>
-    `);
+  // Square Pay Now — rendered first (priority placement) so the customer
+  // sees the online-payment CTA before bank/PayID/etc.
+  if (squareUrl) {
+    sections.push(generateSquarePayNowHTML(squareUrl));
   }
 
-  // PayID - check enabled and has value
-  if (pm.payId?.enabled && pm.payId?.payIdValue) {
-    const payIdLabel = pm.payId.payIdType === 'phone' ? 'Phone' :
-                       pm.payId.payIdType === 'email' ? 'Email' : 'ABN';
-    sections.push(`
-      <div class="payment-method">
-        <strong>PayID</strong><br>
-        ${payIdLabel}: ${pm.payId.payIdValue}
-      </div>
-    `);
-  }
+  // The remaining methods are Pro-only; suppressed on the free plan.
+  if (!isFree) {
+    // Bank Transfer - check enabled and has at least one field with data
+    const bankHasData = pm.bankAccount?.accountName || pm.bankAccount?.bsb || pm.bankAccount?.accountNumber;
+    if (pm.bankAccount?.enabled && bankHasData) {
+      sections.push(`
+        <div class="payment-method">
+          <strong>Bank Transfer</strong><br>
+          ${pm.bankAccount.accountName ? `Account Name: ${pm.bankAccount.accountName}<br>` : ''}
+          ${pm.bankAccount.bsb ? `BSB: ${pm.bankAccount.bsb}<br>` : ''}
+          ${pm.bankAccount.accountNumber ? `Account: ${pm.bankAccount.accountNumber}` : ''}
+        </div>
+      `);
+    }
 
-  // BPAY - check enabled and has at least one field with data
-  const bpayHasData = pm.bpay?.billerCode || pm.bpay?.referenceNumber;
-  if (pm.bpay?.enabled && bpayHasData) {
-    sections.push(`
-      <div class="payment-method">
-        <strong>BPAY</strong><br>
-        ${pm.bpay.billerCode ? `Biller Code: ${pm.bpay.billerCode}<br>` : ''}
-        ${pm.bpay.referenceNumber ? `Reference: ${pm.bpay.referenceNumber}` : ''}
-      </div>
-    `);
-  }
+    // PayID - check enabled and has value
+    if (pm.payId?.enabled && pm.payId?.payIdValue) {
+      const payIdLabel = pm.payId.payIdType === 'phone' ? 'Phone' :
+                         pm.payId.payIdType === 'email' ? 'Email' : 'ABN';
+      sections.push(`
+        <div class="payment-method">
+          <strong>PayID</strong><br>
+          ${payIdLabel}: ${pm.payId.payIdValue}
+        </div>
+      `);
+    }
 
-  // PayPal - check enabled and has email
-  if (pm.paypal?.enabled && pm.paypal?.email) {
-    sections.push(`
-      <div class="payment-method">
-        <strong>PayPal</strong><br>
-        ${pm.paypal.email}
-      </div>
-    `);
-  }
+    // BPAY - check enabled and has at least one field with data
+    const bpayHasData = pm.bpay?.billerCode || pm.bpay?.referenceNumber;
+    if (pm.bpay?.enabled && bpayHasData) {
+      sections.push(`
+        <div class="payment-method">
+          <strong>BPAY</strong><br>
+          ${pm.bpay.billerCode ? `Biller Code: ${pm.bpay.billerCode}<br>` : ''}
+          ${pm.bpay.referenceNumber ? `Reference: ${pm.bpay.referenceNumber}` : ''}
+        </div>
+      `);
+    }
 
-  // Other Instructions - check enabled and has instructions
-  if (pm.other?.enabled && pm.other?.instructions) {
-    sections.push(`
-      <div class="payment-method">
-        <strong>Other Payment Options</strong><br>
-        ${pm.other.instructions.replace(/\n/g, '<br>')}
-      </div>
-    `);
+    // PayPal - check enabled and has email
+    if (pm.paypal?.enabled && pm.paypal?.email) {
+      sections.push(`
+        <div class="payment-method">
+          <strong>PayPal</strong><br>
+          ${pm.paypal.email}
+        </div>
+      `);
+    }
+
+    // Other Instructions - check enabled and has instructions
+    if (pm.other?.enabled && pm.other?.instructions) {
+      sections.push(`
+        <div class="payment-method">
+          <strong>Other Payment Options</strong><br>
+          ${pm.other.instructions.replace(/\n/g, '<br>')}
+        </div>
+      `);
+    }
   }
 
   if (sections.length === 0) return '';
@@ -422,7 +464,7 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
 
       ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${quote.notes}</p></div>` : ''}
 
-      ${generatePaymentMethodsHTML(quote.paymentMethods)}
+      ${generatePaymentMethodsHTML(quote.paymentMethods, { plan: quote.plan, squarePaymentLinkUrl: quote.squarePaymentLinkUrl })}
 
       <div style="margin-top: 40px; font-size: 12px; color: #666666;">
         <p>This quote is valid for 30 days from the date of issue.</p>
@@ -518,7 +560,7 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
         ${invoice.invoiceNumber ? `<p>Please reference invoice number ${invoice.invoiceNumber} with your payment.</p>` : ''}
       </div>
 
-      ${generatePaymentMethodsHTML(invoice.paymentMethods)}
+      ${generatePaymentMethodsHTML(invoice.paymentMethods, { plan: invoice.plan, squarePaymentLinkUrl: invoice.squarePaymentLinkUrl })}
 
       <div style="margin-top: 40px; font-size: 12px; color: #666666;">
         <p>Payment is due by ${invoice.dueDate}.</p>

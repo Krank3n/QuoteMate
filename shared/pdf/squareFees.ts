@@ -16,15 +16,23 @@
  *  - QuoteMate's cut is a business decision, not a per-tenant setting.
  */
 
-/** Our platform cut on online hosted-checkout payments. */
+/**
+ * Our platform cut on online hosted-checkout payments. Pro users pay 1%; free
+ * users pay 2.5% — the elevated rate is the freemium model's revenue source
+ * and the headline pitch for the Pro upgrade ("drop the platform fee from
+ * 2.5% to 1%"). Tier resolution is server-side: see `getUserPlanServerSide`.
+ */
 export const QM_APP_FEE_PCT_ONLINE = 1.0;
+export const QM_APP_FEE_PCT_ONLINE_FREE = 2.5;
 
 /**
- * Our platform cut on in-person Tap-to-Pay payments. Slightly higher because
- * Square's in-person rate is lower than their online rate, so the combined
- * cost of acceptance still sits under the 2.9% passthrough.
+ * Our platform cut on in-person Tap-to-Pay payments. Slightly higher than
+ * online because Square's in-person rate is lower than their online rate, so
+ * the combined cost of acceptance still sits under the 2.9% passthrough.
+ * Free-tier in-person matches free-tier online (2.5%) for simplicity.
  */
 export const QM_APP_FEE_PCT_IN_PERSON = 1.5;
+export const QM_APP_FEE_PCT_IN_PERSON_FREE = 2.5;
 
 /**
  * Surcharge added to the customer-facing price when surchargePaymentFees is

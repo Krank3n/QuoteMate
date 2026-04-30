@@ -12,6 +12,7 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { Alert, Share, Linking, Platform } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { format } from 'date-fns';
 
 import { Quote, Invoice, BusinessSettings } from '../types';
@@ -20,6 +21,7 @@ import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
+import { ensureCanDeliver } from '../utils/quoteDeliveryGuard';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
 import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
 import {
@@ -42,6 +44,7 @@ export function SendDocumentDialog({
   doc,
   businessSettings,
 }: SendDocumentDialogProps) {
+  const navigation = useNavigation<any>();
   const isInvoice = doc.type === 'invoice';
   const quote: Quote = useMemo(() => documentToQuote(doc), [doc]);
   const invoice: Invoice = useMemo(() => documentToInvoice(doc), [doc]);
@@ -125,7 +128,48 @@ export function SendDocumentDialog({
     onDismiss();
   };
 
+  /**
+   * Free-tier delivery gate. Returns true when the caller can proceed.
+   * On failure, prompts the user to Connect Square (or upgrade) and dismisses
+   * the send dialog. Pro / trial users always pass without a network round-trip.
+   */
+  const passesDeliveryGate = async (): Promise<boolean> => {
+    const gate = await ensureCanDeliver(
+      isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: quote }
+    );
+    if (gate.ok) return true;
+    setActionSheetVisible(false);
+    Alert.alert(
+      gate.reason === 'connect_square' ? 'Connect Square to send' : 'Square link unavailable',
+      gate.message,
+      [
+        { text: 'Not now', style: 'cancel', onPress: onDismiss },
+        gate.reason === 'connect_square'
+          ? {
+              text: 'Connect Square',
+              onPress: () => {
+                onDismiss();
+                navigation.navigate('SquareIntegration' as never);
+              },
+            }
+          : {
+              text: 'Try again',
+              onPress: () => {},
+            },
+        {
+          text: 'Upgrade to Pro',
+          onPress: () => {
+            onDismiss();
+            navigation.navigate('Paywall' as never);
+          },
+        },
+      ]
+    );
+    return false;
+  };
+
   const handleEmailOption = async () => {
+    if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
     if (emailHandler.draftBody) {
       setEmailBody(emailHandler.draftBody);
@@ -175,6 +219,7 @@ export function SendDocumentDialog({
   };
 
   const handleSendSMS = async () => {
+    if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
     const message = isInvoice
       ? `Hi ${invoice.customerName}, your invoice from ${businessSettings?.businessName || 'us'} for ${invoice.job.name} is ready. Total: ${formatCurrency(invoice.total)}. Payment due: ${format(new Date(invoice.dueDate), 'dd MMM yyyy')}. Thank you!`
@@ -192,6 +237,7 @@ export function SendDocumentDialog({
   };
 
   const handleShareFromDialog = async () => {
+    if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
     try {
       const message = isInvoice
@@ -205,6 +251,7 @@ export function SendDocumentDialog({
   };
 
   const handleExportFromDialog = async () => {
+    if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
     try {
       await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
