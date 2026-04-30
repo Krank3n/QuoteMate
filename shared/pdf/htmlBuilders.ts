@@ -12,6 +12,15 @@ const escapeHtml = (s: string) =>
 
 const formatMultiline = (s: string) => escapeHtml(s).replace(/\n/g, '<br>');
 
+const roundCents = (n: number) => Math.round(n * 100) / 100;
+
+// Materials subtotals must equal the eyeball sum of the rounded line totals
+// the customer sees in the table. Multiplying the pre-rounded subtotal by the
+// markup multiplier and rounding once produces a different value when each
+// line is rounded individually first.
+const sumRoundedLineTotals = (materials: PdfMaterial[], multiplier: number) =>
+  materials.reduce((sum, m) => sum + roundCents(m.totalPrice * multiplier), 0);
+
 /**
  * Render the T&Cs section at the end of a quote/invoice PDF. Preserves
  * paragraph breaks by splitting on blank lines and wrapping each in <p>.
@@ -39,7 +48,6 @@ export function buildTermsHTML(terms: string | undefined): string {
 export function generateMaterialsHTML(
   materials: PdfMaterial[],
   groupBySection: boolean,
-  materialsSubtotal: number,
   markupPercent: number = 0,
 ): string {
   if (materials.length === 0) {
@@ -47,7 +55,7 @@ export function generateMaterialsHTML(
   }
 
   const multiplier = markupPercent > 0 ? (1 + markupPercent / 100) : 1;
-  const displaySubtotal = materialsSubtotal * multiplier;
+  const displaySubtotal = sumRoundedLineTotals(materials, multiplier);
 
   const tableHeader = `
     <thead>
@@ -101,7 +109,7 @@ export function generateMaterialsHTML(
   let html = '';
   sortedKeys.forEach(key => {
     const sectionMaterials = grouped.get(key)!;
-    const sectionTotal = sectionMaterials.reduce((sum, m) => sum + m.totalPrice, 0) * multiplier;
+    const sectionTotal = sumRoundedLineTotals(sectionMaterials, multiplier);
     const sectionName = key || 'Other';
 
     html += `
@@ -301,9 +309,16 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   const rollMarkup = data.showMarkup !== true;
   const materialMul = rollMarkup ? 1 + ((data.markup || 0) / 100) : 1;
   const laborMul = rollMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
-  const displayMaterialsSubtotal = data.materialsSubtotal * materialMul;
+  // Match the eyeball sum of rounded line totals shown in the materials table.
+  const displayMaterialsSubtotal = sumRoundedLineTotals(data.materials, materialMul);
   const displayLaborTotal = data.laborTotal * laborMul;
   const displaySubtotal = displayMaterialsSubtotal + displayLaborTotal;
+  const inclusive = data.pricesIncludeGst === true;
+  // Under exclusive mode the GST line is *added* to reach the total, so it
+  // sits above the divider as a separate addend. Under inclusive mode it's
+  // disclosure only — shown beneath the line items, not added to anything.
+  const subtotalLabel = inclusive ? 'Subtotal' : 'Subtotal (ex GST)';
+  const gstLabel = inclusive ? 'Includes GST' : 'GST (10%)';
 
   return `
       <div class="summary">
@@ -316,7 +331,7 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
           <span>${formatCurrency(displayLaborTotal)}</span>
         </div>
         <div class="summary-row">
-          <span>Subtotal</span>
+          <span>${subtotalLabel}</span>
           <span>${formatCurrency(displaySubtotal)}</span>
         </div>
         ${!rollMarkup && data.markupAmount > 0 ? `
@@ -332,7 +347,7 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
         </div>
         ` : ''}
         <div class="summary-row">
-          <span>GST (10%)</span>
+          <span>${gstLabel}</span>
           <span>${formatCurrency(data.gst)}</span>
         </div>
         ${depositCredit && depositCredit > 0 ? `
@@ -413,7 +428,7 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
 
       <div class="section-wrapper">
         <h3>Materials</h3>
-        ${generateMaterialsHTML(quote.materials, quote.groupMaterialsBySection === true, quote.materialsSubtotal, rollMarkup ? quote.markup : 0)}
+        ${generateMaterialsHTML(quote.materials, quote.groupMaterialsBySection === true, rollMarkup ? quote.markup : 0)}
       </div>
 
       ${buildLaborHTML(quote)}
@@ -502,7 +517,7 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
 
       <div class="section-wrapper">
         <h3>Materials</h3>
-        ${generateMaterialsHTML(invoice.materials, invoice.groupMaterialsBySection === true, invoice.materialsSubtotal, rollMarkup ? invoice.markup : 0)}
+        ${generateMaterialsHTML(invoice.materials, invoice.groupMaterialsBySection === true, rollMarkup ? invoice.markup : 0)}
       </div>
 
       ${buildLaborHTML(invoice)}

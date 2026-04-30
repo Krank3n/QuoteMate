@@ -26,7 +26,7 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { checkSquareConnection } from '../../services/squareService';
-import { DEFAULT_AU_TRADIE_TERMS, hashTerms } from '../../../shared/pdf/terms/defaultAuTradie';
+import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 import { PASSTHROUGH_SURCHARGE_PCT } from '../../../shared/pdf/squareFees';
 
 export function BusinessDefaultsScreen() {
@@ -40,6 +40,7 @@ export function BusinessDefaultsScreen() {
   const [requireDepositByDefault, setRequireDepositByDefault] = useState(false);
   const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
   const [surchargePaymentFees, setSurchargePaymentFees] = useState(false);
+  const [pricesIncludeGst, setPricesIncludeGst] = useState(false);
   const [termsAndConditions, setTermsAndConditions] = useState('');
 
   const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
@@ -57,6 +58,7 @@ export function BusinessDefaultsScreen() {
     const rd = businessSettings.requireDepositByDefault === true;
     const tm = businessSettings.transportMarkupEnabled !== false;
     const sf = businessSettings.surchargePaymentFees === true;
+    const pig = businessSettings.pricesIncludeGst === true;
     const tc = businessSettings.termsAndConditions ?? '';
 
     setLaborRate(lr);
@@ -66,9 +68,10 @@ export function BusinessDefaultsScreen() {
     setRequireDepositByDefault(rd);
     setTransportMarkupEnabled(tm);
     setSurchargePaymentFees(sf);
+    setPricesIncludeGst(pig);
     setTermsAndConditions(tc);
 
-    initialSnapshotRef.current = JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, tc });
+    initialSnapshotRef.current = JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, tc });
   }, [businessSettings]);
 
   // Re-check on focus so the deposit + surcharge toggles unlock the moment
@@ -93,12 +96,13 @@ export function BusinessDefaultsScreen() {
       rd: requireDepositByDefault,
       tm: transportMarkupEnabled,
       sf: surchargePaymentFees,
+      pig: pricesIncludeGst,
       tc: termsAndConditions,
     });
     return current !== initialSnapshotRef.current;
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
-    transportMarkupEnabled, surchargePaymentFees, termsAndConditions,
+    transportMarkupEnabled, surchargePaymentFees, pricesIncludeGst, termsAndConditions,
   ]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
@@ -121,6 +125,7 @@ export function BusinessDefaultsScreen() {
         requireDepositByDefault,
         transportMarkupEnabled,
         surchargePaymentFees,
+        pricesIncludeGst,
         termsAndConditions: termsAndConditions.trim() || undefined,
         termsUpdatedAt:
           termsAndConditions !== (businessSettings?.termsAndConditions ?? '')
@@ -196,6 +201,31 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={transportMarkupEnabled}
                 onValueChange={setTransportMarkupEnabled}
+                color={colors.primary}
+              />
+            </View>
+
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Prices include GST</Text>
+                <Text style={styles.toggleDescription}>
+                  {pricesIncludeGst
+                    ? 'Prices you enter are inc-GST. The quote shows GST as a 1/11 disclosure.'
+                    : 'Prices you enter are ex-GST. The quote adds 10% GST to the total.'}
+                </Text>
+              </View>
+              <Switch
+                value={pricesIncludeGst}
+                onValueChange={(next) => {
+                  setPricesIncludeGst(next);
+                  // Keep the starter T&C's GST line in sync when toggling —
+                  // but only if the tradie hasn't hand-edited the template.
+                  // If they've customised the wording we leave it alone so
+                  // we don't clobber their changes.
+                  if (isUnmodifiedStarterTerms(termsAndConditions)) {
+                    setTermsAndConditions(defaultAuTradieTerms(next));
+                  }
+                }}
                 color={colors.primary}
               />
             </View>
@@ -312,7 +342,7 @@ export function BusinessDefaultsScreen() {
                   <Button
                     mode="text"
                     compact
-                    onPress={() => setTermsAndConditions(DEFAULT_AU_TRADIE_TERMS)}
+                    onPress={() => setTermsAndConditions(defaultAuTradieTerms(pricesIncludeGst))}
                   >
                     Reset to starter
                   </Button>
@@ -326,7 +356,7 @@ export function BusinessDefaultsScreen() {
                 <Button
                   mode="contained-tonal"
                   icon="file-document-plus"
-                  onPress={() => setTermsAndConditions(DEFAULT_AU_TRADIE_TERMS)}
+                  onPress={() => setTermsAndConditions(defaultAuTradieTerms(pricesIncludeGst))}
                 >
                   Use starter template
                 </Button>

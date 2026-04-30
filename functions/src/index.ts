@@ -54,7 +54,7 @@ admin.initializeApp();
 
 // When markup is hidden from the customer, the visible line items must still
 // reconcile to the final total. Inflate materials and labor by their respective
-// markup so Materials + Labour + GST = Total.
+// markup so Materials + Labour = Total (GST is inclusive in the line totals).
 function applyHideMarkupForDisplay(q: any) {
   const matMarkup = Number(q.markup) || 0;
   const laborMarkup = Number(q.laborMarkup ?? q.markup) || 0;
@@ -1883,7 +1883,7 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
     if (!decodedToken) return;
 
     try {
-      const { items } = req.body as {
+      const { items, jobName, jobDescription } = req.body as {
         items: Array<{
           id: string;
           name: string;
@@ -1898,6 +1898,8 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
             description?: string;
           }>;
         }>;
+        jobName?: string;
+        jobDescription?: string;
       };
 
       if (!Array.isArray(items) || items.length === 0) {
@@ -1915,29 +1917,41 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
         return;
       }
 
+      const jobContextBlock = (jobName || jobDescription)
+        ? `JOB CONTEXT — use this to sanity-check that each chosen candidate makes sense for the job. A toilet suite for a kitchen-sink job, or a retaining-wall post for a deck-screw job, is a category mismatch and must be REJECTED, not applied.
+Job: ${jobName || '(unnamed)'}
+Description: ${jobDescription || '(none provided)'}
+
+`
+        : '';
+
       const prompt = `You are a pricing assistant for an Australian tradie quoting tool. For each material row, the tradie has stated their individual-unit requirement (e.g. "600 each nails", "150 m tape", "40 m² paint coverage") and the price-search has returned a RANKED LIST of candidate products (most likely first).
 
-Your job has two parts:
-1. Pick the candidate that best matches the requirement (chosenIndex into the candidates array, 0-based). If NONE of the candidates are the right product category, reject the whole row.
+${jobContextBlock}Your job has two parts:
+1. Pick the candidate that best matches the requirement (chosenIndex into the candidates array, 0-based). If NONE of the candidates are the right product category, REJECT the row — do not estimate, do not apply a wrong-category candidate.
 2. For the chosen candidate, work out how many ACTUAL PURCHASES the tradie should buy, and the resulting total price. Use your general knowledge of Australian hardware and trade products.
 
-DECISION HIERARCHY — strongly prefer "apply" over "estimate" over "reject". The order matters: a real Bunnings candidate at the right price is ALWAYS more useful than your best guess, even when the candidate isn't a perfect match.
+DECISION HIERARCHY:
+1. CATEGORY GATE first — if the candidate isn't in the same product category as the requirement, it cannot be applied. A "kitchen sink" requirement and a "toilet suite" candidate are NOT the same category, even if both are plumbing. A "deck screw" requirement and a "retaining-wall post" candidate are NOT the same category, even if both are timber/outdoor. Examples of category-compatible vs not:
+   - ✅ Same category: kitchen sink ↔ kitchen sink (any brand/size); decking screws ↔ deck/timber screws; cup-head bolt M12 ↔ cup-head bolt M10; flexible water hose ↔ flexible water hose.
+   - ❌ Different category: kitchen sink ↔ toilet suite; deck screws ↔ deck boards; gas hose ↔ water tap; tile adhesive ↔ tile grout.
+2. Within the right category, prefer "apply" — different brand, slightly different size, alternative material is fine. An apply on an imperfect-but-same-category match is better than an estimate.
+3. Use "estimate" only when every candidate is the wrong category but you have a confident general-knowledge price.
+4. Use "reject" when every candidate is the wrong category AND the price is uncertain, OR when the only same-category candidate is implausibly priced (see PRICE SANITY below).
 
 For each item, return one of three decisions:
-- "apply" — pick this whenever ANY candidate could reasonably fulfil the requirement. This includes imperfect matches: different brand, slightly different size, alternative material, generic vs branded. Examples of valid applies:
+- "apply" — the chosen candidate is in the SAME product category as the requirement (see CATEGORY GATE above) and the price is plausible. Imperfect matches within the same category are encouraged. Examples of valid applies:
   - Exact: "600 nails" + candidates [(1kg tub @ $13.90)] → 340 nails per tub, buy 2, total $27.80, confidence='high'.
   - Brand substitute: "Eco Deck composite fascia" + candidates include [(Ekodeck fascia 5.4m), (PermaTimber fascia 5.4m)] → apply the closest; confidence='medium'.
   - Spec substitute: "Cup Head Bolt M12 x 150mm" + candidates include [(Cup Head Bolt M12 x 120mm), (Cup Head Bolt M10 x 150mm)] → apply the closest size; confidence='medium'.
   - Length substitute: "Decking screws 50mm" + candidates include [(Decking screws 65mm box of 500)] → apply, confidence='medium'.
-  - Functional substitute: "Composite fascia 50m" + candidates include [(PVC trim 5.4m), (Modwood fascia 5.4m)] → apply Modwood (closer fit), or PVC trim if it's the only option; confidence='medium'.
-  An apply on an imperfect match is BETTER than an estimate, because the tradie can see the actual product and decide whether to swap.
-- "estimate" — ONLY when EVERY candidate is the wrong category (e.g. all candidates are decking boards when the requirement is decking screws, or all are retaining-wall posts when the requirement is post stirrups). In that case, return a reasonable per-purchase price from general AU pricing knowledge so the row isn't $0. Examples:
+- "estimate" — every candidate is the wrong category, but you can give a confident AU-market price from general knowledge so the row isn't $0. Examples:
   - "Eco Deck Starter Clips" + candidates all decking boards → estimate ~$12 per 15-pack, confidence='low'.
   - "Composite Fascia Screws" + candidates all unrelated boards → estimate ~$25 per 100-pack, confidence='low'.
-  Always include a reasoning that flags it as an estimate (e.g. "All candidates were boards, not screws; estimate based on typical AU pricing — verify with supplier").
-- "reject" — last resort, only when ALL candidates are wrong AND you have no general-knowledge price for the product (genuinely unknown specialty item).
+  Always flag it as an estimate in the reasoning ("All candidates were boards, not screws; estimate based on typical AU pricing — verify with supplier").
+- "reject" — every candidate is the wrong category AND you have no confident price, OR every same-category candidate is implausibly priced. Set rejectReason explaining the mismatch (e.g. "Job is a kitchen sink replacement but all candidates were toilet suites").
 
-CRITICAL — if a candidate is in the right product category but a different brand/size/spec, ALWAYS apply it. Do not estimate around real candidates. Reserve "estimate" for the situation where every candidate is in the wrong category.
+PRICE SANITY — before applying, check the candidate's per-purchase price against typical AU retail for the requirement. If the chosen candidate is more than ~3× a sensible price for that product (e.g. a $946 "kitchen sink" candidate when typical kitchen sinks are $150–$500, or a $400 "PTFE tape" candidate when tape is $5–$10), REJECT instead of applying. The job description above is your strongest signal of what "sensible" means for this row.
 
 CRITICAL — units must be compatible with the chosen candidate. If requirement is in "each" (count of items) but the product is sold by length/weight/volume, work out the conversion (nails per kg, screws per box, paint coverage per litre) using general knowledge. If you can't confidently convert, set confidence: "low" and explain in reasoning.
 
@@ -2735,30 +2749,31 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
       };
 
       if (searchData?.products && searchData.products.length > 0) {
-        const product = searchData.products[0];
-        // Pull the first unit of measure — that's the smallest sellable unit
-        // (e.g. "LEN" for a length of pipe). The order-gateway requires both
-        // the unit and the matching ex-GST price echoed back, so we surface
-        // them now rather than re-fetching at order time.
-        const uom = product.unitOfMeasures?.[0];
-
-        const imageUrl = extractReeceImageUrl(product);
-
-        res.status(200).json({
-          product: {
-            itemNumber: String(product.productId),
-            description: product.productTitle,
-            brand: product.brand,
-            category: product.category,
+        // Return up to 5 candidates so the reconciliation pass has options
+        // to pick the best fit / reject category mismatches. The first
+        // candidate is also surfaced as `product` for backward compat with
+        // callers that just want the top hit.
+        const mapped = searchData.products.slice(0, 5).map((p: any) => {
+          const uom = p.unitOfMeasures?.[0];
+          return {
+            itemNumber: String(p.productId),
+            description: p.productTitle,
+            brand: p.brand,
+            category: p.category,
             unitOfMeasure: uom?.pack || null,
             unitPriceExcludingGst: uom?.unitPriceExcludingGST ?? null,
             unitPriceIncludingGst: uom?.unitPriceIncludingGST ?? null,
-            imageUrl,
-          },
-          _debug: { ..._debug, imageExtracted: !!imageUrl, imageUrl },
+            imageUrl: extractReeceImageUrl(p),
+          };
+        });
+
+        res.status(200).json({
+          product: mapped[0],
+          products: mapped,
+          _debug: { ..._debug, imageExtracted: !!mapped[0].imageUrl, imageUrl: mapped[0].imageUrl },
         });
       } else {
-        res.status(200).json({ product: null, _debug });
+        res.status(200).json({ product: null, products: [], _debug });
       }
     } catch (error: any) {
       res.status(200).json({ product: null });
@@ -5412,9 +5427,9 @@ function generateAcceptancePage(token: string): string {
           '<div class="totals-row"><span>Materials</span><span>' + formatCurrency(quote.materialsSubtotal) + '</span></div>' +
           '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>' +
           ((quote.markupAmount || quote.travelAdjustmentAmount) ?
-            '<div class="totals-row"><span>Subtotal (ex GST)</span><span>' + formatCurrency(quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0)) + '</span></div>' :
-            '<div class="totals-row"><span>Subtotal</span><span>' + formatCurrency(quote.subtotal) + '</span></div>') +
-          '<div class="totals-row"><span>GST (10%)</span><span>' + formatCurrency(quote.gst) + '</span></div>' +
+            '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Subtotal' : 'Subtotal (ex GST)') + '</span><span>' + formatCurrency(quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0)) + '</span></div>' :
+            '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Subtotal' : 'Subtotal (ex GST)') + '</span><span>' + formatCurrency(quote.subtotal) + '</span></div>') +
+          '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Includes GST' : 'GST (10%)') + '</span><span>' + formatCurrency(quote.gst) + '</span></div>' +
           '<div class="totals-row total"><span>Total</span><span class="amount">' + formatCurrency(quote.total) + '</span></div>' +
         '</div>' +
 
@@ -8904,7 +8919,9 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
         Date: formatDate(invoice.issueDate),
         DueDate: formatDate(invoice.dueDate),
         Status: xeroStatus,
-        LineAmountTypes: 'Exclusive', // Amounts are ex-GST, Xero adds GST
+        // Tell Xero whether our UnitAmounts already include GST or not, so it
+        // applies the right tax treatment. Mirrors the doc's pricesIncludeGst.
+        LineAmountTypes: invoice.pricesIncludeGst === true ? 'Inclusive' : 'Exclusive',
         LineItems: lineItems,
         CurrencyCode: 'AUD',
       };

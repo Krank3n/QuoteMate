@@ -1200,7 +1200,10 @@ export interface ReconcileResult {
   rejectReason?: string;
 }
 
-export async function reconcilePricedMaterials(items: ReconcileItem[]): Promise<ReconcileResult[]> {
+export async function reconcilePricedMaterials(
+  items: ReconcileItem[],
+  jobContext?: { jobName?: string; jobDescription?: string },
+): Promise<ReconcileResult[]> {
   if (!items || items.length === 0) return [];
   const idToken = await auth.currentUser?.getIdToken();
   const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/reconcilePricedMaterials`, {
@@ -1209,7 +1212,11 @@ export async function reconcilePricedMaterials(items: ReconcileItem[]): Promise<
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${idToken}`,
     },
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({
+      items,
+      jobName: jobContext?.jobName,
+      jobDescription: jobContext?.jobDescription,
+    }),
   });
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));

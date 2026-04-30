@@ -37,7 +37,7 @@ import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
 import { Material, FavoriteProductMapping } from '../../types';
 import { colors } from '../../theme';
-import { formatCurrency } from '../../utils/quoteCalculator';
+import { formatCurrency, supplierPriceForGstMode } from '../../utils/quoteCalculator';
 import { ProBadge } from '../../components/ProBadge';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import {
@@ -1003,6 +1003,8 @@ export function AddMaterialScreen() {
 
   const handleSelectProduct = async (item: any) => {
     let newMaterial: Material;
+    const inclusive = currentQuote?.pricesIncludeGst === true;
+    const adjustedPrice = supplierPriceForGstMode(item.price || 0, inclusive);
 
     if (item.isAiEstimate) {
       newMaterial = {
@@ -1010,8 +1012,8 @@ export function AddMaterialScreen() {
         name: item.productName,
         quantity: 1,
         unit: 'each',
-        price: item.price || 0,
-        totalPrice: item.price || 0,
+        price: adjustedPrice,
+        totalPrice: adjustedPrice,
         manualPriceOverride: false,
         searchTerm: item.productName,
         pricingSource: 'ai',
@@ -1023,8 +1025,8 @@ export function AddMaterialScreen() {
         name: item.productName,
         quantity: 1,
         unit: (item.unit as Material['unit']) || 'each',
-        price: item.price || 0,
-        totalPrice: item.price || 0,
+        price: adjustedPrice,
+        totalPrice: adjustedPrice,
         manualPriceOverride: false,
         searchTerm: item.productName,
         pricingSource: 'manual',
@@ -1044,8 +1046,8 @@ export function AddMaterialScreen() {
         bunningsItemNumber: isReeceResult ? undefined : item.itemNumber,
         reeceItemNumber: isReeceResult ? item.reeceItemNumber : undefined,
         reeceUnitOfMeasure: isReeceResult ? (item.reeceUnitOfMeasure || undefined) : undefined,
-        price: item.price || 0,
-        totalPrice: item.price || 0,
+        price: adjustedPrice,
+        totalPrice: adjustedPrice,
         manualPriceOverride: false,
         searchTerm: item.productName,
         pricingSource: isReeceResult ? 'api' : 'scraper',
@@ -1074,8 +1076,8 @@ export function AddMaterialScreen() {
         quantity: 1,
         unit: 'each',
         bunningsItemNumber: item.itemNumber,
-        price: item.price || 0,
-        totalPrice: item.price || 0,
+        price: adjustedPrice,
+        totalPrice: adjustedPrice,
         manualPriceOverride: false,
         searchTerm: item.description,
         pricingSource: 'manual',
@@ -2217,6 +2219,9 @@ export function AddMaterialScreen() {
             // Adapt the saved favorite to the Material shape MaterialItemCard
             // expects so the Saved tab renders consistently with the main
             // materials list (and any future card improvements land here too).
+            const storeLower = (item.store || '').toLowerCase();
+            const isReeceItem = storeLower.includes('reece');
+            const isBunningsItem = storeLower.includes('bunnings');
             const synthetic: Material = {
               id: item.key,
               name: item.productName,
@@ -2230,7 +2235,8 @@ export function AddMaterialScreen() {
               productUrl: item.productUrl,
               description: item.notes || undefined,
               brand: item.brand || undefined,
-              bunningsItemNumber: item.isPersonalRate ? undefined : item.itemNumber,
+              bunningsItemNumber: !item.isPersonalRate && isBunningsItem ? item.itemNumber : undefined,
+              reeceItemNumber: !item.isPersonalRate && isReeceItem ? item.itemNumber : undefined,
               pricingSource: item.isPersonalRate ? 'manual' : 'scraper',
               favoriteProduct: item as FavoriteProductMapping,
             };

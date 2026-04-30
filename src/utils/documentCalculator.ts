@@ -17,6 +17,18 @@ export function roundToTwoDecimals(num: number): number {
   return Math.round(num * 100) / 100;
 }
 
+/**
+ * Reece, Bunnings, and the LLM pricing fallbacks all return GST-inclusive
+ * Australian retail prices. When the business is in exclusive (+GST) mode,
+ * the line item the tradie sees should be ex-GST so the totals row reads
+ * "Subtotal + 10% GST = Total" without double-counting. In inclusive mode
+ * we keep the price as-is.
+ */
+export function supplierPriceForGstMode(incGstPrice: number, pricesIncludeGst: boolean): number {
+  if (pricesIncludeGst) return incGstPrice;
+  return roundToTwoDecimals(incGstPrice / 1.1);
+}
+
 /** Format a number as Australian Dollars. */
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-AU', {
@@ -67,6 +79,7 @@ export function calculateDocumentTotals(
   sections?: QuoteSection[],
   laborMarkupPercent: number = 0,
   laborExtraHours: number = 0,
+  pricesIncludeGst: boolean = false,
 ): {
   materialsSubtotal: number;
   laborTotal: number;
@@ -86,8 +99,15 @@ export function calculateDocumentTotals(
   const markupAmount = materialMarkupAmount + laborMarkupAmount;
   const travelAdjustmentAmount = subtotal * (travelAdjustment / 100);
   const subtotalWithMarkup = subtotal + markupAmount + travelAdjustmentAmount;
-  const gst = subtotalWithMarkup * 0.1;
-  const total = subtotalWithMarkup + gst;
+  // Inclusive: line prices already include GST → total stays at subtotal,
+  // GST is extracted as 1/11 for tax-invoice disclosure.
+  // Exclusive: line prices are ex-GST → 10% GST is added on top.
+  const total = pricesIncludeGst
+    ? subtotalWithMarkup
+    : subtotalWithMarkup * 1.1;
+  const gst = pricesIncludeGst
+    ? total - total / 1.1
+    : subtotalWithMarkup * 0.1;
   return {
     materialsSubtotal: roundToTwoDecimals(materialsSubtotal),
     laborTotal: roundToTwoDecimals(laborTotal),
@@ -110,6 +130,7 @@ export function updateDocumentCalculations(doc: Document): Document {
     doc.sections,
     doc.laborMarkup ?? doc.markup ?? 0,
     doc.laborExtraHours ?? 0,
+    doc.pricesIncludeGst === true,
   );
   return {
     ...doc,

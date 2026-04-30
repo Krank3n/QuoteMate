@@ -37,10 +37,10 @@ import { useCurrentDocument, useDocumentMode, UnifiedDocument } from '../../util
 import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapping } from '../../types';
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
-import { formatCurrency, updateMaterialTotalPrice } from '../../utils/quoteCalculator';
+import { formatCurrency, updateMaterialTotalPrice, supplierPriceForGstMode } from '../../utils/quoteCalculator';
 import { parsePackInfo } from '../../utils/parsePackInfo';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
-import { searchReeceMaterialPrice, getReeceConnectionStatus } from '../../services/reeceApi';
+import { searchReeceMaterialPrice, searchReeceMaterialCandidates, getReeceConnectionStatus } from '../../services/reeceApi';
 import { shouldRunReeceFirst } from '../../services/supplierPriority';
 import { analyzeJobDescription, convertLLMMaterialsToMaterials, reconcilePricedMaterials } from '../../services/llmService';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
@@ -1172,7 +1172,7 @@ export function MaterialsListScreen() {
         }
         if (hits.length === 0) continue;
         const top = hits[0];
-        m.price = top.price;
+        m.price = supplierPriceForGstMode(top.price, currentQuote?.pricesIncludeGst === true);
         m.manualPriceOverride = false;
         m.pricingSource = 'manual';
         if (top.productUrl) m.productUrl = top.productUrl;
@@ -1193,6 +1193,11 @@ export function MaterialsListScreen() {
     // Bunnings is above Reece, this pass runs AFTER the Bunnings batch
     // below — we only ask Reece for items Bunnings missed.
     const reecePricedTerms = new Set<string>();
+    // Per-material candidate cache, keyed by material.id, used by the
+    // reconciliation pass once all price-fetch passes finish. Declared up
+    // here so the Reece pass (defined just below) can also push into it —
+    // otherwise Reece-priced rows skip reconciliation entirely.
+    const candidatesByMaterialId = new Map<string, ScraperProduct[]>();
     // overrideExisting: when Reece is the preferred supplier (pre-pass), we
     // upgrade items already priced by Bunnings/local — the user explicitly
     // ranked Reece higher, so a Bunnings price shouldn't block a Reece one.
@@ -1215,22 +1220,60 @@ export function MaterialsListScreen() {
         if (reecePricedTerms.has(term)) continue;
         if (eligibleTerms && !eligibleTerms.has(term)) continue;
 
-        let result;
+        // Surface what's being searched in the fetch modal so the user sees
+        // "Checking Reece for X" instead of a blank "Warming up the ute..."
+        setFetchingMaterialId(m.id);
+        setCurrentFetchingName(m.name);
+
+        let candidates;
         try {
-          result = await withCancel(searchReeceMaterialPrice(term));
+          candidates = await withCancel(searchReeceMaterialCandidates(term));
         } catch (err: any) {
           if (err?.message === '__FETCH_CANCELLED__') throw err;
+          setFetchedItemNames(prev => [...prev, { name: m.name, success: false }]);
           continue;
         }
-        if (result.reauthRequired) {
+        if (candidates[0]?.reauthRequired) {
           setReeceReauthNeeded(true);
           setReeceConnected(false);
           break;
         }
-        if (!result.price || !result.itemNumber) continue;
+        const result = candidates[0];
+        if (!result || !result.price || !result.itemNumber) {
+          setFetchedItemNames(prev => [...prev, { name: m.name, success: false }]);
+          continue;
+        }
 
-        m.price = result.price;
-        m.totalPrice = result.price * m.quantity;
+        // Preserve the original requirement so the reconciliation pass sees
+        // the user/AI's intent ("Kitchen Double Bowl Sink"), not the matched
+        // product name we're about to overwrite m.name with.
+        if (!m.searchTerm) m.searchTerm = m.name;
+
+        // Push every Reece candidate into the reconciliation cache, mapped
+        // into the ScraperProduct shape reconcile expects. Reconcile can then
+        // reject category mismatches (drainage fitting vs sink) or pick a
+        // better candidate from the same list.
+        candidatesByMaterialId.set(
+          m.id,
+          candidates
+            .filter(c => c.price != null && c.price > 0 && c.itemNumber)
+            .map(c => ({
+              productName: c.productName || '',
+              description: c.productName,
+              price: c.price as number,
+              priceIncGst: c.price as number,
+              unit: c.unitOfMeasure || 'each',
+              itemNumber: c.itemNumber as string,
+              stockLevel: 'unknown' as const,
+              productUrl: c.productUrl || '',
+              imageUrl: c.imageUrl || undefined,
+              confidence: 'medium' as const,
+            })),
+        );
+
+        const reecePrice = supplierPriceForGstMode(result.price, currentQuote?.pricesIncludeGst === true);
+        m.price = reecePrice;
+        m.totalPrice = reecePrice * m.quantity;
         m.manualPriceOverride = false;
         m.pricingSource = 'api';
         // Clear stale Bunnings-only state when upgrading to Reece.
@@ -1244,6 +1287,11 @@ export function MaterialsListScreen() {
         if (result.productUrl) m.productUrl = result.productUrl;
         fetchedCount++;
         reecePricedTerms.add(term);
+        setFetchedItemNames(prev => [...prev, { name: m.name, success: true }]);
+        setFetchProgress(prev => ({
+          current: Math.min(prev.current + 1, prev.total || materialsToFetch.length),
+          total: prev.total || materialsToFetch.length,
+        }));
         triggerPriceFlash(m.id);
       }
     };
@@ -1258,9 +1306,6 @@ export function MaterialsListScreen() {
       // batchResults now holds the full candidate list per term so the
       // reconciliation pass at the end can pick across alternatives.
       let batchResults: Map<string, ScraperProduct[]> | null = null;
-      // Per-material candidate cache, keyed by material.id, used by the
-      // reconciliation pass once the fetch loop finishes.
-      const candidatesByMaterialId = new Map<string, ScraperProduct[]>();
       const batchSucceededTerms = new Set<string>();
       // Skip terms we just filled from local sources or Reece — no point
       // asking the scraper for prices we already have.
@@ -1456,7 +1501,7 @@ export function MaterialsListScreen() {
             const product = candidates[0] || null;
 
             if (product && product.price > 0) {
-              material.price = product.price;
+              material.price = supplierPriceForGstMode(product.price, currentQuote?.pricesIncludeGst === true);
               material.manualPriceOverride = false;
               material.pricingSource = 'scraper';
 
@@ -1507,7 +1552,7 @@ export function MaterialsListScreen() {
             const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
             if (aiResult.price) {
-              material.price = aiResult.price;
+              material.price = supplierPriceForGstMode(aiResult.price, currentQuote?.pricesIncludeGst === true);
               material.manualPriceOverride = false;
               material.pricingSource = 'ai';
               material.priceConfidence = aiResult.confidence || 'medium';
@@ -1532,7 +1577,7 @@ export function MaterialsListScreen() {
           const result = await withCancel(searchReeceMaterialPrice(searchTerm));
 
           if (result.price) {
-            material.price = result.price;
+            material.price = supplierPriceForGstMode(result.price, currentQuote?.pricesIncludeGst === true);
             material.manualPriceOverride = false;
             material.pricingSource = 'api';
 
@@ -1663,7 +1708,7 @@ export function MaterialsListScreen() {
             const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
 
             if (aiResult.price) {
-              material.price = aiResult.price;
+              material.price = supplierPriceForGstMode(aiResult.price, currentQuote?.pricesIncludeGst === true);
               material.manualPriceOverride = false;
               material.pricingSource = 'ai';
               material.priceConfidence = aiResult.confidence || 'medium';
@@ -1742,9 +1787,12 @@ export function MaterialsListScreen() {
           })
           .map(m => {
             const cands = candidatesByMaterialId.get(m.id) || [];
+            // Use searchTerm for the requirement when available — the Reece
+            // path overwrites m.name with the matched product name, which
+            // would otherwise hide the original intent from reconcile.
             return {
               id: m.id,
-              name: m.name,
+              name: m.searchTerm || m.name,
               requirement: m.requiredQty ?? m.quantity,
               requirementUnit: (m.packUnit ?? m.unit) as string,
               candidates: cands.slice(0, 5).map(c => ({
@@ -1759,7 +1807,10 @@ export function MaterialsListScreen() {
         if (reconcileItems.length > 0) {
           try {
             setCurrentFetchingName('Reconciling pack sizes...');
-            const results = await reconcilePricedMaterials(reconcileItems);
+            const results = await reconcilePricedMaterials(reconcileItems, {
+              jobName: currentQuote?.job?.name,
+              jobDescription: currentQuote?.job?.description,
+            });
             const byId = new Map(results.map(r => [r.id, r]));
             for (const m of updatedMaterials) {
               const r = byId.get(m.id);
@@ -1786,11 +1837,15 @@ export function MaterialsListScreen() {
                 if (m.requiredQty === undefined) m.requiredQty = m.quantity;
                 m.quantity = r.purchaseCount;
                 if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
-                m.price = r.estimatedUnitPrice;
+                const estimatedUnit = supplierPriceForGstMode(
+                  r.estimatedUnitPrice,
+                  currentQuote?.pricesIncludeGst === true,
+                );
+                m.price = estimatedUnit;
                 m.totalPrice =
                   typeof r.totalPrice === 'number' && r.totalPrice > 0
-                    ? r.totalPrice
-                    : r.estimatedUnitPrice * r.purchaseCount;
+                    ? supplierPriceForGstMode(r.totalPrice, currentQuote?.pricesIncludeGst === true)
+                    : estimatedUnit * r.purchaseCount;
                 m.priceConfidence = 'low';
                 m.pricingSource = 'ai';
                 m.description = r.coverageNote || r.reasoning || 'Estimated — verify with supplier';
@@ -1813,14 +1868,25 @@ export function MaterialsListScreen() {
                 const idx = typeof r.chosenIndex === 'number' ? r.chosenIndex : 0;
                 const chosen = cands[idx];
                 if (chosen) {
-                  if (chosen.itemNumber) m.bunningsItemNumber = chosen.itemNumber;
+                  // Route the item number to the right field based on the
+                  // material's pricing source — Reece-priced rows already had
+                  // bunningsItemNumber cleared, so writing the chosen
+                  // candidate to bunningsItemNumber would mis-tag it.
+                  if (chosen.itemNumber) {
+                    if (m.pricingSource === 'api') {
+                      m.reeceItemNumber = chosen.itemNumber;
+                    } else {
+                      m.bunningsItemNumber = chosen.itemNumber;
+                    }
+                  }
                   if (chosen.productUrl) m.productUrl = chosen.productUrl;
                   if (chosen.imageUrl) m.imageUrl = chosen.imageUrl;
                   if (chosen.description) m.description = chosen.description;
                   if (
                     chosen.brand &&
                     chosen.brand.toLowerCase() !== 'bunnings' &&
-                    chosen.brand.toLowerCase() !== 'bunnings.com.au'
+                    chosen.brand.toLowerCase() !== 'bunnings.com.au' &&
+                    chosen.brand.toLowerCase() !== 'reece'
                   ) {
                     m.brand = chosen.brand;
                   }
@@ -1831,9 +1897,13 @@ export function MaterialsListScreen() {
                 m.quantity = r.purchaseCount;
                 if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
                 if (typeof r.totalPrice === 'number' && r.totalPrice > 0) {
-                  m.totalPrice = r.totalPrice;
+                  const adjustedTotal = supplierPriceForGstMode(
+                    r.totalPrice,
+                    currentQuote?.pricesIncludeGst === true,
+                  );
+                  m.totalPrice = adjustedTotal;
                   // Keep price as the per-purchase price so display stays consistent.
-                  m.price = r.totalPrice / r.purchaseCount;
+                  m.price = adjustedTotal / r.purchaseCount;
                 }
                 if (r.confidence) m.priceConfidence = r.confidence;
                 if (r.coverageNote) m.description = r.coverageNote;

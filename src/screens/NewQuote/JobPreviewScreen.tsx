@@ -437,13 +437,20 @@ export function JobPreviewScreen() {
   // the badge would stay stuck on the old quote number / placeholder.
   // Treat liveDoc as the source of truth for both.
   const liveIsInvoice = liveDoc?.type === 'invoice' || isInvoiceMode;
+  // Track the last liveDoc.number we synced into refNumber so we only react
+  // to *external* changes (e.g. Quote → Invoice convert). Without this the
+  // effect would also fire when the user types a custom number and blurs —
+  // refNumber would drift from liveDoc.number and get reverted.
+  const lastSyncedNumberRef = useRef<string | null>(null);
   useEffect(() => {
     if (isEditingNumber) return;
     const liveNumber = liveDoc?.number;
-    if (liveNumber && liveNumber !== refNumber) {
+    if (!liveNumber) return;
+    if (liveNumber !== lastSyncedNumberRef.current) {
+      lastSyncedNumberRef.current = liveNumber;
       setRefNumber(liveNumber);
     }
-  }, [liveDoc?.number, isEditingNumber, refNumber]);
+  }, [liveDoc?.number, isEditingNumber]);
 
   const handleViewPDF = async () => {
     if (!liveDoc) return;
@@ -705,6 +712,7 @@ export function JobPreviewScreen() {
             workingDoc.subtotal * ((workingDoc.travelAdjustment ?? 0) / 100)
           }
           travelAdjustmentPercent={workingDoc.travelAdjustment}
+          pricesIncludeGst={workingDoc.pricesIncludeGst === true}
         />
 
         <Surface style={documentStyles.section}>

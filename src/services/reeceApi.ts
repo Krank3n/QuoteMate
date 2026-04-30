@@ -135,46 +135,65 @@ export async function getReecePrice(itemNumber: string): Promise<number | null> 
 export async function searchReeceMaterialPrice(
   materialName: string,
 ): Promise<PriceSearchResult> {
+  const candidates = await searchReeceMaterialCandidates(materialName);
+  if (candidates.length === 0) return { price: null };
+  const top = candidates[0];
+  if (top.reauthRequired || top.notConnected) return top;
+  return top;
+}
+
+/**
+ * Top-N variant of searchReeceMaterialPrice. Returns up to 5 candidates so
+ * the reconciliation pass can pick the best match (or reject category
+ * mismatches like a drainage fitting being returned for a "kitchen sink"
+ * query). The reauth/notConnected flags ride on the first element so the
+ * caller can short-circuit.
+ */
+export async function searchReeceMaterialCandidates(
+  materialName: string,
+): Promise<PriceSearchResult[]> {
   try {
     const searchResponse = await authedFetch('searchReeceProduct', {
       body: { productName: materialName },
     });
-    if (!searchResponse.ok) return { price: null };
+    if (!searchResponse.ok) return [];
     const searchData = await searchResponse.json();
 
-    // Temporary: print the inline diagnostic to Metro so we can see what
-    // Reece returned for each query. Remove once coverage is dialed in.
     if (searchData._debug) {
       console.log('[reece search]', searchData._debug);
     }
 
     if (searchData.error === 'reece_reauth_required') {
-      return { price: null, reauthRequired: true };
+      return [{ price: null, reauthRequired: true }];
     }
     if (searchData.error === 'reece_not_connected') {
-      return { price: null, notConnected: true };
+      return [{ price: null, notConnected: true }];
     }
 
-    const product = searchData.product;
-    if (!product) return { price: null };
+    const products: any[] = Array.isArray(searchData.products)
+      ? searchData.products
+      : searchData.product
+        ? [searchData.product]
+        : [];
 
-    const price = product.unitPriceIncludingGst ?? product.unitPriceExcludingGst;
-    if (price == null) return { price: null };
-
-    return {
-      price,
-      productName: product.description,
-      store: 'Reece Plumbing',
-      itemNumber: product.itemNumber,
-      imageUrl: product.imageUrl ?? null,
-      // Reece's product detail URL needs a slug we don't have, so fall back to
-      // a search by item number — lands the user on the right product page.
-      productUrl: `https://www.reece.com.au/search?query=${encodeURIComponent(product.itemNumber)}`,
-      unitOfMeasure: product.unitOfMeasure || null,
-      unitPriceExcludingGst: product.unitPriceExcludingGst ?? null,
-    };
+    const results: PriceSearchResult[] = [];
+    for (const product of products) {
+      const price = product.unitPriceIncludingGst ?? product.unitPriceExcludingGst;
+      if (price == null) continue;
+      results.push({
+        price,
+        productName: product.description,
+        store: 'Reece Plumbing',
+        itemNumber: product.itemNumber,
+        imageUrl: product.imageUrl ?? null,
+        productUrl: `https://www.reece.com.au/search?query=${encodeURIComponent(product.itemNumber)}`,
+        unitOfMeasure: product.unitOfMeasure || null,
+        unitPriceExcludingGst: product.unitPriceExcludingGst ?? null,
+      });
+    }
+    return results;
   } catch {
-    return { price: null };
+    return [];
   }
 }
 

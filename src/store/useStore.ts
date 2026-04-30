@@ -367,6 +367,7 @@ export const useStore = create<AppState>((set, get) => ({
       subtotal: 0,
       gst: 0,
       total: 0,
+      pricesIncludeGst: businessSettings?.pricesIncludeGst === true,
       status: 'draft',
     };
 
@@ -1157,6 +1158,7 @@ export const useStore = create<AppState>((set, get) => ({
       subtotal: 0,
       gst: 0,
       total: 0,
+      pricesIncludeGst: businessSettings?.pricesIncludeGst === true,
       status: 'draft',
       paymentTerms: 'net_14',
     };
@@ -1233,6 +1235,7 @@ export const useStore = create<AppState>((set, get) => ({
       subtotal: quote.subtotal,
       gst: quote.gst,
       total: adjustedTotal,
+      pricesIncludeGst: quote.pricesIncludeGst,
       status: 'draft',
       paymentTerms: 'net_14',
       sourceQuoteId: quote.id,
@@ -1286,8 +1289,9 @@ export const useStore = create<AppState>((set, get) => ({
     const markupAmount =
       materialsSubtotal * (healed.markup / 100) + laborTotal * (laborMarkupPercent / 100);
     const subtotalWithMarkup = subtotal + markupAmount;
-    const gst = subtotalWithMarkup * 0.1;
-    const total = subtotalWithMarkup + gst;
+    const inclusive = healed.pricesIncludeGst === true;
+    const total = inclusive ? subtotalWithMarkup : subtotalWithMarkup * 1.1;
+    const gst = inclusive ? total - total / 1.1 : subtotalWithMarkup * 0.1;
 
     set({
       currentInvoice: {

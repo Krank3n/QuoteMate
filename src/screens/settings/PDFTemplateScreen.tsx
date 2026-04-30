@@ -47,7 +47,7 @@ function Line({ width, height = 3, color = '#D1D5DB', style }: {
 }
 
 /** Full-width detailed native document preview */
-function TemplatePreview({ templateId, businessName, groupBySection, brandColor }: { templateId: PdfTemplateId; businessName: string; groupBySection: boolean; brandColor?: string }) {
+function TemplatePreview({ templateId, businessName, groupBySection, brandColor, pricesIncludeGst }: { templateId: PdfTemplateId; businessName: string; groupBySection: boolean; brandColor?: string; pricesIncludeGst: boolean }) {
   const configs: Record<PdfTemplateId, {
     pageBg: string;
     headerBg: string;
@@ -374,10 +374,16 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor 
           !c.summaryBorder && templateId === 'clean' && { borderTopWidth: 0.5 * scale, borderTopColor: '#E5E7EB', paddingHorizontal: 0 },
           !c.summaryBorder && templateId === 'tradesman' && { borderTopWidth: 1.5 * scale, borderBottomWidth: 1.5 * scale, borderColor: c.accentColor, paddingHorizontal: 0 },
         ]}>
-          {[
-            { label: 'Subtotal', value: '$1,217.90' },
-            { label: 'GST (10%)', value: '$121.79' },
-          ].map((row, i) => (
+          {(pricesIncludeGst
+            ? [
+                { label: 'Subtotal', value: '$1,217.90' },
+                { label: 'Includes GST', value: '$110.72' },
+              ]
+            : [
+                { label: 'Subtotal (ex GST)', value: '$1,107.18' },
+                { label: 'GST (10%)', value: '$110.72' },
+              ]
+          ).map((row, i) => (
             <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 * scale }}>
               <Text style={{ color: c.bodyTextColor, fontSize: 5 * scale, ...font }}>{row.label}</Text>
               <Text style={{ color: c.bodyTextColor, fontSize: 5 * scale, ...font }}>{row.value}</Text>
@@ -386,7 +392,7 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor 
           <View style={{ borderTopWidth: 0.5 * scale, borderTopColor: c.bodyTextColor + '30', marginVertical: 2 * scale }} />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: c.accentColor, fontSize: 7 * scale, fontWeight: '800', ...font }}>TOTAL</Text>
-            <Text style={{ color: c.accentColor, fontSize: 7 * scale, fontWeight: '800', ...font }}>$1,339.69</Text>
+            <Text style={{ color: c.accentColor, fontSize: 7 * scale, fontWeight: '800', ...font }}>$1,217.90</Text>
           </View>
         </View>
 
@@ -621,11 +627,18 @@ export function PDFTemplateScreen() {
           <div class="summary">
             <div class="summary-row"><span>Materials Subtotal</span><span>$1,526.25</span></div>
             <div class="summary-row"><span>Labor</span><span>$1,360.00</span></div>
-            <div class="summary-row"><span>Subtotal</span><span>$2,886.25</span></div>
-            ${showMarkup ? `<div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>` : ''}
-            <div class="summary-row"><span>GST (10%)</span><span>$331.92</span></div>
-            <hr>
-            <div class="summary-row grand-total"><span>TOTAL</span><span>$3,651.11</span></div>
+            ${businessSettings?.pricesIncludeGst === true
+              ? `<div class="summary-row"><span>Subtotal</span><span>$2,886.25</span></div>
+                ${showMarkup ? `<div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>` : ''}
+                <div class="summary-row"><span>Includes GST</span><span>$301.74</span></div>
+                <hr>
+                <div class="summary-row grand-total"><span>TOTAL</span><span>$3,319.19</span></div>`
+              : `<div class="summary-row"><span>Subtotal (ex GST)</span><span>$2,886.25</span></div>
+                ${showMarkup ? `<div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>` : ''}
+                <div class="summary-row"><span>GST (10%)</span><span>$331.92</span></div>
+                <hr>
+                <div class="summary-row grand-total"><span>TOTAL</span><span>$3,651.11</span></div>`
+            }
           </div>
 
           <div class="info-section"><h3>Notes</h3><p>All timber will be treated and stained. Work includes cleanup and disposal of waste materials. Deck will comply with local council regulations.</p></div>
@@ -720,7 +733,7 @@ export function PDFTemplateScreen() {
 
                   {/* Large preview */}
                   <View style={styles.previewWrapper}>
-                    <TemplatePreview templateId={template.id} businessName={businessName} groupBySection={groupMaterialsBySection} brandColor={businessSettings?.brandColor} />
+                    <TemplatePreview templateId={template.id} businessName={businessName} groupBySection={groupMaterialsBySection} brandColor={businessSettings?.brandColor} pricesIncludeGst={businessSettings?.pricesIncludeGst === true} />
                   </View>
 
                   {/* Preview PDF button */}

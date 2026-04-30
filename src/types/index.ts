@@ -271,6 +271,12 @@ export interface Quote {
   depositPaymentLinkCreatedAt?: number | Date; // When the link was minted (ms epoch). Used to detect >23h stale and re-mint.
   depositSquarePaymentId?: string; // Set by webhook on COMPLETED (idempotency key).
 
+  // GST mode snapshotted at quote creation. When true, line prices are
+  // GST-inclusive and the GST line shows the extracted 1/11. When false,
+  // prices are ex-GST and 10% is added on top. Falls back to the business
+  // setting when undefined (legacy quotes).
+  pricesIncludeGst?: boolean;
+
   // T&Cs snapshot taken at send-time so later edits to the BusinessProfile
   // T&Cs don't rewrite history. The hash identifies the exact version the
   // customer saw when they paid.
@@ -467,6 +473,12 @@ export interface BusinessSettings {
   // Default deposit percentage applied to new quotes when requireDeposit is on.
   // Per-quote override lives on Quote.depositPercentage.
   defaultDepositPercentage?: number;
+  // GST handling: when true, prices entered/displayed are GST-inclusive and
+  // the GST line on quotes/invoices shows the extracted 1/11 component for
+  // tax-invoice disclosure. When false (default for new users), prices are
+  // ex-GST and 10% GST is added on top. Snapshotted onto each Quote/Invoice
+  // at creation time so toggling the setting later doesn't rewrite history.
+  pricesIncludeGst?: boolean;
   // Terms & Conditions shown on the quote/invoice PDF and recorded as
   // accepted when the customer pays. Editable in Settings → Business Profile.
   // When blank, the PDF falls back to the built-in AU tradie default so new
@@ -631,6 +643,9 @@ export interface Invoice {
   // "Deposit of $X already paid" on the invoice/PDF/email.
   depositCredit?: number;
   depositCreditFromQuoteId?: string;
+
+  // GST mode snapshotted at invoice creation. See Quote.pricesIncludeGst.
+  pricesIncludeGst?: boolean;
 
   // T&Cs snapshot taken at send-time — see Quote.termsSnapshot.
   termsSnapshot?: string;

@@ -82,6 +82,11 @@ export interface Document {
   estimatedFuelCost?: number;
   travelGeocodeFailed?: boolean;
 
+  // ===== GST mode snapshot =====
+  // Inclusive vs exclusive at the time this document was created. Calculator
+  // and PDF render branch on this; falls back to BusinessSettings when undefined.
+  pricesIncludeGst?: boolean;
+
   // ===== T&Cs snapshot (shared between quote and invoice flows) =====
   termsSnapshot?: string;
   termsVersionHash?: string;
