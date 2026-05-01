@@ -36,22 +36,42 @@ export async function compressImage(uri: string): Promise<string> {
   }
 }
 
+export interface CompressedLogo {
+  uri: string;
+  contentType: string;
+  extension: 'png' | 'jpg';
+}
+
 /**
  * Compress a logo for upload. Smaller target size than general quote photos
- * because logos render at ~100-200px on PDFs and emails — storing anything
- * larger wastes Firebase Storage and slows email rendering.
+ * because logos render at ~100-200px on PDFs and emails.
+ *
+ * Preserves PNG so transparent logos keep their alpha channel; converts
+ * everything else — HEIC, JPEG, WebP — to JPEG. Throws on failure: silently
+ * falling back to the source bytes mislabelled as JPEG produces a "broken
+ * image" file in Storage that nothing can render.
  */
-export async function compressLogo(uri: string): Promise<string> {
-  try {
+export async function compressLogo(
+  uri: string,
+  mimeType?: string
+): Promise<CompressedLogo> {
+  const isPng = mimeType === 'image/png' || /\.png(\?|$)/i.test(uri);
+
+  if (isPng) {
     const result = await manipulateAsync(
       uri,
       [{ resize: { width: LOGO_MAX_WIDTH } }],
-      { compress: LOGO_JPEG_QUALITY, format: SaveFormat.JPEG }
+      { format: SaveFormat.PNG }
     );
-    return result.uri;
-  } catch (error) {
-    return uri;
+    return { uri: result.uri, contentType: 'image/png', extension: 'png' };
   }
+
+  const result = await manipulateAsync(
+    uri,
+    [{ resize: { width: LOGO_MAX_WIDTH } }],
+    { compress: LOGO_JPEG_QUALITY, format: SaveFormat.JPEG }
+  );
+  return { uri: result.uri, contentType: 'image/jpeg', extension: 'jpg' };
 }
 
 /**
@@ -72,6 +92,39 @@ async function uriToBlob(uri: string): Promise<Blob> {
     xhr.open('GET', uri, true);
     xhr.send(null);
   });
+}
+
+/**
+ * Upload a business logo for the given user. Compresses, uploads to
+ * Firebase Storage, removes any prior logo in the other format (so PNG→JPEG
+ * or JPEG→PNG swaps don't leave orphans), and returns the public download URL.
+ *
+ * Throws on failure.
+ */
+export async function uploadBusinessLogo(
+  userId: string,
+  uri: string,
+  mimeType?: string
+): Promise<string> {
+  // Already a remote URL (previously uploaded), nothing to do.
+  if (uri.startsWith('https://')) return uri;
+
+  const { uri: compressedUri, contentType, extension } = await compressLogo(uri, mimeType);
+  const blob = await uriToBlob(compressedUri);
+
+  const logoRef = ref(storage, `users/${userId}/logo.${extension}`);
+  await uploadBytes(logoRef, blob, { contentType });
+  const url = await getDownloadURL(logoRef);
+
+  // Best-effort: drop the other format if a previous upload left one behind.
+  const otherExtension = extension === 'png' ? 'jpg' : 'png';
+  try {
+    await deleteObject(ref(storage, `users/${userId}/logo.${otherExtension}`));
+  } catch {
+    // No prior logo in the other format — nothing to clean up.
+  }
+
+  return url;
 }
 
 /**
