@@ -13,8 +13,8 @@ import { sendEmail, getUserEmail } from './email';
 import {
   stageToQuoteStatus,
   stageToInvoiceStatus,
-} from '../../shared/document/adapter';
-import type { DocumentStage, DocumentType } from '../../shared/document/types';
+} from './shared/document/adapter';
+import type { DocumentStage, DocumentType } from './shared/document/types';
 
 const db = () => admin.firestore();
 
