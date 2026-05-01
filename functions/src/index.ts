@@ -24,6 +24,19 @@ import {
   sendDraftNudgeEmail,
 } from './email';
 export * from './adminCrm';
+export {
+  adminLeadDiscovery,
+  adminEnrichLeads,
+  adminGenerateLeadMessages,
+  adminListLeads,
+  adminGetLead,
+  adminUpdateLeadMessage,
+  adminApproveLeads,
+  adminRejectLeads,
+  adminAddLeadNote,
+  onUserCreatedLinkLead,
+  leadUnsubscribe,
+} from './leadOutreach';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
 import {
   sendDocumentEmail,

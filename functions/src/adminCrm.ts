@@ -10,6 +10,7 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import { sendEmail, getUserEmail } from './email';
+import { applyBrevoEventToLead } from './leadOutreach';
 import {
   stageToQuoteStatus,
   stageToInvoiceStatus,
@@ -2119,6 +2120,27 @@ export const brevoEmailWebhook = functions.https.onRequest(async (req, res) => {
     for (const body of events) {
       const event = String(body.event || '').toLowerCase();
       const logId = parseEmailLogId(body);
+
+      // Fan out lead-tagged events to leads/{id} regardless of emailLog match.
+      try {
+        const tagField = body.tag || body.tags;
+        let parsedTags: string[] = [];
+        if (Array.isArray(tagField)) parsedTags = tagField;
+        else if (typeof tagField === 'string') {
+          try { parsedTags = JSON.parse(tagField); } catch { parsedTags = [tagField]; }
+        }
+        const eventAt = timestampFromBrevo(body);
+        await applyBrevoEventToLead({
+          tags: parsedTags,
+          event,
+          email: body.email || null,
+          at: eventAt,
+          reason: body.reason || null,
+        });
+      } catch (e) {
+        console.warn('brevoEmailWebhook: lead fan-out failed', e);
+      }
+
       if (!logId) {
         unmatched++;
         console.info(`brevoEmailWebhook: ${event} event with no emailLogId`, body.email, body['message-id']);
