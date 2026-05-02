@@ -596,16 +596,17 @@ async function claudeGenerateMessage(input: {
   const system = `You write short cold outreach emails on behalf of Tom, the maker of QuoteMate — a quoting + invoicing app for Australian tradies. The reader is a working tradie. Tone: a mate emailing, not a marketer. The reader will smell automation immediately and dismiss the brand if you sound generic.
 
 Hard rules:
-- Total body ≤ 80 words.
+- Total body ≤ 80 words (excluding the single inline link mentioned below).
 - Open by referencing the SPECIFIC personalization hook provided. Not "saw your website and was impressed" — name the actual thing.
 - Never use the word "AI" anywhere. Use "smart", "describes", "suggests" instead if you need to.
-- Subject 3-6 words, lowercase except proper nouns, references their work or suburb. Not "Hi {name}" or "Quick question".
-- Single soft CTA: invite a reply, NOT a meeting/call.
+- SUBJECT RULE: 3-6 words, lowercase except proper nouns. Must NOT mimic a customer inquiry — that gets opens but burns trust the moment they realise it's a pitch. NEVER use subjects like "fencing quotes in [city]", "fence repair", "need a quote", "[trade] services". Instead reference the personalisation hook or the speed/efficiency angle. GOOD examples: "loved your bondi install", "speeding up sydney fencing quotes", "fencing quotes by the metre", "saw your colorbond work". BAD examples: "fencing quotes in sydney" (looks like a customer lead), "quick question" (lazy), "Hi {name}" (lazy).
 - Sign off "Tom" only. No company sig, no taglines.
 - Plaintext-style HTML — paragraphs separated by <br><br>. No styling, no images, no buttons.
 - Must include a one-line pitch using the trade-specific hook provided.
 - NAME RULE: If ownerName is "(unknown)" you MUST open with "Hey team" or "Hi there" or the business name — NEVER invent or guess a name. Many tradie inboxes are managed by a partner/spouse/admin, so a wrong name reads as automation.
 - SUPPLIER RULE: Use the supplier wording from the trade-specific hook AS IS. Do not add or substitute supplier names. Reece is plumbing/irrigation only — never mention Reece for fencing, decking, carpentry, painting, or any trade that doesn't touch water. "Your local suppliers" is the safe default when a specific name isn't in the hook.
+- LINK RULE: Include EXACTLY ONE link in the body, woven in naturally so the lurker can self-serve without replying. Format as <a href="https://quotemateapp.au">quotemateapp.au</a>. Examples: "It's at <a href=\\"https://quotemateapp.au\\">quotemateapp.au</a> if you want a peek." or "Have a look at <a href=\\"https://quotemateapp.au\\">quotemateapp.au</a> — iOS + Android.". Don't make it the main CTA; the reply ask is.
+- CTA RULE: One soft reply CTA at the end, like "Worth a look?" or "Keen for the link if useful?". Reply, not call/meeting.
 
 Output strict JSON only — no markdown fences:
 { "subject": string, "body": string }`;
@@ -626,7 +627,7 @@ ${hooksList || '(none — keep open generic-but-friendly)'}
 Trade-specific pitch line to use (paraphrase, do not paste verbatim):
 ${TRADE_PITCH[input.trade]}
 
-Mention the QuoteMate iOS + Android apps once. Make it sound human and dashed off, not polished marketing copy.`;
+Include the website link <a href="https://quotemateapp.au">quotemateapp.au</a> woven naturally into the body (one place only — see LINK RULE). Mention iOS + Android once if it fits without being clunky. Make it sound human and dashed off, not polished marketing copy.`;
 
   const r = await callClaudeJSON<ClaudeMessage>({ system, user, maxTokens: 800, temperature: 0.6 });
   if (!r.ok) {
@@ -1140,13 +1141,16 @@ export const adminApproveLeads = functions
     const leadIds: string[] = Array.isArray(data?.leadIds) ? data.leadIds.filter((s: any) => typeof s === 'string') : [];
     if (!leadIds.length) throw new functions.https.HttpsError('invalid-argument', 'leadIds[] required');
 
-    // Optional config kill switch + caps
+    // Kill switch + effective caps (auto-ramp schedule wins if enabled)
     const cfgSnap = await db().doc('leadOutreachConfig/current').get();
-    const cfg: any = cfgSnap.exists ? cfgSnap.data() : {};
+    const cfg: LeadOutreachConfig = cfgSnap.exists
+      ? { ...DEFAULT_CONFIG, ...(cfgSnap.data() as any) }
+      : DEFAULT_CONFIG;
     if (cfg.enabled === false) {
       throw new functions.https.HttpsError('failed-precondition', 'lead outreach is disabled (kill switch)');
     }
-    const dailyMax = Number(cfg.dailyMaxSends ?? 200);
+    const eff = effectiveCaps(cfg);
+    const dailyMax = eff.daily;
 
     // Count today's sends
     const since = admin.firestore.Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
@@ -1156,7 +1160,8 @@ export const adminApproveLeads = functions
       .get();
     const remaining = Math.max(0, dailyMax - sentTodaySnap.size);
     if (remaining <= 0) {
-      throw new functions.https.HttpsError('resource-exhausted', `daily cap reached (${dailyMax})`);
+      const stageInfo = eff.source === 'auto' && eff.stage ? ` (auto-ramp: ${eff.stage.label})` : '';
+      throw new functions.https.HttpsError('resource-exhausted', `daily cap reached (${dailyMax})${stageInfo}`);
     }
 
     const sentDomains = new Set<string>();
@@ -1327,14 +1332,84 @@ interface LeadOutreachConfig {
   dailyMaxSends: number;
   hourlyMaxSends: number;
   perDomainMax: number;
+  warmupAuto: boolean;
+  warmupStartedAt: number | null; // ms epoch
 }
 
 const DEFAULT_CONFIG: LeadOutreachConfig = {
-  enabled: false, // safe default — explicitly opt in
+  enabled: false,
   dailyMaxSends: 5,
   hourlyMaxSends: 3,
   perDomainMax: 1,
+  warmupAuto: false,
+  warmupStartedAt: null,
 };
+
+// Progressive ramp schedule. Each stage applies from `dayFrom` (inclusive) to
+// `dayTo` (inclusive). Day 1 is the first day of warmup (warmupStartedAt date).
+// Caps are calibrated for a single subdomain on Brevo shared IPs — going past
+// stage 6 from one domain = high deliverability risk; add domains instead.
+interface WarmupStage {
+  dayFrom: number;
+  dayTo: number;
+  label: string;
+  daily: number;
+  hourly: number;
+}
+const WARMUP_SCHEDULE: WarmupStage[] = [
+  { dayFrom: 1,  dayTo: 3,   label: 'Days 1-3 · cold-start',     daily: 5,   hourly: 3  },
+  { dayFrom: 4,  dayTo: 7,   label: 'Days 4-7 · gentle ramp',    daily: 10,  hourly: 4  },
+  { dayFrom: 8,  dayTo: 14,  label: 'Days 8-14 · week 2',        daily: 25,  hourly: 8  },
+  { dayFrom: 15, dayTo: 28,  label: 'Days 15-28 · week 3-4',     daily: 50,  hourly: 15 },
+  { dayFrom: 29, dayTo: 56,  label: 'Days 29-56 · week 5-8',     daily: 100, hourly: 25 },
+  { dayFrom: 57, dayTo: 999, label: 'Day 57+ · single-domain ceiling', daily: 200, hourly: 40 },
+];
+
+function dayOfWarmup(startedAt: number | null): number | null {
+  if (!startedAt) return null;
+  const ms = Date.now() - startedAt;
+  if (ms < 0) return null;
+  return Math.floor(ms / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function stageForDay(day: number | null): WarmupStage | null {
+  if (day == null || day < 1) return null;
+  return WARMUP_SCHEDULE.find(s => day >= s.dayFrom && day <= s.dayTo) || WARMUP_SCHEDULE[WARMUP_SCHEDULE.length - 1];
+}
+
+// Returns the EFFECTIVE caps for today, accounting for warmupAuto override.
+function effectiveCaps(cfg: LeadOutreachConfig): { daily: number; hourly: number; source: 'auto' | 'manual'; stage?: WarmupStage; day?: number } {
+  if (cfg.warmupAuto && cfg.warmupStartedAt) {
+    const day = dayOfWarmup(cfg.warmupStartedAt);
+    const stage = stageForDay(day);
+    if (stage && day != null) {
+      return { daily: stage.daily, hourly: stage.hourly, source: 'auto', stage, day };
+    }
+  }
+  return { daily: cfg.dailyMaxSends, hourly: cfg.hourlyMaxSends, source: 'manual' };
+}
+
+// Per-day send histogram for the last N days (UTC days).
+async function sendsPerDay(daysBack: number): Promise<Array<{ date: string; count: number }>> {
+  const since = admin.firestore.Timestamp.fromMillis(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+  const snap = await db().collection('leads').where('sentAt', '>=', since).select('sentAt').get();
+  const counts = new Map<string, number>();
+  for (const d of snap.docs) {
+    const ts = (d.data() as any)?.sentAt;
+    const ms = ts?.toMillis?.() ?? null;
+    if (!ms) continue;
+    const date = new Date(ms).toISOString().slice(0, 10);
+    counts.set(date, (counts.get(date) || 0) + 1);
+  }
+  // Build full series (zero-fill) so the UI doesn't have gaps.
+  const out: Array<{ date: string; count: number }> = [];
+  for (let i = daysBack - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+    const date = d.toISOString().slice(0, 10);
+    out.push({ date, count: counts.get(date) || 0 });
+  }
+  return out;
+}
 
 export const adminGetLeadConfig = functions.https.onCall(async (_data, context) => {
   requireAdmin(context);
@@ -1343,21 +1418,50 @@ export const adminGetLeadConfig = functions.https.onCall(async (_data, context) 
     ? { ...DEFAULT_CONFIG, ...(snap.data() as any) }
     : DEFAULT_CONFIG;
 
-  // How many we've sent in the last 24h / last hour
+  // Compute effective caps (auto-ramp schedule wins if enabled)
+  const eff = effectiveCaps(config);
+  // Look ahead: tomorrow's stage if we cross a stage boundary overnight
+  let nextStage: WarmupStage | null = null;
+  let daysUntilNext: number | null = null;
+  if (eff.source === 'auto' && eff.day != null && eff.stage) {
+    const dayTomorrow = eff.day + 1;
+    const stTomorrow = stageForDay(dayTomorrow);
+    if (stTomorrow && stTomorrow !== eff.stage) {
+      nextStage = stTomorrow;
+      daysUntilNext = 1;
+    } else {
+      // Find the upcoming stage and how many days away it is
+      const upcoming = WARMUP_SCHEDULE.find(s => s.dayFrom > eff.day!);
+      if (upcoming) { nextStage = upcoming; daysUntilNext = upcoming.dayFrom - eff.day; }
+    }
+  }
+
   const now = Date.now();
   const since24 = admin.firestore.Timestamp.fromMillis(now - 24 * 60 * 60 * 1000);
   const since1h = admin.firestore.Timestamp.fromMillis(now - 60 * 60 * 1000);
-  const [sent24Snap, sent1hSnap] = await Promise.all([
+  const [sent24Snap, sent1hSnap, history] = await Promise.all([
     db().collection('leads').where('sentAt', '>=', since24).select().get(),
     db().collection('leads').where('sentAt', '>=', since1h).select().get(),
+    sendsPerDay(14),
   ]);
 
   return {
     config,
+    effective: {
+      dailyMaxSends: eff.daily,
+      hourlyMaxSends: eff.hourly,
+      source: eff.source,
+      currentStage: eff.stage || null,
+      currentDay: eff.day || null,
+      nextStage,
+      daysUntilNext,
+    },
+    schedule: WARMUP_SCHEDULE,
     sentLast24h: sent24Snap.size,
     sentLastHour: sent1hSnap.size,
-    remainingToday: Math.max(0, config.dailyMaxSends - sent24Snap.size),
-    remainingThisHour: Math.max(0, config.hourlyMaxSends - sent1hSnap.size),
+    remainingToday: Math.max(0, eff.daily - sent24Snap.size),
+    remainingThisHour: Math.max(0, eff.hourly - sent1hSnap.size),
+    history,
   };
 });
 
@@ -1373,6 +1477,25 @@ export const adminUpdateLeadConfig = functions.https.onCall(async (data, context
   }
   if (typeof data?.perDomainMax === 'number') {
     updates.perDomainMax = Math.max(1, Math.min(50, Math.floor(data.perDomainMax)));
+  }
+  if (typeof data?.warmupAuto === 'boolean') {
+    updates.warmupAuto = data.warmupAuto;
+    // Convenience: turning auto-ramp ON for the first time stamps the start date
+    // unless the caller explicitly provides one. Turning OFF leaves the existing
+    // start date alone so the user can re-enable without losing progress.
+    if (data.warmupAuto && !data.warmupStartedAt) {
+      const existing = await db().doc('leadOutreachConfig/current').get();
+      if (!existing.exists || !(existing.data() as any)?.warmupStartedAt) {
+        updates.warmupStartedAt = Date.now();
+      }
+    }
+  }
+  if (data?.warmupStartedAt !== undefined) {
+    if (data.warmupStartedAt === null) {
+      updates.warmupStartedAt = null;
+    } else if (typeof data.warmupStartedAt === 'number' && data.warmupStartedAt > 0) {
+      updates.warmupStartedAt = data.warmupStartedAt;
+    }
   }
   if (!Object.keys(updates).length) {
     throw new functions.https.HttpsError('invalid-argument', 'no valid fields to update');
