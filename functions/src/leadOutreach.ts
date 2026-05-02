@@ -400,14 +400,14 @@ async function scrapeWebsite(rootUrl: string): Promise<ScrapedSiteContent | null
     new URL('/services', base).toString(),
   ];
   const seen = new Set<string>();
-  const htmls: Array<{ url: string; html: string | null }> = [];
-  for (const u of candidates) {
+  const uniqueUrls = candidates.filter(u => {
     const norm = u.replace(/\/$/, '');
-    if (seen.has(norm)) continue;
+    if (seen.has(norm)) return false;
     seen.add(norm);
-    const html = await fetchPage(u);
-    htmls.push({ url: u, html });
-  }
+    return true;
+  });
+  // Fetch in parallel — sequential was 5×10s = 50s worst case, blowing the timeout.
+  const htmls = await Promise.all(uniqueUrls.map(async u => ({ url: u, html: await fetchPage(u) })));
   if (htmls.every(h => !h.html)) return null;
   return extractSiteContent(rootUrl, htmls);
 }
@@ -555,6 +555,7 @@ export const adminLeadDiscovery = functions
     let dedupedExistingUser = 0;
     let placeFetchFailures = 0;
     const sample: any[] = [];
+    const searchErrors: string[] = [];
 
     for (const suburb of suburbs) {
       for (const phrase of TRADE_QUERY[trade]) {
@@ -563,7 +564,12 @@ export const adminLeadDiscovery = functions
         try {
           results = await placesTextSearch(query);
         } catch (e: any) {
-          console.warn(`places search failed for "${query}": ${e?.message || e}`);
+          const msg = e?.message || String(e);
+          console.warn(`places search failed for "${query}": ${msg}`);
+          // Capture the first distinct error verbatim so it surfaces in the UI.
+          if (searchErrors.length < 3 && !searchErrors.includes(msg)) {
+            searchErrors.push(msg);
+          }
           continue;
         }
 
@@ -577,44 +583,22 @@ export const adminLeadDiscovery = functions
           const supByPlace = await isSuppressed({ placeId: r.place_id });
           if (supByPlace.suppressed) { dedupedSuppressed++; continue; }
 
-          const det = await placesDetails(r.place_id);
-          if (!det) { placeFetchFailures++; continue; }
-
-          const phone = det.formatted_phone_number || null;
-          const intlPhone = det.international_phone_number || null;
-          const website = det.website || null;
-
-          // Try to extract email from website if available — quick fetch only here
-          let email: string | null = null;
-          let mobile: string | null = null;
-          let scraped: ScrapedSiteContent | null = null;
-          if (website) {
-            scraped = await scrapeWebsite(website);
-            email = scraped?.emails?.[0] || null;
-            mobile = scraped?.mobiles?.[0] || null;
-          }
-
-          // Dedupe by email/domain/users
-          if (email) {
-            const supByEmail = await isSuppressed({ email, domain: domainOf(email) || undefined });
-            if (supByEmail.suppressed) { dedupedSuppressed++; continue; }
-            const exUid = await findExistingUserByEmail(email);
-            if (exUid) {
-              await addSuppression({ type: 'email', value: email, reason: 'is-existing-user' });
-              dedupedExistingUser++;
-              continue;
-            }
-            const emailMatch = await db().collection('leads').where('email', '==', email).limit(1).get();
-            if (!emailMatch.empty) { dedupedExisting++; continue; }
-          }
-
-          // Dedupe by businessName+suburb fallback
+          // Business-name dedupe (cheap query — placeId already deduped above)
           const bizKey = normaliseBusinessKey(r.name, suburb);
           if (bizKey) {
             const bizMatch = await db().collection('leads').where('businessKey', '==', bizKey).limit(1).get();
             if (!bizMatch.empty) { dedupedExisting++; continue; }
           }
 
+          // Place Details for phone + website + address. Website *content* is
+          // scraped later by adminEnrichLeads — discovery stays fast (no fetches
+          // here, no Claude here).
+          const det = await placesDetails(r.place_id);
+          if (!det) { placeFetchFailures++; continue; }
+
+          const phone = det.formatted_phone_number || null;
+          const intlPhone = det.international_phone_number || null;
+          const website = det.website || null;
           const state = pickFromAddressComponents(det.address_components, 'administrative_area_level_1');
           const postcode = pickFromAddressComponents(det.address_components, 'postal_code');
 
@@ -624,17 +608,17 @@ export const adminLeadDiscovery = functions
             trade,
             ownerName: null,
             ownerNameSource: null,
-            email,
+            email: null,
             phone,
-            mobile,
+            mobile: null,
             internationalPhone: intlPhone,
             address: det.formatted_address || null,
             suburb,
             state: state || 'NSW',
             postcode: postcode || null,
             websiteUrl: website,
-            facebookUrl: scraped?.socials?.facebook || null,
-            instagramUrl: scraped?.socials?.instagram || null,
+            facebookUrl: null,
+            instagramUrl: null,
             googlePlaceId: r.place_id,
             googleRating: det.rating ?? null,
             googleReviewCount: det.user_ratings_total ?? null,
@@ -685,6 +669,7 @@ export const adminLeadDiscovery = functions
       dedupedSuppressed,
       dedupedExistingUser,
       placeFetchFailures,
+      searchErrors,
       sample: dryRun ? sample.slice(0, 10) : undefined,
     };
   });
