@@ -632,6 +632,7 @@ export const adminLeadDiscovery = functions
 
           if (dryRun) {
             sample.push({ ...leadDoc, scrapedAt: undefined, createdAt: undefined });
+            created++; // count it for the dry-run total even though we don't write
             continue;
           }
 
