@@ -245,6 +245,16 @@ interface PlacesDetailsResult {
   rating?: number;
   user_ratings_total?: number;
   address_components?: Array<{ long_name: string; short_name: string; types: string[] }>;
+  reviews?: Array<{
+    author_name?: string;
+    rating?: number;
+    relative_time_description?: string;
+    text?: string;
+    time?: number;
+  }>;
+  editorial_summary?: { overview?: string };
+  types?: string[];
+  business_status?: string;
 }
 
 async function placesTextSearch(query: string): Promise<PlacesSearchResult[]> {
@@ -269,7 +279,7 @@ async function placesDetails(placeId: string): Promise<PlacesDetailsResult | nul
   const fields = [
     'place_id', 'name', 'formatted_address', 'formatted_phone_number',
     'international_phone_number', 'website', 'rating', 'user_ratings_total',
-    'address_components',
+    'address_components', 'reviews', 'editorial_summary', 'types', 'business_status',
   ].join(',');
   const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=${fields}&key=${key}`;
   const res = await fetch(url);
@@ -290,15 +300,19 @@ function pickFromAddressComponents(comps: PlacesDetailsResult['address_component
 // ============================================================
 
 async function fetchPage(url: string, timeoutMs = 10_000): Promise<string | null> {
+  // Real browser UA — many sites (Wix, Squarespace, Cloudflare) serve a stripped
+  // page or 403 to anything that looks like a bot.
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-AU,en;q=0.9',
+  };
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     const res = await fetch(url, {
       signal: ctrl.signal as any,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; QuoteMateBot/1.0; +https://quotemateapp.au/bot)',
-        'Accept': 'text/html,application/xhtml+xml',
-      },
+      headers,
       redirect: 'follow',
     });
     clearTimeout(timer);
@@ -306,7 +320,7 @@ async function fetchPage(url: string, timeoutMs = 10_000): Promise<string | null
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('text/html') && !ct.includes('application/xhtml')) return null;
     const text = await res.text();
-    return text.length > 500_000 ? text.slice(0, 500_000) : text;
+    return text.length > 800_000 ? text.slice(0, 800_000) : text;
   } catch {
     return null;
   }
@@ -315,18 +329,22 @@ async function fetchPage(url: string, timeoutMs = 10_000): Promise<string | null
 interface ScrapedSiteContent {
   title: string;
   description: string;
-  textBlocks: string[]; // visible text from main pages
+  textBlocks: string[]; // visible text from main pages (compacted)
+  jsonLd: any[]; // raw JSON-LD blocks (often has owner/about/services for Wix etc.)
+  metaTags: Record<string, string>; // og:*, twitter:*, etc.
   emails: string[];
   mobiles: string[];
   socials: { facebook?: string; instagram?: string };
-  pages: Array<{ url: string; ok: boolean }>;
+  pages: Array<{ url: string; ok: boolean; bytes: number }>;
 }
 
 function extractSiteContent(rootUrl: string, htmls: Array<{ url: string; html: string | null }>): ScrapedSiteContent {
   const emails = new Set<string>();
   const mobiles = new Set<string>();
   const textBlocks: string[] = [];
-  const pages: Array<{ url: string; ok: boolean }> = [];
+  const jsonLd: any[] = [];
+  const metaTags: Record<string, string> = {};
+  const pages: Array<{ url: string; ok: boolean; bytes: number }> = [];
   let title = '';
   let description = '';
   let facebook: string | undefined;
@@ -334,21 +352,41 @@ function extractSiteContent(rootUrl: string, htmls: Array<{ url: string; html: s
 
   for (const { url, html } of htmls) {
     if (!html) {
-      pages.push({ url, ok: false });
+      pages.push({ url, ok: false, bytes: 0 });
       continue;
     }
-    pages.push({ url, ok: true });
+    pages.push({ url, ok: true, bytes: html.length });
     const $ = cheerio.load(html);
-    $('script, style, noscript, svg').remove();
+
+    // JSON-LD often has { "@type": "LocalBusiness", "name", "address", "founder", "description", "areaServed", ... }
+    $('script[type="application/ld+json"]').each((_i, el) => {
+      const raw = $(el).contents().text().trim();
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        const arr = Array.isArray(parsed) ? parsed : [parsed];
+        for (const item of arr) jsonLd.push(item);
+      } catch {
+        // ignore malformed JSON-LD
+      }
+    });
+
+    // Meta tags before stripping
+    $('meta').each((_i, el) => {
+      const name = ($(el).attr('name') || $(el).attr('property') || '').toLowerCase();
+      const content = ($(el).attr('content') || '').trim();
+      if (!name || !content) return;
+      if (/^(og:|twitter:|description|keywords|author|geo\.)/.test(name) && !metaTags[name]) {
+        metaTags[name] = content.slice(0, 500);
+      }
+    });
+
     if (!title) title = $('title').first().text().trim().slice(0, 200);
     if (!description) {
-      description = ($('meta[name="description"]').attr('content') || $('meta[property="og:description"]').attr('content') || '').trim().slice(0, 300);
+      description = (metaTags['description'] || metaTags['og:description'] || metaTags['twitter:description'] || '').slice(0, 400);
     }
-    // Visible text — collapse whitespace
-    const body = $('body').text().replace(/\s+/g, ' ').trim();
-    if (body) textBlocks.push(body.slice(0, 8000));
 
-    // Emails — both mailto: and inline
+    // Emails BEFORE stripping scripts — Wix often has email in JSON inside <script>
     $('a[href^="mailto:"]').each((_i, el) => {
       const e = ($(el).attr('href') || '').replace(/^mailto:/, '').split('?')[0];
       const n = normaliseEmail(e);
@@ -357,10 +395,12 @@ function extractSiteContent(rootUrl: string, htmls: Array<{ url: string; html: s
     const rawText = (html.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []) as string[];
     for (const e of rawText) {
       const n = normaliseEmail(e);
-      if (n) emails.add(n);
+      // Skip generic Wix/Squarespace tracking emails
+      if (!n || /\.wix\.com$/.test(n) || /\.squarespace\.com$/.test(n) || /^.*@example\./.test(n) || /sentry\.io$/.test(n)) continue;
+      emails.add(n);
     }
 
-    // Australian mobile — match digits with optional spacing/dashes
+    // Australian mobile
     const mobileMatches = (html.match(/(?:\+?61\s?|0)4\d{2}[\s-]?\d{3}[\s-]?\d{3}/g) || []) as string[];
     for (const m of mobileMatches) {
       mobiles.add(m.replace(/[\s-]/g, '').replace(/^\+?61/, '0'));
@@ -372,12 +412,28 @@ function extractSiteContent(rootUrl: string, htmls: Array<{ url: string; html: s
       if (!facebook && /facebook\.com\/[a-z0-9.\-_]+/.test(href)) facebook = href.split('?')[0];
       if (!instagram && /instagram\.com\/[a-z0-9.\-_]+/.test(href)) instagram = href.split('?')[0];
     });
+
+    // NOW strip noise + extract visible text. Prefer headings + paragraphs (signal-rich)
+    // over raw body() (which includes nav, footer, cookie banners).
+    $('script, style, noscript, svg, header nav, footer').remove();
+    const headings = $('h1, h2, h3').map((_i, el) => $(el).text().trim()).get().filter(Boolean).slice(0, 30);
+    const paras = $('p, li').map((_i, el) => $(el).text().trim()).get().filter(t => t.length > 20).slice(0, 60);
+    const combined = [...headings, ...paras].join(' \n ').replace(/\s+/g, ' ').replace(/ \n /g, '\n').trim();
+    if (combined) {
+      textBlocks.push(combined.slice(0, 10_000));
+    } else {
+      // Fallback: raw body text if structured extraction got nothing
+      const body = $('body').text().replace(/\s+/g, ' ').trim();
+      if (body) textBlocks.push(body.slice(0, 10_000));
+    }
   }
 
   return {
     title,
     description,
     textBlocks,
+    jsonLd,
+    metaTags,
     emails: Array.from(emails).slice(0, 5),
     mobiles: Array.from(mobiles).slice(0, 3),
     socials: { facebook, instagram },
@@ -426,34 +482,80 @@ async function claudeEnrich(input: {
   suburb: string | null;
   websiteUrl: string | null;
   scraped: ScrapedSiteContent | null;
+  googleReviews: Array<{ author: string | null; rating: number | null; text: string; when: string | null }>;
+  googleEditorialSummary: string | null;
+  googleTypes: string[];
 }): Promise<ClaudeEnrichment | null> {
-  const system = `You are extracting facts about an Australian tradie business from their website to support a tasteful, human-sounding cold outreach. Output strict JSON only — no prose, no markdown fences. Schema:
+  const system = `You are extracting concrete, useful facts about an Australian tradie business to support a tasteful, human-sounding cold outreach. The reader is the business owner. Output strict JSON only — no prose, no markdown fences. Schema:
 {
-  "ownerName": string|null,           // first name only of the owner/operator if confidently named on the site (e.g. About page, signoff). null if uncertain.
-  "ownerNameSource": "about-page"|"guess"|null,
-  "enrichmentSummary": string,        // <= 200 chars, factual one-sentence summary of the business.
-  "personalizationHooks": [           // 2-4 specific, factual hooks usable as a personal reference. Avoid generic "professional" / "quality".
+  "ownerName": string|null,           // First name only of the owner/operator if confidently named (about page, email like ivan@<domain>, signoff "— Tom", review reply signed by, JSON-LD founder). null if uncertain.
+  "ownerNameSource": "about-page"|"email-prefix"|"review-reply"|"json-ld"|"guess"|null,
+  "enrichmentSummary": string,        // <= 200 chars, factual sentence summary including specifics: trade niche, suburb, years/scale, materials.
+  "personalizationHooks": [           // 2-4 SPECIFIC factual hooks usable to open a personal email. Each must reference something concrete. Cite source.
     { "text": string, "source": string }
   ],
   "confidence": "low"|"medium"|"high"
 }
-Constraints:
-- Hooks must reference SOMETHING SPECIFIC: a recent project, a niche, a region they serve, an unusual specialty, years in business with a number, materials they specialise in. Not "they care about quality".
-- If the page content is too thin to extract real specifics, return confidence "low" and only 1-2 generic-but-true hooks.
-- Never invent facts.`;
+What counts as a SPECIFIC hook (good):
+- "Recent reviewer Sarah praised your team's installation of a Colorbond fence in Bondi"
+- "Specialise in pool fencing — mentioned three times across reviews"
+- "Established 2024, already 105 projects completed per the homepage"
+- "Owner Ivan replies personally to Google reviews"
+- "Customers note your '1-3 day turnaround' as a standout"
+NOT specific (bad — never produce these):
+- "Provides quality fencing services"
+- "Customer-focused approach"
+- "Operating in Sydney"
+- "Skilled team"
 
-  const blocks = (input.scraped?.textBlocks || []).join('\n---\n').slice(0, 12_000);
+Rules:
+- ALWAYS prefer hooks from Google reviews (real customer language) over website marketing copy.
+- If the website content is sparse but reviews exist, that's still HIGH confidence — reviews are the gold mine.
+- Never invent facts, dates, or names. If unsure, leave null / lower confidence.
+- ownerName: prefer email prefix (e.g. ivan@bestfence.com.au → "Ivan") if the email looks personal, not info@/contact@/admin@.`;
+
+  const blocks = (input.scraped?.textBlocks || []).join('\n---\n').slice(0, 10_000);
+
+  const reviewsText = input.googleReviews.length
+    ? input.googleReviews.map(r => `[${r.rating}★ from ${r.author || 'anon'}, ${r.when || ''}] ${r.text}`).join('\n\n')
+    : '(no reviews on Google)';
+
+  const jsonLdText = (input.scraped?.jsonLd || []).length
+    ? JSON.stringify((input.scraped?.jsonLd || []).slice(0, 3)).slice(0, 3000)
+    : '(none)';
+
+  const metaTagsText = input.scraped?.metaTags && Object.keys(input.scraped.metaTags).length
+    ? Object.entries(input.scraped.metaTags).map(([k, v]) => `${k}: ${v}`).join('\n')
+    : '(none)';
+
+  const detectedEmails = (input.scraped?.emails || []).join(', ') || '(none)';
+
   const user = `Business: ${input.businessName}
 Trade category: ${input.trade}
 Suburb: ${input.suburb || 'unknown'}
 Website: ${input.websiteUrl || 'none'}
-Title tag: ${input.scraped?.title || ''}
-Meta description: ${input.scraped?.description || ''}
+Google business types: ${(input.googleTypes || []).join(', ') || 'unknown'}
+${input.googleEditorialSummary ? `Google editorial summary: ${input.googleEditorialSummary}` : ''}
 
-Page text (multiple pages, separated by ---):
-${blocks || '(no website content)'}`;
+=== GOOGLE REVIEWS (use these for hooks — real customer language) ===
+${reviewsText}
 
-  const r = await callClaudeJSON<ClaudeEnrichment>({ system, user, maxTokens: 1200, temperature: 0.2 });
+=== Website detected emails ===
+${detectedEmails}
+
+=== Website title tag ===
+${input.scraped?.title || '(none)'}
+
+=== Website meta tags ===
+${metaTagsText}
+
+=== Website JSON-LD ===
+${jsonLdText}
+
+=== Website page text ===
+${blocks || '(no scraped page content — site likely JS-rendered or blocked our crawl. Lean heavily on the Google reviews above.)'}`;
+
+  const r = await callClaudeJSON<ClaudeEnrichment>({ system, user, maxTokens: 1500, temperature: 0.3 });
   if (!r.ok) {
     console.warn('claudeEnrich failed:', r.error);
     return null;
@@ -601,6 +703,12 @@ export const adminLeadDiscovery = functions
           const website = det.website || null;
           const state = pickFromAddressComponents(det.address_components, 'administrative_area_level_1');
           const postcode = pickFromAddressComponents(det.address_components, 'postal_code');
+          const reviews = (det.reviews || []).slice(0, 5).map(rev => ({
+            author: rev.author_name || null,
+            rating: rev.rating ?? null,
+            text: (rev.text || '').slice(0, 800),
+            when: rev.relative_time_description || null,
+          })).filter(rev => rev.text);
 
           const leadDoc: any = {
             businessName: r.name,
@@ -622,6 +730,9 @@ export const adminLeadDiscovery = functions
             googlePlaceId: r.place_id,
             googleRating: det.rating ?? null,
             googleReviewCount: det.user_ratings_total ?? null,
+            googleReviews: reviews,
+            googleEditorialSummary: det.editorial_summary?.overview || null,
+            googleTypes: det.types || [],
             source: 'gmaps' as const,
             sourceUrl: `https://www.google.com/maps/place/?q=place_id:${r.place_id}`,
             status: 'new' as LeadStatus,
@@ -701,6 +812,28 @@ export const adminEnrichLeads = functions
 
       await ref.set({ status: 'researching' as LeadStatus }, { merge: true });
 
+      // Backfill googleReviews / types / editorial summary for leads created
+      // before we started saving them at discovery time.
+      if (!Array.isArray(lead.googleReviews) && lead.googlePlaceId) {
+        const det = await placesDetails(lead.googlePlaceId);
+        if (det) {
+          const reviews = (det.reviews || []).slice(0, 5).map(rev => ({
+            author: rev.author_name || null,
+            rating: rev.rating ?? null,
+            text: (rev.text || '').slice(0, 800),
+            when: rev.relative_time_description || null,
+          })).filter(rev => rev.text);
+          await ref.set({
+            googleReviews: reviews,
+            googleEditorialSummary: det.editorial_summary?.overview || null,
+            googleTypes: det.types || [],
+          }, { merge: true });
+          lead.googleReviews = reviews;
+          lead.googleEditorialSummary = det.editorial_summary?.overview || null;
+          lead.googleTypes = det.types || [];
+        }
+      }
+
       let scraped: ScrapedSiteContent | null = null;
       if (lead.websiteUrl) {
         scraped = await scrapeWebsite(lead.websiteUrl);
@@ -712,6 +845,9 @@ export const adminEnrichLeads = functions
         suburb: lead.suburb,
         websiteUrl: lead.websiteUrl,
         scraped,
+        googleReviews: Array.isArray(lead.googleReviews) ? lead.googleReviews : [],
+        googleEditorialSummary: lead.googleEditorialSummary || null,
+        googleTypes: Array.isArray(lead.googleTypes) ? lead.googleTypes : [],
       });
 
       if (!enrich) {
@@ -905,6 +1041,8 @@ export const adminGetLead = functions.https.onCall(async (data, context) => {
   // Convert Firestore timestamps to ms for the client
   const tsKeys = ['createdAt', 'scrapedAt', 'enrichedAt', 'enrichmentAttemptedAt', 'queuedAt', 'sentAt', 'engagedAt', 'repliedAt', 'convertedAt', 'generatedAt'];
   for (const k of tsKeys) if (lead[k]?.toMillis) lead[k] = lead[k].toMillis();
+  // Strip data that's noisy in JSON responses but pass-throughs reviews so UI can render them.
+  // (no-op here — googleReviews and googleTypes already serialize fine.)
 
   const outreach = outreachSnap.docs.map(d => {
     const x = d.data() as any;
