@@ -1235,6 +1235,52 @@ export const adminApproveLeads = functions
   });
 
 // ============================================================
+// adminTestSendLead — sends the lead's generated message to an arbitrary
+// test address. Bypasses suppression / daily cap. Does NOT update lead status.
+// Use this to preview deliverability + formatting before going live.
+// ============================================================
+
+export const adminTestSendLead = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const leadId = String(data?.leadId || '');
+  const to = normaliseEmail(String(data?.to || ''));
+  if (!leadId || !to) {
+    throw new functions.https.HttpsError('invalid-argument', 'leadId + to (email) required');
+  }
+  const ref = db().doc(`leads/${leadId}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'lead not found');
+  const lead: any = snap.data();
+  if (!lead.generatedSubject || !lead.generatedBody) {
+    throw new functions.https.HttpsError('failed-precondition', 'No generated message yet — generate first');
+  }
+
+  // Keep 'lead_outreach' tag so email.ts wraps with the compliance footer +
+  // outreach sender (accurate preview). DROP 'lead:<id>' tag so the
+  // brevoEmailWebhook fan-out doesn't flip the lead's status to 'engaged' when
+  // YOU open the test email.
+  const ok = await sendEmail({
+    to,
+    subject: `[TEST] ${lead.generatedSubject}`,
+    htmlContent: lead.generatedBody,
+    category: 'transactional', // bypass marketing opt-in checks for the test recipient
+    tags: ['lead_outreach', 'lead_outreach_test', `test_lead:${leadId}`],
+    userId: undefined,
+  });
+
+  await logAdminAction({
+    adminUid,
+    action: 'lead_test_send',
+    targetType: 'lead',
+    targetId: leadId,
+    payload: { to, subject: lead.generatedSubject, ok },
+  });
+
+  if (!ok) throw new functions.https.HttpsError('internal', 'Send failed — check Brevo config');
+  return { ok: true, to };
+});
+
+// ============================================================
 // 8. adminRejectLeads — mark rejected + add to suppression
 // ============================================================
 
@@ -1267,6 +1313,78 @@ export const adminRejectLeads = functions.https.onCall(async (data, context) => 
 
   await logAdminAction({ adminUid, action: 'lead_reject', targetType: 'lead_batch', payload: { count: leadIds.length, reason, dnc, rejected } });
   return { ok: true, rejected };
+});
+
+// ============================================================
+// adminGetLeadConfig / adminUpdateLeadConfig — kill switch + send caps
+// ============================================================
+//
+// Single doc at leadOutreachConfig/current. adminApproveLeads enforces
+// dailyMaxSends as a hard cap. Start small on a fresh domain; ramp slowly.
+
+interface LeadOutreachConfig {
+  enabled: boolean;
+  dailyMaxSends: number;
+  hourlyMaxSends: number;
+  perDomainMax: number;
+}
+
+const DEFAULT_CONFIG: LeadOutreachConfig = {
+  enabled: false, // safe default — explicitly opt in
+  dailyMaxSends: 5,
+  hourlyMaxSends: 3,
+  perDomainMax: 1,
+};
+
+export const adminGetLeadConfig = functions.https.onCall(async (_data, context) => {
+  requireAdmin(context);
+  const snap = await db().doc('leadOutreachConfig/current').get();
+  const config: LeadOutreachConfig = snap.exists
+    ? { ...DEFAULT_CONFIG, ...(snap.data() as any) }
+    : DEFAULT_CONFIG;
+
+  // How many we've sent in the last 24h / last hour
+  const now = Date.now();
+  const since24 = admin.firestore.Timestamp.fromMillis(now - 24 * 60 * 60 * 1000);
+  const since1h = admin.firestore.Timestamp.fromMillis(now - 60 * 60 * 1000);
+  const [sent24Snap, sent1hSnap] = await Promise.all([
+    db().collection('leads').where('sentAt', '>=', since24).select().get(),
+    db().collection('leads').where('sentAt', '>=', since1h).select().get(),
+  ]);
+
+  return {
+    config,
+    sentLast24h: sent24Snap.size,
+    sentLastHour: sent1hSnap.size,
+    remainingToday: Math.max(0, config.dailyMaxSends - sent24Snap.size),
+    remainingThisHour: Math.max(0, config.hourlyMaxSends - sent1hSnap.size),
+  };
+});
+
+export const adminUpdateLeadConfig = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const updates: Partial<LeadOutreachConfig> = {};
+  if (typeof data?.enabled === 'boolean') updates.enabled = data.enabled;
+  if (typeof data?.dailyMaxSends === 'number') {
+    updates.dailyMaxSends = Math.max(0, Math.min(10000, Math.floor(data.dailyMaxSends)));
+  }
+  if (typeof data?.hourlyMaxSends === 'number') {
+    updates.hourlyMaxSends = Math.max(0, Math.min(1000, Math.floor(data.hourlyMaxSends)));
+  }
+  if (typeof data?.perDomainMax === 'number') {
+    updates.perDomainMax = Math.max(1, Math.min(50, Math.floor(data.perDomainMax)));
+  }
+  if (!Object.keys(updates).length) {
+    throw new functions.https.HttpsError('invalid-argument', 'no valid fields to update');
+  }
+  await db().doc('leadOutreachConfig/current').set(updates, { merge: true });
+  await logAdminAction({
+    adminUid,
+    action: 'lead_config_update',
+    targetType: 'system',
+    payload: updates,
+  });
+  return { ok: true, updates };
 });
 
 // ============================================================

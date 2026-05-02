@@ -34,6 +34,9 @@ export {
   adminApproveLeads,
   adminRejectLeads,
   adminAddLeadNote,
+  adminGetLeadConfig,
+  adminUpdateLeadConfig,
+  adminTestSendLead,
   onUserCreatedLinkLead,
   leadUnsubscribe,
 } from './leadOutreach';
