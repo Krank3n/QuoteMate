@@ -94,13 +94,18 @@ const TRADE_QUERY: Record<Trade, string[]> = {
   'deck-builder': ['deck builder', 'decking contractor'],
 };
 
+// Per-trade hook lines — fed to Claude as input, NOT pasted verbatim.
+// Rules embedded here: only name a specific supplier when it's the right one
+// for that trade. Reece = plumbing/irrigation only. Bunnings is fine as a
+// general timber/hardware reference but "your local suppliers" reads less
+// salesy and stays accurate when the user has custom suppliers wired up.
 const TRADE_PITCH: Record<Trade, string> = {
   'fencer':
-    'Pickets, posts, screws — live Bunnings + Reece pricing baked in, plus accurate qty for the run length you describe.',
+    'Pickets, posts, palings, screws — live pricing from your local suppliers baked in, plus accurate qty (palings, posts, screws, concrete) for the run length you describe.',
   'landscaper':
-    'Mulch, soil, edging — live Bunnings pricing plus Reece for irrigation. Describe the job, get the quote.',
+    'Mulch, soil, plants, edging — live pricing from your local suppliers, plus Reece for any irrigation/sprinkler work. Describe the job, get the quote.',
   'deck-builder':
-    'Merbau, joists, screws — live Bunnings pricing plus accurate joist + screw qty from the deck size you describe.',
+    'Merbau or treated pine, joists, bearers, screws — live pricing from your local suppliers, plus accurate joist + screw qty from the deck dimensions you describe.',
 };
 
 // ============================================================
@@ -571,11 +576,23 @@ interface ClaudeMessage {
 async function claudeGenerateMessage(input: {
   businessName: string;
   ownerName: string | null;
+  ownerNameSource: string | null;
+  enrichmentConfidence: 'low' | 'medium' | 'high' | null;
   trade: Trade;
   suburb: string | null;
   hooks: PersonalizationHook[];
   enrichmentSummary: string;
 }): Promise<ClaudeMessage | null> {
+  // Guard against using a guessed/low-confidence owner name. Many small trade
+  // businesses are family trusts or partnerships — the inbox isn't always the
+  // person whose name is on the website. Wrong-name = instant red flag.
+  const safeOwnerName = (
+    input.ownerName
+    && input.ownerNameSource
+    && input.ownerNameSource !== 'guess'
+    && input.enrichmentConfidence !== 'low'
+  ) ? input.ownerName : null;
+
   const system = `You write short cold outreach emails on behalf of Tom, the maker of QuoteMate — a quoting + invoicing app for Australian tradies. The reader is a working tradie. Tone: a mate emailing, not a marketer. The reader will smell automation immediately and dismiss the brand if you sound generic.
 
 Hard rules:
@@ -587,7 +604,8 @@ Hard rules:
 - Sign off "Tom" only. No company sig, no taglines.
 - Plaintext-style HTML — paragraphs separated by <br><br>. No styling, no images, no buttons.
 - Must include a one-line pitch using the trade-specific hook provided.
-- If ownerName is null, open with "Hey there" or with the business name — never invent a name.
+- NAME RULE: If ownerName is "(unknown)" you MUST open with "Hey team" or "Hi there" or the business name — NEVER invent or guess a name. Many tradie inboxes are managed by a partner/spouse/admin, so a wrong name reads as automation.
+- SUPPLIER RULE: Use the supplier wording from the trade-specific hook AS IS. Do not add or substitute supplier names. Reece is plumbing/irrigation only — never mention Reece for fencing, decking, carpentry, painting, or any trade that doesn't touch water. "Your local suppliers" is the safe default when a specific name isn't in the hook.
 
 Output strict JSON only — no markdown fences:
 { "subject": string, "body": string }`;
@@ -597,7 +615,7 @@ Output strict JSON only — no markdown fences:
     .join('\n');
 
   const user = `Business: ${input.businessName}
-Owner first name: ${input.ownerName || '(unknown)'}
+Owner first name: ${safeOwnerName || '(unknown)'}
 Trade: ${input.trade}
 Suburb: ${input.suburb || 'unknown'}
 Summary: ${input.enrichmentSummary}
@@ -930,6 +948,8 @@ export const adminGenerateLeadMessages = functions
       const msg = await claudeGenerateMessage({
         businessName: lead.businessName,
         ownerName: lead.ownerName || null,
+        ownerNameSource: lead.ownerNameSource || null,
+        enrichmentConfidence: lead.enrichmentConfidence || null,
         trade: lead.trade as Trade,
         suburb: lead.suburb,
         hooks: lead.personalizationHooks || [],
