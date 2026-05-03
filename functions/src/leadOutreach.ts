@@ -1240,6 +1240,162 @@ export const adminApproveLeads = functions
   });
 
 // ============================================================
+// autoSendQueuedLeads — scheduled background sender
+// ============================================================
+//
+// Runs every 30 minutes during Australian business hours (Mon-Fri 9am-5pm
+// AEST). Picks queued leads, oldest first, and sends them up to the hourly
+// remaining cap. Respects the kill switch and the auto-ramp / manual caps.
+// This is what makes the system run "while you sleep" — close the browser
+// and queued leads will trickle out across the next few business days.
+
+async function sendOneLead(params: {
+  leadId: string;
+  sentDomainsThisBatch: Set<string>;
+  bySender: 'admin' | 'auto';
+  senderUid?: string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const { leadId, sentDomainsThisBatch, bySender, senderUid } = params;
+  const ref = db().doc(`leads/${leadId}`);
+  const snap = await ref.get();
+  if (!snap.exists) return { sent: false, reason: 'not_found' };
+  const lead: any = snap.data();
+  if (lead.status !== 'queued') return { sent: false, reason: `not_queued:${lead.status}` };
+  if (!lead.email) return { sent: false, reason: 'no_email' };
+  if (!lead.generatedSubject || !lead.generatedBody) return { sent: false, reason: 'no_message' };
+
+  const email = normaliseEmail(lead.email);
+  if (!email) return { sent: false, reason: 'invalid_email' };
+  const dom = domainOf(email);
+
+  const supp = await isSuppressed({ email, domain: dom || undefined, placeId: lead.googlePlaceId });
+  if (supp.suppressed) {
+    await ref.set({ status: 'rejected' as LeadStatus, rejectionReason: `suppressed:${supp.reason}` }, { merge: true });
+    return { sent: false, reason: `suppressed:${supp.reason}` };
+  }
+  const exUid = await findExistingUserByEmail(email);
+  if (exUid) {
+    await addSuppression({ type: 'email', value: email, reason: 'is-existing-user' });
+    await ref.set({ status: 'rejected' as LeadStatus, rejectionReason: 'is-existing-user', convertedUid: exUid }, { merge: true });
+    return { sent: false, reason: 'existing-user' };
+  }
+  if (dom && sentDomainsThisBatch.has(dom)) return { sent: false, reason: 'per_domain_cap' };
+
+  const tags = ['lead_outreach', `lead:${leadId}`];
+  if (lead.campaignId) tags.push(`campaign:${lead.campaignId}`);
+  if (bySender === 'auto') tags.push('auto_send');
+
+  const ok = await sendEmail({
+    to: email,
+    subject: lead.generatedSubject,
+    htmlContent: lead.generatedBody,
+    category: 'marketing',
+    tags,
+    userId: undefined,
+  });
+  if (!ok) {
+    await ref.set({ status: 'rejected' as LeadStatus, rejectionReason: 'send_failed' }, { merge: true });
+    return { sent: false, reason: 'send_failed' };
+  }
+  await ref.set({ status: 'sent' as LeadStatus, sentAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  await ref.collection('outreach').add({
+    subject: lead.generatedSubject,
+    body: lead.generatedBody,
+    sentAt: admin.firestore.FieldValue.serverTimestamp(),
+    sentBy: bySender === 'auto' ? 'auto-scheduler' : (senderUid || 'admin'),
+  });
+  if (dom) sentDomainsThisBatch.add(dom);
+  return { sent: true };
+}
+
+export const autoSendQueuedLeads = functions.pubsub
+  .schedule('every 30 minutes')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    // Only run Mon-Fri 9am-5pm AEST. Tradies check email morning + lunch;
+    // weekend cold sends look spammy and convert worse.
+    const now = new Date();
+    const localHour = Number(now.toLocaleString('en-AU', { timeZone: 'Australia/Sydney', hour: 'numeric', hour12: false }));
+    const localDay = now.toLocaleString('en-AU', { timeZone: 'Australia/Sydney', weekday: 'short' });
+    if (localDay === 'Sat' || localDay === 'Sun') {
+      console.info('autoSendQueuedLeads: weekend, skipping');
+      return null;
+    }
+    if (localHour < 9 || localHour >= 17) {
+      console.info(`autoSendQueuedLeads: outside business hours (h=${localHour}), skipping`);
+      return null;
+    }
+
+    const cfgSnap = await db().doc('leadOutreachConfig/current').get();
+    const cfg: LeadOutreachConfig = cfgSnap.exists
+      ? { ...DEFAULT_CONFIG, ...(cfgSnap.data() as any) }
+      : DEFAULT_CONFIG;
+    if (!cfg.enabled) {
+      console.info('autoSendQueuedLeads: disabled (kill switch)');
+      return null;
+    }
+
+    const eff = effectiveCaps(cfg);
+    const since24 = admin.firestore.Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
+    const since1h = admin.firestore.Timestamp.fromMillis(Date.now() - 60 * 60 * 1000);
+    const [sent24Snap, sent1hSnap] = await Promise.all([
+      db().collection('leads').where('sentAt', '>=', since24).select().get(),
+      db().collection('leads').where('sentAt', '>=', since1h).select().get(),
+    ]);
+    const dailyRemaining = Math.max(0, eff.daily - sent24Snap.size);
+    const hourlyRemaining = Math.max(0, eff.hourly - sent1hSnap.size);
+    const budget = Math.min(dailyRemaining, hourlyRemaining);
+
+    if (budget <= 0) {
+      console.info(`autoSendQueuedLeads: no budget (daily=${dailyRemaining}, hourly=${hourlyRemaining})`);
+      return null;
+    }
+
+    // Pick oldest queued leads. Pull a wider net than budget so we have
+    // candidates to skip past (per-domain cap, missing email, etc.) without
+    // running out.
+    const queuedSnap = await db().collection('leads')
+      .where('status', '==', 'queued')
+      .orderBy('queuedAt', 'asc')
+      .limit(budget * 4)
+      .get();
+
+    if (queuedSnap.empty) {
+      console.info('autoSendQueuedLeads: no queued leads');
+      return null;
+    }
+
+    const sentDomains = new Set<string>();
+    let sent = 0;
+    let skipped = 0;
+    let failed = 0;
+    const skipReasons: Record<string, number> = {};
+
+    for (const d of queuedSnap.docs) {
+      if (sent >= budget) break;
+      const r = await sendOneLead({ leadId: d.id, sentDomainsThisBatch: sentDomains, bySender: 'auto' });
+      if (r.sent) {
+        sent++;
+      } else {
+        const reason = r.reason || 'unknown';
+        skipReasons[reason] = (skipReasons[reason] || 0) + 1;
+        if (reason === 'send_failed') failed++;
+        else skipped++;
+      }
+    }
+
+    await logAdminAction({
+      adminUid: 'system',
+      action: 'auto_send_run',
+      targetType: 'system',
+      payload: { sent, skipped, failed, budget, dailyRemaining, hourlyRemaining, skipReasons, stage: eff.stage?.label || null, day: eff.day || null },
+    });
+
+    console.info(`autoSendQueuedLeads: sent=${sent}, skipped=${skipped}, failed=${failed}, budget=${budget}`);
+    return null;
+  });
+
+// ============================================================
 // adminTestSendLead — sends the lead's generated message to an arbitrary
 // test address. Bypasses suppression / daily cap. Does NOT update lead status.
 // Use this to preview deliverability + formatting before going live.

@@ -37,6 +37,7 @@ export {
   adminGetLeadConfig,
   adminUpdateLeadConfig,
   adminTestSendLead,
+  autoSendQueuedLeads,
   onUserCreatedLinkLead,
   leadUnsubscribe,
 } from './leadOutreach';
