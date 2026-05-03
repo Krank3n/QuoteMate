@@ -10,6 +10,12 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import { sendEmail, getUserEmail } from './email';
+import { applyBrevoEventToLead } from './leadOutreach';
+import {
+  stageToQuoteStatus,
+  stageToInvoiceStatus,
+} from './shared/document/adapter';
+import type { DocumentStage, DocumentType } from './shared/document/types';
 
 const db = () => admin.firestore();
 
@@ -527,8 +533,7 @@ export const adminGetUser = functions.https.onCall(async (data, context) => {
     referralSnap,
     subSnap,
     squareSnap,
-    quotesSnap,
-    invoicesSnap,
+    documentsSnap,
     notesSnap,
     callsSnap,
     emailLogSnap,
@@ -544,8 +549,7 @@ export const adminGetUser = functions.https.onCall(async (data, context) => {
     firestore.doc(`users/${uid}/profile/referral`).get(),
     firestore.doc(`users/${uid}/profile/subscription`).get(),
     firestore.doc(`users/${uid}/settings/squareConnection`).get(),
-    firestore.collection(`users/${uid}/quotes`).orderBy('createdAt', 'desc').limit(25).get().catch(() => ({ docs: [] as any[] })),
-    firestore.collection(`users/${uid}/invoices`).orderBy('createdAt', 'desc').limit(25).get().catch(() => ({ docs: [] as any[] })),
+    firestore.collection(`users/${uid}/documents`).orderBy('createdAt', 'desc').limit(50).get().catch(() => ({ docs: [] as any[] })),
     firestore.collection(`users/${uid}/adminNotes`).orderBy('createdAt', 'desc').limit(50).get().catch(() => ({ docs: [] as any[] })),
     firestore.collection(`users/${uid}/crmEvents`).orderBy('at', 'desc').limit(50).get().catch(() => ({ docs: [] as any[] })),
     firestore.collection('emailLog').where('userId', '==', uid).orderBy('sentAt', 'desc').limit(50).get().catch(() => ({ docs: [] as any[] })),
@@ -604,8 +608,7 @@ export const adminGetUser = functions.https.onCall(async (data, context) => {
     // Square summary — tokens are intentionally stripped, admin only needs
     // connection state + merchant identity for support.
     square: summariseSquare(squareSnap.data()),
-    quotes: (quotesSnap as any).docs.map(docToJson),
-    invoices: (invoicesSnap as any).docs.map(docToJson),
+    documents: (documentsSnap as any).docs.map(docToJson),
     notes: (notesSnap as any).docs.map(docToJson),
     calls: (callsSnap as any).docs.map(docToJson),
     emailLog: (emailLogSnap as any).docs.map(docToJson),
@@ -1036,8 +1039,114 @@ export const adminBroadcast = functions
   });
 
 // ============================================================
-// FEEDBACK — reply
+// FEEDBACK — list + reply
 // ============================================================
+
+interface FeedbackRow {
+  id: string;
+  userId: string | null;
+  email: string | null;
+  category: string | null;
+  feedback: string | null;
+  rating: string | null;
+  details: string | null;
+  source: string | null;
+  replied: boolean;
+  repliedAt: number | null;
+  repliedBy: string | null;
+  replyBody: string | null;
+  detailsAddedAt: number | null;
+  createdAt: number | null;
+}
+
+export const adminListFeedback = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const limit = Math.min(Math.max(Number(data?.limit) || 100, 1), 500);
+    const category = (data?.category || '').toString().trim();
+    const rating = (data?.rating || '').toString().trim();
+    const replied = data?.replied as boolean | undefined;
+
+    let q: admin.firestore.Query = db().collection('feedback').orderBy('createdAt', 'desc');
+    if (category) q = q.where('category', '==', category);
+    if (rating) q = q.where('rating', '==', rating);
+
+    const snap = await q.limit(limit).get();
+    const docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as any }));
+
+    // Resolve missing emails from userId in one pass (de-duped)
+    const uidsToLookup = Array.from(
+      new Set(
+        docs
+          .filter((d) => !d.data.userEmail && !d.data.email && d.data.userId)
+          .map((d) => d.data.userId as string)
+      )
+    );
+    const emailByUid = new Map<string, string | null>();
+    await Promise.all(
+      uidsToLookup.map(async (uid) => {
+        try {
+          emailByUid.set(uid, await getUserEmail(uid));
+        } catch {
+          emailByUid.set(uid, null);
+        }
+      })
+    );
+
+    let rows: FeedbackRow[] = docs.map(({ id, data: v }) => {
+      const uid = v.userId || null;
+      const email = v.userEmail || v.email || (uid ? emailByUid.get(uid) || null : null);
+      return {
+        id,
+        userId: uid,
+        email,
+        category: v.category || null,
+        feedback: v.feedback || v.message || null,
+        rating: v.rating || null,
+        details: v.details || null,
+        source: v.source || null,
+        replied: !!v.replied,
+        repliedAt: ts(v.repliedAt),
+        repliedBy: v.repliedBy || null,
+        replyBody: v.replyBody || null,
+        detailsAddedAt: ts(v.detailsAddedAt),
+        createdAt: ts(v.createdAt),
+      };
+    });
+
+    if (typeof replied === 'boolean') {
+      rows = rows.filter((r) => r.replied === replied);
+    }
+
+    // Aggregate counts across the unfiltered slice (pre-replied filter so chips show real totals)
+    const all = docs.map(({ id, data: v }) => ({
+      id,
+      replied: !!v.replied,
+      rating: (v.rating || null) as string | null,
+      category: (v.category || null) as string | null,
+      createdAt: ts(v.createdAt),
+    }));
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const totals = {
+      all: all.length,
+      unreplied: all.filter((r) => !r.replied).length,
+      replied: all.filter((r) => r.replied).length,
+      last7d: all.filter((r) => (r.createdAt || 0) >= sevenDaysAgo).length,
+      ratings: {
+        great: all.filter((r) => r.rating === 'great').length,
+        okay: all.filter((r) => r.rating === 'okay').length,
+        bad: all.filter((r) => r.rating === 'bad').length,
+      },
+    };
+    const categoryCounts: Record<string, number> = {};
+    for (const r of all) {
+      const c = r.category || 'Uncategorised';
+      categoryCounts[c] = (categoryCounts[c] || 0) + 1;
+    }
+
+    return { items: rows, totals, categoryCounts };
+  });
 
 export const adminReplyToFeedback = functions.https.onCall(async (data, context) => {
   const adminUid = requireAdmin(context);
@@ -1315,24 +1424,57 @@ export const adminMetricsSeries = functions.https.onCall(async (data, context) =
 });
 
 // ============================================================
-// QUOTES — global log across all tradies
+// DOCUMENTS — global log across all tradies (unified quote+invoice model)
 // ============================================================
+//
+// Source of truth post-unification: users/{uid}/documents/{id}. The legacy
+// quotes/{id} and invoices/{id} collections are kept as mirrors for older
+// clients but the stage field on the document is canonical.
 
-export const adminListQuotes = functions
+const STUCK_VIEWED_NO_RESPONSE_DAYS = 3;
+const STUCK_INVOICE_UNPAID_DAYS = 14;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function tsMs(v: any): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
+    const t = Date.parse(v);
+    return isNaN(t) ? null : t;
+  }
+  if (typeof v === 'object') {
+    if (typeof v._seconds === 'number') return v._seconds * 1000;
+    if (typeof v.seconds === 'number') return v.seconds * 1000;
+    if (typeof v.toMillis === 'function') {
+      try { return v.toMillis(); } catch { return null; }
+    }
+  }
+  return null;
+}
+
+function jobToString(job: any): string | null {
+  if (typeof job === 'string') return job.slice(0, 200);
+  if (job && typeof job === 'object') {
+    const parts = [job.name, job.description].filter((x) => typeof x === 'string' && x.trim());
+    const joined = parts.join(' — ').slice(0, 200);
+    return joined || null;
+  }
+  return null;
+}
+
+export const adminListDocuments = functions
   .runWith({ memory: '512MB', timeoutSeconds: 60 })
   .https.onCall(async (data, context) => {
     requireAdmin(context);
-    const limit = Math.min(Math.max(Number(data?.limit) || 300, 1), 2000);
-    const statusFilter = (data?.status || '').toString();
+    const limit = Math.min(Math.max(Number(data?.limit) || 500, 1), 2000);
+    const stageFilter = (data?.stage || '').toString() as DocumentStage | '';
+    const typeFilter = (data?.type || '').toString() as DocumentType | '';
     const userIdFilter = (data?.userId || '').toString();
 
     const firestore = db();
-    // Quotes live at users/{uid}/quotes/{id} — collection-group query spans all users.
-    // Fetched without orderBy to avoid requiring a composite index; sort/limit in memory.
-    // At current scale (<1k quotes) this is fine; revisit if it grows past a few thousand.
-    const snap = await firestore.collectionGroup('quotes').get();
+    const snap = await firestore.collectionGroup('documents').get();
 
-    // Batch-resolve user info so each row can show the business name + email.
+    // Resolve auth + business per uid in batch so each row can show the tradie.
     const uidSet = new Set<string>();
     for (const d of snap.docs) {
       const uid = d.ref.parent.parent?.id;
@@ -1354,112 +1496,178 @@ export const adminListQuotes = functions
       })
     );
 
+    const now = Date.now();
+
     const rows = snap.docs
       .map((d) => {
         const uid = d.ref.parent.parent?.id || '';
-        const q = d.data() as any;
+        const doc = d.data() as any;
         if (userIdFilter && uid !== userIdFilter) return null;
-        if (statusFilter && q.status !== statusFilter) return null;
+        const stage = (doc.stage || 'draft') as DocumentStage;
+        const type = (doc.type || (stage.startsWith('invoice') || stage === 'paid' || stage === 'partially_paid' ? 'invoice' : 'quote')) as DocumentType;
+        if (stageFilter && stage !== stageFilter) return null;
+        if (typeFilter && type !== typeFilter) return null;
+
         const auth = authMap.get(uid);
         const biz = businessMap.get(uid) || {};
+
+        const createdAt = tsMs(doc.createdAt);
+        const updatedAt = tsMs(doc.updatedAt);
+        const sentAt = tsMs(doc.sentAt);
+        const respondedAt = tsMs(doc.respondedAt);
+        const firstViewedAt = tsMs(doc.firstViewedAt);
+        const lastViewedAt = tsMs(doc.lastViewedAt);
+        const acceptedAt = tsMs(doc.acceptedAt);
+        const invoicedAt = tsMs(doc.invoicedAt);
+        const paidInFullAt = tsMs(doc.paidInFullAt);
+        const dueDate = tsMs(doc.dueDate);
+        const issueDate = tsMs(doc.issueDate);
+        const depositPaidAt = tsMs(doc.depositPaidAt);
+
+        const total = Number(doc.total) || 0;
+        const paidTotal = Number(doc.paidTotal) || 0;
+        const depositPaid = Number(doc.depositPaid) || 0;
+        const balanceDue = Number(doc.balanceDue) || Math.max(total - paidTotal - depositPaid, 0);
+
+        // "Stuck" heuristic — quote viewed but no response for >3 days, OR
+        // invoice sent and overdue/unpaid for >14 days. Helps the admin spot
+        // pipelines that need a nudge without scanning every row.
+        const stuck = (() => {
+          if (type === 'quote' && firstViewedAt && !respondedAt) {
+            return now - firstViewedAt > STUCK_VIEWED_NO_RESPONSE_DAYS * DAY_MS;
+          }
+          if (type === 'invoice' && (stage === 'invoice_sent' || stage === 'partially_paid')) {
+            const ref = sentAt || invoicedAt || createdAt;
+            return !!ref && now - ref > STUCK_INVOICE_UNPAID_DAYS * DAY_MS;
+          }
+          return false;
+        })();
+
         return {
           id: d.id,
           uid,
           userEmail: auth?.email || biz.email || null,
           userBusinessName: biz.businessName || auth?.displayName || null,
-          customerName: q.customerName || null,
-          customerEmail: q.customerEmail || null,
-          customerPhone: q.customerPhone || null,
-          jobAddress: q.jobAddress || null,
-          job: (() => {
-            if (typeof q.job === 'string') return q.job.slice(0, 200);
-            if (q.job && typeof q.job === 'object') {
-              const parts = [q.job.name, q.job.description].filter((x) => typeof x === 'string' && x.trim());
-              return parts.join(' — ').slice(0, 200) || null;
-            }
-            return null;
-          })(),
-          status: q.status || 'draft',
-          total: Number(q.total) || 0,
-          subtotal: Number(q.subtotal) || 0,
-          gst: Number(q.gst) || 0,
-          materialsSubtotal: Number(q.materialsSubtotal) || 0,
-          laborTotal: Number(q.laborTotal) || 0,
-          markup: Number(q.markup) || 0,
-          materialCount: Array.isArray(q.materials) ? q.materials.length : 0,
-          photoCount: Array.isArray(q.photos) ? q.photos.length : 0,
-          createdAt: ts(q.createdAt),
-          updatedAt: ts(q.updatedAt),
-          respondedAt: ts(q.respondedAt),
-          respondedBy: q.respondedBy || null,
-          firstViewedAt: ts(q.firstViewedAt),
-          lastViewedAt: ts(q.lastViewedAt),
-          viewCount: Number(q.viewCount) || 0,
-          hasAcceptanceToken: !!q.acceptanceToken,
-          // Square payment state — depositPaid tracks deposit-kind, paidTotal tracks full-payment kind.
-          depositPaid: Number(q.depositPaid) || 0,
-          paidTotal: Number(q.paidTotal) || 0,
-          balanceDue: Number(q.balanceDue) || 0,
-          depositPaidAt: ts(q.depositPaidAt),
-          squarePaymentId: q.depositSquarePaymentId || q.squarePaymentId || null,
+          type,
+          stage,
+          // Legacy status alias for callers that still want one — derived, never stored.
+          legacyStatus: type === 'invoice' ? stageToInvoiceStatus(stage) : stageToQuoteStatus(stage),
+          number: doc.number || null,
+          customerName: doc.customerName || null,
+          customerEmail: doc.customerEmail || null,
+          customerPhone: doc.customerPhone || null,
+          jobAddress: doc.jobAddress || null,
+          job: jobToString(doc.job),
+          total,
+          subtotal: Number(doc.subtotal) || 0,
+          gst: Number(doc.gst) || 0,
+          materialsSubtotal: Number(doc.materialsSubtotal) || 0,
+          laborTotal: Number(doc.laborTotal) || 0,
+          markup: Number(doc.markup) || 0,
+          materialCount: Array.isArray(doc.materials) ? doc.materials.length : 0,
+          photoCount: Array.isArray(doc.photos) ? doc.photos.length : 0,
+          createdAt,
+          updatedAt,
+          sentAt,
+          respondedAt,
+          respondedBy: doc.respondedBy || null,
+          firstViewedAt,
+          lastViewedAt,
+          viewCount: Number(doc.viewCount) || 0,
+          acceptedAt,
+          invoicedAt,
+          paidInFullAt,
+          issueDate,
+          dueDate,
+          hasAcceptanceToken: !!doc.acceptanceToken,
+          depositPaid,
+          paidTotal,
+          balanceDue,
+          depositPaidAt,
+          squarePaymentId: doc.depositSquarePaymentId || doc.squarePaymentId || null,
+          paymentLinkUrl: doc.activePaymentLink?.url || doc.depositPaymentLinkUrl || doc.squarePaymentLinkUrl || null,
+          jobId: doc.jobId || null,
+          stuck,
         };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null)
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
       .slice(0, limit);
 
-    // Totals across the filtered slice.
+    const countByStage = (s: DocumentStage) => rows.filter((r) => r.stage === s).length;
+    const sumByStage = (s: DocumentStage) => rows.filter((r) => r.stage === s).reduce((a, r) => a + r.total, 0);
+
     const totals = {
       all: rows.length,
-      draft: rows.filter((r) => r.status === 'draft').length,
-      sent: rows.filter((r) => r.status === 'sent').length,
-      viewed: rows.filter((r) => r.status === 'viewed' || (!!r.firstViewedAt && r.status === 'sent')).length,
-      viewedButNoResponse: rows.filter((r) => !!r.firstViewedAt && !r.respondedAt).length,
-      accepted: rows.filter((r) => r.status === 'accepted').length,
-      declined: rows.filter((r) => r.status === 'declined').length,
+      // Per-stage counts
+      draft: countByStage('draft'),
+      quote_sent: countByStage('quote_sent'),
+      quote_accepted: countByStage('quote_accepted'),
+      quote_rejected: countByStage('quote_rejected'),
+      invoice_sent: countByStage('invoice_sent'),
+      partially_paid: countByStage('partially_paid'),
+      paid: countByStage('paid'),
+      cancelled: countByStage('cancelled'),
+      // Per-type counts
+      quotes: rows.filter((r) => r.type === 'quote').length,
+      invoices: rows.filter((r) => r.type === 'invoice').length,
+      // Action-oriented buckets
+      stuck: rows.filter((r) => r.stuck).length,
+      viewedNoResponse: rows.filter((r) => r.type === 'quote' && r.firstViewedAt && !r.respondedAt).length,
+      // Money rolls
       valueAll: rows.reduce((a, r) => a + r.total, 0),
-      valueSent: rows
-        .filter((r) => r.status === 'sent' || r.status === 'viewed' || r.status === 'accepted' || r.status === 'declined')
-        .reduce((a, r) => a + r.total, 0),
-      valueAccepted: rows.filter((r) => r.status === 'accepted').reduce((a, r) => a + r.total, 0),
-      valueViewedPending: rows.filter((r) => !!r.firstViewedAt && !r.respondedAt).reduce((a, r) => a + r.total, 0),
+      valueDraft: sumByStage('draft'),
+      valueQuoteSent: sumByStage('quote_sent') + sumByStage('quote_accepted') + sumByStage('quote_rejected'),
+      valueAccepted: sumByStage('quote_accepted'),
+      valueInvoiced: sumByStage('invoice_sent') + sumByStage('partially_paid') + sumByStage('paid'),
       valuePaid: rows.reduce((a, r) => a + Math.max(r.paidTotal, r.depositPaid), 0),
       paidCount: rows.filter((r) => r.paidTotal > 0 || r.depositPaid > 0).length,
     };
 
-    return { quotes: rows, totals };
+    return { documents: rows, totals };
   });
 
-export const adminGetQuote = functions.https.onCall(async (data, context) => {
+export const adminGetDocument = functions.https.onCall(async (data, context) => {
   requireAdmin(context);
   const uid = (data?.uid || '').toString();
   const id = (data?.id || '').toString();
   if (!uid || !id) throw new functions.https.HttpsError('invalid-argument', 'uid and id required');
 
-  const [quoteSnap, biz, authRec] = await Promise.all([
-    db().doc(`users/${uid}/quotes/${id}`).get(),
-    db().doc(`users/${uid}/settings/business`).get(),
+  const firestore = db();
+  const [docSnap, biz, authRec] = await Promise.all([
+    firestore.doc(`users/${uid}/documents/${id}`).get(),
+    firestore.doc(`users/${uid}/settings/business`).get(),
     admin.auth().getUser(uid).catch(() => null),
   ]);
-  if (!quoteSnap.exists) throw new functions.https.HttpsError('not-found', 'quote not found');
+  if (!docSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'document not found');
+  }
 
-  const q = quoteSnap.data() as any;
+  const doc = docSnap.data() as any;
+  // Convert known date fields to ms epochs so the client doesn't have to.
+  const dateFields = [
+    'createdAt', 'updatedAt', 'sentAt', 'respondedAt',
+    'acceptanceTokenCreatedAt', 'syncedAt', 'firstViewedAt', 'lastViewedAt',
+    'acceptedAt', 'invoicedAt', 'paidInFullAt', 'issueDate', 'dueDate',
+    'depositPaidAt', 'squarePaidAt', 'xeroSyncedAt',
+  ];
+  const cleaned: any = { ...doc, id };
+  for (const f of dateFields) {
+    if (doc[f] !== undefined) cleaned[f] = tsMs(doc[f]);
+  }
+  if (Array.isArray(doc.payments)) {
+    cleaned.payments = doc.payments.map((p: any) => ({
+      ...p,
+      paidAt: tsMs(p.paidAt),
+    }));
+  }
+
   return {
     id,
     uid,
     userEmail: authRec?.email || null,
     userBusinessName: biz.data()?.businessName || null,
-    quote: {
-      ...q,
-      createdAt: ts(q.createdAt),
-      updatedAt: ts(q.updatedAt),
-      respondedAt: ts(q.respondedAt),
-      acceptanceTokenCreatedAt: ts(q.acceptanceTokenCreatedAt),
-      syncedAt: ts(q.syncedAt),
-      firstViewedAt: ts(q.firstViewedAt),
-      lastViewedAt: ts(q.lastViewedAt),
-      viewCount: Number(q.viewCount) || 0,
-    },
+    document: cleaned,
   };
 });
 
@@ -2018,6 +2226,27 @@ export const brevoEmailWebhook = functions.https.onRequest(async (req, res) => {
     for (const body of events) {
       const event = String(body.event || '').toLowerCase();
       const logId = parseEmailLogId(body);
+
+      // Fan out lead-tagged events to leads/{id} regardless of emailLog match.
+      try {
+        const tagField = body.tag || body.tags;
+        let parsedTags: string[] = [];
+        if (Array.isArray(tagField)) parsedTags = tagField;
+        else if (typeof tagField === 'string') {
+          try { parsedTags = JSON.parse(tagField); } catch { parsedTags = [tagField]; }
+        }
+        const eventAt = timestampFromBrevo(body);
+        await applyBrevoEventToLead({
+          tags: parsedTags,
+          event,
+          email: body.email || null,
+          at: eventAt,
+          reason: body.reason || null,
+        });
+      } catch (e) {
+        console.warn('brevoEmailWebhook: lead fan-out failed', e);
+      }
+
       if (!logId) {
         unmatched++;
         console.info(`brevoEmailWebhook: ${event} event with no emailLogId`, body.email, body['message-id']);

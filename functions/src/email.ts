@@ -182,11 +182,46 @@ async function canSendEmail(userId: string, category: EmailCategory): Promise<bo
   }
 }
 
+// AU Spam Act 2003 compliance footer for cold outreach. Required:
+//   - clear sender business identity
+//   - functional reply contact
+//   - one-click unsubscribe
+// Wrapped around the body for any send tagged 'lead_outreach'.
+function wrapLeadOutreachBody(innerBody: string, unsubscribeLink: string): string {
+  return `<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;font-size:15px;line-height:1.6;">
+<div style="max-width:560px;margin:0 auto;padding:24px 20px;">
+<div>${innerBody}</div>
+<div style="margin-top:36px;padding-top:18px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:1.6;">
+QuoteMate is made by Hansen Dev (Sydney NSW, Australia). You're receiving this because your business is publicly listed as a tradie servicing this area &mdash; reply "stop" or click below and I'll never email you again.<br/>
+<a href="${unsubscribeLink}" style="color:#64748b;text-decoration:underline;">Unsubscribe from QuoteMate outreach</a>
+</div>
+</div>
+</body></html>`;
+}
+
 // Pre-create the emailLog doc, attach its id as a Brevo tag, then send. The
 // Brevo webhook posts back events keyed to that tag, which lets us correlate
 // delivery / bounce / open / click / spam back to this exact send.
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to, subject, htmlContent, category, userId, tags, attachment, unsubscribeUrl } = options;
+  const { to, subject, category, userId, tags, attachment } = options;
+  let { htmlContent, unsubscribeUrl } = options;
+
+  // For cold lead outreach, wrap with the AU spam-act compliance footer
+  // and ensure a List-Unsubscribe header is set even if the caller didn't.
+  const isLeadOutreach = !!tags?.includes('lead_outreach');
+  if (isLeadOutreach) {
+    const leadTag = tags!.find(t => t.startsWith('lead:'));
+    const leadId = leadTag ? leadTag.slice('lead:'.length) : '';
+    if (!unsubscribeUrl) {
+      // Cloud Function endpoint (one-click). Override via OUTREACH_UNSUB_URL_BASE env if you front it with a custom domain.
+      const base = process.env.OUTREACH_UNSUB_URL_BASE
+        || 'https://us-central1-hansendev.cloudfunctions.net/leadUnsubscribe';
+      unsubscribeUrl = `${base}?to=${encodeURIComponent(to)}&lead=${encodeURIComponent(leadId)}`;
+    }
+    htmlContent = wrapLeadOutreachBody(htmlContent, unsubscribeUrl);
+  }
+
   const apiKey = getBrevoApiKey();
 
   if (!apiKey) {
@@ -233,8 +268,16 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         'Accept': 'application/json',
       },
       body: JSON.stringify({
-        sender: SENDER,
-        replyTo: { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
+        // Cold outreach uses an isolated sender (separate domain/subdomain ideally)
+        // so spam complaints don't poison the transactional sender's reputation.
+        // Configure OUTREACH_SENDER_EMAIL + OUTREACH_REPLY_TO_EMAIL in functions/.env.
+        // Falls back to the default SENDER if those aren't set.
+        sender: isLeadOutreach && process.env.OUTREACH_SENDER_EMAIL
+          ? { email: process.env.OUTREACH_SENDER_EMAIL, name: process.env.OUTREACH_SENDER_NAME || 'Tom' }
+          : SENDER,
+        replyTo: isLeadOutreach && process.env.OUTREACH_REPLY_TO_EMAIL
+          ? { email: process.env.OUTREACH_REPLY_TO_EMAIL, name: process.env.OUTREACH_REPLY_TO_NAME || 'Tom' }
+          : { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
         to: [{ email: to }],
         subject,
         htmlContent,

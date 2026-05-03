@@ -7,4 +7,6 @@ export {
   canTransition,
   allowedNextStages,
   isTerminal,
+  stageRank,
+  isStageDowngrade,
 } from '../../shared/document/stage';

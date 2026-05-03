@@ -24,6 +24,30 @@ import {
   sendDraftNudgeEmail,
 } from './email';
 export * from './adminCrm';
+export {
+  adminLeadDiscovery,
+  adminEnrichLeads,
+  adminGenerateLeadMessages,
+  adminListLeads,
+  adminGetLead,
+  adminUpdateLeadMessage,
+  adminApproveLeads,
+  adminRejectLeads,
+  adminAddLeadNote,
+  adminMarkLeadReplied,
+  brevoInboundWebhook,
+  weeklyLeadDiscovery,
+  adminGetDiscoveryConfig,
+  adminUpdateDiscoveryConfig,
+  adminGetLeadConfig,
+  adminUpdateLeadConfig,
+  adminTestSendLead,
+  autoSendQueuedLeads,
+  weeklyLeadOutreachReport,
+  adminSendLeadReport,
+  onUserCreatedLinkLead,
+  leadUnsubscribe,
+} from './leadOutreach';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
 import {
   sendDocumentEmail,

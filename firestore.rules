@@ -108,6 +108,24 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Lead outreach pipeline — Cloud Functions only (admin-gated callables).
+    // No client should ever read or write these directly.
+    match /leads/{leadId} {
+      allow read, write: if false;
+      match /{sub=**} {
+        allow read, write: if false;
+      }
+    }
+    match /leadSuppression/{key} {
+      allow read, write: if false;
+    }
+    match /leadCampaigns/{campaignId} {
+      allow read, write: if false;
+    }
+    match /leadOutreachConfig/{docId} {
+      allow read, write: if false;
+    }
+
     // Default: deny all access
     match /{document=**} {
       allow read, write: if false;

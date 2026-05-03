@@ -2,7 +2,9 @@ import {
   LEGAL_TRANSITIONS,
   allowedNextStages,
   canTransition,
+  isStageDowngrade,
   isTerminal,
+  stageRank,
 } from '../documentStage';
 import type { DocumentStage } from '../../types/document';
 
@@ -78,6 +80,47 @@ describe('documentStage', () => {
       for (const s of ALL_STAGES) {
         expect(isTerminal(s)).toBe(false);
       }
+    });
+  });
+
+  describe('isStageDowngrade', () => {
+    // The mirror trigger relies on this ordering to refuse to walk a sent /
+    // accepted / paid doc back to draft when the legacy `status` field gets
+    // overwritten by a stale-cache client write. Lock down the cases that
+    // actually fire in production.
+    it('flags the saveDraft-after-send race as a downgrade', () => {
+      expect(isStageDowngrade('quote_sent', 'draft')).toBe(true);
+      expect(isStageDowngrade('quote_accepted', 'draft')).toBe(true);
+      expect(isStageDowngrade('invoice_sent', 'draft')).toBe(true);
+      expect(isStageDowngrade('paid', 'draft')).toBe(true);
+    });
+
+    it('lets legitimate forward progress through', () => {
+      expect(isStageDowngrade('draft', 'quote_sent')).toBe(false);
+      expect(isStageDowngrade('quote_sent', 'quote_accepted')).toBe(false);
+      expect(isStageDowngrade('quote_accepted', 'invoice_sent')).toBe(false);
+      expect(isStageDowngrade('invoice_sent', 'paid')).toBe(false);
+    });
+
+    it('treats self-transitions as non-downgrades', () => {
+      for (const s of ALL_STAGES) {
+        expect(isStageDowngrade(s, s)).toBe(false);
+      }
+    });
+
+    it('protects cancelled docs from a legacy-status un-cancel', () => {
+      // Un-cancel is a legitimate transition but goes through setDocumentStage
+      // directly. The mirror must not perform it implicitly off a stale legacy
+      // status='draft' write.
+      expect(isStageDowngrade('cancelled', 'draft')).toBe(true);
+    });
+
+    it('ranks quote_rejected alongside quote_sent', () => {
+      // Both are sent-tier outcomes; flipping between them should not count
+      // as a downgrade in either direction.
+      expect(stageRank('quote_rejected')).toBe(stageRank('quote_sent'));
+      expect(isStageDowngrade('quote_rejected', 'quote_sent')).toBe(false);
+      expect(isStageDowngrade('quote_sent', 'quote_rejected')).toBe(false);
     });
   });
 });
