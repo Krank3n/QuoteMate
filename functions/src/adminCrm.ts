@@ -1039,8 +1039,114 @@ export const adminBroadcast = functions
   });
 
 // ============================================================
-// FEEDBACK — reply
+// FEEDBACK — list + reply
 // ============================================================
+
+interface FeedbackRow {
+  id: string;
+  userId: string | null;
+  email: string | null;
+  category: string | null;
+  feedback: string | null;
+  rating: string | null;
+  details: string | null;
+  source: string | null;
+  replied: boolean;
+  repliedAt: number | null;
+  repliedBy: string | null;
+  replyBody: string | null;
+  detailsAddedAt: number | null;
+  createdAt: number | null;
+}
+
+export const adminListFeedback = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const limit = Math.min(Math.max(Number(data?.limit) || 100, 1), 500);
+    const category = (data?.category || '').toString().trim();
+    const rating = (data?.rating || '').toString().trim();
+    const replied = data?.replied as boolean | undefined;
+
+    let q: admin.firestore.Query = db().collection('feedback').orderBy('createdAt', 'desc');
+    if (category) q = q.where('category', '==', category);
+    if (rating) q = q.where('rating', '==', rating);
+
+    const snap = await q.limit(limit).get();
+    const docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as any }));
+
+    // Resolve missing emails from userId in one pass (de-duped)
+    const uidsToLookup = Array.from(
+      new Set(
+        docs
+          .filter((d) => !d.data.userEmail && !d.data.email && d.data.userId)
+          .map((d) => d.data.userId as string)
+      )
+    );
+    const emailByUid = new Map<string, string | null>();
+    await Promise.all(
+      uidsToLookup.map(async (uid) => {
+        try {
+          emailByUid.set(uid, await getUserEmail(uid));
+        } catch {
+          emailByUid.set(uid, null);
+        }
+      })
+    );
+
+    let rows: FeedbackRow[] = docs.map(({ id, data: v }) => {
+      const uid = v.userId || null;
+      const email = v.userEmail || v.email || (uid ? emailByUid.get(uid) || null : null);
+      return {
+        id,
+        userId: uid,
+        email,
+        category: v.category || null,
+        feedback: v.feedback || v.message || null,
+        rating: v.rating || null,
+        details: v.details || null,
+        source: v.source || null,
+        replied: !!v.replied,
+        repliedAt: ts(v.repliedAt),
+        repliedBy: v.repliedBy || null,
+        replyBody: v.replyBody || null,
+        detailsAddedAt: ts(v.detailsAddedAt),
+        createdAt: ts(v.createdAt),
+      };
+    });
+
+    if (typeof replied === 'boolean') {
+      rows = rows.filter((r) => r.replied === replied);
+    }
+
+    // Aggregate counts across the unfiltered slice (pre-replied filter so chips show real totals)
+    const all = docs.map(({ id, data: v }) => ({
+      id,
+      replied: !!v.replied,
+      rating: (v.rating || null) as string | null,
+      category: (v.category || null) as string | null,
+      createdAt: ts(v.createdAt),
+    }));
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const totals = {
+      all: all.length,
+      unreplied: all.filter((r) => !r.replied).length,
+      replied: all.filter((r) => r.replied).length,
+      last7d: all.filter((r) => (r.createdAt || 0) >= sevenDaysAgo).length,
+      ratings: {
+        great: all.filter((r) => r.rating === 'great').length,
+        okay: all.filter((r) => r.rating === 'okay').length,
+        bad: all.filter((r) => r.rating === 'bad').length,
+      },
+    };
+    const categoryCounts: Record<string, number> = {};
+    for (const r of all) {
+      const c = r.category || 'Uncategorised';
+      categoryCounts[c] = (categoryCounts[c] || 0) + 1;
+    }
+
+    return { items: rows, totals, categoryCounts };
+  });
 
 export const adminReplyToFeedback = functions.https.onCall(async (data, context) => {
   const adminUid = requireAdmin(context);
