@@ -3069,25 +3069,40 @@ export const reeceExchangeCustomerToken = functions.https.onRequest((req, res) =
         return;
       }
 
-      const exchangeResponse = await fetch(
-        `${REECE_API_BASE_URL}/${REECE_REGION}/customer-application-onboarding-gateway/customer-token`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ requestToken }),
+      // Retry once on "Invalid request token" — Reece's consent state can lag
+      // a second or two behind the redirect on busy days, so what looks like a
+      // failure is sometimes just a propagation race. We exit the loop on
+      // first success or any non-"Invalid request token" failure.
+      let exchangeResponse: any = null;
+      let exchangeBody = '';
+      for (let attempt = 0; attempt < 2; attempt++) {
+        exchangeResponse = await fetch(
+          `${REECE_API_BASE_URL}/${REECE_REGION}/customer-application-onboarding-gateway/customer-token`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ requestToken }),
+          }
+        );
+        if (exchangeResponse.ok) break;
+        exchangeBody = await exchangeResponse.text().catch(() => '');
+        if (attempt === 0 && /invalid request token/i.test(exchangeBody)) {
+          await new Promise((r) => setTimeout(r, 1500));
+          continue;
         }
-      );
+        break;
+      }
 
       if (!exchangeResponse.ok) {
-        const body = await exchangeResponse.text().catch(() => '');
         console.error('[reece] customer-token exchange failed', {
           uid: decodedToken.uid,
           status: exchangeResponse.status,
-          body: body.slice(0, 300),
+          requestToken,
+          body: exchangeBody.slice(0, 500),
         });
         // Most common case: user landed on the maX consent page but didn't
         // tap Approve/Link before closing the tab — Reece responds with
@@ -3095,7 +3110,7 @@ export const reeceExchangeCustomerToken = functions.https.onRequest((req, res) =
         // approved state. The message below tells them exactly what to do.
         res.status(400).json({
           error:
-            "Reece sign-in didn't complete. Tap Connect again, sign in to maX, and tap the Approve / Link button on the consent page before closing the tab.",
+            "Reece sign-in didn't complete. Tap Connect again, sign in to maX, then on the consent page tap the green Approve (or Link) button before returning to the app.",
         });
         return;
       }
