@@ -37,7 +37,6 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
 import ColorPicker, { Panel1, HueSlider, type ColorFormatsObject } from 'reanimated-color-picker';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useStore } from '../store/useStore';
@@ -47,11 +46,11 @@ import { OnboardingProgress, OnboardingStep } from '../components/OnboardingProg
 import { CelebrationAnimation } from '../components/CelebrationAnimation';
 import { AlertModal } from '../components/AlertModal';
 import { TRADE_CATEGORIES } from '../constants/tradeCategories';
-import { auth, storage } from '../config/firebase';
+import { auth } from '../config/firebase';
 import * as squareService from '../services/squareService';
 import { runReeceConnectFlow } from '../services/reeceConnect';
 import { getReeceConnectionStatus } from '../services/reeceApi';
-import { compressLogo } from '../services/photoService';
+import { uploadBusinessLogo } from '../services/photoService';
 import { lightTap, successTap, errorTap, selectionTap } from '../utils/haptics';
 
 const STORAGE_KEY = 'onboarding:draft';
@@ -89,6 +88,7 @@ export function NewOnboardingScreen() {
 
     // Step 4: Branding
     const [logoUri, setLogoUri] = useState<string | undefined>(undefined);
+    const [logoMimeType, setLogoMimeType] = useState<string | undefined>(undefined);
     const [brandColor, setBrandColor] = useState<string | undefined>(undefined);
     const [hexInput, setHexInput] = useState('');
 
@@ -325,6 +325,7 @@ export function NewOnboardingScreen() {
             if (!result.canceled && result.assets[0]) {
                 selectionTap();
                 setLogoUri(result.assets[0].uri);
+                setLogoMimeType(result.assets[0].mimeType);
             }
         } catch (error) {
             setLogoPickError("We couldn't open the image picker. Please try again.");
@@ -338,35 +339,13 @@ export function NewOnboardingScreen() {
     const confirmRemoveLogo = () => {
         setRemoveLogoModalVisible(false);
         setLogoUri(undefined);
+        setLogoMimeType(undefined);
     };
 
-    // Upload logo to Firebase Storage (ported from BusinessProfileScreen)
-    const uploadLogoToStorage = async (uri: string): Promise<string> => {
-        if (uri.startsWith('https://')) return uri;
-
+    const uploadLogoToStorage = async (uri: string, mimeType?: string): Promise<string> => {
         const userId = auth.currentUser?.uid;
         if (!userId) throw new Error('Not signed in');
-
-        // Compress/resize before upload so we don't ship multi-MB camera-roll
-        // images for something that renders at ~150px on PDFs and emails.
-        const compressedUri = await compressLogo(uri);
-
-        const blob: Blob = await new Promise((resolve, reject) => {
-            if (Platform.OS === 'web') {
-                fetch(compressedUri).then(r => r.blob()).then(resolve).catch(reject);
-                return;
-            }
-            const xhr = new XMLHttpRequest();
-            xhr.onload = () => resolve(xhr.response);
-            xhr.onerror = () => reject(new Error('Failed to read image file'));
-            xhr.responseType = 'blob';
-            xhr.open('GET', compressedUri, true);
-            xhr.send(null);
-        });
-
-        const logoRef = ref(storage, `users/${userId}/logo.jpg`);
-        await uploadBytes(logoRef, blob, { contentType: 'image/jpeg' });
-        return getDownloadURL(logoRef);
+        return uploadBusinessLogo(userId, uri, mimeType);
     };
 
     // Brand colour handler
@@ -427,7 +406,7 @@ export function NewOnboardingScreen() {
             let savedLogoUri: string | undefined = logoUri;
             if (logoUri) {
                 try {
-                    savedLogoUri = await uploadLogoToStorage(logoUri);
+                    savedLogoUri = await uploadLogoToStorage(logoUri, logoMimeType);
                 } catch (error: any) {
                     console.error('[Onboarding] Logo upload failed:', error);
                     savedLogoUri = undefined;

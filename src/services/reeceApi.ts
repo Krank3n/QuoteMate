@@ -91,6 +91,19 @@ async function authedFetch(
   });
 }
 
+// Firebase returns an HTML 404 page when a function isn't deployed, which
+// blows up `response.json()` with "Unexpected character: <". Read the body
+// as text first and only parse if it actually looks like JSON.
+async function safeJson(response: Response): Promise<any> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { __nonJson: true, status: response.status };
+  }
+}
+
 /**
  * Search the Reece catalog for a product by name. Returns null if Reece can't
  * find a match, the user hasn't connected, or their token needs to be refreshed.
@@ -243,8 +256,8 @@ export async function checkReeceApiStatus(): Promise<boolean> {
  */
 export async function startReeceConnect(): Promise<{ requestToken: string; authUrl: string }> {
   const response = await authedFetch('reeceRequestToken');
-  const data = await response.json();
-  if (!response.ok) {
+  const data = await safeJson(response);
+  if (!response.ok || data.__nonJson) {
     throw new Error(data.error || 'Could not start Reece connection. Please try again.');
   }
   return { requestToken: data.requestToken, authUrl: data.authUrl };
@@ -259,8 +272,8 @@ export async function completeReeceConnect(
   requestToken: string,
 ): Promise<ReeceConnectionStatus> {
   const response = await authedFetch('reeceExchangeCustomerToken', { body: { requestToken } });
-  const data = await response.json();
-  if (!response.ok) {
+  const data = await safeJson(response);
+  if (!response.ok || data.__nonJson) {
     throw new Error(data.error || 'Could not finish connecting Reece. Please try again.');
   }
   return {
