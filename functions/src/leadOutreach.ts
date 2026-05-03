@@ -1868,6 +1868,491 @@ export const adminUpdateLeadConfig = functions.https.onCall(async (data, context
 });
 
 // ============================================================
+// weeklyLeadDiscovery — auto-fill the queue every Monday morning
+// ============================================================
+//
+// Runs every Monday 8am AEST (1 hour before the weekly report). Reads
+// `leadOutreachConfig/discovery`, pulls fresh Google Maps results for the
+// configured trades + suburbs, dedupes against existing leads, and lands
+// them as 'new'. If autoResearch is on, immediately enriches them. If
+// autoGenerate is on, generates messages too — meaning by Monday afternoon
+// the queue is full of personalised emails ready for the auto-sender to
+// trickle out across the week.
+
+interface DiscoveryConfig {
+  enabled: boolean;
+  trades: Trade[];
+  suburbs: string[];
+  targetPerWeek: number;     // hard cap on new leads created per run
+  autoResearch: boolean;     // chain enrichment after discovery
+  autoGenerate: boolean;     // chain message generation after research
+}
+
+const DEFAULT_DISCOVERY_CONFIG: DiscoveryConfig = {
+  enabled: false,
+  trades: ['fencer'],
+  suburbs: ['Sydney'],
+  targetPerWeek: 50,
+  autoResearch: true,
+  autoGenerate: true,
+};
+
+// Internal discovery — same logic as adminLeadDiscovery but no auth context.
+// Returns IDs of leads created so the scheduler can chain enrichment + gen.
+async function runDiscoveryBatch(params: {
+  trade: Trade;
+  suburbs: string[];
+  maxResults: number;
+  campaignId: string;
+}): Promise<{ created: string[]; dedupedExisting: number; dedupedSuppressed: number; dedupedExistingUser: number }> {
+  const { trade, suburbs, maxResults, campaignId } = params;
+  const created: string[] = [];
+  let dedupedExisting = 0;
+  let dedupedSuppressed = 0;
+  let dedupedExistingUser = 0;
+
+  for (const suburb of suburbs) {
+    if (created.length >= maxResults) break;
+    for (const phrase of TRADE_QUERY[trade]) {
+      if (created.length >= maxResults) break;
+      let results: PlacesSearchResult[] = [];
+      try {
+        results = await placesTextSearch(`${phrase} ${suburb}`);
+      } catch (e: any) {
+        console.warn(`runDiscoveryBatch: places search failed for "${phrase} ${suburb}":`, e?.message);
+        continue;
+      }
+
+      for (const r of results) {
+        if (created.length >= maxResults) break;
+
+        // Dedupe by placeId
+        const placeIdMatch = await db().collection('leads').where('googlePlaceId', '==', r.place_id).limit(1).get();
+        if (!placeIdMatch.empty) { dedupedExisting++; continue; }
+        const supByPlace = await isSuppressed({ placeId: r.place_id });
+        if (supByPlace.suppressed) { dedupedSuppressed++; continue; }
+
+        // Dedupe by businessName+suburb
+        const bizKey = normaliseBusinessKey(r.name, suburb);
+        if (bizKey) {
+          const bizMatch = await db().collection('leads').where('businessKey', '==', bizKey).limit(1).get();
+          if (!bizMatch.empty) { dedupedExisting++; continue; }
+        }
+
+        const det = await placesDetails(r.place_id);
+        if (!det) continue;
+
+        const phone = det.formatted_phone_number || null;
+        const intlPhone = det.international_phone_number || null;
+        const website = det.website || null;
+        const state = pickFromAddressComponents(det.address_components, 'administrative_area_level_1');
+        const postcode = pickFromAddressComponents(det.address_components, 'postal_code');
+        const reviews = (det.reviews || []).slice(0, 5).map(rev => ({
+          author: rev.author_name || null,
+          rating: rev.rating ?? null,
+          text: (rev.text || '').slice(0, 800),
+          when: rev.relative_time_description || null,
+        })).filter(rev => rev.text);
+
+        const docRef = await db().collection('leads').add({
+          businessName: r.name,
+          businessKey: bizKey,
+          trade,
+          ownerName: null,
+          ownerNameSource: null,
+          email: null,
+          phone,
+          mobile: null,
+          internationalPhone: intlPhone,
+          address: det.formatted_address || null,
+          suburb,
+          state: state || 'NSW',
+          postcode: postcode || null,
+          websiteUrl: website,
+          facebookUrl: null,
+          instagramUrl: null,
+          googlePlaceId: r.place_id,
+          googleRating: det.rating ?? null,
+          googleReviewCount: det.user_ratings_total ?? null,
+          googleReviews: reviews,
+          googleEditorialSummary: det.editorial_summary?.overview || null,
+          googleTypes: det.types || [],
+          source: 'gmaps' as const,
+          sourceUrl: `https://www.google.com/maps/place/?q=place_id:${r.place_id}`,
+          status: 'new' as LeadStatus,
+          campaignId,
+          scrapedAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        created.push(docRef.id);
+      }
+    }
+  }
+  return { created, dedupedExisting, dedupedSuppressed, dedupedExistingUser };
+}
+
+export const weeklyLeadDiscovery = functions
+  .runWith({ memory: '1GB', timeoutSeconds: 540 })
+  .pubsub
+  .schedule('every monday 08:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const cfgSnap = await db().doc('leadOutreachConfig/discovery').get();
+    const cfg: DiscoveryConfig = cfgSnap.exists
+      ? { ...DEFAULT_DISCOVERY_CONFIG, ...(cfgSnap.data() as any) }
+      : DEFAULT_DISCOVERY_CONFIG;
+    if (!cfg.enabled) {
+      console.info('weeklyLeadDiscovery: disabled in config');
+      return null;
+    }
+    if (!cfg.trades?.length || !cfg.suburbs?.length) {
+      console.warn('weeklyLeadDiscovery: trades/suburbs empty');
+      return null;
+    }
+
+    const campaignRef = db().collection('leadCampaigns').doc();
+    await campaignRef.set({
+      trade: cfg.trades.join(','),
+      suburbs: cfg.suburbs,
+      requestedBy: 'auto-scheduler',
+      requestedAt: admin.firestore.FieldValue.serverTimestamp(),
+      leadsCreated: 0,
+      status: 'running',
+    });
+
+    let totalCreated: string[] = [];
+    let totalDeduped = 0;
+    const perTradeRemaining = Math.max(1, Math.floor(cfg.targetPerWeek / cfg.trades.length));
+
+    for (const trade of cfg.trades) {
+      if (totalCreated.length >= cfg.targetPerWeek) break;
+      const remaining = Math.min(perTradeRemaining, cfg.targetPerWeek - totalCreated.length);
+      const r = await runDiscoveryBatch({ trade, suburbs: cfg.suburbs, maxResults: remaining, campaignId: campaignRef.id });
+      totalCreated.push(...r.created);
+      totalDeduped += r.dedupedExisting + r.dedupedSuppressed + r.dedupedExistingUser;
+    }
+
+    await campaignRef.set({
+      leadsCreated: totalCreated.length,
+      dedupedTotal: totalDeduped,
+      status: 'completed',
+      completedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    // OPTIONAL: chain enrichment + generation
+    let enriched = 0;
+    let generated = 0;
+    if (cfg.autoResearch && totalCreated.length > 0) {
+      // Enrich in chunks to avoid hitting timeout
+      for (const leadId of totalCreated) {
+        const ref = db().doc(`leads/${leadId}`);
+        const snap = await ref.get();
+        if (!snap.exists) continue;
+        const lead: any = snap.data();
+        if (!['new', 'researching'].includes(lead.status)) continue;
+
+        await ref.set({ status: 'researching' as LeadStatus }, { merge: true });
+
+        if (!Array.isArray(lead.googleReviews) && lead.googlePlaceId) {
+          const det = await placesDetails(lead.googlePlaceId);
+          if (det) {
+            const reviews = (det.reviews || []).slice(0, 5).map(rev => ({
+              author: rev.author_name || null,
+              rating: rev.rating ?? null,
+              text: (rev.text || '').slice(0, 800),
+              when: rev.relative_time_description || null,
+            })).filter(rev => rev.text);
+            await ref.set({
+              googleReviews: reviews,
+              googleEditorialSummary: det.editorial_summary?.overview || null,
+              googleTypes: det.types || [],
+            }, { merge: true });
+            lead.googleReviews = reviews;
+            lead.googleEditorialSummary = det.editorial_summary?.overview || null;
+            lead.googleTypes = det.types || [];
+          }
+        }
+
+        let scraped: ScrapedSiteContent | null = null;
+        if (lead.websiteUrl) scraped = await scrapeWebsite(lead.websiteUrl);
+
+        const enrich = await claudeEnrich({
+          businessName: lead.businessName,
+          trade: lead.trade as Trade,
+          suburb: lead.suburb,
+          websiteUrl: lead.websiteUrl,
+          scraped,
+          googleReviews: Array.isArray(lead.googleReviews) ? lead.googleReviews : [],
+          googleEditorialSummary: lead.googleEditorialSummary || null,
+          googleTypes: Array.isArray(lead.googleTypes) ? lead.googleTypes : [],
+        });
+
+        if (!enrich) {
+          await ref.set({ status: 'new' as LeadStatus, enrichmentFailureReason: 'auto_research_failed' }, { merge: true });
+          continue;
+        }
+
+        const updates: any = {
+          status: 'researched' as LeadStatus,
+          ownerName: enrich.ownerName,
+          ownerNameSource: enrich.ownerNameSource,
+          enrichmentSummary: enrich.enrichmentSummary,
+          personalizationHooks: enrich.personalizationHooks || [],
+          enrichmentConfidence: enrich.confidence,
+          enrichedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        if (!lead.email && scraped?.emails?.length) updates.email = scraped.emails[0];
+        if (!lead.mobile && scraped?.mobiles?.length) updates.mobile = scraped.mobiles[0];
+        if (!lead.facebookUrl && scraped?.socials?.facebook) updates.facebookUrl = scraped.socials.facebook;
+        if (!lead.instagramUrl && scraped?.socials?.instagram) updates.instagramUrl = scraped.socials.instagram;
+        await ref.set(updates, { merge: true });
+        enriched++;
+      }
+
+      if (cfg.autoGenerate) {
+        for (const leadId of totalCreated) {
+          const ref = db().doc(`leads/${leadId}`);
+          const snap = await ref.get();
+          if (!snap.exists) continue;
+          const lead: any = snap.data();
+          if (lead.status !== 'researched') continue;
+          // Only auto-generate if we have an email AND meaningful enrichment
+          if (!lead.email) continue;
+          if (lead.enrichmentConfidence === 'low') continue;
+
+          const msg = await claudeGenerateMessage({
+            businessName: lead.businessName,
+            ownerName: lead.ownerName || null,
+            ownerNameSource: lead.ownerNameSource || null,
+            enrichmentConfidence: lead.enrichmentConfidence || null,
+            trade: lead.trade as Trade,
+            suburb: lead.suburb,
+            hooks: lead.personalizationHooks || [],
+            enrichmentSummary: lead.enrichmentSummary || '',
+          });
+          if (!msg || !msg.subject || !msg.body) continue;
+          const cleanBody = msg.body.replace(/\bAI\b/g, 'smart');
+          const cleanSubject = msg.subject.replace(/\bAI\b/g, 'smart');
+          await ref.set({
+            generatedSubject: cleanSubject,
+            generatedBody: cleanBody,
+            generatedBodyVersion: admin.firestore.FieldValue.increment(1),
+            generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            status: 'queued' as LeadStatus,
+            queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          generated++;
+        }
+      }
+    }
+
+    await logAdminAction({
+      adminUid: 'system',
+      action: 'weekly_discovery_run',
+      targetType: 'system',
+      payload: {
+        campaignId: campaignRef.id,
+        created: totalCreated.length,
+        dedupedTotal: totalDeduped,
+        enriched,
+        generated,
+        trades: cfg.trades,
+        suburbs: cfg.suburbs,
+      },
+    });
+
+    console.info(`weeklyLeadDiscovery: created=${totalCreated.length} deduped=${totalDeduped} enriched=${enriched} generated=${generated}`);
+    return null;
+  });
+
+export const adminGetDiscoveryConfig = functions.https.onCall(async (_data, context) => {
+  requireAdmin(context);
+  const snap = await db().doc('leadOutreachConfig/discovery').get();
+  const config: DiscoveryConfig = snap.exists
+    ? { ...DEFAULT_DISCOVERY_CONFIG, ...(snap.data() as any) }
+    : DEFAULT_DISCOVERY_CONFIG;
+  return { config };
+});
+
+export const adminUpdateDiscoveryConfig = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const updates: Partial<DiscoveryConfig> = {};
+  if (typeof data?.enabled === 'boolean') updates.enabled = data.enabled;
+  if (Array.isArray(data?.trades)) {
+    updates.trades = data.trades.filter((t: any) => ['fencer', 'landscaper', 'deck-builder'].includes(t));
+  }
+  if (Array.isArray(data?.suburbs)) {
+    updates.suburbs = data.suburbs.filter((s: any) => typeof s === 'string' && s.trim().length > 0).map((s: string) => s.trim());
+  }
+  if (typeof data?.targetPerWeek === 'number') {
+    updates.targetPerWeek = Math.max(1, Math.min(500, Math.floor(data.targetPerWeek)));
+  }
+  if (typeof data?.autoResearch === 'boolean') updates.autoResearch = data.autoResearch;
+  if (typeof data?.autoGenerate === 'boolean') updates.autoGenerate = data.autoGenerate;
+  if (!Object.keys(updates).length) {
+    throw new functions.https.HttpsError('invalid-argument', 'no valid fields to update');
+  }
+  await db().doc('leadOutreachConfig/discovery').set(updates, { merge: true });
+  await logAdminAction({
+    adminUid,
+    action: 'discovery_config_update',
+    targetType: 'system',
+    payload: updates,
+  });
+  return { ok: true };
+});
+
+// ============================================================
+// brevoInboundWebhook — automatic reply detection
+// ============================================================
+//
+// Brevo posts here on every email received at outreach.hansendev.com.au
+// (configure: dashboard → Transactional → Settings → Inbound Parsing).
+// Detects auto-responders (ignored), unsubscribe-style replies (DNC), and
+// genuine replies (status='replied' + saves snippet on the lead doc).
+
+const AUTO_RESPONDER_SUBJECT = /\b(out\s*of\s*office|auto[\s-]?reply|automatic\s*reply|vacation|on\s*holiday|delivery\s*status|undeliverable|returned\s*mail|mail\s*delivery\s*failed|failure\s*notice)\b/i;
+const AUTO_RESPONDER_HEADER_KEYS = ['auto-submitted', 'x-autoreply', 'x-autorespond', 'x-auto-response-suppress', 'precedence'];
+const AUTO_RESPONDER_HEADER_VALUES = /(auto[-_ ]?(replied|generated|response)|vacation|out[-_ ]?of[-_ ]?office|bulk|junk)/i;
+
+const STOP_KEYWORDS = /\b(stop|unsubscribe|remove\s*me|opt[\s-]?out|don'?t\s*(email|contact|message)\s*me|not\s*interested|leave\s*me\s*alone|take\s*me\s*off)\b/i;
+
+function classifyInboundEmail(payload: {
+  subject: string;
+  text: string;
+  headers: Record<string, string>;
+}): 'auto-responder' | 'stop' | 'reply' {
+  // Headers first — most reliable signal for auto-responders
+  const headers = payload.headers || {};
+  for (const key of Object.keys(headers)) {
+    const lk = key.toLowerCase();
+    if (AUTO_RESPONDER_HEADER_KEYS.includes(lk)) {
+      const v = String(headers[key]).toLowerCase();
+      if (AUTO_RESPONDER_HEADER_VALUES.test(v)) return 'auto-responder';
+    }
+  }
+  // Subject patterns
+  if (AUTO_RESPONDER_SUBJECT.test(payload.subject || '')) return 'auto-responder';
+  // Stop/unsub keywords (check first 1000 chars; tradies might paste boilerplate quotes
+  // that contain unrelated words, so we want the explicit signal near the top)
+  const top = (payload.text || '').slice(0, 1000);
+  if (STOP_KEYWORDS.test(top)) return 'stop';
+  return 'reply';
+}
+
+export const brevoInboundWebhook = functions.https.onRequest(async (req, res) => {
+  try {
+    const expected = process.env.BREVO_INBOUND_WEBHOOK_SECRET;
+    const provided = (req.query.key as string | undefined) || req.get('x-brevo-key');
+    if (!expected || !provided || provided !== expected) {
+      console.warn('brevoInboundWebhook: unauthorized attempt');
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+
+    // Brevo Inbound Parsing payload — items[] array per their docs.
+    const items: any[] = Array.isArray(req.body?.items) ? req.body.items
+      : Array.isArray(req.body) ? req.body
+      : [req.body];
+
+    let matched = 0;
+    let autoresponders = 0;
+    let stops = 0;
+    let unmatched = 0;
+
+    for (const item of items) {
+      const fromEmailRaw = item?.From?.Address
+        || item?.from?.[0]?.Address
+        || item?.from?.[0]?.address
+        || item?.from?.email
+        || item?.email
+        || item?.sender?.email
+        || '';
+      const fromEmail = normaliseEmail(fromEmailRaw);
+      const subject = String(item?.Subject || item?.subject || '').slice(0, 500);
+      const text = String(item?.RawTextBody || item?.text || item?.body || '').slice(0, 5000);
+      const headersRaw = item?.Headers || item?.headers || {};
+      // Brevo sends headers as either {key: value} or [{Name, Value}]
+      const headers: Record<string, string> = {};
+      if (Array.isArray(headersRaw)) {
+        for (const h of headersRaw) {
+          if (h?.Name) headers[String(h.Name)] = String(h.Value || '');
+          else if (h?.name) headers[String(h.name)] = String(h.value || '');
+        }
+      } else if (typeof headersRaw === 'object') {
+        for (const [k, v] of Object.entries(headersRaw)) headers[k] = String(v);
+      }
+
+      if (!fromEmail) {
+        unmatched++;
+        console.info('brevoInboundWebhook: no from email', { subject, item });
+        continue;
+      }
+
+      // Match a lead by email
+      const leadSnap = await db().collection('leads').where('email', '==', fromEmail).limit(1).get();
+      if (leadSnap.empty) {
+        unmatched++;
+        console.info(`brevoInboundWebhook: no lead matches ${fromEmail}`);
+        continue;
+      }
+      const leadRef = leadSnap.docs[0].ref;
+      const lead = leadSnap.docs[0].data() as any;
+
+      const classification = classifyInboundEmail({ subject, text, headers });
+      const at = admin.firestore.FieldValue.serverTimestamp();
+      const snippet = text.slice(0, 500);
+
+      if (classification === 'auto-responder') {
+        autoresponders++;
+        // Don't change status; just record the auto-responder so we don't
+        // accidentally count this as a reply later. Useful for debugging too.
+        await leadRef.set({
+          autoResponderAt: at,
+          autoResponderSubject: subject,
+        }, { merge: true });
+        continue;
+      }
+
+      if (classification === 'stop') {
+        stops++;
+        if (fromEmail) await addSuppression({ type: 'email', value: fromEmail, reason: 'replied-stop' });
+        if (lead.googlePlaceId) await addSuppression({ type: 'placeId', value: lead.googlePlaceId, reason: 'replied-stop' });
+        await leadRef.set({
+          status: 'dnc' as LeadStatus,
+          repliedAt: at,
+          replyIntent: 'stop',
+          replyText: snippet,
+          replySubject: subject,
+          replyDetectedBy: 'brevo-inbound',
+        }, { merge: true });
+        continue;
+      }
+
+      // Genuine reply
+      matched++;
+      // Don't downgrade if already converted; otherwise flip to replied
+      if (lead.status !== 'converted') {
+        await leadRef.set({
+          status: 'replied' as LeadStatus,
+          repliedAt: at,
+          replyIntent: 'neutral', // human can reclassify in the UI
+          replyText: snippet,
+          replySubject: subject,
+          replyDetectedBy: 'brevo-inbound',
+        }, { merge: true });
+      }
+    }
+
+    console.info(`brevoInboundWebhook: matched=${matched} stops=${stops} autoresponders=${autoresponders} unmatched=${unmatched}`);
+    res.json({ ok: true, matched, stops, autoresponders, unmatched });
+  } catch (err: any) {
+    console.error('brevoInboundWebhook: handler error', err);
+    res.status(500).json({ error: err?.message || 'webhook error' });
+  }
+});
+
+// ============================================================
 // adminMarkLeadReplied — manual reply marking
 // ============================================================
 //
