@@ -1396,6 +1396,207 @@ export const autoSendQueuedLeads = functions.pubsub
   });
 
 // ============================================================
+// weeklyLeadOutreachReport — Mon 9am AEST email summary
+// ============================================================
+//
+// Queries the previous 7 days of lead activity + emailLog deliverability
+// signals, composes a report, and emails it to ADMIN_EMAIL. Self-contained:
+// no remote agent, no extra credentials, no UI clicks.
+
+interface LeadStageCounts {
+  new: number; researched: number; queued: number; sent: number;
+  engaged: number; replied: number; converted: number; rejected: number;
+  dnc: number; bounced: number;
+}
+
+async function buildWeeklyReport(): Promise<{ html: string; subject: string; numbers: any }> {
+  const now = Date.now();
+  const since = admin.firestore.Timestamp.fromMillis(now - 7 * 24 * 60 * 60 * 1000);
+  const sinceMs = now - 7 * 24 * 60 * 60 * 1000;
+
+  // Total stage counts (entire pipeline, not just last 7d)
+  const allLeadsSnap = await db().collection('leads').select('status', 'sentAt', 'engagedAt', 'repliedAt', 'convertedAt').get();
+  const stageCounts: LeadStageCounts = {
+    new: 0, researched: 0, queued: 0, sent: 0, engaged: 0, replied: 0,
+    converted: 0, rejected: 0, dnc: 0, bounced: 0,
+  };
+  let sent7d = 0;
+  let engaged7dFromSent = 0;
+  let replied7dFromSent = 0;
+  let converted7dFromSent = 0;
+  for (const d of allLeadsSnap.docs) {
+    const data = d.data() as any;
+    const status = data.status as keyof LeadStageCounts;
+    if (status in stageCounts) stageCounts[status]++;
+    const sentMs = data.sentAt?.toMillis?.();
+    if (sentMs && sentMs >= sinceMs) {
+      sent7d++;
+      if (data.engagedAt?.toMillis?.() && data.engagedAt.toMillis() >= sinceMs) engaged7dFromSent++;
+      if (data.repliedAt?.toMillis?.() && data.repliedAt.toMillis() >= sinceMs) replied7dFromSent++;
+      if (data.convertedAt?.toMillis?.() && data.convertedAt.toMillis() >= sinceMs) converted7dFromSent++;
+    }
+  }
+
+  // Brevo deliverability via emailLog filtered by tag
+  const emailLogSnap = await db().collection('emailLog')
+    .where('queuedAt', '>=', since)
+    .get();
+  let logSends = 0, logDelivered = 0, logBounced = 0, logSpam = 0, logUnsub = 0, logOpened = 0, logClicked = 0;
+  for (const d of emailLogSnap.docs) {
+    const data = d.data() as any;
+    const tags: string[] = Array.isArray(data.tags) ? data.tags : [];
+    if (!tags.includes('lead_outreach')) continue;
+    if (tags.includes('lead_outreach_test')) continue; // exclude test sends
+    logSends++;
+    if (data.status === 'delivered' || data.deliveredAt) logDelivered++;
+    if (data.status === 'bounced' || data.bouncedAt) logBounced++;
+    if (data.status === 'spam' || data.spamReportedAt) logSpam++;
+    if (data.unsubscribedAt) logUnsub++;
+    if ((data.openCount ?? 0) > 0) logOpened++;
+    if ((data.clickCount ?? 0) > 0) logClicked++;
+  }
+
+  // Effective caps + day for context
+  const cfgSnap = await db().doc('leadOutreachConfig/current').get();
+  const cfg: LeadOutreachConfig = cfgSnap.exists
+    ? { ...DEFAULT_CONFIG, ...(cfgSnap.data() as any) }
+    : DEFAULT_CONFIG;
+  const eff = effectiveCaps(cfg);
+
+  // Per-day histogram (last 7 days)
+  const daily = await sendsPerDay(7);
+
+  // Rates
+  const openRate = sent7d > 0 ? (logOpened / sent7d) * 100 : 0;
+  const clickRate = sent7d > 0 ? (logClicked / sent7d) * 100 : 0;
+  const replyRate = sent7d > 0 ? (replied7dFromSent / sent7d) * 100 : 0;
+  const conversionRate = sent7d > 0 ? (converted7dFromSent / sent7d) * 100 : 0;
+  const bounceRate = logSends > 0 ? (logBounced / logSends) * 100 : 0;
+  const spamRate = logSends > 0 ? (logSpam / logSends) * 100 : 0;
+
+  // Recommendation logic
+  let recommendation = '';
+  let recColor = '#10b981';
+  if (spamRate > 0.3) {
+    recommendation = `🚨 PAUSE — spam complaint rate ${spamRate.toFixed(2)}% is above Gmail's 0.3% threshold. Disable outreach until you investigate.`;
+    recColor = '#ef4444';
+  } else if (bounceRate > 5) {
+    recommendation = `🛑 PAUSE — bounce rate ${bounceRate.toFixed(1)}% is high (>5%). Check email validation; could be hurting sender reputation.`;
+    recColor = '#ef4444';
+  } else if (replyRate < 1 && sent7d >= 20) {
+    recommendation = `⚠️ REWORK MESSAGES — reply rate ${replyRate.toFixed(2)}% is below 1% across ${sent7d} sends. The hooks aren't landing. Review generated messages and re-tune the prompt.`;
+    recColor = '#fcd34d';
+  } else if (eff.source === 'auto' && eff.stage && (replyRate >= 3 || (replyRate >= 1.5 && conversionRate > 0))) {
+    recommendation = `✅ KEEP RAMPING — reply rate ${replyRate.toFixed(2)}% is healthy. Auto-ramp is doing its job; let it advance to the next stage on schedule.`;
+  } else if (sent7d === 0) {
+    recommendation = `📭 NO SENDS THIS WEEK — kill switch off, queue empty, or outside business hours. Check that auto-send is enabled and there are queued leads.`;
+    recColor = '#94a3b8';
+  } else {
+    recommendation = `📊 CONTINUE — metrics are within normal range. Keep current ramp.`;
+  }
+
+  const numbers = {
+    sent7d, engaged7dFromSent, replied7dFromSent, converted7dFromSent,
+    logSends, logDelivered, logBounced, logSpam, logUnsub, logOpened, logClicked,
+    openRate, clickRate, replyRate, conversionRate, bounceRate, spamRate,
+    stageCounts, daily, eff, recommendation,
+  };
+
+  // HTML email
+  const stageRows = (Object.entries(stageCounts) as Array<[string, number]>)
+    .filter(([_, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([s, n]) => `<tr><td style="padding:4px 8px;color:#475569;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;">${s}</td><td style="padding:4px 8px;font-weight:600;text-align:right;">${n}</td></tr>`)
+    .join('');
+
+  const dailyRow = daily.map(d => `<td style="padding:6px 4px;text-align:center;font-size:11px;border-right:1px solid #e2e8f0;">${d.date.slice(5)}<br/><strong style="font-size:14px;">${d.count}</strong></td>`).join('');
+
+  const stage = eff.source === 'auto' && eff.stage
+    ? `Auto-ramp · ${eff.stage.label} · day ${eff.day} · ${eff.daily}/day cap`
+    : `Manual caps · ${eff.daily}/day`;
+
+  const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
+<div style="max-width:640px;margin:0 auto;background:#ffffff;padding:32px;">
+  <h1 style="margin:0 0 4px;font-size:22px;">Lead Outreach · Weekly Report</h1>
+  <div style="color:#64748b;font-size:13px;margin-bottom:24px;">${new Date(sinceMs).toLocaleDateString('en-AU')} → ${new Date(now).toLocaleDateString('en-AU')} · ${stage}</div>
+
+  <div style="padding:16px;background:${recColor}11;border-left:4px solid ${recColor};border-radius:6px;margin-bottom:24px;">
+    <div style="font-weight:700;font-size:14px;">${recommendation}</div>
+  </div>
+
+  <h2 style="font-size:16px;margin:24px 0 12px;">This week</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <tr><td style="padding:6px 0;color:#64748b;">Sends</td><td style="padding:6px 0;text-align:right;font-weight:700;">${sent7d}</td></tr>
+    <tr><td style="padding:6px 0;color:#64748b;">Delivered</td><td style="padding:6px 0;text-align:right;">${logDelivered} (${logSends > 0 ? ((logDelivered / logSends) * 100).toFixed(0) : 0}%)</td></tr>
+    <tr><td style="padding:6px 0;color:#64748b;">Open rate</td><td style="padding:6px 0;text-align:right;color:${openRate >= 30 ? '#10b981' : '#0f172a'};">${openRate.toFixed(1)}%</td></tr>
+    <tr><td style="padding:6px 0;color:#64748b;">Click rate</td><td style="padding:6px 0;text-align:right;">${clickRate.toFixed(1)}%</td></tr>
+    <tr><td style="padding:6px 0;color:#64748b;">Reply rate</td><td style="padding:6px 0;text-align:right;color:${replyRate >= 3 ? '#10b981' : replyRate < 1 ? '#fca5a5' : '#0f172a'};font-weight:600;">${replyRate.toFixed(2)}% (${replied7dFromSent})</td></tr>
+    <tr><td style="padding:6px 0;color:#64748b;">Conversion rate</td><td style="padding:6px 0;text-align:right;color:${conversionRate > 0 ? '#10b981' : '#0f172a'};">${conversionRate.toFixed(2)}% (${converted7dFromSent})</td></tr>
+    <tr><td style="padding:6px 0;color:#64748b;">Bounce rate</td><td style="padding:6px 0;text-align:right;color:${bounceRate > 5 ? '#ef4444' : '#0f172a'};">${bounceRate.toFixed(1)}%</td></tr>
+    <tr><td style="padding:6px 0;color:#64748b;">Spam rate</td><td style="padding:6px 0;text-align:right;color:${spamRate > 0.3 ? '#ef4444' : '#0f172a'};">${spamRate.toFixed(2)}%</td></tr>
+    <tr><td style="padding:6px 0;color:#64748b;">Unsubscribes</td><td style="padding:6px 0;text-align:right;">${logUnsub}</td></tr>
+  </table>
+
+  <h2 style="font-size:16px;margin:32px 0 12px;">Sends per day</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
+    <tr>${dailyRow}</tr>
+  </table>
+
+  <h2 style="font-size:16px;margin:32px 0 12px;">Pipeline</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;background:#f8fafc;border-radius:6px;">
+    ${stageRows || '<tr><td style="padding:8px;color:#94a3b8;">No leads yet.</td></tr>'}
+  </table>
+
+  <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;">
+    Generated by QuoteMate Lead Outreach · weekly Monday 9am AEST
+  </div>
+</div></body></html>`;
+
+  const subject = `Lead Outreach: ${sent7d} sent, ${replyRate.toFixed(1)}% reply rate · week of ${new Date(sinceMs).toLocaleDateString('en-AU')}`;
+  return { html, subject, numbers };
+}
+
+export const weeklyLeadOutreachReport = functions.pubsub
+  .schedule('every monday 09:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const adminEmail = process.env.ADMIN_EMAILS?.split(',')[0]?.trim();
+    if (!adminEmail) {
+      console.warn('weeklyLeadOutreachReport: ADMIN_EMAILS not configured');
+      return null;
+    }
+    const report = await buildWeeklyReport();
+    await sendEmail({
+      to: adminEmail,
+      subject: report.subject,
+      htmlContent: report.html,
+      category: 'transactional',
+      tags: ['lead_weekly_report'],
+    });
+    console.info('weeklyLeadOutreachReport sent:', report.numbers);
+    return null;
+  });
+
+// On-demand version so the user can hit "send now" from the admin UI without
+// waiting for Monday. Returns the report inline + emails it.
+export const adminSendLeadReport = functions.https.onCall(async (_data, context) => {
+  requireAdmin(context);
+  const adminEmail = process.env.ADMIN_EMAILS?.split(',')[0]?.trim();
+  if (!adminEmail) {
+    throw new functions.https.HttpsError('failed-precondition', 'ADMIN_EMAILS not set');
+  }
+  const report = await buildWeeklyReport();
+  const ok = await sendEmail({
+    to: adminEmail,
+    subject: report.subject,
+    htmlContent: report.html,
+    category: 'transactional',
+    tags: ['lead_weekly_report', 'on_demand'],
+  });
+  return { ok, sentTo: adminEmail, numbers: report.numbers };
+});
+
+// ============================================================
 // adminTestSendLead — sends the lead's generated message to an arbitrary
 // test address. Bypasses suppression / daily cap. Does NOT update lead status.
 // Use this to preview deliverability + formatting before going live.

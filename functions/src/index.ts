@@ -38,6 +38,8 @@ export {
   adminUpdateLeadConfig,
   adminTestSendLead,
   autoSendQueuedLeads,
+  weeklyLeadOutreachReport,
+  adminSendLeadReport,
   onUserCreatedLinkLead,
   leadUnsubscribe,
 } from './leadOutreach';
