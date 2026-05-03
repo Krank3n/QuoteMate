@@ -1868,6 +1868,60 @@ export const adminUpdateLeadConfig = functions.https.onCall(async (data, context
 });
 
 // ============================================================
+// adminMarkLeadReplied — manual reply marking
+// ============================================================
+//
+// Used while reply detection is manual (you read the reply in Gmail, come
+// here, click "Mark replied"). Sets status='replied' so the weekly report
+// counts it correctly. Optional `replyText` and `intent` ('positive' /
+// 'neutral' / 'negative' / 'stop') get stored for context.
+
+export const adminMarkLeadReplied = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const id = String(data?.id || '');
+  const replyText = String(data?.replyText || '').trim().slice(0, 5000);
+  const intent = String(data?.intent || 'neutral') as 'positive' | 'neutral' | 'negative' | 'stop';
+  if (!id) throw new functions.https.HttpsError('invalid-argument', 'id required');
+
+  const ref = db().doc(`leads/${id}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'lead not found');
+  const lead: any = snap.data();
+
+  // Stop intent → also DNC + suppression
+  if (intent === 'stop') {
+    const e = normaliseEmail(lead.email);
+    if (e) await addSuppression({ type: 'email', value: e, reason: 'replied-stop' });
+    if (lead.googlePlaceId) await addSuppression({ type: 'placeId', value: lead.googlePlaceId, reason: 'replied-stop' });
+    await ref.set({
+      status: 'dnc' as LeadStatus,
+      repliedAt: admin.firestore.FieldValue.serverTimestamp(),
+      replyIntent: 'stop',
+      replyText: replyText || null,
+      replyMarkedBy: adminUid,
+    }, { merge: true });
+  } else {
+    await ref.set({
+      status: 'replied' as LeadStatus,
+      repliedAt: admin.firestore.FieldValue.serverTimestamp(),
+      replyIntent: intent,
+      replyText: replyText || null,
+      replyMarkedBy: adminUid,
+    }, { merge: true });
+  }
+
+  await logAdminAction({
+    adminUid,
+    action: 'lead_mark_replied',
+    targetType: 'lead',
+    targetId: id,
+    payload: { intent, hasReplyText: !!replyText },
+  });
+
+  return { ok: true };
+});
+
+// ============================================================
 // 9. adminAddLeadNote — manual note (mirrors users/{uid}/adminNotes)
 // ============================================================
 

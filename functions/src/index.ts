@@ -34,6 +34,7 @@ export {
   adminApproveLeads,
   adminRejectLeads,
   adminAddLeadNote,
+  adminMarkLeadReplied,
   adminGetLeadConfig,
   adminUpdateLeadConfig,
   adminTestSendLead,
