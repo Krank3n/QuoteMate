@@ -1145,7 +1145,22 @@ export function MaterialsListScreen() {
     // above Bunnings, do the Reece pre-pass (trade-discounted prices win).
     // If Bunnings is above Reece, do the Bunnings batch first and only ask
     // Reece for items Bunnings missed.
-    const useReeceApi = reeceConnected === true;
+    //
+    // Resolve connection state on demand instead of relying on the on-mount
+    // useEffect — otherwise tapping Generate before that effect resolves
+    // captures `reeceConnected === null`, silently demoting Reece to a
+    // post-pass gap-filler instead of running it first.
+    let liveReeceConnected = reeceConnected;
+    if (liveReeceConnected === null) {
+      try {
+        const status = await getReeceConnectionStatus();
+        liveReeceConnected = !!status.connected;
+        setReeceConnected(liveReeceConnected);
+      } catch {
+        liveReeceConnected = false;
+      }
+    }
+    const useReeceApi = liveReeceConnected === true;
     const reeceFirst = useReeceApi && shouldRunReeceFirst(businessSettings?.supplierPriority);
     const useScraperApi = true; // Bunnings backbone via Firebase proxy
     const hardwareStores = ['bunnings.com.au']; // backbone, always
