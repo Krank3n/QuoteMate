@@ -193,13 +193,19 @@ export async function searchReeceMaterialCandidates(
     for (const product of products) {
       const price = product.unitPriceIncludingGst ?? product.unitPriceExcludingGst;
       if (price == null) continue;
+      // Cache-sourced results carry their own productUrl (built from the
+      // description because the price-file's productCode lives in a different
+      // ID space than reece.com.au's web search). Live results don't, so we
+      // fall back to the legacy itemNumber query.
+      const productUrl = product.productUrl
+        || `https://www.reece.com.au/search?query=${encodeURIComponent(product.itemNumber)}`;
       results.push({
         price,
         productName: product.description,
         store: 'Reece Plumbing',
         itemNumber: product.itemNumber,
         imageUrl: product.imageUrl ?? null,
-        productUrl: `https://www.reece.com.au/search?query=${encodeURIComponent(product.itemNumber)}`,
+        productUrl,
         unitOfMeasure: product.unitOfMeasure || null,
         unitPriceExcludingGst: product.unitPriceExcludingGst ?? null,
       });
@@ -306,6 +312,80 @@ export async function disconnectReece(): Promise<void> {
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || 'Could not disconnect Reece.');
+  }
+}
+
+// ---------- Price-file sync -------------------------------------------------
+
+export interface ReecePriceFileStatus {
+  enabled: boolean;
+  generatedAt: number | null;
+  productCount: number | null;
+  lastError: string | null;
+}
+
+/**
+ * Build the Reece price-select redirect URL. The user opens this in a
+ * browser, picks their price-file format settings on reece.com.au, then is
+ * redirected back to our static callback page; the client then calls
+ * confirmReecePriceFile.
+ */
+export async function enableReecePriceFile(): Promise<{ authUrl: string }> {
+  const response = await authedFetch('reeceEnablePriceFile');
+  const data = await safeJson(response);
+  if (!response.ok || data.__nonJson || !data.authUrl) {
+    throw new Error(data.error || 'Could not start Reece catalogue sync. Please try again.');
+  }
+  return { authUrl: data.authUrl };
+}
+
+/**
+ * Flip the per-user `priceFileEnabled` flag and kick off the initial fetch.
+ * Returns immediately — the catalogue arrives asynchronously and is visible
+ * via getReecePriceFileStatus.
+ */
+export async function confirmReecePriceFile(): Promise<{ enabled: boolean; status: string }> {
+  const response = await authedFetch('reeceConfirmPriceFile');
+  const data = await safeJson(response);
+  if (!response.ok || data.__nonJson) {
+    throw new Error(data.error || 'Could not enable Reece catalogue sync.');
+  }
+  return { enabled: data.enabled === true, status: data.status || 'queued' };
+}
+
+/**
+ * Trigger an immediate price-file refresh. Blocks until Reece completes
+ * generation (up to ~8 minutes), so callers should show a spinner.
+ */
+export async function refreshReecePriceFile(): Promise<{
+  status: 'ready' | 'failed' | 'reauth_required' | 'not_enabled';
+  productCount?: number;
+  generatedAt?: number;
+  error?: string;
+}> {
+  const response = await authedFetch('reeceRefreshPriceFileNow');
+  const data = await safeJson(response);
+  if (!response.ok || data.__nonJson) {
+    return { status: 'failed', error: data.error || 'refresh_failed' };
+  }
+  return data;
+}
+
+export async function disableReecePriceFile(): Promise<void> {
+  const response = await authedFetch('reeceDisablePriceFile');
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Could not disable Reece catalogue sync.');
+  }
+}
+
+export async function getReecePriceFileStatus(): Promise<ReecePriceFileStatus> {
+  try {
+    const response = await authedFetch('reecePriceFileStatus', { method: 'GET' });
+    if (!response.ok) return { enabled: false, generatedAt: null, productCount: null, lastError: null };
+    return await response.json();
+  } catch {
+    return { enabled: false, generatedAt: null, productCount: null, lastError: null };
   }
 }
 

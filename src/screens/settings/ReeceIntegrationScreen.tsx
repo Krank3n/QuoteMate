@@ -26,15 +26,33 @@ import { AlertModal } from '../../components/AlertModal';
 import {
   getReeceConnectionStatus,
   disconnectReece,
+  getReecePriceFileStatus,
+  refreshReecePriceFile,
+  disableReecePriceFile,
   type ReeceConnectionStatus,
+  type ReecePriceFileStatus,
 } from '../../services/reeceApi';
-import { runReeceConnectFlow } from '../../services/reeceConnect';
+import { runReeceConnectFlow, runReecePriceFileEnableFlow } from '../../services/reeceConnect';
+
+function formatRelativeAge(generatedAt: number | null): string {
+  if (!generatedAt) return 'never';
+  const ms = Date.now() - generatedAt;
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export function ReeceIntegrationScreen() {
   const [connection, setConnection] = useState<ReeceConnectionStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkingConnection, setCheckingConnection] = useState(true);
   const [disconnectModalVisible, setDisconnectModalVisible] = useState(false);
+  const [priceFileStatus, setPriceFileStatus] = useState<ReecePriceFileStatus | null>(null);
+  const [priceFileBusy, setPriceFileBusy] = useState<'enable' | 'refresh' | 'disable' | null>(null);
   const [alertModal, setAlertModal] = useState<{
     visible: boolean;
     type: 'success' | 'error' | 'info';
@@ -57,10 +75,78 @@ export function ReeceIntegrationScreen() {
     try {
       const status = await getReeceConnectionStatus();
       setConnection(status.connected ? status : null);
+      if (status.connected) {
+        const pfs = await getReecePriceFileStatus();
+        setPriceFileStatus(pfs);
+      } else {
+        setPriceFileStatus(null);
+      }
     } catch {
       setConnection(null);
+      setPriceFileStatus(null);
     } finally {
       setCheckingConnection(false);
+    }
+  };
+
+  const handleEnablePriceFile = async () => {
+    setPriceFileBusy('enable');
+    try {
+      const outcome = await runReecePriceFileEnableFlow();
+      if (outcome.kind === 'enabled') {
+        showAlert(
+          'success',
+          'Catalogue sync enabled',
+          'Reece is generating your price file now. It usually takes 1–5 minutes — you’ll see the product count once it’s ready.',
+        );
+      } else {
+        showAlert('error', 'Could not enable sync', outcome.message);
+      }
+      const pfs = await getReecePriceFileStatus();
+      setPriceFileStatus(pfs);
+    } finally {
+      setPriceFileBusy(null);
+    }
+  };
+
+  const handleRefreshPriceFile = async () => {
+    setPriceFileBusy('refresh');
+    try {
+      const result = await refreshReecePriceFile();
+      if (result.status === 'ready') {
+        showAlert(
+          'success',
+          'Catalogue updated',
+          `Pulled ${result.productCount ?? 0} Reece products at your trade pricing.`,
+        );
+      } else if (result.status === 'reauth_required') {
+        showAlert(
+          'error',
+          'Reece sign-in expired',
+          'Your Reece consent expired — reconnect Reece below to refresh.',
+        );
+      } else if (result.status === 'not_enabled') {
+        showAlert('info', 'Sync not enabled', 'Enable catalogue sync first.');
+      } else {
+        showAlert('error', 'Refresh failed', result.error || 'Try again in a few minutes.');
+      }
+      const pfs = await getReecePriceFileStatus();
+      setPriceFileStatus(pfs);
+    } finally {
+      setPriceFileBusy(null);
+    }
+  };
+
+  const handleDisablePriceFile = async () => {
+    setPriceFileBusy('disable');
+    try {
+      await disableReecePriceFile();
+      const pfs = await getReecePriceFileStatus();
+      setPriceFileStatus(pfs);
+    } catch (error: any) {
+      showAlert('error', 'Could not disable sync', error?.message || 'Try again in a moment.');
+    } finally {
+      setPriceFileBusy(null);
     }
   };
 
@@ -225,6 +311,73 @@ export function ReeceIntegrationScreen() {
               </View>
             )}
           </Surface>
+
+          {/* Catalogue sync — only show once the user has a connection */}
+          {connection?.connected ? (
+            <Surface style={styles.card}>
+              <Text style={styles.sectionTitle}>Catalogue sync</Text>
+              <Text style={styles.disconnectedText}>
+                Reece can dump your full purchasable catalogue — every product you can buy at your trade rate. We refresh it nightly so quotes price faster and match the right items.
+              </Text>
+
+              {priceFileStatus?.enabled ? (
+                <>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Last synced</Text>
+                    <Text style={styles.detailValue}>
+                      {formatRelativeAge(priceFileStatus.generatedAt)}
+                    </Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Products</Text>
+                    <Text style={styles.detailValue}>
+                      {priceFileStatus.productCount ?? '—'}
+                    </Text>
+                  </View>
+                  {priceFileStatus.lastError ? (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Last error</Text>
+                      <Text style={[styles.detailValue, { color: colors.error }]}>
+                        {priceFileStatus.lastError}
+                      </Text>
+                    </View>
+                  ) : null}
+                  <Divider style={styles.divider} />
+                  <Button
+                    mode="contained"
+                    onPress={handleRefreshPriceFile}
+                    loading={priceFileBusy === 'refresh'}
+                    disabled={priceFileBusy !== null}
+                    style={styles.connectButton}
+                    buttonColor={colors.primary}
+                  >
+                    Refresh now
+                  </Button>
+                  <Button
+                    mode="outlined"
+                    onPress={handleDisablePriceFile}
+                    loading={priceFileBusy === 'disable'}
+                    disabled={priceFileBusy !== null}
+                    textColor={colors.error}
+                    style={[styles.disconnectButton, { marginTop: 8 }]}
+                  >
+                    Disable catalogue sync
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  mode="contained"
+                  onPress={handleEnablePriceFile}
+                  loading={priceFileBusy === 'enable'}
+                  disabled={priceFileBusy !== null}
+                  style={styles.connectButton}
+                  buttonColor={colors.primary}
+                >
+                  Enable catalogue sync
+                </Button>
+              )}
+            </Surface>
+          ) : null}
 
           {/* How it works */}
           <Surface style={styles.card}>

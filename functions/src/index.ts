@@ -1609,6 +1609,22 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 300 }).
         templateReferenceSection = `\n\nSAVED TEMPLATES (use as reference for section names and materials when they match the job):\n${templateDescriptions}\n\nWhen a saved template closely matches a section of this job:\n- Use the template's exact name as the section name\n- Use the template's material names where applicable (you can adjust quantities)\n- Set the sectionMultiplier to match the job scope\n`;
       }
 
+      // Build Reece catalogue slice section. We only inject it for users
+      // who've opted into price-file sync AND whose job description triggers
+      // a category match — outside those cases the slice would be either
+      // missing or too noisy to help the LLM.
+      let reeceCatalogueSection = '';
+      let reeceCatalogueGeneratedAt: number | null = null;
+      try {
+        const slice = await getRelevantCatalogueSlice(decodedToken.uid, jobDescription);
+        if (slice && slice.products.length > 0) {
+          reeceCatalogueGeneratedAt = slice.generatedAt;
+          reeceCatalogueSection = `\n\nREECE TRADE CATALOGUE (preferred for plumbing items)\nThe tradie has ${slice.products.length} Reece SKUs synced below at their negotiated trade pricing. When a Reece SKU is a clear, confident match for a plumbing material the job genuinely needs, return its integer "reeceProductId" — that gives the tradie their real trade price and skips a search round trip.\n\nIMPORTANT — only pick a Reece SKU when it's the right product for the job. Don't force-fit:\n- If the job calls for a generic item that doesn't match a specific SKU, leave reeceProductId empty and use a normal "searchTerm".\n- Don't pick obscure replacement parts (e.g. "Solus MK2 Replacement Bypass Tube") for a generic install job — those are repair-specific SKUs.\n- For non-plumbing items (timber, fasteners, paint, etc.) leave reeceProductId empty.\n- For bog-standard items where multiple Reece SKUs would all work (e.g. "PVC elbow 90°"), use a generic searchTerm — the per-material search will pick the cheapest fit.\n\nFormat: [productId] title (brand) · category/section · price/unit\n\n${formatCatalogueSliceForPrompt(slice)}\n`;
+        }
+      } catch (err: any) {
+        console.warn('[reece pricefile] slice build failed', { uid: decodedToken.uid, message: err?.message });
+      }
+
       // Build user's saved supplier rates section
       let savedRatesSection = '';
       if (Array.isArray(userSavedRates) && userSavedRates.length > 0) {
@@ -1625,7 +1641,7 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 300 }).
       const hasExisting = existingMaterials && existingMaterials.length > 0;
       const prompt = `You are an expert Australian tradie assistant specializing in construction and trade work. ${hasExisting ? 'Some materials have already been added from templates. Analyze the job and suggest only the ADDITIONAL materials needed to complete the job.' : 'Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.'}
 
-Job Description: "${jobDescription}"${contextSection}${existingMaterialsSection}${templateReferenceSection}${savedRatesSection}
+Job Description: "${jobDescription}"${contextSection}${existingMaterialsSection}${templateReferenceSection}${savedRatesSection}${reeceCatalogueSection}
 
 Hardware Store for pricing: ${storeName}
 
@@ -1644,7 +1660,8 @@ Provide a JSON response with the following structure:
       "sectionLaborHours": 1.5,
       "reasoning": "Why this material is needed",
       "savedRateName": "(only set when matched to a saved rate)",
-      "pricingSource": "(set to 'saved_rate' when matched)"
+      "pricingSource": "(set to 'saved_rate' when matched)",
+      "reeceProductId": "(only set when a Reece catalogue line clearly matches — copy the integer productId from the catalogue listing. Leave empty if unsure; the search layer will look it up.)"
     }
   ]
 }
@@ -1755,6 +1772,40 @@ Return ONLY valid JSON, no other text.`;
         } catch (err: any) {
           console.warn('Quantity sanity-check failed, returning raw list:', err?.message);
         }
+      }
+
+      // Phase 2 enrichment — when the LLM returned a reeceProductId, look it
+      // up in the cached catalogue and stamp price/source/itemNumber so the
+      // client's existing reecePass guard skips a redundant search. We also
+      // overwrite the AI's emitted name with the title-cased catalogue title
+      // because the LLM echoes the SAP-uppercase version straight from the
+      // prompt ("ISE SINK FLANGE MATTE BLACK"), which then ships into the
+      // quote as the displayed line item.
+      let reeceDirectMatchCount = 0;
+      if (reeceCatalogueGeneratedAt) {
+        for (const m of validatedMaterials) {
+          const id = Number(m.reeceProductId);
+          if (!Number.isFinite(id) || id <= 0) continue;
+          const cached = await getCachedReeceProductById(decodedToken.uid, id);
+          if (!cached) continue;
+          const price = cached.priceIncGst ?? cached.priceExGst;
+          if (price == null) continue;
+          m.reeceItemNumber = String(cached.productId);
+          m.pricingSource = 'api';
+          m.price = price;
+          m.unit = m.unit || cached.unit || 'each';
+          m.imageUrl = m.imageUrl || cached.imageUrl;
+          m.searchTerm = m.searchTerm || m.name;
+          // Replace the AI's title (likely uppercase echo from the prompt)
+          // with the cleanly-cased catalogue title.
+          m.name = cached.title;
+          reeceDirectMatchCount++;
+        }
+        console.log('[reece pricefile] direct LLM matches', {
+          uid: decodedToken.uid,
+          materialCount: validatedMaterials.length,
+          directMatches: reeceDirectMatchCount,
+        });
       }
 
       res.status(200).json({
@@ -2587,6 +2638,576 @@ async function clearReeceConnection(uid: string, reason: string): Promise<void> 
   }
 }
 
+// ─── Price-file cache ──────────────────────────────────────────────────────
+// Reece's product-search is rate-limited and category-blind, which makes
+// per-quote search both slow and prone to category-mismatch errors. The
+// price-file endpoint dumps the customer's entire purchasable catalogue
+// (with their negotiated trade pricing, categories and sections), which we
+// trim and persist to Cloud Storage as gs://<bucket>/reece-catalogues/<uid>.json.
+// Subsequent search/price lookups read from this cache; live search remains
+// the fallback when the user hasn't opted in or the cache is empty.
+
+interface ReeceCachedProduct {
+  productId: number;
+  // The full SAP/legacy stock code from the price-file (e.g. "2402918-1").
+  // Stored alongside the integer productId because Reece's price-file uses a
+  // *different ID space* than /product-gateway/search and /order-gateway/orders
+  // — we keep both so we can resolve the canonical search productId at order
+  // time without re-fetching the catalogue.
+  productCode: string | null;
+  title: string;
+  brand: string | null;
+  category: string | null;
+  section: string | null;
+  unit: string | null;
+  priceExGst: number | null;
+  priceIncGst: number | null;
+  imageUrl: string | null;
+  // Lowercased token set of title+brand+category, precomputed at cache time
+  // so `searchLocalCatalogue` doesn't re-tokenize on every query.
+  searchTokens: string;
+}
+
+// Reece's price-file dumps `productDescription` in ALL CAPS by SAP convention
+// ("RAPIDFLO VALVE 15/20/25 LONG TAIL (EA)"). Applying naive lowercase →
+// capitalise mangles short acronyms ("EA", "PVC", "BSP"), so preserve any
+// all-caps token of length ≤3 as a likely abbreviation.
+function reeceTitleCase(s: string): string {
+  return s
+    .split(/(\s+|[()])/)
+    .map(part => {
+      if (!/[a-zA-Z]/.test(part)) return part;
+      if (part.length <= 3 && part === part.toUpperCase()) return part;
+      return part.charAt(0) + part.slice(1).toLowerCase();
+    })
+    .join('');
+}
+
+interface ReeceCachedCatalogue {
+  generatedAt: number;
+  customerNumber: string;
+  products: ReeceCachedProduct[];
+}
+
+// Per-instance memoisation of parsed catalogues. Firebase Functions instances
+// recycle every ~15min, which is short enough to act as TTL. Cap at a small
+// number to bound memory — plumbing catalogues are 5–50MB parsed.
+const reeceCatalogueCache = new Map<string, { data: ReeceCachedCatalogue; loadedAt: number }>();
+const REECE_CATALOGUE_MAX_INSTANCES = 5;
+
+function reeceCataloguePath(uid: string): string {
+  return `reece-catalogues/${uid}.json`;
+}
+
+const REECE_STOPWORDS = new Set([
+  'the', 'a', 'an', 'of', 'for', 'with', 'and', 'or', 'to', 'in', 'on', 'at', 'by',
+  'mm', 'inch', 'inches',
+]);
+
+function tokenizeReeceQuery(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(t => t.length > 1 && !REECE_STOPWORDS.has(t));
+}
+
+/**
+ * Read the price-file metadata stamped on the user's reece integration doc.
+ * Returns null when sync hasn't been enabled or the meta has never been
+ * written.
+ */
+async function getReecePriceFileMeta(uid: string): Promise<{
+  priceFileEnabled: boolean;
+  generatedAt: number | null;
+  productCount: number | null;
+  lastError: string | null;
+} | null> {
+  try {
+    const doc = await admin.firestore().doc(`users/${uid}/integrations/reece`).get();
+    if (!doc.exists) return null;
+    const data = doc.data() || {};
+    const meta = data.priceFileMeta || {};
+    const generatedAt = meta.generatedAt?.toMillis?.() ?? null;
+    return {
+      priceFileEnabled: data.priceFileEnabled === true,
+      generatedAt,
+      productCount: typeof meta.productCount === 'number' ? meta.productCount : null,
+      lastError: typeof meta.lastError === 'string' ? meta.lastError : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadCachedCatalogue(uid: string): Promise<ReeceCachedCatalogue | null> {
+  const cached = reeceCatalogueCache.get(uid);
+  if (cached && Date.now() - cached.loadedAt < 15 * 60 * 1000) {
+    return cached.data;
+  }
+  try {
+    const file = admin.storage().bucket().file(reeceCataloguePath(uid));
+    const [exists] = await file.exists();
+    if (!exists) return null;
+    const [buffer] = await file.download();
+    const parsed = JSON.parse(buffer.toString('utf8')) as ReeceCachedCatalogue;
+    if (!parsed?.products?.length) return null;
+    if (reeceCatalogueCache.size >= REECE_CATALOGUE_MAX_INSTANCES) {
+      // Evict oldest by loadedAt — Map preserves insertion order so deleting
+      // the first key gives us LRU-by-arrival.
+      const firstKey = reeceCatalogueCache.keys().next().value;
+      if (firstKey) reeceCatalogueCache.delete(firstKey);
+    }
+    reeceCatalogueCache.set(uid, { data: parsed, loadedAt: Date.now() });
+    return parsed;
+  } catch (err: any) {
+    console.error('[reece pricefile] loadCachedCatalogue failed', { uid, message: err?.message });
+    return null;
+  }
+}
+
+/**
+ * Score a cached product against a tokenized query. Title/brand match weighs
+ * 1.0 per token, category 0.5, section 0.3 — heavy bias toward title so a
+ * "kitchen sink" query isn't outranked by every product whose category is
+ * "Kitchen". Returns 0 when no tokens hit (caller filters out).
+ */
+function scoreReeceProduct(p: ReeceCachedProduct, tokens: string[]): number {
+  if (tokens.length === 0) return 0;
+  let score = 0;
+  for (const t of tokens) {
+    if (p.searchTokens.includes(t)) score += 1.0;
+    if (p.category && p.category.toLowerCase().includes(t)) score += 0.5;
+    if (p.section && p.section.toLowerCase().includes(t)) score += 0.3;
+  }
+  return score;
+}
+
+/**
+ * Local-cache equivalent of Reece's `/product-gateway/search`. Returns the
+ * top-N matches in the same wire shape `searchReeceProduct` returns, so the
+ * frontend stays oblivious to which path served the result.
+ */
+async function searchLocalCatalogue(
+  uid: string,
+  query: string,
+  limit = 5,
+): Promise<{
+  products: any[];
+  product: any | null;
+  source: 'local-cache';
+  generatedAt: number;
+  productCount: number;
+} | null> {
+  // Same flag gate as getRelevantCatalogueSlice — see comment there for why
+  // we trust Firestore over cache presence.
+  const meta = await getReecePriceFileMeta(uid);
+  if (!meta?.priceFileEnabled) return null;
+  const catalogue = await loadCachedCatalogue(uid);
+  if (!catalogue) return null;
+  const tokens = tokenizeReeceQuery(query);
+  if (tokens.length === 0) return null;
+
+  const scored: Array<{ p: ReeceCachedProduct; score: number }> = [];
+  for (const p of catalogue.products) {
+    const score = scoreReeceProduct(p, tokens);
+    if (score > 0) scored.push({ p, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, limit).map(({ p }) => ({
+    itemNumber: String(p.productId),
+    description: p.title,
+    brand: p.brand,
+    category: p.category,
+    unitOfMeasure: p.unit,
+    unitPriceExcludingGst: p.priceExGst,
+    unitPriceIncludingGst: p.priceIncGst,
+    imageUrl: p.imageUrl,
+    // Use the description (not the price-file productCode) as the search
+    // query — productCode lives in a different ID space than what
+    // reece.com.au's website search expects, and would link to a different
+    // product entirely.
+    productUrl: `https://www.reece.com.au/search?query=${encodeURIComponent(p.title)}`,
+  }));
+  return {
+    products: top,
+    product: top[0] ?? null,
+    source: 'local-cache',
+    generatedAt: catalogue.generatedAt,
+    productCount: catalogue.products.length,
+  };
+}
+
+/**
+ * Direct productId lookup. Used by `getReecePrice` and by Phase-2 AI
+ * material conversion when the LLM returned a `reeceProductId`.
+ */
+async function getCachedReeceProductById(
+  uid: string,
+  productId: string | number,
+): Promise<ReeceCachedProduct | null> {
+  const meta = await getReecePriceFileMeta(uid);
+  if (!meta?.priceFileEnabled) return null;
+  const catalogue = await loadCachedCatalogue(uid);
+  if (!catalogue) return null;
+  const id = Number(productId);
+  if (!Number.isFinite(id)) return null;
+  return catalogue.products.find(p => p.productId === id) || null;
+}
+
+/**
+ * Reece's price-file is async: trigger generation, then poll until ready.
+ * The endpoint returns 204 while the job is queued and 200 with the body
+ * once Reece finishes building the file. We back off (15s, 30s, 60s, 120s,
+ * 240s) and bail at ~8min.
+ */
+const PRICE_FILE_BACKOFF_MS = [15_000, 30_000, 60_000, 120_000, 240_000];
+
+async function fetchAndCachePriceFile(uid: string): Promise<{
+  ok: boolean;
+  productCount?: number;
+  generatedAt?: number;
+  error?: string;
+  reauthRequired?: boolean;
+}> {
+  const token = await getReeceAuthToken();
+  if (!token) return { ok: false, error: 'reece_app_token_unavailable' };
+  const userToken = await getReeceCustomerToken(uid);
+  if (!userToken) return { ok: false, error: 'reece_not_connected' };
+
+  const integrationsRef = admin.firestore().doc(`users/${uid}/integrations/reece`);
+
+  // 1. Enqueue generation (fire-and-forget; safe to call even if a job is
+  // already pending — Reece dedupes server-side).
+  try {
+    await fetch(
+      `${REECE_API_BASE_URL}/${REECE_REGION}/price-gateway/price-file/trigger-generation`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+          'Customer-Token': userToken.customerToken,
+        },
+      },
+    );
+  } catch (err: any) {
+    console.warn('[reece pricefile] trigger failed (continuing to poll)', {
+      uid,
+      message: err?.message,
+    });
+  }
+
+  // 2. Poll the price file. 204 = still generating, 200 = ready.
+  let raw: any = null;
+  for (let i = 0; i < PRICE_FILE_BACKOFF_MS.length; i++) {
+    await new Promise(r => setTimeout(r, PRICE_FILE_BACKOFF_MS[i]));
+    let response: any;
+    try {
+      response = await fetch(
+        `${REECE_API_BASE_URL}/${REECE_REGION}/price-gateway/price-file?format=MAX_JSON&additionalFields=CATEGORY,SECTION,PRODUCT_IMAGES`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'Customer-Token': userToken.customerToken,
+          },
+        },
+      );
+    } catch (err: any) {
+      console.warn('[reece pricefile] poll error', { uid, attempt: i, message: err?.message });
+      continue;
+    }
+    if (response.status === 401) {
+      await clearReeceConnection(uid, 'price_file_401');
+      return { ok: false, reauthRequired: true, error: 'reece_reauth_required' };
+    }
+    if (response.status === 204) {
+      console.log('[reece pricefile] poll 204', { uid, attempt: i });
+      continue;
+    }
+    if (!response.ok) {
+      console.warn('[reece pricefile] poll non-ok', { uid, attempt: i, status: response.status });
+      continue;
+    }
+    // Read as text first so we can log the raw shape — Reece's MAX_JSON
+    // response shape isn't documented and we've been getting 70-byte
+    // payloads back instead of the expected catalogue dump.
+    let bodyText = '';
+    try {
+      bodyText = await response.text();
+    } catch (err: any) {
+      console.warn('[reece pricefile] body read failed', { uid, message: err?.message });
+      continue;
+    }
+    const contentType = response.headers.get('content-type') || '';
+    console.log('[reece pricefile] poll 200', {
+      uid,
+      attempt: i,
+      contentType,
+      sizeBytes: bodyText.length,
+      preview: bodyText.slice(0, 500),
+    });
+    try {
+      raw = JSON.parse(bodyText);
+      break;
+    } catch (err: any) {
+      console.warn('[reece pricefile] parse failed', { uid, message: err?.message, preview: bodyText.slice(0, 200) });
+      continue;
+    }
+  }
+
+  if (!raw) {
+    await integrationsRef.set(
+      { priceFileMeta: { lastError: 'timeout', updatedAt: admin.firestore.FieldValue.serverTimestamp() } },
+      { merge: true },
+    );
+    return { ok: false, error: 'price_file_timeout' };
+  }
+
+  // 3. Trim. Reece's MAX_JSON shape is undocumented — try every plausible
+  // root key. If none of them yield an array, log the top-level shape so we
+  // can adapt without flying blind.
+  let rawProducts: any[] = [];
+  if (Array.isArray(raw)) {
+    rawProducts = raw;
+  } else if (raw && typeof raw === 'object') {
+    for (const key of ['products', 'priceFile', 'priceList', 'items', 'data', 'lines', 'priceFileLines', 'productPrices']) {
+      if (Array.isArray(raw[key])) {
+        rawProducts = raw[key];
+        console.log('[reece pricefile] using root key', { uid, key, count: raw[key].length });
+        break;
+      }
+    }
+    if (rawProducts.length === 0) {
+      console.warn('[reece pricefile] no array found at any known root key', {
+        uid,
+        topLevelKeys: Object.keys(raw),
+        sample: JSON.stringify(raw).slice(0, 500),
+      });
+    }
+  }
+
+  // One-shot diagnostic on the first item — surface its keys so we can adapt
+  // field detection if Reece uses different names than product-gateway/search.
+  if (rawProducts.length > 0) {
+    const first = rawProducts[0];
+    console.log('[reece pricefile] first product shape', {
+      uid,
+      keys: typeof first === 'object' && first ? Object.keys(first) : [],
+      sample: JSON.stringify(first).slice(0, 600),
+    });
+  }
+
+  // Reece's MAX_JSON price-file uses different field names than the
+  // product-gateway/search endpoint. Real shape (sampled live):
+  //   productCodeWithSuffix: "1004839-1"  ← string, leading int is productId
+  //   productDescription: "RAPIDFLO VALVE 15/20/25 LONG TAIL (EA)"
+  //   unitOfMeasure: "EA"                  ← flat string
+  //   section: { code, name }              ← nested
+  //   category: { code, name }             ← nested
+  //   cmpPriceGstInc / cmpPriceGstExc      ← customer-specific trade price
+  // We also retain the search-endpoint shape as a fallback in case the
+  // format is ever harmonised on Reece's side.
+  let droppedNoId = 0;
+  let droppedNoTitle = 0;
+  const trimmed: ReeceCachedProduct[] = [];
+  const extractName = (v: any): string | null => {
+    if (!v) return null;
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object') return v.name || v.description || null;
+    return null;
+  };
+  for (const p of rawProducts) {
+    // productCodeWithSuffix is "1004839-1"; the leading integer is the
+    // legacy SAP stock code used by the price-file. Important: it is NOT the
+    // same as the `productId` returned by /product-gateway/search — those
+    // are separate ID spaces, so this code can't be sent to /order-gateway
+    // /orders directly. We keep the full string for ordering follow-ups and
+    // the integer for cache lookup keys.
+    const codeRaw: string = String(p.productCodeWithSuffix ?? p.productCode ?? p.productId ?? p.id ?? '');
+    const codeMatch = codeRaw.match(/^\d+/);
+    const productId = codeMatch ? Number(codeMatch[0]) : NaN;
+    if (!Number.isFinite(productId) || productId <= 0) { droppedNoId++; continue; }
+    const productCode = codeRaw || null;
+    const titleRaw = String(
+      p.productDescription || p.productTitle || p.title || p.description || p.name || p.productName || '',
+    ).trim();
+    if (!titleRaw) { droppedNoTitle++; continue; }
+    const title = reeceTitleCase(titleRaw);
+    const uom = Array.isArray(p.unitOfMeasures) ? p.unitOfMeasures[0] : null;
+    const brand = (p.brand ?? null) ? String(p.brand) : null;
+    const category = extractName(p.category);
+    const section = extractName(p.section);
+    const unit = (typeof p.unitOfMeasure === 'string' && p.unitOfMeasure)
+      ? p.unitOfMeasure
+      : uom?.pack ? String(uom.pack) : null;
+    const priceIncGst = typeof p.cmpPriceGstInc === 'number'
+      ? p.cmpPriceGstInc
+      : typeof uom?.unitPriceIncludingGST === 'number' ? uom.unitPriceIncludingGST : null;
+    const priceExGst = typeof p.cmpPriceGstExc === 'number'
+      ? p.cmpPriceGstExc
+      : typeof uom?.unitPriceExcludingGST === 'number' ? uom.unitPriceExcludingGST : null;
+    const tokenSrc = `${title} ${brand || ''} ${category || ''} ${section || ''}`.toLowerCase();
+    const tokens = Array.from(new Set(tokenSrc.split(/[^a-z0-9]+/).filter(t => t.length > 1)));
+    trimmed.push({
+      productId,
+      productCode,
+      title,
+      brand,
+      category,
+      section,
+      unit,
+      priceExGst,
+      priceIncGst,
+      imageUrl: extractReeceImageUrl(p),
+      searchTokens: ' ' + tokens.join(' ') + ' ',
+    });
+  }
+
+  const generatedAt = Date.now();
+  const catalogue: ReeceCachedCatalogue = {
+    generatedAt,
+    customerNumber: userToken.customerNumber,
+    products: trimmed,
+  };
+  const json = JSON.stringify(catalogue);
+
+  // 4. Upload to Cloud Storage.
+  try {
+    await admin.storage().bucket().file(reeceCataloguePath(uid)).save(json, {
+      contentType: 'application/json',
+      resumable: false,
+      metadata: { cacheControl: 'private, max-age=0' },
+    });
+  } catch (err: any) {
+    console.error('[reece pricefile] upload failed', { uid, message: err?.message });
+    return { ok: false, error: 'storage_upload_failed' };
+  }
+
+  // 5. Stamp Firestore meta. Bust the in-memory cache so the next call reads
+  // the fresh blob.
+  reeceCatalogueCache.delete(uid);
+  await integrationsRef.set(
+    {
+      priceFileMeta: {
+        generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        productCount: trimmed.length,
+        sizeBytes: json.length,
+        customerNumber: userToken.customerNumber,
+        lastError: admin.firestore.FieldValue.delete(),
+      },
+    },
+    { merge: true },
+  );
+  console.log('[reece pricefile] cached', {
+    uid,
+    productCount: trimmed.length,
+    rawProductCount: rawProducts.length,
+    droppedNoId,
+    droppedNoTitle,
+    sizeBytes: json.length,
+  });
+
+  return { ok: true, productCount: trimmed.length, generatedAt };
+}
+
+// ─── Catalogue slice for AI material generation (Phase 2) ──────────────────
+// We score every catalogue product by token overlap with the job description
+// and take the top-N. Reece's actual category names are very plumber-specific
+// ("STOPS/FLEX HOSES/COVER PLATES", "BALL VALVE FLOATS"), so trying to map
+// generic English terms like "bathroom" to Reece categories was returning
+// empty slices. Token-overlap on title+brand+category+section is more robust.
+
+const REECE_SLICE_MAX_PRODUCTS = 600;
+
+// Common plumbing-job tokens that surface relevant SKUs even when the job
+// description is sparse ("install a tap"). Mixed in alongside the
+// description's own tokens so very short jobs still get a useful slice.
+const REECE_FALLBACK_TOKENS = [
+  'tap', 'mixer', 'valve', 'fitting', 'pipe', 'fitting', 'elbow', 'tee',
+  'sink', 'toilet', 'basin', 'shower', 'drain', 'waste', 'flange',
+];
+
+async function getRelevantCatalogueSlice(
+  uid: string,
+  jobDescription: string,
+): Promise<{ products: ReeceCachedProduct[]; generatedAt: number } | null> {
+  // Always gate on the Firestore flag — disable() clears the local
+  // in-memory cache only on the instance that handled it, so a stale
+  // catalogue can linger in another instance for up to ~15min after the
+  // user disables sync. Reading Firestore here is cheap (~10ms) and the
+  // alternative (forcibly evicting all instance caches) isn't possible
+  // without a pub/sub broadcast.
+  const meta = await getReecePriceFileMeta(uid);
+  if (!meta?.priceFileEnabled) return null;
+  const catalogue = await loadCachedCatalogue(uid);
+  if (!catalogue) return null;
+  const tokens = tokenizeReeceQuery(jobDescription);
+  if (tokens.length === 0) return null;
+
+  // Score every product. Title-overlap weighs highest, then category/section
+  // (which can surface related items even when the job description doesn't
+  // match the exact title).
+  const scored: Array<{ p: ReeceCachedProduct; score: number }> = [];
+  for (const p of catalogue.products) {
+    let score = 0;
+    for (const t of tokens) {
+      if (p.searchTokens.includes(' ' + t + ' ') || p.searchTokens.includes(t)) score += 1.0;
+      if (p.category && p.category.toLowerCase().includes(t)) score += 0.5;
+      if (p.section && p.section.toLowerCase().includes(t)) score += 0.3;
+    }
+    if (score > 0) scored.push({ p, score });
+  }
+
+  // Backfill with fallback-token matches when the description-driven slice
+  // is thin — this gives the AI a baseline pool of common plumbing items it
+  // can pick from even for vague jobs.
+  if (scored.length < REECE_SLICE_MAX_PRODUCTS) {
+    const seen = new Set(scored.map(s => s.p.productId));
+    for (const ft of REECE_FALLBACK_TOKENS) {
+      for (const p of catalogue.products) {
+        if (seen.has(p.productId)) continue;
+        if (p.searchTokens.includes(' ' + ft + ' ')) {
+          scored.push({ p, score: 0.1 });
+          seen.add(p.productId);
+          if (scored.length >= REECE_SLICE_MAX_PRODUCTS) break;
+        }
+      }
+      if (scored.length >= REECE_SLICE_MAX_PRODUCTS) break;
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, REECE_SLICE_MAX_PRODUCTS).map(s => s.p);
+  console.log('[reece pricefile] slice built', {
+    uid,
+    jobTokenCount: tokens.length,
+    sliceSize: top.length,
+    catalogueSize: catalogue.products.length,
+    topScores: scored.slice(0, 5).map(s => ({ id: s.p.productId, title: s.p.title, score: s.score })),
+  });
+  if (top.length === 0) return null;
+  return { products: top, generatedAt: catalogue.generatedAt };
+}
+
+/**
+ * Format a catalogue slice as terse prompt lines. Kept compact so the LLM
+ * spends its attention on picking, not parsing JSON.
+ */
+function formatCatalogueSliceForPrompt(slice: { products: ReeceCachedProduct[] }): string {
+  return slice.products
+    .map(p => {
+      const price = p.priceIncGst ?? p.priceExGst;
+      const priceStr = price != null ? `$${price.toFixed(2)}` : 'no-price';
+      const unit = p.unit || 'EA';
+      const cat = [p.category, p.section].filter(Boolean).join('/') || '—';
+      const brand = p.brand ? ` (${p.brand})` : '';
+      return `[${p.productId}] ${p.title}${brand} · ${cat} · ${priceStr}/${unit}`;
+    })
+    .join('\n');
+}
+
 /**
  * Check if Reece API is available and configured
  */
@@ -2697,6 +3318,27 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
       const userToken = await getReeceCustomerToken(decodedToken.uid);
       if (!userToken) {
         res.status(200).json({ product: null, error: 'reece_not_connected' });
+        return;
+      }
+
+      // Fast path — search the user's cached price-file index instead of
+      // round-tripping to Reece. Hits return identical wire shape so the
+      // client can't tell the difference.
+      const local = await searchLocalCatalogue(decodedToken.uid, productName, 5);
+      if (local && local.products.length > 0) {
+        const _debug = {
+          query: productName,
+          source: 'local-cache' as const,
+          generatedAt: local.generatedAt,
+          productCount: local.productCount,
+          topTitle: local.product?.description ?? null,
+          topProductId: local.product?.itemNumber ?? null,
+          topUnitPriceIncGst: local.product?.unitPriceIncludingGst ?? null,
+          topUnitPriceExGst: local.product?.unitPriceExcludingGst ?? null,
+          imageUrl: local.product?.imageUrl ?? null,
+        };
+        console.log('[reece search]', JSON.stringify({ uid: decodedToken.uid, ..._debug }));
+        res.status(200).json({ product: local.product, products: local.products, _debug });
         return;
       }
 
@@ -2848,6 +3490,23 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
         return;
       }
 
+      // Direct lookup against the cached price-file. itemNumber is the Reece
+      // productId, so this is an O(N) scan over a single in-memory array.
+      const cached = await getCachedReeceProductById(decodedToken.uid, itemNumber);
+      if (cached) {
+        const price = cached.priceIncGst ?? cached.priceExGst;
+        if (price != null) {
+          res.status(200).json({
+            price,
+            currency: 'AUD',
+            priceIncGst: cached.priceIncGst,
+            gstRate: 10,
+            source: 'local-cache',
+          });
+          return;
+        }
+      }
+
       const priceResponse = await fetch(
         `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(itemNumber)}&pageNumber=1&pageSize=1`,
         {
@@ -2931,6 +3590,21 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
       const userToken = await getReeceCustomerToken(decodedToken.uid);
       if (!userToken) {
         res.status(200).json({ inventory: null, error: 'reece_not_connected' });
+        return;
+      }
+
+      // The Reece public API has no real stock-levels endpoint — we use
+      // existence as the only signal. The cached catalogue is enough for the
+      // existence probe and skips the extra API hop.
+      const cached = await getCachedReeceProductById(decodedToken.uid, itemNumber);
+      if (cached) {
+        res.status(200).json({
+          inventory: {
+            itemNumber: String(cached.productId),
+            branchCode: branchCode || userToken.homeBranch || 'unknown',
+            quantityAvailable: -1,
+          },
+        });
         return;
       }
 
@@ -3076,13 +3750,16 @@ export const reeceExchangeCustomerToken = functions.https.onRequest((req, res) =
         return;
       }
 
-      // Retry once on "Invalid request token" — Reece's consent state can lag
-      // a second or two behind the redirect on busy days, so what looks like a
-      // failure is sometimes just a propagation race. We exit the loop on
-      // first success or any non-"Invalid request token" failure.
+      // Reece's consent state can lag several seconds behind the user's
+      // Approve tap before their exchange endpoint will validate the token —
+      // the previous 1.5s single-retry was hitting users on slower nights.
+      // Try up to 5 times with linear backoff (2s, 4s, 6s, 8s — ~20s total)
+      // before giving up. We only retry on "Invalid request token" (the
+      // propagation-race error); other failures bail immediately.
+      const exchangeBackoffsMs = [2000, 4000, 6000, 8000];
       let exchangeResponse: any = null;
       let exchangeBody = '';
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (let attempt = 0; attempt < 5; attempt++) {
         exchangeResponse = await fetch(
           `${REECE_API_BASE_URL}/${REECE_REGION}/customer-application-onboarding-gateway/customer-token`,
           {
@@ -3097,8 +3774,14 @@ export const reeceExchangeCustomerToken = functions.https.onRequest((req, res) =
         );
         if (exchangeResponse.ok) break;
         exchangeBody = await exchangeResponse.text().catch(() => '');
-        if (attempt === 0 && /invalid request token/i.test(exchangeBody)) {
-          await new Promise((r) => setTimeout(r, 1500));
+        const isPropagationRace = /invalid request token/i.test(exchangeBody);
+        if (isPropagationRace && attempt < exchangeBackoffsMs.length) {
+          console.log('[reece] customer-token exchange retrying', {
+            uid: decodedToken.uid,
+            attempt: attempt + 1,
+            waitMs: exchangeBackoffsMs[attempt],
+          });
+          await new Promise((r) => setTimeout(r, exchangeBackoffsMs[attempt]));
           continue;
         }
         break;
@@ -3606,6 +4289,238 @@ export const reeceOrderPlace = functions.https.onRequest((req, res) => {
       },
     });
   });
+});
+
+// ─── Reece price-file lifecycle endpoints ──────────────────────────────────
+
+/**
+ * Build the redirect URL the user opens to opt their Reece account into
+ * price-file generation. Reece's price-select consent flow needs the customer
+ * token in the query string, so we keep that work server-side rather than
+ * leaking the token to the client.
+ */
+export const reeceEnablePriceFile = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const userToken = await getReeceCustomerToken(decodedToken.uid);
+    if (!userToken) {
+      res.status(200).json({ error: 'reece_not_connected' });
+      return;
+    }
+    const params = new URLSearchParams({
+      callback_url: REECE_CALLBACK_URL,
+      customer_token: userToken.customerToken,
+    });
+    const authUrl = `https://reece.com.au/link-application/account-select/price-select?${params.toString()}`;
+    res.status(200).json({ authUrl });
+  });
+});
+
+/**
+ * Called by the client after the price-select redirect lands back on the
+ * QuoteMate callback page. We flip the priceFileEnabled flag, then kick off
+ * an initial fetch in the background (response returns immediately so the
+ * user isn't blocked on Reece's 1–5 minute generation lag).
+ */
+export const reeceConfirmPriceFile = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const userToken = await getReeceCustomerToken(decodedToken.uid);
+    if (!userToken) {
+      res.status(200).json({ error: 'reece_not_connected' });
+      return;
+    }
+
+    await admin.firestore().doc(`users/${decodedToken.uid}/integrations/reece`).set(
+      {
+        priceFileEnabled: true,
+        priceFileEnabledAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    res.status(200).json({ enabled: true, status: 'queued' });
+
+    // Fire the initial fetch after the response — Reece's generation cycle
+    // can take minutes and we don't want the client hanging.
+    fetchAndCachePriceFile(decodedToken.uid).catch(err => {
+      console.error('[reece pricefile] initial fetch failed', {
+        uid: decodedToken.uid,
+        message: err?.message,
+      });
+    });
+  });
+});
+
+/**
+ * Tear down the user's price-file sync. Calls Reece's delete endpoint, drops
+ * the Cloud Storage blob, and clears the meta + flag.
+ */
+export const reeceDisablePriceFile = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const uid = decodedToken.uid;
+    const userToken = await getReeceCustomerToken(uid);
+    if (userToken) {
+      const token = await getReeceAuthToken();
+      if (token) {
+        try {
+          await fetch(
+            `${REECE_API_BASE_URL}/${REECE_REGION}/price-gateway/price-file-settings`,
+            {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Customer-Token': userToken.customerToken,
+              },
+            },
+          );
+        } catch (err: any) {
+          // Don't block local teardown on Reece-side failure.
+          console.warn('[reece pricefile] remote delete failed', { uid, message: err?.message });
+        }
+      }
+    }
+
+    try {
+      await admin.storage().bucket().file(reeceCataloguePath(uid)).delete({ ignoreNotFound: true });
+    } catch (err: any) {
+      console.warn('[reece pricefile] storage delete failed', { uid, message: err?.message });
+    }
+    reeceCatalogueCache.delete(uid);
+
+    await admin.firestore().doc(`users/${uid}/integrations/reece`).set(
+      {
+        priceFileEnabled: false,
+        priceFileMeta: admin.firestore.FieldValue.delete(),
+      },
+      { merge: true },
+    );
+
+    res.status(200).json({ disabled: true });
+  });
+});
+
+/**
+ * Manually re-pull the price-file. Synchronous (the client will see the
+ * spinner long enough that we'd rather block than poll).
+ */
+export const reeceRefreshPriceFileNow = functions
+  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const meta = await getReecePriceFileMeta(decodedToken.uid);
+    if (!meta?.priceFileEnabled) {
+      res.status(200).json({ status: 'not_enabled' });
+      return;
+    }
+
+    const result = await fetchAndCachePriceFile(decodedToken.uid);
+    if (result.reauthRequired) {
+      res.status(200).json({ status: 'reauth_required' });
+      return;
+    }
+    if (!result.ok) {
+      res.status(200).json({ status: 'failed', error: result.error });
+      return;
+    }
+    res.status(200).json({
+      status: 'ready',
+      productCount: result.productCount,
+      generatedAt: result.generatedAt,
+    });
+  });
+});
+
+/**
+ * Lightweight read of the user's price-file status — used by the settings
+ * screen to show "last synced X ago / N products".
+ */
+export const reecePriceFileStatus = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'GET') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+    const meta = await getReecePriceFileMeta(decodedToken.uid);
+    res.status(200).json({
+      enabled: meta?.priceFileEnabled === true,
+      generatedAt: meta?.generatedAt ?? null,
+      productCount: meta?.productCount ?? null,
+      lastError: meta?.lastError ?? null,
+    });
+  });
+});
+
+/**
+ * Daily refresh job — opted-in users get fresh pricing every morning. Cap
+ * concurrency so we don't hammer Reece (their auth host shares pool capacity
+ * across all of their integration partners).
+ */
+export const refreshReecePriceFiles = functions
+  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .pubsub.schedule('every day 03:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+  const snap = await admin.firestore()
+    .collectionGroup('integrations')
+    .where('priceFileEnabled', '==', true)
+    .get();
+  // collectionGroup matches every doc named `*` under any `integrations`
+  // sub-collection — filter to the reece doc only.
+  const uids: string[] = [];
+  for (const doc of snap.docs) {
+    if (doc.id !== 'reece') continue;
+    const parent = doc.ref.parent.parent;
+    if (parent) uids.push(parent.id);
+  }
+  console.log('[reece pricefile] scheduled refresh', { userCount: uids.length });
+
+  const concurrency = 5;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < uids.length) {
+      const idx = cursor++;
+      const uid = uids[idx];
+      try {
+        const result = await fetchAndCachePriceFile(uid);
+        if (!result.ok) {
+          console.warn('[reece pricefile] scheduled refresh failed', { uid, error: result.error });
+        }
+      } catch (err: any) {
+        console.error('[reece pricefile] scheduled refresh threw', { uid, message: err?.message });
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  return null;
 });
 
 /**

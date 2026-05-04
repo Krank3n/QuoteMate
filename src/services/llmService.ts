@@ -40,6 +40,14 @@ interface LLMMaterial {
   // Set by LLM when matched to a user's saved supplier rate.
   savedRateName?: string;
   pricingSource?: string;
+  // Set by the analyzeJobDescription backend when the LLM matched this row
+  // directly to a Reece catalogue product (Phase 2 price-file flow). When
+  // present, price/reeceItemNumber/pricingSource are pre-stamped server-side
+  // so the client's pricing pass skips the search round trip.
+  reeceProductId?: number;
+  reeceItemNumber?: string;
+  price?: number;
+  imageUrl?: string;
 }
 
 interface LLMResponse {
@@ -777,17 +785,28 @@ function getFallbackResponse(jobDescription: string): LLMResponse {
 export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Partial<Material> & { sectionMultiplier?: number; sectionLaborHours?: number; savedRateName?: string })[] {
   return llmMaterials.map((m) => {
     const multiplier = m.sectionMultiplier || 1;
+    const finalQuantity = Math.round(m.quantity * multiplier * 1000) / 1000;
+    // When the backend has already resolved a Reece catalogue match, trust
+    // the pre-stamped price/itemNumber/pricingSource — the reece pricing
+    // pass in MaterialsListScreen skips materials that already carry these.
+    const hasReeceMatch = m.pricingSource === 'api' && !!m.reeceItemNumber && typeof m.price === 'number' && m.price > 0;
+    const unitPrice = hasReeceMatch ? (m.price as number) : 0;
     return {
       name: m.name,
       searchTerm: m.searchTerm,
       templateBaseQuantity: multiplier > 1 ? m.quantity : undefined,
-      quantity: Math.round(m.quantity * multiplier * 1000) / 1000,
+      quantity: finalQuantity,
       unit: m.unit as Material['unit'],
-      price: 0,
-      totalPrice: 0,
+      price: unitPrice,
+      totalPrice: unitPrice * finalQuantity,
       manualPriceOverride: false,
       ...(m.section && { section: m.section }),
       ...(m.savedRateName && { savedRateName: m.savedRateName }),
+      ...(hasReeceMatch && {
+        reeceItemNumber: m.reeceItemNumber,
+        pricingSource: 'api' as const,
+        ...(m.imageUrl && { imageUrl: m.imageUrl }),
+      }),
       sectionMultiplier: multiplier,
       ...(m.sectionLaborHours && m.sectionLaborHours > 0 && { sectionLaborHours: m.sectionLaborHours }),
     };

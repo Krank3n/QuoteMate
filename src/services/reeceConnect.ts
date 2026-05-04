@@ -21,12 +21,18 @@ import * as WebBrowser from 'expo-web-browser';
 import {
   startReeceConnect,
   completeReeceConnect,
+  enableReecePriceFile,
+  confirmReecePriceFile,
   type ReeceConnectionStatus,
 } from './reeceApi';
 
 export type ReeceConnectOutcome =
   | { kind: 'connected'; status: ReeceConnectionStatus }
   | { kind: 'cancelled' }
+  | { kind: 'failed'; message: string };
+
+export type ReecePriceFileEnableOutcome =
+  | { kind: 'enabled' }
   | { kind: 'failed'; message: string };
 
 /**
@@ -72,6 +78,45 @@ export async function runReeceConnectFlow(): Promise<ReeceConnectOutcome> {
       message:
         error?.message ||
         'Could not finish connecting Reece. Please try again and tap Approve on the Reece consent page.',
+    };
+  }
+}
+
+/**
+ * Run the Reece price-file enable flow. The user picks their format settings
+ * on reece.com.au's price-select page and is redirected back to QuoteMate's
+ * callback. Unlike the connect flow there's no request/exchange dance —
+ * confirmReecePriceFile just flips the local flag and kicks off the initial
+ * fetch in the background.
+ */
+export async function runReecePriceFileEnableFlow(): Promise<ReecePriceFileEnableOutcome> {
+  let authUrl: string;
+  try {
+    const started = await enableReecePriceFile();
+    authUrl = started.authUrl;
+  } catch (error: any) {
+    return {
+      kind: 'failed',
+      message: error?.message || 'Could not start Reece catalogue sync. Please try again.',
+    };
+  }
+
+  try {
+    await WebBrowser.openBrowserAsync(authUrl, { dismissButtonStyle: 'done' });
+  } catch (error: any) {
+    return {
+      kind: 'failed',
+      message: error?.message || 'Could not open the Reece price-file consent page.',
+    };
+  }
+
+  try {
+    await confirmReecePriceFile();
+    return { kind: 'enabled' };
+  } catch (error: any) {
+    return {
+      kind: 'failed',
+      message: error?.message || 'Could not enable Reece catalogue sync. Please try again.',
     };
   }
 }
