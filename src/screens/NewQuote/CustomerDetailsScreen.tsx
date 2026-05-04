@@ -290,9 +290,14 @@ export function CustomerDetailsScreen() {
     // Fire-and-forget: calculate travel distance in background
     const trimmedJobAddress = jobAddress.trim();
     if (businessSettings?.address && trimmedJobAddress) {
+      console.log('[travel] kicking off calculation', {
+        businessAddress: businessSettings.address,
+        jobAddress: trimmedJobAddress,
+      });
       calculateTravelAdjustment(businessSettings.address, trimmedJobAddress)
         .then((result) => {
           if (result) {
+            console.log('[travel] result', result);
             // Only set travel adjustment if user hasn't already manually adjusted it
             const hasExistingAdjustment = updatedQuote.travelAdjustment !== undefined && updatedQuote.travelAdjustment > 0;
             updateDocument({
@@ -304,18 +309,25 @@ export function CustomerDetailsScreen() {
             });
           } else {
             // Geocoding returned null — one or both addresses couldn't be resolved
+            console.warn('[travel] calculateTravelAdjustment returned null');
             updateDocument({
               ...updatedQuote,
               travelGeocodeFailed: true,
             });
           }
         })
-        .catch(() => {
+        .catch((err) => {
+          console.warn('[travel] calculateTravelAdjustment threw', err);
           updateDocument({
             ...updatedQuote,
             travelGeocodeFailed: true,
           });
         });
+    } else {
+      console.log('[travel] skipped — missing address', {
+        hasBusinessAddress: !!businessSettings?.address,
+        hasJobAddress: !!trimmedJobAddress,
+      });
     }
   };
 

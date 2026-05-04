@@ -26,20 +26,27 @@ export async function geocodeAddress(address: string): Promise<GeoLocation | nul
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'QuoteMate/1.0',
+        'User-Agent': 'QuoteMate/1.0 (thomas.andrew.hansen@gmail.com)',
       },
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.warn('[travel] Nominatim HTTP error', response.status, response.statusText, 'for', address);
+      return null;
+    }
 
     const results = await response.json();
-    if (!results || results.length === 0) return null;
+    if (!results || results.length === 0) {
+      console.warn('[travel] Nominatim returned no results for', address);
+      return null;
+    }
 
     return {
       lat: parseFloat(results[0].lat),
       lng: parseFloat(results[0].lon),
     };
-  } catch {
+  } catch (err) {
+    console.warn('[travel] geocodeAddress threw for', address, err);
     return null;
   }
 }
@@ -97,12 +104,21 @@ export async function calculateTravelAdjustment(
   businessAddress: string,
   jobAddress: string
 ): Promise<TravelAdjustmentResult | null> {
-  const [businessLocation, jobLocation] = await Promise.all([
-    geocodeAddress(businessAddress),
-    geocodeAddress(jobAddress),
-  ]);
+  console.log('[travel] calculateTravelAdjustment start', { businessAddress, jobAddress });
 
-  if (!businessLocation || !jobLocation) return null;
+  const businessLocation = await geocodeAddress(businessAddress);
+  if (!businessLocation) {
+    console.warn('[travel] business address could not be geocoded:', businessAddress);
+    return null;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+
+  const jobLocation = await geocodeAddress(jobAddress);
+  if (!jobLocation) {
+    console.warn('[travel] job address could not be geocoded:', jobAddress);
+    return null;
+  }
 
   const distance = haversineDistance(
     businessLocation.lat,

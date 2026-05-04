@@ -2772,6 +2772,13 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
         topProductImages: searchData?.products?.[0]?.productImages ?? null,
       };
 
+      // Mirror the diagnostic into Cloud Logging too so we can audit a whole
+      // batch from the dashboard without round-tripping through Metro.
+      console.log('[reece search]', JSON.stringify({
+        uid: decodedToken.uid,
+        ..._debug,
+      }));
+
       if (searchData?.products && searchData.products.length > 0) {
         // Return up to 5 candidates so the reconciliation pass has options
         // to pick the best fit / reject category mismatches. The first
