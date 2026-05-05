@@ -68,7 +68,22 @@ async function logAdminAction(params: {
 // TYPES
 // ============================================================
 
-type Trade = 'fencer' | 'landscaper' | 'deck-builder';
+export const TRADES = [
+  'fencer',
+  'landscaper',
+  'deck-builder',
+  'plumber',
+  'electrician',
+  'hvac',
+  'carpenter',
+  'painter',
+  'roofer',
+  'flooring',
+  'cleaner',
+  'pest-control',
+  'handyman',
+] as const;
+type Trade = typeof TRADES[number];
 
 type LeadStatus =
   | 'new'
@@ -92,6 +107,16 @@ const TRADE_QUERY: Record<Trade, string[]> = {
   'fencer': ['fencing contractor', 'fence installation'],
   'landscaper': ['landscaper', 'landscape design'],
   'deck-builder': ['deck builder', 'decking contractor'],
+  'plumber': ['plumber', 'plumbing contractor'],
+  'electrician': ['electrician', 'electrical contractor'],
+  'hvac': ['air conditioning installation', 'air conditioning contractor'],
+  'carpenter': ['carpenter', 'carpentry contractor'],
+  'painter': ['painter', 'painting contractor'],
+  'roofer': ['roofer', 'roofing contractor'],
+  'flooring': ['flooring installer', 'flooring contractor'],
+  'cleaner': ['commercial cleaner', 'cleaning service'],
+  'pest-control': ['pest control', 'pest control service'],
+  'handyman': ['handyman', 'handyman service'],
 };
 
 // Per-trade hook lines — fed to Claude as input, NOT pasted verbatim.
@@ -106,6 +131,26 @@ const TRADE_PITCH: Record<Trade, string> = {
     'Mulch, soil, plants, edging — live pricing from your local suppliers, plus Reece for any irrigation/sprinkler work. Describe the job, get the quote.',
   'deck-builder':
     'Merbau or treated pine, joists, bearers, screws — live pricing from your local suppliers, plus accurate joist + screw qty from the deck dimensions you describe.',
+  'plumber':
+    'Pipes, fittings, fixtures, valves — live pricing from Reece baked in, plus accurate fitting + run qty from the points and metres you describe. Describe the job, get the quote.',
+  'electrician':
+    'Cable, conduit, GPOs, switchboards — live pricing from your local suppliers, plus accurate cable run + accessory qty from the points and circuits you describe.',
+  'hvac':
+    'Splits, ducting, brackets, refrigerant lines — live pricing from your local suppliers, plus accurate qty for the rooms and capacity you describe. Describe the job, get the quote.',
+  'carpenter':
+    'Framing timber, sheet goods, fixings — live pricing from your local suppliers, plus accurate qty for the framing, lining or trim work you describe.',
+  'painter':
+    'Paint, primer, prep gear, drop sheets — live pricing from your local suppliers, plus accurate paint qty (litres + coats) from the wall and ceiling areas you describe.',
+  'roofer':
+    'Sheets, ridges, flashings, screws — live pricing from your local suppliers, plus accurate sheet + screw qty from the roof dimensions and pitch you describe.',
+  'flooring':
+    'Planks, underlay, trim, adhesives — live pricing from your local suppliers, plus accurate qty (with waste factor) from the room dimensions you describe.',
+  'cleaner':
+    'Time on site, consumables, bond-clean checklists — describe the property and scope and get a quote that lines up with how you actually price, not a flat hourly rate.',
+  'pest-control':
+    'Treatments, bait, callout time — describe the property and pest type and get a quote with accurate product qty + time, not a generic flat fee.',
+  'handyman':
+    'Mixed materials and labour — describe the job, live supplier pricing for the bits you need, accurate time estimate for the work. Quote in minutes, not hours.',
 };
 
 // ============================================================
@@ -651,7 +696,7 @@ export const adminLeadDiscovery = functions
     const dryRun = data?.dryRun === true;
 
     if (!TRADE_QUERY[trade]) {
-      throw new functions.https.HttpsError('invalid-argument', 'trade must be fencer | landscaper | deck-builder');
+      throw new functions.https.HttpsError('invalid-argument', `trade must be one of: ${TRADES.join(' | ')}`);
     }
     if (!suburbs.length) {
       throw new functions.https.HttpsError('invalid-argument', 'suburbs[] required');
@@ -2179,7 +2224,7 @@ export const adminUpdateDiscoveryConfig = functions.https.onCall(async (data, co
   const updates: Partial<DiscoveryConfig> = {};
   if (typeof data?.enabled === 'boolean') updates.enabled = data.enabled;
   if (Array.isArray(data?.trades)) {
-    updates.trades = data.trades.filter((t: any) => ['fencer', 'landscaper', 'deck-builder'].includes(t));
+    updates.trades = data.trades.filter((t: any) => (TRADES as readonly string[]).includes(t));
   }
   if (Array.isArray(data?.suburbs)) {
     updates.suburbs = data.suburbs.filter((s: any) => typeof s === 'string' && s.trim().length > 0).map((s: string) => s.trim());

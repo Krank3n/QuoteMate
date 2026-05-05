@@ -573,6 +573,7 @@ export function MaterialsListScreen() {
   const [successMessage, setSuccessMessage] = useState('');
   const [successTitle, setSuccessTitle] = useState('Success!');
   const [successType, setSuccessType] = useState<'success' | 'warning' | 'error' | 'info'>('success');
+  const [successShowFetchPrices, setSuccessShowFetchPrices] = useState(false);
 
   // Fetch time estimate modal state
   const [showFetchEstimateModal, setShowFetchEstimateModal] = useState(false);
@@ -1034,6 +1035,7 @@ export function MaterialsListScreen() {
 
       setSuccessTitle('Materials Generated!');
       setSuccessMessage(`Generated ${generatedMaterials.length} material${generatedMaterials.length !== 1 ? 's' : ''} from your job description.`);
+      setSuccessShowFetchPrices(true);
       setShowSuccessModal(true);
     } catch (error: any) {
       console.error('[MaterialsListScreen] Generation failed:', error);
@@ -3459,10 +3461,23 @@ export function MaterialsListScreen() {
       {/* Success Modal */}
       <AlertModal
         visible={showSuccessModal}
-        onDismiss={() => { setShowSuccessModal(false); setSuccessType('success'); }}
+        onDismiss={() => { setShowSuccessModal(false); setSuccessType('success'); setSuccessShowFetchPrices(false); }}
         type={successType}
         title={successTitle}
         message={successMessage}
+        primaryButtonText={successShowFetchPrices ? 'Fetch Prices' : undefined}
+        primaryButtonAction={successShowFetchPrices ? () => {
+          setShowSuccessModal(false);
+          setSuccessType('success');
+          setSuccessShowFetchPrices(false);
+          handleFetchPrices();
+        } : undefined}
+        secondaryButtonText={successShowFetchPrices ? 'Close' : undefined}
+        secondaryButtonAction={successShowFetchPrices ? () => {
+          setShowSuccessModal(false);
+          setSuccessType('success');
+          setSuccessShowFetchPrices(false);
+        } : undefined}
       />
       {!showSuccessModal && unifiedTourActive && (
         <>
