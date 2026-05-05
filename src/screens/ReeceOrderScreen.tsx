@@ -26,6 +26,7 @@ import { colors } from '../theme';
 import { useStore } from '../store/useStore';
 import { ActionSheet, type ActionSheetOption } from '../components/ActionSheet';
 import { BottomSheet } from '../components/BottomSheet';
+import { WebContainer } from '../components/WebContainer';
 import {
   listReeceBranches,
   previewReeceOrder,
@@ -351,16 +352,18 @@ export function ReeceOrderScreen() {
   if (status.kind === 'placed') {
     return (
       <View style={styles.screen}>
-        <View style={styles.placedContainer}>
-          <MaterialCommunityIcons name="check-circle" size={64} color={colors.success} />
-          <Text style={styles.placedTitle}>Order placed</Text>
-          <Text style={styles.placedSubtitle}>
-            Reece order #{status.reeceOrderNumber}. Reece will email you a confirmation and bill on your trade account.
-          </Text>
-          <Button mode="contained" buttonColor={colors.primary} onPress={handleClose} style={styles.placedDoneButton}>
-            Done
-          </Button>
-        </View>
+        <WebContainer style={styles.flexFill}>
+          <View style={styles.placedContainer}>
+            <MaterialCommunityIcons name="check-circle" size={64} color={colors.success} />
+            <Text style={styles.placedTitle}>Order placed</Text>
+            <Text style={styles.placedSubtitle}>
+              Reece order #{status.reeceOrderNumber}. Reece will email you a confirmation and bill on your trade account.
+            </Text>
+            <Button mode="contained" buttonColor={colors.primary} onPress={handleClose} style={styles.placedDoneButton}>
+              Done
+            </Button>
+          </View>
+        </WebContainer>
       </View>
     );
   }
@@ -368,14 +371,16 @@ export function ReeceOrderScreen() {
   if (status.kind === 'error') {
     return (
       <View style={styles.screen}>
-        <View style={styles.placedContainer}>
-          <MaterialCommunityIcons name="alert-circle" size={64} color={colors.error} />
-          <Text style={styles.placedTitle}>Couldn’t open order</Text>
-          <Text style={styles.placedSubtitle}>{status.message}</Text>
-          <Button mode="contained" buttonColor={colors.primary} onPress={handleClose} style={styles.placedDoneButton}>
-            Close
-          </Button>
-        </View>
+        <WebContainer style={styles.flexFill}>
+          <View style={styles.placedContainer}>
+            <MaterialCommunityIcons name="alert-circle" size={64} color={colors.error} />
+            <Text style={styles.placedTitle}>Couldn’t open order</Text>
+            <Text style={styles.placedSubtitle}>{status.message}</Text>
+            <Button mode="contained" buttonColor={colors.primary} onPress={handleClose} style={styles.placedDoneButton}>
+              Close
+            </Button>
+          </View>
+        </WebContainer>
       </View>
     );
   }
@@ -383,6 +388,7 @@ export function ReeceOrderScreen() {
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <WebContainer>
         {renderHeader()}
 
         {/* Fulfilment mode toggle */}
@@ -576,6 +582,7 @@ export function ReeceOrderScreen() {
             Place order with Reece
           </Button>
         </View>
+        </WebContainer>
       </ScrollView>
 
       <BranchPicker
@@ -720,6 +727,9 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  flexFill: {
+    flex: 1,
   },
   body: {
     padding: 20,

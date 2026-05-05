@@ -84,13 +84,6 @@ const ROWS: RowDef[] = [
         primaryDoc.stage === 'partially_paid'),
   },
   {
-    id: 'edit',
-    label: 'Edit scope & pricing',
-    sub: 'Change materials, labour, or markup',
-    icon: 'pencil-outline',
-    when: ({ primaryDoc }) => !!primaryDoc,
-  },
-  {
     id: 'send',
     label: 'Send',
     sub: 'Email / SMS / Share / PDF',
