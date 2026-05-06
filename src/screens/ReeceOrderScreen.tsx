@@ -17,16 +17,19 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Keyboard } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Keyboard, Platform } from 'react-native';
 import { Text, Button, ActivityIndicator, Divider, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '../theme';
 import { useStore } from '../store/useStore';
 import { ActionSheet, type ActionSheetOption } from '../components/ActionSheet';
 import { BottomSheet } from '../components/BottomSheet';
 import { WebContainer } from '../components/WebContainer';
+import { FooterButton } from '../components/FooterButton';
+import { PillToggle } from '../components/PillToggle';
 import {
   listReeceBranches,
   previewReeceOrder,
@@ -87,6 +90,7 @@ function parseAddress(raw?: string): { addressLine1: string; suburb?: string; st
 export function ReeceOrderScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
+  const insets = useSafeAreaInsets();
   const docId: string | undefined = route.params?.docId;
 
   // Resolve the doc from wherever it currently lives. The wizard writes to
@@ -394,23 +398,15 @@ export function ReeceOrderScreen() {
         {/* Fulfilment mode toggle */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Fulfilment</Text>
-          <View style={styles.modeRow}>
-            {(['PICKUP', 'DELIVERY'] as const).map((mode) => {
-              const selected = fulfillmentMode === mode;
-              return (
-                <Button
-                  key={mode}
-                  mode={selected ? 'contained' : 'outlined'}
-                  onPress={() => setFulfillmentMode(mode)}
-                  style={styles.modeButton}
-                  buttonColor={selected ? colors.primary : undefined}
-                  icon={mode === 'PICKUP' ? 'storefront-outline' : 'truck-outline'}
-                >
-                  {mode === 'PICKUP' ? 'Pickup' : 'Delivery'}
-                </Button>
-              );
-            })}
-          </View>
+          <PillToggle<'PICKUP' | 'DELIVERY'>
+            value={fulfillmentMode}
+            onChange={setFulfillmentMode}
+            options={[
+              { value: 'PICKUP', label: 'Pickup', icon: 'storefront-outline' },
+              { value: 'DELIVERY', label: 'Delivery', icon: 'truck-outline' },
+            ]}
+            fullWidth
+          />
         </View>
 
         {/* Pickup branch picker */}
@@ -559,15 +555,23 @@ export function ReeceOrderScreen() {
         ) : null}
 
         {renderViolations()}
+        </WebContainer>
+      </ScrollView>
 
-        {/* Actions */}
-        <View style={styles.actionsRow}>
-          <Button mode="outlined" onPress={handleClose} style={{ flex: 1 }}>
-            Cancel
-          </Button>
-          <Button
+      {/* Fixed footer — same shape + spacing as the wizard footers and the
+          ViewJob sticky bar. Cancel sits on the left, Place order on the
+          right with the heavier flex weight to match the primary action. */}
+      <View style={[styles.footerBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={styles.footerRow}>
+          <FooterButton
+            mode="outlined"
+            label="Cancel"
+            onPress={handleClose}
+            style={{ flex: 1 }}
+          />
+          <FooterButton
             mode="contained"
-            buttonColor={colors.primary}
+            label="Place order with Reece"
             onPress={handlePlace}
             loading={status.kind === 'placing'}
             disabled={
@@ -577,13 +581,10 @@ export function ReeceOrderScreen() {
               violations.length > 0 ||
               orderableMaterials.length === 0
             }
-            style={{ flex: 2 }}
-          >
-            Place order with Reece
-          </Button>
+            style={{ flex: 1 }}
+          />
         </View>
-        </WebContainer>
-      </ScrollView>
+      </View>
 
       <BranchPicker
         visible={branchPickerVisible}
@@ -733,7 +734,7 @@ const styles = StyleSheet.create({
   },
   body: {
     padding: 20,
-    paddingBottom: 32,
+    paddingBottom: 120, // clearance for the sticky FooterBar below
   },
   headerRow: {
     flexDirection: 'row',
@@ -744,8 +745,6 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
   section: { marginBottom: 14 },
   sectionLabel: { fontSize: 13, color: colors.textMuted, marginBottom: 6, fontWeight: '600' },
-  modeRow: { flexDirection: 'row', gap: 8 },
-  modeButton: { flex: 1 },
   pickerButton: { borderColor: colors.border },
   input: { marginBottom: 8, backgroundColor: colors.surface },
   divider: { marginVertical: 12, backgroundColor: colors.border },
@@ -776,7 +775,39 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   violationText: { fontSize: 12, color: colors.error, lineHeight: 16 },
-  actionsRow: { flexDirection: 'row', gap: 8, marginTop: 18 },
+  footerBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: 10,
+    paddingHorizontal: 16,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      },
+      android: { elevation: 8 },
+      web: {
+        boxShadow: '0 -2px 12px rgba(0,0,0,0.2)' as any,
+      },
+    }),
+  },
+  footerRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 10,
+    width: '100%',
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+      alignSelf: 'center' as any,
+    }),
+  },
   placedContainer: {
     flex: 1,
     padding: 28,

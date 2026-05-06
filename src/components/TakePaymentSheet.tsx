@@ -547,6 +547,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'flex-end',
+    ...(Platform.OS === 'web' && {
+      alignItems: 'center',
+    }),
   },
   sheet: {
     backgroundColor: colors.surface,
@@ -554,6 +557,10 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     padding: 20,
     paddingBottom: 32,
+    ...(Platform.OS === 'web' && {
+      width: '100%',
+      maxWidth: 600,
+    }),
   },
   grabber: {
     width: 40,

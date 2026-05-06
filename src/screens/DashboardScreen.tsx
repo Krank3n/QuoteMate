@@ -619,13 +619,24 @@ export function DashboardScreen() {
       {/* Sync Error Banner — warns if the latest quote/invoice didn't sync to cloud */}
       <SyncErrorBanner />
 
-      {/* Trial Status */}
-      {subscriptionStatus && !subscriptionStatus.isPro && subscriptionStatus.trialStartedAt && (
-        <TrialBanner
-          trialStartedAt={subscriptionStatus.trialStartedAt}
-          quoteCount={quotes.length}
-        />
-      )}
+      {/* Trial Status — hidden on the Dashboard for the first ~4 days of the
+          7-day trial. Showing a countdown from day 1 makes the app feel
+          metered/temporary; suppressing it lets the tradie get hooked first,
+          then a 3-day urgency window closes the deal. The banner is always
+          available on the Subscription Settings screen if they want it. */}
+      {(() => {
+        if (!subscriptionStatus || subscriptionStatus.isPro || !subscriptionStatus.trialStartedAt) return null;
+        const elapsed = Date.now() - new Date(subscriptionStatus.trialStartedAt).getTime();
+        const trialMs = 7 * 24 * 60 * 60 * 1000;
+        const daysRemaining = Math.max(0, Math.ceil((trialMs - elapsed) / (24 * 60 * 60 * 1000)));
+        if (daysRemaining > 3) return null;
+        return (
+          <TrialBanner
+            trialStartedAt={subscriptionStatus.trialStartedAt}
+            quoteCount={quotes.length}
+          />
+        );
+      })()}
 
       {/* Continue Draft Banner */}
       {inProgressDraft && (

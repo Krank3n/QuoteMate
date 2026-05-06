@@ -4,13 +4,13 @@
  * Similar to the "Next: Labor & Markup" button in MaterialsListScreen
  */
 
-import React, { useEffect, useRef, forwardRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Platform, Animated, Easing, TouchableOpacity } from 'react-native';
-import { Button, Text } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { colors } from '../theme';
-import { lightTap } from '../utils/haptics';
+import { FooterButton } from './FooterButton';
 
 interface FixedBottomButtonProps {
   /** Button label text */
@@ -222,8 +222,8 @@ export function FixedBottomButton({
         style={[
           styles.bottomActions,
           Platform.OS === 'web'
-            ? { marginBottom: insets.bottom }
-            : { paddingBottom: Math.max(insets.bottom, 16) },
+            ? { paddingBottom: 12, marginBottom: insets.bottom }
+            : { paddingBottom: Math.max(insets.bottom, 12) },
         ]}
         needsOffscreenAlphaCompositing={false}
         renderToHardwareTextureAndroid={true}
@@ -236,31 +236,25 @@ export function FixedBottomButton({
                   {secondaryLabel}
                 </PulsingBorderButton>
               ) : (
-                <Button
+                <FooterButton
                   mode="outlined"
+                  label={secondaryLabel}
                   onPress={secondaryOnPress}
-                  style={styles.secondaryButton}
-                  labelStyle={styles.secondaryButtonLabel}
-                  contentStyle={styles.secondaryButtonContent}
                   disabled={secondaryDisabled}
-                >
-                  {secondaryLabel}
-                </Button>
+                />
               )}
             </View>
           )}
-          <Button
-            mode={mode}
-            onPress={() => { lightTap(); onPress(); }}
-            style={[styles.button, buttonStyle, secondaryLabel && styles.buttonWithSecondary]}
-            labelStyle={[styles.buttonLabel, labelStyle]}
-            contentStyle={styles.buttonContent}
-            disabled={disabled}
-            loading={loading}
+          <FooterButton
+            mode={mode === 'contained' || mode === 'outlined' || mode === 'text' ? mode : 'contained'}
+            label={label}
+            onPress={onPress}
             icon={icon}
-          >
-            {loading ? '' : label}
-          </Button>
+            loading={loading}
+            disabled={disabled}
+            style={buttonStyle}
+            labelStyle={labelStyle}
+          />
         </View>
       </Container>
     </>
@@ -278,7 +272,8 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   bottomActions: {
-    padding: 16,
+    paddingTop: 10,
+    paddingHorizontal: 16,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     position: "absolute",
@@ -301,46 +296,11 @@ const styles = StyleSheet.create({
   bottomActionsInner: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    gap: 12,
+    gap: 10,
     width: '100%',
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
     }),
-  },
-  button: {
-    flex: 1,
-    margin: 0,
-    justifyContent: 'center',
-  },
-  buttonWithSecondary: {
-    flex: 1,
-  },
-  buttonLabel: {
-    color: colors.white,
-    marginVertical: 0,
-    marginHorizontal: 10,
-  },
-  buttonContent: {
-    gap: 8,
-    paddingVertical: 16,
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  secondaryButton: {
-    borderWidth: 2,
-    // marginHorizontal: 10,
-    borderColor: colors.primary,
-    flex: 1,
-    margin: 0,
-  },
-  secondaryButtonLabel: {
-    color: colors.primary,
-    marginVertical: 0,
-    marginHorizontal: 0,
-  },
-  secondaryButtonContent: {
-    paddingVertical: 16,
   },
   pulsingBorderWrapper: {
     position: 'relative',

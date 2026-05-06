@@ -32,6 +32,7 @@ import type { PaymentTerms } from '../../types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SendTypePill } from '../../components/SendSwitcher';
 import { SendDocumentButton } from '../../components/SendDocumentButton';
+import { FooterButton } from '../../components/FooterButton';
 import { DocumentSentBanner } from '../../components/DocumentSentBanner';
 import { TakePaymentSheet, type TakePaymentTarget } from '../../components/TakePaymentSheet';
 import { reconcileNextNumber } from '../../utils/nextNumber';
@@ -739,7 +740,7 @@ export function JobPreviewScreen() {
       </ScrollView>
 
 
-      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <View style={styles.bottomButtonsRow}>
           {/* Take Payment — in-person capture path. Same shared sheet
               the ViewJob sticky bar uses: quote → deposit (or full),
@@ -747,11 +748,18 @@ export function JobPreviewScreen() {
               customer walks off.
               iOS gating: hidden until Tap to Pay is approved and a Square
               reader is available for App Review demo. */}
-          {liveDoc && Platform.OS === 'android' ? (
+          {liveDoc && Platform.OS !== 'ios' ? (
             <View style={styles.bottomButtonHalfWrapper}>
-              <Button
+              <FooterButton
                 mode="outlined"
                 icon="credit-card-outline"
+                label={
+                  liveDoc.type === 'invoice'
+                    ? 'Take Payment'
+                    : (liveDoc.depositAmount ?? 0) > 0
+                      ? 'Take Deposit'
+                      : 'Tap to Pay'
+                }
                 onPress={() => {
                   if (liveDoc.type === 'invoice') {
                     setTakePaymentTarget({
@@ -775,15 +783,7 @@ export function JobPreviewScreen() {
                     });
                   }
                 }}
-                style={styles.bottomButtonFlex}
-                contentStyle={styles.bottomButtonContent}
-              >
-                {liveDoc.type === 'invoice'
-                  ? 'Take Payment'
-                  : (liveDoc.depositAmount ?? 0) > 0
-                    ? 'Take Deposit'
-                    : 'Tap to Pay'}
-              </Button>
+              />
             </View>
           ) : null}
           <View ref={sendButtonRef} style={styles.bottomButtonHalfWrapper}>
@@ -794,7 +794,7 @@ export function JobPreviewScreen() {
                 buttonMode="contained"
                 buttonLabel={liveDoc.type === 'invoice' ? 'Send Invoice' : 'Send Quote'}
                 buttonIcon="send"
-                buttonStyle={styles.bottomButtonFlex}
+                buttonStyle={styles.sendButtonShape}
               />
             ) : null}
           </View>
@@ -1085,7 +1085,7 @@ const styles = StyleSheet.create({
       web: {
         position: 'sticky' as any,
         bottom: 0,
-        paddingBottom: 16,
+        paddingBottom: 12,
         boxShadow: '0 -2px 12px rgba(0,0,0,0.2)',
         alignItems: 'center',
       },
@@ -1097,9 +1097,9 @@ const styles = StyleSheet.create({
   },
   bottomButtonsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     width: '100%',
-    gap: 12,
+    gap: 10,
     ...(Platform.OS === 'web' && {
       maxWidth: 800,
     }),
@@ -1107,12 +1107,10 @@ const styles = StyleSheet.create({
   bottomButtonHalfWrapper: {
     flex: 1,
   },
-  bottomButtonFlex: {
+  sendButtonShape: {
     width: '100%',
     margin: 0,
-  },
-  bottomButtonContent: {
-    paddingVertical: 8,
+    borderRadius: 12,
   },
   headerDoneButton: {
     marginRight: 12,

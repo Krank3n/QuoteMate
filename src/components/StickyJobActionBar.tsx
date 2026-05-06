@@ -406,10 +406,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+    alignItems: 'center',
   },
   row: {
     flexDirection: 'row',
     gap: 10,
+    width: '100%',
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+    }),
   },
   button: {
     flex: 1,
