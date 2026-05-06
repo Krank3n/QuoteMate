@@ -4291,6 +4291,164 @@ export const reeceOrderPlace = functions.https.onRequest((req, res) => {
   });
 });
 
+// ─── Address autocomplete (Google Places, AU only) ─────────────────────────
+// Used by the Reece order screen so a tradie can search a delivery address
+// instead of typing line/suburb/state/postcode by hand. AU-restricted because
+// Reece's address validator only accepts Australian addresses, and address
+// type so we don't surface businesses or POIs in the dropdown. Reuses the
+// existing GOOGLE_PLACES_API_KEY (already used for lead enrichment).
+
+interface PlacesAutocompletePrediction {
+  placeId: string;
+  description: string;
+  mainText: string;
+  secondaryText: string;
+}
+
+/**
+ * Google Places Autocomplete proxy, AU + address-only. The client passes the
+ * raw input string and (optionally) a session token to bundle keystrokes into
+ * a single billable session. Returns predictions verbatim (placeId is opaque
+ * to us — we only feed it back to placesAddressDetails).
+ */
+export const placesAddressAutocomplete = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const input = (req.body?.input ?? '').toString().trim();
+    const sessionToken = isNonEmptyString(req.body?.sessionToken) ? req.body.sessionToken : '';
+    if (input.length < 3) {
+      res.status(200).json({ predictions: [] });
+      return;
+    }
+
+    const key = process.env.GOOGLE_PLACES_API_KEY;
+    if (!key) {
+      res.status(200).json({ predictions: [], error: 'places_not_configured' });
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({
+        input,
+        components: 'country:au',
+        types: 'address',
+        key,
+      });
+      if (sessionToken) params.set('sessiontoken', sessionToken);
+      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?${params.toString()}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        res.status(200).json({ predictions: [] });
+        return;
+      }
+      const body: any = await response.json();
+      if (body.status !== 'OK' && body.status !== 'ZERO_RESULTS') {
+        res.status(200).json({ predictions: [], error: body.status });
+        return;
+      }
+      const predictions: PlacesAutocompletePrediction[] = (body.predictions || []).map(
+        (p: any) => ({
+          placeId: p.place_id,
+          description: p.description,
+          mainText: p.structured_formatting?.main_text || p.description,
+          secondaryText: p.structured_formatting?.secondary_text || '',
+        }),
+      );
+      res.status(200).json({ predictions });
+    } catch (error: any) {
+      console.error('[places] autocomplete failed', { message: error?.message });
+      res.status(200).json({ predictions: [] });
+    }
+  });
+});
+
+/**
+ * Resolve a placeId to its structured AU address components. Returns the
+ * pieces the Reece order screen needs (addressLine1, suburb, state,
+ * postCode). State is the AU short code (VIC/NSW/etc) — Reece accepts those.
+ */
+export const placesAddressDetails = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const placeId = (req.body?.placeId ?? '').toString().trim();
+    const sessionToken = isNonEmptyString(req.body?.sessionToken) ? req.body.sessionToken : '';
+    if (!placeId) {
+      res.status(400).json({ error: 'placeId is required' });
+      return;
+    }
+
+    const key = process.env.GOOGLE_PLACES_API_KEY;
+    if (!key) {
+      res.status(200).json({ address: null, error: 'places_not_configured' });
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({
+        place_id: placeId,
+        fields: 'address_components,formatted_address',
+        key,
+      });
+      if (sessionToken) params.set('sessiontoken', sessionToken);
+      const url = `https://maps.googleapis.com/maps/api/place/details/json?${params.toString()}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        res.status(200).json({ address: null });
+        return;
+      }
+      const body: any = await response.json();
+      if (body.status !== 'OK' || !body.result) {
+        res.status(200).json({ address: null, error: body.status });
+        return;
+      }
+      const comps: Array<{ long_name: string; short_name: string; types: string[] }> =
+        body.result.address_components || [];
+      const pick = (type: string, useShort = false) => {
+        const m = comps.find((c) => c.types.includes(type));
+        if (!m) return '';
+        return useShort ? m.short_name : m.long_name;
+      };
+      const streetNumber = pick('street_number');
+      const route = pick('route');
+      const subpremise = pick('subpremise');
+      const addressLine1 = [
+        subpremise ? `${subpremise}/${streetNumber}` : streetNumber,
+        route,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      const suburb = pick('locality') || pick('sublocality') || pick('postal_town');
+      const state = pick('administrative_area_level_1', /* useShort */ true);
+      const postCode = pick('postal_code');
+      res.status(200).json({
+        address: {
+          addressLine1,
+          suburb,
+          state,
+          postCode,
+          formattedAddress: body.result.formatted_address || '',
+        },
+      });
+    } catch (error: any) {
+      console.error('[places] details failed', { message: error?.message });
+      res.status(200).json({ address: null });
+    }
+  });
+});
+
 // ─── Reece price-file lifecycle endpoints ──────────────────────────────────
 
 /**

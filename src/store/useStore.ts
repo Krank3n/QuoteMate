@@ -2197,17 +2197,34 @@ export const useStore = create<AppState>((set, get) => ({
       legacyQuoteId: undefined,
       // Re-id nested rows so edits on one don't splash onto the other.
       materials: (source.materials ?? []).map((m) => ({ ...m, id: generateId() })),
-      sections: (source.sections ?? []).map((s) => ({
-        ...s,
-        id: generateId(),
-      })),
+      sections: (source.sections ?? []).map((s) => ({ ...s, id: generateId() })),
       // Photos are visit-specific; drop them.
       photos: [],
       // Draft email body — stale for a new visit.
       draftEmailBody: undefined,
     };
-    await get().saveDocument(clone);
-    return clone;
+    // If the source was an invoice, its `total` had any paid deposit
+    // subtracted (see convertDocumentToInvoice). Add it back so the cloned
+    // quote represents the full job value, not the residual.
+    const depositCredit =
+      source.type === 'invoice'
+        ? (source.payments ?? [])
+            .filter((p) => p.kind === 'deposit')
+            .reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
+        : 0;
+    const restoredTotal = (Number(source.total) || 0) + depositCredit;
+    const finalDoc: Document = {
+      ...clone,
+      materialsSubtotal: Number(source.materialsSubtotal) || 0,
+      laborTotal: Number(source.laborTotal) || 0,
+      subtotal: Number(source.subtotal) || 0,
+      markupAmount: Number(source.markupAmount) || 0,
+      gst: Number(source.gst) || 0,
+      total: restoredTotal,
+      balanceDue: restoredTotal,
+    };
+    await get().saveDocument(finalDoc);
+    return finalDoc;
   },
 
   // Clear all data (for logout)

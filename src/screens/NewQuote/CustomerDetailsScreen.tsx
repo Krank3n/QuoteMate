@@ -40,6 +40,7 @@ import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/t
 import { useUnifiedContactSearch, SOURCE_COLORS } from '../../hooks/useUnifiedContactSearch';
 import { SearchableContact } from '../../types';
 import { AlertModal } from '../../components/AlertModal';
+import { AddressSearchInput } from '../../components/AddressSearchInput';
 
 const validateEmail = (email: string): string => {
   const trimmed = email.trim();
@@ -548,16 +549,15 @@ export function CustomerDetailsScreen() {
               </HelperText>
             )}
 
-            <TextInput
-              ref={jobAddressRef}
-              label="Job Address"
-              value={jobAddress}
-              onChangeText={setJobAddress}
-              mode="outlined"
-              style={styles.input}
-              multiline
-              numberOfLines={2}
-            />
+            <View ref={jobAddressRef} collapsable={false}>
+              <AddressSearchInput
+                label="Job Address"
+                placeholder="Start typing the job address"
+                value={jobAddress}
+                onChangeText={setJobAddress}
+                style={styles.input}
+              />
+            </View>
           </Surface>
         </WebContainer>
       </ScrollView>

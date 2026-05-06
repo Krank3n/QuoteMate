@@ -354,6 +354,28 @@ export function DashboardScreen() {
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] || null;
   }, [quotes]);
 
+  // Translate the wizard step they left off on into a "what's needed
+  // next" hint shown on the draft banner. Mirrors the screens in the
+  // NewJob stack (see RootNavigator).
+  const draftStepLabel = useMemo(() => {
+    switch (inProgressDraft?.draftStep) {
+      case 'Details':
+        return 'Add job details';
+      case 'CustomerDetails':
+        return 'Add customer';
+      case 'MaterialsList':
+        return 'Add materials';
+      case 'AddMaterial':
+        return 'Add materials';
+      case 'LaborMarkup':
+        return 'Set labour & markup';
+      case 'JobPreview':
+        return 'Ready to send';
+      default:
+        return null;
+    }
+  }, [inProgressDraft?.draftStep]);
+
   // Recent quotes (last 3) — kept so the existing quote-scoped logic
   // (tour dummy data) still resolves.
   const recentQuotes = [...quotes]
@@ -640,32 +662,44 @@ export function DashboardScreen() {
 
       {/* Continue Draft Banner */}
       {inProgressDraft && (
-        <SwipeableCard
-          leftActions={[
-            { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteDraft },
-          ]}
-        >
-          <TouchableOpacity
-            onPress={() => handleContinueDraft(inProgressDraft)}
-            activeOpacity={0.7}
-            accessibilityLabel={`Continue draft for ${inProgressDraft.job.name || 'Untitled'}`}
+        <View>
+          <SwipeableCard
+            leftActions={[
+              { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteDraft },
+            ]}
           >
-            <Surface style={styles.draftBanner}>
-              <View style={styles.draftBannerContent}>
-                <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: colors.warningBg, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
-                  <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.secondary} />
-                </RNAnimated.View>
-                <View style={styles.draftBannerText}>
-                  <Text style={styles.draftBannerTitle}>Continue Draft</Text>
-                  <Text style={styles.draftBannerSubtitle} numberOfLines={1}>
-                    {inProgressDraft.job.name || 'Untitled'}{inProgressDraft.customerName ? ` — ${inProgressDraft.customerName}` : ''}
-                  </Text>
+            <TouchableOpacity
+              onPress={() => handleContinueDraft(inProgressDraft)}
+              activeOpacity={0.7}
+              accessibilityLabel={`Continue draft for ${inProgressDraft.job.name || 'Untitled'}`}
+            >
+              <Surface style={styles.draftBanner}>
+                <View style={styles.draftBannerContent}>
+                  <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: colors.warningBg, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
+                    <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.secondary} />
+                  </RNAnimated.View>
+                  <View style={styles.draftBannerText}>
+                    <Text style={styles.draftBannerTitle} numberOfLines={1}>
+                      {inProgressDraft.job.name || 'Untitled'}{inProgressDraft.customerName ? ` — ${inProgressDraft.customerName}` : ''}
+                    </Text>
+                    <Text style={styles.draftBannerSubtitle} numberOfLines={1}>
+                      {draftStepLabel ? `Next: ${draftStepLabel}` : 'Continue draft'}
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.primary} />
                 </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.primary} />
-              </View>
-            </Surface>
+              </Surface>
+            </TouchableOpacity>
+          </SwipeableCard>
+          <TouchableOpacity
+            style={styles.draftDeleteButton}
+            onPress={handleDeleteDraft}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="Delete draft"
+          >
+            <MaterialCommunityIcons name="close-circle" size={22} color="#ef4444" />
           </TouchableOpacity>
-        </SwipeableCard>
+        </View>
       )}
 
       {/* New Quote Button */}
@@ -673,11 +707,11 @@ export function DashboardScreen() {
         <View ref={newQuoteRef} style={{
           marginHorizontal: 20,
           marginBottom: 24,
-          borderRadius: 28,
+          borderRadius: 12,
           overflow: 'hidden',
         }}>
         <View style={{
-          borderRadius: 28,
+          borderRadius: 12,
           shadowColor: colors.primary,
           shadowOffset: { width: 0, height: 0 },
           shadowRadius: 8,
@@ -977,11 +1011,20 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     marginTop: 2,
   },
+  draftDeleteButton: {
+    position: 'absolute',
+    top: -6,
+    right: 14,
+    backgroundColor: colors.surface,
+    borderRadius: 11,
+    zIndex: 10,
+    elevation: 10,
+  },
   newQuoteButton: {
-    borderRadius: 28,
+    borderRadius: 12,
   },
   newQuoteButtonContent: {
-    paddingVertical: 8,
+    paddingVertical: 14,
   },
   statsContainer: {
     flexDirection: 'row',

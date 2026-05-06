@@ -170,7 +170,7 @@ export function resolveJobActions(
   // No doc attached yet — kick the tradie straight into the quote wizard.
   if (!primaryDoc) {
     return [
-      { id: 'createQuote', label: 'Create Quote', icon: 'file-document-plus-outline', tone: 'primary' },
+      { id: 'createQuote', label: 'Create Quote', icon: 'file-plus-outline', tone: 'primary' },
     ];
   }
 

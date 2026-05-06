@@ -125,6 +125,11 @@ export function ViewJobScreen() {
     () => documents.filter((d) => d.jobId === jobId),
     [documents, jobId],
   );
+  // Pick the most actionable doc on the job for the sticky bar. Invoices
+  // trump quotes once they exist; within a type the most recent wins.
+  // Must sit above the `!job` guard so the hook count stays stable when
+  // the job is deleted out from under us.
+  const actionableDoc = useMemo(() => pickPrimaryDoc(attachedDocs), [attachedDocs]);
 
   if (!job) {
     return (
@@ -146,9 +151,6 @@ export function ViewJobScreen() {
   }
 
   const meta = JOB_STAGE_META[job.stage];
-  // Pick the most actionable doc on the job for the sticky bar. Invoices
-  // trump quotes once they exist; within a type the most recent wins.
-  const actionableDoc = useMemo(() => pickPrimaryDoc(attachedDocs), [attachedDocs]);
   // Duration comes from the primary attached doc's labour rather than
   // duplicate fields on the Job itself. Prefer the explicitly-linked
   // primaryDocumentId when it's still on the job; otherwise fall back to
@@ -883,7 +885,7 @@ function ScopeBlock({
         <Card style={styles.emptyDocsCard}>
           <View style={styles.emptyDocs}>
             <MaterialCommunityIcons
-              name={'file-document-plus-outline' as any}
+              name={'file-plus-outline' as any}
               size={28}
               color={colors.textMuted}
             />

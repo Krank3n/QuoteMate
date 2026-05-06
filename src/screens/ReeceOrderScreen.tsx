@@ -17,19 +17,22 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Keyboard, Platform } from 'react-native';
-import { Text, Button, ActivityIndicator, Divider, TextInput } from 'react-native-paper';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Keyboard, Platform, Pressable } from 'react-native';
+import { Text, Button, ActivityIndicator, TextInput } from 'react-native-paper';
+import { Calendar, DateData } from 'react-native-calendars';
+import { format } from 'date-fns';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '../theme';
 import { useStore } from '../store/useStore';
-import { ActionSheet, type ActionSheetOption } from '../components/ActionSheet';
 import { BottomSheet } from '../components/BottomSheet';
 import { WebContainer } from '../components/WebContainer';
 import { FooterButton } from '../components/FooterButton';
 import { PillToggle } from '../components/PillToggle';
+import { AddressSearchInput } from '../components/AddressSearchInput';
+import type { PlacesAddressDetails } from '../services/placesApi';
 import {
   listReeceBranches,
   previewReeceOrder,
@@ -66,6 +69,58 @@ function addDays(d: Date, days: number): Date {
 function shortDateLabel(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+// Calendar theme — matches DueDateSheet / ScheduleJobSheet so the date
+// picker on this screen feels like the rest of the app.
+const CALENDAR_THEME = {
+  backgroundColor: 'transparent',
+  calendarBackground: 'transparent',
+  textSectionTitleColor: colors.textMuted,
+  dayTextColor: colors.text,
+  todayTextColor: colors.primary,
+  selectedDayTextColor: colors.white,
+  selectedDayBackgroundColor: colors.primary,
+  monthTextColor: colors.text,
+  arrowColor: colors.primary,
+  textDisabledColor: colors.inactive,
+  textMonthFontWeight: '700' as const,
+  textDayFontWeight: '500' as const,
+  textDayHeaderFontWeight: '600' as const,
+  textMonthFontSize: 15,
+  textDayFontSize: 13,
+  textDayHeaderFontSize: 11,
+};
+
+function isoDayFromIsoLocal(iso: string): string {
+  // requiredByIso is "yyyy-MM-ddTHH:mm:ss" — strip the time portion to
+  // produce the "yyyy-MM-dd" key Calendar uses for selection.
+  return iso.slice(0, 10);
+}
+
+function dateFromIsoDay(isoDay: string): Date {
+  // Anchor at noon local time — avoids edge cases where DST or "T00:00:00"
+  // can roll the day backward in some timezones, and gives Reece a
+  // sensible time-of-day for "needed by".
+  return new Date(`${isoDay}T12:00:00`);
+}
+
+function todayIsoDay(): string {
+  return format(new Date(), 'yyyy-MM-dd');
+}
+
+function formatViolation(v: { fieldName: string; message: string }): string {
+  // Reece's address validator reports "postcode is mandatory" / "Address
+  // Validation Error" against the deliveryAddress field even when the real
+  // issue is that suburb/state/postcode don't form a recognised AU address.
+  // Surface a hint the tradie can actually act on.
+  const isAddrField = /deliveryAddress/i.test(v.fieldName);
+  const looksLikeAddrValidation =
+    /postcode/i.test(v.message) || /address validation/i.test(v.message);
+  if (isAddrField && looksLikeAddrValidation) {
+    return "Reece couldn't validate this address. Check that the address line, suburb, state, and postcode all match a real Australian address.";
+  }
+  return `${v.fieldName}: ${v.message}`;
 }
 
 function parseAddress(raw?: string): { addressLine1: string; suburb?: string; state?: string; postCode: string } | null {
@@ -124,6 +179,10 @@ export function ReeceOrderScreen() {
   const [deliverySuburb, setDeliverySuburb] = useState('');
   const [deliveryState, setDeliveryState] = useState('');
   const [deliveryContactName, setDeliveryContactName] = useState(jobContactName || '');
+  // Display string for the "selected" card. Empty = no address picked yet.
+  const [selectedFormattedAddress, setSelectedFormattedAddress] = useState('');
+  // True = user has dropped the search and is editing the four fields by hand.
+  const [addressManual, setAddressManual] = useState(false);
   const [requiredByIso, setRequiredByIso] = useState(() => isoLocal(addDays(new Date(), 1)));
   const [comment, setComment] = useState('');
   const [previewData, setPreviewData] = useState<any | null>(null);
@@ -158,13 +217,17 @@ export function ReeceOrderScreen() {
       } else if (b.branches && b.branches.length > 0) {
         setPickupBranchNumber(b.branches[0].branchNumber);
       }
-      // Default delivery fields from quote address
+      // Default delivery fields from the quote's job address. Only seed the
+      // "selected" card if the parse yielded a complete address — partial
+      // parses (no suburb / state) would just fail Reece validation, so let
+      // the user search instead.
       const parsed = parseAddress(jobAddress);
-      if (parsed) {
+      if (parsed && parsed.suburb && parsed.state && parsed.postCode) {
         setDeliveryAddressLine(parsed.addressLine1);
+        setDeliverySuburb(parsed.suburb);
+        setDeliveryState(parsed.state);
         setDeliveryPostCode(parsed.postCode);
-        if (parsed.suburb) setDeliverySuburb(parsed.suburb);
-        if (parsed.state) setDeliveryState(parsed.state);
+        setSelectedFormattedAddress(jobAddress || '');
       }
       setStatus({ kind: 'previewing' });
     })();
@@ -196,7 +259,17 @@ export function ReeceOrderScreen() {
       if (!pickupBranchNumber) return null;
       fulfillment = { type: 'PICKUP', pickupBranch: pickupBranchNumber };
     } else {
-      if (!deliveryAddressLine || !deliveryPostCode || !deliveryContactName) return null;
+      // Reece's address validator needs the full triple — suburb + state +
+      // postcode — to match against AU Post records, not just postcode alone.
+      if (
+        !deliveryAddressLine ||
+        !deliverySuburb ||
+        !deliveryState ||
+        !deliveryPostCode ||
+        !deliveryContactName
+      ) {
+        return null;
+      }
       fulfillment = {
         type: 'DELIVERY',
         deliveryDetails: {
@@ -268,7 +341,7 @@ export function ReeceOrderScreen() {
           return;
         }
         if (result.violations) {
-          setViolations(result.violations.map((v) => `${v.fieldName}: ${v.message}`));
+          setViolations(result.violations.map(formatViolation));
           setPreviewData(null);
         } else if (result.errors) {
           setViolations(result.errors.map((e) => e.message));
@@ -293,7 +366,7 @@ export function ReeceOrderScreen() {
     if (result.reeceOrderNumber) {
       setStatus({ kind: 'placed', reeceOrderNumber: result.reeceOrderNumber });
     } else if (result.violations) {
-      setViolations(result.violations.map((v) => `${v.fieldName}: ${v.message}`));
+      setViolations(result.violations.map(formatViolation));
       setStatus({ kind: 'reviewing' });
     } else if (result.errors) {
       setViolations(result.errors.map((e) => e.message));
@@ -303,24 +376,43 @@ export function ReeceOrderScreen() {
     }
   };
 
-  const dateOptions: ActionSheetOption[] = useMemo(() => {
+  // Quick-pick chips at the top of the date sheet — most Reece orders are
+  // "tomorrow" or "this week", so a single tap should cover the common case.
+  const quickPicks = useMemo(() => {
     const today = new Date();
     return [
       { days: 1, label: 'Tomorrow' },
-      { days: 2, label: 'In 2 days' },
-      { days: 3, label: 'In 3 days' },
+      { days: 2, label: '+2 days' },
       { days: 7, label: 'In a week' },
       { days: 14, label: 'In 2 weeks' },
-    ].map(({ days, label }) => {
-      const d = addDays(today, days);
-      const dateStr = d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
-      return {
-        label: `${label} — ${dateStr}`,
-        icon: 'calendar',
-        onPress: () => setRequiredByIso(isoLocal(d)),
-      };
-    });
+    ].map(({ days, label }) => ({
+      label,
+      sublabel: addDays(today, days).toLocaleDateString('en-AU', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+      }),
+      isoDay: format(addDays(today, days), 'yyyy-MM-dd'),
+    }));
   }, []);
+
+  const selectedIsoDay = isoDayFromIsoLocal(requiredByIso);
+
+  const requiredDateMarked = useMemo(
+    () => ({
+      [selectedIsoDay]: {
+        selected: true,
+        selectedColor: colors.primary,
+        selectedTextColor: colors.white,
+      },
+    }),
+    [selectedIsoDay],
+  );
+
+  const handlePickIsoDay = (isoDay: string) => {
+    setRequiredByIso(isoLocal(dateFromIsoDay(isoDay)));
+    setDatePickerVisible(false);
+  };
 
   const selectedBranch = useMemo(
     () => branches.find((b) => b.branchNumber === pickupBranchNumber) || null,
@@ -330,14 +422,26 @@ export function ReeceOrderScreen() {
   // ----- Render --------------------------------------------------------
 
   const renderHeader = () => (
-    <View style={styles.headerRow}>
-      <MaterialCommunityIcons name="pipe" size={26} color={colors.primary} />
-      <View style={{ flex: 1, marginLeft: 12 }}>
+    <View style={styles.headerCard}>
+      <View style={styles.reeceIconWrap}>
+        <MaterialCommunityIcons name="pipe" size={28} color={colors.primary} />
+      </View>
+      <View style={{ flex: 1 }}>
         <Text style={styles.title}>Order from Reece</Text>
         {connection?.displayName ? (
           <Text style={styles.subtitle}>{connection.displayName}</Text>
-        ) : null}
+        ) : (
+          <Text style={styles.subtitle}>Bills to your trade account</Text>
+        )}
       </View>
+    </View>
+  );
+
+  const renderCardHeader = (icon: string, title: string, trailing?: React.ReactNode) => (
+    <View style={styles.cardHeader}>
+      <MaterialCommunityIcons name={icon as any} size={18} color={colors.primary} />
+      <Text style={styles.cardTitle}>{title}</Text>
+      {trailing ? <View style={styles.cardHeaderTrailing}>{trailing}</View> : null}
     </View>
   );
 
@@ -395,9 +499,11 @@ export function ReeceOrderScreen() {
         <WebContainer>
         {renderHeader()}
 
-        {/* Fulfilment mode toggle */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Fulfilment</Text>
+        {/* Delivery & timing card */}
+        <View style={styles.card}>
+          {renderCardHeader('truck-delivery-outline', 'Delivery & timing')}
+
+          <Text style={styles.fieldLabel}>Fulfilment</Text>
           <PillToggle<'PICKUP' | 'DELIVERY'>
             value={fulfillmentMode}
             onChange={setFulfillmentMode}
@@ -407,84 +513,145 @@ export function ReeceOrderScreen() {
             ]}
             fullWidth
           />
-        </View>
 
-        {/* Pickup branch picker */}
-        {fulfillmentMode === 'PICKUP' ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Pickup branch</Text>
+          {fulfillmentMode === 'PICKUP' ? (
+            <View style={styles.cardSubsection}>
+              <Text style={styles.fieldLabel}>Pickup branch</Text>
+              <Button
+                mode="outlined"
+                onPress={() => setBranchPickerVisible(true)}
+                icon="store-outline"
+                contentStyle={{ justifyContent: 'flex-start' }}
+                style={styles.pickerButton}
+              >
+                {selectedBranch ? selectedBranch.name : 'Choose a branch'}
+              </Button>
+            </View>
+          ) : (
+            <View style={styles.cardSubsection}>
+              <Text style={styles.fieldLabel}>Delivery details</Text>
+              <TextInput
+                label="Contact name"
+                value={deliveryContactName}
+                onChangeText={setDeliveryContactName}
+                mode="outlined"
+                style={styles.input}
+              />
+
+              {addressManual ? (
+                <>
+                  <Text style={styles.deliveryHint}>
+                    All fields required — Reece checks the address against
+                    Australia Post records.
+                  </Text>
+                  <TextInput
+                    label="Address line"
+                    value={deliveryAddressLine}
+                    onChangeText={setDeliveryAddressLine}
+                    mode="outlined"
+                    style={styles.input}
+                  />
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TextInput
+                      label="Suburb"
+                      value={deliverySuburb}
+                      onChangeText={setDeliverySuburb}
+                      mode="outlined"
+                      style={[styles.input, { flex: 2 }]}
+                    />
+                    <TextInput
+                      label="State"
+                      value={deliveryState}
+                      onChangeText={setDeliveryState}
+                      mode="outlined"
+                      style={[styles.input, { flex: 1 }]}
+                    />
+                    <TextInput
+                      label="P/code"
+                      value={deliveryPostCode}
+                      onChangeText={setDeliveryPostCode}
+                      mode="outlined"
+                      keyboardType="number-pad"
+                      style={[styles.input, { flex: 1 }]}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setAddressManual(false);
+                      setDeliveryAddressLine('');
+                      setDeliverySuburb('');
+                      setDeliveryState('');
+                      setDeliveryPostCode('');
+                      setSelectedFormattedAddress('');
+                    }}
+                    style={styles.addressLinkRow}
+                  >
+                    <MaterialCommunityIcons name="magnify" size={16} color={colors.primary} />
+                    <Text style={styles.addressLinkText}>Use address search instead</Text>
+                  </TouchableOpacity>
+                </>
+              ) : selectedFormattedAddress ? (
+                <View style={styles.selectedAddressCard}>
+                  <MaterialCommunityIcons name="map-marker-check" size={20} color={colors.success} />
+                  <Text style={styles.selectedAddressText} numberOfLines={2}>
+                    {selectedFormattedAddress}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSelectedFormattedAddress('');
+                      setDeliveryAddressLine('');
+                      setDeliverySuburb('');
+                      setDeliveryState('');
+                      setDeliveryPostCode('');
+                    }}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.addressLinkText}>Change</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <>
+                  <AddressSearchInput
+                    onAddressSelect={(addr: PlacesAddressDetails) => {
+                      setDeliveryAddressLine(addr.addressLine1);
+                      setDeliverySuburb(addr.suburb);
+                      setDeliveryState(addr.state);
+                      setDeliveryPostCode(addr.postCode);
+                      setSelectedFormattedAddress(addr.formattedAddress);
+                    }}
+                    style={styles.input}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setAddressManual(true)}
+                    style={styles.addressLinkRow}
+                  >
+                    <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.primary} />
+                    <Text style={styles.addressLinkText}>Can't find it? Enter manually</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          )}
+
+          <View style={styles.cardSubsection}>
+            <Text style={styles.fieldLabel}>Required by</Text>
             <Button
               mode="outlined"
-              onPress={() => setBranchPickerVisible(true)}
-              icon="store-outline"
+              onPress={() => setDatePickerVisible(true)}
+              icon="calendar"
               contentStyle={{ justifyContent: 'flex-start' }}
               style={styles.pickerButton}
             >
-              {selectedBranch ? selectedBranch.name : 'Choose a branch'}
+              {shortDateLabel(requiredByIso)}
             </Button>
           </View>
-        ) : (
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Delivery</Text>
-            <TextInput
-              label="Contact name"
-              value={deliveryContactName}
-              onChangeText={setDeliveryContactName}
-              mode="outlined"
-              style={styles.input}
-            />
-            <TextInput
-              label="Address line"
-              value={deliveryAddressLine}
-              onChangeText={setDeliveryAddressLine}
-              mode="outlined"
-              style={styles.input}
-            />
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TextInput
-                label="Suburb"
-                value={deliverySuburb}
-                onChangeText={setDeliverySuburb}
-                mode="outlined"
-                style={[styles.input, { flex: 2 }]}
-              />
-              <TextInput
-                label="State"
-                value={deliveryState}
-                onChangeText={setDeliveryState}
-                mode="outlined"
-                style={[styles.input, { flex: 1 }]}
-              />
-              <TextInput
-                label="P/code"
-                value={deliveryPostCode}
-                onChangeText={setDeliveryPostCode}
-                mode="outlined"
-                keyboardType="number-pad"
-                style={[styles.input, { flex: 1 }]}
-              />
-            </View>
-          </View>
-        )}
-
-        {/* Required-by date */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Required by</Text>
-          <Button
-            mode="outlined"
-            onPress={() => setDatePickerVisible(true)}
-            icon="calendar"
-            contentStyle={{ justifyContent: 'flex-start' }}
-            style={styles.pickerButton}
-          >
-            {shortDateLabel(requiredByIso)}
-          </Button>
         </View>
 
-        {/* Reference / comment */}
-        <View style={styles.section}>
+        {/* Reference & notes card */}
+        <View style={styles.card}>
+          {renderCardHeader('text-box-outline', 'Reference & notes')}
           <TextInput
-            label="Reference (optional)"
+            label="Reference"
             value={quoteReference || ''}
             mode="outlined"
             style={styles.input}
@@ -501,58 +668,72 @@ export function ReeceOrderScreen() {
           />
         </View>
 
-        <Divider style={styles.divider} />
-
-        {/* Line items */}
-        <Text style={styles.sectionLabel}>Items ({orderableMaterials.length})</Text>
-        {orderableMaterials.length === 0 ? (
-          <Text style={styles.emptyHint}>
-            No Reece-priced materials in this quote. Tap “Fetch prices” with Reece selected as your store, then come back.
-          </Text>
-        ) : (
-          orderableMaterials.map((m) => (
-            <View key={m.id} style={styles.lineRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.lineName} numberOfLines={2}>{m.name}</Text>
-                <Text style={styles.lineMeta}>
-                  {m.quantity} × {m.reeceUnitOfMeasure || m.unit} · ${m.price.toFixed(2)}
-                </Text>
+        {/* Items + totals card */}
+        <View style={styles.card}>
+          {renderCardHeader(
+            'package-variant-closed',
+            'Items',
+            orderableMaterials.length > 0 ? (
+              <View style={styles.countChip}>
+                <Text style={styles.countChipText}>{orderableMaterials.length}</Text>
               </View>
-              <Text style={styles.lineTotal}>${(m.quantity * m.price).toFixed(2)}</Text>
+            ) : null,
+          )}
+
+          {orderableMaterials.length === 0 ? (
+            <Text style={styles.emptyHint}>
+              No Reece-priced materials in this quote. Tap “Fetch prices” with Reece selected as your store, then come back.
+            </Text>
+          ) : (
+            orderableMaterials.map((m, idx) => (
+              <View
+                key={m.id}
+                style={[
+                  styles.lineRow,
+                  idx === orderableMaterials.length - 1 && styles.lineRowLast,
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.lineName} numberOfLines={2}>{m.name}</Text>
+                  <Text style={styles.lineMeta}>
+                    {m.quantity} × {m.reeceUnitOfMeasure || m.unit} · ${m.price.toFixed(2)}
+                  </Text>
+                </View>
+                <Text style={styles.lineTotal}>${(m.quantity * m.price).toFixed(2)}</Text>
+              </View>
+            ))
+          )}
+
+          {previewData ? (
+            <View style={styles.totalsBox}>
+              {Number(previewData.cartageFee || 0) > 0 ? (
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Cartage</Text>
+                  <Text style={styles.totalValue}>${Number(previewData.cartageFee).toFixed(2)}</Text>
+                </View>
+              ) : null}
+              {previewData.totalExcludingGst != null ? (
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Subtotal (ex GST)</Text>
+                  <Text style={styles.totalValue}>${Number(previewData.totalExcludingGst).toFixed(2)}</Text>
+                </View>
+              ) : null}
+              {previewData.totalIncludingGst != null ? (
+                <View style={[styles.totalRow, styles.totalRowGrand]}>
+                  <Text style={[styles.totalLabel, styles.totalLabelStrong]}>Total (inc GST)</Text>
+                  <Text style={[styles.totalValue, styles.totalValueStrong]}>
+                    ${Number(previewData.totalIncludingGst).toFixed(2)}
+                  </Text>
+                </View>
+              ) : null}
             </View>
-          ))
-        )}
-
-        {/* Totals from preview */}
-        {previewData ? (
-          <View style={styles.totalsBox}>
-            {Number(previewData.cartageFee || 0) > 0 ? (
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Cartage</Text>
-                <Text style={styles.totalValue}>${Number(previewData.cartageFee).toFixed(2)}</Text>
-              </View>
-            ) : null}
-            {previewData.totalExcludingGst != null ? (
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Subtotal (ex GST)</Text>
-                <Text style={styles.totalValue}>${Number(previewData.totalExcludingGst).toFixed(2)}</Text>
-              </View>
-            ) : null}
-            {previewData.totalIncludingGst != null ? (
-              <View style={styles.totalRow}>
-                <Text style={[styles.totalLabel, styles.totalLabelStrong]}>Total (inc GST)</Text>
-                <Text style={[styles.totalValue, styles.totalValueStrong]}>
-                  ${Number(previewData.totalIncludingGst).toFixed(2)}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        ) : status.kind === 'previewing' ? (
-          <View style={styles.previewingBox}>
-            <ActivityIndicator size="small" color={colors.primary} />
-            <Text style={styles.previewingText}>Refreshing total from Reece...</Text>
-          </View>
-        ) : null}
+          ) : status.kind === 'previewing' ? (
+            <View style={styles.previewingBox}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={styles.previewingText}>Refreshing total from Reece...</Text>
+            </View>
+          ) : null}
+        </View>
 
         {renderViolations()}
         </WebContainer>
@@ -596,12 +777,75 @@ export function ReeceOrderScreen() {
         onSelect={setPickupBranchNumber}
       />
 
-      <ActionSheet
+      <BottomSheet
         visible={datePickerVisible}
         onDismiss={() => setDatePickerVisible(false)}
         title="When do you need it?"
-        options={dateOptions}
-      />
+        scrollable
+        maxHeightRatio={0.9}
+      >
+        <View style={dateSheetStyles.content}>
+          {/* Selected-date summary pill — same pattern as ScheduleJobSheet */}
+          <View style={dateSheetStyles.summaryPill}>
+            <MaterialCommunityIcons
+              name={'calendar-clock' as any}
+              size={16}
+              color={colors.primary}
+            />
+            <Text style={dateSheetStyles.summaryText}>
+              {shortDateLabel(requiredByIso)}
+            </Text>
+          </View>
+
+          {/* Quick-pick chips */}
+          <View style={dateSheetStyles.chipsRow}>
+            {quickPicks.map((q) => {
+              const selected = q.isoDay === selectedIsoDay;
+              return (
+                <Pressable
+                  key={q.label}
+                  onPress={() => handlePickIsoDay(q.isoDay)}
+                  style={({ pressed }) => [
+                    dateSheetStyles.chip,
+                    selected && dateSheetStyles.chipSelected,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      dateSheetStyles.chipLabel,
+                      selected && dateSheetStyles.chipLabelSelected,
+                    ]}
+                  >
+                    {q.label}
+                  </Text>
+                  <Text
+                    style={[
+                      dateSheetStyles.chipSublabel,
+                      selected && dateSheetStyles.chipSublabelSelected,
+                    ]}
+                  >
+                    {q.sublabel}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {/* Calendar for any other date */}
+          <View style={dateSheetStyles.calendarCard}>
+            <Calendar
+              theme={CALENDAR_THEME}
+              firstDay={1}
+              current={selectedIsoDay}
+              minDate={todayIsoDay()}
+              markedDates={requiredDateMarked}
+              onDayPress={(day: DateData) => handlePickIsoDay(day.dateString)}
+              enableSwipeMonths
+            />
+          </View>
+        </View>
+      </BottomSheet>
     </View>
   );
 }
@@ -736,36 +980,137 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 120, // clearance for the sticky FooterBar below
   },
-  headerRow: {
+  headerCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+    elevation: 2,
+  },
+  reeceIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: colors.primaryBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
   },
   title: { fontSize: 20, fontWeight: '700', color: colors.text },
   subtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
-  section: { marginBottom: 14 },
-  sectionLabel: { fontSize: 13, color: colors.textMuted, marginBottom: 6, fontWeight: '600' },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+    elevation: 2,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    flex: 1,
+  },
+  cardHeaderTrailing: {
+    marginLeft: 'auto',
+  },
+  cardSubsection: {
+    marginTop: 14,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: 6,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  countChip: {
+    minWidth: 24,
+    height: 22,
+    paddingHorizontal: 8,
+    borderRadius: 11,
+    backgroundColor: colors.primaryBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
   pickerButton: { borderColor: colors.border },
   input: { marginBottom: 8, backgroundColor: colors.surface },
-  divider: { marginVertical: 12, backgroundColor: colors.border },
   lineRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+  },
+  lineRowLast: {
+    borderBottomWidth: 0,
   },
   lineName: { fontSize: 14, color: colors.text, fontWeight: '500' },
   lineMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   lineTotal: { fontSize: 14, color: colors.text, fontWeight: '600', marginLeft: 12 },
   emptyHint: { fontSize: 13, color: colors.textMuted, lineHeight: 18, fontStyle: 'italic' },
-  totalsBox: { marginTop: 12, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border },
+  deliveryHint: { fontSize: 12, color: colors.textMuted, lineHeight: 16, marginBottom: 8 },
+  selectedAddressCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceGray3,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 10,
+    marginBottom: 8,
+  },
+  selectedAddressText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  addressLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  addressLinkText: {
+    fontSize: 13,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  totalsBox: {
+    marginTop: 14,
+    paddingTop: 12,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    borderRadius: 12,
+    backgroundColor: colors.primaryBg,
+  },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  totalRowGrand: {
+    marginTop: 6,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.primary + '55',
+  },
   totalLabel: { fontSize: 13, color: colors.textMuted },
   totalLabelStrong: { fontSize: 14, color: colors.text, fontWeight: '700' },
   totalValue: { fontSize: 13, color: colors.text },
-  totalValueStrong: { fontSize: 16, color: colors.text, fontWeight: '700' },
-  previewingBox: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
+  totalValueStrong: { fontSize: 18, color: colors.primary, fontWeight: '800' },
+  previewingBox: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
   previewingText: { marginLeft: 8, fontSize: 12, color: colors.textMuted },
   violationsBox: {
     flexDirection: 'row',
@@ -892,5 +1237,68 @@ const branchPickerStyles = StyleSheet.create({
   footerWrap: {
     paddingHorizontal: 16,
     paddingTop: 8,
+  },
+});
+
+const dateSheetStyles = StyleSheet.create({
+  content: {
+    paddingVertical: 4,
+    gap: 14,
+  },
+  summaryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceGray3,
+    alignSelf: 'stretch',
+  },
+  summaryText: {
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    flexGrow: 1,
+    flexBasis: '47%',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceDark,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chipSelected: {
+    backgroundColor: colors.primaryBg,
+    borderColor: colors.primary,
+  },
+  chipLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  chipLabelSelected: {
+    color: colors.primary,
+  },
+  chipSublabel: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  chipSublabelSelected: {
+    color: colors.primary,
+  },
+  calendarCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: colors.surfaceDark,
+    paddingVertical: 4,
   },
 });

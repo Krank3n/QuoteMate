@@ -36,6 +36,7 @@ import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
+import { AddressSearchInput } from '../../components/AddressSearchInput';
 import { ProBadge } from '../../components/ProBadge';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
@@ -285,14 +286,12 @@ export function BusinessProfileScreen() {
               placeholder="https://"
             />
 
-            <TextInput
+            <AddressSearchInput
               label="Business Address"
+              placeholder="Start typing your business address"
               value={address}
               onChangeText={setAddress}
-              mode="outlined"
               style={styles.input}
-              multiline
-              numberOfLines={3}
             />
           </Surface>
 

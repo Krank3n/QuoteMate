@@ -132,7 +132,7 @@ const ROWS: RowDef[] = [
   {
     id: 'delete',
     label: 'Delete',
-    sub: 'Can only delete jobs with no attached docs',
+    sub: 'Cascades to attached docs. Archive instead if anything is paid.',
     icon: 'trash-can-outline',
     tone: 'danger',
     when: () => true,
