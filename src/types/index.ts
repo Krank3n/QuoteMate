@@ -463,6 +463,10 @@ export interface BusinessSettings {
   // this list, treat it as appended at the end. Reece is only honoured
   // when the user has connected (the integration screen flips that on).
   supplierPriority?: string[];
+  // Auto-nudge customers who haven't accepted a sent quote. Off by default.
+  // When on, the customerQuoteFollowUp scheduled function emails the
+  // customer ~3 days after send and again ~7 days, capped at 2 nudges.
+  autoCustomerFollowUpEnabled?: boolean;
   // Quote display settings
   showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)
   showMarkup?: boolean; // If true, allow per-document markup line. When undefined or false, markup is hidden across all documents. Default: false (hide markup).

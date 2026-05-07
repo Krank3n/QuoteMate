@@ -18,6 +18,7 @@ import {
   sendNewUserNotificationEmail,
   sendFeedbackEmail,
   sendQuoteFollowUpEmail,
+  sendCustomerQuoteReminderEmail,
   sendAffiliateInviteEmail,
   sendNewProSubscriptionEmail,
   sendMaterialListErrorEmail,
@@ -9264,6 +9265,100 @@ export const onQuoteExpiring = functions.pubsub
       }
     }
 
+  });
+
+// -----------------------------------------------------------
+// customerQuoteFollowUp — Scheduled daily: nudge customers who haven't
+// accepted a sent quote yet. Two reminders max (~3 days then ~7 days
+// after sentAt). Opt-in per tradie via business settings.
+// -----------------------------------------------------------
+export const customerQuoteFollowUp = functions.pubsub
+  .schedule('every day 09:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const now = Date.now();
+    const usersSnapshot = await db.collection('users').get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
+      const settings = settingsDoc.exists ? (settingsDoc.data() || {}) : {};
+      if (!settings.autoCustomerFollowUpEnabled) continue;
+
+      const businessName = settings.businessName || '';
+      if (!businessName) continue;
+
+      const quotesSnapshot = await userDoc.ref
+        .collection('quotes')
+        .where('status', '==', 'sent')
+        .get();
+
+      for (const quoteDoc of quotesSnapshot.docs) {
+        const q = quoteDoc.data();
+        if (!q.customerEmail) continue;
+        // Skip anything that has already moved on. status === 'sent' filter
+        // catches most of this; the explicit checks defend against legacy
+        // docs where the status flag wasn't flipped.
+        if (q.acceptedAt || q.declinedAt) continue;
+        if (q.suppressAutoFollowUp) continue;
+
+        const sentAtMs = q.sentAt?.toDate?.()?.getTime?.()
+          ?? (typeof q.sentAt === 'number' ? q.sentAt : 0);
+        if (!sentAtMs) continue;
+
+        const count: number = q.customerFollowUpCount ?? 0;
+        if (count >= 2) continue;
+
+        const lastAtMs = q.customerFollowUpLastAt?.toDate?.()?.getTime?.() ?? 0;
+        const ageDays = (now - sentAtMs) / 86_400_000;
+        const sinceLastDays = (now - (lastAtMs || sentAtMs)) / 86_400_000;
+
+        const shouldSend =
+          (count === 0 && ageDays >= 3) ||
+          (count === 1 && sinceLastDays >= 4);
+        if (!shouldSend) continue;
+
+        // Mint a fresh acceptance token. Existing tokens stay valid — the
+        // acceptance page looks them up by hash directly, so the customer's
+        // original email link still works alongside this fresh one.
+        const token = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
+          userId: userDoc.id,
+          quoteId: quoteDoc.id,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        const acceptanceUrl =
+          `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
+
+        const sent = await sendCustomerQuoteReminderEmail({
+          to: q.customerEmail,
+          customerName: q.customerName || '',
+          jobName: q.job?.name || 'your job',
+          total: q.total || 0,
+          acceptanceUrl,
+          followUpNumber: (count + 1) as 1 | 2,
+          business: {
+            name: businessName,
+            abn: settings.abn,
+            phone: settings.phone,
+            email: settings.email,
+            address: settings.address,
+            logoUrl: settings.logoStorageUrl || settings.logoUri,
+            brandColor: settings.brandColor,
+          },
+          userId: userDoc.id,
+        });
+
+        if (sent) {
+          await quoteDoc.ref.update({
+            customerFollowUpCount: count + 1,
+            customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
+            acceptanceTokenHash: tokenHash,
+            acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    }
   });
 
 // -----------------------------------------------------------

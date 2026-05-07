@@ -1538,6 +1538,118 @@ export function sendQuoteFollowUpEmail(
   });
 }
 
+/**
+ * Customer-facing reminder for a sent quote that hasn't been accepted yet.
+ * Triggered by the customerQuoteFollowUp scheduled function. Tone is
+ * professional and shifts slightly between the first and second nudge.
+ */
+export function sendCustomerQuoteReminderEmail(args: {
+  to: string;
+  customerName: string;
+  jobName: string;
+  total: number;
+  acceptanceUrl: string;
+  followUpNumber: 1 | 2;
+  business: {
+    name: string;
+    abn?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    logoUrl?: string;
+    brandColor?: string;
+  };
+  userId: string;
+}): Promise<boolean> {
+  const { to, customerName, jobName, total, acceptanceUrl, followUpNumber, business, userId } = args;
+  const accent = business.brandColor || '#059669';
+  const esc = escapeHtml;
+  const acceptUrl = acceptanceUrl + (acceptanceUrl.includes('?') ? '&' : '?') + 'action=accept';
+  const declineUrl = acceptanceUrl + (acceptanceUrl.includes('?') ? '&' : '?') + 'action=decline';
+
+  const subject = followUpNumber === 1
+    ? `Reminder: your quote from ${business.name} for ${jobName}`
+    : `Following up on your quote from ${business.name}`;
+
+  const lead = followUpNumber === 1
+    ? `Just bumping this up your inbox in case it got buried — happy to answer any questions about the quote.`
+    : `One last check-in on the quote below. If the price or scope isn't quite right, reply to this email and we can adjust it.`;
+
+  const content = `
+    <h1 style="color:#1f2937;font-size:24px;font-weight:700;margin:0 0 8px;line-height:1.3;">
+      Quote for ${esc(jobName)}
+    </h1>
+    <p style="color:#6b7280;font-size:14px;margin:0 0 24px;">
+      Hi ${esc(customerName || 'there')},
+    </p>
+
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      ${lead}
+    </p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0 0;">
+      <tr>
+        <td style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="color:#6b7280;font-size:13px;padding:0 0 4px;">Total</td>
+              <td style="color:${accent};font-size:20px;font-weight:700;text-align:right;padding:0 0 4px;">$${total.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td colspan="2" style="color:#9ca3af;font-size:12px;">The original quote PDF was attached to your previous email.</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+            <tr>
+              <td style="background:${accent};border-radius:10px;text-align:center;">
+                <a href="${esc(acceptUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Review &amp; accept quote</a>
+              </td>
+            </tr>
+            <tr>
+              <td height="12" style="font-size:12px;line-height:12px;">&nbsp;</td>
+            </tr>
+            <tr>
+              <td style="text-align:center;">
+                <a href="${esc(declineUrl)}" target="_blank" style="color:#9ca3af;font-size:14px;text-decoration:underline;">Decline quote</a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:24px 0 0;">
+      Cheers,<br/>
+      <strong style="color:#1f2937;">${esc(business.name)}</strong>
+    </p>
+
+    ${renderBusinessFooter(business, accent)}
+  `;
+
+  const htmlContent = wrapQuoteEmailTemplate(content, {
+    brandColor: accent,
+    businessName: business.name,
+    logoUrl: business.logoUrl,
+    preheader: `Reminder: ${jobName} quote — $${total.toFixed(2)} from ${business.name}`,
+  });
+
+  return sendEmail({
+    to,
+    subject,
+    htmlContent,
+    category: 'transactional',
+    userId,
+    tags: ['quote-customer-reminder', `followup:${followUpNumber}`],
+  });
+}
+
 // ============================================================
 // ADMIN NOTIFICATION EMAILS
 // ============================================================

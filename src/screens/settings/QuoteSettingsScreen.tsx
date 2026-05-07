@@ -13,6 +13,7 @@ import {
   Text,
   TextInput,
   Surface,
+  Switch,
   Title,
 } from 'react-native-paper';
 
@@ -29,6 +30,7 @@ export function QuoteSettingsScreen() {
   const [laborRate, setLaborRate] = useState('85');
   const [markup, setMarkup] = useState('20');
   const [laborMarkup, setLaborMarkup] = useState('20');
+  const [autoFollowUp, setAutoFollowUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -39,17 +41,19 @@ export function QuoteSettingsScreen() {
       const lr = businessSettings.defaultLaborRate.toString();
       const mk = businessSettings.defaultMarkup.toString();
       const lm = (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup).toString();
+      const fu = businessSettings.autoCustomerFollowUpEnabled === true;
       setLaborRate(lr);
       setMarkup(mk);
       setLaborMarkup(lm);
-      initialSnapshotRef.current = JSON.stringify({ lr, mk, lm });
+      setAutoFollowUp(fu);
+      initialSnapshotRef.current = JSON.stringify({ lr, mk, lm, fu });
     }
   }, [businessSettings]);
 
   const isDirty = useMemo(() => {
     if (!initialSnapshotRef.current) return false;
-    return JSON.stringify({ lr: laborRate, mk: markup, lm: laborMarkup }) !== initialSnapshotRef.current;
-  }, [laborRate, markup, laborMarkup]);
+    return JSON.stringify({ lr: laborRate, mk: markup, lm: laborMarkup, fu: autoFollowUp }) !== initialSnapshotRef.current;
+  }, [laborRate, markup, laborMarkup, autoFollowUp]);
 
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
@@ -59,8 +63,9 @@ export function QuoteSettingsScreen() {
         defaultLaborRate: parseFloat(laborRate) || 85,
         defaultMarkup: parseFloat(markup) || 20,
         defaultLaborMarkup: parseFloat(laborMarkup) || 0,
+        autoCustomerFollowUpEnabled: autoFollowUp,
       });
-      initialSnapshotRef.current = JSON.stringify({ lr: laborRate, mk: markup, lm: laborMarkup });
+      initialSnapshotRef.current = JSON.stringify({ lr: laborRate, mk: markup, lm: laborMarkup, fu: autoFollowUp });
       if (!opts?.silent) setShowSuccessModal(true);
       return true;
     } catch (error) {
@@ -119,6 +124,27 @@ export function QuoteSettingsScreen() {
               keyboardType="decimal-pad"
               right={<TextInput.Affix text="%" />}
             />
+          </Surface>
+
+          <Surface style={styles.card}>
+            <Title style={styles.sectionTitle}>Customer Follow-Ups</Title>
+            <Text style={styles.helperText}>
+              Automatically chase customers who haven&rsquo;t accepted yet.
+            </Text>
+
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Auto follow-up customers</Text>
+                <Text style={styles.toggleDescription}>
+                  Sends a reminder ~3 days after a quote is sent and again at ~7 days. Stops as soon as the customer accepts or declines. Capped at 2 reminders.
+                </Text>
+              </View>
+              <Switch
+                value={autoFollowUp}
+                onValueChange={setAutoFollowUp}
+                color={colors.primary}
+              />
+            </View>
           </Surface>
         </WebContainer>
       </ScrollView>
@@ -180,5 +206,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.onSurface,
     marginBottom: 16,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  toggleLabel: { flex: 1, marginRight: 12 },
+  toggleTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  toggleDescription: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
   },
 });
