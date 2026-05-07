@@ -26,6 +26,19 @@ interface SendEmailOptions {
   tags?: string[];
   attachment?: Array<{ name: string; content: string }>; // base64 encoded
   unsubscribeUrl?: string; // If set, adds List-Unsubscribe headers (required by Gmail bulk-sender rules)
+  // Customer-facing sends (quote/invoice to client) override the default
+  // QuoteMate identity so replies go to the tradie and the from-name shows
+  // their business. Sender email stays on the verified domain — only the
+  // display name changes — so DKIM/SPF/DMARC remain aligned.
+  replyTo?: { email: string; name?: string };
+  senderName?: string;
+}
+
+// Strip characters that could break an RFC 5322 display-name header.
+// Brevo serialises sender.name into "Name <email>" so commas, quotes, and
+// CR/LF could splice the header. Belt-and-braces sanitisation.
+function sanitizeDisplayName(name: string): string {
+  return name.replace(/[\r\n,"<>]/g, '').trim().slice(0, 78);
 }
 
 // Shared email wrapper (base layout for all emails)
@@ -204,7 +217,7 @@ QuoteMate is made by Hansen Dev (Sydney NSW, Australia). You're receiving this b
 // Brevo webhook posts back events keyed to that tag, which lets us correlate
 // delivery / bounce / open / click / spam back to this exact send.
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to, subject, category, userId, tags, attachment } = options;
+  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName } = options;
   let { htmlContent, unsubscribeUrl } = options;
 
   // For cold lead outreach, wrap with the AU spam-act compliance footer
@@ -271,13 +284,18 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         // Cold outreach uses an isolated sender (separate domain/subdomain ideally)
         // so spam complaints don't poison the transactional sender's reputation.
         // Configure OUTREACH_SENDER_EMAIL + OUTREACH_REPLY_TO_EMAIL in functions/.env.
-        // Falls back to the default SENDER if those aren't set.
+        // Customer-facing sends (sendDocumentEmail) pass senderName/replyTo so
+        // the inbox shows the tradie's business and replies route to them, not us.
         sender: isLeadOutreach && process.env.OUTREACH_SENDER_EMAIL
           ? { email: process.env.OUTREACH_SENDER_EMAIL, name: process.env.OUTREACH_SENDER_NAME || 'Tom' }
-          : SENDER,
-        replyTo: isLeadOutreach && process.env.OUTREACH_REPLY_TO_EMAIL
-          ? { email: process.env.OUTREACH_REPLY_TO_EMAIL, name: process.env.OUTREACH_REPLY_TO_NAME || 'Tom' }
-          : { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
+          : senderName
+            ? { email: SENDER.email, name: sanitizeDisplayName(senderName) }
+            : SENDER,
+        replyTo: replyToOverride
+          ? { email: replyToOverride.email, name: replyToOverride.name ? sanitizeDisplayName(replyToOverride.name) : undefined }
+          : isLeadOutreach && process.env.OUTREACH_REPLY_TO_EMAIL
+            ? { email: process.env.OUTREACH_REPLY_TO_EMAIL, name: process.env.OUTREACH_REPLY_TO_NAME || 'Tom' }
+            : { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
         to: [{ email: to }],
         subject,
         htmlContent,
@@ -1647,6 +1665,10 @@ export function sendCustomerQuoteReminderEmail(args: {
     category: 'transactional',
     userId,
     tags: ['quote-customer-reminder', `followup:${followUpNumber}`],
+    // Match the original quote send: from-name shows the tradie's business and
+    // replies route back to them, not to the QuoteMate inbox.
+    senderName: business.name ? `${business.name} via QuoteMate` : undefined,
+    replyTo: business.email ? { email: business.email, name: business.name } : undefined,
   });
 }
 

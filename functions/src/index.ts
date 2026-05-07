@@ -9330,6 +9330,11 @@ export const customerQuoteFollowUp = functions.pubsub
         const acceptanceUrl =
           `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
 
+        // Fall back to the auth email so replies still route to the tradie
+        // even if they haven't filled in business.email — same shape as
+        // sendQuoteFlavour does for the original send.
+        const tradieReplyEmail = settings.email || (await getUserEmail(userDoc.id)) || undefined;
+
         const sent = await sendCustomerQuoteReminderEmail({
           to: q.customerEmail,
           customerName: q.customerName || '',
@@ -9341,7 +9346,7 @@ export const customerQuoteFollowUp = functions.pubsub
             name: businessName,
             abn: settings.abn,
             phone: settings.phone,
-            email: settings.email,
+            email: tradieReplyEmail,
             address: settings.address,
             logoUrl: settings.logoStorageUrl || settings.logoUri,
             brandColor: settings.brandColor,

@@ -44,6 +44,7 @@ export function BusinessDefaultsScreen() {
   const [showMarkup, setShowMarkup] = useState(false);
   const [showMaterialCostsByDefault, setShowMaterialCostsByDefault] = useState(true);
   const [showLaborCostsByDefault, setShowLaborCostsByDefault] = useState(true);
+  const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(false);
   const [termsAndConditions, setTermsAndConditions] = useState('');
 
   const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
@@ -65,6 +66,7 @@ export function BusinessDefaultsScreen() {
     const sm = businessSettings.showMarkup === true;
     const smc = businessSettings.showMaterialCostsByDefault !== false;
     const slc = businessSettings.showLaborCostsByDefault !== false;
+    const acf = businessSettings.autoCustomerFollowUpEnabled === true;
     const tc = businessSettings.termsAndConditions ?? '';
 
     setLaborRate(lr);
@@ -78,9 +80,10 @@ export function BusinessDefaultsScreen() {
     setShowMarkup(sm);
     setShowMaterialCostsByDefault(smc);
     setShowLaborCostsByDefault(slc);
+    setAutoCustomerFollowUp(acf);
     setTermsAndConditions(tc);
 
-    initialSnapshotRef.current = JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, tc });
+    initialSnapshotRef.current = JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, acf, tc });
   }, [businessSettings]);
 
   // Re-check on focus so the deposit + surcharge toggles unlock the moment
@@ -109,13 +112,14 @@ export function BusinessDefaultsScreen() {
       sm: showMarkup,
       smc: showMaterialCostsByDefault,
       slc: showLaborCostsByDefault,
+      acf: autoCustomerFollowUp,
       tc: termsAndConditions,
     });
     return current !== initialSnapshotRef.current;
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
     transportMarkupEnabled, surchargePaymentFees, pricesIncludeGst,
-    showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, termsAndConditions,
+    showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, autoCustomerFollowUp, termsAndConditions,
   ]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
@@ -142,6 +146,7 @@ export function BusinessDefaultsScreen() {
         showMarkup,
         showMaterialCostsByDefault,
         showLaborCostsByDefault,
+        autoCustomerFollowUpEnabled: autoCustomerFollowUp,
         termsAndConditions: termsAndConditions.trim() || undefined,
         termsUpdatedAt:
           termsAndConditions !== (businessSettings?.termsAndConditions ?? '')
@@ -291,6 +296,27 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={showLaborCostsByDefault}
                 onValueChange={setShowLaborCostsByDefault}
+                color={colors.primary}
+              />
+            </View>
+          </Surface>
+
+          <Surface style={styles.card}>
+            <Title style={styles.sectionTitle}>Customer Follow-Ups</Title>
+            <Text style={styles.helperText}>
+              Automatically chase customers who haven&rsquo;t accepted yet.
+            </Text>
+
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Auto follow-up customers</Text>
+                <Text style={styles.toggleDescription}>
+                  Sends a reminder ~3 days after a quote is sent and again at ~7 days. Stops as soon as the customer accepts or declines. Capped at 2 reminders.
+                </Text>
+              </View>
+              <Switch
+                value={autoCustomerFollowUp}
+                onValueChange={setAutoCustomerFollowUp}
                 color={colors.primary}
               />
             </View>

@@ -663,6 +663,11 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     attachments.push(...photoAttachments);
   }
 
+  // Prefer business settings email, fall back to auth email so replies always
+  // land in the tradie's actual inbox even if they haven't filled in settings.
+  const tradieReplyEmail = business.email || (await getUserEmail(userId)) || undefined;
+  const tradieDisplayName = business.businessName || undefined;
+
   const sent = await sendEmail({
     to: recipientEmail,
     subject: `${isTestSend ? '[TEST] ' : ''}Quotation from ${business.businessName || 'Your Tradie'} - ${quote.job?.name || 'Job'}`,
@@ -671,6 +676,8 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     userId,
     tags: isTestSend ? ['quote-test'] : ['quote-to-client'],
     attachment: attachments,
+    senderName: tradieDisplayName ? `${tradieDisplayName} via QuoteMate` : undefined,
+    replyTo: tradieReplyEmail ? { email: tradieReplyEmail, name: tradieDisplayName } : undefined,
   });
 
   if (!sent) return { success: false };
@@ -865,6 +872,9 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     }
   }
 
+  const tradieReplyEmail = business.email || (await getUserEmail(userId)) || undefined;
+  const tradieDisplayName = business.businessName || undefined;
+
   const sent = await sendEmail({
     to: recipientEmail,
     subject: `${isTestSend ? '[TEST] ' : ''}Invoice from ${business.businessName || 'Your Tradie'} - ${invoice.job?.name || 'Job'}`,
@@ -873,6 +883,8 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     userId,
     tags: isTestSend ? ['invoice-test'] : ['invoice-to-client'],
     attachment: attachments,
+    senderName: tradieDisplayName ? `${tradieDisplayName} via QuoteMate` : undefined,
+    replyTo: tradieReplyEmail ? { email: tradieReplyEmail, name: tradieDisplayName } : undefined,
   });
 
   if (!sent) return { success: false };
