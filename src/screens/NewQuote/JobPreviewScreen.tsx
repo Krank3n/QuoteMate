@@ -749,41 +749,43 @@ export function JobPreviewScreen() {
               iOS gating: hidden until Tap to Pay is approved and a Square
               reader is available for App Review demo. */}
           {liveDoc && Platform.OS !== 'ios' ? (
-            <FooterButton
-              mode="outlined"
-              icon="credit-card-outline"
-              label={
-                liveDoc.type === 'invoice'
-                  ? 'Take Payment'
-                  : (liveDoc.depositAmount ?? 0) > 0
-                    ? 'Take Deposit'
-                    : 'Tap to Pay'
-              }
-              onPress={() => {
-                if (liveDoc.type === 'invoice') {
-                  setTakePaymentTarget({
-                    kind: 'invoice',
-                    invoiceId: liveDoc.id,
-                    total: Number(liveDoc.total ?? 0),
-                    paidAmount: Number(liveDoc.paidTotal ?? 0),
-                    jobName: liveDoc.job?.name,
-                    invoiceNumber: liveDoc.number,
-                    terms: liveDoc.termsSnapshot ?? null,
-                  });
-                } else {
-                  setTakePaymentTarget({
-                    kind: 'quote_deposit',
-                    quoteId: liveDoc.id,
-                    depositAmount: Number(liveDoc.depositAmount ?? 0),
-                    depositPaid: Number(liveDoc.depositPaid ?? 0),
-                    total: Number(liveDoc.total ?? 0),
-                    jobName: liveDoc.job?.name,
-                    terms: liveDoc.termsSnapshot ?? null,
-                  });
+            <View style={styles.bottomButtonHalfWrapper}>
+              <FooterButton
+                mode="outlined"
+                icon="credit-card-outline"
+                label={
+                  liveDoc.type === 'invoice'
+                    ? 'Take Payment'
+                    : (liveDoc.depositAmount ?? 0) > 0
+                      ? 'Take Deposit'
+                      : 'Tap to Pay'
                 }
-              }}
-              style={{ flex: 1 }}
-            />
+                onPress={() => {
+                  if (liveDoc.type === 'invoice') {
+                    setTakePaymentTarget({
+                      kind: 'invoice',
+                      invoiceId: liveDoc.id,
+                      total: Number(liveDoc.total ?? 0),
+                      paidAmount: Number(liveDoc.paidTotal ?? 0),
+                      jobName: liveDoc.job?.name,
+                      invoiceNumber: liveDoc.number,
+                      terms: liveDoc.termsSnapshot ?? null,
+                    });
+                  } else {
+                    setTakePaymentTarget({
+                      kind: 'quote_deposit',
+                      quoteId: liveDoc.id,
+                      depositAmount: Number(liveDoc.depositAmount ?? 0),
+                      depositPaid: Number(liveDoc.depositPaid ?? 0),
+                      total: Number(liveDoc.total ?? 0),
+                      jobName: liveDoc.job?.name,
+                      terms: liveDoc.termsSnapshot ?? null,
+                    });
+                  }
+                }}
+                style={{ width: '100%' }}
+              />
+            </View>
           ) : null}
           <View ref={sendButtonRef} style={styles.bottomButtonHalfWrapper}>
             {liveDoc ? (

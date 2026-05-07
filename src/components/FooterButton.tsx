@@ -77,15 +77,11 @@ const styles = StyleSheet.create({
   },
   buttonContent: {
     paddingVertical: 14,
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     gap: 8,
   },
   buttonLabel: {
     fontSize: 15,
     fontWeight: '700',
     marginVertical: 0,
-    marginHorizontal: 10,
   },
 });
