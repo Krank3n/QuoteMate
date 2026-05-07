@@ -1667,7 +1667,7 @@ export function sendCustomerQuoteReminderEmail(args: {
     tags: ['quote-customer-reminder', `followup:${followUpNumber}`],
     // Match the original quote send: from-name shows the tradie's business and
     // replies route back to them, not to the QuoteMate inbox.
-    senderName: business.name ? `${business.name} via QuoteMate` : undefined,
+    senderName: business.name || undefined,
     replyTo: business.email ? { email: business.email, name: business.name } : undefined,
   });
 }
