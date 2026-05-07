@@ -53,6 +53,35 @@ type AnyData = Record<string, any>;
 
 const db = () => admin.firestore();
 
+// Loose RFC 5321 sanity check: one @, no whitespace, dot in the domain. Not a
+// full validator — the goal is to catch typos like trailing characters that
+// would silently route customer replies into the void.
+function isLikelyValidEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
+}
+
+/**
+ * Decide which address to use as Reply-To on customer-facing sends. Prefers
+ * the saved business email; falls back to the auth email when the business
+ * email is missing or malformed. Returns null only when both are unusable.
+ */
+async function resolveTradieReplyEmail(
+  userId: string,
+  businessEmail: string | undefined,
+): Promise<string | null> {
+  const trimmed = (businessEmail || '').trim();
+  if (trimmed && isLikelyValidEmail(trimmed)) return trimmed;
+  if (trimmed) {
+    // Logged so we can surface bad data in support / outreach later.
+    console.warn(
+      `resolveTradieReplyEmail: business.email "${trimmed}" failed validation for user ${userId}; falling back to auth email`,
+    );
+  }
+  const authEmail = await getUserEmail(userId);
+  if (authEmail && isLikelyValidEmail(authEmail)) return authEmail;
+  return null;
+}
+
 /**
  * Load a unified document for a user. Prefers `documents/{id}`. Falls back to
  * `quotes/{id}` then `invoices/{id}`, mirroring through the shared adapter on
@@ -665,7 +694,8 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
 
   // Prefer business settings email, fall back to auth email so replies always
   // land in the tradie's actual inbox even if they haven't filled in settings.
-  const tradieReplyEmail = business.email || (await getUserEmail(userId)) || undefined;
+  // Validates the email so a typo doesn't silently swallow customer replies.
+  const tradieReplyEmail = await resolveTradieReplyEmail(userId, business.email);
   const tradieDisplayName = business.businessName || undefined;
 
   const sent = await sendEmail({
@@ -676,7 +706,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     userId,
     tags: isTestSend ? ['quote-test'] : ['quote-to-client'],
     attachment: attachments,
-    senderName: tradieDisplayName ? `${tradieDisplayName} via QuoteMate` : undefined,
+    senderName: tradieDisplayName,
     replyTo: tradieReplyEmail ? { email: tradieReplyEmail, name: tradieDisplayName } : undefined,
   });
 
@@ -872,7 +902,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     }
   }
 
-  const tradieReplyEmail = business.email || (await getUserEmail(userId)) || undefined;
+  const tradieReplyEmail = await resolveTradieReplyEmail(userId, business.email);
   const tradieDisplayName = business.businessName || undefined;
 
   const sent = await sendEmail({
@@ -883,7 +913,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     userId,
     tags: isTestSend ? ['invoice-test'] : ['invoice-to-client'],
     attachment: attachments,
-    senderName: tradieDisplayName ? `${tradieDisplayName} via QuoteMate` : undefined,
+    senderName: tradieDisplayName,
     replyTo: tradieReplyEmail ? { email: tradieReplyEmail, name: tradieDisplayName } : undefined,
   });
 
