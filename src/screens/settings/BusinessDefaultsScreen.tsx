@@ -41,6 +41,9 @@ export function BusinessDefaultsScreen() {
   const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
   const [surchargePaymentFees, setSurchargePaymentFees] = useState(false);
   const [pricesIncludeGst, setPricesIncludeGst] = useState(false);
+  const [showMarkup, setShowMarkup] = useState(false);
+  const [showMaterialCostsByDefault, setShowMaterialCostsByDefault] = useState(true);
+  const [showLaborCostsByDefault, setShowLaborCostsByDefault] = useState(true);
   const [termsAndConditions, setTermsAndConditions] = useState('');
 
   const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
@@ -59,6 +62,9 @@ export function BusinessDefaultsScreen() {
     const tm = businessSettings.transportMarkupEnabled !== false;
     const sf = businessSettings.surchargePaymentFees === true;
     const pig = businessSettings.pricesIncludeGst === true;
+    const sm = businessSettings.showMarkup === true;
+    const smc = businessSettings.showMaterialCostsByDefault !== false;
+    const slc = businessSettings.showLaborCostsByDefault !== false;
     const tc = businessSettings.termsAndConditions ?? '';
 
     setLaborRate(lr);
@@ -69,9 +75,12 @@ export function BusinessDefaultsScreen() {
     setTransportMarkupEnabled(tm);
     setSurchargePaymentFees(sf);
     setPricesIncludeGst(pig);
+    setShowMarkup(sm);
+    setShowMaterialCostsByDefault(smc);
+    setShowLaborCostsByDefault(slc);
     setTermsAndConditions(tc);
 
-    initialSnapshotRef.current = JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, tc });
+    initialSnapshotRef.current = JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, tc });
   }, [businessSettings]);
 
   // Re-check on focus so the deposit + surcharge toggles unlock the moment
@@ -97,12 +106,16 @@ export function BusinessDefaultsScreen() {
       tm: transportMarkupEnabled,
       sf: surchargePaymentFees,
       pig: pricesIncludeGst,
+      sm: showMarkup,
+      smc: showMaterialCostsByDefault,
+      slc: showLaborCostsByDefault,
       tc: termsAndConditions,
     });
     return current !== initialSnapshotRef.current;
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
-    transportMarkupEnabled, surchargePaymentFees, pricesIncludeGst, termsAndConditions,
+    transportMarkupEnabled, surchargePaymentFees, pricesIncludeGst,
+    showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, termsAndConditions,
   ]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
@@ -126,6 +139,9 @@ export function BusinessDefaultsScreen() {
         transportMarkupEnabled,
         surchargePaymentFees,
         pricesIncludeGst,
+        showMarkup,
+        showMaterialCostsByDefault,
+        showLaborCostsByDefault,
         termsAndConditions: termsAndConditions.trim() || undefined,
         termsUpdatedAt:
           termsAndConditions !== (businessSettings?.termsAndConditions ?? '')
@@ -226,6 +242,55 @@ export function BusinessDefaultsScreen() {
                     setTermsAndConditions(defaultAuTradieTerms(next));
                   }
                 }}
+                color={colors.primary}
+              />
+            </View>
+          </Surface>
+
+          <Surface style={styles.card}>
+            <Title style={styles.sectionTitle}>Document Display</Title>
+            <Text style={styles.helperText}>
+              Defaults for what appears on customer-facing quotes and invoices. Each document can override these.
+            </Text>
+
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Show Markup</Text>
+                <Text style={styles.toggleDescription}>
+                  When off, markup is rolled into the line totals instead of showing as a separate line to the customer.
+                </Text>
+              </View>
+              <Switch
+                value={showMarkup}
+                onValueChange={setShowMarkup}
+                color={colors.primary}
+              />
+            </View>
+
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Show Material Costs</Text>
+                <Text style={styles.toggleDescription}>
+                  When off, the materials breakdown and subtotal are hidden. Turn both this and labour off to show only the grand total.
+                </Text>
+              </View>
+              <Switch
+                value={showMaterialCostsByDefault}
+                onValueChange={setShowMaterialCostsByDefault}
+                color={colors.primary}
+              />
+            </View>
+
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Show Labour Costs</Text>
+                <Text style={styles.toggleDescription}>
+                  When off, the labour breakdown and subtotal are hidden. Turn both this and materials off to show only the grand total.
+                </Text>
+              </View>
+              <Switch
+                value={showLaborCostsByDefault}
+                onValueChange={setShowLaborCostsByDefault}
                 color={colors.primary}
               />
             </View>

@@ -99,6 +99,8 @@ export function LaborMarkupScreen() {
   const [travelDismissed, setTravelDismissed] = useState(false);
   const [lastTravelValue, setLastTravelValue] = useState('0');
   const [showMarkup, setShowMarkup] = useState(false);
+  const [showMaterialCosts, setShowMaterialCosts] = useState(true);
+  const [showLaborCosts, setShowLaborCosts] = useState(true);
   const [showLaborBreakdown, setShowLaborBreakdown] = useState(true);
   const [depositPercentage, setDepositPercentage] = useState('');
   const [requireDeposit, setRequireDeposit] = useState(false);
@@ -134,11 +136,14 @@ export function LaborMarkupScreen() {
         rateForInput = currentQuote.laborRate;
       }
 
-      // Auto-default to days when the total is 6+ hours of work. Fires on
-      // every load so legacy/sectioned quotes get the better default. The
-      // section map gets converted to days too so the per-section steppers
-      // are in the same unit as the input.
-      if (totalHoursStored >= 6) {
+      // Auto-default to days when the total is 6+ hours of work. Only
+      // applies when the stored unit is hours (or unset on legacy quotes) —
+      // otherwise this effect re-fires after every save (currentQuote dep)
+      // and re-multiplies an already-converted rate by 8, sending it to
+      // 51,200 / 409,600 / etc. The section map gets converted to days too
+      // so the per-section steppers are in the same unit as the input.
+      const alreadyInDays = currentQuote.laborUnit === 'days';
+      if (!alreadyInDays && totalHoursStored >= 6) {
         setLaborUnit('days');
         setLaborHours((Math.round((totalHoursStored / HOURS_PER_DAY) * 10) / 10).toString());
         setLaborRate((rateForInput * HOURS_PER_DAY).toString());
@@ -167,7 +172,23 @@ export function LaborMarkupScreen() {
       setMarkup(currentQuote.markup.toString());
       const lm = currentQuote.laborMarkup ?? currentQuote.markup ?? 0;
       setLaborMarkup(lm.toString());
-      setShowMarkup(currentQuote.showMarkup === true);
+      // Per-doc value wins; otherwise inherit the business default.
+      setShowMarkup(
+        currentQuote.showMarkup !== undefined
+          ? currentQuote.showMarkup === true
+          : (businessSettings?.showMarkup === true)
+      );
+      // Quote-level override > business default > true (show)
+      setShowMaterialCosts(
+        currentQuote.showMaterialCosts !== undefined
+          ? currentQuote.showMaterialCosts
+          : (businessSettings?.showMaterialCostsByDefault !== false)
+      );
+      setShowLaborCosts(
+        currentQuote.showLaborCosts !== undefined
+          ? currentQuote.showLaborCosts
+          : (businessSettings?.showLaborCostsByDefault !== false)
+      );
       setShowLaborBreakdown(currentQuote.showLaborBreakdown !== false);
       const dp = currentQuote.depositPercentage ?? businessSettings?.defaultDepositPercentage ?? 0;
       setDepositPercentage(dp ? dp.toString() : '30');
@@ -304,6 +325,8 @@ export function LaborMarkupScreen() {
         markup: markupPercent,
         laborMarkup: laborMarkupPercent,
         showMarkup,
+        showMaterialCosts,
+        showLaborCosts,
         showLaborBreakdown,
         travelAdjustment: travelPct,
         laborTotal: calculation.laborTotal,
@@ -325,7 +348,7 @@ export function LaborMarkupScreen() {
     });
 
     return unsubscribe;
-  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showMarkup, showLaborBreakdown, travelAdjustment, travelDismissed, depositPercentage, requireDeposit, updateQuote, saveDraft]);
+  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showMarkup, showMaterialCosts, showLaborCosts, showLaborBreakdown, travelAdjustment, travelDismissed, depositPercentage, requireDeposit, updateQuote, saveDraft]);
 
   if (!currentQuote) {
     return null;
@@ -736,6 +759,36 @@ export function LaborMarkupScreen() {
             onValueChange={setShowMarkup}
             trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
             thumbColor={showMarkup ? colors.primary : '#F3F4F6'}
+          />
+        </View>
+
+        <View style={styles.showMarkupToggle}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.showMarkupTitle}>Show material costs on {mode === 'invoice' ? 'invoice' : 'quote'}</Text>
+            <Text style={styles.showMarkupSubtitle}>
+              When off, the materials breakdown and subtotal are hidden. Turn both this and labour off to show only the grand total.
+            </Text>
+          </View>
+          <Switch
+            value={showMaterialCosts}
+            onValueChange={setShowMaterialCosts}
+            trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
+            thumbColor={showMaterialCosts ? colors.primary : '#F3F4F6'}
+          />
+        </View>
+
+        <View style={styles.showMarkupToggle}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.showMarkupTitle}>Show labour costs on {mode === 'invoice' ? 'invoice' : 'quote'}</Text>
+            <Text style={styles.showMarkupSubtitle}>
+              When off, the labour breakdown and subtotal are hidden. Turn both this and materials off to show only the grand total.
+            </Text>
+          </View>
+          <Switch
+            value={showLaborCosts}
+            onValueChange={setShowLaborCosts}
+            trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
+            thumbColor={showLaborCosts ? colors.primary : '#F3F4F6'}
           />
         </View>
       </View>

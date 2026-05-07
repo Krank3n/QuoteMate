@@ -299,6 +299,8 @@ interface BusinessSettings {
   brandColor?: string;
   pdfTemplate?: any;
   showMarkup?: boolean;
+  showMaterialCostsByDefault?: boolean;
+  showLaborCostsByDefault?: boolean;
   showLaborHours?: boolean;
   groupMaterialsBySection?: boolean;
   paymentMethods?: any;
@@ -306,10 +308,14 @@ interface BusinessSettings {
   [key: string]: any;
 }
 
-function applyHideMarkupForDisplay(q: any) {
+function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
   const matMarkup = Number(q.markup) || 0;
   const laborMarkup = Number(q.laborMarkup ?? q.markup) || 0;
-  const hideMarkup = q.showMarkup !== true && (matMarkup > 0 || laborMarkup > 0);
+  // Resolution order matches the PDF: per-doc override > business default > false.
+  const showMarkup = q.showMarkup !== undefined
+    ? q.showMarkup === true
+    : businessSettings?.showMarkup === true;
+  const hideMarkup = !showMarkup && (matMarkup > 0 || laborMarkup > 0);
   if (!hideMarkup) {
     return {
       materials: (q.materials || []).map((m: any) => ({ ...m })),
@@ -537,7 +543,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
 
   const photoUrls = (quote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
   const logoUrl = business.logoStorageUrl || business.logoUri || '';
-  const displayQuote = applyHideMarkupForDisplay(quote);
+  const displayQuote = applyHideMarkupForDisplay(quote, business);
   const emailMaterials = displayQuote.materials.map((m: any) => ({
     name: m.name, quantity: m.quantity, unit: m.unit,
     totalPrice: m.totalPrice || 0, section: m.section,
@@ -615,7 +621,15 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
       markup: quote.markup || 0,
       markupAmount: quote.markupAmount || 0,
       laborMarkup: quote.laborMarkup ?? quote.markup ?? 0,
-      showMarkup: quote.showMarkup === true && business.showMarkup !== false,
+      showMarkup: quote.showMarkup !== undefined
+        ? quote.showMarkup === true
+        : business.showMarkup === true,
+      showMaterialCosts: quote.showMaterialCosts !== undefined
+        ? quote.showMaterialCosts
+        : business.showMaterialCostsByDefault !== false,
+      showLaborCosts: quote.showLaborCosts !== undefined
+        ? quote.showLaborCosts
+        : business.showLaborCostsByDefault !== false,
       travelAdjustment: quote.travelAdjustment,
       gst: quote.gst || 0,
       total: quote.total || 0,
@@ -802,7 +816,15 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       markup: invoice.markup || 0,
       markupAmount: invoice.markupAmount || 0,
       laborMarkup: invoice.laborMarkup ?? invoice.markup ?? 0,
-      showMarkup: invoice.showMarkup === true && business.showMarkup !== false,
+      showMarkup: invoice.showMarkup !== undefined
+        ? invoice.showMarkup === true
+        : business.showMarkup === true,
+      showMaterialCosts: invoice.showMaterialCosts !== undefined
+        ? invoice.showMaterialCosts
+        : business.showMaterialCostsByDefault !== false,
+      showLaborCosts: invoice.showLaborCosts !== undefined
+        ? invoice.showLaborCosts
+        : business.showLaborCostsByDefault !== false,
       travelAdjustment: invoice.travelAdjustment,
       gst: invoice.gst || 0,
       total: invoice.total || 0,

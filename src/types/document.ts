@@ -74,6 +74,8 @@ export interface Document {
 
   // ===== Display flags =====
   showMarkup?: boolean;
+  showMaterialCosts?: boolean;
+  showLaborCosts?: boolean;
   showLaborBreakdown?: boolean;
 
   // ===== Travel adjustment =====

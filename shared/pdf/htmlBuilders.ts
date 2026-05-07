@@ -320,20 +320,35 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   const subtotalLabel = inclusive ? 'Subtotal' : 'Subtotal (ex GST)';
   const gstLabel = inclusive ? 'Includes GST' : 'GST (10%)';
 
+  // Per-section visibility. When materials/labour costs are hidden, the
+  // corresponding subtotal row in the summary is hidden too. When BOTH are
+  // hidden, the Subtotal row is also dropped so the customer sees only the
+  // grand TOTAL (with GST disclosure). Subtotal/GST/Total still reconcile
+  // because displaySubtotal is computed regardless.
+  const showMaterials = data.showMaterialCosts !== false;
+  const showLabor = data.showLaborCosts !== false;
+  const showSubtotalLine = showMaterials || showLabor;
+
   return `
       <div class="summary">
+        ${showMaterials ? `
         <div class="summary-row">
           <span>Materials Subtotal</span>
           <span>${formatCurrency(displayMaterialsSubtotal)}</span>
         </div>
+        ` : ''}
+        ${showLabor ? `
         <div class="summary-row">
           <span>Labour</span>
           <span>${formatCurrency(displayLaborTotal)}</span>
         </div>
+        ` : ''}
+        ${showSubtotalLine ? `
         <div class="summary-row">
           <span>${subtotalLabel}</span>
           <span>${formatCurrency(displaySubtotal)}</span>
         </div>
+        ` : ''}
         ${!rollMarkup && data.markupAmount > 0 ? `
         <div class="summary-row">
           <span>Markup</span>
@@ -380,6 +395,8 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
 export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
   const rollMarkup = quote.showMarkup !== true && quote.markup > 0;
+  const showMaterials = quote.showMaterialCosts !== false;
+  const showLabor = quote.showLaborCosts !== false;
 
   return `
     <!DOCTYPE html>
@@ -426,12 +443,14 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
         <p>${formatMultiline(quote.job.description)}</p>
       </div>
 
+      ${showMaterials ? `
       <div class="section-wrapper">
         <h3>Materials</h3>
         ${generateMaterialsHTML(quote.materials, quote.groupMaterialsBySection === true, rollMarkup ? quote.markup : 0)}
       </div>
+      ` : ''}
 
-      ${buildLaborHTML(quote)}
+      ${showLabor ? buildLaborHTML(quote) : ''}
 
       ${buildSummaryHTML(quote)}
 
@@ -460,6 +479,8 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
 export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessPdfData): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
   const rollMarkup = invoice.showMarkup !== true && invoice.markup > 0;
+  const showMaterials = invoice.showMaterialCosts !== false;
+  const showLabor = invoice.showLaborCosts !== false;
 
   const paidAmount = invoice.paidAmount || 0;
   const amountDue = invoice.total - paidAmount;
@@ -515,12 +536,14 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
         <p>${formatMultiline(invoice.job.description)}</p>
       </div>
 
+      ${showMaterials ? `
       <div class="section-wrapper">
         <h3>Materials</h3>
         ${generateMaterialsHTML(invoice.materials, invoice.groupMaterialsBySection === true, rollMarkup ? invoice.markup : 0)}
       </div>
+      ` : ''}
 
-      ${buildLaborHTML(invoice)}
+      ${showLabor ? buildLaborHTML(invoice) : ''}
 
       ${buildSummaryHTML(invoice, paidAmount, amountDue, invoice.depositCredit)}
 

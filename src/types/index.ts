@@ -231,6 +231,14 @@ export interface Quote {
   templateSuggestions?: TemplateSuggestion[];
   // Markup visibility
   showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
+  // Materials cost visibility on PDFs/email. When false, both the materials
+  // table and the Materials Subtotal summary row are hidden. Undefined =
+  // inherit BusinessSettings.showMaterialCostsByDefault.
+  showMaterialCosts?: boolean;
+  // Labour cost visibility on PDFs/email. When false, both the labour table
+  // and the Labour summary row are hidden. Undefined = inherit
+  // BusinessSettings.showLaborCostsByDefault.
+  showLaborCosts?: boolean;
   // Labour breakdown visibility on PDFs. When false, the per-section labour
   // rows are hidden and only the Labour Total is shown. Default: true.
   showLaborBreakdown?: boolean;
@@ -457,7 +465,13 @@ export interface BusinessSettings {
   supplierPriority?: string[];
   // Quote display settings
   showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)
-  showMarkup?: boolean; // If true, show markup line on documents. Default: true (show markup)
+  showMarkup?: boolean; // If true, allow per-document markup line. When undefined or false, markup is hidden across all documents. Default: false (hide markup).
+  // Default for new quotes' showMaterialCosts. When false, new quotes hide
+  // the materials table + Materials Subtotal row by default. Per-quote
+  // toggle on Quote.showMaterialCosts overrides. Default: true.
+  showMaterialCostsByDefault?: boolean;
+  // Default for new quotes' showLaborCosts. Same shape as above for labour.
+  showLaborCostsByDefault?: boolean;
   // Payment method settings
   paymentMethods?: PaymentMethodSettings;
   // Branding
@@ -599,6 +613,14 @@ export interface Invoice {
 
   // Markup visibility
   showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
+  // Materials cost visibility on PDFs/email. When false, both the materials
+  // table and the Materials Subtotal summary row are hidden. Undefined =
+  // inherit BusinessSettings.showMaterialCostsByDefault.
+  showMaterialCosts?: boolean;
+  // Labour cost visibility on PDFs/email. When false, both the labour table
+  // and the Labour summary row are hidden. Undefined = inherit
+  // BusinessSettings.showLaborCostsByDefault.
+  showLaborCosts?: boolean;
   // Labour breakdown visibility on PDFs. When false, the per-section labour
   // rows are hidden and only the Labour Total is shown. Default: true.
   showLaborBreakdown?: boolean;

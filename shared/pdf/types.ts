@@ -54,6 +54,14 @@ export interface QuotePdfData {
   // the customer sees a single rolled-in price.
   laborMarkup?: number;
   showMarkup?: boolean;
+  // Materials cost visibility. When false, the renderer hides the materials
+  // table AND the Materials Subtotal row in the summary. Subtotal/GST/Total
+  // are still computed and shown.
+  showMaterialCosts?: boolean;
+  // Labour cost visibility. When false, the renderer hides the labour table
+  // AND the Labour row in the summary. Subtotal/GST/Total are still computed
+  // and shown.
+  showLaborCosts?: boolean;
   travelAdjustment?: number;
   gst: number;
   total: number;

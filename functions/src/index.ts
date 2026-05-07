@@ -79,10 +79,14 @@ admin.initializeApp();
 // When markup is hidden from the customer, the visible line items must still
 // reconcile to the final total. Inflate materials and labor by their respective
 // markup so Materials + Labour = Total (GST is inclusive in the line totals).
-function applyHideMarkupForDisplay(q: any) {
+// Resolution order matches the PDF: per-doc override > business default > false.
+function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
   const matMarkup = Number(q.markup) || 0;
   const laborMarkup = Number(q.laborMarkup ?? q.markup) || 0;
-  const hideMarkup = q.showMarkup !== true && (matMarkup > 0 || laborMarkup > 0);
+  const showMarkup = q.showMarkup !== undefined
+    ? q.showMarkup === true
+    : businessSettings?.showMarkup === true;
+  const hideMarkup = !showMarkup && (matMarkup > 0 || laborMarkup > 0);
   if (!hideMarkup) {
     return {
       materials: (q.materials || []).map((m: any) => ({ ...m })),
@@ -5661,7 +5665,18 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
 
       // When markup is hidden, roll it into materials AND labor for the
       // customer view so the visible lines reconcile to the final total.
-      const display = applyHideMarkupForDisplay(foundQuote);
+      const display = applyHideMarkupForDisplay(foundQuote, businessSettings);
+
+      // Mirror the PDF's visibility flags on the web acceptance page so a
+      // customer who got a "lump sum only" PDF doesn't see the breakdown
+      // here. Inheritance: per-doc override > business default > show.
+      const showMaterialCosts = foundQuote.showMaterialCosts !== undefined
+        ? foundQuote.showMaterialCosts === true
+        : (businessSettings?.showMaterialCostsByDefault !== false);
+      const showLaborCosts = foundQuote.showLaborCosts !== undefined
+        ? foundQuote.showLaborCosts === true
+        : (businessSettings?.showLaborCostsByDefault !== false);
+      const showSubtotal = showMaterialCosts || showLaborCosts;
 
       res.status(200).json({
         success: true,
@@ -5671,15 +5686,21 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           customerName: foundQuote.customerName,
           jobName: foundQuote.job?.name,
           jobDescription: foundQuote.job?.description,
-          materials: display.materials.map((m: any) => ({
-            name: m.name,
-            quantity: m.quantity,
-            unit: m.unit,
-            totalPrice: m.totalPrice || 0,
-          })),
-          laborTotal: display.laborTotal,
-          materialsSubtotal: display.materialsSubtotal,
-          subtotal: display.subtotal,
+          ...(showMaterialCosts ? {
+            materials: display.materials.map((m: any) => ({
+              name: m.name,
+              quantity: m.quantity,
+              unit: m.unit,
+              totalPrice: m.totalPrice || 0,
+            })),
+            materialsSubtotal: display.materialsSubtotal,
+          } : {}),
+          ...(showLaborCosts ? {
+            laborTotal: display.laborTotal,
+          } : {}),
+          ...(showSubtotal ? {
+            subtotal: display.subtotal,
+          } : {}),
           markupAmount: display.markupAmount,
           travelAdjustmentAmount: foundQuote.travelAdjustmentAmount || 0,
           gst: foundQuote.gst,
@@ -5688,6 +5709,9 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           createdAt: foundQuote.createdAt,
           aiEmailBody: foundQuote.aiEmailBody || null,
           photoUrls: photoUrls,
+          showMaterialCosts,
+          showLaborCosts,
+          showSubtotal,
         },
         business: {
           name: businessSettings?.businessName || 'Your Trade Business',
