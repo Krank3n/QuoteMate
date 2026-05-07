@@ -6567,11 +6567,15 @@ function generateAcceptancePage(token: string): string {
 
         '<div class="section">' +
           '<div class="section-title">Summary</div>' +
-          '<div class="totals-row"><span>Materials</span><span>' + formatCurrency(quote.materialsSubtotal) + '</span></div>' +
-          '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>' +
-          ((quote.markupAmount || quote.travelAdjustmentAmount) ?
-            '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Subtotal' : 'Subtotal (ex GST)') + '</span><span>' + formatCurrency(quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0)) + '</span></div>' :
-            '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Subtotal' : 'Subtotal (ex GST)') + '</span><span>' + formatCurrency(quote.subtotal) + '</span></div>') +
+          (quote.showMaterialCosts !== false ?
+            '<div class="totals-row"><span>Materials</span><span>' + formatCurrency(quote.materialsSubtotal) + '</span></div>' : '') +
+          (quote.showLaborCosts !== false ?
+            '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>' : '') +
+          (quote.showSubtotal !== false ?
+            ((quote.markupAmount || quote.travelAdjustmentAmount) ?
+              '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Subtotal' : 'Subtotal (ex GST)') + '</span><span>' + formatCurrency(quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0)) + '</span></div>' :
+              '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Subtotal' : 'Subtotal (ex GST)') + '</span><span>' + formatCurrency(quote.subtotal) + '</span></div>')
+            : '') +
           '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Includes GST' : 'GST (10%)') + '</span><span>' + formatCurrency(quote.gst) + '</span></div>' +
           '<div class="totals-row total"><span>Total</span><span class="amount">' + formatCurrency(quote.total) + '</span></div>' +
         '</div>' +

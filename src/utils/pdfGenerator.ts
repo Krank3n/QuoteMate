@@ -214,7 +214,9 @@ export async function generateDocumentPDF(
     markup: doc.markup,
     markupAmount: doc.markupAmount,
     laborMarkup: doc.laborMarkup ?? doc.markup,
-    showMarkup: doc.showMarkup === true && businessSettings?.showMarkup !== false,
+    showMarkup: doc.showMarkup !== undefined
+      ? doc.showMarkup === true
+      : businessSettings?.showMarkup === true,
     showMaterialCosts: doc.showMaterialCosts !== undefined
       ? doc.showMaterialCosts
       : businessSettings?.showMaterialCostsByDefault !== false,
