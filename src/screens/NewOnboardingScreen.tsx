@@ -52,6 +52,7 @@ import { runReeceConnectFlow } from '../services/reeceConnect';
 import { getReeceConnectionStatus } from '../services/reeceApi';
 import { uploadBusinessLogo } from '../services/photoService';
 import { lightTap, successTap, errorTap, selectionTap } from '../utils/haptics';
+import { SuppliersStep, type AddedSupplier } from './onboarding/SuppliersStep';
 
 const STORAGE_KEY = 'onboarding:draft';
 
@@ -107,11 +108,26 @@ export function NewOnboardingScreen() {
     const [reeceConnected, setReeceConnected] = useState(false);
     const [reeceError, setReeceError] = useState<string | null>(null);
 
+    // Suppliers step — list of suppliers added during this onboarding session.
+    // Stored purely for the visual confirmation card; the underlying
+    // materialFavorites + supplierGroups writes already happened, so this
+    // array is just UI state that we persist in the draft for back/forward
+    // navigation and force-quit recovery.
+    const [addedSuppliers, setAddedSuppliers] = useState<AddedSupplier[]>([]);
+    const appendAddedSupplier = useCallback((s: AddedSupplier) => {
+        setAddedSuppliers(prev => [...prev, s]);
+    }, []);
+
     const ONBOARDING_STEPS: OnboardingStep[] = useMemo(() => {
         const items = [...BASE_STEPS];
         if (selectedCategories.includes('plumbing')) {
             items.push({ key: 'reece', label: 'Reece', icon: 'pipe' });
         }
+        // Always offer the supplier price-book step. Sits after Reece (when
+        // shown) so plumbers can layer their local hardware store on top of
+        // their maX trade prices, and before Payments so the wow moment
+        // happens before the monetisation ask.
+        items.push({ key: 'suppliers', label: 'Suppliers', icon: 'truck-delivery' });
         items.push({ key: 'payments', label: 'Payments', icon: 'credit-card-outline' });
         return items.map((s, i) => ({ id: i + 1, key: s.key, label: s.label, icon: s.icon }));
     }, [selectedCategories]);
@@ -160,6 +176,7 @@ export function NewOnboardingScreen() {
                     if (typeof d.brandColor === 'string') setBrandColor(d.brandColor);
                     if (typeof d.laborRate === 'string') setLaborRate(d.laborRate);
                     if (typeof d.markup === 'string') setMarkup(d.markup);
+                    if (Array.isArray(d.addedSuppliers)) setAddedSuppliers(d.addedSuppliers);
                     // logoUri is intentionally not persisted — local file:// URIs don't survive app restarts.
                 }
             } catch {
@@ -185,9 +202,10 @@ export function NewOnboardingScreen() {
                 brandColor,
                 laborRate,
                 markup,
+                addedSuppliers,
             }),
         ).catch(() => { /* ignore storage errors */ });
-    }, [currentStep, businessName, selectedCategories, phone, email, abn, brandColor, laborRate, markup]);
+    }, [currentStep, businessName, selectedCategories, phone, email, abn, brandColor, laborRate, markup, addedSuppliers]);
 
     // Animate step transitions, reset scroll, haptic tick, auto-focus first input
     useEffect(() => {
@@ -464,6 +482,13 @@ export function NewOnboardingScreen() {
                 return renderStep5Rates();
             case 'reece':
                 return renderStepReece();
+            case 'suppliers':
+                return (
+                    <SuppliersStep
+                        addedSuppliers={addedSuppliers}
+                        onSupplierAdded={appendAddedSupplier}
+                    />
+                );
             case 'payments':
                 return renderStep6Payments();
             default:

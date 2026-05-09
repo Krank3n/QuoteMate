@@ -12,6 +12,10 @@
 import { Platform } from 'react-native';
 import { compressImage } from './photoService';
 import { extractSupplierPriceList as extractViaFunction } from './llmService';
+import { generateId } from '../utils/generateId';
+import { bulkSaveFavorites } from './materialFavorites';
+import { getSupplierGroupByName, loadGroups, saveGroup } from './supplierGroupService';
+import type { FavoriteProductMapping, Material, SupplierGroup } from '../types';
 
 // Lazy-import FileSystem — only available on native
 let FileSystem: typeof import('expo-file-system') | null = null;
@@ -19,10 +23,13 @@ if (Platform.OS !== 'web') {
   FileSystem = require('expo-file-system');
 }
 
+export type ExtractionMode = 'priceList' | 'invoice';
+
 export interface ExtractedItem {
   name: string;
   price: number;
   unit: string;
+  qty?: number;
   coveragePerUnit?: number;
   coverageUnit?: 'm²' | 'm³' | 'm';
   keywords: string[];
@@ -73,10 +80,18 @@ function normaliseItem(raw: any): ExtractedItem {
     confidenceRaw === 'high' || confidenceRaw === 'medium' || confidenceRaw === 'low'
       ? confidenceRaw
       : 'medium';
+  let qty: number | undefined;
+  if (raw?.qty !== undefined && raw?.qty !== null) {
+    const parsedQty = typeof raw.qty === 'number' ? raw.qty : parseFloat(raw.qty);
+    if (Number.isFinite(parsedQty) && parsedQty > 0) {
+      qty = Math.min(9999, Math.max(1, Math.round(parsedQty)));
+    }
+  }
   return {
     name: (raw?.name || '').toString().trim(),
     price,
     unit: (raw?.unit || 'each').toString().trim(),
+    qty,
     coveragePerUnit:
       typeof raw?.coveragePerUnit === 'number' && raw.coveragePerUnit > 0
         ? raw.coveragePerUnit
@@ -117,11 +132,12 @@ async function readBase64(uri: string): Promise<string> {
 }
 
 /**
- * Extract a supplier price list from one or more photos.
+ * Extract a supplier price list (or invoice) from one or more photos.
  */
 export async function extractFromPhotos(
   uris: string[],
   supplierName?: string,
+  mode: ExtractionMode = 'priceList',
 ): Promise<ExtractResult> {
   if (!Array.isArray(uris) || uris.length === 0) {
     throw new Error('No photos provided');
@@ -140,6 +156,7 @@ export async function extractFromPhotos(
   const result = await extractViaFunction({
     imageBase64,
     supplierName,
+    mode,
   });
 
   return {
@@ -150,11 +167,12 @@ export async function extractFromPhotos(
 }
 
 /**
- * Extract a supplier price list from a single PDF file.
+ * Extract a supplier price list (or invoice) from a single PDF file.
  */
 export async function extractFromPdf(
   uri: string,
   supplierName?: string,
+  mode: ExtractionMode = 'priceList',
 ): Promise<ExtractResult> {
   if (!uri) throw new Error('No PDF provided');
 
@@ -166,11 +184,125 @@ export async function extractFromPdf(
   const result = await extractViaFunction({
     pdfBase64,
     supplierName,
+    mode,
   });
 
   return {
     supplierName: result.supplierName || supplierName || '',
     supplierContact: normaliseContact(result.supplierContact),
     items: (result.items || []).map(normaliseItem).filter(i => i.name && i.price > 0),
+  };
+}
+
+export interface ImportFavoriteRow {
+  name: string;
+  price: number;
+  unit: string;
+  coveragePerUnit?: number;
+  coverageUnit?: 'm²' | 'm³' | 'm';
+  keywords?: string[];
+}
+
+/**
+ * Save a batch of imported items to the supplier book under a single supplier
+ * name and (if a contact is supplied) merge contact details into that
+ * supplier's SupplierGroup record. Used by both the supplier-list import
+ * (price list mode) and invoice import flows.
+ *
+ * Returns the same kind of summary `useSupplierListImport.handleSaveImported`
+ * already produces so callers can reuse their snackbar copy.
+ */
+export async function persistImportToSupplierBook(args: {
+  supplierName: string;
+  rows: ImportFavoriteRow[];
+  contact?: ExtractedSupplierContact;
+}): Promise<{
+  itemCount: number;
+  unchanged: number;
+  contactFieldsApplied: number;
+  itemNames: string[];
+}> {
+  const { supplierName, rows, contact } = args;
+  const importBatchId = generateId();
+  const nowIso = new Date().toISOString();
+
+  const toSave: Array<Partial<FavoriteProductMapping> & { productName: string }> = rows.map(item => ({
+    productName: item.name,
+    store: supplierName || 'Supplier',
+    unit: item.unit as Material['unit'],
+    price: item.price,
+    coveragePerUnit: item.coveragePerUnit,
+    coverageUnit: item.coverageUnit,
+    keywords: item.keywords,
+    source: 'imported' as const,
+    sourceRef: importBatchId,
+    isPersonalRate: true,
+    lastUpdatedAt: nowIso,
+  }));
+
+  const counts =
+    toSave.length > 0
+      ? await bulkSaveFavorites(toSave)
+      : { created: 0, updated: 0, unchanged: 0 };
+
+  let contactFieldsApplied = 0;
+  if (contact && supplierName) {
+    try {
+      const existing = await getSupplierGroupByName(supplierName);
+      const pickIfMissing = (current: string | undefined, incoming: string | undefined) => {
+        if (current && current.trim()) return { value: current, applied: false };
+        if (incoming && incoming.trim()) return { value: incoming.trim(), applied: true };
+        return { value: current, applied: false };
+      };
+
+      const contactPerson = pickIfMissing(existing?.contactPerson, contact.contactPerson);
+      const phone = pickIfMissing(existing?.phone, contact.phone);
+      const email = pickIfMissing(existing?.email, contact.email);
+      const address = pickIfMissing(existing?.address, contact.address);
+      const website = pickIfMissing(existing?.searchUrl, contact.website);
+
+      contactFieldsApplied =
+        (contactPerson.applied ? 1 : 0) +
+        (phone.applied ? 1 : 0) +
+        (email.applied ? 1 : 0) +
+        (address.applied ? 1 : 0) +
+        (website.applied ? 1 : 0);
+
+      if (contactFieldsApplied > 0) {
+        const now = new Date().toISOString();
+        const record: SupplierGroup = existing
+          ? {
+              ...existing,
+              contactPerson: contactPerson.value || undefined,
+              phone: phone.value || undefined,
+              email: email.value || undefined,
+              address: address.value || undefined,
+              searchUrl: website.value || undefined,
+              updatedAt: now,
+            }
+          : {
+              id: generateId(),
+              name: supplierName.trim(),
+              contactPerson: contactPerson.value || undefined,
+              phone: phone.value || undefined,
+              email: email.value || undefined,
+              address: address.value || undefined,
+              searchUrl: website.value || undefined,
+              sortOrder: (await loadGroups()).length,
+              createdAt: now,
+              updatedAt: now,
+            };
+        await saveGroup(record);
+      }
+    } catch {
+      // Don't block — items are already saved.
+    }
+  }
+
+  return {
+    itemCount: counts.created + counts.updated,
+    unchanged: counts.unchanged,
+    contactFieldsApplied,
+    itemNames: rows.map(r => r.name).slice(0, 3),
   };
 }

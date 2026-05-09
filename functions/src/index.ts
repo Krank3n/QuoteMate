@@ -2205,8 +2205,14 @@ async function callClaudeForExtraction(
   return parseLLMJson(content);
 }
 
-function buildExtractSupplierPrompt(supplierName?: string, defaultUnit?: string): string {
-  return `You are reading a tradesperson's supplier price list. Extract every line item visible.
+function buildExtractSupplierPrompt(
+  supplierName?: string,
+  defaultUnit?: string,
+  mode: 'priceList' | 'invoice' = 'priceList',
+): string {
+  const isInvoice = mode === 'invoice';
+  const docLabel = isInvoice ? 'supplier invoice or receipt' : 'supplier price list';
+  return `You are reading a tradesperson's ${docLabel}. Extract every line item visible.
 
 Supplier hint: ${supplierName || '(unknown)'}
 Default unit hint: ${defaultUnit || '(none)'}
@@ -2220,8 +2226,8 @@ ALSO extract the supplier's contact details if they are clearly printed on the d
 
 For each item, return:
 - name: clean product name (strip SKU codes unless they're the only identifier)
-- price: numeric AUD value (no currency symbol, no GST marker)
-- unit: one of "each|m|m²|m³|L|kg|box|pack" — the SALEABLE unit. If the supplier sells a packaged/bundled product (a bag, tub, bundle), use "each" for the unit and capture the contained quantity in coveragePerUnit/coverageUnit (see rules below).
+- price: numeric AUD value (no currency symbol, no GST marker)${isInvoice ? ' — this is the UNIT price, not the line total. If the receipt shows "3 × $12.50 = $37.50", price is 12.50.' : ''}
+- unit: one of "each|m|m²|m³|L|kg|box|pack" — the SALEABLE unit. If the supplier sells a packaged/bundled product (a bag, tub, bundle), use "each" for the unit and capture the contained quantity in coveragePerUnit/coverageUnit (see rules below).${isInvoice ? '\n- qty: integer quantity purchased on this line. Read from "QTY", "Qty", "3×", "3 @", or count of identical lines. If absent or illegible, default to 1.' : ''}
 - coveragePerUnit: numeric, only if one purchasable unit contains a measurable amount of work (e.g. "covers 13 m² with 100 mm overlap" → 13, OR "1/2 m³ bag of mulch" → 0.5)
 - coverageUnit: "m²"|"m³"|"m" — only if coveragePerUnit set
 - keywords: 2-4 short lowercase words describing the product type (e.g. ["concrete","ready-mix","slab"])
@@ -2237,7 +2243,7 @@ How to choose unit vs coverage:
 
 The rule of thumb: if a tradie can't buy a fraction of the listed item (e.g. a whole bag, a whole sheet), the unit must be "each" and the bundled measurement goes into coveragePerUnit.
 
-Skip header rows, column headings, section titles, subtotals, totals, page numbers, ads, terms, disclaimers, and anything that is not a purchasable line item. Contact info goes in the supplierContact block, NOT in items.
+Skip header rows, column headings, section titles, subtotals, totals${isInvoice ? ', GST/tax lines, payment lines, change, tender, rounding, store policy text' : ''}, page numbers, ads, terms, disclaimers, and anything that is not a purchasable line item. Contact info goes in the supplierContact block, NOT in items.
 
 If the photo contains ONLY contact details (a business card, letterhead, contact page) and no purchasable line items, return items: [] and fill in supplierContact with whatever you can read.
 
@@ -2245,7 +2251,7 @@ Return ONLY valid JSON in this exact shape:
 {
   "supplierName": "...",
   "supplierContact": { "contactPerson": null, "phone": null, "email": null, "address": null, "website": null },
-  "items": [ { "name": "...", "price": 0, "unit": "each", "coveragePerUnit": null, "coverageUnit": null, "keywords": [], "confidence": "high", "rawLine": "..." } ]
+  "items": [ { "name": "...", "price": 0,${isInvoice ? ' "qty": 1,' : ''} "unit": "each", "coveragePerUnit": null, "coverageUnit": null, "keywords": [], "confidence": "high", "rawLine": "..." } ]
 }
 For supplierContact, use null for any field that is not clearly printed on the document. If no contact details are visible at all, set every field to null.`;
 }
@@ -2267,7 +2273,7 @@ export const extractSupplierPriceList = functions
       if (!decodedToken) return;
 
       try {
-        const { pdfBase64, imageBase64, supplierName, defaultUnit } = req.body;
+        const { pdfBase64, imageBase64, supplierName, defaultUnit, mode } = req.body;
 
         if (!pdfBase64 && (!Array.isArray(imageBase64) || imageBase64.length === 0)) {
           res.status(400).json({ error: 'Provide either pdfBase64 or imageBase64[]' });
@@ -2290,7 +2296,8 @@ export const extractSupplierPriceList = functions
           return;
         }
 
-        const prompt = buildExtractSupplierPrompt(supplierName, defaultUnit);
+        const extractionMode: 'priceList' | 'invoice' = mode === 'invoice' ? 'invoice' : 'priceList';
+        const prompt = buildExtractSupplierPrompt(supplierName, defaultUnit, extractionMode);
         const input: ExtractionInput = { pdfBase64, imageBase64 };
 
         let parsed: any | null = null;

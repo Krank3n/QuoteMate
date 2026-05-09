@@ -1253,6 +1253,7 @@ export interface ExtractedSupplierItem {
   name: string;
   price: number;
   unit: string;
+  qty?: number;
   coveragePerUnit?: number;
   coverageUnit?: 'm²' | 'm³' | 'm';
   keywords?: string[];
@@ -1280,6 +1281,7 @@ export async function extractSupplierPriceList(
     imageBase64?: string[];
     supplierName?: string;
     defaultUnit?: string;
+    mode?: 'priceList' | 'invoice';
   },
   retryCount: number = 3,
 ): Promise<SupplierExtractionResponse> {
