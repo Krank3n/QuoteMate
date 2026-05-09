@@ -6028,9 +6028,68 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
       return;
     }
 
+    // Phase-8: make sure the quote has a Job before flipping status. The
+    // wizard's saveDraft normally creates one via ensureJobForQuote, but
+    // any code path that wrote the quote without that step (legacy flows,
+    // imports) leaves the quote orphaned — onDocumentWriteSyncJob then
+    // bails because the Job doesn't exist, and the Jobs tab never sees
+    // the customer-accepted quote. Materialise here as a backstop.
+    let resolvedJobId: string | undefined =
+      typeof foundQuote.jobId === 'string' && foundQuote.jobId
+        ? foundQuote.jobId
+        : undefined;
+    if (!resolvedJobId && responseType === 'accepted') {
+      const customerName = (foundQuote.customerName || '').trim();
+      const customerEmail = (foundQuote.customerEmail || '').trim();
+      const customerPhone = (foundQuote.customerPhone || '').trim();
+      const jobAddress = (foundQuote.jobAddress || '').trim();
+      const jobName = (foundQuote.job?.name || '').trim();
+      if (customerName || customerEmail || customerPhone || jobAddress || jobName) {
+        const newJobRef = db.collection('users').doc(foundUserId)
+          .collection('jobs').doc();
+        const now = Date.now();
+        // Carry the quote's creation time across so the Job's age reflects
+        // when work was actually scoped, not when the customer happened to
+        // click accept. quotedAt comes from sentAt for the same reason.
+        const toMs = (v: unknown): number => {
+          if (!v) return 0;
+          const maybeTs = v as { toMillis?: () => number };
+          if (typeof maybeTs.toMillis === 'function') return maybeTs.toMillis();
+          if (v instanceof Date) return v.getTime();
+          if (typeof v === 'number') return v;
+          const parsed = Date.parse(String(v));
+          return Number.isFinite(parsed) ? parsed : 0;
+        };
+        const quoteCreatedAt = toMs(foundQuote.createdAt) || now;
+        const quoteSentAt = toMs(foundQuote.sentAt);
+        await newJobRef.set({
+          id: newJobRef.id,
+          userId: foundUserId,
+          customerName,
+          customerEmail,
+          customerPhone,
+          jobAddress,
+          name: jobName || 'Job',
+          description: foundQuote.job?.description || '',
+          stage: 'accepted',
+          acceptedAt: now,
+          ...(quoteSentAt > 0 ? { quotedAt: quoteSentAt } : {}),
+          documentIds: [],
+          totalQuoted: Number(foundQuote.total) || 0,
+          totalInvoiced: 0,
+          totalPaid: 0,
+          balanceDue: 0,
+          createdAt: quoteCreatedAt,
+          updatedAt: now,
+        });
+        resolvedJobId = newJobRef.id;
+      }
+    }
+
     // Process the response
     await quoteDoc.ref.update({
       status: responseType,
+      ...(resolvedJobId && !foundQuote.jobId ? { jobId: resolvedJobId } : {}),
       respondedAt: admin.firestore.FieldValue.serverTimestamp(),
       respondedBy: foundQuote.customerName || 'Client',
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),

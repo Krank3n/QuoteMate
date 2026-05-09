@@ -36,10 +36,138 @@ export const onDocumentWriteSyncJob = functions.firestore
   .document('users/{userId}/documents/{docId}')
   .onWrite(async (change, ctx) => {
     const userId = ctx.params.userId as string;
+    const docId = ctx.params.docId as string;
+
+    // Safety net: documents are supposed to arrive with jobId already
+    // stamped (saveDraft → ensureJobForQuote on the client, or the email-
+    // accept handler). Anything that slips through — legacy imports,
+    // older code paths, third-party writes — leaves an orphan in the
+    // documents collection that the Jobs tab can never see. Materialise
+    // a Job from this doc's fields and stamp jobId back, atomically.
+    const after = change.after.exists ? change.after.data() || null : null;
+    if (after && shouldMaterialiseJob(after)) {
+      const stamped = await ensureJobForOrphanDocument(userId, docId, after);
+      // Stamping jobId fires another onWrite — that pass syncs aggregates
+      // against the freshly-created Job. Bail this pass to avoid double-
+      // computing on stale data.
+      if (stamped) return;
+    }
+
     for (const jobId of collectJobIds(change)) {
       await syncJobAggregates(userId, jobId);
     }
   });
+
+// Decide whether the trigger should attempt to materialise a Job for an
+// otherwise-orphaned document. Skip when the doc already has a Job (happy
+// path), when it's been cancelled (no point creating a Job we'd close), or
+// when there's nothing to put on the Job card (blank shell).
+function shouldMaterialiseJob(after: Record<string, unknown>): boolean {
+  if (typeof after.jobId === 'string' && after.jobId) return false;
+  if (after.stage === 'cancelled') return false;
+  const customerName = trimString(after.customerName);
+  const customerEmail = trimString(after.customerEmail);
+  const customerPhone = trimString(after.customerPhone);
+  const jobAddress = trimString(after.jobAddress);
+  const job = (after.job as { name?: unknown } | undefined) || {};
+  const jobName = trimString(job.name);
+  return !!(customerName || customerEmail || customerPhone || jobAddress || jobName);
+}
+
+function trimString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+// Materialise a Job for a document that arrived without jobId. Runs in a
+// transaction so the new Job and the doc.jobId stamp land together — and
+// re-checks jobId inside the transaction in case a concurrent invocation
+// already won. Returns the new Job's id, or null if we declined / lost the
+// race. Logs and swallows errors so a transient Firestore hiccup doesn't
+// take the trigger out.
+async function ensureJobForOrphanDocument(
+  userId: string,
+  docId: string,
+  // The change's after data — used only to decide whether to enter the
+  // transaction. The transaction re-reads from Firestore for the actual
+  // values it writes against.
+  _after: Record<string, unknown>,
+): Promise<string | null> {
+  const docRef = db()
+    .collection('users').doc(userId)
+    .collection('documents').doc(docId);
+  const jobRef = db()
+    .collection('users').doc(userId)
+    .collection('jobs').doc();
+
+  try {
+    return await db().runTransaction(async (tx) => {
+      const fresh = await tx.get(docRef);
+      if (!fresh.exists) return null;
+      const data = fresh.data() || {};
+      // Concurrent invocation may have already stamped a jobId — bail.
+      if (typeof data.jobId === 'string' && data.jobId) return null;
+
+      const customerName = trimString(data.customerName);
+      const customerEmail = trimString(data.customerEmail);
+      const customerPhone = trimString(data.customerPhone);
+      const jobAddress = trimString(data.jobAddress);
+      const job = (data.job as { name?: unknown; description?: unknown } | undefined) || {};
+      const jobName = trimString(job.name);
+      const jobDescription = trimString(job.description);
+
+      if (!customerName && !customerEmail && !customerPhone && !jobAddress && !jobName) {
+        return null;
+      }
+
+      // Derive starting stage from this single document so a doc that
+      // arrives mid-lifecycle (e.g. a customer-accepted quote with no
+      // jobId) lands on the right Job stage instead of inquiry.
+      const initialStage = deriveJobStageFromDocs([
+        { id: docId, ...(data as Omit<JobDocument, 'id'>) } as JobDocument,
+      ]);
+
+      // Inherit timestamps from the source document so the materialised
+      // Job carries its real history. Per-stage stamps come from the
+      // doc's sentAt / acceptedAt / paidInFullAt fields when present.
+      const docCreatedAt = toMillis(data.createdAt);
+      const docUpdatedAt = toMillis(data.updatedAt);
+      const now = Date.now();
+      const createdAt = docCreatedAt > 0 ? docCreatedAt : now;
+      const updatedAt = docUpdatedAt > 0 ? docUpdatedAt : createdAt;
+      const stageStamps = computeStageStampsFromDocs([data]);
+
+      tx.set(jobRef, {
+        id: jobRef.id,
+        userId,
+        customerName,
+        customerEmail,
+        customerPhone,
+        jobAddress,
+        name: jobName || 'Job',
+        description: jobDescription,
+        stage: initialStage,
+        ...stageStamps,
+        documentIds: [docId],
+        primaryDocumentId: docId,
+        totalQuoted: 0,
+        totalInvoiced: 0,
+        totalPaid: 0,
+        balanceDue: 0,
+        createdAt,
+        updatedAt,
+      });
+      tx.update(docRef, { jobId: jobRef.id, updatedAt: docUpdatedAt > 0 ? docUpdatedAt : now });
+
+      return jobRef.id;
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    functions.logger.error('ensureJobForOrphanDocument failed', {
+      userId, docId, message,
+    });
+    return null;
+  }
+}
 
 // Gather every jobId that might be affected by this write: the new one, and
 // (if different) the old one — a doc moving from Job A to Job B needs both
@@ -61,27 +189,42 @@ async function syncJobAggregates(userId: string, jobId: string): Promise<void> {
   const jobRef = db()
     .collection('users').doc(userId)
     .collection('jobs').doc(jobId);
-  const jobSnap = await jobRef.get();
-  if (!jobSnap.exists) {
-    // Dangling reference — a doc points at a Job that never existed or was
-    // deleted. Log and skip; don't auto-create (creation is explicit in
-    // Phase 9 and the backfill).
-    functions.logger.warn('syncJobAggregates: job missing', { userId, jobId });
-    return;
-  }
 
-  const job = jobSnap.data() || {};
-
-  const docsSnap = await db()
-    .collection('users').doc(userId)
-    .collection('documents')
-    .where('jobId', '==', jobId)
-    .get();
+  const [jobSnap, docsSnap] = await Promise.all([
+    jobRef.get(),
+    db()
+      .collection('users').doc(userId)
+      .collection('documents')
+      .where('jobId', '==', jobId)
+      .get(),
+  ]);
 
   const docs: JobDocument[] = docsSnap.docs.map((d) => ({
     id: d.id,
     ...(d.data() as Omit<JobDocument, 'id'>),
   }));
+
+  let job: Record<string, unknown>;
+  if (!jobSnap.exists) {
+    // Dangling reference — docs point at a Job that doesn't exist. If we
+    // can rebuild it from the attached docs, do so; otherwise bail. This
+    // is the auto-heal counterpart to the orphan-doc safety net above —
+    // together they make sure no doc can leak into a state where the Jobs
+    // tab can't see it.
+    if (docs.length === 0) {
+      functions.logger.warn('syncJobAggregates: job missing, no attached docs', { userId, jobId });
+      return;
+    }
+    const rebuilt = rebuildDanglingJob(userId, jobId, docs);
+    if (!rebuilt) {
+      functions.logger.warn('syncJobAggregates: job missing, no signal to rebuild', { userId, jobId });
+      return;
+    }
+    await jobRef.set(rebuilt);
+    job = rebuilt as Record<string, unknown>;
+  } else {
+    job = jobSnap.data() || {};
+  }
 
   const aggregates = computeJobAggregates({ id: jobId }, docs);
 
@@ -114,13 +257,24 @@ async function syncJobAggregates(userId: string, jobId: string): Promise<void> {
   const stageStamp =
     stampField && !alreadyStamped ? { [stampField]: Date.now() } : {};
 
+  // updatedAt should track real activity, not trigger-fire time. Take the
+  // max of the Job's existing updatedAt and the most recent doc.updatedAt
+  // — that way a backfill / re-aggregate doesn't make a months-old Job
+  // look like it was just touched.
+  const docMaxUpdatedAt = docs.reduce(
+    (acc, d) => Math.max(acc, Number(d.updatedAt) || 0),
+    0,
+  );
+  const existingUpdatedAt = Number(job.updatedAt) || 0;
+  const updatedAt = Math.max(existingUpdatedAt, docMaxUpdatedAt) || Date.now();
+
   await jobRef.set(
     {
       ...aggregates,
       ...userFields,
       ...(stageBump ? { stage: stageBump } : {}),
       ...stageStamp,
-      updatedAt: Date.now(),
+      updatedAt,
     },
     { merge: true },
   );
@@ -408,6 +562,18 @@ export async function runBackfill(opts: {
       const createdAt = Math.min(...entries.map((e) => e.createdAtMs).filter((n) => n > 0)) || Date.now();
       const updatedAt = Math.max(...entries.map((e) => toMillis(e.data.updatedAt)).filter((n) => n > 0)) || createdAt;
 
+      // Lift per-stage timestamps off the source documents so the JobCard
+      // status line ("accepted 1d ago") reflects real activity instead of
+      // the moment the backfill ran. Use the earliest sentAt across all
+      // docs (when did this job first go out?), the earliest accept
+      // confirmation (respondedAt or doc.acceptedAt), the earliest paid
+      // confirmation. quotedAt seeds from sentAt; we don't try to
+      // reconstruct scheduled / in_progress / completed since those have
+      // no source-doc analogue.
+      const stageStamps = computeStageStampsFromDocs(
+        entries.map((e) => e.data as unknown as { [k: string]: unknown }),
+      );
+
       const newJob: Job = {
         id: report.proposedJobId,
         userId,
@@ -424,6 +590,7 @@ export async function runBackfill(opts: {
         totalPaid: aggregates.totalPaid,
         balanceDue: aggregates.balanceDue,
         photos: uniquePhotos.length > 0 ? uniquePhotos : undefined,
+        ...stageStamps,
         createdAt,
         updatedAt,
       };
@@ -461,6 +628,103 @@ function groupKey(doc: JobDocument): string {
   const name = (doc.job?.name || '').toString().trim().toLowerCase() || '∅';
   const raw = `${customer}‖${address}‖${name}`;
   return createHash('sha1').update(raw).digest('hex').slice(0, 12);
+}
+
+// Build a Job record from a set of attached documents whose jobId is set
+// but whose Job has gone missing (dangling reference). Mirrors what
+// runBackfill does for a single group: pick the latest doc as the source
+// of customer fields, derive stage from the doc set, inherit timestamps.
+// Returns null when there's nothing to rebuild from.
+function rebuildDanglingJob(
+  userId: string,
+  jobId: string,
+  docs: JobDocument[],
+): Record<string, unknown> | null {
+  if (docs.length === 0) return null;
+
+  const sorted = [...docs].sort(
+    (a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0),
+  );
+  const primary = sorted[0];
+  const customerName = (primary.customerName || '').trim();
+  const customerEmail = (primary.customerEmail || '').trim();
+  const customerPhone = (primary.customerPhone || '').trim();
+  const jobAddress = (primary.jobAddress || '').trim();
+  const jobName = (primary.job?.name || '').trim();
+  if (!customerName && !customerEmail && !customerPhone && !jobAddress && !jobName) {
+    return null;
+  }
+
+  const stage = deriveJobStageFromDocs(docs);
+  const aggregates = computeJobAggregates({ id: jobId }, docs);
+  const stageStamps = computeStageStampsFromDocs(
+    docs as unknown as Array<{ [k: string]: unknown }>,
+  );
+
+  const createdAtCandidates = docs.map((d) => Number(d.createdAt) || 0).filter((n) => n > 0);
+  const updatedAtCandidates = docs.map((d) => Number(d.updatedAt) || 0).filter((n) => n > 0);
+  const now = Date.now();
+  const createdAt = createdAtCandidates.length > 0 ? Math.min(...createdAtCandidates) : now;
+  const updatedAt = updatedAtCandidates.length > 0 ? Math.max(...updatedAtCandidates) : createdAt;
+
+  return {
+    id: jobId,
+    userId,
+    customerName,
+    customerEmail,
+    customerPhone,
+    jobAddress,
+    name: jobName || 'Job',
+    stage,
+    documentIds: aggregates.documentIds,
+    primaryDocumentId: primary.id,
+    totalQuoted: aggregates.totalQuoted,
+    totalInvoiced: aggregates.totalInvoiced,
+    totalPaid: aggregates.totalPaid,
+    balanceDue: aggregates.balanceDue,
+    ...stageStamps,
+    createdAt,
+    updatedAt,
+  };
+}
+
+// Reconstruct per-Job-stage timestamps from a set of source documents. Used
+// by both the runBackfill path (script + admin callable) and the safety-net
+// trigger when materialising Jobs after the fact, so a migrated Job lands
+// with realistic "accepted 3d ago" / "paid 2w ago" labels instead of the
+// moment of materialisation.
+//
+//   sentAt → quotedAt (first time the doc was sent)
+//   acceptedAt or respondedAt → acceptedAt
+//   paidInFullAt or paidAt → paidAt
+//
+// Earliest wins: a Job that already has multiple docs uses the first time
+// any of them moved into that stage. Returns only the fields it has signal
+// for; absent fields are omitted so existing values aren't clobbered.
+function computeStageStampsFromDocs(
+  docs: ReadonlyArray<{ readonly [k: string]: unknown }>,
+): Partial<Record<'quotedAt' | 'acceptedAt' | 'paidAt', number>> {
+  const out: Partial<Record<'quotedAt' | 'acceptedAt' | 'paidAt', number>> = {};
+  const minPositive = (values: number[]): number | null => {
+    const filtered = values.filter((n) => Number.isFinite(n) && n > 0);
+    return filtered.length ? Math.min(...filtered) : null;
+  };
+
+  const sentAts = docs.map((d) => toMillis(d.sentAt));
+  const sent = minPositive(sentAts);
+  if (sent !== null) out.quotedAt = sent;
+
+  const acceptedAts = docs.map((d) =>
+    toMillis(d.acceptedAt ?? d.respondedAt),
+  );
+  const accepted = minPositive(acceptedAts);
+  if (accepted !== null) out.acceptedAt = accepted;
+
+  const paidAts = docs.map((d) => toMillis(d.paidInFullAt ?? d.paidAt));
+  const paid = minPositive(paidAts);
+  if (paid !== null) out.paidAt = paid;
+
+  return out;
 }
 
 function toMillis(v: unknown): number {
