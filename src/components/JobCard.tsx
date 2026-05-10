@@ -1,7 +1,7 @@
 /**
  * JobCard — compact card shown in the Jobs list.
  *
- * Simpler than DocumentCard. Shows the customer, address, stage chip,
+ * Shows the customer, address, stage chip,
  * a single right-aligned headline price (matches ViewJob's header), and
  * a status line with the most recent stage event (e.g. "Quote sent 2h
  * ago"). Tap → ViewJobScreen.
@@ -141,9 +141,9 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
     return totalQuoted;
   });
 
-  // Idle bob + tilt — ported from the old DocumentCard so the list
-  // feels alive rather than static. Each card picks its own duration
-  // and direction so the stack doesn't breathe in lockstep.
+  // Idle bob + tilt so the list feels alive rather than static. Each
+  // card picks its own duration and direction so the stack doesn't
+  // breathe in lockstep.
   const idleAnim = useRef(new Animated.Value(0)).current;
   const idleTilt = useRef(new Animated.Value(0)).current;
   const bobDurationRef = useRef(2400 + Math.random() * 1200);

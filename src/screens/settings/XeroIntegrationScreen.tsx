@@ -3,12 +3,15 @@
  * Connect/disconnect Xero, view sync status, manage settings
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
+  AppState,
+  type AppStateStatus,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   Text,
   Surface,
@@ -34,13 +37,16 @@ export function XeroIntegrationScreen() {
     setXeroConnection,
     subscriptionStatus,
     invoices,
+    quotes,
     xeroBulkSync,
+    pushQuoteToXero,
     xeroLoading,
   } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const [loading, setLoading] = useState(false);
+  const [bulkSyncing, setBulkSyncing] = useState(false);
   const [checkingConnection, setCheckingConnection] = useState(true);
   const [alertModal, setAlertModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'info'; title: string; message: string }>({ visible: false, type: 'info', title: '', message: '' });
 
@@ -48,18 +54,21 @@ export function XeroIntegrationScreen() {
     setAlertModal({ visible: true, type, title, message });
   };
 
-  // Count unsynced invoices
+  // Unsynced invoices: any non-draft invoice that hasn't successfully synced.
   const unsyncedInvoices = invoices.filter(
     (inv) => inv.status !== 'draft' && inv.xeroSyncStatus !== 'synced'
   );
+  // Unsynced quotes: only accepted ones — sent-but-not-accepted quotes are
+  // intentionally not bulk-pushed so we don't dump the tradie's open
+  // pipeline into Xero. The auto-trigger handles new acceptances; this
+  // covers the existing accepted-quote backfill (Tracy's QU-177828 case).
+  const unsyncedQuotes = quotes.filter(
+    (q) => q.status === 'accepted' && q.xeroSyncStatus !== 'synced'
+  );
+  const totalUnsynced = unsyncedInvoices.length + unsyncedQuotes.length;
 
-  // Check connection on mount
-  useEffect(() => {
-    checkConnection();
-  }, []);
-
-  const checkConnection = async () => {
-    setCheckingConnection(true);
+  const checkConnection = useCallback(async (opts: { showSpinner?: boolean } = {}) => {
+    if (opts.showSpinner !== false) setCheckingConnection(true);
     try {
       // Timeout after 5 seconds to avoid blank screen
       const timeout = new Promise<{ connected: false }>((resolve) =>
@@ -77,15 +86,32 @@ export function XeroIntegrationScreen() {
           lastSyncAt: status.lastSyncAt,
           syncEnabled: status.syncEnabled ?? true,
         });
+        return true;
       } else {
         setXeroConnection(null);
+        return false;
       }
     } catch {
-      // Silently fail — just show disconnected state
+      return false;
     } finally {
-      setCheckingConnection(false);
+      if (opts.showSpinner !== false) setCheckingConnection(false);
     }
-  };
+  }, [setXeroConnection]);
+
+  // Re-check whenever the screen regains focus (e.g. user navigated away
+  // and back) and whenever the app comes back to the foreground (e.g. user
+  // returned from the Xero OAuth browser tab on Android, where the in-app
+  // browser doesn't always trigger our resume callback). Cheap — single
+  // HTTPS round-trip, server-cached by tokenExpiresAt.
+  useFocusEffect(
+    useCallback(() => {
+      checkConnection({ showSpinner: false });
+      const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+        if (next === 'active') checkConnection({ showSpinner: false });
+      });
+      return () => sub.remove();
+    }, [checkConnection]),
+  );
 
   const handleConnect = async () => {
     if (!isPro) {
@@ -99,9 +125,19 @@ export function XeroIntegrationScreen() {
       await WebBrowser.openBrowserAsync(authUrl, {
         dismissButtonStyle: 'done',
       });
-      // Browser closed — re-check connection (user may have completed OAuth)
+      // Browser closed — poll briefly for the connection to land. The OAuth
+      // callback fires server-side AFTER the browser dismisses, so a single
+      // immediate check often races and reports "not connected" when in
+      // fact the user just authorised. Poll every 2s for up to ~20s,
+      // stopping as soon as the connection appears.
       setCheckingConnection(true);
-      await checkConnection();
+      const start = Date.now();
+      while (Date.now() - start < 20_000) {
+        const connected = await checkConnection({ showSpinner: false });
+        if (connected) break;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      setCheckingConnection(false);
     } catch (error: any) {
       showAlert('error', 'Connection Failed', error.message || 'Could not start Xero connection. Please try again.');
     } finally {
@@ -129,22 +165,67 @@ export function XeroIntegrationScreen() {
   };
 
   const handleBulkSync = async () => {
-    const ids = unsyncedInvoices.map((inv) => inv.id);
-    if (ids.length === 0) {
-      showAlert('success', 'All Synced', 'All your invoices are already synced to Xero.');
+    if (totalUnsynced === 0) {
+      showAlert('success', 'All Synced', 'Everything is already synced to Xero.');
       return;
     }
 
+    setBulkSyncing(true);
+    let invoiceSuccess = 0;
+    let invoiceTotal = 0;
+    let quoteSuccess = 0;
+    const quoteFailures: { ref: string; reason: string }[] = [];
+
     try {
-      const result = await xeroBulkSync(ids);
-      showAlert(
-        result.successCount > 0 ? 'success' : 'error',
-        'Sync Complete',
-        `${result.successCount} of ${result.totalCount} invoices synced successfully.`
-      );
+      // Invoices first — server-side bulk endpoint handles them in one shot.
+      if (unsyncedInvoices.length > 0) {
+        const ids = unsyncedInvoices.map((inv) => inv.id);
+        const result = await xeroBulkSync(ids);
+        invoiceSuccess = result.successCount;
+        invoiceTotal = result.totalCount;
+      }
+
+      // Quotes go one-by-one through the per-doc push because each quote
+      // hits the Xero Quotes API (different endpoint from the invoice bulk
+      // endpoint). Volume in practice is small — backfill only.
+      for (const q of unsyncedQuotes) {
+        try {
+          await pushQuoteToXero(q);
+          quoteSuccess += 1;
+        } catch (err: any) {
+          quoteFailures.push({
+            ref: q.quoteNumber || q.id,
+            reason: err?.message || 'Unknown error',
+          });
+        }
+      }
+
+      const lines: string[] = [];
+      if (invoiceTotal > 0) lines.push(`${invoiceSuccess} of ${invoiceTotal} invoices synced.`);
+      if (unsyncedQuotes.length > 0) {
+        lines.push(`${quoteSuccess} of ${unsyncedQuotes.length} quotes synced.`);
+      }
+      if (quoteFailures.length > 0) {
+        console.warn('[XeroIntegrationScreen] bulk sync failures:', quoteFailures);
+        lines.push('');
+        // Server now maps Xero errors to actionable text (e.g. duplicate
+        // contact warnings, token expiry). Surface the first one — that's
+        // usually enough for the tradie to act. Subsequent failures often
+        // share the same root cause.
+        lines.push(`${quoteFailures[0].ref}: ${quoteFailures[0].reason}`);
+        if (quoteFailures.length > 1) {
+          const others = quoteFailures.slice(1).map((f) => f.ref).join(', ');
+          lines.push(`Also failed: ${others}`);
+        }
+      }
+
+      const allOk = invoiceSuccess === invoiceTotal && quoteFailures.length === 0;
+      showAlert(allOk ? 'success' : 'error', 'Sync Complete', lines.join('\n') || 'Nothing to sync.');
       await checkConnection();
     } catch (error: any) {
-      showAlert('error', 'Sync Failed', error.message || 'Some invoices failed to sync.');
+      showAlert('error', 'Sync Failed', error.message || 'Some items failed to sync.');
+    } finally {
+      setBulkSyncing(false);
     }
   };
 
@@ -256,35 +337,53 @@ export function XeroIntegrationScreen() {
 
             <View style={styles.syncSummary}>
               <View style={styles.syncStat}>
-                <Text style={styles.syncStatNumber}>{invoices.filter(i => i.xeroSyncStatus === 'synced').length}</Text>
+                <Text style={styles.syncStatNumber}>
+                  {invoices.filter(i => i.xeroSyncStatus === 'synced').length
+                    + quotes.filter(q => q.xeroSyncStatus === 'synced').length}
+                </Text>
                 <Text style={styles.syncStatLabel}>Synced</Text>
               </View>
               <View style={styles.syncStat}>
-                <Text style={[styles.syncStatNumber, unsyncedInvoices.length > 0 && { color: '#F59E0B' }]}>
-                  {unsyncedInvoices.length}
+                <Text style={[styles.syncStatNumber, totalUnsynced > 0 && { color: '#F59E0B' }]}>
+                  {totalUnsynced}
                 </Text>
                 <Text style={styles.syncStatLabel}>Unsynced</Text>
               </View>
               <View style={styles.syncStat}>
                 <Text style={[styles.syncStatNumber, { color: '#d32f2f' }]}>
-                  {invoices.filter(i => i.xeroSyncStatus === 'error').length}
+                  {invoices.filter(i => i.xeroSyncStatus === 'error').length
+                    + quotes.filter(q => q.xeroSyncStatus === 'error').length}
                 </Text>
                 <Text style={styles.syncStatLabel}>Errors</Text>
               </View>
             </View>
 
-            {unsyncedInvoices.length > 0 && (
-              <Button
-                mode="contained"
-                onPress={handleBulkSync}
-                loading={xeroLoading}
-                disabled={xeroLoading}
-                style={styles.syncButton}
-                buttonColor={colors.primary}
-                icon="sync"
-              >
-                Sync {unsyncedInvoices.length} invoice{unsyncedInvoices.length === 1 ? '' : 's'}
-              </Button>
+            {totalUnsynced > 0 && (
+              <>
+                <Button
+                  mode="contained"
+                  onPress={handleBulkSync}
+                  loading={xeroLoading || bulkSyncing}
+                  disabled={xeroLoading || bulkSyncing}
+                  style={styles.syncButton}
+                  buttonColor={colors.primary}
+                  icon="sync"
+                >
+                  {`Sync ${totalUnsynced} item${totalUnsynced === 1 ? '' : 's'}`}
+                </Button>
+                <Text style={styles.syncBreakdown}>
+                  {[
+                    unsyncedQuotes.length > 0
+                      ? `${unsyncedQuotes.length} accepted quote${unsyncedQuotes.length === 1 ? '' : 's'}`
+                      : null,
+                    unsyncedInvoices.length > 0
+                      ? `${unsyncedInvoices.length} invoice${unsyncedInvoices.length === 1 ? '' : 's'}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' + ')}
+                </Text>
+              </>
             )}
           </Surface>
         )}
@@ -302,13 +401,13 @@ export function XeroIntegrationScreen() {
           <View style={styles.howItWorksItem}>
             <MaterialCommunityIcons name="numeric-2-circle" size={24} color={colors.primary} />
             <Text style={styles.howItWorksText}>
-              Tap "Push to Xero" on any invoice, or sync all at once
+              Accepted quotes auto-push to Xero. Invoices push when sent.
             </Text>
           </View>
           <View style={styles.howItWorksItem}>
             <MaterialCommunityIcons name="numeric-3-circle" size={24} color={colors.primary} />
             <Text style={styles.howItWorksText}>
-              Invoices, contacts, and payments sync automatically
+              Tap "Push to Xero" on any job to re-sync, or use the bulk button above.
             </Text>
           </View>
         </Surface>
@@ -417,6 +516,12 @@ const styles = StyleSheet.create({
   syncStatNumber: { fontSize: 24, fontWeight: '700', color: colors.text },
   syncStatLabel: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   syncButton: { marginTop: 4 },
+  syncBreakdown: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 6,
+    textAlign: 'center',
+  },
   howItWorksItem: {
     flexDirection: 'row',
     alignItems: 'center',

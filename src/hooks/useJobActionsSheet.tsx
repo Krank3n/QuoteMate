@@ -55,6 +55,7 @@ export function useJobActionsSheet(
   const businessSettings = useStore((s) => s.businessSettings);
   const xeroConnection = useStore((s) => s.xeroConnection);
   const pushInvoiceToXero = useStore((s) => s.pushInvoiceToXero);
+  const pushQuoteToXero = useStore((s) => s.pushQuoteToXero);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
   const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
@@ -166,12 +167,29 @@ export function useJobActionsSheet(
       }
       case 'pushToXero': {
         const doc = primaryDocForJob(job);
-        if (!doc || doc.type !== 'invoice') return;
+        if (!doc) return;
+        const noun = doc.type === 'invoice' ? 'Invoice' : 'Quote';
         try {
-          await pushInvoiceToXero(documentToInvoice(doc));
-          Alert.alert('Synced to Xero', 'Invoice pushed successfully.');
+          if (doc.type === 'invoice') {
+            await pushInvoiceToXero(documentToInvoice(doc));
+          } else {
+            await pushQuoteToXero(documentToQuote(doc));
+          }
+          showAlert({
+            type: 'success',
+            icon: 'cloud-check',
+            title: 'Synced to Xero',
+            message: `${noun} pushed successfully.`,
+            primaryButtonText: 'OK',
+          });
         } catch (e: any) {
-          Alert.alert('Xero sync failed', e?.message || 'Try again in a moment.');
+          showAlert({
+            type: 'error',
+            icon: 'cloud-alert',
+            title: 'Xero sync failed',
+            message: e?.message || 'Try again in a moment.',
+            primaryButtonText: 'OK',
+          });
         }
         break;
       }

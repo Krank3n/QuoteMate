@@ -5,7 +5,7 @@
  */
 
 import { auth } from '../config/firebase';
-import { Invoice, Contact } from '../types';
+import { Invoice, Quote, Contact } from '../types';
 import { generateId } from '../utils/generateId';
 
 // Firebase Functions URL configuration
@@ -30,10 +30,37 @@ async function xeroFetch(endpoint: string, body?: any): Promise<any> {
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  const data = await response.json();
+  // Read the raw body once so we can fall back to text on non-JSON responses
+  // (a 404 from Firebase returns an HTML page — JSON.parse on that is the
+  // unhelpful "Unexpected character: <" error tradies were seeing).
+  const raw = await response.text();
+  let data: any = null;
+  try {
+    data = raw ? JSON.parse(raw) : null;
+  } catch {
+    // Log technical detail for debugging; show a friendly message to the user.
+    console.warn(
+      `[xeroService] non-JSON response from ${endpoint} (${response.status}):`,
+      raw.slice(0, 500),
+    );
+    throw new Error(
+      "Couldn't reach the Xero sync service. Please try again in a moment.",
+    );
+  }
 
   if (!response.ok) {
-    throw new Error(data.error || `Request failed (${response.status})`);
+    // Server-side error mapping (mapXeroError on the cloud function) already
+    // produces tradie-friendly text — surface it. Fall back to a generic
+    // message only when the server didn't supply one.
+    console.warn(
+      `[xeroService] ${endpoint} failed (${response.status}):`,
+      data?.error || data,
+      data?.details ? `details=${String(data.details).slice(0, 200)}` : '',
+    );
+    if (data?.error && typeof data.error === 'string') {
+      throw new Error(data.error);
+    }
+    throw new Error("Xero couldn't process this request. Please try again.");
   }
 
   return data;
@@ -110,6 +137,27 @@ export async function pushInvoiceToXero(invoice: Invoice): Promise<{
   };
 
   return xeroFetch('pushInvoiceToXero', { invoice: serialized });
+}
+
+/**
+ * Push a single quote to Xero as a Xero Quote (status DRAFT / SENT /
+ * ACCEPTED / DECLINED depending on the QuoteMate stage).
+ */
+export async function pushQuoteToXero(quote: Quote): Promise<{
+  success: boolean;
+  xeroQuoteId?: string;
+  xeroContactId?: string;
+  xeroTotal?: number;
+}> {
+  const serialized = {
+    ...quote,
+    createdAt: quote.createdAt instanceof Date ? quote.createdAt.toISOString() : quote.createdAt,
+    updatedAt: quote.updatedAt instanceof Date ? quote.updatedAt.toISOString() : quote.updatedAt,
+    respondedAt: quote.respondedAt instanceof Date ? quote.respondedAt.toISOString() : quote.respondedAt,
+    xeroSyncedAt: quote.xeroSyncedAt instanceof Date ? quote.xeroSyncedAt.toISOString() : quote.xeroSyncedAt,
+  };
+
+  return xeroFetch('pushQuoteToXero', { quote: serialized });
 }
 
 /**

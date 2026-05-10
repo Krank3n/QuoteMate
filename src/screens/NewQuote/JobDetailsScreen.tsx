@@ -13,7 +13,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
-  findNodeHandle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -128,6 +127,11 @@ export function JobDetailsScreen() {
   // captured via onLayout. measureLayout against the inner scroll node was
   // flaky (worked first tap then drifted), this is the reliable signal.
   const descriptionCardYRef = useRef(0);
+  // Y of the description input wrapper relative to its parent Surface card.
+  // Combined with descriptionCardYRef to compute an absolute scroll target —
+  // measureLayout on Fabric requires a host-component ref (not a numeric
+  // node handle from findNodeHandle), so we side-step it with onLayout.
+  const descriptionYInCardRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
   const [tourActive, setTourActive] = useState(false);
   const [tourAnnotatorOpen, setTourAnnotatorOpen] = useState(false);
@@ -791,23 +795,17 @@ export function JobDetailsScreen() {
 
   // Scroll the pills row to the top of the viewport when the description
   // input is focused — gives the user a clean view of "what's left to
-  // mention" the moment they start typing. Uses measureLayout because the
-  // pills are nested inside the Surface, so the View's own onLayout y is
-  // relative to the Surface, not the scroll container.
+  // mention" the moment they start typing. The description wrapper's
+  // onLayout y is relative to the Surface card, so we add the card's y
+  // (also captured via onLayout) to get the absolute offset in the scroll
+  // container.
   const handleDescriptionFocus = () => {
     // Small delay so any keyboard-driven auto-scroll resolves first; we
     // want the final scroll position to be ours, not the keyboard's.
     setTimeout(() => {
-      const scrollNode = scrollRef.current ? findNodeHandle(scrollRef.current as any) : null;
-      const target = descriptionRef.current as any;
-      if (!scrollNode || !target?.measureLayout) return;
-      target.measureLayout(
-        scrollNode,
-        (_x: number, y: number) => {
-          scrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
-        },
-        () => {}
-      );
+      const absoluteY = descriptionCardYRef.current + descriptionYInCardRef.current;
+      if (absoluteY <= 0) return;
+      scrollRef.current?.scrollTo({ y: Math.max(0, absoluteY - 8), animated: true });
     }, 80);
   };
 
@@ -1359,7 +1357,12 @@ export function JobDetailsScreen() {
 
         {/* Job Description + Clean-up Button + Title (wrapped for tour highlights) */}
         <View ref={descriptionCleanedRef}>
-        <View ref={descriptionRef}>
+        <View
+          ref={descriptionRef}
+          onLayout={(e) => {
+            descriptionYInCardRef.current = e.nativeEvent.layout.y;
+          }}
+        >
         {nichePills.length > 0 && (
           <ListeningPills pills={nichePills} state={pillState} />
         )}

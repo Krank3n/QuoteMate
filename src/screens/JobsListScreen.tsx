@@ -28,6 +28,8 @@ import { SkeletonCardList } from '../components/SkeletonCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap } from '../utils/haptics';
+import { applyJobStageChange } from '../utils/applyJobStageChange';
+import { pickPrimaryDoc } from '../components/StickyJobActionBar';
 
 type FilterKind = 'all' | 'active' | 'scheduled' | 'completed' | 'archived';
 
@@ -67,6 +69,10 @@ export function JobsListScreen() {
   const { jobs, jobsLoaded, loadJobs, saveJob } = useJobStore();
   const canCreateQuote = useStore((s) => s.canCreateQuote);
   const createNewQuote = useStore((s) => s.createNewQuote);
+  const documents = useStore((s) => s.documents);
+  const saveQuote = useStore((s) => s.saveQuote);
+  const saveInvoice = useStore((s) => s.saveInvoice);
+  const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterKind>('active');
@@ -138,11 +144,22 @@ export function JobsListScreen() {
     if (!stageSheetJob) return;
     const job = stageSheetJob;
     setStageSheetJob(null);
-    // UI is flexible — the tradie can jump to any stage. The shared state
-    // machine is enforced server-side for correctness (future phase),
-    // not here.
+    // UI is flexible — the tradie can jump to any stage. The shared helper
+    // also propagates the stage to the underlying primary quote-doc so
+    // downstream features (Push to Xero, Continue Draft banner) stay
+    // consistent.
     try {
-      await saveJob({ ...job, stage: target });
+      const attached = documents.filter((d) => d.jobId === job.id);
+      const primaryDoc = job.primaryDocumentId
+        ? documents.find((d) => d.id === job.primaryDocumentId) ?? pickPrimaryDoc(attached)
+        : pickPrimaryDoc(attached);
+      await applyJobStageChange({
+        job,
+        target,
+        primaryDoc,
+        saveJob,
+        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
+      });
     } catch {
       Alert.alert('Error', 'Failed to update stage. Please try again.');
     }

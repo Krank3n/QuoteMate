@@ -164,6 +164,7 @@ interface AppState {
   loadXeroConnection: () => Promise<void>;
   setXeroConnection: (connection: XeroConnection | null) => void;
   pushInvoiceToXero: (invoice: Invoice) => Promise<void>;
+  pushQuoteToXero: (quote: Quote) => Promise<void>;
   pushPaymentToXero: (invoiceId: string, xeroInvoiceId: string, amount: number, date: Date, method?: string) => Promise<void>;
   xeroBulkSync: (invoiceIds: string[]) => Promise<{ successCount: number; totalCount: number }>;
 
@@ -555,10 +556,27 @@ export const useStore = create<AppState>((set, get) => ({
         }
       }
 
-      // Assign quote number for new quotes that don't have one
-      if (isNewQuote && !calculatedQuote.quoteNumber) {
+      // Assign a quote number when the quote is leaving draft state without
+      // one. New quotes get a number on first save (the existing path); the
+      // extra arm covers the case where a tradie advances a never-sent draft
+      // straight to accepted (e.g. via the Job stage sheet) — without this,
+      // the legacy quote.quoteNumber stays undefined and downstream features
+      // (Xero push, customer-facing PDF) end up with a missing number.
+      const needsNumber =
+        !calculatedQuote.quoteNumber &&
+        (isNewQuote || calculatedQuote.status !== 'draft');
+      if (needsNumber) {
         const quoteNumber = await getNextQuoteNumber();
         calculatedQuote = { ...calculatedQuote, quoteNumber };
+      }
+
+      // Once the quote is past draft, clear the wizard's draftStep marker.
+      // It exists so the Dashboard "Continue Draft" banner can deep-link
+      // back into the wizard mid-flow; once the tradie has marked the quote
+      // accepted (or sent), continuing the draft no longer makes sense and
+      // the banner / "Continue Draft" sticky CTA must hide.
+      if (calculatedQuote.status !== 'draft' && calculatedQuote.draftStep) {
+        calculatedQuote = { ...calculatedQuote, draftStep: undefined };
       }
 
       let updatedQuotes: Quote[];
@@ -1243,6 +1261,11 @@ export const useStore = create<AppState>((set, get) => ({
       ...(depositCredit > 0
         ? { depositCredit, depositCreditFromQuoteId: quote.id }
         : {}),
+      // Carry the Xero contact across so the invoice push reuses the contact
+      // the quote-side push already created — avoids a duplicate contact in
+      // Xero. xeroQuoteId is preserved on the quote itself; the invoice push
+      // sets Reference to the source quote number for the audit trail.
+      ...(quote.xeroContactId ? { xeroContactId: quote.xeroContactId } : {}),
     };
 
     set({ currentInvoice: newInvoice });
@@ -1955,12 +1978,40 @@ export const useStore = create<AppState>((set, get) => ({
 
   loadXeroConnection: async () => {
     try {
+      // Show the AsyncStorage-cached connection immediately so the UI doesn't
+      // flicker on app start, then refresh from server. Cache-only would lie
+      // across sign-outs and account switches: AsyncStorage is per-device, so
+      // a different user signing in on the same device would inherit the
+      // previous account's Xero connection until they opened the integration
+      // screen. The server doc at users/{uid}/settings/xeroConnection is the
+      // source of truth.
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.XERO_CONNECTION);
       if (stored) {
         set({ xeroConnection: JSON.parse(stored) });
       }
+
+      if (!auth.currentUser) return;
+      const xeroService = await import('../services/xeroService');
+      const status = await xeroService.checkXeroConnection();
+      if (status.connected) {
+        const conn: XeroConnection = {
+          tenantId: status.tenantId!,
+          tenantName: status.tenantName!,
+          connectedAt: status.connectedAt!,
+          lastSyncAt: status.lastSyncAt,
+          syncEnabled: status.syncEnabled ?? true,
+        };
+        set({ xeroConnection: conn });
+        await AsyncStorage.setItem(STORAGE_KEYS.XERO_CONNECTION, JSON.stringify(conn));
+      } else {
+        set({ xeroConnection: null });
+        await AsyncStorage.removeItem(STORAGE_KEYS.XERO_CONNECTION);
+      }
     } catch (error) {
-      // silently ignore
+      // Network failure — leave whatever AsyncStorage put in place. We'd
+      // rather show stale-connected and have the next push fail with a
+      // clear "session expired" message than wipe a working connection on
+      // a transient connectivity blip.
     }
   },
 
@@ -2020,6 +2071,53 @@ export const useStore = create<AppState>((set, get) => ({
       );
       await AsyncStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(errorInvoices));
       set({ invoices: errorInvoices });
+      throw error;
+    }
+  },
+
+  pushQuoteToXero: async (quote: Quote) => {
+    const { quotes } = get();
+    const xeroService = await import('../services/xeroService');
+
+    const syncingQuotes = quotes.map((q) =>
+      q.id === quote.id ? { ...q, xeroSyncStatus: 'syncing' as XeroSyncStatus } : q
+    );
+    set({ quotes: syncingQuotes });
+
+    try {
+      const result = await xeroService.pushQuoteToXero(quote);
+
+      const updatedQuote: Quote = {
+        ...quote,
+        xeroQuoteId: result.xeroQuoteId,
+        xeroContactId: result.xeroContactId,
+        xeroSyncStatus: 'synced' as XeroSyncStatus,
+        xeroSyncedAt: new Date(),
+        xeroSyncError: undefined,
+        updatedAt: new Date(),
+      };
+
+      const updatedQuotes = get().quotes.map((q) =>
+        q.id === quote.id ? updatedQuote : q
+      );
+
+      await AsyncStorage.setItem(STORAGE_KEYS.QUOTES, JSON.stringify(updatedQuotes));
+      set({ quotes: updatedQuotes });
+
+      const { xeroConnection } = get();
+      if (xeroConnection) {
+        const updatedConnection = { ...xeroConnection, lastSyncAt: new Date().toISOString() };
+        set({ xeroConnection: updatedConnection });
+        await AsyncStorage.setItem(STORAGE_KEYS.XERO_CONNECTION, JSON.stringify(updatedConnection));
+      }
+    } catch (error: any) {
+      const errorQuotes = get().quotes.map((q) =>
+        q.id === quote.id
+          ? { ...q, xeroSyncStatus: 'error' as XeroSyncStatus, xeroSyncError: error.message || 'Sync failed' }
+          : q
+      );
+      await AsyncStorage.setItem(STORAGE_KEYS.QUOTES, JSON.stringify(errorQuotes));
+      set({ quotes: errorQuotes });
       throw error;
     }
   },
