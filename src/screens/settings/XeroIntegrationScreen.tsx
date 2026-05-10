@@ -105,11 +105,17 @@ export function XeroIntegrationScreen() {
   // HTTPS round-trip, server-cached by tokenExpiresAt.
   useFocusEffect(
     useCallback(() => {
-      checkConnection({ showSpinner: false });
+      let cancelled = false;
+      checkConnection({ showSpinner: false }).finally(() => {
+        if (!cancelled) setCheckingConnection(false);
+      });
       const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
         if (next === 'active') checkConnection({ showSpinner: false });
       });
-      return () => sub.remove();
+      return () => {
+        cancelled = true;
+        sub.remove();
+      };
     }, [checkConnection]),
   );
 

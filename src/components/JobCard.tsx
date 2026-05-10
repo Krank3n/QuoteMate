@@ -141,6 +141,18 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
     return totalQuoted;
   });
 
+  // Aggregate Xero sync state across the job's docs so the card can
+  // show a small status pip on the meta row. 'error' wins over 'synced'
+  // — a failed push is more important to surface than a successful one.
+  const xeroSyncStatus = useStore((s) => {
+    const docs = s.documents.filter(
+      (d) => d.jobId === job.id && d.stage !== 'cancelled',
+    );
+    if (docs.some((d) => d.xeroSyncStatus === 'error')) return 'error' as const;
+    if (docs.some((d) => d.xeroSyncStatus === 'synced')) return 'synced' as const;
+    return undefined;
+  });
+
   // Idle bob + tilt so the list feels alive rather than static. Each
   // card picks its own duration and direction so the stack doesn't
   // breathe in lockstep.
@@ -355,6 +367,21 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
           <Text style={styles.metaText} numberOfLines={1}>
             {status.label} {formatUpdatedAt(status.ms)}
           </Text>
+          {xeroSyncStatus === 'synced' ? (
+            <MaterialCommunityIcons
+              name="cloud-check"
+              size={14}
+              color={colors.success}
+              accessibilityLabel="Synced to Xero"
+            />
+          ) : xeroSyncStatus === 'error' ? (
+            <MaterialCommunityIcons
+              name="cloud-alert"
+              size={14}
+              color={colors.error}
+              accessibilityLabel="Xero sync failed"
+            />
+          ) : null}
         </View>
 
         {!terminal ? (
