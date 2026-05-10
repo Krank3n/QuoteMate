@@ -189,11 +189,16 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     dueDate: type === 'invoice' ? toMs(s.dueDate) : undefined,
     paymentTerms: type === 'invoice' ? s.paymentTerms : undefined,
     customPaymentDays: type === 'invoice' ? s.customPaymentDays : undefined,
+    // Xero integration — both quote-side (xeroQuoteId) and invoice-side
+    // (xeroInvoiceId) records project. xeroContactId is shared so the
+    // invoice generated from a quote re-uses the contact and avoids
+    // duplicate-creating it in Xero.
     xeroInvoiceId: type === 'invoice' ? s.xeroInvoiceId : undefined,
-    xeroContactId: type === 'invoice' ? s.xeroContactId : undefined,
-    xeroSyncStatus: type === 'invoice' ? s.xeroSyncStatus : undefined,
-    xeroSyncedAt: type === 'invoice' ? toMs(s.xeroSyncedAt) : undefined,
-    xeroSyncError: type === 'invoice' ? s.xeroSyncError : undefined,
+    xeroQuoteId: type === 'quote' ? s.xeroQuoteId : undefined,
+    xeroContactId: s.xeroContactId,
+    xeroSyncStatus: s.xeroSyncStatus,
+    xeroSyncedAt: toMs(s.xeroSyncedAt),
+    xeroSyncError: s.xeroSyncError,
     squarePaymentLinkId: type === 'invoice' ? s.squarePaymentLinkId : undefined,
     squarePaymentLinkUrl:
       type === 'invoice' ? s.squarePaymentLinkUrl : undefined,
@@ -517,6 +522,11 @@ export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocument
     disputeId: doc.disputeId,
     invoiceId: doc.legacyInvoiceId,
     invoicedAt: fromMs(doc.invoicedAt),
+    xeroQuoteId: doc.xeroQuoteId,
+    xeroContactId: doc.xeroContactId,
+    xeroSyncStatus: doc.xeroSyncStatus,
+    xeroSyncedAt: fromMs(doc.xeroSyncedAt),
+    xeroSyncError: doc.xeroSyncError,
   };
 }
 

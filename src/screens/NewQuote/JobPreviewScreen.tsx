@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity, Animated } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity, Animated, Pressable } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
@@ -18,6 +18,7 @@ import {
   Title,
   TextInput,
   Menu,
+  ActivityIndicator,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -470,9 +471,12 @@ export function JobPreviewScreen() {
           };
         }
       } else {
+        // System print preview UI — full-screen rendered PDF with zoom,
+        // page navigation, and Save-as-PDF / Share from the overflow menu.
         await Print.printAsync({ html });
       }
-    } catch (error) {
+    } catch (error: any) {
+      Alert.alert('Could not open preview', error?.message || 'Please try again.');
     } finally {
       setIsPdfLoading(false);
     }
@@ -726,16 +730,26 @@ export function JobPreviewScreen() {
           />
         </Surface>
 
-        <Button
-          mode="outlined"
+        <Pressable
           onPress={handleViewPDF}
-          loading={isPdfLoading}
           disabled={isPdfLoading}
-          icon="file-pdf-box"
-          style={styles.viewPdfButton}
+          style={({ pressed }) => [
+            styles.previewButton,
+            pressed && styles.previewButtonPressed,
+            isPdfLoading && styles.previewButtonDisabled,
+          ]}
         >
-          View PDF Preview
-        </Button>
+          {isPdfLoading ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <MaterialCommunityIcons
+              name={'file-eye-outline' as any}
+              size={16}
+              color={colors.primary}
+            />
+          )}
+          <Text style={styles.previewButtonLabel}>Preview PDF</Text>
+        </Pressable>
         </WebContainer>
       </ScrollView>
 
@@ -1064,8 +1078,28 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontWeight: '600',
   },
-  viewPdfButton: {
+  previewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: colors.primaryBg,
+    borderWidth: 1,
+    borderColor: colors.primary + '33',
     marginBottom: 16,
+  },
+  previewButtonPressed: {
+    opacity: 0.8,
+  },
+  previewButtonDisabled: {
+    opacity: 0.55,
+  },
+  previewButtonLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
   },
   bottomBar: {
     flexDirection: 'column',

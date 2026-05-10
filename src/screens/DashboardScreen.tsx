@@ -18,6 +18,8 @@ import { format } from 'date-fns';
 
 import { useStore } from '../store/useStore';
 import { useJobStore } from '../store/useJobStore';
+import { applyJobStageChange } from '../utils/applyJobStageChange';
+import { pickPrimaryDoc } from '../components/StickyJobActionBar';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
@@ -402,7 +404,18 @@ export function DashboardScreen() {
     const job = stageSheetJob;
     setStageSheetJob(null);
     try {
-      await saveJob({ ...job, stage: target });
+      const documents = useStore.getState().documents;
+      const attached = documents.filter((d) => d.jobId === job.id);
+      const primaryDoc = job.primaryDocumentId
+        ? documents.find((d) => d.id === job.primaryDocumentId) ?? pickPrimaryDoc(attached)
+        : pickPrimaryDoc(attached);
+      await applyJobStageChange({
+        job,
+        target,
+        primaryDoc,
+        saveJob,
+        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
+      });
     } catch {
       Alert.alert('Error', 'Failed to update stage. Please try again.');
     }

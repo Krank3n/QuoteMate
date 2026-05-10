@@ -327,6 +327,16 @@ export interface Quote {
   // never touches the money. Append-only history; cancelling an order is done
   // through Reece's website, not QuoteMate.
   reeceOrders?: ReeceOrder[];
+
+  // Xero integration — populated when the quote is pushed to Xero as a Quote
+  // (status DRAFT / SENT / ACCEPTED / DECLINED). Contact id is shared with
+  // the invoice generated from this quote so we don't create duplicate
+  // contacts in Xero.
+  xeroQuoteId?: string;
+  xeroContactId?: string;
+  xeroSyncStatus?: XeroSyncStatus;
+  xeroSyncedAt?: Date;
+  xeroSyncError?: string;
 }
 
 export type SquareDisputeStatus =

@@ -51,6 +51,13 @@ export {
 } from './leadOutreach';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
 import {
+  buildXeroAuthHeaders,
+  pushQuoteToXeroCore,
+  persistQuoteSyncSuccess,
+  persistQuoteSyncError,
+} from './xeroSync';
+export { onDocumentAcceptedSyncXero } from './xeroSyncTriggers';
+import {
   sendDocumentEmail,
   loadDocumentForQuoteId,
   loadDocumentForInvoiceId,
@@ -6035,9 +6042,68 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
       return;
     }
 
+    // Phase-8: make sure the quote has a Job before flipping status. The
+    // wizard's saveDraft normally creates one via ensureJobForQuote, but
+    // any code path that wrote the quote without that step (legacy flows,
+    // imports) leaves the quote orphaned — onDocumentWriteSyncJob then
+    // bails because the Job doesn't exist, and the Jobs tab never sees
+    // the customer-accepted quote. Materialise here as a backstop.
+    let resolvedJobId: string | undefined =
+      typeof foundQuote.jobId === 'string' && foundQuote.jobId
+        ? foundQuote.jobId
+        : undefined;
+    if (!resolvedJobId && responseType === 'accepted') {
+      const customerName = (foundQuote.customerName || '').trim();
+      const customerEmail = (foundQuote.customerEmail || '').trim();
+      const customerPhone = (foundQuote.customerPhone || '').trim();
+      const jobAddress = (foundQuote.jobAddress || '').trim();
+      const jobName = (foundQuote.job?.name || '').trim();
+      if (customerName || customerEmail || customerPhone || jobAddress || jobName) {
+        const newJobRef = db.collection('users').doc(foundUserId)
+          .collection('jobs').doc();
+        const now = Date.now();
+        // Carry the quote's creation time across so the Job's age reflects
+        // when work was actually scoped, not when the customer happened to
+        // click accept. quotedAt comes from sentAt for the same reason.
+        const toMs = (v: unknown): number => {
+          if (!v) return 0;
+          const maybeTs = v as { toMillis?: () => number };
+          if (typeof maybeTs.toMillis === 'function') return maybeTs.toMillis();
+          if (v instanceof Date) return v.getTime();
+          if (typeof v === 'number') return v;
+          const parsed = Date.parse(String(v));
+          return Number.isFinite(parsed) ? parsed : 0;
+        };
+        const quoteCreatedAt = toMs(foundQuote.createdAt) || now;
+        const quoteSentAt = toMs(foundQuote.sentAt);
+        await newJobRef.set({
+          id: newJobRef.id,
+          userId: foundUserId,
+          customerName,
+          customerEmail,
+          customerPhone,
+          jobAddress,
+          name: jobName || 'Job',
+          description: foundQuote.job?.description || '',
+          stage: 'accepted',
+          acceptedAt: now,
+          ...(quoteSentAt > 0 ? { quotedAt: quoteSentAt } : {}),
+          documentIds: [],
+          totalQuoted: Number(foundQuote.total) || 0,
+          totalInvoiced: 0,
+          totalPaid: 0,
+          balanceDue: 0,
+          createdAt: quoteCreatedAt,
+          updatedAt: now,
+        });
+        resolvedJobId = newJobRef.id;
+      }
+    }
+
     // Process the response
     await quoteDoc.ref.update({
       status: responseType,
+      ...(resolvedJobId && !foundQuote.jobId ? { jobId: resolvedJobId } : {}),
       respondedAt: admin.firestore.FieldValue.serverTimestamp(),
       respondedBy: foundQuote.customerName || 'Client',
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -10242,6 +10308,72 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
       });
     } catch (error: any) {
       res.status(500).json({ error: 'Internal error syncing to Xero' });
+    }
+  });
+});
+
+/**
+ * Push a quote to Xero as a Xero Quote (status DRAFT / SENT / ACCEPTED /
+ * DECLINED). Mirrors pushInvoiceToXero in shape but hits the Quotes API and
+ * delegates to the shared helpers in xeroSync.ts so the HTTP path and the
+ * auto-push trigger can't drift.
+ */
+export const pushQuoteToXero = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { quote } = req.body;
+    if (!quote || !quote.id) {
+      res.status(400).json({ error: 'Missing quote data' });
+      return;
+    }
+
+    const tokens = await getXeroTokens(decodedToken.uid);
+    if (!tokens) {
+      res.status(401).json({ error: 'Xero not connected or token expired. Please reconnect.' });
+      return;
+    }
+
+    const headers = buildXeroAuthHeaders(tokens.accessToken, tokens.tenantId);
+
+    try {
+      const result = await pushQuoteToXeroCore(headers, quote);
+      if (!result.ok) {
+        functions.logger.error('xero_quote_push_failed', {
+          uid: decodedToken.uid,
+          quoteId: quote.id,
+          quoteNumber: quote.quoteNumber,
+          error: result.error,
+          details: result.details,
+        });
+        await persistQuoteSyncError(decodedToken.uid, quote.id, result.details || result.error);
+        res.status(400).json({ error: result.error, details: result.details });
+        return;
+      }
+
+      await persistQuoteSyncSuccess(decodedToken.uid, quote.id, result);
+
+      res.status(200).json({
+        success: true,
+        xeroQuoteId: result.xeroQuoteId,
+        xeroContactId: result.xeroContactId,
+        xeroTotal: result.xeroTotal,
+      });
+    } catch (error: any) {
+      functions.logger.error('xero_quote_push_threw', {
+        uid: decodedToken.uid,
+        quoteId: quote.id,
+        error: error?.message,
+        stack: error?.stack,
+      });
+      await persistQuoteSyncError(decodedToken.uid, quote.id, error?.message || 'Unknown error');
+      res.status(500).json({ error: 'Internal error syncing quote to Xero' });
     }
   });
 });

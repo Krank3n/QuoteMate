@@ -1503,6 +1503,12 @@ export const convertDocumentToInvoice = functions.https.onCall(
         paymentTerms: 'net_14',
         total: adjustedTotal,
         legacyInvoiceId: docId,
+        // Xero: keep xeroQuoteId (historical link, used as Reference on the
+        // pushed invoice) and xeroContactId (re-use Xero contact, avoid a
+        // duplicate). Reset sync status so the invoice push fires fresh.
+        xeroSyncStatus: 'not_synced',
+        xeroSyncedAt: admin.firestore.FieldValue.delete(),
+        xeroSyncError: admin.firestore.FieldValue.delete(),
       },
     });
 

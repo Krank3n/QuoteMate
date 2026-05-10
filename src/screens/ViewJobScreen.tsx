@@ -49,6 +49,7 @@ import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { applyStageChange } from '../utils/applyStageChange';
+import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { formatScheduledDateLong } from '../utils/formatSchedule';
 import { selectionTap, lightTap } from '../utils/haptics';
@@ -184,23 +185,13 @@ export function ViewJobScreen() {
 
   const applyStageTransition = async (target: JobStage) => {
     try {
-      const patch: Partial<Job> = { stage: target };
-      // Coupling: stage backward to 'quoted' should revert the primary
-      // doc too so the customer-facing state matches.
-      if (
-        target === 'quoted' &&
-        actionableDoc &&
-        actionableDoc.type === 'quote' &&
-        actionableDoc.stage === 'quote_accepted'
-      ) {
-        await applyStageChange(actionableDoc, 'quote_sent', {
-          saveQuote,
-          saveInvoice,
-          createInvoiceFromQuote,
-          navigation,
-        });
-      }
-      await saveJob({ ...job, ...patch });
+      await applyJobStageChange({
+        job,
+        target,
+        primaryDoc: actionableDoc,
+        saveJob,
+        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
+      });
     } catch (err) {
       console.error('[ViewJob] applyStageTransition failed', err);
       showAlert({
