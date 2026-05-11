@@ -55,3 +55,32 @@ export function allowedNextStages(from: DocumentStage): ReadonlyArray<DocumentSt
 export function isTerminal(stage: DocumentStage): boolean {
   return LEGAL_TRANSITIONS[stage].length === 0;
 }
+
+/**
+ * Rough lifecycle ordering for forward-only checks. Used by the legacy→unified
+ * mirror to avoid downgrading a stage that's already advanced past what the
+ * legacy `status` field can express (e.g. a sent quote whose mobile client
+ * later writes back status='draft' from a stale cache).
+ *
+ * cancelled is ranked above paid so the mirror never silently un-cancels a
+ * doc — un-cancel goes through setDocumentStage explicitly. quote_rejected
+ * sits alongside quote_sent because rejection is a sent-tier outcome.
+ */
+const STAGE_RANK: Readonly<Record<DocumentStage, number>> = {
+  draft: 0,
+  quote_sent: 10,
+  quote_rejected: 10,
+  quote_accepted: 20,
+  invoice_sent: 30,
+  partially_paid: 40,
+  paid: 50,
+  cancelled: 60,
+};
+
+export function stageRank(stage: DocumentStage): number {
+  return STAGE_RANK[stage] ?? 0;
+}
+
+export function isStageDowngrade(from: DocumentStage, to: DocumentStage): boolean {
+  return stageRank(to) < stageRank(from);
+}

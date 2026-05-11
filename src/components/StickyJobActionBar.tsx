@@ -170,7 +170,7 @@ export function resolveJobActions(
   // No doc attached yet — kick the tradie straight into the quote wizard.
   if (!primaryDoc) {
     return [
-      { id: 'createQuote', label: 'Create Quote', icon: 'file-document-plus-outline', tone: 'primary' },
+      { id: 'createQuote', label: 'Create Quote', icon: 'file-plus-outline', tone: 'primary' },
     ];
   }
 
@@ -406,10 +406,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+    alignItems: 'center',
   },
   row: {
     flexDirection: 'row',
     gap: 10,
+    width: '100%',
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+    }),
   },
   button: {
     flex: 1,

@@ -18,13 +18,45 @@ import {
   sendNewUserNotificationEmail,
   sendFeedbackEmail,
   sendQuoteFollowUpEmail,
+  sendCustomerQuoteReminderEmail,
   sendAffiliateInviteEmail,
   sendNewProSubscriptionEmail,
   sendMaterialListErrorEmail,
   sendDraftNudgeEmail,
 } from './email';
 export * from './adminCrm';
+export {
+  adminLeadDiscovery,
+  adminEnrichLeads,
+  adminGenerateLeadMessages,
+  adminListLeads,
+  adminGetLead,
+  adminUpdateLeadMessage,
+  adminApproveLeads,
+  adminRejectLeads,
+  adminAddLeadNote,
+  adminMarkLeadReplied,
+  brevoInboundWebhook,
+  weeklyLeadDiscovery,
+  adminGetDiscoveryConfig,
+  adminUpdateDiscoveryConfig,
+  adminGetLeadConfig,
+  adminUpdateLeadConfig,
+  adminTestSendLead,
+  autoSendQueuedLeads,
+  weeklyLeadOutreachReport,
+  adminSendLeadReport,
+  onUserCreatedLinkLead,
+  leadUnsubscribe,
+} from './leadOutreach';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
+import {
+  buildXeroAuthHeaders,
+  pushQuoteToXeroCore,
+  persistQuoteSyncSuccess,
+  persistQuoteSyncError,
+} from './xeroSync';
+export { onDocumentAcceptedSyncXero } from './xeroSyncTriggers';
 import {
   sendDocumentEmail,
   loadDocumentForQuoteId,
@@ -56,11 +88,15 @@ admin.initializeApp();
 
 // When markup is hidden from the customer, the visible line items must still
 // reconcile to the final total. Inflate materials and labor by their respective
-// markup so Materials + Labour + GST = Total.
-function applyHideMarkupForDisplay(q: any) {
+// markup so Materials + Labour = Total (GST is inclusive in the line totals).
+// Resolution order matches the PDF: per-doc override > business default > false.
+function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
   const matMarkup = Number(q.markup) || 0;
   const laborMarkup = Number(q.laborMarkup ?? q.markup) || 0;
-  const hideMarkup = q.showMarkup !== true && (matMarkup > 0 || laborMarkup > 0);
+  const showMarkup = q.showMarkup !== undefined
+    ? q.showMarkup === true
+    : businessSettings?.showMarkup === true;
+  const hideMarkup = !showMarkup && (matMarkup > 0 || laborMarkup > 0);
   if (!hideMarkup) {
     return {
       materials: (q.materials || []).map((m: any) => ({ ...m })),
@@ -1587,6 +1623,22 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 300 }).
         templateReferenceSection = `\n\nSAVED TEMPLATES (use as reference for section names and materials when they match the job):\n${templateDescriptions}\n\nWhen a saved template closely matches a section of this job:\n- Use the template's exact name as the section name\n- Use the template's material names where applicable (you can adjust quantities)\n- Set the sectionMultiplier to match the job scope\n`;
       }
 
+      // Build Reece catalogue slice section. We only inject it for users
+      // who've opted into price-file sync AND whose job description triggers
+      // a category match — outside those cases the slice would be either
+      // missing or too noisy to help the LLM.
+      let reeceCatalogueSection = '';
+      let reeceCatalogueGeneratedAt: number | null = null;
+      try {
+        const slice = await getRelevantCatalogueSlice(decodedToken.uid, jobDescription);
+        if (slice && slice.products.length > 0) {
+          reeceCatalogueGeneratedAt = slice.generatedAt;
+          reeceCatalogueSection = `\n\nREECE TRADE CATALOGUE (preferred for plumbing items)\nThe tradie has ${slice.products.length} Reece SKUs synced below at their negotiated trade pricing. When a Reece SKU is a clear, confident match for a plumbing material the job genuinely needs, return its integer "reeceProductId" — that gives the tradie their real trade price and skips a search round trip.\n\nIMPORTANT — only pick a Reece SKU when it's the right product for the job. Don't force-fit:\n- If the job calls for a generic item that doesn't match a specific SKU, leave reeceProductId empty and use a normal "searchTerm".\n- Don't pick obscure replacement parts (e.g. "Solus MK2 Replacement Bypass Tube") for a generic install job — those are repair-specific SKUs.\n- For non-plumbing items (timber, fasteners, paint, etc.) leave reeceProductId empty.\n- For bog-standard items where multiple Reece SKUs would all work (e.g. "PVC elbow 90°"), use a generic searchTerm — the per-material search will pick the cheapest fit.\n\nFormat: [productId] title (brand) · category/section · price/unit\n\n${formatCatalogueSliceForPrompt(slice)}\n`;
+        }
+      } catch (err: any) {
+        console.warn('[reece pricefile] slice build failed', { uid: decodedToken.uid, message: err?.message });
+      }
+
       // Build user's saved supplier rates section
       let savedRatesSection = '';
       if (Array.isArray(userSavedRates) && userSavedRates.length > 0) {
@@ -1603,7 +1655,7 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 300 }).
       const hasExisting = existingMaterials && existingMaterials.length > 0;
       const prompt = `You are an expert Australian tradie assistant specializing in construction and trade work. ${hasExisting ? 'Some materials have already been added from templates. Analyze the job and suggest only the ADDITIONAL materials needed to complete the job.' : 'Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.'}
 
-Job Description: "${jobDescription}"${contextSection}${existingMaterialsSection}${templateReferenceSection}${savedRatesSection}
+Job Description: "${jobDescription}"${contextSection}${existingMaterialsSection}${templateReferenceSection}${savedRatesSection}${reeceCatalogueSection}
 
 Hardware Store for pricing: ${storeName}
 
@@ -1622,7 +1674,8 @@ Provide a JSON response with the following structure:
       "sectionLaborHours": 1.5,
       "reasoning": "Why this material is needed",
       "savedRateName": "(only set when matched to a saved rate)",
-      "pricingSource": "(set to 'saved_rate' when matched)"
+      "pricingSource": "(set to 'saved_rate' when matched)",
+      "reeceProductId": "(only set when a Reece catalogue line clearly matches — copy the integer productId from the catalogue listing. Leave empty if unsure; the search layer will look it up.)"
     }
   ]
 }
@@ -1733,6 +1786,40 @@ Return ONLY valid JSON, no other text.`;
         } catch (err: any) {
           console.warn('Quantity sanity-check failed, returning raw list:', err?.message);
         }
+      }
+
+      // Phase 2 enrichment — when the LLM returned a reeceProductId, look it
+      // up in the cached catalogue and stamp price/source/itemNumber so the
+      // client's existing reecePass guard skips a redundant search. We also
+      // overwrite the AI's emitted name with the title-cased catalogue title
+      // because the LLM echoes the SAP-uppercase version straight from the
+      // prompt ("ISE SINK FLANGE MATTE BLACK"), which then ships into the
+      // quote as the displayed line item.
+      let reeceDirectMatchCount = 0;
+      if (reeceCatalogueGeneratedAt) {
+        for (const m of validatedMaterials) {
+          const id = Number(m.reeceProductId);
+          if (!Number.isFinite(id) || id <= 0) continue;
+          const cached = await getCachedReeceProductById(decodedToken.uid, id);
+          if (!cached) continue;
+          const price = cached.priceIncGst ?? cached.priceExGst;
+          if (price == null) continue;
+          m.reeceItemNumber = String(cached.productId);
+          m.pricingSource = 'api';
+          m.price = price;
+          m.unit = m.unit || cached.unit || 'each';
+          m.imageUrl = m.imageUrl || cached.imageUrl;
+          m.searchTerm = m.searchTerm || m.name;
+          // Replace the AI's title (likely uppercase echo from the prompt)
+          // with the cleanly-cased catalogue title.
+          m.name = cached.title;
+          reeceDirectMatchCount++;
+        }
+        console.log('[reece pricefile] direct LLM matches', {
+          uid: decodedToken.uid,
+          materialCount: validatedMaterials.length,
+          directMatches: reeceDirectMatchCount,
+        });
       }
 
       res.status(200).json({
@@ -1885,7 +1972,7 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
     if (!decodedToken) return;
 
     try {
-      const { items } = req.body as {
+      const { items, jobName, jobDescription } = req.body as {
         items: Array<{
           id: string;
           name: string;
@@ -1900,6 +1987,8 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
             description?: string;
           }>;
         }>;
+        jobName?: string;
+        jobDescription?: string;
       };
 
       if (!Array.isArray(items) || items.length === 0) {
@@ -1917,29 +2006,41 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
         return;
       }
 
+      const jobContextBlock = (jobName || jobDescription)
+        ? `JOB CONTEXT — use this to sanity-check that each chosen candidate makes sense for the job. A toilet suite for a kitchen-sink job, or a retaining-wall post for a deck-screw job, is a category mismatch and must be REJECTED, not applied.
+Job: ${jobName || '(unnamed)'}
+Description: ${jobDescription || '(none provided)'}
+
+`
+        : '';
+
       const prompt = `You are a pricing assistant for an Australian tradie quoting tool. For each material row, the tradie has stated their individual-unit requirement (e.g. "600 each nails", "150 m tape", "40 m² paint coverage") and the price-search has returned a RANKED LIST of candidate products (most likely first).
 
-Your job has two parts:
-1. Pick the candidate that best matches the requirement (chosenIndex into the candidates array, 0-based). If NONE of the candidates are the right product category, reject the whole row.
+${jobContextBlock}Your job has two parts:
+1. Pick the candidate that best matches the requirement (chosenIndex into the candidates array, 0-based). If NONE of the candidates are the right product category, REJECT the row — do not estimate, do not apply a wrong-category candidate.
 2. For the chosen candidate, work out how many ACTUAL PURCHASES the tradie should buy, and the resulting total price. Use your general knowledge of Australian hardware and trade products.
 
-DECISION HIERARCHY — strongly prefer "apply" over "estimate" over "reject". The order matters: a real Bunnings candidate at the right price is ALWAYS more useful than your best guess, even when the candidate isn't a perfect match.
+DECISION HIERARCHY:
+1. CATEGORY GATE first — if the candidate isn't in the same product category as the requirement, it cannot be applied. A "kitchen sink" requirement and a "toilet suite" candidate are NOT the same category, even if both are plumbing. A "deck screw" requirement and a "retaining-wall post" candidate are NOT the same category, even if both are timber/outdoor. Examples of category-compatible vs not:
+   - ✅ Same category: kitchen sink ↔ kitchen sink (any brand/size); decking screws ↔ deck/timber screws; cup-head bolt M12 ↔ cup-head bolt M10; flexible water hose ↔ flexible water hose.
+   - ❌ Different category: kitchen sink ↔ toilet suite; deck screws ↔ deck boards; gas hose ↔ water tap; tile adhesive ↔ tile grout.
+2. Within the right category, prefer "apply" — different brand, slightly different size, alternative material is fine. An apply on an imperfect-but-same-category match is better than an estimate.
+3. Use "estimate" only when every candidate is the wrong category but you have a confident general-knowledge price.
+4. Use "reject" when every candidate is the wrong category AND the price is uncertain, OR when the only same-category candidate is implausibly priced (see PRICE SANITY below).
 
 For each item, return one of three decisions:
-- "apply" — pick this whenever ANY candidate could reasonably fulfil the requirement. This includes imperfect matches: different brand, slightly different size, alternative material, generic vs branded. Examples of valid applies:
+- "apply" — the chosen candidate is in the SAME product category as the requirement (see CATEGORY GATE above) and the price is plausible. Imperfect matches within the same category are encouraged. Examples of valid applies:
   - Exact: "600 nails" + candidates [(1kg tub @ $13.90)] → 340 nails per tub, buy 2, total $27.80, confidence='high'.
   - Brand substitute: "Eco Deck composite fascia" + candidates include [(Ekodeck fascia 5.4m), (PermaTimber fascia 5.4m)] → apply the closest; confidence='medium'.
   - Spec substitute: "Cup Head Bolt M12 x 150mm" + candidates include [(Cup Head Bolt M12 x 120mm), (Cup Head Bolt M10 x 150mm)] → apply the closest size; confidence='medium'.
   - Length substitute: "Decking screws 50mm" + candidates include [(Decking screws 65mm box of 500)] → apply, confidence='medium'.
-  - Functional substitute: "Composite fascia 50m" + candidates include [(PVC trim 5.4m), (Modwood fascia 5.4m)] → apply Modwood (closer fit), or PVC trim if it's the only option; confidence='medium'.
-  An apply on an imperfect match is BETTER than an estimate, because the tradie can see the actual product and decide whether to swap.
-- "estimate" — ONLY when EVERY candidate is the wrong category (e.g. all candidates are decking boards when the requirement is decking screws, or all are retaining-wall posts when the requirement is post stirrups). In that case, return a reasonable per-purchase price from general AU pricing knowledge so the row isn't $0. Examples:
+- "estimate" — every candidate is the wrong category, but you can give a confident AU-market price from general knowledge so the row isn't $0. Examples:
   - "Eco Deck Starter Clips" + candidates all decking boards → estimate ~$12 per 15-pack, confidence='low'.
   - "Composite Fascia Screws" + candidates all unrelated boards → estimate ~$25 per 100-pack, confidence='low'.
-  Always include a reasoning that flags it as an estimate (e.g. "All candidates were boards, not screws; estimate based on typical AU pricing — verify with supplier").
-- "reject" — last resort, only when ALL candidates are wrong AND you have no general-knowledge price for the product (genuinely unknown specialty item).
+  Always flag it as an estimate in the reasoning ("All candidates were boards, not screws; estimate based on typical AU pricing — verify with supplier").
+- "reject" — every candidate is the wrong category AND you have no confident price, OR every same-category candidate is implausibly priced. Set rejectReason explaining the mismatch (e.g. "Job is a kitchen sink replacement but all candidates were toilet suites").
 
-CRITICAL — if a candidate is in the right product category but a different brand/size/spec, ALWAYS apply it. Do not estimate around real candidates. Reserve "estimate" for the situation where every candidate is in the wrong category.
+PRICE SANITY — before applying, check the candidate's per-purchase price against typical AU retail for the requirement. If the chosen candidate is more than ~3× a sensible price for that product (e.g. a $946 "kitchen sink" candidate when typical kitchen sinks are $150–$500, or a $400 "PTFE tape" candidate when tape is $5–$10), REJECT instead of applying. The job description above is your strongest signal of what "sensible" means for this row.
 
 CRITICAL — units must be compatible with the chosen candidate. If requirement is in "each" (count of items) but the product is sold by length/weight/volume, work out the conversion (nails per kg, screws per box, paint coverage per litre) using general knowledge. If you can't confidently convert, set confidence: "low" and explain in reasoning.
 
@@ -2113,8 +2214,14 @@ async function callClaudeForExtraction(
   return parseLLMJson(content);
 }
 
-function buildExtractSupplierPrompt(supplierName?: string, defaultUnit?: string): string {
-  return `You are reading a tradesperson's supplier price list. Extract every line item visible.
+function buildExtractSupplierPrompt(
+  supplierName?: string,
+  defaultUnit?: string,
+  mode: 'priceList' | 'invoice' = 'priceList',
+): string {
+  const isInvoice = mode === 'invoice';
+  const docLabel = isInvoice ? 'supplier invoice or receipt' : 'supplier price list';
+  return `You are reading a tradesperson's ${docLabel}. Extract every line item visible.
 
 Supplier hint: ${supplierName || '(unknown)'}
 Default unit hint: ${defaultUnit || '(none)'}
@@ -2128,8 +2235,8 @@ ALSO extract the supplier's contact details if they are clearly printed on the d
 
 For each item, return:
 - name: clean product name (strip SKU codes unless they're the only identifier)
-- price: numeric AUD value (no currency symbol, no GST marker)
-- unit: one of "each|m|m²|m³|L|kg|box|pack" — the SALEABLE unit. If the supplier sells a packaged/bundled product (a bag, tub, bundle), use "each" for the unit and capture the contained quantity in coveragePerUnit/coverageUnit (see rules below).
+- price: numeric AUD value (no currency symbol, no GST marker)${isInvoice ? ' — this is the UNIT price, not the line total. If the receipt shows "3 × $12.50 = $37.50", price is 12.50.' : ''}
+- unit: one of "each|m|m²|m³|L|kg|box|pack" — the SALEABLE unit. If the supplier sells a packaged/bundled product (a bag, tub, bundle), use "each" for the unit and capture the contained quantity in coveragePerUnit/coverageUnit (see rules below).${isInvoice ? '\n- qty: integer quantity purchased on this line. Read from "QTY", "Qty", "3×", "3 @", or count of identical lines. If absent or illegible, default to 1.' : ''}
 - coveragePerUnit: numeric, only if one purchasable unit contains a measurable amount of work (e.g. "covers 13 m² with 100 mm overlap" → 13, OR "1/2 m³ bag of mulch" → 0.5)
 - coverageUnit: "m²"|"m³"|"m" — only if coveragePerUnit set
 - keywords: 2-4 short lowercase words describing the product type (e.g. ["concrete","ready-mix","slab"])
@@ -2145,7 +2252,7 @@ How to choose unit vs coverage:
 
 The rule of thumb: if a tradie can't buy a fraction of the listed item (e.g. a whole bag, a whole sheet), the unit must be "each" and the bundled measurement goes into coveragePerUnit.
 
-Skip header rows, column headings, section titles, subtotals, totals, page numbers, ads, terms, disclaimers, and anything that is not a purchasable line item. Contact info goes in the supplierContact block, NOT in items.
+Skip header rows, column headings, section titles, subtotals, totals${isInvoice ? ', GST/tax lines, payment lines, change, tender, rounding, store policy text' : ''}, page numbers, ads, terms, disclaimers, and anything that is not a purchasable line item. Contact info goes in the supplierContact block, NOT in items.
 
 If the photo contains ONLY contact details (a business card, letterhead, contact page) and no purchasable line items, return items: [] and fill in supplierContact with whatever you can read.
 
@@ -2153,7 +2260,7 @@ Return ONLY valid JSON in this exact shape:
 {
   "supplierName": "...",
   "supplierContact": { "contactPerson": null, "phone": null, "email": null, "address": null, "website": null },
-  "items": [ { "name": "...", "price": 0, "unit": "each", "coveragePerUnit": null, "coverageUnit": null, "keywords": [], "confidence": "high", "rawLine": "..." } ]
+  "items": [ { "name": "...", "price": 0,${isInvoice ? ' "qty": 1,' : ''} "unit": "each", "coveragePerUnit": null, "coverageUnit": null, "keywords": [], "confidence": "high", "rawLine": "..." } ]
 }
 For supplierContact, use null for any field that is not clearly printed on the document. If no contact details are visible at all, set every field to null.`;
 }
@@ -2175,7 +2282,7 @@ export const extractSupplierPriceList = functions
       if (!decodedToken) return;
 
       try {
-        const { pdfBase64, imageBase64, supplierName, defaultUnit } = req.body;
+        const { pdfBase64, imageBase64, supplierName, defaultUnit, mode } = req.body;
 
         if (!pdfBase64 && (!Array.isArray(imageBase64) || imageBase64.length === 0)) {
           res.status(400).json({ error: 'Provide either pdfBase64 or imageBase64[]' });
@@ -2198,7 +2305,8 @@ export const extractSupplierPriceList = functions
           return;
         }
 
-        const prompt = buildExtractSupplierPrompt(supplierName, defaultUnit);
+        const extractionMode: 'priceList' | 'invoice' = mode === 'invoice' ? 'invoice' : 'priceList';
+        const prompt = buildExtractSupplierPrompt(supplierName, defaultUnit, extractionMode);
         const input: ExtractionInput = { pdfBase64, imageBase64 };
 
         let parsed: any | null = null;
@@ -2364,20 +2472,27 @@ Example:
 
 /**
  * Reece API Endpoints
- * Integration with Reece Group API for plumbing supplies
- * API Docs: https://docs.api.reecegroup.com.au/latest/index.html#tag/Pricing
+ * Integration with Reece Group API for plumbing supplies.
+ * API docs: https://docs.api.reecegroup.com.au/latest/index.html
  *
- * Setup instructions:
- * 1. Register for API access at https://developers.reecegroup.com.au/
- * 2. Obtain API credentials (client_id, client_secret)
- * 3. Set up Firebase config: firebase functions:config:set reece.client_id="xxx" reece.client_secret="xxx"
+ * Auth model: app-level OAuth (client_credentials) wraps every request, but
+ * Reece prod strictly rejects the Customer-Number header — every plumber must
+ * complete the per-user maX onboarding flow which yields a long-lived
+ * Customer-Token. We store that token (encrypted at rest) per user in
+ * Firestore and pass it on every product/price/inventory call.
+ *
+ * Required env: REECE_CLIENT_ID, REECE_CLIENT_SECRET, REECE_TOKEN_ENC_KEY,
+ * REECE_CALLBACK_URL. REECE_USE_TEST_ENV=true switches to Reece's test
+ * environment (where the Customer-Number trick still works for smoke tests).
  */
 
-// Token cache to avoid requesting a new token on every call
+// Token cache to avoid requesting a new app-level token on every call
 let reeceTokenCache: { token: string; expiresAt: number } | null = null;
 
-// Reece API environment configuration
-const REECE_USE_TEST_ENV = (process.env.REECE_USE_TEST_ENV || 'true') === 'true';
+// Reece API environment configuration. Default to PROD now that the per-user
+// onboarding flow is shipping — the test env was only useful while we were
+// validating the Customer-Number shortcut, which doesn't work in prod anyway.
+const REECE_USE_TEST_ENV = (process.env.REECE_USE_TEST_ENV || 'false') === 'true';
 const REECE_AUTH_BASE_URL = REECE_USE_TEST_ENV
   ? 'https://auth.api.test.reecegroup.com.au'
   : 'https://auth.api.reecegroup.com.au';
@@ -2385,6 +2500,12 @@ const REECE_API_BASE_URL = REECE_USE_TEST_ENV
   ? 'https://open.api.test.reecegroup.com.au'
   : 'https://open.api.reecegroup.com.au';
 const REECE_REGION = process.env.REECE_REGION || 'au';
+// Public page the maX consent flow redirects to once the user approves
+// QuoteMate. Reece doesn't append any query params — the redirect itself is
+// the only completion signal — so this just needs to be a stable URL that
+// renders a "you can close this tab" message.
+const REECE_CALLBACK_URL =
+  process.env.REECE_CALLBACK_URL || 'https://quotemateapp.au/reece/callback';
 
 /**
  * Get OAuth token for Reece API
@@ -2441,6 +2562,673 @@ async function getReeceAuthToken(): Promise<string | null> {
   }
 }
 
+// ---- Customer-token at-rest encryption -----------------------------------
+// Reece customer tokens are stored encrypted in Firestore so a database leak
+// alone doesn't expose every plumber's trade-pricing entitlement to Reece.
+// Format on disk: `enc:v1:base64(iv ‖ authTag ‖ ciphertext)` (AES-256-GCM).
+// Mirrors the Square pattern below at squareTokenEnc helpers.
+const REECE_TOKEN_ENC_PREFIX = 'enc:v1:';
+function getReeceEncKey(): Buffer | null {
+  const raw = process.env.REECE_TOKEN_ENC_KEY || '';
+  if (!raw) return null;
+  try {
+    const buf = Buffer.from(raw, 'base64');
+    if (buf.length !== 32) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+function encryptReeceToken(plaintext: string): string {
+  const key = getReeceEncKey();
+  if (!key) {
+    console.warn('[reece] REECE_TOKEN_ENC_KEY not set — storing token in plaintext');
+    return plaintext;
+  }
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return REECE_TOKEN_ENC_PREFIX + Buffer.concat([iv, authTag, ciphertext]).toString('base64');
+}
+
+function decryptReeceToken(value: string | undefined | null): string | null {
+  if (!value) return null;
+  if (!value.startsWith(REECE_TOKEN_ENC_PREFIX)) {
+    return value;
+  }
+  const key = getReeceEncKey();
+  if (!key) {
+    console.error('[reece] REECE_TOKEN_ENC_KEY missing — cannot decrypt token');
+    return null;
+  }
+  try {
+    const packed = Buffer.from(value.slice(REECE_TOKEN_ENC_PREFIX.length), 'base64');
+    const iv = packed.subarray(0, 12);
+    const authTag = packed.subarray(12, 28);
+    const ciphertext = packed.subarray(28);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+  } catch (err: any) {
+    console.error('[reece] token decrypt failed', { message: err?.message });
+    return null;
+  }
+}
+
+/**
+ * Read + decrypt the user's Reece customer token from Firestore. Returns
+ * null when the user hasn't completed onboarding or their record is unreadable.
+ */
+async function getReeceCustomerToken(uid: string): Promise<{
+  customerToken: string;
+  customerNumber: string;
+  homeBranch?: string;
+  displayName?: string;
+} | null> {
+  try {
+    const doc = await admin.firestore().doc(`users/${uid}/integrations/reece`).get();
+    if (!doc.exists) return null;
+    const data = doc.data()!;
+    const enc = data.customerTokenEnc as string | undefined;
+    const customerToken = decryptReeceToken(enc);
+    if (!customerToken || !data.customerNumber) return null;
+    return {
+      customerToken,
+      customerNumber: String(data.customerNumber),
+      homeBranch: data.homeBranch,
+      displayName: data.displayName,
+    };
+  } catch (err: any) {
+    console.error('[reece] failed to load customer token', { uid, message: err?.message });
+    return null;
+  }
+}
+
+/**
+ * Clear the user's stored Reece connection — typically called when Reece
+ * returns 401, signalling the customer token has been revoked or expired.
+ */
+async function clearReeceConnection(uid: string, reason: string): Promise<void> {
+  try {
+    await admin.firestore().doc(`users/${uid}/integrations/reece`).delete();
+    console.warn('[reece] cleared connection', { uid, reason });
+  } catch (err: any) {
+    console.error('[reece] failed to clear connection', { uid, message: err?.message });
+  }
+}
+
+// ─── Price-file cache ──────────────────────────────────────────────────────
+// Reece's product-search is rate-limited and category-blind, which makes
+// per-quote search both slow and prone to category-mismatch errors. The
+// price-file endpoint dumps the customer's entire purchasable catalogue
+// (with their negotiated trade pricing, categories and sections), which we
+// trim and persist to Cloud Storage as gs://<bucket>/reece-catalogues/<uid>.json.
+// Subsequent search/price lookups read from this cache; live search remains
+// the fallback when the user hasn't opted in or the cache is empty.
+
+interface ReeceCachedProduct {
+  productId: number;
+  // The full SAP/legacy stock code from the price-file (e.g. "2402918-1").
+  // Stored alongside the integer productId because Reece's price-file uses a
+  // *different ID space* than /product-gateway/search and /order-gateway/orders
+  // — we keep both so we can resolve the canonical search productId at order
+  // time without re-fetching the catalogue.
+  productCode: string | null;
+  title: string;
+  brand: string | null;
+  category: string | null;
+  section: string | null;
+  unit: string | null;
+  priceExGst: number | null;
+  priceIncGst: number | null;
+  imageUrl: string | null;
+  // Lowercased token set of title+brand+category, precomputed at cache time
+  // so `searchLocalCatalogue` doesn't re-tokenize on every query.
+  searchTokens: string;
+}
+
+// Reece's price-file dumps `productDescription` in ALL CAPS by SAP convention
+// ("RAPIDFLO VALVE 15/20/25 LONG TAIL (EA)"). Applying naive lowercase →
+// capitalise mangles short acronyms ("EA", "PVC", "BSP"), so preserve any
+// all-caps token of length ≤3 as a likely abbreviation.
+function reeceTitleCase(s: string): string {
+  return s
+    .split(/(\s+|[()])/)
+    .map(part => {
+      if (!/[a-zA-Z]/.test(part)) return part;
+      if (part.length <= 3 && part === part.toUpperCase()) return part;
+      return part.charAt(0) + part.slice(1).toLowerCase();
+    })
+    .join('');
+}
+
+interface ReeceCachedCatalogue {
+  generatedAt: number;
+  customerNumber: string;
+  products: ReeceCachedProduct[];
+}
+
+// Per-instance memoisation of parsed catalogues. Firebase Functions instances
+// recycle every ~15min, which is short enough to act as TTL. Cap at a small
+// number to bound memory — plumbing catalogues are 5–50MB parsed.
+const reeceCatalogueCache = new Map<string, { data: ReeceCachedCatalogue; loadedAt: number }>();
+const REECE_CATALOGUE_MAX_INSTANCES = 5;
+
+function reeceCataloguePath(uid: string): string {
+  return `reece-catalogues/${uid}.json`;
+}
+
+const REECE_STOPWORDS = new Set([
+  'the', 'a', 'an', 'of', 'for', 'with', 'and', 'or', 'to', 'in', 'on', 'at', 'by',
+  'mm', 'inch', 'inches',
+]);
+
+function tokenizeReeceQuery(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(t => t.length > 1 && !REECE_STOPWORDS.has(t));
+}
+
+/**
+ * Read the price-file metadata stamped on the user's reece integration doc.
+ * Returns null when sync hasn't been enabled or the meta has never been
+ * written.
+ */
+async function getReecePriceFileMeta(uid: string): Promise<{
+  priceFileEnabled: boolean;
+  generatedAt: number | null;
+  productCount: number | null;
+  lastError: string | null;
+} | null> {
+  try {
+    const doc = await admin.firestore().doc(`users/${uid}/integrations/reece`).get();
+    if (!doc.exists) return null;
+    const data = doc.data() || {};
+    const meta = data.priceFileMeta || {};
+    const generatedAt = meta.generatedAt?.toMillis?.() ?? null;
+    return {
+      priceFileEnabled: data.priceFileEnabled === true,
+      generatedAt,
+      productCount: typeof meta.productCount === 'number' ? meta.productCount : null,
+      lastError: typeof meta.lastError === 'string' ? meta.lastError : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadCachedCatalogue(uid: string): Promise<ReeceCachedCatalogue | null> {
+  const cached = reeceCatalogueCache.get(uid);
+  if (cached && Date.now() - cached.loadedAt < 15 * 60 * 1000) {
+    return cached.data;
+  }
+  try {
+    const file = admin.storage().bucket().file(reeceCataloguePath(uid));
+    const [exists] = await file.exists();
+    if (!exists) return null;
+    const [buffer] = await file.download();
+    const parsed = JSON.parse(buffer.toString('utf8')) as ReeceCachedCatalogue;
+    if (!parsed?.products?.length) return null;
+    if (reeceCatalogueCache.size >= REECE_CATALOGUE_MAX_INSTANCES) {
+      // Evict oldest by loadedAt — Map preserves insertion order so deleting
+      // the first key gives us LRU-by-arrival.
+      const firstKey = reeceCatalogueCache.keys().next().value;
+      if (firstKey) reeceCatalogueCache.delete(firstKey);
+    }
+    reeceCatalogueCache.set(uid, { data: parsed, loadedAt: Date.now() });
+    return parsed;
+  } catch (err: any) {
+    console.error('[reece pricefile] loadCachedCatalogue failed', { uid, message: err?.message });
+    return null;
+  }
+}
+
+/**
+ * Score a cached product against a tokenized query. Title/brand match weighs
+ * 1.0 per token, category 0.5, section 0.3 — heavy bias toward title so a
+ * "kitchen sink" query isn't outranked by every product whose category is
+ * "Kitchen". Returns 0 when no tokens hit (caller filters out).
+ */
+function scoreReeceProduct(p: ReeceCachedProduct, tokens: string[]): number {
+  if (tokens.length === 0) return 0;
+  let score = 0;
+  for (const t of tokens) {
+    if (p.searchTokens.includes(t)) score += 1.0;
+    if (p.category && p.category.toLowerCase().includes(t)) score += 0.5;
+    if (p.section && p.section.toLowerCase().includes(t)) score += 0.3;
+  }
+  return score;
+}
+
+/**
+ * Local-cache equivalent of Reece's `/product-gateway/search`. Returns the
+ * top-N matches in the same wire shape `searchReeceProduct` returns, so the
+ * frontend stays oblivious to which path served the result.
+ */
+async function searchLocalCatalogue(
+  uid: string,
+  query: string,
+  limit = 5,
+): Promise<{
+  products: any[];
+  product: any | null;
+  source: 'local-cache';
+  generatedAt: number;
+  productCount: number;
+} | null> {
+  // Same flag gate as getRelevantCatalogueSlice — see comment there for why
+  // we trust Firestore over cache presence.
+  const meta = await getReecePriceFileMeta(uid);
+  if (!meta?.priceFileEnabled) return null;
+  const catalogue = await loadCachedCatalogue(uid);
+  if (!catalogue) return null;
+  const tokens = tokenizeReeceQuery(query);
+  if (tokens.length === 0) return null;
+
+  const scored: Array<{ p: ReeceCachedProduct; score: number }> = [];
+  for (const p of catalogue.products) {
+    const score = scoreReeceProduct(p, tokens);
+    if (score > 0) scored.push({ p, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, limit).map(({ p }) => ({
+    itemNumber: String(p.productId),
+    description: p.title,
+    brand: p.brand,
+    category: p.category,
+    unitOfMeasure: p.unit,
+    unitPriceExcludingGst: p.priceExGst,
+    unitPriceIncludingGst: p.priceIncGst,
+    imageUrl: p.imageUrl,
+    // Use the description (not the price-file productCode) as the search
+    // query — productCode lives in a different ID space than what
+    // reece.com.au's website search expects, and would link to a different
+    // product entirely.
+    productUrl: `https://www.reece.com.au/search?query=${encodeURIComponent(p.title)}`,
+  }));
+  return {
+    products: top,
+    product: top[0] ?? null,
+    source: 'local-cache',
+    generatedAt: catalogue.generatedAt,
+    productCount: catalogue.products.length,
+  };
+}
+
+/**
+ * Direct productId lookup. Used by `getReecePrice` and by Phase-2 AI
+ * material conversion when the LLM returned a `reeceProductId`.
+ */
+async function getCachedReeceProductById(
+  uid: string,
+  productId: string | number,
+): Promise<ReeceCachedProduct | null> {
+  const meta = await getReecePriceFileMeta(uid);
+  if (!meta?.priceFileEnabled) return null;
+  const catalogue = await loadCachedCatalogue(uid);
+  if (!catalogue) return null;
+  const id = Number(productId);
+  if (!Number.isFinite(id)) return null;
+  return catalogue.products.find(p => p.productId === id) || null;
+}
+
+/**
+ * Reece's price-file is async: trigger generation, then poll until ready.
+ * The endpoint returns 204 while the job is queued and 200 with the body
+ * once Reece finishes building the file. We back off (15s, 30s, 60s, 120s,
+ * 240s) and bail at ~8min.
+ */
+const PRICE_FILE_BACKOFF_MS = [15_000, 30_000, 60_000, 120_000, 240_000];
+
+async function fetchAndCachePriceFile(uid: string): Promise<{
+  ok: boolean;
+  productCount?: number;
+  generatedAt?: number;
+  error?: string;
+  reauthRequired?: boolean;
+}> {
+  const token = await getReeceAuthToken();
+  if (!token) return { ok: false, error: 'reece_app_token_unavailable' };
+  const userToken = await getReeceCustomerToken(uid);
+  if (!userToken) return { ok: false, error: 'reece_not_connected' };
+
+  const integrationsRef = admin.firestore().doc(`users/${uid}/integrations/reece`);
+
+  // 1. Enqueue generation (fire-and-forget; safe to call even if a job is
+  // already pending — Reece dedupes server-side).
+  try {
+    await fetch(
+      `${REECE_API_BASE_URL}/${REECE_REGION}/price-gateway/price-file/trigger-generation`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+          'Customer-Token': userToken.customerToken,
+        },
+      },
+    );
+  } catch (err: any) {
+    console.warn('[reece pricefile] trigger failed (continuing to poll)', {
+      uid,
+      message: err?.message,
+    });
+  }
+
+  // 2. Poll the price file. 204 = still generating, 200 = ready.
+  let raw: any = null;
+  for (let i = 0; i < PRICE_FILE_BACKOFF_MS.length; i++) {
+    await new Promise(r => setTimeout(r, PRICE_FILE_BACKOFF_MS[i]));
+    let response: any;
+    try {
+      response = await fetch(
+        `${REECE_API_BASE_URL}/${REECE_REGION}/price-gateway/price-file?format=MAX_JSON&additionalFields=CATEGORY,SECTION,PRODUCT_IMAGES`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'Customer-Token': userToken.customerToken,
+          },
+        },
+      );
+    } catch (err: any) {
+      console.warn('[reece pricefile] poll error', { uid, attempt: i, message: err?.message });
+      continue;
+    }
+    if (response.status === 401) {
+      await clearReeceConnection(uid, 'price_file_401');
+      return { ok: false, reauthRequired: true, error: 'reece_reauth_required' };
+    }
+    if (response.status === 204) {
+      console.log('[reece pricefile] poll 204', { uid, attempt: i });
+      continue;
+    }
+    if (!response.ok) {
+      console.warn('[reece pricefile] poll non-ok', { uid, attempt: i, status: response.status });
+      continue;
+    }
+    // Read as text first so we can log the raw shape — Reece's MAX_JSON
+    // response shape isn't documented and we've been getting 70-byte
+    // payloads back instead of the expected catalogue dump.
+    let bodyText = '';
+    try {
+      bodyText = await response.text();
+    } catch (err: any) {
+      console.warn('[reece pricefile] body read failed', { uid, message: err?.message });
+      continue;
+    }
+    const contentType = response.headers.get('content-type') || '';
+    console.log('[reece pricefile] poll 200', {
+      uid,
+      attempt: i,
+      contentType,
+      sizeBytes: bodyText.length,
+      preview: bodyText.slice(0, 500),
+    });
+    try {
+      raw = JSON.parse(bodyText);
+      break;
+    } catch (err: any) {
+      console.warn('[reece pricefile] parse failed', { uid, message: err?.message, preview: bodyText.slice(0, 200) });
+      continue;
+    }
+  }
+
+  if (!raw) {
+    await integrationsRef.set(
+      { priceFileMeta: { lastError: 'timeout', updatedAt: admin.firestore.FieldValue.serverTimestamp() } },
+      { merge: true },
+    );
+    return { ok: false, error: 'price_file_timeout' };
+  }
+
+  // 3. Trim. Reece's MAX_JSON shape is undocumented — try every plausible
+  // root key. If none of them yield an array, log the top-level shape so we
+  // can adapt without flying blind.
+  let rawProducts: any[] = [];
+  if (Array.isArray(raw)) {
+    rawProducts = raw;
+  } else if (raw && typeof raw === 'object') {
+    for (const key of ['products', 'priceFile', 'priceList', 'items', 'data', 'lines', 'priceFileLines', 'productPrices']) {
+      if (Array.isArray(raw[key])) {
+        rawProducts = raw[key];
+        console.log('[reece pricefile] using root key', { uid, key, count: raw[key].length });
+        break;
+      }
+    }
+    if (rawProducts.length === 0) {
+      console.warn('[reece pricefile] no array found at any known root key', {
+        uid,
+        topLevelKeys: Object.keys(raw),
+        sample: JSON.stringify(raw).slice(0, 500),
+      });
+    }
+  }
+
+  // One-shot diagnostic on the first item — surface its keys so we can adapt
+  // field detection if Reece uses different names than product-gateway/search.
+  if (rawProducts.length > 0) {
+    const first = rawProducts[0];
+    console.log('[reece pricefile] first product shape', {
+      uid,
+      keys: typeof first === 'object' && first ? Object.keys(first) : [],
+      sample: JSON.stringify(first).slice(0, 600),
+    });
+  }
+
+  // Reece's MAX_JSON price-file uses different field names than the
+  // product-gateway/search endpoint. Real shape (sampled live):
+  //   productCodeWithSuffix: "1004839-1"  ← string, leading int is productId
+  //   productDescription: "RAPIDFLO VALVE 15/20/25 LONG TAIL (EA)"
+  //   unitOfMeasure: "EA"                  ← flat string
+  //   section: { code, name }              ← nested
+  //   category: { code, name }             ← nested
+  //   cmpPriceGstInc / cmpPriceGstExc      ← customer-specific trade price
+  // We also retain the search-endpoint shape as a fallback in case the
+  // format is ever harmonised on Reece's side.
+  let droppedNoId = 0;
+  let droppedNoTitle = 0;
+  const trimmed: ReeceCachedProduct[] = [];
+  const extractName = (v: any): string | null => {
+    if (!v) return null;
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object') return v.name || v.description || null;
+    return null;
+  };
+  for (const p of rawProducts) {
+    // productCodeWithSuffix is "1004839-1"; the leading integer is the
+    // legacy SAP stock code used by the price-file. Important: it is NOT the
+    // same as the `productId` returned by /product-gateway/search — those
+    // are separate ID spaces, so this code can't be sent to /order-gateway
+    // /orders directly. We keep the full string for ordering follow-ups and
+    // the integer for cache lookup keys.
+    const codeRaw: string = String(p.productCodeWithSuffix ?? p.productCode ?? p.productId ?? p.id ?? '');
+    const codeMatch = codeRaw.match(/^\d+/);
+    const productId = codeMatch ? Number(codeMatch[0]) : NaN;
+    if (!Number.isFinite(productId) || productId <= 0) { droppedNoId++; continue; }
+    const productCode = codeRaw || null;
+    const titleRaw = String(
+      p.productDescription || p.productTitle || p.title || p.description || p.name || p.productName || '',
+    ).trim();
+    if (!titleRaw) { droppedNoTitle++; continue; }
+    const title = reeceTitleCase(titleRaw);
+    const uom = Array.isArray(p.unitOfMeasures) ? p.unitOfMeasures[0] : null;
+    const brand = (p.brand ?? null) ? String(p.brand) : null;
+    const category = extractName(p.category);
+    const section = extractName(p.section);
+    const unit = (typeof p.unitOfMeasure === 'string' && p.unitOfMeasure)
+      ? p.unitOfMeasure
+      : uom?.pack ? String(uom.pack) : null;
+    const priceIncGst = typeof p.cmpPriceGstInc === 'number'
+      ? p.cmpPriceGstInc
+      : typeof uom?.unitPriceIncludingGST === 'number' ? uom.unitPriceIncludingGST : null;
+    const priceExGst = typeof p.cmpPriceGstExc === 'number'
+      ? p.cmpPriceGstExc
+      : typeof uom?.unitPriceExcludingGST === 'number' ? uom.unitPriceExcludingGST : null;
+    const tokenSrc = `${title} ${brand || ''} ${category || ''} ${section || ''}`.toLowerCase();
+    const tokens = Array.from(new Set(tokenSrc.split(/[^a-z0-9]+/).filter(t => t.length > 1)));
+    trimmed.push({
+      productId,
+      productCode,
+      title,
+      brand,
+      category,
+      section,
+      unit,
+      priceExGst,
+      priceIncGst,
+      imageUrl: extractReeceImageUrl(p),
+      searchTokens: ' ' + tokens.join(' ') + ' ',
+    });
+  }
+
+  const generatedAt = Date.now();
+  const catalogue: ReeceCachedCatalogue = {
+    generatedAt,
+    customerNumber: userToken.customerNumber,
+    products: trimmed,
+  };
+  const json = JSON.stringify(catalogue);
+
+  // 4. Upload to Cloud Storage.
+  try {
+    await admin.storage().bucket().file(reeceCataloguePath(uid)).save(json, {
+      contentType: 'application/json',
+      resumable: false,
+      metadata: { cacheControl: 'private, max-age=0' },
+    });
+  } catch (err: any) {
+    console.error('[reece pricefile] upload failed', { uid, message: err?.message });
+    return { ok: false, error: 'storage_upload_failed' };
+  }
+
+  // 5. Stamp Firestore meta. Bust the in-memory cache so the next call reads
+  // the fresh blob.
+  reeceCatalogueCache.delete(uid);
+  await integrationsRef.set(
+    {
+      priceFileMeta: {
+        generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        productCount: trimmed.length,
+        sizeBytes: json.length,
+        customerNumber: userToken.customerNumber,
+        lastError: admin.firestore.FieldValue.delete(),
+      },
+    },
+    { merge: true },
+  );
+  console.log('[reece pricefile] cached', {
+    uid,
+    productCount: trimmed.length,
+    rawProductCount: rawProducts.length,
+    droppedNoId,
+    droppedNoTitle,
+    sizeBytes: json.length,
+  });
+
+  return { ok: true, productCount: trimmed.length, generatedAt };
+}
+
+// ─── Catalogue slice for AI material generation (Phase 2) ──────────────────
+// We score every catalogue product by token overlap with the job description
+// and take the top-N. Reece's actual category names are very plumber-specific
+// ("STOPS/FLEX HOSES/COVER PLATES", "BALL VALVE FLOATS"), so trying to map
+// generic English terms like "bathroom" to Reece categories was returning
+// empty slices. Token-overlap on title+brand+category+section is more robust.
+
+const REECE_SLICE_MAX_PRODUCTS = 600;
+
+// Common plumbing-job tokens that surface relevant SKUs even when the job
+// description is sparse ("install a tap"). Mixed in alongside the
+// description's own tokens so very short jobs still get a useful slice.
+const REECE_FALLBACK_TOKENS = [
+  'tap', 'mixer', 'valve', 'fitting', 'pipe', 'fitting', 'elbow', 'tee',
+  'sink', 'toilet', 'basin', 'shower', 'drain', 'waste', 'flange',
+];
+
+async function getRelevantCatalogueSlice(
+  uid: string,
+  jobDescription: string,
+): Promise<{ products: ReeceCachedProduct[]; generatedAt: number } | null> {
+  // Always gate on the Firestore flag — disable() clears the local
+  // in-memory cache only on the instance that handled it, so a stale
+  // catalogue can linger in another instance for up to ~15min after the
+  // user disables sync. Reading Firestore here is cheap (~10ms) and the
+  // alternative (forcibly evicting all instance caches) isn't possible
+  // without a pub/sub broadcast.
+  const meta = await getReecePriceFileMeta(uid);
+  if (!meta?.priceFileEnabled) return null;
+  const catalogue = await loadCachedCatalogue(uid);
+  if (!catalogue) return null;
+  const tokens = tokenizeReeceQuery(jobDescription);
+  if (tokens.length === 0) return null;
+
+  // Score every product. Title-overlap weighs highest, then category/section
+  // (which can surface related items even when the job description doesn't
+  // match the exact title).
+  const scored: Array<{ p: ReeceCachedProduct; score: number }> = [];
+  for (const p of catalogue.products) {
+    let score = 0;
+    for (const t of tokens) {
+      if (p.searchTokens.includes(' ' + t + ' ') || p.searchTokens.includes(t)) score += 1.0;
+      if (p.category && p.category.toLowerCase().includes(t)) score += 0.5;
+      if (p.section && p.section.toLowerCase().includes(t)) score += 0.3;
+    }
+    if (score > 0) scored.push({ p, score });
+  }
+
+  // Backfill with fallback-token matches when the description-driven slice
+  // is thin — this gives the AI a baseline pool of common plumbing items it
+  // can pick from even for vague jobs.
+  if (scored.length < REECE_SLICE_MAX_PRODUCTS) {
+    const seen = new Set(scored.map(s => s.p.productId));
+    for (const ft of REECE_FALLBACK_TOKENS) {
+      for (const p of catalogue.products) {
+        if (seen.has(p.productId)) continue;
+        if (p.searchTokens.includes(' ' + ft + ' ')) {
+          scored.push({ p, score: 0.1 });
+          seen.add(p.productId);
+          if (scored.length >= REECE_SLICE_MAX_PRODUCTS) break;
+        }
+      }
+      if (scored.length >= REECE_SLICE_MAX_PRODUCTS) break;
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, REECE_SLICE_MAX_PRODUCTS).map(s => s.p);
+  console.log('[reece pricefile] slice built', {
+    uid,
+    jobTokenCount: tokens.length,
+    sliceSize: top.length,
+    catalogueSize: catalogue.products.length,
+    topScores: scored.slice(0, 5).map(s => ({ id: s.p.productId, title: s.p.title, score: s.score })),
+  });
+  if (top.length === 0) return null;
+  return { products: top, generatedAt: catalogue.generatedAt };
+}
+
+/**
+ * Format a catalogue slice as terse prompt lines. Kept compact so the LLM
+ * spends its attention on picking, not parsing JSON.
+ */
+function formatCatalogueSliceForPrompt(slice: { products: ReeceCachedProduct[] }): string {
+  return slice.products
+    .map(p => {
+      const price = p.priceIncGst ?? p.priceExGst;
+      const priceStr = price != null ? `$${price.toFixed(2)}` : 'no-price';
+      const unit = p.unit || 'EA';
+      const cat = [p.category, p.section].filter(Boolean).join('/') || '—';
+      const brand = p.brand ? ` (${p.brand})` : '';
+      return `[${p.productId}] ${p.title}${brand} · ${cat} · ${priceStr}/${unit}`;
+    })
+    .join('\n');
+}
+
 /**
  * Check if Reece API is available and configured
  */
@@ -2461,7 +3249,68 @@ export const checkReeceApi = functions.https.onRequest((req, res) => {
 });
 
 /**
- * Search for a product in Reece catalog
+ * Pull the best image URL out of a Reece product-gateway product object.
+ * Tries the SAP Commerce images[] envelope first (Reece runs Hybris), then
+ * common flat field names. Relative URLs are prefixed with the Reece host so
+ * they render in <Image> on the client.
+ */
+function extractReeceImageUrl(product: any): string | null {
+  if (!product) return null;
+
+  const candidates: Array<string | undefined> = [];
+
+  // Reece's product-gateway returns images on `productImages`. Older docs
+  // and other Hybris endpoints sometimes use plain `images`, so we check
+  // both — the inner shape is tried with several common conventions
+  // (Hybris `format`, generic `imageType`, plain `.url`/`.imageUrl`/string).
+  for (const arr of [product.productImages, product.images]) {
+    if (!Array.isArray(arr) || arr.length === 0) continue;
+    const pick = (img: any): string | undefined =>
+      typeof img === 'string' ? img : img?.url || img?.imageUrl || img?.href;
+    const byFormat = (fmt: string) =>
+      pick(arr.find((img: any) => img?.format === fmt));
+    const byImageType = (t: string) =>
+      pick(arr.find((img: any) => img?.imageType === t));
+    candidates.push(byFormat('product'), byFormat('zoom'), byFormat('thumbnail'));
+    candidates.push(byImageType('PRIMARY'), byImageType('GALLERY'));
+    candidates.push(pick(arr[0]));
+  }
+
+  if (Array.isArray(product.media)) {
+    candidates.push(product.media[0]?.url);
+  } else if (product.media && typeof product.media === 'object') {
+    candidates.push(product.media.primary?.url, product.media.url, product.media.primary);
+  }
+
+  if (Array.isArray(product.assets)) {
+    candidates.push(
+      product.assets.find((a: any) => a?.type === 'IMAGE')?.url,
+      product.assets[0]?.url,
+    );
+  }
+
+  candidates.push(
+    product.imageUrl,
+    product.productImage,
+    product.productImageUrl,
+    product.thumbnailUrl,
+    product.thumbnail,
+    product.image,
+  );
+
+  const found = candidates.find(
+    (c): c is string => typeof c === 'string' && c.length > 0,
+  );
+  if (!found) return null;
+
+  if (/^https?:\/\//i.test(found)) return found;
+  if (found.startsWith('//')) return `https:${found}`;
+  return `https://www.reece.com.au${found.startsWith('/') ? '' : '/'}${found}`;
+}
+
+/**
+ * Search for a product in Reece catalog using the calling user's customer
+ * token. Returns trade-discounted pricing inline in the product result.
  */
 export const searchReeceProduct = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -2481,50 +3330,144 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Get OAuth token
       const token = await getReeceAuthToken();
       if (!token) {
         res.status(200).json({ product: null });
         return;
       }
 
-      // Search for product using the product-gateway/search endpoint
-      // Requires Customer-Token or Customer-Number header
-      const customerNumber = process.env.REECE_CUSTOMER_NUMBER;
-      const searchResponse = await fetch(
-        `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(productName)}&pageNumber=1&pageSize=5`,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-            ...(customerNumber ? { 'Customer-Number': customerNumber } : {}),
-          },
-        }
-      );
-
-      if (!searchResponse.ok) {
-        await searchResponse.text();
-        res.status(200).json({ product: null });
+      const userToken = await getReeceCustomerToken(decodedToken.uid);
+      if (!userToken) {
+        res.status(200).json({ product: null, error: 'reece_not_connected' });
         return;
       }
 
-      const searchData = await searchResponse.json();
+      // Fast path — search the user's cached price-file index instead of
+      // round-tripping to Reece. Hits return identical wire shape so the
+      // client can't tell the difference.
+      const local = await searchLocalCatalogue(decodedToken.uid, productName, 5);
+      if (local && local.products.length > 0) {
+        const _debug = {
+          query: productName,
+          source: 'local-cache' as const,
+          generatedAt: local.generatedAt,
+          productCount: local.productCount,
+          topTitle: local.product?.description ?? null,
+          topProductId: local.product?.itemNumber ?? null,
+          topUnitPriceIncGst: local.product?.unitPriceIncludingGst ?? null,
+          topUnitPriceExGst: local.product?.unitPriceExcludingGst ?? null,
+          imageUrl: local.product?.imageUrl ?? null,
+        };
+        console.log('[reece search]', JSON.stringify({ uid: decodedToken.uid, ..._debug }));
+        res.status(200).json({ product: local.product, products: local.products, _debug });
+        return;
+      }
 
-      // Return the first matching product if found
-      if (searchData.products && searchData.products.length > 0) {
-        const product = searchData.products[0];
+      // Reece's search is strict token-AND, so a query whose noun-phrase is
+      // surrounded by brand prefix or trailing size/color descriptors
+      // ("Atomik Priming Fluid PVC Clear 500ml") returns 0 even when Reece
+      // sells the thing. Generate variants by trimming tokens from the
+      // front, back, and both ends, plus the existing last-N anchors. Try
+      // them in order, stop at the first variant that returns hits.
+      const tokens = productName.trim().split(/\s+/);
+      const n = tokens.length;
+      const candidates = [productName];
+      if (n >= 4) {
+        candidates.push(tokens.slice(0, -1).join(' ')); // drop trailing descriptor
+        candidates.push(tokens.slice(1).join(' '));      // drop leading brand prefix
+        candidates.push(tokens.slice(1, -1).join(' '));  // drop both ends
+      }
+      if (n >= 4) candidates.push(tokens.slice(-3).join(' ')); // noun-tail (3)
+      if (n >= 3) candidates.push(tokens.slice(-2).join(' ')); // noun-tail (2)
+      if (n >= 3) candidates.push(tokens.slice(0, 2).join(' ')); // noun-head (2)
+      const variants = Array.from(new Set(candidates));
+
+      const fetchVariant = (variant: string) =>
+        fetch(
+          `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(variant)}&pageNumber=1&pageSize=5`,
+          {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+              'Customer-Token': userToken.customerToken,
+            },
+          },
+        );
+
+      let searchData: any = null;
+      let usedVariant = productName;
+      for (const variant of variants) {
+        const response = await fetchVariant(variant);
+        if (response.status === 401) {
+          await clearReeceConnection(decodedToken.uid, 'search_401');
+          res.status(200).json({ product: null, error: 'reece_reauth_required' });
+          return;
+        }
+        if (!response.ok) {
+          await response.text();
+          continue;
+        }
+        const data = await response.json();
+        if (data.products && data.products.length > 0) {
+          searchData = data;
+          usedVariant = variant;
+          break;
+        }
+        searchData = data; // keep last (empty) so _debug has a shape if every variant misses
+      }
+
+      // Temporary diagnostic returned inline in the response — Cloud Logging
+      // was swallowing console.log for this function, so we pass the shape
+      // through to the client where it can hit Metro. Drop once Reece
+      // coverage is dialed in.
+      const _debug = {
+        query: productName,
+        usedVariant,
+        retried: usedVariant !== productName,
+        productCount: searchData?.products?.length ?? 0,
+        topTitle: searchData?.products?.[0]?.productTitle ?? null,
+        topProductId: searchData?.products?.[0]?.productId ?? null,
+        topHasUom: !!searchData?.products?.[0]?.unitOfMeasures?.[0],
+        topUnitPriceIncGst: searchData?.products?.[0]?.unitOfMeasures?.[0]?.unitPriceIncludingGST ?? null,
+        topUnitPriceExGst: searchData?.products?.[0]?.unitOfMeasures?.[0]?.unitPriceExcludingGST ?? null,
+        topProductKeys: searchData?.products?.[0] ? Object.keys(searchData.products[0]) : null,
+        topProductImages: searchData?.products?.[0]?.productImages ?? null,
+      };
+
+      // Mirror the diagnostic into Cloud Logging too so we can audit a whole
+      // batch from the dashboard without round-tripping through Metro.
+      console.log('[reece search]', JSON.stringify({
+        uid: decodedToken.uid,
+        ..._debug,
+      }));
+
+      if (searchData?.products && searchData.products.length > 0) {
+        // Return up to 5 candidates so the reconciliation pass has options
+        // to pick the best fit / reject category mismatches. The first
+        // candidate is also surfaced as `product` for backward compat with
+        // callers that just want the top hit.
+        const mapped = searchData.products.slice(0, 5).map((p: any) => {
+          const uom = p.unitOfMeasures?.[0];
+          return {
+            itemNumber: String(p.productId),
+            description: p.productTitle,
+            brand: p.brand,
+            category: p.category,
+            unitOfMeasure: uom?.pack || null,
+            unitPriceExcludingGst: uom?.unitPriceExcludingGST ?? null,
+            unitPriceIncludingGst: uom?.unitPriceIncludingGST ?? null,
+            imageUrl: extractReeceImageUrl(p),
+          };
+        });
 
         res.status(200).json({
-          product: {
-            itemNumber: String(product.productId),
-            description: product.productTitle,
-            brand: product.brand,
-            category: product.category,
-          },
+          product: mapped[0],
+          products: mapped,
+          _debug: { ..._debug, imageExtracted: !!mapped[0].imageUrl, imageUrl: mapped[0].imageUrl },
         });
       } else {
-        res.status(200).json({ product: null });
+        res.status(200).json({ product: null, products: [], _debug });
       }
     } catch (error: any) {
       res.status(200).json({ product: null });
@@ -2533,7 +3476,10 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
 });
 
 /**
- * Get price for a Reece product
+ * Get price for a Reece product. Pricing comes inline with the product
+ * search response (the dedicated price-file endpoint is a bulk dump, not a
+ * per-item lookup), so this handler is structurally identical to
+ * searchReeceProduct but extracts the price field instead of the description.
  */
 export const getReecePrice = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -2553,19 +3499,35 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Get OAuth token
       const token = await getReeceAuthToken();
       if (!token) {
         res.status(200).json({ price: null });
         return;
       }
 
-      // Get pricing using price-gateway/price-file endpoint (MAX_JSON format)
-      // Note: Price file is a bulk download of all customer prices, not per-item lookup.
-      // For now we search the product to get inline pricing from the product search results.
-      const customerNumber = process.env.REECE_CUSTOMER_NUMBER;
+      const userToken = await getReeceCustomerToken(decodedToken.uid);
+      if (!userToken) {
+        res.status(200).json({ price: null, error: 'reece_not_connected' });
+        return;
+      }
 
-      // Search by product ID to get price info from product results
+      // Direct lookup against the cached price-file. itemNumber is the Reece
+      // productId, so this is an O(N) scan over a single in-memory array.
+      const cached = await getCachedReeceProductById(decodedToken.uid, itemNumber);
+      if (cached) {
+        const price = cached.priceIncGst ?? cached.priceExGst;
+        if (price != null) {
+          res.status(200).json({
+            price,
+            currency: 'AUD',
+            priceIncGst: cached.priceIncGst,
+            gstRate: 10,
+            source: 'local-cache',
+          });
+          return;
+        }
+      }
+
       const priceResponse = await fetch(
         `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(itemNumber)}&pageNumber=1&pageSize=1`,
         {
@@ -2573,10 +3535,16 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
-            ...(customerNumber ? { 'Customer-Number': customerNumber } : {}),
+            'Customer-Token': userToken.customerToken,
           },
         }
       );
+
+      if (priceResponse.status === 401) {
+        await clearReeceConnection(decodedToken.uid, 'price_401');
+        res.status(200).json({ price: null, error: 'reece_reauth_required' });
+        return;
+      }
 
       if (!priceResponse.ok) {
         await priceResponse.text();
@@ -2586,7 +3554,6 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
 
       const priceData = await priceResponse.json();
 
-      // Extract price from product search results
       if (priceData.products && priceData.products.length > 0) {
         const product = priceData.products[0];
         const uom = product.unitOfMeasures?.[0];
@@ -2612,7 +3579,10 @@ export const getReecePrice = functions.https.onRequest((req, res) => {
 });
 
 /**
- * Get inventory for a Reece product
+ * Get inventory for a Reece product. The Reece public API has no direct
+ * stock-level endpoint, so we use product search as an existence probe and
+ * report quantityAvailable: -1 (meaning "exists, level unknown"). Punchout
+ * cart is the only path to real-time stock per Reece docs.
  */
 export const getReeceInventory = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -2632,19 +3602,33 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Get OAuth token
       const token = await getReeceAuthToken();
       if (!token) {
         res.status(200).json({ inventory: null });
         return;
       }
 
-      // Note: Reece API doesn't have a direct inventory/stock level endpoint.
-      // Inventory availability is shown through the product search results or punchout cart.
-      // For now, we return null - this will need to be revisited once we have full API access.
-      const customerNumber = process.env.REECE_CUSTOMER_NUMBER;
+      const userToken = await getReeceCustomerToken(decodedToken.uid);
+      if (!userToken) {
+        res.status(200).json({ inventory: null, error: 'reece_not_connected' });
+        return;
+      }
 
-      // Use product search to check if item exists (basic availability check)
+      // The Reece public API has no real stock-levels endpoint — we use
+      // existence as the only signal. The cached catalogue is enough for the
+      // existence probe and skips the extra API hop.
+      const cached = await getCachedReeceProductById(decodedToken.uid, itemNumber);
+      if (cached) {
+        res.status(200).json({
+          inventory: {
+            itemNumber: String(cached.productId),
+            branchCode: branchCode || userToken.homeBranch || 'unknown',
+            quantityAvailable: -1,
+          },
+        });
+        return;
+      }
+
       const inventoryResponse = await fetch(
         `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(itemNumber)}&pageNumber=1&pageSize=1`,
         {
@@ -2652,10 +3636,16 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
-            ...(customerNumber ? { 'Customer-Number': customerNumber } : {}),
+            'Customer-Token': userToken.customerToken,
           },
         }
       );
+
+      if (inventoryResponse.status === 401) {
+        await clearReeceConnection(decodedToken.uid, 'inventory_401');
+        res.status(200).json({ inventory: null, error: 'reece_reauth_required' });
+        return;
+      }
 
       if (!inventoryResponse.ok) {
         await inventoryResponse.text();
@@ -2670,8 +3660,8 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
         res.status(200).json({
           inventory: {
             itemNumber: String(product.productId),
-            branchCode: branchCode || 'unknown',
-            quantityAvailable: -1, // -1 indicates availability unknown, product exists
+            branchCode: branchCode || userToken.homeBranch || 'unknown',
+            quantityAvailable: -1,
           },
         });
       } else {
@@ -2681,6 +3671,1035 @@ export const getReeceInventory = functions.https.onRequest((req, res) => {
       res.status(200).json({ inventory: null });
     }
   });
+});
+
+/**
+ * Start Reece per-user onboarding — exchange the app-level OAuth token for a
+ * shortlived requestToken, then return the maX consent URL the user opens in
+ * a browser. After the user approves, Reece redirects to REECE_CALLBACK_URL
+ * (no params), the client closes the tab and calls reeceExchangeCustomerToken.
+ */
+export const reeceRequestToken = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    try {
+      const token = await getReeceAuthToken();
+      if (!token) {
+        res.status(500).json({ error: 'Reece API not configured' });
+        return;
+      }
+
+      const requestTokenResponse = await fetch(
+        `${REECE_API_BASE_URL}/${REECE_REGION}/customer-application-onboarding-gateway/request-token`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        }
+      );
+
+      if (!requestTokenResponse.ok) {
+        const body = await requestTokenResponse.text().catch(() => '');
+        console.error('[reece] request-token failed', {
+          uid: decodedToken.uid,
+          status: requestTokenResponse.status,
+          body: body.slice(0, 300),
+        });
+        res.status(502).json({ error: 'Could not start Reece connection. Please try again.' });
+        return;
+      }
+
+      const data: any = await requestTokenResponse.json();
+      const requestToken = data.requestToken || data.request_token;
+      if (!requestToken) {
+        res.status(502).json({ error: 'Reece returned an unexpected response.' });
+        return;
+      }
+
+      // Reece's consent UI lives on reece.com.au, NOT on the API host.
+      const params = new URLSearchParams({
+        request_token: requestToken,
+        callback_url: REECE_CALLBACK_URL,
+      });
+      const authUrl = `https://reece.com.au/link-application/account-select?${params.toString()}`;
+
+      res.status(200).json({ requestToken, authUrl });
+    } catch (error: any) {
+      console.error('[reece] request-token error', { message: error?.message });
+      res.status(500).json({ error: 'Reece connection failed. Please try again.' });
+    }
+  });
+});
+
+/**
+ * Complete Reece onboarding — once the user has approved QuoteMate inside the
+ * maX consent flow, the client posts the requestToken back here. We exchange
+ * it for the long-lived customerToken and store the full record (encrypted)
+ * on the user's integrations doc.
+ */
+export const reeceExchangeCustomerToken = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    try {
+      const { requestToken } = req.body;
+      if (!isNonEmptyString(requestToken)) {
+        res.status(400).json({ error: 'Missing requestToken' });
+        return;
+      }
+
+      const token = await getReeceAuthToken();
+      if (!token) {
+        res.status(500).json({ error: 'Reece API not configured' });
+        return;
+      }
+
+      // Reece's consent state can lag several seconds behind the user's
+      // Approve tap before their exchange endpoint will validate the token —
+      // the previous 1.5s single-retry was hitting users on slower nights.
+      // Try up to 5 times with linear backoff (2s, 4s, 6s, 8s — ~20s total)
+      // before giving up. We only retry on "Invalid request token" (the
+      // propagation-race error); other failures bail immediately.
+      const exchangeBackoffsMs = [2000, 4000, 6000, 8000];
+      let exchangeResponse: any = null;
+      let exchangeBody = '';
+      for (let attempt = 0; attempt < 5; attempt++) {
+        exchangeResponse = await fetch(
+          `${REECE_API_BASE_URL}/${REECE_REGION}/customer-application-onboarding-gateway/customer-token`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ requestToken }),
+          }
+        );
+        if (exchangeResponse.ok) break;
+        exchangeBody = await exchangeResponse.text().catch(() => '');
+        const isPropagationRace = /invalid request token/i.test(exchangeBody);
+        if (isPropagationRace && attempt < exchangeBackoffsMs.length) {
+          console.log('[reece] customer-token exchange retrying', {
+            uid: decodedToken.uid,
+            attempt: attempt + 1,
+            waitMs: exchangeBackoffsMs[attempt],
+          });
+          await new Promise((r) => setTimeout(r, exchangeBackoffsMs[attempt]));
+          continue;
+        }
+        break;
+      }
+
+      if (!exchangeResponse.ok) {
+        console.error('[reece] customer-token exchange failed', {
+          uid: decodedToken.uid,
+          status: exchangeResponse.status,
+          requestToken,
+          body: exchangeBody.slice(0, 500),
+        });
+        // Most common case: user landed on the maX consent page but didn't
+        // tap Approve/Link before closing the tab — Reece responds with
+        // "Invalid request token" because the token never moved to an
+        // approved state. The message below tells them exactly what to do.
+        res.status(400).json({
+          error:
+            "Reece sign-in didn't complete. Tap Connect again, sign in to maX, then on the consent page tap the green Approve (or Link) button before returning to the app.",
+        });
+        return;
+      }
+
+      const data: any = await exchangeResponse.json();
+      const customerToken = data.customerToken || data.customer_token;
+      const customerNumber = data.customerNumber || data.customer_number;
+      const displayName = data.displayName || data.display_name;
+
+      // Reece returns `homeBranch` as an object — confirmed shape:
+      // { branchNumber: "3032", name: "Plumbing Burwood", shortName, address,
+      //   geographicalCoordinates, managerName, telephone, ... }. Earlier
+      // versions of this code stringified the object, leaving "[object Object]"
+      // in Firestore. Now we extract a stable display name and the branch
+      // number separately.
+      const homeBranchRaw = data.homeBranch || data.home_branch;
+      const homeBranchName =
+        homeBranchRaw?.name ||
+        homeBranchRaw?.branchName ||
+        homeBranchRaw?.shortName ||
+        (typeof homeBranchRaw === 'string' ? homeBranchRaw : null);
+      const homeBranchNumber =
+        homeBranchRaw?.branchNumber ||
+        homeBranchRaw?.branch_number ||
+        homeBranchRaw?.number ||
+        null;
+
+      // One-shot diagnostic: dump raw shape (without the customerToken) so we
+      // can spot future field renames without re-running the manual flow.
+      console.log('[reece] customer-token exchange success', {
+        uid: decodedToken.uid,
+        customerNumberType: typeof customerNumber,
+        homeBranchType: typeof homeBranchRaw,
+        homeBranchKeys: homeBranchRaw && typeof homeBranchRaw === 'object'
+          ? Object.keys(homeBranchRaw)
+          : null,
+        topLevelKeys: Object.keys(data),
+      });
+
+      if (!customerToken || !customerNumber) {
+        res.status(502).json({ error: 'Reece returned an unexpected response.' });
+        return;
+      }
+
+      await admin.firestore().doc(`users/${decodedToken.uid}/integrations/reece`).set({
+        customerNumber: String(customerNumber),
+        displayName: displayName ? String(displayName) : null,
+        homeBranch: homeBranchName,
+        homeBranchNumber: homeBranchNumber ? String(homeBranchNumber) : null,
+        customerTokenEnc: encryptReeceToken(customerToken),
+        connectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      res.status(200).json({
+        connected: true,
+        customerNumber: String(customerNumber),
+        displayName: displayName ? String(displayName) : null,
+        homeBranch: homeBranchName,
+        homeBranchNumber: homeBranchNumber ? String(homeBranchNumber) : null,
+      });
+    } catch (error: any) {
+      console.error('[reece] exchange error', { message: error?.message });
+      res.status(500).json({ error: 'Could not finish connecting Reece. Please try again.' });
+    }
+  });
+});
+
+/**
+ * Report whether the calling user has a stored Reece connection. Used by the
+ * settings screen and the materials list to gate UI without exposing the
+ * encrypted token to the client.
+ */
+export const reeceConnectionStatus = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    try {
+      const doc = await admin.firestore().doc(`users/${decodedToken.uid}/integrations/reece`).get();
+      if (!doc.exists) {
+        res.status(200).json({ connected: false });
+        return;
+      }
+      const data = doc.data()!;
+      res.status(200).json({
+        connected: true,
+        customerNumber: data.customerNumber || null,
+        displayName: data.displayName || null,
+        homeBranch: data.homeBranch || null,
+        homeBranchNumber: data.homeBranchNumber || null,
+        connectedAt: data.connectedAt?.toDate?.()?.toISOString?.() || null,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Could not check Reece connection.' });
+    }
+  });
+});
+
+/**
+ * Disconnect Reece for the calling user. Reece has no documented revoke
+ * endpoint, so we just delete the local record — the user's existing maX
+ * consent goes dormant on Reece's side until they reconnect.
+ */
+export const reeceDisconnect = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    try {
+      await admin.firestore().doc(`users/${decodedToken.uid}/integrations/reece`).delete();
+      res.status(200).json({ disconnected: true });
+    } catch (error: any) {
+      console.error('[reece] disconnect failed', { message: error?.message });
+      res.status(500).json({ error: 'Could not disconnect Reece.' });
+    }
+  });
+});
+
+// ----- Reece order-gateway -------------------------------------------------
+// Endpoints below let a connected plumber preview, validate, and place orders
+// against their Reece trade account directly from a QuoteMate quote. Reece
+// invoices the plumber on their normal trade terms; QuoteMate never handles
+// money or fulfilment. Order shape was verified end-to-end against prod on
+// 2026-04-28 — see .claude/skills/reece-api/SKILL.md for the full schema.
+
+interface ReeceProduct {
+  productId: number;
+  quantity: number;
+  unitOfMeasure: string;
+  unitPriceExcludingGst: number;
+  quoteNumber?: string | null;
+  quoteLineNumber?: number | null;
+}
+
+interface ReeceFulfillment {
+  type: 'PICKUP' | 'DELIVERY';
+  pickupBranch?: string;            // branchNumber (string) for PICKUP
+  deliveryDetails?: {                // for DELIVERY
+    contactName: string;
+    deliveryAddress: {
+      addressLine1: string;
+      addressLine2?: string;
+      suburb?: string;
+      state?: string;
+      postCode: string;
+    };
+  };
+}
+
+interface ReeceOrderRequest {
+  orderByName: string;
+  orderByPhone?: string;
+  orderByEmail?: string;
+  jobName?: string;
+  orderNumber?: string;             // PO / reference echoed to Reece
+  comment?: string;
+  requiredByDateTime: string;        // yyyy-MM-dd'T'HH:mm:ss (no Z suffix)
+  fulfillment: ReeceFulfillment;
+  products: ReeceProduct[];
+}
+
+// Branch list cache: {uid -> {branches, expiresAt}}. The Reece /branches list
+// is identical for all customers (it's a global directory) but the endpoint
+// requires a Customer-Token, so we still fetch per-user the first time. ~1
+// hour TTL is generous given how rarely Reece adds/closes branches.
+const reeceBranchesCache: Map<string, { branches: any[]; expiresAt: number }> = new Map();
+
+/**
+ * List Reece branches. Used by the order modal's branch picker — the user
+ * defaults to their home branch but can change it. Backend caches the
+ * response for an hour to avoid hammering Reece on every modal open.
+ */
+export const reeceListBranches = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    try {
+      const cached = reeceBranchesCache.get(decodedToken.uid);
+      if (cached && cached.expiresAt > Date.now()) {
+        res.status(200).json({ branches: cached.branches });
+        return;
+      }
+
+      const token = await getReeceAuthToken();
+      const userToken = await getReeceCustomerToken(decodedToken.uid);
+      if (!token || !userToken) {
+        res.status(200).json({ branches: [], error: 'reece_not_connected' });
+        return;
+      }
+
+      const response = await fetch(`${REECE_API_BASE_URL}/${REECE_REGION}/branches`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+          'Customer-Token': userToken.customerToken,
+        },
+      });
+
+      if (response.status === 401) {
+        await clearReeceConnection(decodedToken.uid, 'branches_401');
+        res.status(200).json({ branches: [], error: 'reece_reauth_required' });
+        return;
+      }
+      if (!response.ok) {
+        await response.text();
+        res.status(200).json({ branches: [] });
+        return;
+      }
+
+      const data = await response.json();
+      const branches = data.branches || [];
+      reeceBranchesCache.set(decodedToken.uid, {
+        branches,
+        expiresAt: Date.now() + 60 * 60 * 1000,
+      });
+      res.status(200).json({ branches });
+    } catch (error: any) {
+      console.error('[reece] list branches failed', { message: error?.message });
+      res.status(200).json({ branches: [] });
+    }
+  });
+});
+
+/**
+ * Internal helper: forward an order request to Reece's preview or check
+ * endpoint. Both endpoints take the same body shape — they differ only in
+ * what they validate and return. Returns the raw upstream response (status +
+ * body) so the calling handler can decide how to surface it.
+ */
+async function callReeceOrderEndpoint(
+  uid: string,
+  endpoint: 'preview' | 'check' | 'orders',
+  request: ReeceOrderRequest,
+): Promise<{ status: number; body: any; error?: 'reece_not_connected' | 'reece_reauth_required' }> {
+  const token = await getReeceAuthToken();
+  const userToken = await getReeceCustomerToken(uid);
+  if (!token || !userToken) {
+    return { status: 200, body: null, error: 'reece_not_connected' };
+  }
+
+  const response = await fetch(
+    `${REECE_API_BASE_URL}/${REECE_REGION}/order-gateway/${endpoint}`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Customer-Token': userToken.customerToken,
+      },
+      body: JSON.stringify(request),
+    },
+  );
+
+  if (response.status === 401) {
+    await clearReeceConnection(uid, `order_${endpoint}_401`);
+    return { status: 200, body: null, error: 'reece_reauth_required' };
+  }
+
+  const text = await response.text();
+  let body: any = null;
+  try { body = text ? JSON.parse(text) : null; } catch { body = { raw: text }; }
+  return { status: response.status, body };
+}
+
+function validateOrderRequest(req: any): ReeceOrderRequest | { error: string } {
+  if (!req || typeof req !== 'object') return { error: 'Missing order body' };
+  if (!isNonEmptyString(req.orderByName)) return { error: 'orderByName is required' };
+  if (!isNonEmptyString(req.requiredByDateTime)) return { error: 'requiredByDateTime is required' };
+  if (!Array.isArray(req.products) || req.products.length === 0) {
+    return { error: 'At least one product is required' };
+  }
+  if (!req.fulfillment || (req.fulfillment.type !== 'PICKUP' && req.fulfillment.type !== 'DELIVERY')) {
+    return { error: 'fulfillment.type must be PICKUP or DELIVERY' };
+  }
+  if (req.fulfillment.type === 'PICKUP' && !isNonEmptyString(req.fulfillment.pickupBranch)) {
+    return { error: 'fulfillment.pickupBranch is required for PICKUP' };
+  }
+  if (req.fulfillment.type === 'DELIVERY') {
+    const dd = req.fulfillment.deliveryDetails;
+    if (!dd || !isNonEmptyString(dd.contactName)) {
+      return { error: 'deliveryDetails.contactName is required for DELIVERY' };
+    }
+    if (!dd.deliveryAddress || !isNonEmptyString(dd.deliveryAddress.addressLine1)) {
+      return { error: 'deliveryAddress.addressLine1 is required for DELIVERY' };
+    }
+    if (!isNonEmptyString(dd.deliveryAddress.postCode)) {
+      return { error: 'deliveryAddress.postCode is required for DELIVERY' };
+    }
+  }
+  for (const p of req.products) {
+    if (!Number.isFinite(p.productId) || p.productId <= 0) return { error: 'product.productId is required' };
+    if (!Number.isFinite(p.quantity) || p.quantity <= 0) return { error: 'product.quantity must be > 0' };
+    if (!isNonEmptyString(p.unitOfMeasure)) return { error: 'product.unitOfMeasure is required' };
+    if (!Number.isFinite(p.unitPriceExcludingGst) || p.unitPriceExcludingGst < 0) {
+      return { error: 'product.unitPriceExcludingGst is required' };
+    }
+  }
+  return req as ReeceOrderRequest;
+}
+
+/**
+ * Preview a Reece order — returns the line items + total + cartage with no
+ * side effects. The order modal calls this on open and again whenever the
+ * user changes branch / delivery so the totals stay live.
+ */
+export const reeceOrderPreview = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const validated = validateOrderRequest(req.body);
+    if ('error' in validated) {
+      res.status(400).json({ error: validated.error });
+      return;
+    }
+
+    const { status, body, error } = await callReeceOrderEndpoint(decodedToken.uid, 'preview', validated);
+    if (error) {
+      res.status(200).json({ preview: null, error });
+      return;
+    }
+    if (status >= 400) {
+      // Reece's 4xx envelope is { violations: [{fieldName, message}] } or
+      // { errors: [{url, message}] }. Forward verbatim so the client can
+      // render specific field-level feedback in the order modal.
+      res.status(200).json({ preview: null, status, ...body });
+      return;
+    }
+    res.status(200).json({ preview: body });
+  });
+});
+
+/**
+ * Run Reece's order /check on the same payload as preview. Used as a final
+ * gate inside reeceOrderPlace before actually creating the order.
+ */
+export const reeceOrderCheck = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const validated = validateOrderRequest(req.body);
+    if ('error' in validated) {
+      res.status(400).json({ error: validated.error });
+      return;
+    }
+
+    const { status, body, error } = await callReeceOrderEndpoint(decodedToken.uid, 'check', validated);
+    if (error) {
+      res.status(200).json({ check: null, error });
+      return;
+    }
+    if (status >= 400) {
+      res.status(200).json({ check: null, status, ...body });
+      return;
+    }
+    res.status(200).json({ check: body });
+  });
+});
+
+/**
+ * Place a Reece order against the user's trade account.
+ *
+ * Sequence:
+ *   1. Validate the request body shape.
+ *   2. Run /check first (as a stock + entitlement gate). Bail on any
+ *      violation rather than placing a half-broken order — Reece can't
+ *      easily undo on their side and we don't want to email plumbers to
+ *      cancel a shipment.
+ *   3. POST to /orders. On success, append a ReeceOrder snapshot to the
+ *      originating quote so the user can see history.
+ *
+ * Side effects: Firestore write to quotes/{quoteId}.reeceOrders. Reece
+ * processes the order on their side.
+ */
+export const reeceOrderPlace = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { quoteId, ...orderBody } = req.body || {};
+
+    const validated = validateOrderRequest(orderBody);
+    if ('error' in validated) {
+      res.status(400).json({ error: validated.error });
+      return;
+    }
+
+    // Step 1: /check (stock + entitlement gate)
+    const checkResult = await callReeceOrderEndpoint(decodedToken.uid, 'check', validated);
+    if (checkResult.error) {
+      res.status(200).json({ order: null, error: checkResult.error });
+      return;
+    }
+    if (checkResult.status >= 400) {
+      res.status(200).json({ order: null, stage: 'check', status: checkResult.status, ...checkResult.body });
+      return;
+    }
+
+    // Step 2: place the order
+    const placeResult = await callReeceOrderEndpoint(decodedToken.uid, 'orders', validated);
+    if (placeResult.error) {
+      res.status(200).json({ order: null, error: placeResult.error });
+      return;
+    }
+    if (placeResult.status >= 400) {
+      res.status(200).json({ order: null, stage: 'place', status: placeResult.status, ...placeResult.body });
+      return;
+    }
+
+    const placed = placeResult.body;
+    const reeceOrderNumber = String(placed?.orderNumber || placed?.id || '');
+
+    // Step 3: append the order to the originating quote (best-effort — we
+    // already placed the order at Reece, so a Firestore failure here is a
+    // user-visible "order placed but history didn't save" rather than a
+    // hard failure. Log and continue.
+    if (quoteId && isNonEmptyString(quoteId) && reeceOrderNumber) {
+      try {
+        const totalIncGst = Number(placed?.totalIncludingGst ?? placed?.total ?? 0);
+        const totalExGst = Number(placed?.totalExcludingGst ?? 0);
+        const cartageFee = Number(placed?.cartageFee ?? 0);
+        const orderRecord = {
+          reeceOrderNumber,
+          placedAt: new Date().toISOString(),
+          itemCount: validated.products.length,
+          totalIncGst,
+          totalExGst,
+          cartageFee,
+          fulfilmentMode: validated.fulfillment.type,
+          branchNumber: validated.fulfillment.pickupBranch || null,
+          branchName: placed?.fulfillment?.pickupBranchName || null,
+          deliveryAddress: validated.fulfillment.deliveryDetails
+            ? [
+                validated.fulfillment.deliveryDetails.deliveryAddress.addressLine1,
+                validated.fulfillment.deliveryDetails.deliveryAddress.suburb,
+                validated.fulfillment.deliveryDetails.deliveryAddress.state,
+                validated.fulfillment.deliveryDetails.deliveryAddress.postCode,
+              ].filter(Boolean).join(', ')
+            : null,
+          reference: validated.orderNumber || null,
+        };
+        await admin.firestore()
+          .doc(`users/${decodedToken.uid}/quotes/${quoteId}`)
+          .update({
+            reeceOrders: admin.firestore.FieldValue.arrayUnion(orderRecord),
+          });
+      } catch (err: any) {
+        console.error('[reece] failed to record order on quote', {
+          uid: decodedToken.uid,
+          quoteId,
+          reeceOrderNumber,
+          message: err?.message,
+        });
+        // Fall through — the order is already placed at Reece.
+      }
+    }
+
+    res.status(200).json({
+      order: {
+        reeceOrderNumber,
+        raw: placed,
+      },
+    });
+  });
+});
+
+// ─── Address autocomplete (Google Places, AU only) ─────────────────────────
+// Used by the Reece order screen so a tradie can search a delivery address
+// instead of typing line/suburb/state/postcode by hand. AU-restricted because
+// Reece's address validator only accepts Australian addresses, and address
+// type so we don't surface businesses or POIs in the dropdown. Reuses the
+// existing GOOGLE_PLACES_API_KEY (already used for lead enrichment).
+
+interface PlacesAutocompletePrediction {
+  placeId: string;
+  description: string;
+  mainText: string;
+  secondaryText: string;
+}
+
+/**
+ * Google Places Autocomplete proxy, AU + address-only. The client passes the
+ * raw input string and (optionally) a session token to bundle keystrokes into
+ * a single billable session. Returns predictions verbatim (placeId is opaque
+ * to us — we only feed it back to placesAddressDetails).
+ */
+export const placesAddressAutocomplete = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const input = (req.body?.input ?? '').toString().trim();
+    const sessionToken = isNonEmptyString(req.body?.sessionToken) ? req.body.sessionToken : '';
+    if (input.length < 3) {
+      res.status(200).json({ predictions: [] });
+      return;
+    }
+
+    const key = process.env.GOOGLE_PLACES_API_KEY;
+    if (!key) {
+      res.status(200).json({ predictions: [], error: 'places_not_configured' });
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({
+        input,
+        components: 'country:au',
+        types: 'address',
+        key,
+      });
+      if (sessionToken) params.set('sessiontoken', sessionToken);
+      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?${params.toString()}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        res.status(200).json({ predictions: [] });
+        return;
+      }
+      const body: any = await response.json();
+      if (body.status !== 'OK' && body.status !== 'ZERO_RESULTS') {
+        res.status(200).json({ predictions: [], error: body.status });
+        return;
+      }
+      const predictions: PlacesAutocompletePrediction[] = (body.predictions || []).map(
+        (p: any) => ({
+          placeId: p.place_id,
+          description: p.description,
+          mainText: p.structured_formatting?.main_text || p.description,
+          secondaryText: p.structured_formatting?.secondary_text || '',
+        }),
+      );
+      res.status(200).json({ predictions });
+    } catch (error: any) {
+      console.error('[places] autocomplete failed', { message: error?.message });
+      res.status(200).json({ predictions: [] });
+    }
+  });
+});
+
+/**
+ * Resolve a placeId to its structured AU address components. Returns the
+ * pieces the Reece order screen needs (addressLine1, suburb, state,
+ * postCode). State is the AU short code (VIC/NSW/etc) — Reece accepts those.
+ */
+export const placesAddressDetails = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const placeId = (req.body?.placeId ?? '').toString().trim();
+    const sessionToken = isNonEmptyString(req.body?.sessionToken) ? req.body.sessionToken : '';
+    if (!placeId) {
+      res.status(400).json({ error: 'placeId is required' });
+      return;
+    }
+
+    const key = process.env.GOOGLE_PLACES_API_KEY;
+    if (!key) {
+      res.status(200).json({ address: null, error: 'places_not_configured' });
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({
+        place_id: placeId,
+        fields: 'address_components,formatted_address',
+        key,
+      });
+      if (sessionToken) params.set('sessiontoken', sessionToken);
+      const url = `https://maps.googleapis.com/maps/api/place/details/json?${params.toString()}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        res.status(200).json({ address: null });
+        return;
+      }
+      const body: any = await response.json();
+      if (body.status !== 'OK' || !body.result) {
+        res.status(200).json({ address: null, error: body.status });
+        return;
+      }
+      const comps: Array<{ long_name: string; short_name: string; types: string[] }> =
+        body.result.address_components || [];
+      const pick = (type: string, useShort = false) => {
+        const m = comps.find((c) => c.types.includes(type));
+        if (!m) return '';
+        return useShort ? m.short_name : m.long_name;
+      };
+      const streetNumber = pick('street_number');
+      const route = pick('route');
+      const subpremise = pick('subpremise');
+      const addressLine1 = [
+        subpremise ? `${subpremise}/${streetNumber}` : streetNumber,
+        route,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      const suburb = pick('locality') || pick('sublocality') || pick('postal_town');
+      const state = pick('administrative_area_level_1', /* useShort */ true);
+      const postCode = pick('postal_code');
+      res.status(200).json({
+        address: {
+          addressLine1,
+          suburb,
+          state,
+          postCode,
+          formattedAddress: body.result.formatted_address || '',
+        },
+      });
+    } catch (error: any) {
+      console.error('[places] details failed', { message: error?.message });
+      res.status(200).json({ address: null });
+    }
+  });
+});
+
+// ─── Reece price-file lifecycle endpoints ──────────────────────────────────
+
+/**
+ * Build the redirect URL the user opens to opt their Reece account into
+ * price-file generation. Reece's price-select consent flow needs the customer
+ * token in the query string, so we keep that work server-side rather than
+ * leaking the token to the client.
+ */
+export const reeceEnablePriceFile = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const userToken = await getReeceCustomerToken(decodedToken.uid);
+    if (!userToken) {
+      res.status(200).json({ error: 'reece_not_connected' });
+      return;
+    }
+    const params = new URLSearchParams({
+      callback_url: REECE_CALLBACK_URL,
+      customer_token: userToken.customerToken,
+    });
+    const authUrl = `https://reece.com.au/link-application/account-select/price-select?${params.toString()}`;
+    res.status(200).json({ authUrl });
+  });
+});
+
+/**
+ * Called by the client after the price-select redirect lands back on the
+ * QuoteMate callback page. We flip the priceFileEnabled flag, then kick off
+ * an initial fetch in the background (response returns immediately so the
+ * user isn't blocked on Reece's 1–5 minute generation lag).
+ */
+export const reeceConfirmPriceFile = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const userToken = await getReeceCustomerToken(decodedToken.uid);
+    if (!userToken) {
+      res.status(200).json({ error: 'reece_not_connected' });
+      return;
+    }
+
+    await admin.firestore().doc(`users/${decodedToken.uid}/integrations/reece`).set(
+      {
+        priceFileEnabled: true,
+        priceFileEnabledAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    res.status(200).json({ enabled: true, status: 'queued' });
+
+    // Fire the initial fetch after the response — Reece's generation cycle
+    // can take minutes and we don't want the client hanging.
+    fetchAndCachePriceFile(decodedToken.uid).catch(err => {
+      console.error('[reece pricefile] initial fetch failed', {
+        uid: decodedToken.uid,
+        message: err?.message,
+      });
+    });
+  });
+});
+
+/**
+ * Tear down the user's price-file sync. Calls Reece's delete endpoint, drops
+ * the Cloud Storage blob, and clears the meta + flag.
+ */
+export const reeceDisablePriceFile = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const uid = decodedToken.uid;
+    const userToken = await getReeceCustomerToken(uid);
+    if (userToken) {
+      const token = await getReeceAuthToken();
+      if (token) {
+        try {
+          await fetch(
+            `${REECE_API_BASE_URL}/${REECE_REGION}/price-gateway/price-file-settings`,
+            {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Customer-Token': userToken.customerToken,
+              },
+            },
+          );
+        } catch (err: any) {
+          // Don't block local teardown on Reece-side failure.
+          console.warn('[reece pricefile] remote delete failed', { uid, message: err?.message });
+        }
+      }
+    }
+
+    try {
+      await admin.storage().bucket().file(reeceCataloguePath(uid)).delete({ ignoreNotFound: true });
+    } catch (err: any) {
+      console.warn('[reece pricefile] storage delete failed', { uid, message: err?.message });
+    }
+    reeceCatalogueCache.delete(uid);
+
+    await admin.firestore().doc(`users/${uid}/integrations/reece`).set(
+      {
+        priceFileEnabled: false,
+        priceFileMeta: admin.firestore.FieldValue.delete(),
+      },
+      { merge: true },
+    );
+
+    res.status(200).json({ disabled: true });
+  });
+});
+
+/**
+ * Manually re-pull the price-file. Synchronous (the client will see the
+ * spinner long enough that we'd rather block than poll).
+ */
+export const reeceRefreshPriceFileNow = functions
+  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const meta = await getReecePriceFileMeta(decodedToken.uid);
+    if (!meta?.priceFileEnabled) {
+      res.status(200).json({ status: 'not_enabled' });
+      return;
+    }
+
+    const result = await fetchAndCachePriceFile(decodedToken.uid);
+    if (result.reauthRequired) {
+      res.status(200).json({ status: 'reauth_required' });
+      return;
+    }
+    if (!result.ok) {
+      res.status(200).json({ status: 'failed', error: result.error });
+      return;
+    }
+    res.status(200).json({
+      status: 'ready',
+      productCount: result.productCount,
+      generatedAt: result.generatedAt,
+    });
+  });
+});
+
+/**
+ * Lightweight read of the user's price-file status — used by the settings
+ * screen to show "last synced X ago / N products".
+ */
+export const reecePriceFileStatus = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'GET') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+    const meta = await getReecePriceFileMeta(decodedToken.uid);
+    res.status(200).json({
+      enabled: meta?.priceFileEnabled === true,
+      generatedAt: meta?.generatedAt ?? null,
+      productCount: meta?.productCount ?? null,
+      lastError: meta?.lastError ?? null,
+    });
+  });
+});
+
+/**
+ * Daily refresh job — opted-in users get fresh pricing every morning. Cap
+ * concurrency so we don't hammer Reece (their auth host shares pool capacity
+ * across all of their integration partners).
+ */
+export const refreshReecePriceFiles = functions
+  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .pubsub.schedule('every day 03:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+  const snap = await admin.firestore()
+    .collectionGroup('integrations')
+    .where('priceFileEnabled', '==', true)
+    .get();
+  // collectionGroup matches every doc named `*` under any `integrations`
+  // sub-collection — filter to the reece doc only.
+  const uids: string[] = [];
+  for (const doc of snap.docs) {
+    if (doc.id !== 'reece') continue;
+    const parent = doc.ref.parent.parent;
+    if (parent) uids.push(parent.id);
+  }
+  console.log('[reece pricefile] scheduled refresh', { userCount: uids.length });
+
+  const concurrency = 5;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < uids.length) {
+      const idx = cursor++;
+      const uid = uids[idx];
+      try {
+        const result = await fetchAndCachePriceFile(uid);
+        if (!result.ok) {
+          console.warn('[reece pricefile] scheduled refresh failed', { uid, error: result.error });
+        }
+      } catch (err: any) {
+        console.error('[reece pricefile] scheduled refresh threw', { uid, message: err?.message });
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  return null;
 });
 
 /**
@@ -3675,7 +5694,18 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
 
       // When markup is hidden, roll it into materials AND labor for the
       // customer view so the visible lines reconcile to the final total.
-      const display = applyHideMarkupForDisplay(foundQuote);
+      const display = applyHideMarkupForDisplay(foundQuote, businessSettings);
+
+      // Mirror the PDF's visibility flags on the web acceptance page so a
+      // customer who got a "lump sum only" PDF doesn't see the breakdown
+      // here. Inheritance: per-doc override > business default > show.
+      const showMaterialCosts = foundQuote.showMaterialCosts !== undefined
+        ? foundQuote.showMaterialCosts === true
+        : (businessSettings?.showMaterialCostsByDefault !== false);
+      const showLaborCosts = foundQuote.showLaborCosts !== undefined
+        ? foundQuote.showLaborCosts === true
+        : (businessSettings?.showLaborCostsByDefault !== false);
+      const showSubtotal = showMaterialCosts || showLaborCosts;
 
       res.status(200).json({
         success: true,
@@ -3685,15 +5715,21 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           customerName: foundQuote.customerName,
           jobName: foundQuote.job?.name,
           jobDescription: foundQuote.job?.description,
-          materials: display.materials.map((m: any) => ({
-            name: m.name,
-            quantity: m.quantity,
-            unit: m.unit,
-            totalPrice: m.totalPrice || 0,
-          })),
-          laborTotal: display.laborTotal,
-          materialsSubtotal: display.materialsSubtotal,
-          subtotal: display.subtotal,
+          ...(showMaterialCosts ? {
+            materials: display.materials.map((m: any) => ({
+              name: m.name,
+              quantity: m.quantity,
+              unit: m.unit,
+              totalPrice: m.totalPrice || 0,
+            })),
+            materialsSubtotal: display.materialsSubtotal,
+          } : {}),
+          ...(showLaborCosts ? {
+            laborTotal: display.laborTotal,
+          } : {}),
+          ...(showSubtotal ? {
+            subtotal: display.subtotal,
+          } : {}),
           markupAmount: display.markupAmount,
           travelAdjustmentAmount: foundQuote.travelAdjustmentAmount || 0,
           gst: foundQuote.gst,
@@ -3702,6 +5738,9 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           createdAt: foundQuote.createdAt,
           aiEmailBody: foundQuote.aiEmailBody || null,
           photoUrls: photoUrls,
+          showMaterialCosts,
+          showLaborCosts,
+          showSubtotal,
         },
         business: {
           name: businessSettings?.businessName || 'Your Trade Business',
@@ -4017,9 +6056,68 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
       return;
     }
 
+    // Phase-8: make sure the quote has a Job before flipping status. The
+    // wizard's saveDraft normally creates one via ensureJobForQuote, but
+    // any code path that wrote the quote without that step (legacy flows,
+    // imports) leaves the quote orphaned — onDocumentWriteSyncJob then
+    // bails because the Job doesn't exist, and the Jobs tab never sees
+    // the customer-accepted quote. Materialise here as a backstop.
+    let resolvedJobId: string | undefined =
+      typeof foundQuote.jobId === 'string' && foundQuote.jobId
+        ? foundQuote.jobId
+        : undefined;
+    if (!resolvedJobId && responseType === 'accepted') {
+      const customerName = (foundQuote.customerName || '').trim();
+      const customerEmail = (foundQuote.customerEmail || '').trim();
+      const customerPhone = (foundQuote.customerPhone || '').trim();
+      const jobAddress = (foundQuote.jobAddress || '').trim();
+      const jobName = (foundQuote.job?.name || '').trim();
+      if (customerName || customerEmail || customerPhone || jobAddress || jobName) {
+        const newJobRef = db.collection('users').doc(foundUserId)
+          .collection('jobs').doc();
+        const now = Date.now();
+        // Carry the quote's creation time across so the Job's age reflects
+        // when work was actually scoped, not when the customer happened to
+        // click accept. quotedAt comes from sentAt for the same reason.
+        const toMs = (v: unknown): number => {
+          if (!v) return 0;
+          const maybeTs = v as { toMillis?: () => number };
+          if (typeof maybeTs.toMillis === 'function') return maybeTs.toMillis();
+          if (v instanceof Date) return v.getTime();
+          if (typeof v === 'number') return v;
+          const parsed = Date.parse(String(v));
+          return Number.isFinite(parsed) ? parsed : 0;
+        };
+        const quoteCreatedAt = toMs(foundQuote.createdAt) || now;
+        const quoteSentAt = toMs(foundQuote.sentAt);
+        await newJobRef.set({
+          id: newJobRef.id,
+          userId: foundUserId,
+          customerName,
+          customerEmail,
+          customerPhone,
+          jobAddress,
+          name: jobName || 'Job',
+          description: foundQuote.job?.description || '',
+          stage: 'accepted',
+          acceptedAt: now,
+          ...(quoteSentAt > 0 ? { quotedAt: quoteSentAt } : {}),
+          documentIds: [],
+          totalQuoted: Number(foundQuote.total) || 0,
+          totalInvoiced: 0,
+          totalPaid: 0,
+          balanceDue: 0,
+          createdAt: quoteCreatedAt,
+          updatedAt: now,
+        });
+        resolvedJobId = newJobRef.id;
+      }
+    }
+
     // Process the response
     await quoteDoc.ref.update({
       status: responseType,
+      ...(resolvedJobId && !foundQuote.jobId ? { jobId: resolvedJobId } : {}),
       respondedAt: admin.firestore.FieldValue.serverTimestamp(),
       respondedBy: foundQuote.customerName || 'Client',
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -4557,12 +6655,16 @@ function generateAcceptancePage(token: string): string {
 
         '<div class="section">' +
           '<div class="section-title">Summary</div>' +
-          '<div class="totals-row"><span>Materials</span><span>' + formatCurrency(quote.materialsSubtotal) + '</span></div>' +
-          '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>' +
-          ((quote.markupAmount || quote.travelAdjustmentAmount) ?
-            '<div class="totals-row"><span>Subtotal (ex GST)</span><span>' + formatCurrency(quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0)) + '</span></div>' :
-            '<div class="totals-row"><span>Subtotal</span><span>' + formatCurrency(quote.subtotal) + '</span></div>') +
-          '<div class="totals-row"><span>GST (10%)</span><span>' + formatCurrency(quote.gst) + '</span></div>' +
+          (quote.showMaterialCosts !== false ?
+            '<div class="totals-row"><span>Materials</span><span>' + formatCurrency(quote.materialsSubtotal) + '</span></div>' : '') +
+          (quote.showLaborCosts !== false ?
+            '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>' : '') +
+          (quote.showSubtotal !== false ?
+            ((quote.markupAmount || quote.travelAdjustmentAmount) ?
+              '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Subtotal' : 'Subtotal (ex GST)') + '</span><span>' + formatCurrency(quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0)) + '</span></div>' :
+              '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Subtotal' : 'Subtotal (ex GST)') + '</span><span>' + formatCurrency(quote.subtotal) + '</span></div>')
+            : '') +
+          '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Includes GST' : 'GST (10%)') + '</span><span>' + formatCurrency(quote.gst) + '</span></div>' +
           '<div class="totals-row total"><span>Total</span><span class="amount">' + formatCurrency(quote.total) + '</span></div>' +
         '</div>' +
 
@@ -7253,6 +9355,105 @@ export const onQuoteExpiring = functions.pubsub
   });
 
 // -----------------------------------------------------------
+// customerQuoteFollowUp — Scheduled daily: nudge customers who haven't
+// accepted a sent quote yet. Two reminders max (~3 days then ~7 days
+// after sentAt). Opt-in per tradie via business settings.
+// -----------------------------------------------------------
+export const customerQuoteFollowUp = functions.pubsub
+  .schedule('every day 09:00')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const now = Date.now();
+    const usersSnapshot = await db.collection('users').get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
+      const settings = settingsDoc.exists ? (settingsDoc.data() || {}) : {};
+      if (!settings.autoCustomerFollowUpEnabled) continue;
+
+      const businessName = settings.businessName || '';
+      if (!businessName) continue;
+
+      const quotesSnapshot = await userDoc.ref
+        .collection('quotes')
+        .where('status', '==', 'sent')
+        .get();
+
+      for (const quoteDoc of quotesSnapshot.docs) {
+        const q = quoteDoc.data();
+        if (!q.customerEmail) continue;
+        // Skip anything that has already moved on. status === 'sent' filter
+        // catches most of this; the explicit checks defend against legacy
+        // docs where the status flag wasn't flipped.
+        if (q.acceptedAt || q.declinedAt) continue;
+        if (q.suppressAutoFollowUp) continue;
+
+        const sentAtMs = q.sentAt?.toDate?.()?.getTime?.()
+          ?? (typeof q.sentAt === 'number' ? q.sentAt : 0);
+        if (!sentAtMs) continue;
+
+        const count: number = q.customerFollowUpCount ?? 0;
+        if (count >= 2) continue;
+
+        const lastAtMs = q.customerFollowUpLastAt?.toDate?.()?.getTime?.() ?? 0;
+        const ageDays = (now - sentAtMs) / 86_400_000;
+        const sinceLastDays = (now - (lastAtMs || sentAtMs)) / 86_400_000;
+
+        const shouldSend =
+          (count === 0 && ageDays >= 3) ||
+          (count === 1 && sinceLastDays >= 4);
+        if (!shouldSend) continue;
+
+        // Mint a fresh acceptance token. Existing tokens stay valid — the
+        // acceptance page looks them up by hash directly, so the customer's
+        // original email link still works alongside this fresh one.
+        const token = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
+          userId: userDoc.id,
+          quoteId: quoteDoc.id,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        const acceptanceUrl =
+          `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
+
+        // Fall back to the auth email so replies still route to the tradie
+        // even if they haven't filled in business.email — same shape as
+        // sendQuoteFlavour does for the original send.
+        const tradieReplyEmail = settings.email || (await getUserEmail(userDoc.id)) || undefined;
+
+        const sent = await sendCustomerQuoteReminderEmail({
+          to: q.customerEmail,
+          customerName: q.customerName || '',
+          jobName: q.job?.name || 'your job',
+          total: q.total || 0,
+          acceptanceUrl,
+          followUpNumber: (count + 1) as 1 | 2,
+          business: {
+            name: businessName,
+            abn: settings.abn,
+            phone: settings.phone,
+            email: tradieReplyEmail,
+            address: settings.address,
+            logoUrl: settings.logoStorageUrl || settings.logoUri,
+            brandColor: settings.brandColor,
+          },
+          userId: userDoc.id,
+        });
+
+        if (sent) {
+          await quoteDoc.ref.update({
+            customerFollowUpCount: count + 1,
+            customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
+            acceptanceTokenHash: tokenHash,
+            acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    }
+  });
+
+// -----------------------------------------------------------
 // quoteFollowUp — Scheduled every 30 mins: send follow-up email 2hrs after first quote created
 // -----------------------------------------------------------
 export const quoteFollowUp = functions.pubsub
@@ -8052,7 +10253,9 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
         Date: formatDate(invoice.issueDate),
         DueDate: formatDate(invoice.dueDate),
         Status: xeroStatus,
-        LineAmountTypes: 'Exclusive', // Amounts are ex-GST, Xero adds GST
+        // Tell Xero whether our UnitAmounts already include GST or not, so it
+        // applies the right tax treatment. Mirrors the doc's pricesIncludeGst.
+        LineAmountTypes: invoice.pricesIncludeGst === true ? 'Inclusive' : 'Exclusive',
         LineItems: lineItems,
         CurrencyCode: 'AUD',
       };
@@ -8119,6 +10322,72 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
       });
     } catch (error: any) {
       res.status(500).json({ error: 'Internal error syncing to Xero' });
+    }
+  });
+});
+
+/**
+ * Push a quote to Xero as a Xero Quote (status DRAFT / SENT / ACCEPTED /
+ * DECLINED). Mirrors pushInvoiceToXero in shape but hits the Quotes API and
+ * delegates to the shared helpers in xeroSync.ts so the HTTP path and the
+ * auto-push trigger can't drift.
+ */
+export const pushQuoteToXero = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const { quote } = req.body;
+    if (!quote || !quote.id) {
+      res.status(400).json({ error: 'Missing quote data' });
+      return;
+    }
+
+    const tokens = await getXeroTokens(decodedToken.uid);
+    if (!tokens) {
+      res.status(401).json({ error: 'Xero not connected or token expired. Please reconnect.' });
+      return;
+    }
+
+    const headers = buildXeroAuthHeaders(tokens.accessToken, tokens.tenantId);
+
+    try {
+      const result = await pushQuoteToXeroCore(headers, quote);
+      if (!result.ok) {
+        functions.logger.error('xero_quote_push_failed', {
+          uid: decodedToken.uid,
+          quoteId: quote.id,
+          quoteNumber: quote.quoteNumber,
+          error: result.error,
+          details: result.details,
+        });
+        await persistQuoteSyncError(decodedToken.uid, quote.id, result.details || result.error);
+        res.status(400).json({ error: result.error, details: result.details });
+        return;
+      }
+
+      await persistQuoteSyncSuccess(decodedToken.uid, quote.id, result);
+
+      res.status(200).json({
+        success: true,
+        xeroQuoteId: result.xeroQuoteId,
+        xeroContactId: result.xeroContactId,
+        xeroTotal: result.xeroTotal,
+      });
+    } catch (error: any) {
+      functions.logger.error('xero_quote_push_threw', {
+        uid: decodedToken.uid,
+        quoteId: quote.id,
+        error: error?.message,
+        stack: error?.stack,
+      });
+      await persistQuoteSyncError(decodedToken.uid, quote.id, error?.message || 'Unknown error');
+      res.status(500).json({ error: 'Internal error syncing quote to Xero' });
     }
   });
 });

@@ -74,6 +74,8 @@ export interface Document {
 
   // ===== Display flags =====
   showMarkup?: boolean;
+  showMaterialCosts?: boolean;
+  showLaborCosts?: boolean;
   showLaborBreakdown?: boolean;
 
   // ===== Travel adjustment =====
@@ -81,6 +83,11 @@ export interface Document {
   estimatedDistance?: number;
   estimatedFuelCost?: number;
   travelGeocodeFailed?: boolean;
+
+  // ===== GST mode snapshot =====
+  // Inclusive vs exclusive at the time this document was created. Calculator
+  // and PDF render branch on this; falls back to BusinessSettings when undefined.
+  pricesIncludeGst?: boolean;
 
   // ===== T&Cs snapshot (shared between quote and invoice flows) =====
   termsSnapshot?: string;
@@ -121,6 +128,10 @@ export interface Document {
   customPaymentDays?: number;
 
   xeroInvoiceId?: string;
+  // Quote-side Xero record. Set when a quote is pushed to Xero as a Quote.
+  // Carried over to the resulting invoice so we can set Xero's Reference
+  // field for traceability between the two records in Xero.
+  xeroQuoteId?: string;
   xeroContactId?: string;
   xeroSyncStatus?: XeroSyncStatus;
   xeroSyncedAt?: number;

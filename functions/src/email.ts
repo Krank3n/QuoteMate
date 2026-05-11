@@ -26,6 +26,19 @@ interface SendEmailOptions {
   tags?: string[];
   attachment?: Array<{ name: string; content: string }>; // base64 encoded
   unsubscribeUrl?: string; // If set, adds List-Unsubscribe headers (required by Gmail bulk-sender rules)
+  // Customer-facing sends (quote/invoice to client) override the default
+  // QuoteMate identity so replies go to the tradie and the from-name shows
+  // their business. Sender email stays on the verified domain — only the
+  // display name changes — so DKIM/SPF/DMARC remain aligned.
+  replyTo?: { email: string; name?: string };
+  senderName?: string;
+}
+
+// Strip characters that could break an RFC 5322 display-name header.
+// Brevo serialises sender.name into "Name <email>" so commas, quotes, and
+// CR/LF could splice the header. Belt-and-braces sanitisation.
+function sanitizeDisplayName(name: string): string {
+  return name.replace(/[\r\n,"<>]/g, '').trim().slice(0, 78);
 }
 
 // Shared email wrapper (base layout for all emails)
@@ -182,11 +195,46 @@ async function canSendEmail(userId: string, category: EmailCategory): Promise<bo
   }
 }
 
+// AU Spam Act 2003 compliance footer for cold outreach. Required:
+//   - clear sender business identity
+//   - functional reply contact
+//   - one-click unsubscribe
+// Wrapped around the body for any send tagged 'lead_outreach'.
+function wrapLeadOutreachBody(innerBody: string, unsubscribeLink: string): string {
+  return `<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;font-size:15px;line-height:1.6;">
+<div style="max-width:560px;margin:0 auto;padding:24px 20px;">
+<div>${innerBody}</div>
+<div style="margin-top:36px;padding-top:18px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:1.6;">
+QuoteMate is made by Hansen Dev (Sydney NSW, Australia). You're receiving this because your business is publicly listed as a tradie servicing this area &mdash; reply "stop" or click below and I'll never email you again.<br/>
+<a href="${unsubscribeLink}" style="color:#64748b;text-decoration:underline;">Unsubscribe from QuoteMate outreach</a>
+</div>
+</div>
+</body></html>`;
+}
+
 // Pre-create the emailLog doc, attach its id as a Brevo tag, then send. The
 // Brevo webhook posts back events keyed to that tag, which lets us correlate
 // delivery / bounce / open / click / spam back to this exact send.
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to, subject, htmlContent, category, userId, tags, attachment, unsubscribeUrl } = options;
+  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName } = options;
+  let { htmlContent, unsubscribeUrl } = options;
+
+  // For cold lead outreach, wrap with the AU spam-act compliance footer
+  // and ensure a List-Unsubscribe header is set even if the caller didn't.
+  const isLeadOutreach = !!tags?.includes('lead_outreach');
+  if (isLeadOutreach) {
+    const leadTag = tags!.find(t => t.startsWith('lead:'));
+    const leadId = leadTag ? leadTag.slice('lead:'.length) : '';
+    if (!unsubscribeUrl) {
+      // Cloud Function endpoint (one-click). Override via OUTREACH_UNSUB_URL_BASE env if you front it with a custom domain.
+      const base = process.env.OUTREACH_UNSUB_URL_BASE
+        || 'https://us-central1-hansendev.cloudfunctions.net/leadUnsubscribe';
+      unsubscribeUrl = `${base}?to=${encodeURIComponent(to)}&lead=${encodeURIComponent(leadId)}`;
+    }
+    htmlContent = wrapLeadOutreachBody(htmlContent, unsubscribeUrl);
+  }
+
   const apiKey = getBrevoApiKey();
 
   if (!apiKey) {
@@ -233,8 +281,21 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         'Accept': 'application/json',
       },
       body: JSON.stringify({
-        sender: SENDER,
-        replyTo: { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
+        // Cold outreach uses an isolated sender (separate domain/subdomain ideally)
+        // so spam complaints don't poison the transactional sender's reputation.
+        // Configure OUTREACH_SENDER_EMAIL + OUTREACH_REPLY_TO_EMAIL in functions/.env.
+        // Customer-facing sends (sendDocumentEmail) pass senderName/replyTo so
+        // the inbox shows the tradie's business and replies route to them, not us.
+        sender: isLeadOutreach && process.env.OUTREACH_SENDER_EMAIL
+          ? { email: process.env.OUTREACH_SENDER_EMAIL, name: process.env.OUTREACH_SENDER_NAME || 'Tom' }
+          : senderName
+            ? { email: SENDER.email, name: sanitizeDisplayName(senderName) }
+            : SENDER,
+        replyTo: replyToOverride
+          ? { email: replyToOverride.email, name: replyToOverride.name ? sanitizeDisplayName(replyToOverride.name) : undefined }
+          : isLeadOutreach && process.env.OUTREACH_REPLY_TO_EMAIL
+            ? { email: process.env.OUTREACH_REPLY_TO_EMAIL, name: process.env.OUTREACH_REPLY_TO_NAME || 'Tom' }
+            : { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
         to: [{ email: to }],
         subject,
         htmlContent,
@@ -1492,6 +1553,122 @@ export function sendQuoteFollowUpEmail(
     userId,
     tags: ['quote-follow-up'],
     unsubscribeUrl,
+  });
+}
+
+/**
+ * Customer-facing reminder for a sent quote that hasn't been accepted yet.
+ * Triggered by the customerQuoteFollowUp scheduled function. Tone is
+ * professional and shifts slightly between the first and second nudge.
+ */
+export function sendCustomerQuoteReminderEmail(args: {
+  to: string;
+  customerName: string;
+  jobName: string;
+  total: number;
+  acceptanceUrl: string;
+  followUpNumber: 1 | 2;
+  business: {
+    name: string;
+    abn?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    logoUrl?: string;
+    brandColor?: string;
+  };
+  userId: string;
+}): Promise<boolean> {
+  const { to, customerName, jobName, total, acceptanceUrl, followUpNumber, business, userId } = args;
+  const accent = business.brandColor || '#059669';
+  const esc = escapeHtml;
+  const acceptUrl = acceptanceUrl + (acceptanceUrl.includes('?') ? '&' : '?') + 'action=accept';
+  const declineUrl = acceptanceUrl + (acceptanceUrl.includes('?') ? '&' : '?') + 'action=decline';
+
+  const subject = followUpNumber === 1
+    ? `Reminder: your quote from ${business.name} for ${jobName}`
+    : `Following up on your quote from ${business.name}`;
+
+  const lead = followUpNumber === 1
+    ? `Just bumping this up your inbox in case it got buried — happy to answer any questions about the quote.`
+    : `One last check-in on the quote below. If the price or scope isn't quite right, reply to this email and we can adjust it.`;
+
+  const content = `
+    <h1 style="color:#1f2937;font-size:24px;font-weight:700;margin:0 0 8px;line-height:1.3;">
+      Quote for ${esc(jobName)}
+    </h1>
+    <p style="color:#6b7280;font-size:14px;margin:0 0 24px;">
+      Hi ${esc(customerName || 'there')},
+    </p>
+
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      ${lead}
+    </p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0 0;">
+      <tr>
+        <td style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="color:#6b7280;font-size:13px;padding:0 0 4px;">Total</td>
+              <td style="color:${accent};font-size:20px;font-weight:700;text-align:right;padding:0 0 4px;">$${total.toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td colspan="2" style="color:#9ca3af;font-size:12px;">The original quote PDF was attached to your previous email.</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+            <tr>
+              <td style="background:${accent};border-radius:10px;text-align:center;">
+                <a href="${esc(acceptUrl)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Review &amp; accept quote</a>
+              </td>
+            </tr>
+            <tr>
+              <td height="12" style="font-size:12px;line-height:12px;">&nbsp;</td>
+            </tr>
+            <tr>
+              <td style="text-align:center;">
+                <a href="${esc(declineUrl)}" target="_blank" style="color:#9ca3af;font-size:14px;text-decoration:underline;">Decline quote</a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:24px 0 0;">
+      Cheers,<br/>
+      <strong style="color:#1f2937;">${esc(business.name)}</strong>
+    </p>
+
+    ${renderBusinessFooter(business, accent)}
+  `;
+
+  const htmlContent = wrapQuoteEmailTemplate(content, {
+    brandColor: accent,
+    businessName: business.name,
+    logoUrl: business.logoUrl,
+    preheader: `Reminder: ${jobName} quote — $${total.toFixed(2)} from ${business.name}`,
+  });
+
+  return sendEmail({
+    to,
+    subject,
+    htmlContent,
+    category: 'transactional',
+    userId,
+    tags: ['quote-customer-reminder', `followup:${followUpNumber}`],
+    // Match the original quote send: from-name shows the tradie's business and
+    // replies route back to them, not to the QuoteMate inbox.
+    senderName: business.name || undefined,
+    replyTo: business.email ? { email: business.email, name: business.name } : undefined,
   });
 }
 

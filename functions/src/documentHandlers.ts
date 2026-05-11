@@ -53,6 +53,35 @@ type AnyData = Record<string, any>;
 
 const db = () => admin.firestore();
 
+// Loose RFC 5321 sanity check: one @, no whitespace, dot in the domain. Not a
+// full validator — the goal is to catch typos like trailing characters that
+// would silently route customer replies into the void.
+function isLikelyValidEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
+}
+
+/**
+ * Decide which address to use as Reply-To on customer-facing sends. Prefers
+ * the saved business email; falls back to the auth email when the business
+ * email is missing or malformed. Returns null only when both are unusable.
+ */
+async function resolveTradieReplyEmail(
+  userId: string,
+  businessEmail: string | undefined,
+): Promise<string | null> {
+  const trimmed = (businessEmail || '').trim();
+  if (trimmed && isLikelyValidEmail(trimmed)) return trimmed;
+  if (trimmed) {
+    // Logged so we can surface bad data in support / outreach later.
+    console.warn(
+      `resolveTradieReplyEmail: business.email "${trimmed}" failed validation for user ${userId}; falling back to auth email`,
+    );
+  }
+  const authEmail = await getUserEmail(userId);
+  if (authEmail && isLikelyValidEmail(authEmail)) return authEmail;
+  return null;
+}
+
 /**
  * Load a unified document for a user. Prefers `documents/{id}`. Falls back to
  * `quotes/{id}` then `invoices/{id}`, mirroring through the shared adapter on
@@ -299,6 +328,8 @@ interface BusinessSettings {
   brandColor?: string;
   pdfTemplate?: any;
   showMarkup?: boolean;
+  showMaterialCostsByDefault?: boolean;
+  showLaborCostsByDefault?: boolean;
   showLaborHours?: boolean;
   groupMaterialsBySection?: boolean;
   paymentMethods?: any;
@@ -306,10 +337,14 @@ interface BusinessSettings {
   [key: string]: any;
 }
 
-function applyHideMarkupForDisplay(q: any) {
+function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
   const matMarkup = Number(q.markup) || 0;
   const laborMarkup = Number(q.laborMarkup ?? q.markup) || 0;
-  const hideMarkup = q.showMarkup !== true && (matMarkup > 0 || laborMarkup > 0);
+  // Resolution order matches the PDF: per-doc override > business default > false.
+  const showMarkup = q.showMarkup !== undefined
+    ? q.showMarkup === true
+    : businessSettings?.showMarkup === true;
+  const hideMarkup = !showMarkup && (matMarkup > 0 || laborMarkup > 0);
   if (!hideMarkup) {
     return {
       materials: (q.materials || []).map((m: any) => ({ ...m })),
@@ -537,7 +572,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
 
   const photoUrls = (quote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
   const logoUrl = business.logoStorageUrl || business.logoUri || '';
-  const displayQuote = applyHideMarkupForDisplay(quote);
+  const displayQuote = applyHideMarkupForDisplay(quote, business);
   const emailMaterials = displayQuote.materials.map((m: any) => ({
     name: m.name, quantity: m.quantity, unit: m.unit,
     totalPrice: m.totalPrice || 0, section: m.section,
@@ -615,7 +650,15 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
       markup: quote.markup || 0,
       markupAmount: quote.markupAmount || 0,
       laborMarkup: quote.laborMarkup ?? quote.markup ?? 0,
-      showMarkup: quote.showMarkup === true && business.showMarkup !== false,
+      showMarkup: quote.showMarkup !== undefined
+        ? quote.showMarkup === true
+        : business.showMarkup === true,
+      showMaterialCosts: quote.showMaterialCosts !== undefined
+        ? quote.showMaterialCosts
+        : business.showMaterialCostsByDefault !== false,
+      showLaborCosts: quote.showLaborCosts !== undefined
+        ? quote.showLaborCosts
+        : business.showLaborCostsByDefault !== false,
       travelAdjustment: quote.travelAdjustment,
       gst: quote.gst || 0,
       total: quote.total || 0,
@@ -649,6 +692,12 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     attachments.push(...photoAttachments);
   }
 
+  // Prefer business settings email, fall back to auth email so replies always
+  // land in the tradie's actual inbox even if they haven't filled in settings.
+  // Validates the email so a typo doesn't silently swallow customer replies.
+  const tradieReplyEmail = await resolveTradieReplyEmail(userId, business.email);
+  const tradieDisplayName = business.businessName || undefined;
+
   const sent = await sendEmail({
     to: recipientEmail,
     subject: `${isTestSend ? '[TEST] ' : ''}Quotation from ${business.businessName || 'Your Tradie'} - ${quote.job?.name || 'Job'}`,
@@ -657,6 +706,8 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     userId,
     tags: isTestSend ? ['quote-test'] : ['quote-to-client'],
     attachment: attachments,
+    senderName: tradieDisplayName,
+    replyTo: tradieReplyEmail ? { email: tradieReplyEmail, name: tradieDisplayName } : undefined,
   });
 
   if (!sent) return { success: false };
@@ -802,7 +853,15 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       markup: invoice.markup || 0,
       markupAmount: invoice.markupAmount || 0,
       laborMarkup: invoice.laborMarkup ?? invoice.markup ?? 0,
-      showMarkup: invoice.showMarkup === true && business.showMarkup !== false,
+      showMarkup: invoice.showMarkup !== undefined
+        ? invoice.showMarkup === true
+        : business.showMarkup === true,
+      showMaterialCosts: invoice.showMaterialCosts !== undefined
+        ? invoice.showMaterialCosts
+        : business.showMaterialCostsByDefault !== false,
+      showLaborCosts: invoice.showLaborCosts !== undefined
+        ? invoice.showLaborCosts
+        : business.showLaborCostsByDefault !== false,
       travelAdjustment: invoice.travelAdjustment,
       gst: invoice.gst || 0,
       total: invoice.total || 0,
@@ -843,6 +902,9 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     }
   }
 
+  const tradieReplyEmail = await resolveTradieReplyEmail(userId, business.email);
+  const tradieDisplayName = business.businessName || undefined;
+
   const sent = await sendEmail({
     to: recipientEmail,
     subject: `${isTestSend ? '[TEST] ' : ''}Invoice from ${business.businessName || 'Your Tradie'} - ${invoice.job?.name || 'Job'}`,
@@ -851,6 +913,8 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     userId,
     tags: isTestSend ? ['invoice-test'] : ['invoice-to-client'],
     attachment: attachments,
+    senderName: tradieDisplayName,
+    replyTo: tradieReplyEmail ? { email: tradieReplyEmail, name: tradieDisplayName } : undefined,
   });
 
   if (!sent) return { success: false };
@@ -1439,6 +1503,12 @@ export const convertDocumentToInvoice = functions.https.onCall(
         paymentTerms: 'net_14',
         total: adjustedTotal,
         legacyInvoiceId: docId,
+        // Xero: keep xeroQuoteId (historical link, used as Reference on the
+        // pushed invoice) and xeroContactId (re-use Xero contact, avoid a
+        // duplicate). Reset sync status so the invoice push fires fresh.
+        xeroSyncStatus: 'not_synced',
+        xeroSyncedAt: admin.firestore.FieldValue.delete(),
+        xeroSyncError: admin.firestore.FieldValue.delete(),
       },
     });
 

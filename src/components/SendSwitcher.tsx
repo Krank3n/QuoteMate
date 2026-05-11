@@ -16,17 +16,16 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, Pressable } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { Text, ActivityIndicator } from 'react-native-paper';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Document } from '../types/document';
 import type { BusinessSettings, Quote } from '../types';
 import { useStore } from '../store/useStore';
 import { colors } from '../theme';
-import { selectionTap } from '../utils/haptics';
 import { SendDocumentButton } from './SendDocumentButton';
 import { AlertModal } from './AlertModal';
+import { PillToggle } from './PillToggle';
 
 interface SendTypePillProps {
   doc: Document;
@@ -92,24 +91,16 @@ export function SendTypePill({ doc, style, fullWidth }: SendTypePillProps) {
 
   return (
     <View style={[styles.pillWrapper, fullWidth && styles.pillWrapperFull, style]}>
-      <View style={[styles.pillRow, fullWidth && styles.pillRowFull]}>
-        <PillOption
-          label="Quote"
-          icon="file-document-outline"
-          active={mode === 'quote'}
-          disabled={lockedToInvoice}
-          onPress={() => handlePillPress('quote')}
-          fullWidth={fullWidth}
-        />
-        <PillOption
-          label="Invoice"
-          icon="receipt"
-          active={mode === 'invoice'}
-          disabled={false}
-          onPress={() => handlePillPress('invoice')}
-          fullWidth={fullWidth}
-        />
-      </View>
+      <PillToggle<SendMode>
+        value={mode}
+        onChange={handlePillPress}
+        options={[
+          { value: 'quote', label: 'Quote', icon: 'file-document-outline', disabled: lockedToInvoice },
+          { value: 'invoice', label: 'Invoice', icon: 'receipt' },
+        ]}
+        fullWidth={fullWidth}
+        style={fullWidth ? { flex: 1 } : undefined}
+      />
       {converting ? (
         <View style={styles.converting}>
           <ActivityIndicator size={12} color={colors.primary} />
@@ -171,54 +162,6 @@ export function SendSwitcher({ doc, businessSettings, style }: SendSwitcherProps
   );
 }
 
-function PillOption({
-  label,
-  icon,
-  active,
-  disabled,
-  onPress,
-  fullWidth,
-}: {
-  label: string;
-  icon: string;
-  active: boolean;
-  disabled: boolean;
-  onPress: () => void;
-  fullWidth?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={() => {
-        if (disabled) return;
-        selectionTap();
-        onPress();
-      }}
-      style={({ pressed }) => [
-        styles.pill,
-        fullWidth && styles.pillFull,
-        active && styles.pillActive,
-        disabled && !active && styles.pillDisabled,
-        pressed && !disabled && { opacity: 0.8 },
-      ]}
-    >
-      <MaterialCommunityIcons
-        name={icon as any}
-        size={14}
-        color={active ? colors.white : disabled ? colors.inactive : colors.text}
-      />
-      <Text
-        style={[
-          styles.pillLabel,
-          active && styles.pillLabelActive,
-          disabled && !active && styles.pillLabelDisabled,
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   wrapper: {
     gap: 8,
@@ -230,46 +173,6 @@ const styles = StyleSheet.create({
   },
   pillWrapperFull: {
     alignSelf: 'stretch',
-  },
-  pillRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 3,
-    borderRadius: 999,
-    backgroundColor: colors.surfaceGray3,
-    gap: 2,
-  },
-  pillRowFull: {
-    flex: 1,
-  },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  pillFull: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  pillActive: {
-    backgroundColor: colors.primary,
-  },
-  pillDisabled: {
-    opacity: 0.5,
-  },
-  pillLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  pillLabelActive: {
-    color: colors.white,
-  },
-  pillLabelDisabled: {
-    color: colors.inactive,
   },
   converting: {
     flexDirection: 'row',

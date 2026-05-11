@@ -28,6 +28,12 @@ export interface Material {
   packSize?: number;
   packUnit?: Material['unit'];
   bunningsItemNumber?: string;
+  // Reece-specific identifiers, populated when pricingSource is the Reece API.
+  // Both are required to build a valid /au/order-gateway/orders payload, so
+  // the "Order from Reece" button only enables when these are present on at
+  // least one material.
+  reeceItemNumber?: string;       // matches productId from Reece's product-gateway/search
+  reeceUnitOfMeasure?: string;    // e.g. "LEN", "MTR" — matches the pack from search.unitOfMeasures[]
   price: number; // per unit
   totalPrice: number;
   manualPriceOverride: boolean;
@@ -46,6 +52,24 @@ export interface Material {
   category?: string; // Trade category ID (e.g., 'carpentry', 'electrical', 'plumbing')
   section?: string; // Work section within a job (e.g., 'Concreting', 'Timber Framing')
   templateBaseQuantity?: number; // Per-unit qty from template/AI (e.g. 2 posts per bay). quantity = templateBaseQuantity * section.multiplier
+}
+
+// Snapshot of a Reece order placed from QuoteMate against the user's trade
+// account. Stored as a sub-array on the originating quote so the user can see
+// "I ordered these parts on this date" history. Reece bills the user directly
+// — QuoteMate never touches money or fulfilment.
+export interface ReeceOrder {
+  reeceOrderNumber: string;       // Reece's order identifier from /order-gateway/orders
+  placedAt: string;               // ISO timestamp
+  itemCount: number;
+  totalIncGst: number;
+  totalExGst: number;
+  cartageFee: number;
+  fulfilmentMode: 'PICKUP' | 'DELIVERY';
+  branchNumber?: string;          // for PICKUP
+  branchName?: string;
+  deliveryAddress?: string;       // for DELIVERY, single-line summary
+  reference?: string;             // PO / job reference echoed to Reece
 }
 
 export interface FavoriteProductMapping {
@@ -207,6 +231,14 @@ export interface Quote {
   templateSuggestions?: TemplateSuggestion[];
   // Markup visibility
   showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
+  // Materials cost visibility on PDFs/email. When false, both the materials
+  // table and the Materials Subtotal summary row are hidden. Undefined =
+  // inherit BusinessSettings.showMaterialCostsByDefault.
+  showMaterialCosts?: boolean;
+  // Labour cost visibility on PDFs/email. When false, both the labour table
+  // and the Labour summary row are hidden. Undefined = inherit
+  // BusinessSettings.showLaborCostsByDefault.
+  showLaborCosts?: boolean;
   // Labour breakdown visibility on PDFs. When false, the per-section labour
   // rows are hidden and only the Labour Total is shown. Default: true.
   showLaborBreakdown?: boolean;
@@ -247,6 +279,12 @@ export interface Quote {
   depositPaymentLinkCreatedAt?: number | Date; // When the link was minted (ms epoch). Used to detect >23h stale and re-mint.
   depositSquarePaymentId?: string; // Set by webhook on COMPLETED (idempotency key).
 
+  // GST mode snapshotted at quote creation. When true, line prices are
+  // GST-inclusive and the GST line shows the extracted 1/11. When false,
+  // prices are ex-GST and 10% is added on top. Falls back to the business
+  // setting when undefined (legacy quotes).
+  pricesIncludeGst?: boolean;
+
   // T&Cs snapshot taken at send-time so later edits to the BusinessProfile
   // T&Cs don't rewrite history. The hash identifies the exact version the
   // customer saw when they paid.
@@ -283,6 +321,22 @@ export interface Quote {
   // — re-tapping Convert returns the existing invoice instead of duplicating.
   invoiceId?: string;
   invoicedAt?: Date;
+
+  // Reece orders placed against this quote's materials. Each entry is a
+  // confirmed order — Reece bills the user via their trade account, QuoteMate
+  // never touches the money. Append-only history; cancelling an order is done
+  // through Reece's website, not QuoteMate.
+  reeceOrders?: ReeceOrder[];
+
+  // Xero integration — populated when the quote is pushed to Xero as a Quote
+  // (status DRAFT / SENT / ACCEPTED / DECLINED). Contact id is shared with
+  // the invoice generated from this quote so we don't create duplicate
+  // contacts in Xero.
+  xeroQuoteId?: string;
+  xeroContactId?: string;
+  xeroSyncStatus?: XeroSyncStatus;
+  xeroSyncedAt?: Date;
+  xeroSyncError?: string;
 }
 
 export type SquareDisputeStatus =
@@ -411,10 +465,27 @@ export interface BusinessSettings {
   tradeNiche?: string;
   // Price fetching settings
   useReeceApi?: boolean; // If true and tradeType is plumber, use Reece API for plumbing supplies
-  selectedStore?: string; // Single selected hardware store (e.g., 'bunnings', 'mitre10')
+  selectedStore?: string; // DEPRECATED — kept for legacy reads. Hardware store routing now uses supplierPriority.
+  // User-controlled supplier priority for material price lookups. Higher in
+  // the list = tried first. Entries are either built-in identifiers
+  // ('bunnings', 'reece') or a SupplierGroup.id from the user's saved local
+  // suppliers. Bunnings is the always-on backbone — if it's missing from
+  // this list, treat it as appended at the end. Reece is only honoured
+  // when the user has connected (the integration screen flips that on).
+  supplierPriority?: string[];
+  // Auto-nudge customers who haven't accepted a sent quote. Off by default.
+  // When on, the customerQuoteFollowUp scheduled function emails the
+  // customer ~3 days after send and again ~7 days, capped at 2 nudges.
+  autoCustomerFollowUpEnabled?: boolean;
   // Quote display settings
   showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)
-  showMarkup?: boolean; // If true, show markup line on documents. Default: true (show markup)
+  showMarkup?: boolean; // If true, allow per-document markup line. When undefined or false, markup is hidden across all documents. Default: false (hide markup).
+  // Default for new quotes' showMaterialCosts. When false, new quotes hide
+  // the materials table + Materials Subtotal row by default. Per-quote
+  // toggle on Quote.showMaterialCosts overrides. Default: true.
+  showMaterialCostsByDefault?: boolean;
+  // Default for new quotes' showLaborCosts. Same shape as above for labour.
+  showLaborCostsByDefault?: boolean;
   // Payment method settings
   paymentMethods?: PaymentMethodSettings;
   // Branding
@@ -430,6 +501,12 @@ export interface BusinessSettings {
   // Default deposit percentage applied to new quotes when requireDeposit is on.
   // Per-quote override lives on Quote.depositPercentage.
   defaultDepositPercentage?: number;
+  // GST handling: when true, prices entered/displayed are GST-inclusive and
+  // the GST line on quotes/invoices shows the extracted 1/11 component for
+  // tax-invoice disclosure. When false (default for new users), prices are
+  // ex-GST and 10% GST is added on top. Snapshotted onto each Quote/Invoice
+  // at creation time so toggling the setting later doesn't rewrite history.
+  pricesIncludeGst?: boolean;
   // Terms & Conditions shown on the quote/invoice PDF and recorded as
   // accepted when the customer pays. Editable in Settings → Business Profile.
   // When blank, the PDF falls back to the built-in AU tradie default so new
@@ -566,6 +643,14 @@ export interface Invoice {
 
   // Markup visibility
   showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
+  // Materials cost visibility on PDFs/email. When false, both the materials
+  // table and the Materials Subtotal summary row are hidden. Undefined =
+  // inherit BusinessSettings.showMaterialCostsByDefault.
+  showMaterialCosts?: boolean;
+  // Labour cost visibility on PDFs/email. When false, both the labour table
+  // and the Labour summary row are hidden. Undefined = inherit
+  // BusinessSettings.showLaborCostsByDefault.
+  showLaborCosts?: boolean;
   // Labour breakdown visibility on PDFs. When false, the per-section labour
   // rows are hidden and only the Labour Total is shown. Default: true.
   showLaborBreakdown?: boolean;
@@ -610,6 +695,9 @@ export interface Invoice {
   // "Deposit of $X already paid" on the invoice/PDF/email.
   depositCredit?: number;
   depositCreditFromQuoteId?: string;
+
+  // GST mode snapshotted at invoice creation. See Quote.pricesIncludeGst.
+  pricesIncludeGst?: boolean;
 
   // T&Cs snapshot taken at send-time — see Quote.termsSnapshot.
   termsSnapshot?: string;

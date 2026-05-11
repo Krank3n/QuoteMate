@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity, Animated } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity, Animated, Pressable } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
@@ -18,6 +18,7 @@ import {
   Title,
   TextInput,
   Menu,
+  ActivityIndicator,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -32,6 +33,7 @@ import type { PaymentTerms } from '../../types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SendTypePill } from '../../components/SendSwitcher';
 import { SendDocumentButton } from '../../components/SendDocumentButton';
+import { FooterButton } from '../../components/FooterButton';
 import { DocumentSentBanner } from '../../components/DocumentSentBanner';
 import { TakePaymentSheet, type TakePaymentTarget } from '../../components/TakePaymentSheet';
 import { reconcileNextNumber } from '../../utils/nextNumber';
@@ -427,13 +429,20 @@ export function JobPreviewScreen() {
   // the badge would stay stuck on the old quote number / placeholder.
   // Treat liveDoc as the source of truth for both.
   const liveIsInvoice = liveDoc?.type === 'invoice' || isInvoiceMode;
+  // Track the last liveDoc.number we synced into refNumber so we only react
+  // to *external* changes (e.g. Quote → Invoice convert). Without this the
+  // effect would also fire when the user types a custom number and blurs —
+  // refNumber would drift from liveDoc.number and get reverted.
+  const lastSyncedNumberRef = useRef<string | null>(null);
   useEffect(() => {
     if (isEditingNumber) return;
     const liveNumber = liveDoc?.number;
-    if (liveNumber && liveNumber !== refNumber) {
+    if (!liveNumber) return;
+    if (liveNumber !== lastSyncedNumberRef.current) {
+      lastSyncedNumberRef.current = liveNumber;
       setRefNumber(liveNumber);
     }
-  }, [liveDoc?.number, isEditingNumber, refNumber]);
+  }, [liveDoc?.number, isEditingNumber]);
 
   const handleViewPDF = async () => {
     if (!liveDoc) return;
@@ -462,9 +471,12 @@ export function JobPreviewScreen() {
           };
         }
       } else {
+        // System print preview UI — full-screen rendered PDF with zoom,
+        // page navigation, and Save-as-PDF / Share from the overflow menu.
         await Print.printAsync({ html });
       }
-    } catch (error) {
+    } catch (error: any) {
+      Alert.alert('Could not open preview', error?.message || 'Please try again.');
     } finally {
       setIsPdfLoading(false);
     }
@@ -695,6 +707,7 @@ export function JobPreviewScreen() {
             workingDoc.subtotal * ((workingDoc.travelAdjustment ?? 0) / 100)
           }
           travelAdjustmentPercent={workingDoc.travelAdjustment}
+          pricesIncludeGst={workingDoc.pricesIncludeGst === true}
         />
 
         <Surface style={documentStyles.section}>
@@ -717,20 +730,31 @@ export function JobPreviewScreen() {
           />
         </Surface>
 
-        <Button
-          mode="outlined"
+        <Pressable
           onPress={handleViewPDF}
-          loading={isPdfLoading}
           disabled={isPdfLoading}
-          icon="file-pdf-box"
-          style={styles.viewPdfButton}
+          style={({ pressed }) => [
+            styles.previewButton,
+            pressed && styles.previewButtonPressed,
+            isPdfLoading && styles.previewButtonDisabled,
+          ]}
         >
-          View PDF Preview
-        </Button>
+          {isPdfLoading ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <MaterialCommunityIcons
+              name={'file-eye-outline' as any}
+              size={16}
+              color={colors.primary}
+            />
+          )}
+          <Text style={styles.previewButtonLabel}>Preview PDF</Text>
+        </Pressable>
         </WebContainer>
       </ScrollView>
 
-      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <View style={styles.bottomButtonsRow}>
           {/* Take Payment — in-person capture path. Same shared sheet
               the ViewJob sticky bar uses: quote → deposit (or full),
@@ -738,11 +762,18 @@ export function JobPreviewScreen() {
               customer walks off.
               iOS gating: hidden until Tap to Pay is approved and a Square
               reader is available for App Review demo. */}
-          {liveDoc && Platform.OS === 'android' ? (
+          {liveDoc && Platform.OS !== 'ios' ? (
             <View style={styles.bottomButtonHalfWrapper}>
-              <Button
+              <FooterButton
                 mode="outlined"
                 icon="credit-card-outline"
+                label={
+                  liveDoc.type === 'invoice'
+                    ? 'Take Payment'
+                    : (liveDoc.depositAmount ?? 0) > 0
+                      ? 'Take Deposit'
+                      : 'Tap to Pay'
+                }
                 onPress={() => {
                   if (liveDoc.type === 'invoice') {
                     setTakePaymentTarget({
@@ -766,15 +797,8 @@ export function JobPreviewScreen() {
                     });
                   }
                 }}
-                style={styles.bottomButtonFlex}
-                contentStyle={styles.bottomButtonContent}
-              >
-                {liveDoc.type === 'invoice'
-                  ? 'Take Payment'
-                  : (liveDoc.depositAmount ?? 0) > 0
-                    ? 'Take Deposit'
-                    : 'Tap to Pay'}
-              </Button>
+                style={{ width: '100%' }}
+              />
             </View>
           ) : null}
           <View ref={sendButtonRef} style={styles.bottomButtonHalfWrapper}>
@@ -785,7 +809,7 @@ export function JobPreviewScreen() {
                 buttonMode="contained"
                 buttonLabel={liveDoc.type === 'invoice' ? 'Send Invoice' : 'Send Quote'}
                 buttonIcon="send"
-                buttonStyle={styles.bottomButtonFlex}
+                buttonStyle={styles.sendButtonShape}
               />
             ) : null}
           </View>
@@ -1054,8 +1078,28 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontWeight: '600',
   },
-  viewPdfButton: {
+  previewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: colors.primaryBg,
+    borderWidth: 1,
+    borderColor: colors.primary + '33',
     marginBottom: 16,
+  },
+  previewButtonPressed: {
+    opacity: 0.8,
+  },
+  previewButtonDisabled: {
+    opacity: 0.55,
+  },
+  previewButtonLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
   },
   bottomBar: {
     flexDirection: 'column',
@@ -1076,8 +1120,9 @@ const styles = StyleSheet.create({
       web: {
         position: 'sticky' as any,
         bottom: 0,
-        paddingBottom: 16,
+        paddingBottom: 12,
         boxShadow: '0 -2px 12px rgba(0,0,0,0.2)',
+        alignItems: 'center',
       },
     }),
   },
@@ -1087,19 +1132,20 @@ const styles = StyleSheet.create({
   },
   bottomButtonsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     width: '100%',
-    gap: 12,
+    gap: 10,
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+    }),
   },
   bottomButtonHalfWrapper: {
     flex: 1,
   },
-  bottomButtonFlex: {
+  sendButtonShape: {
     width: '100%',
     margin: 0,
-  },
-  bottomButtonContent: {
-    paddingVertical: 8,
+    borderRadius: 12,
   },
   headerDoneButton: {
     marginRight: 12,

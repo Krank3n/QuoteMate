@@ -35,6 +35,7 @@ import {
 } from '../types/documentAdapter';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
+import { useAlertModal } from './useAlertModal';
 
 interface UseJobActionsSheetOptions {
   /** Optional callback fired after a job is duplicated, before navigating
@@ -54,10 +55,13 @@ export function useJobActionsSheet(
   const businessSettings = useStore((s) => s.businessSettings);
   const xeroConnection = useStore((s) => s.xeroConnection);
   const pushInvoiceToXero = useStore((s) => s.pushInvoiceToXero);
+  const pushQuoteToXero = useStore((s) => s.pushQuoteToXero);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
   const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
+
+  const { showAlert, alertNode } = useAlertModal();
 
   const [actionsJob, setActionsJob] = useState<Job | null>(null);
   const [sendDialogDoc, setSendDialogDoc] = useState<Document | null>(null);
@@ -163,21 +167,46 @@ export function useJobActionsSheet(
       }
       case 'pushToXero': {
         const doc = primaryDocForJob(job);
-        if (!doc || doc.type !== 'invoice') return;
+        if (!doc) return;
+        const noun = doc.type === 'invoice' ? 'Invoice' : 'Quote';
         try {
-          await pushInvoiceToXero(documentToInvoice(doc));
-          Alert.alert('Synced to Xero', 'Invoice pushed successfully.');
+          if (doc.type === 'invoice') {
+            await pushInvoiceToXero(documentToInvoice(doc));
+          } else {
+            await pushQuoteToXero(documentToQuote(doc));
+          }
+          showAlert({
+            type: 'success',
+            icon: 'cloud-check',
+            title: 'Synced to Xero',
+            message: `${noun} pushed successfully.`,
+            primaryButtonText: 'OK',
+          });
         } catch (e: any) {
-          Alert.alert('Xero sync failed', e?.message || 'Try again in a moment.');
+          showAlert({
+            type: 'error',
+            icon: 'cloud-alert',
+            title: 'Xero sync failed',
+            message: e?.message || 'Try again in a moment.',
+            primaryButtonText: 'OK',
+          });
         }
         break;
       }
       case 'duplicate': {
         try {
           const cloned = await duplicateJob(job.id);
-          if (job.primaryDocumentId) {
+          // Fall back to the most recently updated attached doc if the job
+          // never had primaryDocumentId stamped — many older jobs are in
+          // that state but still have docs the JobCard renders by jobId.
+          const sourceDocId =
+            job.primaryDocumentId ??
+            documents
+              .filter((d) => d.jobId === job.id && d.stage !== 'cancelled')
+              .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]?.id;
+          if (sourceDocId) {
             const clonedDoc = await duplicateDocumentForJob(
-              job.primaryDocumentId,
+              sourceDocId,
               cloned.id,
             );
             await saveJob({
@@ -206,10 +235,14 @@ export function useJobActionsSheet(
         const attached = documents.filter((d) => d.jobId === job.id);
         const paidDocs = pickPaidDocs(attached);
         if (paidDocs.length > 0) {
-          Alert.alert(
-            'Can’t delete — paid invoice attached',
-            'This job has paid or partially-paid documents that belong in your records. Archive the job instead.',
-          );
+          showAlert({
+            type: 'warning',
+            icon: 'lock-outline',
+            title: 'Can’t delete — paid invoice attached',
+            message:
+              'This job has paid or partially-paid documents that belong in your records. Archive the job instead.',
+            primaryButtonText: 'OK',
+          });
           return;
         }
         const docCount = attached.length;
@@ -217,24 +250,31 @@ export function useJobActionsSheet(
           docCount === 0
             ? 'This cannot be undone.'
             : `This will also delete ${docCount} attached ${docCount === 1 ? 'document' : 'documents'}. This cannot be undone.`;
-        Alert.alert('Delete job?', message, [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Delete',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                await cascadeDeleteJob(job, attached, {
-                  deleteQuote,
-                  deleteInvoice,
-                  deleteJob,
-                });
-              } catch {
-                Alert.alert('Delete failed', 'Try again in a moment.');
-              }
-            },
+        showAlert({
+          type: 'error',
+          icon: 'trash-can-outline',
+          title: 'Delete job?',
+          message,
+          primaryButtonText: 'Delete',
+          primaryButtonAction: async () => {
+            try {
+              await cascadeDeleteJob(job, attached, {
+                deleteQuote,
+                deleteInvoice,
+                deleteJob,
+              });
+            } catch {
+              showAlert({
+                type: 'error',
+                title: 'Delete failed',
+                message: 'Try again in a moment.',
+                primaryButtonText: 'OK',
+              });
+            }
           },
-        ]);
+          secondaryButtonText: 'Cancel',
+          secondaryButtonAction: () => {},
+        });
         break;
       }
     }
@@ -286,6 +326,8 @@ export function useJobActionsSheet(
           jobName={followUpJob?.name ?? 'the job'}
         />
       ) : null}
+
+      {alertNode}
     </>
   );
 

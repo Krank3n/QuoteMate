@@ -345,6 +345,7 @@ function ExpandedSections({
         hideMarkup={!showMarkupRow}
         travelAdjustmentAmount={travelAdjustmentAmount}
         travelAdjustmentPercent={travelAdjustmentPercent}
+        pricesIncludeGst={(doc as any).pricesIncludeGst === true}
         style={sectionOverride}
       />
     </View>

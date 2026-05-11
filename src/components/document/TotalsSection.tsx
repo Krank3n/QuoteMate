@@ -17,6 +17,7 @@ interface TotalsSectionProps {
   balanceDue?: number;
   travelAdjustmentAmount?: number;
   travelAdjustmentPercent?: number;
+  pricesIncludeGst?: boolean;
   style?: any;
 }
 
@@ -32,15 +33,18 @@ export function TotalsSection({
   balanceDue,
   travelAdjustmentAmount = 0,
   travelAdjustmentPercent = 0,
+  pricesIncludeGst = false,
   style,
 }: TotalsSectionProps) {
   const showMarkup = hideMarkup ? false : (hideZeroMarkup ? markup > 0 : true);
   const showTravel = travelAdjustmentAmount > 0;
+  const subtotalLabel = pricesIncludeGst ? 'Subtotal' : 'Subtotal (ex GST)';
+  const gstLabel = pricesIncludeGst ? 'Includes GST' : 'GST (10%)';
 
   return (
     <Surface style={[documentStyles.totalSection, style]}>
       <View style={documentStyles.summaryRow}>
-        <Text style={documentStyles.summaryLabel}>Subtotal</Text>
+        <Text style={documentStyles.summaryLabel}>{subtotalLabel}</Text>
         <Text style={documentStyles.summaryValue}>{formatCurrency(subtotal)}</Text>
       </View>
       {showMarkup && (
@@ -60,7 +64,7 @@ export function TotalsSection({
         </View>
       )}
       <View style={documentStyles.summaryRow}>
-        <Text style={documentStyles.summaryLabel}>GST (10%)</Text>
+        <Text style={documentStyles.summaryLabel}>{gstLabel}</Text>
         <Text style={documentStyles.summaryValue}>{formatCurrency(gst)}</Text>
       </View>
       <Divider style={documentStyles.divider} />

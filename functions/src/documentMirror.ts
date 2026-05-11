@@ -24,7 +24,8 @@ import {
   quoteRecordToDocumentRecord,
   invoiceRecordToDocumentRecord,
 } from './shared/document/adapter';
-import type { LegacyDocumentRecord } from './shared/document/types';
+import { isStageDowngrade } from './shared/document/stage';
+import type { DocumentStage, LegacyDocumentRecord } from './shared/document/types';
 
 type AnyData = LegacyDocumentRecord;
 
@@ -88,6 +89,7 @@ async function writeMirror(
 ): Promise<MirrorWriteResult> {
   const ref = documentRef(userId, mirrorId);
   const existing = await ref.get();
+  let toWrite: AnyData = projection;
   if (existing.exists) {
     const existingData = existing.data() ?? {};
     const existingUpdated = Number(existingData.updatedAt ?? 0);
@@ -95,18 +97,20 @@ async function writeMirror(
     if (existingUpdated > incomingUpdated) {
       return { written: false, skipped: true, reason: 'newer-on-disk' };
     }
-    // Phase-4: detect drift between server-side stage logic (setDocumentStage)
-    // and the legacy-status-derived stage. Logged only — the mirror keeps
-    // overwriting with the derived value so legacy clients remain authoritative
-    // for their own writes; phase-5 (client migration) eliminates the drift
-    // source by making the client write through documents/{id} directly.
-    const existingStage = existingData.stage;
-    const incomingStage = projection.stage;
+    // Forward-only stage guard. The mirror derives `stage` from the legacy
+    // `status` field, but `setDocumentStage` (cloud-function send / payment /
+    // convert) is the canonical writer of advanced stages. If a legacy quote
+    // gets re-written with status='draft' (e.g. a stale-cache saveDraft right
+    // after the tradie tapped Send), the derived projection would otherwise
+    // downgrade an already-sent doc and leave a contradictory sentAt behind.
+    const existingStage = existingData.stage as DocumentStage | undefined;
+    const incomingStage = projection.stage as DocumentStage | undefined;
     if (
       typeof existingStage === 'string' &&
       typeof incomingStage === 'string' &&
       existingStage !== incomingStage
     ) {
+      const downgrade = isStageDowngrade(existingStage, incomingStage);
       functions.logger.warn('[stage] mirror_drift', {
         userId,
         docId: mirrorId,
@@ -114,10 +118,15 @@ async function writeMirror(
         incoming: incomingStage,
         existingUpdatedAt: existingUpdated,
         incomingUpdatedAt: incomingUpdated,
+        downgrade,
       });
+      if (downgrade) {
+        const { stage: _drop, ...rest } = projection;
+        toWrite = rest;
+      }
     }
   }
-  await ref.set(stripUndefined(projection), { merge: true });
+  await ref.set(stripUndefined(toWrite), { merge: true });
   return { written: true, skipped: false };
 }
 

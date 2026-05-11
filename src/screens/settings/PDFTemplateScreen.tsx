@@ -47,7 +47,7 @@ function Line({ width, height = 3, color = '#D1D5DB', style }: {
 }
 
 /** Full-width detailed native document preview */
-function TemplatePreview({ templateId, businessName, groupBySection, brandColor }: { templateId: PdfTemplateId; businessName: string; groupBySection: boolean; brandColor?: string }) {
+function TemplatePreview({ templateId, businessName, groupBySection, brandColor, pricesIncludeGst }: { templateId: PdfTemplateId; businessName: string; groupBySection: boolean; brandColor?: string; pricesIncludeGst: boolean }) {
   const configs: Record<PdfTemplateId, {
     pageBg: string;
     headerBg: string;
@@ -374,10 +374,16 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor 
           !c.summaryBorder && templateId === 'clean' && { borderTopWidth: 0.5 * scale, borderTopColor: '#E5E7EB', paddingHorizontal: 0 },
           !c.summaryBorder && templateId === 'tradesman' && { borderTopWidth: 1.5 * scale, borderBottomWidth: 1.5 * scale, borderColor: c.accentColor, paddingHorizontal: 0 },
         ]}>
-          {[
-            { label: 'Subtotal', value: '$1,217.90' },
-            { label: 'GST (10%)', value: '$121.79' },
-          ].map((row, i) => (
+          {(pricesIncludeGst
+            ? [
+                { label: 'Subtotal', value: '$1,217.90' },
+                { label: 'Includes GST', value: '$110.72' },
+              ]
+            : [
+                { label: 'Subtotal (ex GST)', value: '$1,107.18' },
+                { label: 'GST (10%)', value: '$110.72' },
+              ]
+          ).map((row, i) => (
             <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 * scale }}>
               <Text style={{ color: c.bodyTextColor, fontSize: 5 * scale, ...font }}>{row.label}</Text>
               <Text style={{ color: c.bodyTextColor, fontSize: 5 * scale, ...font }}>{row.value}</Text>
@@ -386,7 +392,7 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor 
           <View style={{ borderTopWidth: 0.5 * scale, borderTopColor: c.bodyTextColor + '30', marginVertical: 2 * scale }} />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: c.accentColor, fontSize: 7 * scale, fontWeight: '800', ...font }}>TOTAL</Text>
-            <Text style={{ color: c.accentColor, fontSize: 7 * scale, fontWeight: '800', ...font }}>$1,339.69</Text>
+            <Text style={{ color: c.accentColor, fontSize: 7 * scale, fontWeight: '800', ...font }}>$1,217.90</Text>
           </View>
         </View>
 
@@ -413,7 +419,6 @@ export function PDFTemplateScreen() {
 
   const [selectedTemplate, setSelectedTemplate] = useState<PdfTemplateId>('professional');
   const [showLaborHours, setShowLaborHours] = useState(false);
-  const [showMarkup, setShowMarkup] = useState(true);
   const [groupMaterialsBySection, setGroupMaterialsBySection] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState<PdfTemplateId | null>(null);
@@ -421,19 +426,24 @@ export function PDFTemplateScreen() {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const initialSnapshotRef = useRef<string | null>(null);
 
+  // Cost/markup visibility toggles live in BusinessDefaults → Document Display.
+  // Here we read the current values to drive the live preview so the tradie
+  // can see the effect without leaving this screen.
+  const showMarkup = businessSettings?.showMarkup === true;
+  const showMaterialCostsByDefault = businessSettings?.showMaterialCostsByDefault !== false;
+  const showLaborCostsByDefault = businessSettings?.showLaborCostsByDefault !== false;
+
   useEffect(() => {
     if (businessSettings) {
       const tpl = businessSettings.pdfTemplate || 'professional';
       const slh = businessSettings.showLaborHours === true;
-      const sm = businessSettings.showMarkup !== false;
       const gm = businessSettings.groupMaterialsBySection === true;
       if (businessSettings.pdfTemplate) {
         setSelectedTemplate(businessSettings.pdfTemplate);
       }
       setShowLaborHours(slh);
-      setShowMarkup(sm);
       setGroupMaterialsBySection(gm);
-      initialSnapshotRef.current = JSON.stringify({ tpl, slh, sm, gm });
+      initialSnapshotRef.current = JSON.stringify({ tpl, slh, gm });
     }
   }, [businessSettings]);
 
@@ -442,10 +452,9 @@ export function PDFTemplateScreen() {
     return JSON.stringify({
       tpl: selectedTemplate,
       slh: showLaborHours,
-      sm: showMarkup,
       gm: groupMaterialsBySection,
     }) !== initialSnapshotRef.current;
-  }, [selectedTemplate, showLaborHours, showMarkup, groupMaterialsBySection]);
+  }, [selectedTemplate, showLaborHours, groupMaterialsBySection]);
 
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
@@ -454,13 +463,11 @@ export function PDFTemplateScreen() {
         ...businessSettings!,
         pdfTemplate: selectedTemplate,
         showLaborHours,
-        showMarkup,
         groupMaterialsBySection,
       });
       initialSnapshotRef.current = JSON.stringify({
         tpl: selectedTemplate,
         slh: showLaborHours,
-        sm: showMarkup,
         gm: groupMaterialsBySection,
       });
       if (!opts?.silent) setShowSuccessModal(true);
@@ -529,6 +536,7 @@ export function PDFTemplateScreen() {
             <p>Build a 6m x 4m hardwood deck with steps and railing to the rear of property.</p>
           </div>
 
+          ${showMaterialCostsByDefault ? `
           <div class="section-wrapper">
             <h3>Materials</h3>
             ${groupMaterialsBySection ? `
@@ -605,7 +613,9 @@ export function PDFTemplateScreen() {
             </table>
             `}
           </div>
+          ` : ''}
 
+          ${showLaborCostsByDefault ? `
           <div class="section-wrapper">
             <h3>Labor</h3>
             <table>
@@ -617,15 +627,23 @@ export function PDFTemplateScreen() {
               </tbody>
             </table>
           </div>
+          ` : ''}
 
           <div class="summary">
-            <div class="summary-row"><span>Materials Subtotal</span><span>$1,526.25</span></div>
-            <div class="summary-row"><span>Labor</span><span>$1,360.00</span></div>
-            <div class="summary-row"><span>Subtotal</span><span>$2,886.25</span></div>
-            ${showMarkup ? `<div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>` : ''}
-            <div class="summary-row"><span>GST (10%)</span><span>$331.92</span></div>
-            <hr>
-            <div class="summary-row grand-total"><span>TOTAL</span><span>$3,651.11</span></div>
+            ${showMaterialCostsByDefault ? `<div class="summary-row"><span>Materials Subtotal</span><span>$1,526.25</span></div>` : ''}
+            ${showLaborCostsByDefault ? `<div class="summary-row"><span>Labor</span><span>$1,360.00</span></div>` : ''}
+            ${businessSettings?.pricesIncludeGst === true
+              ? `${(showMaterialCostsByDefault || showLaborCostsByDefault) ? `<div class="summary-row"><span>Subtotal</span><span>$2,886.25</span></div>` : ''}
+                ${showMarkup ? `<div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>` : ''}
+                <div class="summary-row"><span>Includes GST</span><span>$301.74</span></div>
+                <hr>
+                <div class="summary-row grand-total"><span>TOTAL</span><span>$3,319.19</span></div>`
+              : `${(showMaterialCostsByDefault || showLaborCostsByDefault) ? `<div class="summary-row"><span>Subtotal (ex GST)</span><span>$2,886.25</span></div>` : ''}
+                ${showMarkup ? `<div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>` : ''}
+                <div class="summary-row"><span>GST (10%)</span><span>$331.92</span></div>
+                <hr>
+                <div class="summary-row grand-total"><span>TOTAL</span><span>$3,651.11</span></div>`
+            }
           </div>
 
           <div class="info-section"><h3>Notes</h3><p>All timber will be treated and stained. Work includes cleanup and disposal of waste materials. Deck will comply with local council regulations.</p></div>
@@ -662,7 +680,7 @@ export function PDFTemplateScreen() {
     } finally {
       setPreviewLoading(null);
     }
-  }, [businessSettings, showLaborHours, showMarkup, groupMaterialsBySection, isPro]);
+  }, [businessSettings, showLaborHours, showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, groupMaterialsBySection, isPro]);
 
   const businessName = businessSettings?.businessName || 'Your Business';
 
@@ -720,7 +738,7 @@ export function PDFTemplateScreen() {
 
                   {/* Large preview */}
                   <View style={styles.previewWrapper}>
-                    <TemplatePreview templateId={template.id} businessName={businessName} groupBySection={groupMaterialsBySection} brandColor={businessSettings?.brandColor} />
+                    <TemplatePreview templateId={template.id} businessName={businessName} groupBySection={groupMaterialsBySection} brandColor={businessSettings?.brandColor} pricesIncludeGst={businessSettings?.pricesIncludeGst === true} />
                   </View>
 
                   {/* Preview PDF button */}
@@ -757,21 +775,6 @@ export function PDFTemplateScreen() {
                 onValueChange={setShowLaborHours}
                 trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
                 thumbColor={showLaborHours ? colors.primary : '#F3F4F6'}
-              />
-            </View>
-
-            <View style={styles.toggleDivider} />
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Markup on Documents</Text>
-                <Text style={styles.toggleSubtitle}>Display markup percentage and amount on quotes and invoices</Text>
-              </View>
-              <Switch
-                value={showMarkup}
-                onValueChange={setShowMarkup}
-                trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
-                thumbColor={showMarkup ? colors.primary : '#F3F4F6'}
               />
             </View>
 

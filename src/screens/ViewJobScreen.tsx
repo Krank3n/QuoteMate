@@ -7,8 +7,8 @@
  * Stage chip → JobStageSheet.
  */
 
-import React, { useState, useMemo } from 'react';
-import { View, StyleSheet, Pressable, Linking, Platform } from 'react-native';
+import React, { useState, useMemo, useEffect } from 'react';
+import { View, StyleSheet, Pressable, Linking, Platform, TouchableOpacity } from 'react-native';
 import { NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { Text, Card, Button, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -43,11 +43,13 @@ import {
   type JobActionId,
 } from '../components/StickyJobActionBar';
 import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaymentSheet';
+import { getReeceConnectionStatus } from '../services/reeceApi';
 import { SendDocumentDialog } from '../components/SendDocumentDialog';
 import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { applyStageChange } from '../utils/applyStageChange';
+import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { formatScheduledDateLong } from '../utils/formatSchedule';
 import { selectionTap, lightTap } from '../utils/haptics';
@@ -96,8 +98,17 @@ export function ViewJobScreen() {
     tone: FollowUpTone;
   } | null>(null);
   const [pendingAction, setPendingAction] = useState<JobActionId | null>(null);
+  const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
   const { showAlert, alertNode } = useAlertModal();
   const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
+
+  useEffect(() => {
+    let cancelled = false;
+    getReeceConnectionStatus()
+      .then((status) => { if (!cancelled) setReeceConnected(!!status.connected); })
+      .catch(() => { if (!cancelled) setReeceConnected(false); });
+    return () => { cancelled = true; };
+  }, []);
   const [notesDirty, setNotesDirty] = useState(false);
   const [notesEditing, setNotesEditing] = useState(false);
 
@@ -115,6 +126,11 @@ export function ViewJobScreen() {
     () => documents.filter((d) => d.jobId === jobId),
     [documents, jobId],
   );
+  // Pick the most actionable doc on the job for the sticky bar. Invoices
+  // trump quotes once they exist; within a type the most recent wins.
+  // Must sit above the `!job` guard so the hook count stays stable when
+  // the job is deleted out from under us.
+  const actionableDoc = useMemo(() => pickPrimaryDoc(attachedDocs), [attachedDocs]);
 
   if (!job) {
     return (
@@ -136,9 +152,6 @@ export function ViewJobScreen() {
   }
 
   const meta = JOB_STAGE_META[job.stage];
-  // Pick the most actionable doc on the job for the sticky bar. Invoices
-  // trump quotes once they exist; within a type the most recent wins.
-  const actionableDoc = useMemo(() => pickPrimaryDoc(attachedDocs), [attachedDocs]);
   // Duration comes from the primary attached doc's labour rather than
   // duplicate fields on the Job itself. Prefer the explicitly-linked
   // primaryDocumentId when it's still on the job; otherwise fall back to
@@ -148,25 +161,37 @@ export function ViewJobScreen() {
     : actionableDoc;
   const completedAt = formatScheduledDateLong(job.completedDate);
 
+  // "Order from Reece" entry — only when Reece is connected and the doc has
+  // at least one Reece-priced material with order identifiers. Slots into
+  // the ScopeBlock right under the JobScopeCard via the `extra` prop.
+  const reeceOrderEntry =
+    reeceConnected === true &&
+    primaryDoc?.materials?.some((m) => !!m.reeceItemNumber && !!m.reeceUnitOfMeasure) ? (
+      <TouchableOpacity
+        style={styles.reeceOrderButton}
+        onPress={() => navigation.navigate('ReeceOrder', { docId: primaryDoc?.id })}
+        activeOpacity={0.7}
+      >
+        <MaterialCommunityIcons name="cart-outline" size={20} color={colors.primary} />
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <Text style={styles.reeceOrderButtonTitle}>Order from Reece</Text>
+          <Text style={styles.reeceOrderButtonSubtitle}>
+            Place this list against your trade account — Reece bills you, no money through QuoteMate.
+          </Text>
+        </View>
+        <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+      </TouchableOpacity>
+    ) : null;
+
   const applyStageTransition = async (target: JobStage) => {
     try {
-      const patch: Partial<Job> = { stage: target };
-      // Coupling: stage backward to 'quoted' should revert the primary
-      // doc too so the customer-facing state matches.
-      if (
-        target === 'quoted' &&
-        actionableDoc &&
-        actionableDoc.type === 'quote' &&
-        actionableDoc.stage === 'quote_accepted'
-      ) {
-        await applyStageChange(actionableDoc, 'quote_sent', {
-          saveQuote,
-          saveInvoice,
-          createInvoiceFromQuote,
-          navigation,
-        });
-      }
-      await saveJob({ ...job, ...patch });
+      await applyJobStageChange({
+        job,
+        target,
+        primaryDoc: actionableDoc,
+        saveJob,
+        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
+      });
     } catch (err) {
       console.error('[ViewJob] applyStageTransition failed', err);
       showAlert({
@@ -689,6 +714,7 @@ export function ViewJobScreen() {
             onEdit={openEditorForDoc}
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={handlePaymentChipPress}
+            extra={reeceOrderEntry}
           />
         ) : null}
 
@@ -708,6 +734,7 @@ export function ViewJobScreen() {
             onEdit={openEditorForDoc}
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={handlePaymentChipPress}
+            extra={reeceOrderEntry}
           />
         ) : null}
 
@@ -785,6 +812,7 @@ export function ViewJobScreen() {
         }
       />
 
+
       {sendDialogDoc ? (
         <SendDocumentDialog
           visible={!!sendDialogDoc}
@@ -827,6 +855,9 @@ interface ScopeBlockProps {
   onEdit: (doc: Document, step: ScopeStep) => void;
   onStagePress: (doc: Document) => void;
   onPaymentPress: (doc: Document) => void;
+  /** Optional slot rendered between the primary doc card and the
+   *  "Also on this job" section. Used for the Order-from-Reece entry. */
+  extra?: React.ReactNode;
 }
 
 function ScopeBlock({
@@ -835,6 +866,7 @@ function ScopeBlock({
   onEdit,
   onStagePress,
   onPaymentPress,
+  extra,
 }: ScopeBlockProps) {
   if (!primaryDoc) {
     // No doc yet — the sticky bar already offers "Create Quote". Render
@@ -844,7 +876,7 @@ function ScopeBlock({
         <Card style={styles.emptyDocsCard}>
           <View style={styles.emptyDocs}>
             <MaterialCommunityIcons
-              name={'file-document-plus-outline' as any}
+              name={'file-plus-outline' as any}
               size={28}
               color={colors.textMuted}
             />
@@ -864,6 +896,7 @@ function ScopeBlock({
         onStagePress={onStagePress}
         onPaymentPress={onPaymentPress}
       />
+      {extra}
       {secondaryDocs.length > 0 ? (
         <View style={styles.secondaryDocsWrap}>
           <Text style={styles.secondaryDocsLabel}>Also on this job</Text>
@@ -946,6 +979,28 @@ const styles = StyleSheet.create({
   },
   secondaryDocsWrap: {
     marginTop: 4,
+  },
+  reeceOrderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  reeceOrderButtonTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  reeceOrderButtonSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 16,
   },
   secondaryDocsLabel: {
     fontSize: 11,

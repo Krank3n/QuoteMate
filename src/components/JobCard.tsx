@@ -1,7 +1,7 @@
 /**
  * JobCard — compact card shown in the Jobs list.
  *
- * Simpler than DocumentCard. Shows the customer, address, stage chip,
+ * Shows the customer, address, stage chip,
  * a single right-aligned headline price (matches ViewJob's header), and
  * a status line with the most recent stage event (e.g. "Quote sent 2h
  * ago"). Tap → ViewJobScreen.
@@ -141,9 +141,21 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
     return totalQuoted;
   });
 
-  // Idle bob + tilt — ported from the old DocumentCard so the list
-  // feels alive rather than static. Each card picks its own duration
-  // and direction so the stack doesn't breathe in lockstep.
+  // Aggregate Xero sync state across the job's docs so the card can
+  // show a small status pip on the meta row. 'error' wins over 'synced'
+  // — a failed push is more important to surface than a successful one.
+  const xeroSyncStatus = useStore((s) => {
+    const docs = s.documents.filter(
+      (d) => d.jobId === job.id && d.stage !== 'cancelled',
+    );
+    if (docs.some((d) => d.xeroSyncStatus === 'error')) return 'error' as const;
+    if (docs.some((d) => d.xeroSyncStatus === 'synced')) return 'synced' as const;
+    return undefined;
+  });
+
+  // Idle bob + tilt so the list feels alive rather than static. Each
+  // card picks its own duration and direction so the stack doesn't
+  // breathe in lockstep.
   const idleAnim = useRef(new Animated.Value(0)).current;
   const idleTilt = useRef(new Animated.Value(0)).current;
   const bobDurationRef = useRef(2400 + Math.random() * 1200);
@@ -355,6 +367,21 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
           <Text style={styles.metaText} numberOfLines={1}>
             {status.label} {formatUpdatedAt(status.ms)}
           </Text>
+          {xeroSyncStatus === 'synced' ? (
+            <MaterialCommunityIcons
+              name="cloud-check"
+              size={14}
+              color={colors.success}
+              accessibilityLabel="Synced to Xero"
+            />
+          ) : xeroSyncStatus === 'error' ? (
+            <MaterialCommunityIcons
+              name="cloud-alert"
+              size={14}
+              color={colors.error}
+              accessibilityLabel="Xero sync failed"
+            />
+          ) : null}
         </View>
 
         {!terminal ? (

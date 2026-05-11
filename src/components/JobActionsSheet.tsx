@@ -44,17 +44,23 @@ interface JobActionsSheetProps {
   onSelect: (action: JobAction, job: Job) => void;
 }
 
+interface RowCtx {
+  job: Job;
+  primaryDoc: Document | null;
+  xeroConnected: boolean;
+}
+
 interface RowDef {
   id: JobAction;
-  label: string;
-  sub?: string;
-  icon: string;
+  label: string | ((ctx: RowCtx) => string);
+  sub?: string | ((ctx: RowCtx) => string);
+  icon: string | ((ctx: RowCtx) => string);
   tone?: 'normal' | 'danger';
-  when: (args: {
-    job: Job;
-    primaryDoc: Document | null;
-    xeroConnected: boolean;
-  }) => boolean;
+  when: (ctx: RowCtx) => boolean;
+}
+
+function resolve<T>(value: T | ((ctx: RowCtx) => T), ctx: RowCtx): T {
+  return typeof value === 'function' ? (value as (ctx: RowCtx) => T)(ctx) : value;
 }
 
 // Take Payment and Follow Up sit at the top — those are the
@@ -84,13 +90,6 @@ const ROWS: RowDef[] = [
         primaryDoc.stage === 'partially_paid'),
   },
   {
-    id: 'edit',
-    label: 'Edit scope & pricing',
-    sub: 'Change materials, labour, or markup',
-    icon: 'pencil-outline',
-    when: ({ primaryDoc }) => !!primaryDoc,
-  },
-  {
     id: 'send',
     label: 'Send',
     sub: 'Email / SMS / Share / PDF',
@@ -113,14 +112,24 @@ const ROWS: RowDef[] = [
   },
   {
     id: 'pushToXero',
-    label: 'Push to Xero',
-    sub: 'Sync this invoice to your Xero account',
-    icon: 'cloud-upload-outline',
-    when: ({ primaryDoc, xeroConnected }) =>
-      !!xeroConnected &&
-      !!primaryDoc &&
-      primaryDoc.type === 'invoice' &&
-      primaryDoc.stage !== 'draft',
+    label: ({ primaryDoc }) =>
+      primaryDoc?.xeroSyncStatus === 'synced' ? 'Re-sync to Xero' : 'Push to Xero',
+    sub: ({ primaryDoc }) => {
+      if (primaryDoc?.xeroSyncStatus === 'error') return 'Last sync failed — tap to retry';
+      const noun = primaryDoc?.type === 'invoice' ? 'invoice' : 'quote';
+      return primaryDoc?.xeroSyncStatus === 'synced'
+        ? `Re-push the latest ${noun} details to Xero`
+        : `Sync this ${noun} to your Xero account`;
+    },
+    icon: ({ primaryDoc }) =>
+      primaryDoc?.xeroSyncStatus === 'synced' ? 'cloud-check-outline' : 'cloud-upload-outline',
+    when: ({ primaryDoc, xeroConnected }) => {
+      if (!xeroConnected || !primaryDoc) return false;
+      if (primaryDoc.stage === 'draft') return false;
+      if (primaryDoc.type === 'invoice') return true;
+      // Quote-side: visible once the quote has been sent or accepted.
+      return primaryDoc.stage === 'quote_sent' || primaryDoc.stage === 'quote_accepted';
+    },
   },
   {
     id: 'archive',
@@ -139,7 +148,7 @@ const ROWS: RowDef[] = [
   {
     id: 'delete',
     label: 'Delete',
-    sub: 'Can only delete jobs with no attached docs',
+    sub: 'Cascades to attached docs. Archive instead if anything is paid.',
     icon: 'trash-can-outline',
     tone: 'danger',
     when: () => true,
@@ -173,6 +182,9 @@ export function JobActionsSheet({
       <View style={styles.list}>
         {rows.map((row) => {
           const danger = row.tone === 'danger';
+          const label = resolve(row.label, ctx);
+          const sub = row.sub ? resolve(row.sub, ctx) : undefined;
+          const icon = resolve(row.icon, ctx);
           return (
             <Pressable
               key={row.id}
@@ -193,7 +205,7 @@ export function JobActionsSheet({
                 ]}
               >
                 <MaterialCommunityIcons
-                  name={row.icon as any}
+                  name={icon as any}
                   size={20}
                   color={danger ? colors.error : colors.primary}
                 />
@@ -205,9 +217,9 @@ export function JobActionsSheet({
                     danger && { color: colors.error },
                   ]}
                 >
-                  {row.label}
+                  {label}
                 </Text>
-                {row.sub ? <Text style={styles.rowSub}>{row.sub}</Text> : null}
+                {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
               </View>
               <MaterialCommunityIcons
                 name={'chevron-right' as any}

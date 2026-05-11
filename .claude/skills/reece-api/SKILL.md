@@ -9,12 +9,13 @@ allowed-tools: Bash, Read, Edit, Glob, Grep, WebFetch
 
 Quick reference for working on the Reece API integration in QuoteMate.
 
-## Current Status (as of 2026-03-19)
+## Current Status (as of 2026-04-28)
 
-- **OAuth2 token acquisition**: WORKING. Credentials are valid.
-- **Customer onboarding**: BLOCKED. maX test account 3204941 registration fails ("We've hit a blockage"). Waiting on Christie Howard to fix.
-- **Product search, pricing, invoicing, etc.**: BLOCKED. All require a `Customer-Token` or working `Customer-Number`, which requires completing onboarding first.
-- **IP whitelist**: May need updating. Last sent to Christie: `122.150.250.38` on 2026-03-13. Check current IP with `curl ifconfig.me`.
+- **End-to-end on prod**: WORKING. OAuth2, request-token, customer-token exchange, product search, and pricing all return 200/201 against `auth.api.reecegroup.com.au` and `open.api.reecegroup.com.au`. Confirmed with maX customer 3204941 ("QUOTEMATE (INTEGRATION)", Plumbing Burwood).
+- **Auth model**: app-level `client_credentials` OAuth wraps every call; per-user `Customer-Token` (NOT `Customer-Number` — prod strictly rejects it) gates customer-specific data and pricing. Tokens are stored encrypted in Firestore at `users/{uid}/integrations/reece` (AES-256-GCM via `REECE_TOKEN_ENC_KEY`, mirroring Square's pattern).
+- **Onboarding UI**: per-user. Each plumber completes `request-token → maX consent → customer-token` once. Surfaces: `src/screens/settings/ReeceIntegrationScreen.tsx` and the optional plumber-only step in `NewOnboardingScreen.tsx`. The shared connect helper is `src/services/reeceConnect.ts`.
+- **Materials integration**: gated on `selectedStore === 'reece' && reeceConnected` — toggles the Reece pricing branch in both `MaterialsListScreen` and `AddMaterialScreen`. `reece_not_connected` and `reece_reauth_required` errors flow back from the backend so the UI can show a reconnect banner instead of silently falling back to estimation.
+- **Inventory**: Reece public API has no real stock endpoint; backend reports `quantityAvailable: -1` (exists, level unknown).
 
 ## Contact
 
@@ -24,20 +25,26 @@ Quick reference for working on the Reece API integration in QuoteMate.
 ## Environment & Credentials
 
 ```
-# Test environment (currently in use)
+# Production (default — REECE_USE_TEST_ENV=false)
+Auth URL:  https://auth.api.reecegroup.com.au/oauth2/token
+API URL:   https://open.api.reecegroup.com.au
+Consent:   https://reece.com.au/link-application/account-select
+
+# Test environment (REECE_USE_TEST_ENV=true) — only weekdays 5am–8pm AEST
 Auth URL:  https://auth.api.test.reecegroup.com.au/oauth2/token
 API URL:   https://open.api.test.reecegroup.com.au
 Stage web: https://stage.reece.com.au/
 
-# Production (for later)
-Auth URL:  https://auth.api.reecegroup.com.au/oauth2/token
-API URL:   https://open.api.reecegroup.com.au
+# Functions env
+REECE_CLIENT_ID         — OAuth client (Christie@reece.com.au issued)
+REECE_CLIENT_SECRET     — OAuth client secret
+REECE_TOKEN_ENC_KEY     — base64(32-byte) AES-256-GCM key for at-rest customer tokens
+REECE_CALLBACK_URL      — public "you can close this tab" page (default: hansendev.com.au/quotemate/reece-callback)
+REECE_REGION            — defaults to "au"
+REECE_USE_TEST_ENV      — defaults to "false"
 
-# Credentials (in .env)
-Client ID:       REECE_CLIENT_ID
-Client Secret:   REECE_CLIENT_SECRET
-Customer Number: REECE_CUSTOMER_NUMBER (3204941 for test)
-Region:          REECE_REGION (au)
+# DEPRECATED — do NOT set in prod, the header is rejected:
+REECE_CUSTOMER_NUMBER
 ```
 
 Test environment is only available weekdays 5am–8pm Melbourne time (AEST/AEDT).
@@ -79,12 +86,55 @@ All endpoints are prefixed with `/{au|nz}/` (e.g., `/au/product-gateway/search`)
 | `/invoice-gateway/invoice-headers?documentTypes=...&fromDate=...&toDate=...` | GET | List invoices |
 | `/invoice-gateway/invoices?documentNumbers=...` | GET | Invoice details |
 | `/invoice-gateway/invoice-documents?documentNumbers=...` | GET | Invoice PDF |
-| `/order-gateway/orders` | POST | Create order |
-| `/order-gateway/preview` | POST | Preview order |
-| `/order-gateway/check` | POST | Check order validity |
-| `/branches` | GET | List all branches |
+| `/order-gateway/orders` | POST | Create order — places it against the customer's trade account |
+| `/order-gateway/preview` | POST | Preview order — returns total + cartage with no side effects |
+| `/order-gateway/check` | POST | Check order validity (stock, entitlement). Same body as preview. |
+| `/branches` | GET | List all branches. Requires Customer-Token (NOT public). |
 | `/punch-out-catalog/gateway?clientId=...&hookUrl=...&customerToken=...` | GET | Punchout to maX cart |
 | `/punch-out-cart/cart/{cartToken}` | GET | Fetch punchout cart |
+
+### Order-gateway request shape (verified 2026-04-28 against prod)
+
+```json
+{
+  "orderByName": "Thomas Hansen",                       // REQUIRED
+  "requiredByDateTime": "2026-04-29T02:58:08",          // REQUIRED — yyyy-MM-dd'T'HH:mm:ss, no Z
+  "fulfillment": {                                      // REQUIRED — note US spelling
+    "type": "PICKUP",                                   // or "DELIVERY"
+    "pickupBranch": "3032",                             // STRING for PICKUP (branchNumber)
+    "deliveryDetails": {                                // for DELIVERY:
+      "contactName": "...",                             // REQUIRED
+      "deliveryAddress": {
+        "addressLine1": "...",                          // REQUIRED — at least 1 line
+        "addressLine2": "...",
+        "suburb": "...",
+        "state": "VIC",
+        "postCode": "3125"                              // REQUIRED
+      }
+    }
+  },
+  "products": [                                         // REQUIRED — non-empty
+    {
+      "productId": 9800762,                             // number, from product-gateway/search.products[].productId
+      "quantity": 1,
+      "unitOfMeasure": "LEN",                           // matches search result unitOfMeasures[].pack
+      "unitPriceExcludingGst": 162.32,                  // client echoes back the price from search
+      "quoteNumber": null,                              // optional — links to a Reece-side quote (NOT QuoteMate quote)
+      "quoteLineNumber": null
+    }
+  ],
+  "orderByPhone": "0407 594 911",                       // optional — pre-filled from customer record on response
+  "orderByEmail": null,
+  "jobName": null,                                      // optional — appears on the printed order
+  "orderNumber": null,                                  // optional — your PO / reference
+  "comment": null                                       // optional — note for branch staff
+}
+```
+
+Validation envelope on 4xx: `{ "violations": [{ "fieldName": "...", "message": "..." }] }`.
+Other errors (parse / 5xx): `{ "errors": [{ "url": "...", "message": "..." }] }`.
+
+Preview response includes `cartageFee` (delivery / handling charge — observed nonzero even on PICKUP, worth confirming with Christie) and `newIdentityCardCreated`.
 
 ## Codebase Files
 

@@ -40,6 +40,7 @@ import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/t
 import { useUnifiedContactSearch, SOURCE_COLORS } from '../../hooks/useUnifiedContactSearch';
 import { SearchableContact } from '../../types';
 import { AlertModal } from '../../components/AlertModal';
+import { AddressSearchInput } from '../../components/AddressSearchInput';
 
 const validateEmail = (email: string): string => {
   const trimmed = email.trim();
@@ -290,9 +291,14 @@ export function CustomerDetailsScreen() {
     // Fire-and-forget: calculate travel distance in background
     const trimmedJobAddress = jobAddress.trim();
     if (businessSettings?.address && trimmedJobAddress) {
+      console.log('[travel] kicking off calculation', {
+        businessAddress: businessSettings.address,
+        jobAddress: trimmedJobAddress,
+      });
       calculateTravelAdjustment(businessSettings.address, trimmedJobAddress)
         .then((result) => {
           if (result) {
+            console.log('[travel] result', result);
             // Only set travel adjustment if user hasn't already manually adjusted it
             const hasExistingAdjustment = updatedQuote.travelAdjustment !== undefined && updatedQuote.travelAdjustment > 0;
             updateDocument({
@@ -304,18 +310,25 @@ export function CustomerDetailsScreen() {
             });
           } else {
             // Geocoding returned null — one or both addresses couldn't be resolved
+            console.warn('[travel] calculateTravelAdjustment returned null');
             updateDocument({
               ...updatedQuote,
               travelGeocodeFailed: true,
             });
           }
         })
-        .catch(() => {
+        .catch((err) => {
+          console.warn('[travel] calculateTravelAdjustment threw', err);
           updateDocument({
             ...updatedQuote,
             travelGeocodeFailed: true,
           });
         });
+    } else {
+      console.log('[travel] skipped — missing address', {
+        hasBusinessAddress: !!businessSettings?.address,
+        hasJobAddress: !!trimmedJobAddress,
+      });
     }
   };
 
@@ -536,16 +549,15 @@ export function CustomerDetailsScreen() {
               </HelperText>
             )}
 
-            <TextInput
-              ref={jobAddressRef}
-              label="Job Address"
-              value={jobAddress}
-              onChangeText={setJobAddress}
-              mode="outlined"
-              style={styles.input}
-              multiline
-              numberOfLines={2}
-            />
+            <View ref={jobAddressRef} collapsable={false}>
+              <AddressSearchInput
+                label="Job Address"
+                placeholder="Start typing the job address"
+                value={jobAddress}
+                onChangeText={setJobAddress}
+                style={styles.input}
+              />
+            </View>
           </Surface>
         </WebContainer>
       </ScrollView>

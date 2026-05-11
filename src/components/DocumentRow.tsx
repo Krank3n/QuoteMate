@@ -1,6 +1,6 @@
 /**
  * DocumentRow
- * Slimmer than DocumentCard — used inside ViewJobScreen to list attached
+ * Slim per-document row used inside ViewJobScreen to list attached
  * documents without the per-card swipe/menu/send buttons. Shows the doc
  * number, type, total, and the Phase-11 two-chip split (stage + payment).
  *
@@ -33,6 +33,38 @@ interface DocumentRowProps {
 
 function stageShortLabel(stage: Document['stage']): string {
   return STAGE_META[stage]?.chipLabel ?? stage;
+}
+
+function XeroSyncChip({ status }: { status?: Document['xeroSyncStatus'] }) {
+  // Render only the states the tradie should notice. 'not_synced'/'syncing'
+  // are transient or expected and would just add visual noise.
+  if (status === 'synced') {
+    return (
+      <View
+        style={[
+          styles.xeroChip,
+          { backgroundColor: colors.successBg, borderColor: colors.success + '44' },
+        ]}
+      >
+        <MaterialCommunityIcons name={'cloud-check' as any} size={12} color={colors.success} />
+        <Text style={[styles.xeroLabel, { color: colors.success }]}>In Xero</Text>
+      </View>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <View
+        style={[
+          styles.xeroChip,
+          { backgroundColor: colors.errorBg, borderColor: colors.error + '44' },
+        ]}
+      >
+        <MaterialCommunityIcons name={'cloud-alert' as any} size={12} color={colors.error} />
+        <Text style={[styles.xeroLabel, { color: colors.error }]}>Xero failed</Text>
+      </View>
+    );
+  }
+  return null;
 }
 
 export function DocumentRow({
@@ -112,6 +144,7 @@ export function DocumentRow({
           ) : null}
 
           <PaymentChip doc={doc} onPress={onPaymentPress} />
+          <XeroSyncChip status={doc.xeroSyncStatus} />
         </View>
       </View>
 
@@ -227,6 +260,19 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   stageLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  xeroChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    gap: 4,
+  },
+  xeroLabel: {
     fontSize: 12,
     fontWeight: '600',
   },

@@ -166,10 +166,19 @@ export async function generateDocumentPDF(
       markup: doc.markup,
       markupAmount: doc.markupAmount,
       laborMarkup: doc.laborMarkup ?? doc.markup,
-      showMarkup: doc.showMarkup === true && businessSettings?.showMarkup !== false,
+      showMarkup: doc.showMarkup !== undefined
+        ? doc.showMarkup === true
+        : businessSettings?.showMarkup === true,
+      showMaterialCosts: doc.showMaterialCosts !== undefined
+        ? doc.showMaterialCosts
+        : businessSettings?.showMaterialCostsByDefault !== false,
+      showLaborCosts: doc.showLaborCosts !== undefined
+        ? doc.showLaborCosts
+        : businessSettings?.showLaborCostsByDefault !== false,
       travelAdjustment: doc.travelAdjustment,
       gst: doc.gst,
       total: doc.total,
+      pricesIncludeGst: doc.pricesIncludeGst ?? businessSettings?.pricesIncludeGst === true,
       notes: doc.notes,
       showLaborHours: businessSettings?.showLaborHours,
       showLaborBreakdown: doc.showLaborBreakdown !== false,
@@ -215,10 +224,19 @@ export async function generateDocumentPDF(
     markup: doc.markup,
     markupAmount: doc.markupAmount,
     laborMarkup: doc.laborMarkup ?? doc.markup,
-    showMarkup: doc.showMarkup === true && businessSettings?.showMarkup !== false,
+    showMarkup: doc.showMarkup !== undefined
+      ? doc.showMarkup === true
+      : businessSettings?.showMarkup === true,
+    showMaterialCosts: doc.showMaterialCosts !== undefined
+      ? doc.showMaterialCosts
+      : businessSettings?.showMaterialCostsByDefault !== false,
+    showLaborCosts: doc.showLaborCosts !== undefined
+      ? doc.showLaborCosts
+      : businessSettings?.showLaborCostsByDefault !== false,
     travelAdjustment: doc.travelAdjustment,
     gst: doc.gst,
     total: doc.total,
+    pricesIncludeGst: doc.pricesIncludeGst ?? businessSettings?.pricesIncludeGst === true,
     notes: doc.notes,
     showLaborHours: businessSettings?.showLaborHours,
     showLaborBreakdown: doc.showLaborBreakdown !== false,

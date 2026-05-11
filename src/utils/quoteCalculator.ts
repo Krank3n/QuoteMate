@@ -19,6 +19,7 @@ export {
   updateAllMaterialPrices,
   calculateEffectiveHourlyRate,
   calculateProfitMargin,
+  supplierPriceForGstMode,
 } from './documentCalculator';
 
 /**
@@ -32,7 +33,8 @@ export function calculateQuote(
   travelAdjustment: number = 0,
   sections?: QuoteSection[],
   laborMarkupPercent: number = 0,
-  laborExtraHours: number = 0
+  laborExtraHours: number = 0,
+  pricesIncludeGst: boolean = false,
 ): QuoteCalculation {
   const calc = calculateDocumentTotals(
     materials,
@@ -43,6 +45,7 @@ export function calculateQuote(
     sections,
     laborMarkupPercent,
     laborExtraHours,
+    pricesIncludeGst,
   );
   return {
     materialsSubtotal: calc.materialsSubtotal,
@@ -108,7 +111,8 @@ export function updateQuoteCalculations(quote: Quote): Quote {
     healed.travelAdjustment || 0,
     healed.sections,
     healed.laborMarkup ?? healed.markup ?? 0,
-    healed.laborExtraHours ?? 0
+    healed.laborExtraHours ?? 0,
+    healed.pricesIncludeGst === true,
   );
 
   return {

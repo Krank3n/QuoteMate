@@ -37,7 +37,7 @@ import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
 import { Material, FavoriteProductMapping } from '../../types';
 import { colors } from '../../theme';
-import { formatCurrency } from '../../utils/quoteCalculator';
+import { formatCurrency, supplierPriceForGstMode } from '../../utils/quoteCalculator';
 import { ProBadge } from '../../components/ProBadge';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import {
@@ -49,25 +49,23 @@ import {
   type ScraperSearchResponse,
 } from '../../services/bunningsScraperClient';
 import {
+  searchReeceMaterialPrice,
+  getReeceConnectionStatus,
+} from '../../services/reeceApi';
+import {
   loadFavoritesFromLocal,
   saveFavoriteProduct,
   removeFavoriteProduct,
-  bulkSaveFavorites,
   getExistingPersonalRateSuppliers,
   deleteAllFavoritesByStore,
 } from '../../services/materialFavorites';
 import { AlertModal } from '../../components/AlertModal';
 import * as ImagePicker from 'expo-image-picker';
-import * as DocumentPicker from 'expo-document-picker';
-import {
-  extractFromPhotos,
-  extractFromPdf,
-  type ExtractedItem,
-  type ExtractResult,
-  type ExtractedSupplierContact,
-} from '../../services/supplierListImporter';
-import { SupplierListReviewModal, type ReviewItemState } from '../../components/SupplierListReviewModal';
+import { SupplierListReviewModal } from '../../components/SupplierListReviewModal';
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
+import { InvoiceReviewModal, type InvoiceReviewRow } from '../../components/InvoiceReviewModal';
+import { useSupplierListImport } from '../../hooks/useSupplierListImport';
+import { useInvoiceImport } from '../../hooks/useInvoiceImport';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
 import { BottomSheet } from '../../components/BottomSheet';
 import { ActionSheet, type ActionSheetOption } from '../../components/ActionSheet';
@@ -77,7 +75,7 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { SwipeableCard } from '../../components/SwipeableCard';
 import { SupplierGroup } from '../../types';
-import { loadGroups, getSupplierGroupByName, saveGroup, deleteGroup } from '../../services/supplierGroupService';
+import { loadGroups, deleteGroup } from '../../services/supplierGroupService';
 import { searchLocalSources, type LocalSearchResult } from '../../services/localMaterialSearch';
 import { ContactActionsBar } from '../../components/document/ContactActionsBar';
 import { useTourRefs } from '../../components/tour/useTourRefs';
@@ -135,6 +133,26 @@ export function AddMaterialScreen() {
   const [hasSearched, setHasSearched] = useState(false);
   const [manualEntrySheetVisible, setManualEntrySheetVisible] = useState(false);
   const searchCancelledRef = useRef(false);
+
+  // Whether the user has connected their Reece account. Drives the Reece
+  // search step in handleSearch when their preferred store is Reece.
+  // Reece is now always-on when connected (no longer gated on a single
+  // selectedStore), so we check connection state once on mount and use it
+  // alongside Bunnings throughout the search chain.
+  const [reeceConnected, setReeceConnected] = useState<boolean>(false);
+  useEffect(() => {
+    let cancelled = false;
+    getReeceConnectionStatus()
+      .then((status) => {
+        if (!cancelled) setReeceConnected(!!status.connected);
+      })
+      .catch(() => {
+        if (!cancelled) setReeceConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Manual entry state - initialize with editing material if in edit mode
   const [manualName, setManualName] = useState(prefillMaterial?.name || '');
@@ -368,21 +386,21 @@ export function AddMaterialScreen() {
   const [savedItems, setSavedItems] = useState<any[]>([]);
   const [isLoadingSaved, setIsLoadingSaved] = useState(false);
 
-  // Bulk-import (supplier price list) state
+  // Bulk-import (supplier price list) — most state is owned by useSupplierListImport.
+  // We keep importSheetVisible (action sheet UI), importMode (drives the hook's
+  // refresh-mode option), and importPrefilledSupplier (passed in when the user
+  // opens the import sheet scoped to a specific supplier).
   const [importSheetVisible, setImportSheetVisible] = useState(false);
   const [importMode, setImportMode] = useState<'new' | 'refresh'>('new');
-  const [importLoading, setImportLoading] = useState(false);
-  const [importLoadingLabel, setImportLoadingLabel] = useState('');
-  const [captureModalVisible, setCaptureModalVisible] = useState(false);
-  const [reviewModalVisible, setReviewModalVisible] = useState(false);
-  const [extractedItems, setExtractedItems] = useState<ExtractedItem[]>([]);
-  const [extractedSupplierName, setExtractedSupplierName] = useState('');
-  // Optional contact details lifted from the supplier price list (header /
-  // footer / letterhead) — applied to the matching SupplierGroup record on
-  // save, but only for fields the user hasn't already filled in.
-  const [extractedSupplierContact, setExtractedSupplierContact] = useState<ExtractedSupplierContact | undefined>(undefined);
-  const [existingForDiff, setExistingForDiff] = useState<any[] | undefined>(undefined);
-  const [existingSupplierNames, setExistingSupplierNames] = useState<string[]>([]);
+  const [importPrefilledSupplier, setImportPrefilledSupplier] = useState<string>('');
+  // Invoice import (current quote) — separate state so the source picker and
+  // follow-up "save to supplier book?" dialog don't collide with price-list import.
+  const [invoiceSheetVisible, setInvoiceSheetVisible] = useState(false);
+  const [savePostInvoiceDialog, setSavePostInvoiceDialog] = useState<{
+    visible: boolean;
+    supplierName: string;
+    rows: InvoiceReviewRow[];
+  }>({ visible: false, supplierName: '', rows: [] });
   // Collapsed supplier sections in the Supplier Book tab
   const [collapsedSuppliers, setCollapsedSuppliers] = useState<Set<string>>(new Set());
   // Expanded saved items (for showing details like image, description, etc.)
@@ -402,7 +420,6 @@ export function AddMaterialScreen() {
     material: Material | null;
     item: any | null;
   }>({ visible: false, material: null, item: null });
-  const [savingImport, setSavingImport] = useState(false);
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
 
@@ -489,6 +506,59 @@ export function AddMaterialScreen() {
   // Bulk import from supplier price list (photos / PDF)
   // -------------------------------------------------------------------------
 
+  const importer = useSupplierListImport({
+    mode: importMode === 'refresh' ? 'refresh' : 'add',
+    prefilledSupplierName: importPrefilledSupplier,
+    // AMS uses Alert.alert for import errors — preserve that pattern.
+    onError: (msg) => Alert.alert('Import Failed', msg),
+    // No-items + contact found → route to EditSupplier so the user can save
+    // the contact-only supplier with full UX. Returning true short-circuits
+    // the hook's default contact-only auto-save.
+    onNoItemsWithContact: ({ supplierName, contact }) => {
+      navigation.navigate(
+        'EditSupplier' as never,
+        {
+          supplierName: supplierName || undefined,
+          prefill: {
+            contactPerson: contact.contactPerson,
+            phone: contact.phone,
+            email: contact.email,
+            address: contact.address,
+            website: contact.website,
+          },
+        } as never,
+      );
+      return true;
+    },
+    onSaved: async (summary) => {
+      const total = summary.itemCount;
+      const label = summary.supplierName ? ` from ${summary.supplierName}` : '';
+      const contactSuffix =
+        summary.contactFieldsApplied > 0
+          ? ` • Added ${summary.contactFieldsApplied} contact detail${summary.contactFieldsApplied === 1 ? '' : 's'}`
+          : '';
+      const msg =
+        total > 0
+          ? `Saved ${total} item${total === 1 ? '' : 's'}${label}${
+              summary.unchanged ? ` (${summary.unchanged} unchanged)` : ''
+            }${contactSuffix}`
+          : `No changes${summary.unchanged ? ` (${summary.unchanged} unchanged)` : ''}${contactSuffix}`;
+      setSnackbarMessage(msg);
+      setSnackbarVisible(true);
+      // Pull the latest groups so newly merged contact details surface in
+      // the Supplier Book header icons immediately.
+      const refreshed = await loadGroups();
+      setSupplierGroups(refreshed);
+      await loadSavedItems();
+    },
+  });
+
+  // Backwards-compatible aliases used elsewhere in this file.
+  const importLoading =
+    importer.phase === 'capturing' || importer.phase === 'extracting';
+  const importLoadingLabel = importer.loadingLabel;
+  const savingImport = importer.saving;
+
   const openImportSheet = (prefilledSupplier?: string) => {
     // When scoped to a specific supplier, check if that supplier already has
     // items — if so, default to refresh mode so the review modal shows a diff.
@@ -496,256 +566,19 @@ export function AddMaterialScreen() {
       ? savedItems.some((s: any) => s.store === prefilledSupplier)
       : savedItems.some((s: any) => s.source === 'imported');
     setImportMode(hasImported ? 'refresh' : 'new');
-    if (prefilledSupplier) {
-      setExtractedSupplierName(prefilledSupplier);
-    }
+    setImportPrefilledSupplier(prefilledSupplier ?? '');
     setImportSheetVisible(true);
   };
 
-  const handleExtractionResult = async (result: ExtractResult) => {
-    if (!result.items.length) {
-      // No purchasable line items found — but the photo may have been a
-      // contact card / business card. If the AI lifted any contact details,
-      // route the user to the EditSupplier form pre-filled with what was
-      // found, so they can review and save it as a supplier.
-      if (result.supplierContact) {
-        navigation.navigate(
-          'EditSupplier' as never,
-          {
-            supplierName: result.supplierName || undefined,
-            prefill: {
-              contactPerson: result.supplierContact.contactPerson,
-              phone: result.supplierContact.phone,
-              email: result.supplierContact.email,
-              address: result.supplierContact.address,
-              website: result.supplierContact.website,
-            },
-          } as never,
-        );
-        return;
-      }
-
-      Alert.alert(
-        'Nothing to import',
-        'No line items or contact details were recognised. Try a clearer photo.'
-      );
-      return;
-    }
-
-    if (importMode === 'refresh') {
-      // Load the current list so we can compute a diff by slug key.
-      const favorites = await loadFavoritesFromLocal();
-      const existing = Object.entries(favorites).map(([key, fav]) => ({ key, ...fav }));
-      setExistingForDiff(existing);
-    } else {
-      setExistingForDiff(undefined);
-    }
-
-    setExtractedItems(result.items);
-    setExtractedSupplierName(result.supplierName || '');
-    setExtractedSupplierContact(result.supplierContact);
-    // Load existing personal-rate supplier names so the modal can offer them
-    // as one-tap consolidation chips.
-    try {
-      const names = await getExistingPersonalRateSuppliers();
-      setExistingSupplierNames(names);
-    } catch {
-      setExistingSupplierNames([]);
-    }
-    setReviewModalVisible(true);
-  };
-
-  const runImport = async (source: 'camera' | 'gallery' | 'pdf') => {
+  const launchImport = (source: 'camera' | 'gallery' | 'pdf') => {
     setImportSheetVisible(false);
-    try {
-      if (source === 'camera') {
-        // Multi-photo capture flow — opens a custom CameraView modal so the
-        // user can snap several pages of a price list in one session, then
-        // hand them off as a single batch to the extractor.
-        setCaptureModalVisible(true);
-        return;
-      } else if (source === 'gallery') {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (perm.status !== 'granted') {
-          Alert.alert('Photo Library Access Needed', 'Enable photo library access to pick a price list.');
-          return;
-        }
-        const picked = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          quality: 0.8,
-          allowsMultipleSelection: true,
-          selectionLimit: 10,
-        });
-        if (picked.canceled || !picked.assets?.length) return;
-        setImportLoading(true);
-        setImportLoadingLabel('Reading your price list…');
-        const result = await extractFromPhotos(picked.assets.map(a => a.uri));
-        await handleExtractionResult(result);
-      } else if (source === 'pdf') {
-        const picked = await DocumentPicker.getDocumentAsync({
-          type: 'application/pdf',
-          multiple: false,
-          copyToCacheDirectory: true,
-        });
-        if (picked.canceled || !picked.assets?.length) return;
-        const asset = picked.assets[0];
-        setImportLoading(true);
-        setImportLoadingLabel('Reading your price list…');
-        const result = await extractFromPdf(asset.uri);
-        await handleExtractionResult(result);
-      }
-    } catch (err: any) {
-      Alert.alert('Import Failed', err?.message || 'Could not read the price list. Please try again.');
-    } finally {
-      setImportLoading(false);
-      setImportLoadingLabel('');
-    }
-  };
-
-  const handleSaveImported = async (supplierName: string, rows: ReviewItemState[]) => {
-    setSavingImport(true);
-    try {
-      const importBatchId = generateId();
-      const nowIso = new Date().toISOString();
-      const selected = rows.filter(r => r.selected && r.diffStatus !== 'removed');
-
-      const toSave = selected.map(item => ({
-        productName: item.name,
-        store: supplierName || 'Supplier',
-        unit: item.unit as Material['unit'],
-        price: item.price,
-        coveragePerUnit: item.coveragePerUnit,
-        coverageUnit: item.coverageUnit,
-        keywords: item.keywords,
-        source: 'imported' as const,
-        sourceRef: importBatchId,
-        isPersonalRate: true,
-        lastUpdatedAt: nowIso,
-      }));
-
-      const counts = await bulkSaveFavorites(toSave);
-
-      // Handle REMOVED rows flagged for deletion (selected = true means delete).
-      const removalTargets = rows.filter(r => r.diffStatus === 'removed' && r.selected);
-      for (const r of removalTargets) {
-        try {
-          await removeFavoriteProduct(r.name);
-        } catch {
-          /* ignore */
-        }
-      }
-
-      // If the AI lifted contact details from the price list header/footer,
-      // merge them into the matching SupplierGroup record. Only fill in fields
-      // the user hasn't already set — never overwrite existing data.
-      let contactFieldsApplied = 0;
-      if (extractedSupplierContact && supplierName) {
-        try {
-          const existing = await getSupplierGroupByName(supplierName);
-          const pickIfMissing = (current: string | undefined, incoming: string | undefined) => {
-            if (current && current.trim()) return { value: current, applied: false };
-            if (incoming && incoming.trim()) return { value: incoming.trim(), applied: true };
-            return { value: current, applied: false };
-          };
-
-          const contactPerson = pickIfMissing(existing?.contactPerson, extractedSupplierContact.contactPerson);
-          const phone = pickIfMissing(existing?.phone, extractedSupplierContact.phone);
-          const email = pickIfMissing(existing?.email, extractedSupplierContact.email);
-          const address = pickIfMissing(existing?.address, extractedSupplierContact.address);
-          const website = pickIfMissing(existing?.searchUrl, extractedSupplierContact.website);
-
-          contactFieldsApplied =
-            (contactPerson.applied ? 1 : 0) +
-            (phone.applied ? 1 : 0) +
-            (email.applied ? 1 : 0) +
-            (address.applied ? 1 : 0) +
-            (website.applied ? 1 : 0);
-
-          if (contactFieldsApplied > 0) {
-            const now = new Date().toISOString();
-            const record = existing
-              ? {
-                  ...existing,
-                  contactPerson: contactPerson.value || undefined,
-                  phone: phone.value || undefined,
-                  email: email.value || undefined,
-                  address: address.value || undefined,
-                  searchUrl: website.value || undefined,
-                  updatedAt: now,
-                }
-              : {
-                  id: generateId(),
-                  name: supplierName.trim(),
-                  contactPerson: contactPerson.value || undefined,
-                  phone: phone.value || undefined,
-                  email: email.value || undefined,
-                  address: address.value || undefined,
-                  searchUrl: website.value || undefined,
-                  sortOrder: (await loadGroups()).length,
-                  createdAt: now,
-                  updatedAt: now,
-                };
-            await saveGroup(record);
-            // Refresh local supplierGroups so the section header picks up
-            // the new contact icons immediately.
-            const refreshed = await loadGroups();
-            setSupplierGroups(refreshed);
-          }
-        } catch {
-          // Don't block the import if contact merge fails — items are already saved.
-        }
-      }
-
-      const total = counts.created + counts.updated;
-      const label = supplierName ? ` from ${supplierName}` : '';
-      const contactSuffix = contactFieldsApplied > 0
-        ? ` • Added ${contactFieldsApplied} contact detail${contactFieldsApplied === 1 ? '' : 's'}`
-        : '';
-      const msg =
-        total > 0
-          ? `Saved ${total} item${total === 1 ? '' : 's'}${label}${
-              counts.unchanged ? ` (${counts.unchanged} unchanged)` : ''
-            }${contactSuffix}`
-          : `No changes${counts.unchanged ? ` (${counts.unchanged} unchanged)` : ''}${contactSuffix}`;
-      setSnackbarMessage(msg);
-      setSnackbarVisible(true);
-
-      setReviewModalVisible(false);
-      setExtractedItems([]);
-      setExtractedSupplierContact(undefined);
-      setExistingForDiff(undefined);
-      await loadSavedItems();
-    } catch (err: any) {
-      Alert.alert('Save Failed', err?.message || 'Could not save imported items.');
-    } finally {
-      setSavingImport(false);
-    }
-  };
-
-  const handleCaptureComplete = async (uris: string[]) => {
-    if (!uris.length) {
-      setCaptureModalVisible(false);
-      return;
-    }
-    setImportLoading(true);
-    setImportLoadingLabel('Reading your price list…');
-    try {
-      const result = await extractFromPhotos(uris);
-      setCaptureModalVisible(false);
-      await handleExtractionResult(result);
-    } catch (err: any) {
-      setCaptureModalVisible(false);
-      Alert.alert('Import Failed', err?.message || 'Could not read the price list. Please try again.');
-    } finally {
-      setImportLoading(false);
-      setImportLoadingLabel('');
-    }
+    importer.startImport(source);
   };
 
   const importSheetOptions: ActionSheetOption[] = [
-    { icon: 'camera', label: 'Take photo', onPress: () => runImport('camera') },
-    { icon: 'image-multiple', label: 'Pick from gallery', onPress: () => runImport('gallery') },
-    { icon: 'file-pdf-box', label: 'Pick PDF', onPress: () => runImport('pdf') },
+    { icon: 'camera', label: 'Take photo', onPress: () => launchImport('camera') },
+    { icon: 'image-multiple', label: 'Pick from gallery', onPress: () => launchImport('gallery') },
+    { icon: 'file-pdf-box', label: 'Pick PDF', onPress: () => launchImport('pdf') },
   ];
 
   const cancelSearch = useCallback(() => {
@@ -851,7 +684,43 @@ export function AddMaterialScreen() {
 
       let remoteResults: any[] = [];
 
-      if (shouldTryBunnings) {
+      // ── Step 2 (Reece priority when connected): plumber's maX account ──
+      // Reece runs alongside the Bunnings backbone. If the user has connected
+      // their maX account, we fetch their trade-discounted price first. Reece
+      // returns one best-match result, so this short-circuits the rest of the
+      // chain when we get a hit; otherwise we fall through to Bunnings as
+      // normal. Skipped when the user scoped the search to a specific
+      // supplier chip — they're explicitly asking for that supplier's catalog.
+      if (reeceConnected && !scopedToOne) {
+        try {
+          const reeceResult = await searchReeceMaterialPrice(searchQuery);
+          if (searchCancelledRef.current) return;
+          if (reeceResult.reauthRequired) {
+            setReeceConnected(false);
+          } else if (reeceResult.price && reeceResult.itemNumber) {
+            remoteResults = [{
+              productName: reeceResult.productName || searchQuery,
+              description: 'Reece trade price',
+              itemNumber: reeceResult.itemNumber,
+              brand: '',
+              price: reeceResult.price,
+              productUrl: reeceResult.productUrl || '',
+              imageUrl: reeceResult.imageUrl || '',
+              store: reeceResult.store || 'Reece Plumbing',
+              isScraperResult: true,
+              // Surface so the eventual Material write picks up Reece-specific
+              // order identifiers without needing a re-query at order time.
+              reeceItemNumber: reeceResult.itemNumber,
+              reeceUnitOfMeasure: reeceResult.unitOfMeasure || null,
+            }];
+          }
+        } catch {
+          // Reece miss — fall through to the existing chain.
+        }
+      }
+      if (searchCancelledRef.current) return;
+
+      if (remoteResults.length === 0 && shouldTryBunnings) {
         // searchBunningsProducts throws on error; preserve the old null-on-
         // error contract so the fallback flow still kicks in.
         let scraperResponse: ScraperSearchResponse | null = null;
@@ -943,6 +812,8 @@ export function AddMaterialScreen() {
 
   const handleSelectProduct = async (item: any) => {
     let newMaterial: Material;
+    const inclusive = currentQuote?.pricesIncludeGst === true;
+    const adjustedPrice = supplierPriceForGstMode(item.price || 0, inclusive);
 
     if (item.isAiEstimate) {
       newMaterial = {
@@ -950,8 +821,8 @@ export function AddMaterialScreen() {
         name: item.productName,
         quantity: 1,
         unit: 'each',
-        price: item.price || 0,
-        totalPrice: item.price || 0,
+        price: adjustedPrice,
+        totalPrice: adjustedPrice,
         manualPriceOverride: false,
         searchTerm: item.productName,
         pricingSource: 'ai',
@@ -963,8 +834,8 @@ export function AddMaterialScreen() {
         name: item.productName,
         quantity: 1,
         unit: (item.unit as Material['unit']) || 'each',
-        price: item.price || 0,
-        totalPrice: item.price || 0,
+        price: adjustedPrice,
+        totalPrice: adjustedPrice,
         manualPriceOverride: false,
         searchTerm: item.productName,
         pricingSource: 'manual',
@@ -973,17 +844,22 @@ export function AddMaterialScreen() {
         description: item.description,
       };
     } else if (item.isScraperResult) {
+      // Reece-sourced rows carry both Bunnings-style metadata AND Reece order
+      // identifiers — discriminator is `reeceItemNumber` being present.
+      const isReeceResult = !!item.reeceItemNumber;
       newMaterial = {
         id: generateId(),
         name: item.productName,
         quantity: 1,
         unit: 'each',
-        bunningsItemNumber: item.itemNumber,
-        price: item.price || 0,
-        totalPrice: item.price || 0,
+        bunningsItemNumber: isReeceResult ? undefined : item.itemNumber,
+        reeceItemNumber: isReeceResult ? item.reeceItemNumber : undefined,
+        reeceUnitOfMeasure: isReeceResult ? (item.reeceUnitOfMeasure || undefined) : undefined,
+        price: adjustedPrice,
+        totalPrice: adjustedPrice,
         manualPriceOverride: false,
         searchTerm: item.productName,
-        pricingSource: 'scraper',
+        pricingSource: isReeceResult ? 'api' : 'scraper',
         // Preserve scraper confidence so the UI can flag low-confidence
         // results (Claude-guessed fallback) as "Est. — verify price".
         priceConfidence: item.confidence,
@@ -1009,8 +885,8 @@ export function AddMaterialScreen() {
         quantity: 1,
         unit: 'each',
         bunningsItemNumber: item.itemNumber,
-        price: item.price || 0,
-        totalPrice: item.price || 0,
+        price: adjustedPrice,
+        totalPrice: adjustedPrice,
         manualPriceOverride: false,
         searchTerm: item.description,
         pricingSource: 'manual',
@@ -1375,6 +1251,70 @@ export function AddMaterialScreen() {
     if (!opts?.silent) {
       allowNextNavigation();
       navigation.goBack();
+    }
+  };
+
+  // Invoice import — declared here (not next to useSupplierListImport) because
+  // it needs `addMaterialToQuote` in its options. Hooks are order-stable across
+  // renders, so placement inside the component body is fine.
+  const invoiceImporter = useInvoiceImport({
+    addMaterialToQuote: (material, opts) => addMaterialToQuote(material, opts),
+    selectedSection,
+    onError: (msg) => Alert.alert('Import Failed', msg),
+    onAddedToQuote: async ({ supplierName, itemCount, rows, contact }) => {
+      const label = supplierName ? ` from ${supplierName}` : '';
+      setSnackbarMessage(
+        itemCount > 0
+          ? `Added ${itemCount} item${itemCount === 1 ? '' : 's'}${label} to quote`
+          : 'No items added',
+      );
+      setSnackbarVisible(true);
+
+      // Contact merge happens inside the hook — refresh groups so any new
+      // contact icons surface in the Supplier Book tab immediately.
+      if (contact && supplierName) {
+        try {
+          const refreshed = await loadGroups();
+          setSupplierGroups(refreshed);
+        } catch {
+          /* non-blocking */
+        }
+      }
+
+      // Offer to persist the line items themselves to the supplier book.
+      if (itemCount > 0 && supplierName) {
+        setSavePostInvoiceDialog({ visible: true, supplierName, rows });
+      }
+    },
+  });
+
+  const openInvoiceSheet = () => setInvoiceSheetVisible(true);
+
+  const launchInvoiceImport = (source: 'camera' | 'gallery' | 'pdf') => {
+    setInvoiceSheetVisible(false);
+    invoiceImporter.startImport(source);
+  };
+
+  const invoiceSheetOptions: ActionSheetOption[] = [
+    { icon: 'camera', label: 'Take photo', onPress: () => launchInvoiceImport('camera') },
+    { icon: 'image-multiple', label: 'Pick from gallery', onPress: () => launchInvoiceImport('gallery') },
+    { icon: 'file-pdf-box', label: 'Pick PDF', onPress: () => launchInvoiceImport('pdf') },
+  ];
+
+  const confirmSaveInvoiceItemsToBook = async () => {
+    const { supplierName, rows } = savePostInvoiceDialog;
+    setSavePostInvoiceDialog({ visible: false, supplierName: '', rows: [] });
+    try {
+      const result = await invoiceImporter.saveToSupplierBook(supplierName, rows);
+      if (result.itemCount > 0) {
+        setSnackbarMessage(
+          `Saved ${result.itemCount} item${result.itemCount === 1 ? '' : 's'} to your supplier book`,
+        );
+        setSnackbarVisible(true);
+        await loadSavedItems();
+      }
+    } catch (err: any) {
+      Alert.alert('Save Failed', err?.message || 'Could not save items to your supplier book.');
     }
   };
 
@@ -1921,6 +1861,24 @@ export function AddMaterialScreen() {
             <MaterialCommunityIcons name="pencil-plus-outline" size={18} color={colors.primary} />
             <Text style={styles.addManuallySearchLinkText}>Add manually</Text>
           </TouchableOpacity>
+          {/* Snap an invoice / receipt and append the line items to this quote */}
+          <TouchableOpacity
+            style={styles.addFromInvoiceLink}
+            onPress={openInvoiceSheet}
+            disabled={invoiceImporter.phase === 'extracting' || invoiceImporter.phase === 'capturing'}
+            activeOpacity={0.7}
+          >
+            {invoiceImporter.phase === 'extracting' ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <MaterialCommunityIcons name="receipt" size={18} color={colors.primary} />
+            )}
+            <Text style={styles.addFromInvoiceLinkText}>
+              {invoiceImporter.phase === 'extracting'
+                ? (invoiceImporter.loadingLabel || 'Reading…')
+                : 'Add from invoice'}
+            </Text>
+          </TouchableOpacity>
         </>
       )}
       </WebContainer>
@@ -2152,6 +2110,9 @@ export function AddMaterialScreen() {
             // Adapt the saved favorite to the Material shape MaterialItemCard
             // expects so the Saved tab renders consistently with the main
             // materials list (and any future card improvements land here too).
+            const storeLower = (item.store || '').toLowerCase();
+            const isReeceItem = storeLower.includes('reece');
+            const isBunningsItem = storeLower.includes('bunnings');
             const synthetic: Material = {
               id: item.key,
               name: item.productName,
@@ -2165,7 +2126,8 @@ export function AddMaterialScreen() {
               productUrl: item.productUrl,
               description: item.notes || undefined,
               brand: item.brand || undefined,
-              bunningsItemNumber: item.isPersonalRate ? undefined : item.itemNumber,
+              bunningsItemNumber: !item.isPersonalRate && isBunningsItem ? item.itemNumber : undefined,
+              reeceItemNumber: !item.isPersonalRate && isReeceItem ? item.itemNumber : undefined,
               pricingSource: item.isPersonalRate ? 'manual' : 'scraper',
               favoriteProduct: item as FavoriteProductMapping,
             };
@@ -2338,11 +2300,59 @@ export function AddMaterialScreen() {
 
       {/* Multi-photo capture modal — replaces single-shot launchCameraAsync */}
       <SupplierListCaptureModal
-        visible={captureModalVisible}
-        onCancel={() => setCaptureModalVisible(false)}
-        onComplete={handleCaptureComplete}
-        processing={importLoading}
-        processingLabel={importLoadingLabel}
+        visible={importer.captureModalVisible}
+        onCancel={importer.cancelCapture}
+        onComplete={importer.handleCaptureComplete}
+        processing={importer.phase === 'extracting'}
+        processingLabel={importer.loadingLabel}
+      />
+
+      {/* Invoice/receipt source picker — separate from price-list import. */}
+      <ActionSheet
+        visible={invoiceSheetVisible}
+        onDismiss={() => setInvoiceSheetVisible(false)}
+        title="Add from invoice"
+        options={invoiceSheetOptions}
+      />
+
+      {/* Invoice capture modal — same component, separate hook state. */}
+      <SupplierListCaptureModal
+        visible={invoiceImporter.captureModalVisible}
+        onCancel={invoiceImporter.cancelCapture}
+        onComplete={invoiceImporter.handleCaptureComplete}
+        processing={invoiceImporter.phase === 'extracting'}
+        processingLabel={invoiceImporter.loadingLabel}
+      />
+
+      {/* Invoice review modal — confirm extracted line items + quantities. */}
+      <InvoiceReviewModal
+        visible={invoiceImporter.reviewModalVisible}
+        initialSupplierName={invoiceImporter.extractedSupplierName}
+        initialItems={invoiceImporter.extractedItems}
+        saving={invoiceImporter.saving}
+        onCancel={invoiceImporter.cancelReview}
+        onConfirm={invoiceImporter.handleAddToQuote}
+      />
+
+      {/* Post-invoice: offer to persist the items to the supplier book too. */}
+      <AlertModal
+        visible={savePostInvoiceDialog.visible}
+        onDismiss={() =>
+          setSavePostInvoiceDialog({ visible: false, supplierName: '', rows: [] })
+        }
+        type="info"
+        icon="bookmark-outline"
+        title="Save to supplier book?"
+        message={`Also save these ${savePostInvoiceDialog.rows.length} item${
+          savePostInvoiceDialog.rows.length === 1 ? '' : 's'
+        } from ${savePostInvoiceDialog.supplierName || 'this supplier'} so they're available next time?`}
+        primaryButtonText="Save"
+        primaryButtonAction={confirmSaveInvoiceItemsToBook}
+        secondaryButtonText="Not Now"
+        secondaryButtonAction={() =>
+          setSavePostInvoiceDialog({ visible: false, supplierName: '', rows: [] })
+        }
+        showConfetti={false}
       />
 
       {/* Delete a single supplier book item */}
@@ -2395,21 +2405,14 @@ export function AddMaterialScreen() {
 
       {/* Review modal for extracted items */}
       <SupplierListReviewModal
-        visible={reviewModalVisible}
-        initialSupplierName={extractedSupplierName}
-        initialItems={extractedItems}
-        existingForDiff={importMode === 'refresh' ? existingForDiff : undefined}
-        existingSupplierNames={existingSupplierNames}
-        saving={savingImport}
-        onCancel={() => {
-          if (!savingImport) {
-            setReviewModalVisible(false);
-            setExtractedItems([]);
-            setExtractedSupplierContact(undefined);
-            setExistingForDiff(undefined);
-          }
-        }}
-        onSave={handleSaveImported}
+        visible={importer.reviewModalVisible}
+        initialSupplierName={importer.extractedSupplierName}
+        initialItems={importer.extractedItems}
+        existingForDiff={importMode === 'refresh' ? importer.existingForDiff : undefined}
+        existingSupplierNames={importer.existingSupplierNames}
+        saving={importer.saving}
+        onCancel={importer.cancelReview}
+        onSave={importer.handleSaveImported}
       />
 
       {/* Snackbar for save confirmation */}
@@ -3108,6 +3111,19 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   addManuallySearchLinkText: {
+    marginLeft: 8,
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  addFromInvoiceLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+  },
+  addFromInvoiceLinkText: {
     marginLeft: 8,
     color: colors.primary,
     fontSize: 14,

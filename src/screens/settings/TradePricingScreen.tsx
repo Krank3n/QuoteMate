@@ -3,12 +3,12 @@
  * Trade categories, niches, and hardware store selection
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
+  Pressable,
   Platform,
 } from 'react-native';
 import {
@@ -18,6 +18,12 @@ import {
   Chip,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import {
+  NestableScrollContainer,
+  NestableDraggableFlatList,
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
 
 import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
@@ -29,39 +35,100 @@ import {
   TRADE_CATEGORIES,
   getTradeCategoryById,
 } from '../../constants/tradeCategories';
+import { getReeceConnectionStatus } from '../../services/reeceApi';
+import { loadGroups } from '../../services/supplierGroupService';
+import { composeSupplierList, type SupplierEntry } from '../../services/supplierPriority';
+import type { SupplierGroup } from '../../types';
 
 export function TradePricingScreen() {
   const { businessSettings, setBusinessSettings } = useStore();
 
+  const navigation = useNavigation<any>();
+
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [selectedNiches, setSelectedNiches] = useState<string[]>([]);
-  const [selectedStore, setSelectedStore] = useState<string>('bunnings');
+  const [reeceConnected, setReeceConnected] = useState<boolean>(false);
+  const [supplierGroups, setSupplierGroups] = useState<SupplierGroup[]>([]);
+  const [supplierPriority, setSupplierPriority] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const initialSnapshotRef = useRef<string | null>(null);
 
+  // Compose the unified ordered supplier list any time inputs change. Drives
+  // both the visible list and the saved priority that gets persisted.
+  const orderedSuppliers: SupplierEntry[] = useMemo(
+    () =>
+      composeSupplierList({
+        savedPriority: supplierPriority,
+        reeceConnected,
+        localGroups: supplierGroups,
+      }),
+    [supplierPriority, reeceConnected, supplierGroups],
+  );
+
+  // Re-check Reece connection every time the screen is focused so returning
+  // from ReeceIntegrationScreen instantly reflects the new state.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      getReeceConnectionStatus()
+        .then((status) => {
+          if (!cancelled) setReeceConnected(!!status.connected);
+        })
+        .catch(() => {
+          if (!cancelled) setReeceConnected(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
+
   useEffect(() => {
     if (businessSettings) {
       const cats = businessSettings.tradeCategories || (businessSettings.tradeCategory ? [businessSettings.tradeCategory] : []);
       const niches = businessSettings.tradeNiches || (businessSettings.tradeNiche ? [businessSettings.tradeNiche] : []);
-      const store = businessSettings.selectedStore || 'bunnings';
+      const priority = businessSettings.supplierPriority || [];
       setSelectedCategories(cats);
       setSelectedNiches(niches);
-      setSelectedStore(store);
-      initialSnapshotRef.current = JSON.stringify({ cats: [...cats].sort(), niches: [...niches].sort(), store });
+      setSupplierPriority(priority);
+      initialSnapshotRef.current = JSON.stringify({
+        cats: [...cats].sort(),
+        niches: [...niches].sort(),
+        priority,
+      });
     }
   }, [businessSettings]);
+
+  // Load the user's local supplier groups (for the draggable list). Refresh
+  // on focus so adding/editing a supplier in the Supplier Book reflects
+  // immediately when the user comes back.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      loadGroups()
+        .then((groups) => {
+          if (!cancelled) setSupplierGroups(groups || []);
+        })
+        .catch(() => {
+          if (!cancelled) setSupplierGroups([]);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
 
   const isDirty = useMemo(() => {
     if (!initialSnapshotRef.current) return false;
     const current = JSON.stringify({
       cats: [...selectedCategories].sort(),
       niches: [...selectedNiches].sort(),
-      store: selectedStore,
+      priority: supplierPriority,
     });
     return current !== initialSnapshotRef.current;
-  }, [selectedCategories, selectedNiches, selectedStore]);
+  }, [selectedCategories, selectedNiches, supplierPriority]);
 
   const handleCategoryToggle = (categoryId: string) => {
     setSelectedCategories(prev => {
@@ -106,10 +173,6 @@ export function TradePricingScreen() {
     return category?.niches.map(niche => ({ ...niche, categoryId: catId })) || [];
   });
 
-  const handleStoreSelect = (storeId: string) => {
-    setSelectedStore(storeId);
-  };
-
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
       setIsLoading(true);
@@ -117,12 +180,12 @@ export function TradePricingScreen() {
         ...businessSettings!,
         tradeCategories: selectedCategories.length > 0 ? selectedCategories : undefined,
         tradeNiches: selectedNiches.length > 0 ? selectedNiches : undefined,
-        selectedStore: selectedStore,
+        supplierPriority: supplierPriority.length > 0 ? supplierPriority : undefined,
       });
       initialSnapshotRef.current = JSON.stringify({
         cats: [...selectedCategories].sort(),
         niches: [...selectedNiches].sort(),
-        store: selectedStore,
+        priority: supplierPriority,
       });
       if (!opts?.silent) setShowSuccessModal(true);
       return true;
@@ -134,14 +197,76 @@ export function TradePricingScreen() {
     }
   };
 
+  // Drag-end handler for the supplier priority list. The composed list is
+  // canonical (already accounts for connection + new groups), so we capture
+  // its IDs in their new order.
+  const handleSupplierReorder = useCallback((data: SupplierEntry[]) => {
+    setSupplierPriority(data.map((entry) => entry.id));
+  }, []);
+
   const { unsavedModalProps } = useUnsavedChangesGuard({
     isDirty,
     onSave: () => handleSave({ silent: true }),
   });
 
+  const renderSupplierItem = ({ item, drag, isActive }: RenderItemParams<SupplierEntry>) => {
+    const iconName: any =
+      item.kind === 'bunnings' ? 'hammer-wrench'
+      : item.kind === 'reece' ? 'pipe'
+      : 'storefront-outline';
+    const iconColor =
+      item.kind === 'reece' ? colors.success
+      : item.kind === 'bunnings' ? colors.warning
+      : colors.primary;
+
+    const tapAction = () => {
+      if (item.kind === 'reece' && !reeceConnected) {
+        navigation.navigate('ReeceIntegration');
+      } else if (item.kind === 'local' && item.group) {
+        navigation.navigate('EditSupplier', { groupId: item.group.id });
+      }
+    };
+    const isTappable = (item.kind === 'reece' && !reeceConnected) || item.kind === 'local';
+
+    return (
+      <View style={[styles.supplierRow, isActive && styles.supplierRowActive]}>
+        {/* Drag handle. Using Pressable (not TouchableOpacity) to match the
+            JobChecklist pattern — TouchableOpacity's tap-feedback animation
+            bubbles up to the parent NestableScrollContainer and triggers a
+            scroll-to-top when the handle is tapped without a long-press. */}
+        <Pressable
+          onLongPress={drag}
+          delayLongPress={150}
+          disabled={isActive}
+          style={styles.supplierDragHandle}
+          hitSlop={6}
+        >
+          <MaterialCommunityIcons name="drag-vertical" size={20} color={colors.textMuted} />
+        </Pressable>
+        <MaterialCommunityIcons name={iconName} size={22} color={iconColor} style={{ marginRight: 12 }} />
+        {/* Body — tap to navigate where applicable; built-in always-on
+            suppliers (Bunnings, connected Reece) just sit there. */}
+        <TouchableOpacity
+          style={{ flex: 1 }}
+          activeOpacity={isTappable ? 0.7 : 1}
+          onPress={isTappable ? tapAction : undefined}
+          disabled={!isTappable}
+        >
+          <Text style={styles.supplierName}>{item.name}</Text>
+          <Text style={styles.supplierSubtitle}>{item.subtitle}</Text>
+        </TouchableOpacity>
+        {item.kind === 'reece' && !reeceConnected ? (
+          <TouchableOpacity onPress={tapAction} style={styles.connectBadge}>
+            <Text style={styles.connectBadgeText}>Connect</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
-      <ScrollView
+      <NestableScrollContainer
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
@@ -236,125 +361,39 @@ export function TradePricingScreen() {
             </Surface>
           )}
 
-          {/* Hardware Store Selection */}
+          {/* Hardware Store Priority */}
           <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Hardware Store</Title>
+            <Title style={styles.sectionTitle}>Hardware Stores</Title>
             <Text style={styles.helperText}>
-              Select your preferred hardware store for pricing
+              Quotes search these suppliers in order. Long-press and drag to change priority — whoever's at the top is tried first.
             </Text>
 
-            {/* Accurate Pricing Section */}
-            <View style={styles.storeCategory}>
-              <View style={styles.storeCategoryHeader}>
-                <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
-                <Text style={styles.storeCategoryTitle}>More Accurate Pricing</Text>
+            <TouchableOpacity
+              style={styles.addSupplierButton}
+              onPress={() => navigation.navigate('AddMaterialStandalone', { supplierBookOnly: true })}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons name="plus-circle-outline" size={20} color={colors.primary} />
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.addSupplierTitle}>Add another supplier</Text>
+                <Text style={styles.addSupplierSubtitle}>
+                  Drop in your own price list — opens the Supplier Book.
+                </Text>
               </View>
-              <Text style={styles.storeCategoryDescription}>
-                Stores with more reliable web search pricing or API access.
-              </Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[
-                  styles.storeRadioOption,
-                  selectedStore === 'bunnings' && styles.storeRadioOptionSelected
-                ]}
-                onPress={() => handleStoreSelect('bunnings')}
-              >
-                <View style={styles.storeRadioLeft}>
-                  <View style={[
-                    styles.radioButton,
-                    selectedStore === 'bunnings' && styles.radioButtonSelected
-                  ]}>
-                    {selectedStore === 'bunnings' && (
-                      <View style={styles.radioButtonInner} />
-                    )}
-                  </View>
-                  <View style={styles.storeInfo}>
-                    <Text style={styles.storeName}>Bunnings</Text>
-                    <Text style={styles.storeMethod}>Web Search</Text>
-                  </View>
-                </View>
-                <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.storeRadioOption, styles.storeRadioOptionDisabled]}
-                disabled={true}
-              >
-                <View style={styles.storeRadioLeft}>
-                  <View style={styles.radioButton}>
-                    <View style={styles.radioButtonDisabled} />
-                  </View>
-                  <View style={styles.storeInfo}>
-                    <Text style={[styles.storeName, styles.storeNameDisabled]}>Reece</Text>
-                    <Text style={styles.storeMethod}>API Integration</Text>
-                  </View>
-                </View>
-                <View style={styles.comingSoonBadge}>
-                  <Text style={styles.comingSoonText}>Coming Soon</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            {/* Guestimates Section */}
-            <View style={styles.storeCategory}>
-              <View style={styles.storeCategoryHeader}>
-                <MaterialCommunityIcons name="approximately-equal" size={20} color="#FF9800" />
-                <Text style={styles.storeCategoryTitle}>Guestimates</Text>
-              </View>
-              <Text style={styles.storeCategoryDescription}>
-                Estimated pricing based on typical product costs
-              </Text>
-
-              {['mitre10', 'hth', 'totaltools', 'flexihire', 'sydneysolvents'].map((storeId) => {
-                const storeNames: Record<string, string> = {
-                  mitre10: 'Mitre 10',
-                  hth: 'Home Timber & Hardware',
-                  totaltools: 'Total Tools',
-                  flexihire: 'Flexihire',
-                  sydneysolvents: 'Sydney Solvents',
-                };
-                return (
-                  <TouchableOpacity
-                    key={storeId}
-                    style={[
-                      styles.storeRadioOption,
-                      selectedStore === storeId && styles.storeRadioOptionSelected
-                    ]}
-                    onPress={() => handleStoreSelect(storeId)}
-                  >
-                    <View style={styles.storeRadioLeft}>
-                      <View style={[
-                        styles.radioButton,
-                        selectedStore === storeId && styles.radioButtonSelected
-                      ]}>
-                        {selectedStore === storeId && (
-                          <View style={styles.radioButtonInner} />
-                        )}
-                      </View>
-                      <View style={styles.storeInfo}>
-                        <Text style={styles.storeName}>{storeNames[storeId]}</Text>
-                        <Text style={styles.storeMethod}>Price Estimate</Text>
-                      </View>
-                    </View>
-                    <MaterialCommunityIcons name="approximately-equal" size={20} color="#FF9800" />
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <View style={styles.infoBox}>
-              <MaterialCommunityIcons name="information" size={20} color={colors.primary} />
-              <Text style={styles.infoBoxText}>
-                {selectedStore === 'bunnings'
-                  ? "Bunnings is selected. Real prices will be fetched using the Bunnings web search when available."
-                  : "Using estimated typical product pricing."
-                }
-              </Text>
-            </View>
+            <NestableDraggableFlatList
+              data={orderedSuppliers}
+              keyExtractor={(item) => item.id}
+              renderItem={renderSupplierItem}
+              onDragEnd={({ data }) => handleSupplierReorder(data)}
+              activationDistance={8}
+              containerStyle={{ marginTop: 12 }}
+            />
           </Surface>
         </WebContainer>
-      </ScrollView>
+      </NestableScrollContainer>
 
       <FixedBottomButton
         mode="contained"
@@ -582,6 +621,74 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: colors.primary,
+  },
+  connectBadge: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  connectBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.surface,
+    letterSpacing: 0.4,
+  },
+  addSupplierButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+  },
+  supplierRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: 12,
+    paddingLeft: 4,
+    paddingRight: 12,
+    marginBottom: 8,
+  },
+  supplierDragHandle: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    marginRight: 4,
+  },
+  supplierRowActive: {
+    borderColor: colors.primary,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  supplierName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  supplierSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  addSupplierTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  addSupplierSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 16,
   },
   infoBox: {
     flexDirection: 'row',

@@ -8,7 +8,6 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Platform,
   Image,
   Alert,
   TouchableOpacity,
@@ -27,17 +26,17 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import ColorPicker, { Panel1, HueSlider, type ColorFormatsObject } from 'reanimated-color-picker';
 
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useStore } from '../../store/useStore';
-import { auth, storage, db } from '../../config/firebase';
+import { auth, db } from '../../config/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { geocodeAddress } from '../../utils/travelCalculator';
 import { checkSquareConnection } from '../../services/squareService';
-import { compressLogo } from '../../services/photoService';
+import { uploadBusinessLogo } from '../../services/photoService';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
+import { AddressSearchInput } from '../../components/AddressSearchInput';
 import { ProBadge } from '../../components/ProBadge';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
@@ -54,6 +53,7 @@ export function BusinessProfileScreen() {
   const [website, setWebsite] = useState('');
   const [address, setAddress] = useState('');
   const [logoUri, setLogoUri] = useState<string | undefined>(undefined);
+  const [logoMimeType, setLogoMimeType] = useState<string | undefined>(undefined);
   const [brandColor, setBrandColor] = useState<string | undefined>(undefined);
   const [hexInput, setHexInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -132,6 +132,7 @@ export function BusinessProfileScreen() {
 
       if (!result.canceled && result.assets[0]) {
         setLogoUri(result.assets[0].uri);
+        setLogoMimeType(result.assets[0].mimeType);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to pick image. Please try again.');
@@ -147,42 +148,19 @@ export function BusinessProfileScreen() {
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: () => setLogoUri(undefined),
+          onPress: () => {
+            setLogoUri(undefined);
+            setLogoMimeType(undefined);
+          },
         },
       ]
     );
   };
 
-  const uploadLogoToStorage = async (uri: string): Promise<string> => {
-    // Already a remote URL (previously uploaded), no need to re-upload
-    if (uri.startsWith('https://')) return uri;
-
+  const uploadLogoToStorage = async (uri: string, mimeType?: string): Promise<string> => {
     const userId = auth.currentUser?.uid;
     if (!userId) throw new Error('Not signed in');
-
-    // Compress/resize before upload. Logos end up as small thumbnails on PDFs
-    // and emails — shipping the raw camera-roll image (often 3-6 MB) was
-    // wasting Storage quota and slowing every PDF/email render.
-    const compressedUri = await compressLogo(uri);
-
-    // On native, fetch(file://).blob() is unreliable in React Native — use XHR
-    // per Firebase's official RN guidance. On web, fetch works fine.
-    const blob: Blob = await new Promise((resolve, reject) => {
-      if (Platform.OS === 'web') {
-        fetch(compressedUri).then(r => r.blob()).then(resolve).catch(reject);
-        return;
-      }
-      const xhr = new XMLHttpRequest();
-      xhr.onload = () => resolve(xhr.response);
-      xhr.onerror = () => reject(new Error('Failed to read image file'));
-      xhr.responseType = 'blob';
-      xhr.open('GET', compressedUri, true);
-      xhr.send(null);
-    });
-
-    const logoRef = ref(storage, `users/${userId}/logo.jpg`);
-    await uploadBytes(logoRef, blob, { contentType: 'image/jpeg' });
-    return getDownloadURL(logoRef);
+    return uploadBusinessLogo(userId, uri, mimeType);
   };
 
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
@@ -198,7 +176,7 @@ export function BusinessProfileScreen() {
       let savedLogoUri = logoUri;
       if (logoUri) {
         try {
-          savedLogoUri = await uploadLogoToStorage(logoUri);
+          savedLogoUri = await uploadLogoToStorage(logoUri, logoMimeType);
           setLogoUri(savedLogoUri);
         } catch (error: any) {
           console.error('[BusinessProfile] Logo upload failed:', error);
@@ -308,14 +286,12 @@ export function BusinessProfileScreen() {
               placeholder="https://"
             />
 
-            <TextInput
+            <AddressSearchInput
               label="Business Address"
+              placeholder="Start typing your business address"
               value={address}
               onChangeText={setAddress}
-              mode="outlined"
               style={styles.input}
-              multiline
-              numberOfLines={3}
             />
           </Surface>
 

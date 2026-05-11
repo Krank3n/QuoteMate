@@ -34,6 +34,7 @@ import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen';
 import { SquareIntegrationScreen } from '../screens/settings/SquareIntegrationScreen';
+import { ReeceIntegrationScreen } from '../screens/settings/ReeceIntegrationScreen';
 import { GoogleCalendarIntegrationScreen } from '../screens/settings/GoogleCalendarIntegrationScreen';
 import { SectionTemplatesScreen } from '../screens/settings/SectionTemplatesScreen';
 import { JobTemplateEditorScreen } from '../screens/settings/JobTemplateEditorScreen';
@@ -47,6 +48,7 @@ import { MaterialsListScreen } from '../screens/NewQuote/MaterialsListScreen';
 import { AddMaterialScreen } from '../screens/NewQuote/AddMaterialScreen';
 import { LaborMarkupScreen } from '../screens/NewQuote/LaborMarkupScreen';
 import { JobPreviewScreen } from '../screens/NewQuote/JobPreviewScreen';
+import { ReeceOrderScreen } from '../screens/ReeceOrderScreen';
 
 import { colors } from '../theme';
 import { TourRefsProvider } from '../components/tour/useTourRefs';
@@ -507,6 +509,20 @@ export function RootNavigator() {
         }}
       />
       <RootStack.Screen
+        name="ReeceOrder"
+        component={ReeceOrderScreen}
+        options={{
+          presentation: 'modal',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
+          headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Order from Reece',
+        }}
+      />
+      <RootStack.Screen
         name="Insights"
         component={InsightsScreen}
         options={{
@@ -763,6 +779,20 @@ export function RootNavigator() {
           headerTintColor: colors.white,
           headerTitleStyle: { fontWeight: '700' },
           title: 'Square Payments',
+        }}
+      />
+      <RootStack.Screen
+        name="ReeceIntegration"
+        component={ReeceIntegrationScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
+          headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Reece Plumbing',
         }}
       />
       <RootStack.Screen

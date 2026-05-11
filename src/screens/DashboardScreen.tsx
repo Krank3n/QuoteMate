@@ -18,6 +18,8 @@ import { format } from 'date-fns';
 
 import { useStore } from '../store/useStore';
 import { useJobStore } from '../store/useJobStore';
+import { applyJobStageChange } from '../utils/applyJobStageChange';
+import { pickPrimaryDoc } from '../components/StickyJobActionBar';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
@@ -40,8 +42,6 @@ import { SwipeableCard } from '../components/SwipeableCard';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap, successTap } from '../utils/haptics';
 import { TrialBanner } from '../components/TrialBanner';
-import { UpgradeBanner } from '../components/UpgradeBanner';
-import { TrialExpiredGate } from '../components/TrialExpiredGate';
 import { SyncErrorBanner } from '../components/SyncErrorBanner';
 import { ShimmerOverlay } from '../components/ShimmerOverlay';
 import { TapRipple } from '../components/TapRipple';
@@ -262,7 +262,7 @@ export function DashboardScreen() {
   }, []);
   const navigation = useNavigation<any>();
   const jobActions = useJobActionsSheet(navigation);
-  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft, hasSeenTour, unifiedTourActive, unifiedTourPhase, startUnifiedTour, isTrialExpired, getEffectivePlan } = useStore();
+  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft, hasSeenTour, unifiedTourActive, unifiedTourPhase, startUnifiedTour } = useStore();
   const { registerRef } = useTourRefs();
   const [tourActive, setTourActive] = useState(false);
 
@@ -356,6 +356,28 @@ export function DashboardScreen() {
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] || null;
   }, [quotes]);
 
+  // Translate the wizard step they left off on into a "what's needed
+  // next" hint shown on the draft banner. Mirrors the screens in the
+  // NewJob stack (see RootNavigator).
+  const draftStepLabel = useMemo(() => {
+    switch (inProgressDraft?.draftStep) {
+      case 'Details':
+        return 'Add job details';
+      case 'CustomerDetails':
+        return 'Add customer';
+      case 'MaterialsList':
+        return 'Add materials';
+      case 'AddMaterial':
+        return 'Add materials';
+      case 'LaborMarkup':
+        return 'Set labour & markup';
+      case 'JobPreview':
+        return 'Ready to send';
+      default:
+        return null;
+    }
+  }, [inProgressDraft?.draftStep]);
+
   // Recent quotes (last 3) — kept so the existing quote-scoped logic
   // (tour dummy data) still resolves.
   const recentQuotes = [...quotes]
@@ -382,7 +404,18 @@ export function DashboardScreen() {
     const job = stageSheetJob;
     setStageSheetJob(null);
     try {
-      await saveJob({ ...job, stage: target });
+      const documents = useStore.getState().documents;
+      const attached = documents.filter((d) => d.jobId === job.id);
+      const primaryDoc = job.primaryDocumentId
+        ? documents.find((d) => d.id === job.primaryDocumentId) ?? pickPrimaryDoc(attached)
+        : pickPrimaryDoc(attached);
+      await applyJobStageChange({
+        job,
+        target,
+        primaryDoc,
+        saveJob,
+        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
+      });
     } catch {
       Alert.alert('Error', 'Failed to update stage. Please try again.');
     }
@@ -541,9 +574,6 @@ export function DashboardScreen() {
 
   return (
     <>
-      {/* Trial-Expired Gate — blocks dashboard for free users without Square */}
-      <TrialExpiredGate />
-
       {/* Duplicate Success */}
       <AlertModal
         visible={duplicateSuccessVisible}
@@ -624,45 +654,65 @@ export function DashboardScreen() {
       {/* Sync Error Banner — warns if the latest quote/invoice didn't sync to cloud */}
       <SyncErrorBanner />
 
-      {/* Subscription banner — trial countdown while in 7-day trial,
-          dismissible "Upgrade to Pro" once on the free plan. */}
-      {subscriptionStatus && !subscriptionStatus.isPro && subscriptionStatus.trialStartedAt && !isTrialExpired() && (
-        <TrialBanner
-          trialStartedAt={subscriptionStatus.trialStartedAt}
-          quoteCount={quotes.length}
-        />
-      )}
-      <UpgradeBanner />
-
+      {/* Trial Status — hidden on the Dashboard for the first ~4 days of the
+          7-day trial. Showing a countdown from day 1 makes the app feel
+          metered/temporary; suppressing it lets the tradie get hooked first,
+          then a 3-day urgency window closes the deal. The banner is always
+          available on the Subscription Settings screen if they want it. */}
+      {(() => {
+        if (!subscriptionStatus || subscriptionStatus.isPro || !subscriptionStatus.trialStartedAt) return null;
+        const elapsed = Date.now() - new Date(subscriptionStatus.trialStartedAt).getTime();
+        const trialMs = 7 * 24 * 60 * 60 * 1000;
+        const daysRemaining = Math.max(0, Math.ceil((trialMs - elapsed) / (24 * 60 * 60 * 1000)));
+        if (daysRemaining > 3) return null;
+        return (
+          <TrialBanner
+            trialStartedAt={subscriptionStatus.trialStartedAt}
+            quoteCount={quotes.length}
+          />
+        );
+      })()}
 
       {/* Continue Draft Banner */}
       {inProgressDraft && (
-        <SwipeableCard
-          leftActions={[
-            { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteDraft },
-          ]}
-        >
-          <TouchableOpacity
-            onPress={() => handleContinueDraft(inProgressDraft)}
-            activeOpacity={0.7}
-            accessibilityLabel={`Continue draft for ${inProgressDraft.job.name || 'Untitled'}`}
+        <View>
+          <SwipeableCard
+            leftActions={[
+              { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteDraft },
+            ]}
           >
-            <Surface style={styles.draftBanner}>
-              <View style={styles.draftBannerContent}>
-                <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: colors.warningBg, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
-                  <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.secondary} />
-                </RNAnimated.View>
-                <View style={styles.draftBannerText}>
-                  <Text style={styles.draftBannerTitle}>Continue Draft</Text>
-                  <Text style={styles.draftBannerSubtitle} numberOfLines={1}>
-                    {inProgressDraft.job.name || 'Untitled'}{inProgressDraft.customerName ? ` — ${inProgressDraft.customerName}` : ''}
-                  </Text>
+            <TouchableOpacity
+              onPress={() => handleContinueDraft(inProgressDraft)}
+              activeOpacity={0.7}
+              accessibilityLabel={`Continue draft for ${inProgressDraft.job.name || 'Untitled'}`}
+            >
+              <Surface style={styles.draftBanner}>
+                <View style={styles.draftBannerContent}>
+                  <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: colors.warningBg, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
+                    <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.secondary} />
+                  </RNAnimated.View>
+                  <View style={styles.draftBannerText}>
+                    <Text style={styles.draftBannerTitle} numberOfLines={1}>
+                      {inProgressDraft.job.name || 'Untitled'}{inProgressDraft.customerName ? ` — ${inProgressDraft.customerName}` : ''}
+                    </Text>
+                    <Text style={styles.draftBannerSubtitle} numberOfLines={1}>
+                      {draftStepLabel ? `Next: ${draftStepLabel}` : 'Continue draft'}
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.primary} />
                 </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.primary} />
-              </View>
-            </Surface>
+              </Surface>
+            </TouchableOpacity>
+          </SwipeableCard>
+          <TouchableOpacity
+            style={styles.draftDeleteButton}
+            onPress={handleDeleteDraft}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="Delete draft"
+          >
+            <MaterialCommunityIcons name="close-circle" size={22} color="#ef4444" />
           </TouchableOpacity>
-        </SwipeableCard>
+        </View>
       )}
 
       {/* New Quote Button */}
@@ -670,11 +720,11 @@ export function DashboardScreen() {
         <View ref={newQuoteRef} style={{
           marginHorizontal: 20,
           marginBottom: 24,
-          borderRadius: 28,
+          borderRadius: 12,
           overflow: 'hidden',
         }}>
         <View style={{
-          borderRadius: 28,
+          borderRadius: 12,
           shadowColor: colors.primary,
           shadowOffset: { width: 0, height: 0 },
           shadowRadius: 8,
@@ -974,11 +1024,20 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     marginTop: 2,
   },
+  draftDeleteButton: {
+    position: 'absolute',
+    top: -6,
+    right: 14,
+    backgroundColor: colors.surface,
+    borderRadius: 11,
+    zIndex: 10,
+    elevation: 10,
+  },
   newQuoteButton: {
-    borderRadius: 28,
+    borderRadius: 12,
   },
   newQuoteButtonContent: {
-    paddingVertical: 8,
+    paddingVertical: 14,
   },
   statsContainer: {
     flexDirection: 'row',
