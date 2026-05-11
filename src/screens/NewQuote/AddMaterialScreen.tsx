@@ -1254,6 +1254,70 @@ export function AddMaterialScreen() {
     }
   };
 
+  // Invoice import — declared here (not next to useSupplierListImport) because
+  // it needs `addMaterialToQuote` in its options. Hooks are order-stable across
+  // renders, so placement inside the component body is fine.
+  const invoiceImporter = useInvoiceImport({
+    addMaterialToQuote: (material, opts) => addMaterialToQuote(material, opts),
+    selectedSection,
+    onError: (msg) => Alert.alert('Import Failed', msg),
+    onAddedToQuote: async ({ supplierName, itemCount, rows, contact }) => {
+      const label = supplierName ? ` from ${supplierName}` : '';
+      setSnackbarMessage(
+        itemCount > 0
+          ? `Added ${itemCount} item${itemCount === 1 ? '' : 's'}${label} to quote`
+          : 'No items added',
+      );
+      setSnackbarVisible(true);
+
+      // Contact merge happens inside the hook — refresh groups so any new
+      // contact icons surface in the Supplier Book tab immediately.
+      if (contact && supplierName) {
+        try {
+          const refreshed = await loadGroups();
+          setSupplierGroups(refreshed);
+        } catch {
+          /* non-blocking */
+        }
+      }
+
+      // Offer to persist the line items themselves to the supplier book.
+      if (itemCount > 0 && supplierName) {
+        setSavePostInvoiceDialog({ visible: true, supplierName, rows });
+      }
+    },
+  });
+
+  const openInvoiceSheet = () => setInvoiceSheetVisible(true);
+
+  const launchInvoiceImport = (source: 'camera' | 'gallery' | 'pdf') => {
+    setInvoiceSheetVisible(false);
+    invoiceImporter.startImport(source);
+  };
+
+  const invoiceSheetOptions: ActionSheetOption[] = [
+    { icon: 'camera', label: 'Take photo', onPress: () => launchInvoiceImport('camera') },
+    { icon: 'image-multiple', label: 'Pick from gallery', onPress: () => launchInvoiceImport('gallery') },
+    { icon: 'file-pdf-box', label: 'Pick PDF', onPress: () => launchInvoiceImport('pdf') },
+  ];
+
+  const confirmSaveInvoiceItemsToBook = async () => {
+    const { supplierName, rows } = savePostInvoiceDialog;
+    setSavePostInvoiceDialog({ visible: false, supplierName: '', rows: [] });
+    try {
+      const result = await invoiceImporter.saveToSupplierBook(supplierName, rows);
+      if (result.itemCount > 0) {
+        setSnackbarMessage(
+          `Saved ${result.itemCount} item${result.itemCount === 1 ? '' : 's'} to your supplier book`,
+        );
+        setSnackbarVisible(true);
+        await loadSavedItems();
+      }
+    } catch (err: any) {
+      Alert.alert('Save Failed', err?.message || 'Could not save items to your supplier book.');
+    }
+  };
+
   const updateMaterialInQuote = (updatedMaterial: Material, opts?: { silent?: boolean }) => {
     if (!currentQuote) return;
 
@@ -1797,6 +1861,24 @@ export function AddMaterialScreen() {
             <MaterialCommunityIcons name="pencil-plus-outline" size={18} color={colors.primary} />
             <Text style={styles.addManuallySearchLinkText}>Add manually</Text>
           </TouchableOpacity>
+          {/* Snap an invoice / receipt and append the line items to this quote */}
+          <TouchableOpacity
+            style={styles.addFromInvoiceLink}
+            onPress={openInvoiceSheet}
+            disabled={invoiceImporter.phase === 'extracting' || invoiceImporter.phase === 'capturing'}
+            activeOpacity={0.7}
+          >
+            {invoiceImporter.phase === 'extracting' ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <MaterialCommunityIcons name="receipt" size={18} color={colors.primary} />
+            )}
+            <Text style={styles.addFromInvoiceLinkText}>
+              {invoiceImporter.phase === 'extracting'
+                ? (invoiceImporter.loadingLabel || 'Reading…')
+                : 'Add from invoice'}
+            </Text>
+          </TouchableOpacity>
         </>
       )}
       </WebContainer>
@@ -2223,6 +2305,54 @@ export function AddMaterialScreen() {
         onComplete={importer.handleCaptureComplete}
         processing={importer.phase === 'extracting'}
         processingLabel={importer.loadingLabel}
+      />
+
+      {/* Invoice/receipt source picker — separate from price-list import. */}
+      <ActionSheet
+        visible={invoiceSheetVisible}
+        onDismiss={() => setInvoiceSheetVisible(false)}
+        title="Add from invoice"
+        options={invoiceSheetOptions}
+      />
+
+      {/* Invoice capture modal — same component, separate hook state. */}
+      <SupplierListCaptureModal
+        visible={invoiceImporter.captureModalVisible}
+        onCancel={invoiceImporter.cancelCapture}
+        onComplete={invoiceImporter.handleCaptureComplete}
+        processing={invoiceImporter.phase === 'extracting'}
+        processingLabel={invoiceImporter.loadingLabel}
+      />
+
+      {/* Invoice review modal — confirm extracted line items + quantities. */}
+      <InvoiceReviewModal
+        visible={invoiceImporter.reviewModalVisible}
+        initialSupplierName={invoiceImporter.extractedSupplierName}
+        initialItems={invoiceImporter.extractedItems}
+        saving={invoiceImporter.saving}
+        onCancel={invoiceImporter.cancelReview}
+        onConfirm={invoiceImporter.handleAddToQuote}
+      />
+
+      {/* Post-invoice: offer to persist the items to the supplier book too. */}
+      <AlertModal
+        visible={savePostInvoiceDialog.visible}
+        onDismiss={() =>
+          setSavePostInvoiceDialog({ visible: false, supplierName: '', rows: [] })
+        }
+        type="info"
+        icon="bookmark-outline"
+        title="Save to supplier book?"
+        message={`Also save these ${savePostInvoiceDialog.rows.length} item${
+          savePostInvoiceDialog.rows.length === 1 ? '' : 's'
+        } from ${savePostInvoiceDialog.supplierName || 'this supplier'} so they're available next time?`}
+        primaryButtonText="Save"
+        primaryButtonAction={confirmSaveInvoiceItemsToBook}
+        secondaryButtonText="Not Now"
+        secondaryButtonAction={() =>
+          setSavePostInvoiceDialog({ visible: false, supplierName: '', rows: [] })
+        }
+        showConfetti={false}
       />
 
       {/* Delete a single supplier book item */}
@@ -2981,6 +3111,19 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   addManuallySearchLinkText: {
+    marginLeft: 8,
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  addFromInvoiceLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+  },
+  addFromInvoiceLinkText: {
     marginLeft: 8,
     color: colors.primary,
     fontSize: 14,
