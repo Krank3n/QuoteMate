@@ -42,6 +42,8 @@ import { SwipeableCard } from '../components/SwipeableCard';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap, successTap } from '../utils/haptics';
 import { TrialBanner } from '../components/TrialBanner';
+import { TrialExpiredBanner } from '../components/TrialExpiredGate';
+import { TRIAL_MS } from '../utils/trialConfig';
 import { SyncErrorBanner } from '../components/SyncErrorBanner';
 import { ShimmerOverlay } from '../components/ShimmerOverlay';
 import { TapRipple } from '../components/TapRipple';
@@ -654,17 +656,22 @@ export function DashboardScreen() {
       {/* Sync Error Banner — warns if the latest quote/invoice didn't sync to cloud */}
       <SyncErrorBanner />
 
-      {/* Trial Status — hidden on the Dashboard for the first ~4 days of the
-          7-day trial. Showing a countdown from day 1 makes the app feel
-          metered/temporary; suppressing it lets the tradie get hooked first,
-          then a 3-day urgency window closes the deal. The banner is always
-          available on the Subscription Settings screen if they want it. */}
+      {/* Trial expired banner — visible only when the trial is over, the user
+          isn't Pro, and Square isn't connected. Replaces the old blocking
+          modal so tradies can keep building (sunk-cost flow). The hard gate
+          fires at Send. */}
+      <TrialExpiredBanner />
+
+      {/* Trial Status — shown only in the final 3 days of an active trial
+          (days 1-3). Earlier in the trial, suppressing the countdown lets
+          the tradie get hooked first; once expired, the TrialExpiredBanner
+          above takes over, so we hide the countdown here. The full banner
+          is always available on the Subscription Settings screen. */}
       {(() => {
         if (!subscriptionStatus || subscriptionStatus.isPro || !subscriptionStatus.trialStartedAt) return null;
         const elapsed = Date.now() - new Date(subscriptionStatus.trialStartedAt).getTime();
-        const trialMs = 7 * 24 * 60 * 60 * 1000;
-        const daysRemaining = Math.max(0, Math.ceil((trialMs - elapsed) / (24 * 60 * 60 * 1000)));
-        if (daysRemaining > 3) return null;
+        const daysRemaining = Math.max(0, Math.ceil((TRIAL_MS - elapsed) / (24 * 60 * 60 * 1000)));
+        if (daysRemaining > 3 || daysRemaining === 0) return null;
         return (
           <TrialBanner
             trialStartedAt={subscriptionStatus.trialStartedAt}

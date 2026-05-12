@@ -23,6 +23,7 @@ import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { TrialBanner } from '../../components/TrialBanner';
+import { TRIAL_DAYS } from '../../utils/trialConfig';
 
 export function SubscriptionSettingsScreen() {
   const navigation = useNavigation<any>();
@@ -42,7 +43,7 @@ export function SubscriptionSettingsScreen() {
       <View style={styles.benefitsList}>
         <View style={styles.benefitItem}>
           <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
-          <Text style={styles.benefitText}>1% Square platform fee (vs 2.5% on free)</Text>
+          <Text style={styles.benefitText}>1% Square platform fee (vs 1.7% on free)</Text>
         </View>
         <View style={styles.benefitItem}>
           <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
@@ -85,7 +86,7 @@ export function SubscriptionSettingsScreen() {
         ) : (
           <>
             <Text style={styles.quotaText}>
-              7-day free trial — starts when you create your first quote
+              {TRIAL_DAYS}-day free trial — starts when you create your first quote
             </Text>
             <View style={styles.progressBar}>
               <View style={[styles.progressFill, { width: '0%' }]} />
@@ -95,9 +96,13 @@ export function SubscriptionSettingsScreen() {
       </View>
 
       <Text style={styles.upgradeDescription}>
-        You've got Pro features for the trial. After 7 days you'll move to the
-        free plan — connect Square so customers can pay your quotes online and
-        we take a 2.5% platform fee. Upgrade to Pro any time to drop that to 1%.
+        You've got full access to Pro features for your {TRIAL_DAYS}-day trial.
+        {'\n\n'}
+        Once it ends, the Free plan kicks in. You can still collect online payments
+        seamlessly via Square, with a small platform fee added to the customer's bill.
+        {'\n\n'}
+        Want to help your clients avoid card surcharges? Go Pro to unlock Bank
+        Transfer options and score discounted card rates.
       </Text>
 
       <Button
@@ -122,7 +127,7 @@ export function SubscriptionSettingsScreen() {
       <View style={styles.benefitsList}>
         <View style={styles.benefitItem}>
           <MaterialCommunityIcons name="information-outline" size={20} color={colors.primary} />
-          <Text style={styles.benefitText}>2.5% platform fee on Square payments</Text>
+          <Text style={styles.benefitText}>1.7% platform fee on Square payments</Text>
         </View>
         <View style={styles.benefitItem}>
           <MaterialCommunityIcons name="information-outline" size={20} color={colors.primary} />
@@ -135,7 +140,7 @@ export function SubscriptionSettingsScreen() {
       </View>
 
       <Text style={styles.upgradeDescription}>
-        Upgrade to Pro to drop the platform fee from 2.5% to 1%, unlock bank
+        Upgrade to Pro to drop the platform fee from 1.7% to 1%, unlock bank
         transfer / PayID / BPAY / PayPal on documents, and send without a Square
         link required.
       </Text>

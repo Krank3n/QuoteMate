@@ -14,6 +14,8 @@ import { calculateDueDate } from '../utils/invoiceCalculator';
 import { reconcileNextNumber } from '../utils/nextNumber';
 import { firestoreService } from '../services/firestoreService';
 import { documentService } from '../services/documentService';
+import { TRIAL_MS } from '../utils/trialConfig';
+import { trackEvent } from '../services/analyticsService';
 import { ensureJobForDocument, ensureJobForQuote } from './useJobStore';
 import { auth } from '../config/firebase';
 
@@ -357,6 +359,7 @@ export const useStore = create<AppState>((set, get) => ({
     const { businessSettings, startTrialIfNeeded } = get();
     // Start trial on first quote creation, not on save
     startTrialIfNeeded();
+    trackEvent('quote_started', { source: 'new_quote' });
     const newQuote: Quote = {
       id: generateId(),
       createdAt: new Date(),
@@ -938,12 +941,11 @@ export const useStore = create<AppState>((set, get) => ({
     if (subscriptionStatus.isPro || subscriptionStatus.plan === 'pro') return 'pro';
     if (subscriptionStatus.plan === 'free') return 'free';
 
-    // Compute trial expiry on read so the moment the 7-day window elapses
+    // Compute trial expiry on read so the moment the trial window elapses
     // we report 'free' even if no save has happened yet.
     if (subscriptionStatus.trialStartedAt) {
       const trialStart = new Date(subscriptionStatus.trialStartedAt);
-      const trialMs = 7 * 24 * 60 * 60 * 1000;
-      if (Date.now() - trialStart.getTime() >= trialMs) return 'free';
+      if (Date.now() - trialStart.getTime() >= TRIAL_MS) return 'free';
     }
     return 'trial';
   },
@@ -954,8 +956,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (subscriptionStatus.isPro || subscriptionStatus.plan === 'pro') return false;
     if (!subscriptionStatus.trialStartedAt) return false;
     const trialStart = new Date(subscriptionStatus.trialStartedAt);
-    const trialMs = 7 * 24 * 60 * 60 * 1000;
-    return Date.now() - trialStart.getTime() >= trialMs;
+    return Date.now() - trialStart.getTime() >= TRIAL_MS;
   },
 
   dismissUpgradeBanner: async () => {
@@ -1204,6 +1205,7 @@ export const useStore = create<AppState>((set, get) => ({
   // Invoice operations
   createNewInvoice: () => {
     const { businessSettings } = get();
+    trackEvent('quote_started', { source: 'new_invoice' });
     const now = new Date();
     const newInvoice: Invoice = {
       id: generateId(),
@@ -1242,12 +1244,17 @@ export const useStore = create<AppState>((set, get) => ({
     // Phase-5: prefer the unified convertDocumentToInvoice path when a
     // matching document exists (server canonicalises via setDocumentStage,
     // mirror trigger projects to the legacy invoices collection).
+    //
+    // Only fire `quote_started` once we know we're actually minting a new
+    // invoice (idempotency below short-circuits if this quote has already
+    // been invoiced — that's a re-open, not a new draft).
     const matchingDoc = get().getDocumentByLegacyId(quote.id);
     if (matchingDoc && matchingDoc.type === 'quote' && !matchingDoc.invoicedAt) {
       try {
         const converted = await get().convertDocumentToInvoice(matchingDoc.id);
         const invoice: Invoice = (await import('../types/documentAdapter')).documentToInvoice(converted);
         set({ currentInvoice: invoice });
+        trackEvent('quote_started', { source: 'from_quote' });
         return invoice;
       } catch {
         // Fall through to the legacy path on failure.
@@ -1269,6 +1276,7 @@ export const useStore = create<AppState>((set, get) => ({
       // mint a fresh one. The back-reference will be overwritten below.
     }
 
+    trackEvent('quote_started', { source: 'from_quote' });
     const now = new Date();
     // If the customer paid a deposit against this quote, deduct it from the
     // invoice total. The deposit is rendered as a credit line on the PDF/email

@@ -219,14 +219,17 @@ export function PaymentMethodsScreen() {
                 <View style={styles.switchTextContainer}>
                   <Text style={styles.switchTitle}>Show on Documents</Text>
                   <Text style={styles.switchDescription}>
-                    Display enabled payment methods on PDF quotes and invoices
+                    {isFreeTier
+                      ? 'On the free plan, only Square is shown on documents'
+                      : 'Display enabled payment methods on PDF quotes and invoices'}
                   </Text>
                 </View>
               </View>
               <Switch
-                value={showPaymentOnDocuments}
+                value={isFreeTier ? false : showPaymentOnDocuments}
                 onValueChange={setShowPaymentOnDocuments}
                 color={colors.primary}
+                disabled={isFreeTier}
               />
             </View>
           </Surface>
@@ -238,13 +241,15 @@ export function PaymentMethodsScreen() {
             <View style={styles.paymentMethodSection}>
               <View style={styles.paymentMethodHeaderWithToggle}>
                 <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="bank" size={20} color={bankEnabled ? colors.primary : colors.onSurface} />
-                  <Text style={[styles.paymentMethodTitle, !bankEnabled && styles.paymentMethodTitleDisabled]}>Bank Transfer</Text>
+                  <MaterialCommunityIcons name="bank" size={20} color={bankEnabled && !isFreeTier ? colors.primary : colors.onSurface} />
+                  <Text style={[styles.paymentMethodTitle, (!bankEnabled || isFreeTier) && styles.paymentMethodTitleDisabled]}>Bank Transfer</Text>
+                  {isFreeTier && <Text style={styles.proBadge}>PRO</Text>}
                 </View>
                 <Switch
-                  value={bankEnabled}
+                  value={isFreeTier ? false : bankEnabled}
                   onValueChange={setBankEnabled}
                   color={colors.primary}
+                  disabled={isFreeTier}
                 />
               </View>
               {bankEnabled && (
@@ -288,13 +293,15 @@ export function PaymentMethodsScreen() {
             <View style={styles.paymentMethodSection}>
               <View style={styles.paymentMethodHeaderWithToggle}>
                 <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="cellphone" size={20} color={payIdEnabled ? colors.primary : colors.onSurface} />
-                  <Text style={[styles.paymentMethodTitle, !payIdEnabled && styles.paymentMethodTitleDisabled]}>PayID</Text>
+                  <MaterialCommunityIcons name="cellphone" size={20} color={payIdEnabled && !isFreeTier ? colors.primary : colors.onSurface} />
+                  <Text style={[styles.paymentMethodTitle, (!payIdEnabled || isFreeTier) && styles.paymentMethodTitleDisabled]}>PayID</Text>
+                  {isFreeTier && <Text style={styles.proBadge}>PRO</Text>}
                 </View>
                 <Switch
-                  value={payIdEnabled}
+                  value={isFreeTier ? false : payIdEnabled}
                   onValueChange={setPayIdEnabled}
                   color={colors.primary}
+                  disabled={isFreeTier}
                 />
               </View>
               {payIdEnabled && (
@@ -344,13 +351,15 @@ export function PaymentMethodsScreen() {
             <View style={styles.paymentMethodSection}>
               <View style={styles.paymentMethodHeaderWithToggle}>
                 <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="barcode" size={20} color={bpayEnabled ? colors.primary : colors.onSurface} />
-                  <Text style={[styles.paymentMethodTitle, !bpayEnabled && styles.paymentMethodTitleDisabled]}>BPAY</Text>
+                  <MaterialCommunityIcons name="barcode" size={20} color={bpayEnabled && !isFreeTier ? colors.primary : colors.onSurface} />
+                  <Text style={[styles.paymentMethodTitle, (!bpayEnabled || isFreeTier) && styles.paymentMethodTitleDisabled]}>BPAY</Text>
+                  {isFreeTier && <Text style={styles.proBadge}>PRO</Text>}
                 </View>
                 <Switch
-                  value={bpayEnabled}
+                  value={isFreeTier ? false : bpayEnabled}
                   onValueChange={setBpayEnabled}
                   color={colors.primary}
+                  disabled={isFreeTier}
                 />
               </View>
               {bpayEnabled && (
@@ -383,13 +392,15 @@ export function PaymentMethodsScreen() {
             <View style={styles.paymentMethodSection}>
               <View style={styles.paymentMethodHeaderWithToggle}>
                 <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="alpha-p-circle" size={20} color={paypalEnabled ? colors.primary : colors.onSurface} />
-                  <Text style={[styles.paymentMethodTitle, !paypalEnabled && styles.paymentMethodTitleDisabled]}>PayPal</Text>
+                  <MaterialCommunityIcons name="alpha-p-circle" size={20} color={paypalEnabled && !isFreeTier ? colors.primary : colors.onSurface} />
+                  <Text style={[styles.paymentMethodTitle, (!paypalEnabled || isFreeTier) && styles.paymentMethodTitleDisabled]}>PayPal</Text>
+                  {isFreeTier && <Text style={styles.proBadge}>PRO</Text>}
                 </View>
                 <Switch
-                  value={paypalEnabled}
+                  value={isFreeTier ? false : paypalEnabled}
                   onValueChange={setPaypalEnabled}
                   color={colors.primary}
+                  disabled={isFreeTier}
                 />
               </View>
               {paypalEnabled && (
@@ -412,13 +423,15 @@ export function PaymentMethodsScreen() {
             <View style={styles.paymentMethodSection}>
               <View style={styles.paymentMethodHeaderWithToggle}>
                 <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="text-box-outline" size={20} color={otherEnabled ? colors.primary : colors.onSurface} />
-                  <Text style={[styles.paymentMethodTitle, !otherEnabled && styles.paymentMethodTitleDisabled]}>Other</Text>
+                  <MaterialCommunityIcons name="text-box-outline" size={20} color={otherEnabled && !isFreeTier ? colors.primary : colors.onSurface} />
+                  <Text style={[styles.paymentMethodTitle, (!otherEnabled || isFreeTier) && styles.paymentMethodTitleDisabled]}>Other</Text>
+                  {isFreeTier && <Text style={styles.proBadge}>PRO</Text>}
                 </View>
                 <Switch
-                  value={otherEnabled}
+                  value={isFreeTier ? false : otherEnabled}
                   onValueChange={setOtherEnabled}
                   color={colors.primary}
+                  disabled={isFreeTier}
                 />
               </View>
               {otherEnabled && (
@@ -581,5 +594,17 @@ const styles = StyleSheet.create({
   },
   payIdTypeChip: {
     backgroundColor: colors.surface,
+  },
+  proBadge: {
+    marginLeft: 8,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    color: colors.secondary,
+    backgroundColor: colors.secondary + '20',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    overflow: 'hidden',
   },
 });

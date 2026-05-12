@@ -20,6 +20,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { Quote, BusinessSettings, SubscriptionStatus, Invoice, ReferralInfo, Contact } from '../types';
+import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
 
 /**
  * Map any legacy invoice-style status that lived on a quote (back when Quote
@@ -57,15 +58,23 @@ function subscriptionFromSnapshotData(data: any): SubscriptionStatus {
     ? new Date(data.trialStartedAt.toDate ? data.trialStartedAt.toDate() : data.trialStartedAt)
     : undefined;
 
+  // Trial expiry is recomputed live from `trialStartedAt + TRIAL_MS`. The
+  // stored `data.trialExpired` flag is unreliable — it's only refreshed on
+  // quota-check writes and can lag the truth on the snapshot (e.g. cohorts
+  // we extended from 7 to 14 days). Many screens key off `!trialExpired` to
+  // gate features, so this needs to be authoritative on load.
+  const isProUser = data.isPro || data.plan === 'pro';
+  const liveTrialExpired = !isProUser
+    && !!trialStartedAt
+    && Date.now() - trialStartedAt.getTime() >= TRIAL_MS;
+
   let plan: SubscriptionStatus['plan'];
-  if (data.plan === 'trial' || data.plan === 'free' || data.plan === 'pro') {
-    plan = data.plan;
-  } else if (data.isPro) {
+  if (isProUser) {
     plan = 'pro';
   } else if (trialStartedAt) {
-    const trialMs = 7 * 24 * 60 * 60 * 1000;
-    const elapsed = Date.now() - trialStartedAt.getTime();
-    plan = elapsed < trialMs ? 'trial' : 'free';
+    plan = liveTrialExpired ? 'free' : 'trial';
+  } else if (data.plan === 'trial' || data.plan === 'free') {
+    plan = data.plan;
   } else {
     plan = 'trial';
   }
@@ -78,7 +87,7 @@ function subscriptionFromSnapshotData(data: any): SubscriptionStatus {
     currentPeriodEnd: new Date(data.currentPeriodEnd),
     freeQuotesLimit: data.freeQuotesLimit,
     trialStartedAt,
-    trialExpired: data.trialExpired || false,
+    trialExpired: liveTrialExpired,
     dismissedUpgradeBanner: data.dismissedUpgradeBanner || false,
     platformFeeBps: typeof data.platformFeeBps === 'number' ? data.platformFeeBps : undefined,
   };
@@ -906,8 +915,6 @@ class FirestoreService {
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
       const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-      const TRIAL_DAYS = 7;
-      const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
 
       const result = await runTransaction(db, async (transaction) => {
         const subscriptionDoc = await transaction.get(subscriptionRef);

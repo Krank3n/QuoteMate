@@ -990,7 +990,7 @@ export function NewOnboardingScreen() {
                 />
                 <Title style={styles.stepTitle}>Get paid faster</Title>
                 <Paragraph style={styles.stepDescription}>
-                    Accept card payments directly on your invoices. Funds settle to your Square account in 1-2 days.
+                    Customers tap to pay or scan a QR code right on your quote. Funds settle to your Square account in 1-2 days.
                 </Paragraph>
             </View>
 
@@ -1011,7 +1011,7 @@ export function NewOnboardingScreen() {
                     <>
                         <View style={styles.squareFeatureRow}>
                             <MaterialCommunityIcons name="credit-card-check-outline" size={22} color={colors.primary} />
-                            <Text style={styles.squareFeatureText}>Customers pay via a secure link on their invoice</Text>
+                            <Text style={styles.squareFeatureText}>Customers tap-to-pay or scan a QR on your quote</Text>
                         </View>
                         <View style={styles.squareFeatureRow}>
                             <MaterialCommunityIcons name="bank-outline" size={22} color={colors.primary} />

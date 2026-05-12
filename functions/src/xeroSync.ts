@@ -73,12 +73,42 @@ export async function upsertXeroContact(
 /**
  * Build Xero LineItems from a doc's materials/sections/markup. Shared between
  * quote and invoice push so the two records show the same breakdown in Xero.
- * Falls back to a single summary line when nothing else is present.
+ *
+ * Honors the same visibility flags the PDF uses: if both showMaterialCosts
+ * and showLaborCosts are off, the customer-facing PDF collapses to a single
+ * "total" row — match that in Xero by emitting one summary line, so the
+ * tradie's customer sees the same shape in both places.
+ *
+ * Falls back to a single summary line when nothing itemised is present.
  */
 export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
+  const showMaterials = doc.showMaterialCosts !== false;
+  const showLabor = doc.showLaborCosts !== false;
+
+  // Pre-GST grand total the customer signed for. doc.subtotal is *pre-markup*
+  // (materials + labour only), so it under-counts; derive from doc.total
+  // instead. Inclusive mode: line UnitAmounts already include GST. Exclusive
+  // mode: strip the 10% Xero will add back on.
+  const total = Number(doc.total ?? 0);
+  const summaryAmount =
+    doc.pricesIncludeGst === true
+      ? total
+      : Math.round((total / 1.1) * 100) / 100;
+
+  // Customer-facing PDF is configured as a single total → send Xero one line.
+  if (!showMaterials && !showLabor) {
+    return [{
+      Description: doc.job?.name || 'Services',
+      Quantity: 1,
+      UnitAmount: summaryAmount,
+      AccountCode: '200',
+      TaxType: 'OUTPUT',
+    }];
+  }
+
   const lineItems: any[] = [];
 
-  if (Array.isArray(doc.materials)) {
+  if (showMaterials && Array.isArray(doc.materials)) {
     for (const mat of doc.materials) {
       lineItems.push({
         Description: mat.name || 'Material',
@@ -90,27 +120,52 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
     }
   }
 
-  if (Array.isArray(doc.sections) && doc.sections.length > 0) {
-    for (const s of doc.sections) {
-      const totalHours = (Number(s.laborHours) || 0) * (Number(s.multiplier) || 1);
-      if (totalHours > 0 && (Number(s.laborRate) || 0) > 0) {
+  if (showLabor) {
+    if (Array.isArray(doc.sections) && doc.sections.length > 0) {
+      // Mirror calculateDocumentTotals: section.laborTotal is the authoritative
+      // figure (writer paths already account for multiplier when computing it),
+      // and laborExtraHours × top-level laborRate is the reconciliation buffer
+      // that brings the section sum back to doc.laborTotal. Deriving Quantity
+      // from laborTotal / laborRate avoids the historical bug where xeroSync
+      // re-applied the section multiplier on top of an already-totalled
+      // laborHours and produced quantities orders of magnitude too high.
+      for (const s of doc.sections) {
+        const sectionTotal = Number(s.laborTotal ?? 0);
+        const rate = Number(s.laborRate ?? 0);
+        if (sectionTotal === 0 || rate <= 0) continue;
+        const quantity =
+          Number(s.laborHoursTotal)
+          || (Number(s.laborHours ?? 0) * Number(s.multiplier ?? 1))
+          || sectionTotal / rate;
         lineItems.push({
           Description: `Labour - ${s.name || 'Section'}`,
-          Quantity: totalHours,
-          UnitAmount: s.laborRate,
+          Quantity: quantity,
+          UnitAmount: rate,
           AccountCode: '200',
           TaxType: 'OUTPUT',
         });
       }
+
+      const extraHours = Number(doc.laborExtraHours ?? 0);
+      const topRate = Number(doc.laborRate ?? 0);
+      if (extraHours !== 0 && topRate > 0) {
+        lineItems.push({
+          Description: 'Labour adjustment',
+          Quantity: extraHours,
+          UnitAmount: topRate,
+          AccountCode: '200',
+          TaxType: 'OUTPUT',
+        });
+      }
+    } else if ((Number(doc.laborHours) || 0) > 0 && (Number(doc.laborRate) || 0) > 0) {
+      lineItems.push({
+        Description: `Labour - ${doc.job?.name || 'General'}`,
+        Quantity: doc.laborHours,
+        UnitAmount: doc.laborRate,
+        AccountCode: '200',
+        TaxType: 'OUTPUT',
+      });
     }
-  } else if ((Number(doc.laborHours) || 0) > 0 && (Number(doc.laborRate) || 0) > 0) {
-    lineItems.push({
-      Description: `Labour - ${doc.job?.name || 'General'}`,
-      Quantity: doc.laborHours,
-      UnitAmount: doc.laborRate,
-      AccountCode: '200',
-      TaxType: 'OUTPUT',
-    });
   }
 
   if ((Number(doc.markupAmount) || 0) > 0) {
@@ -127,7 +182,7 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
     lineItems.push({
       Description: doc.job?.name || 'Services',
       Quantity: 1,
-      UnitAmount: doc.subtotal || doc.total || 0,
+      UnitAmount: summaryAmount,
       AccountCode: '200',
       TaxType: 'OUTPUT',
     });

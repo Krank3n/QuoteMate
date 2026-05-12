@@ -542,10 +542,10 @@ export interface QuoteCalculation {
 // Subscription
 //
 // Tier model:
-//   trial — 7 days of full Pro behaviour, no Square required.
+//   trial — 14 days of full Pro behaviour, no Square required.
 //   free  — unlimited use, but Square mandatory; only Square offered as a
 //           payment method; every delivered quote/invoice carries a Square
-//           pay link. Platform takes platformFeeBps (default 250 = 2.5%).
+//           pay link. Platform takes platformFeeBps (default 170 = 1.7%).
 //   pro   — paid; full payment-method choice, no delivery gating.
 //           Platform takes platformFeeBps (default 100 = 1%).
 //

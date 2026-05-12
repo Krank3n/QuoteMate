@@ -45,6 +45,7 @@ import {
 import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaymentSheet';
 import { getReeceConnectionStatus } from '../services/reeceApi';
 import { SendDocumentDialog } from '../components/SendDocumentDialog';
+import { TrialExpiredBanner } from '../components/TrialExpiredGate';
 import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
@@ -682,6 +683,9 @@ export function ViewJobScreen() {
           sit inline without fighting the outer scroll on native. On web
           it behaves as a regular scroll view. */}
       <NestableScrollContainer contentContainerStyle={styles.scrollContent}>
+        <WebContainer>
+          <TrialExpiredBanner />
+        </WebContainer>
         <WebContainer>
           <JobDetailHeader
             job={job}

@@ -1,28 +1,35 @@
 /**
- * Trial-Expired Gate
+ * Trial-Expired Banner
  *
- * Once the 7-day Pro trial elapses, the free tier requires a connected Square
+ * Once the Pro trial elapses, the free tier requires a connected Square
  * account (that's how the platform monetises the free tier — every customer
- * payment goes through Square so we collect a fee). When trial has elapsed
- * AND Square is not connected, this modal blocks dashboard interaction with
- * two CTAs: Connect Square (free tier) or Upgrade to Pro.
+ * payment goes through Square so we collect a fee).
  *
- * If the user is Pro, in-trial, or already has Square connected, the gate
- * renders nothing.
+ * Previously this rendered as a dashboard-blocking Modal, which cut off
+ * engagement at the exact moment a tradie was most likely to abandon. We've
+ * switched to a non-blocking inline banner: the user can keep building
+ * quotes, the live preview and PDFs get watermarked, and the hard gate only
+ * fires at Send (see SendDocumentDialog + quoteDeliveryGuard). This is the
+ * sunk-cost-fallacy flow — by the time we ask for Square, they've already
+ * invested 15-20 minutes building the quote.
+ *
+ * Renders nothing for Pro users, in-trial users, or anyone already connected
+ * to Square. The export is named TrialExpiredBanner; the legacy TrialExpiredGate
+ * alias is kept so existing imports don't break.
  */
 
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Modal } from 'react-native';
+import React, { useState } from 'react';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Text, Button, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
 import { useStore } from '../store/useStore';
 import { checkSquareConnection } from '../services/squareService';
+import { trackEvent } from '../services/analyticsService';
 import { colors } from '../theme';
 
-export function TrialExpiredGate() {
-  const navigation = useNavigation<any>();
+export function TrialExpiredBanner() {
   const isTrialExpired = useStore((s) => s.isTrialExpired);
   const getEffectivePlan = useStore((s) => s.getEffectivePlan);
 
@@ -31,9 +38,8 @@ export function TrialExpiredGate() {
   const expired = isTrialExpired();
   const plan = getEffectivePlan();
 
-  // Re-check Square connection whenever the screen comes into focus so a
-  // user who just connected Square in another flow doesn't get stuck behind
-  // a stale "Connect Square" modal.
+  // Re-check Square connection on focus so a user who just connected Square
+  // in another flow doesn't get stuck behind a stale banner.
   useFocusEffect(
     React.useCallback(() => {
       let cancelled = false;
@@ -56,87 +62,108 @@ export function TrialExpiredGate() {
   if (squareConnected === null || squareConnected === true) return null;
 
   return (
-    <Modal transparent visible animationType="fade">
-      <View style={styles.backdrop}>
-        <Surface style={styles.card} elevation={4}>
-          <MaterialCommunityIcons
-            name="lock-outline"
-            size={36}
-            color={colors.primary}
-            style={styles.icon}
-          />
-          <Text style={styles.title}>Pick how you want to keep going</Text>
-          <Text style={styles.subtitle}>
-            Your 7-day trial's done. To keep sending quotes, connect a Square
-            account so customers can pay you online — or upgrade to Pro for the
-            lower fee and all payment methods.
-          </Text>
-
-          <Button
-            mode="contained"
-            onPress={() => navigation.navigate('SquareIntegration' as never)}
-            style={styles.primaryButton}
-            contentStyle={styles.buttonContent}
-            icon="bank-outline"
-          >
-            Connect Square (free)
-          </Button>
-          <Button
-            mode="outlined"
-            onPress={() => navigation.navigate('Paywall' as never)}
-            style={styles.secondaryButton}
-            contentStyle={styles.buttonContent}
-            icon="crown-outline"
-          >
-            Upgrade to Pro
-          </Button>
-        </Surface>
-      </View>
-    </Modal>
+    <TrialExpiredBannerCard />
   );
 }
 
+/**
+ * Inner card that owns the impression event. Split out from the host so the
+ * effect only runs on the render that the banner is actually visible —
+ * mounting the impression directly on the outer component would also fire on
+ * the renders that return null before this point.
+ */
+function TrialExpiredBannerCard() {
+  const navigation = useNavigation<any>();
+  React.useEffect(() => {
+    trackEvent('trial_expired_banner_shown');
+  }, []);
+
+  return (
+    <Surface style={styles.card} elevation={2}>
+      <View style={styles.header}>
+        <View style={styles.iconCircle}>
+          <MaterialCommunityIcons name="lock-clock" size={20} color={colors.error} />
+        </View>
+        <View style={styles.headerText}>
+          <Text style={styles.title}>Trial expired</Text>
+          <Text style={styles.subtitle}>
+            Connect Square to keep sending quotes for free, or upgrade to Pro.
+          </Text>
+        </View>
+      </View>
+      <View style={styles.buttonRow}>
+        <Button
+          mode="contained"
+          compact
+          onPress={() => navigation.navigate('SquareIntegration' as never)}
+          style={styles.primaryButton}
+          icon="bank-outline"
+        >
+          Connect Square
+        </Button>
+        <TouchableOpacity onPress={() => navigation.navigate('Paywall' as never)}>
+          <Text style={styles.upgradeLink}>Upgrade →</Text>
+        </TouchableOpacity>
+      </View>
+    </Surface>
+  );
+}
+
+// Back-compat: the previous name. New code should use TrialExpiredBanner.
+export const TrialExpiredGate = TrialExpiredBanner;
+
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
   card: {
-    width: '100%',
-    maxWidth: 420,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 12,
     backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
+    borderLeftWidth: 4,
+    borderLeftColor: colors.error,
   },
-  icon: {
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 12,
   },
+  iconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    backgroundColor: colors.error + '20',
+  },
+  headerText: {
+    flex: 1,
+  },
   title: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '700',
     color: colors.text,
-    textAlign: 'center',
-    marginBottom: 8,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 12,
     color: colors.onSurface,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 20,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
   },
   primaryButton: {
-    width: '100%',
-    marginBottom: 10,
+    flex: 1,
   },
-  secondaryButton: {
-    width: '100%',
-  },
-  buttonContent: {
-    paddingVertical: 4,
+  upgradeLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
   },
 });

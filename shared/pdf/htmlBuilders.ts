@@ -6,6 +6,7 @@
 import { PdfMaterial, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId } from './types';
 import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
+import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -26,6 +27,57 @@ const sumRoundedLineTotals = (materials: PdfMaterial[], multiplier: number) =>
  * paragraph breaks by splitting on blank lines and wrapping each in <p>.
  * Escapes HTML so hand-edited terms can't break the document.
  */
+/**
+ * Diagonal watermark for gated previews / local share-PDFs. The Send path
+ * never reaches this code (quoteDeliveryGuard blocks before mint+send), so
+ * a watermarked PDF only appears when the user is exporting locally and
+ * trying to bypass the gate.
+ */
+function buildWatermarkCSS(): string {
+  return `
+    .pdf-watermark {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 9999;
+      transform: rotate(-28deg);
+      transform-origin: center center;
+    }
+    .pdf-watermark .pdf-watermark-text {
+      font-size: 140px;
+      font-weight: 900;
+      letter-spacing: 8px;
+      color: rgba(220, 38, 38, 0.18);
+      text-align: center;
+      line-height: 1;
+    }
+    .pdf-watermark .pdf-watermark-sub {
+      display: block;
+      font-size: 22px;
+      letter-spacing: 3px;
+      color: rgba(220, 38, 38, 0.32);
+      margin-top: 12px;
+    }
+  `;
+}
+
+function buildWatermarkHTML(text: string): string {
+  return `
+    <div class="pdf-watermark">
+      <div>
+        <div class="pdf-watermark-text">DRAFT</div>
+        <div class="pdf-watermark-sub">${escapeHtml(text)}</div>
+      </div>
+    </div>
+  `;
+}
+
 export function buildTermsHTML(terms: string | undefined): string {
   if (!terms || !terms.trim()) return '';
   const paras = terms
@@ -152,9 +204,15 @@ export function generateMaterialsHTML(
  * Generate HTML for the Square "Pay Now" block. Rendered above the rest of
  * the payment methods when a hosted-checkout URL is available. The plain-text
  * URL underneath the styled button is the printed-PDF fallback so paper-mail
- * recipients can still type the link in.
+ * recipients can still type the link in. When the tradie has opted into
+ * surchargePaymentFees, a subtle disclosure sits below the URL so the
+ * customer isn't surprised when checkout charges them PASSTHROUGH_SURCHARGE_PCT
+ * more than the quoted total.
  */
-function generateSquarePayNowHTML(url: string): string {
+function generateSquarePayNowHTML(url: string, surchargeOn: boolean): string {
+  const surchargeLine = surchargeOn
+    ? `<div style="margin-top: 4px; font-size: 10px; color: #888; font-style: italic;">Card payments include a ${PASSTHROUGH_SURCHARGE_PCT}% processing fee.</div>`
+    : '';
   return `
     <div class="payment-method square-pay-now">
       <strong>Pay Online</strong><br>
@@ -162,6 +220,7 @@ function generateSquarePayNowHTML(url: string): string {
         Pay with Square
       </a>
       <div style="margin-top: 6px; font-size: 11px; color: #555;">${url}</div>
+      ${surchargeLine}
     </div>
   `;
 }
@@ -175,10 +234,15 @@ function generateSquarePayNowHTML(url: string): string {
  */
 export function generatePaymentMethodsHTML(
   pm: any,
-  options?: { plan?: 'trial' | 'free' | 'pro'; squarePaymentLinkUrl?: string }
+  options?: {
+    plan?: 'trial' | 'free' | 'pro';
+    squarePaymentLinkUrl?: string;
+    surchargePaymentFees?: boolean;
+  }
 ): string {
   const plan = options?.plan;
   const squareUrl = options?.squarePaymentLinkUrl;
+  const surchargeOn = options?.surchargePaymentFees === true;
   const isFree = plan === 'free';
 
   // showOnDocuments is the user's "render the payment-methods section" toggle.
@@ -192,7 +256,7 @@ export function generatePaymentMethodsHTML(
   // Square Pay Now — rendered first (priority placement) so the customer
   // sees the online-payment CTA before bank/PayID/etc.
   if (squareUrl) {
-    sections.push(generateSquarePayNowHTML(squareUrl));
+    sections.push(generateSquarePayNowHTML(squareUrl, surchargeOn));
   }
 
   // The remaining methods are Pro-only; suppressed on the free plan.
@@ -434,11 +498,16 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
 /**
  * Build the full quote PDF HTML document
  */
-export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData): string {
+export function buildQuotePdfHtml(
+  quote: QuotePdfData,
+  business: BusinessPdfData,
+  options?: { watermark?: string }
+): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
   const rollMarkup = quote.showMarkup !== true && quote.markup > 0;
   const showMaterials = quote.showMaterialCosts !== false;
   const showLabor = quote.showLaborCosts !== false;
+  const watermark = options?.watermark;
 
   return `
     <!DOCTYPE html>
@@ -449,9 +518,11 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
       <style>
         ${printMediaCSS}
         ${getTemplateCSS(templateId, business.brandColor)}
+        ${watermark ? buildWatermarkCSS() : ''}
       </style>
     </head>
     <body>
+      ${watermark ? buildWatermarkHTML(watermark) : ''}
       <div class="content-wrapper">
       <div class="header">
         <div class="header-content">
@@ -498,7 +569,7 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
 
       ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${quote.notes}</p></div>` : ''}
 
-      ${generatePaymentMethodsHTML(quote.paymentMethods, { plan: quote.plan, squarePaymentLinkUrl: quote.squarePaymentLinkUrl })}
+      ${generatePaymentMethodsHTML(quote.paymentMethods, { plan: quote.plan, squarePaymentLinkUrl: quote.squarePaymentLinkUrl, surchargePaymentFees: quote.surchargePaymentFees })}
 
       <div style="margin-top: 40px; font-size: 12px; color: #666666;">
         <p>This quote is valid for 30 days from the date of issue.</p>
@@ -518,11 +589,16 @@ export function buildQuotePdfHtml(quote: QuotePdfData, business: BusinessPdfData
 /**
  * Build the full invoice PDF HTML document
  */
-export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessPdfData): string {
+export function buildInvoicePdfHtml(
+  invoice: InvoicePdfData,
+  business: BusinessPdfData,
+  options?: { watermark?: string }
+): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
   const rollMarkup = invoice.showMarkup !== true && invoice.markup > 0;
   const showMaterials = invoice.showMaterialCosts !== false;
   const showLabor = invoice.showLaborCosts !== false;
+  const watermark = options?.watermark;
 
   const paidAmount = invoice.paidAmount || 0;
   const amountDue = invoice.total - paidAmount;
@@ -536,9 +612,11 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
       <style>
         ${printMediaCSS}
         ${getTemplateCSS(templateId, business.brandColor)}
+        ${watermark ? buildWatermarkCSS() : ''}
       </style>
     </head>
     <body>
+      ${watermark ? buildWatermarkHTML(watermark) : ''}
       <div class="content-wrapper">
       <div class="header">
         <div class="header-content">
@@ -598,7 +676,7 @@ export function buildInvoicePdfHtml(invoice: InvoicePdfData, business: BusinessP
         ${invoice.invoiceNumber ? `<p>Please reference invoice number ${invoice.invoiceNumber} with your payment.</p>` : ''}
       </div>
 
-      ${generatePaymentMethodsHTML(invoice.paymentMethods, { plan: invoice.plan, squarePaymentLinkUrl: invoice.squarePaymentLinkUrl })}
+      ${generatePaymentMethodsHTML(invoice.paymentMethods, { plan: invoice.plan, squarePaymentLinkUrl: invoice.squarePaymentLinkUrl, surchargePaymentFees: invoice.surchargePaymentFees })}
 
       <div style="margin-top: 40px; font-size: 12px; color: #666666;">
         <p>Payment is due by ${invoice.dueDate}.</p>

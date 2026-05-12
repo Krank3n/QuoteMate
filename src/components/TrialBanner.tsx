@@ -10,6 +10,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 
 import { colors } from '../theme';
+import { TRIAL_MS } from '../utils/trialConfig';
 
 interface TrialBannerProps {
   trialStartedAt: string | Date;
@@ -61,7 +62,23 @@ function getTrialMessage(daysRemaining: number, quoteCount: number, trialExpired
     return midTrial[quoteCount % midTrial.length];
   }
 
-  // 6-7 days (fresh trial)
+  if (daysRemaining <= 7) {
+    const weekLeft = [
+      { title: `${daysRemaining} days left`, subtitle: quoteCount > 0 ? `${quoteCount} quotes deep — over the halfway mark` : "Halfway through. Plenty of time to give it a proper go" },
+      { title: `${daysRemaining} days of free quoting`, subtitle: "Cruising along nicely. Have a crack at a few more quotes" },
+    ];
+    return weekLeft[quoteCount % weekLeft.length];
+  }
+
+  if (daysRemaining <= 10) {
+    const midSecondWeek = [
+      { title: `${daysRemaining} days left in trial`, subtitle: quoteCount > 0 ? `${quoteCount} quotes in already — you're flying` : "Loads of time. Smash out a quote or two" },
+      { title: `${daysRemaining} days of free quoting`, subtitle: "She's looking good — keep the wheels turning" },
+    ];
+    return midSecondWeek[quoteCount % midSecondWeek.length];
+  }
+
+  // 11-14 days (fresh trial)
   const freshMessages = [
     { title: `${daysRemaining} days left in trial`, subtitle: "Welcome aboard! Have a crack at your first quote — she's free as a bird" },
     { title: `${daysRemaining} days of free quoting`, subtitle: "No wukkas, plenty of time. Get amongst it!" },
@@ -75,10 +92,9 @@ export function TrialBanner({ trialStartedAt, quoteCount, compact = false }: Tri
   const trialStart = new Date(trialStartedAt);
   const now = new Date();
   const elapsed = now.getTime() - trialStart.getTime();
-  const trialMs = 7 * 24 * 60 * 60 * 1000;
-  const daysRemaining = Math.max(0, Math.ceil((trialMs - elapsed) / (24 * 60 * 60 * 1000)));
-  const trialExpired = elapsed >= trialMs;
-  const progress = Math.max(0, 1 - (elapsed / trialMs));
+  const daysRemaining = Math.max(0, Math.ceil((TRIAL_MS - elapsed) / (24 * 60 * 60 * 1000)));
+  const trialExpired = elapsed >= TRIAL_MS;
+  const progress = Math.max(0, 1 - (elapsed / TRIAL_MS));
 
   const { title, subtitle } = getTrialMessage(daysRemaining, quoteCount, trialExpired);
 

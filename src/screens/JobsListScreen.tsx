@@ -30,6 +30,7 @@ import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap } from '../utils/haptics';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
+import { TrialExpiredBanner } from '../components/TrialExpiredGate';
 
 type FilterKind = 'all' | 'active' | 'scheduled' | 'completed' | 'archived';
 
@@ -183,6 +184,7 @@ export function JobsListScreen() {
   return (
     <View style={styles.container}>
       <WebContainer>
+        <TrialExpiredBanner />
         <Searchbar
           placeholder="Search jobs..."
           onChangeText={setSearchQuery}

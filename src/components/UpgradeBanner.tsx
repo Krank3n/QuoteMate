@@ -35,7 +35,7 @@ export function UpgradeBanner() {
         <View style={styles.textContainer}>
           <Text style={styles.title}>Upgrade to Pro</Text>
           <Text style={styles.subtitle}>
-            Drop the platform fee from 2.5% to 1% and unlock all payment methods.
+            Drop the platform fee from 1.7% to 1% and unlock all payment methods.
           </Text>
         </View>
         <TouchableOpacity

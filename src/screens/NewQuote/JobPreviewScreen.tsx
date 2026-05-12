@@ -21,10 +21,11 @@ import {
   ActivityIndicator,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import { useStore } from '../../store/useStore';
 import { useDocumentMode } from '../../utils/documentMode';
+import { checkSquareConnection } from '../../services/squareService';
 import { colors } from '../../theme';
 import { generateDocumentPDF } from '../../utils/pdfGenerator';
 import { quoteToDocument, invoiceToDocument } from '../../types/documentAdapter';
@@ -127,6 +128,10 @@ export function JobPreviewScreen() {
     if (editSectionsRef.current) registerRef('editSections', editSectionsRef.current);
     if (sendButtonRef.current) registerRef('sendButton', sendButtonRef.current);
   });
+
+  const isTrialExpired = useStore((s) => s.isTrialExpired);
+  const getEffectivePlan = useStore((s) => s.getEffectivePlan);
+  const [previewWatermark, setPreviewWatermark] = useState(false);
 
   // The wizard writes one or the other — prefer whichever is set. mode is the
   // tiebreaker for the route-declared intent.
@@ -422,6 +427,44 @@ export function JobPreviewScreen() {
     if (currentQuote) return quoteToDocument(currentQuote);
     return null;
   }, [workingDoc?.id, documents, currentInvoice, currentQuote]);
+
+  // Watermark gate: free-tier + trial expired + no Square + DOC STILL IN
+  // DRAFT = obscure the preview with a diagonal DRAFT overlay. Prevents
+  // screenshot bypass while the user is in the sunk-cost build window. Pro
+  // users and in-trial users see no watermark; once Square connects, they
+  // upgrade, or the doc is sent, it disappears.
+  //
+  // Crucially: never watermark a doc that's already been sent. The customer
+  // has a clean copy — a watermark now would only panic the tradie into
+  // thinking the customer saw "UPGRADE TO SEND" on the version they got.
+  // Sent docs are records to re-open, not deliverables.
+  //
+  // useFocusEffect (not useEffect): zustand selectors are stable refs, so a
+  // dep array of [isTrialExpired, getEffectivePlan] never re-runs. The user
+  // connects Square via SquareIntegrationScreen (a stack push) — when they
+  // pop back to this preview, the screen re-focuses without remounting, so
+  // useEffect wouldn't refire. focus-effect catches that path.
+  const liveStage = liveDoc?.stage;
+  useFocusEffect(
+    React.useCallback(() => {
+      let cancelled = false;
+      const plan = getEffectivePlan();
+      if (!isTrialExpired() || plan === 'pro' || liveStage !== 'draft') {
+        setPreviewWatermark(false);
+        return;
+      }
+      checkSquareConnection()
+        .then((c) => {
+          if (!cancelled) setPreviewWatermark(!c.connected);
+        })
+        .catch(() => {
+          if (!cancelled) setPreviewWatermark(true);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [isTrialExpired, getEffectivePlan, liveStage])
+  );
 
   // After a Quote → Invoice convert, liveDoc.type flips to 'invoice' and
   // liveDoc.number gets the new INV-NNN. The route param `mode` and the
@@ -753,6 +796,12 @@ export function JobPreviewScreen() {
         </WebContainer>
       </ScrollView>
 
+      {previewWatermark ? (
+        <View pointerEvents="none" style={styles.watermarkOverlay}>
+          <Text style={styles.watermarkText}>DRAFT</Text>
+          <Text style={styles.watermarkSubText}>CONNECT SQUARE TO SEND</Text>
+        </View>
+      ) : null}
 
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <View style={styles.bottomButtonsRow}>
@@ -914,6 +963,31 @@ const styles = StyleSheet.create({
       display: 'flex' as any,
       flexDirection: 'column' as any,
     }),
+  },
+  watermarkOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    transform: [{ rotate: '-28deg' }],
+  },
+  watermarkText: {
+    fontSize: 96,
+    fontWeight: '900',
+    letterSpacing: 6,
+    color: colors.error,
+    opacity: 0.18,
+  },
+  watermarkSubText: {
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: colors.error,
+    opacity: 0.28,
+    marginTop: 4,
   },
   container: {
     flex: 1,

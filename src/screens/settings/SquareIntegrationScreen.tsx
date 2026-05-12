@@ -203,7 +203,7 @@ export function SquareIntegrationScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.requiredCalloutTitle}>Required on the free plan</Text>
                 <Text style={styles.requiredCalloutBody}>
-                  Connect Square so customers can pay your quotes online. We take a 2.5% platform fee on the free plan — drops to 1% when you upgrade to Pro.
+                  Connect Square so customers can pay your quotes online. We take a 1.7% platform fee on the free plan — drops to 1% when you upgrade to Pro.
                 </Text>
               </View>
             </Surface>

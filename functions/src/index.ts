@@ -52,6 +52,7 @@ export {
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
 import {
   buildXeroAuthHeaders,
+  buildXeroLineItems,
   pushQuoteToXeroCore,
   persistQuoteSyncSuccess,
   persistQuoteSyncError,
@@ -1025,7 +1026,7 @@ export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
     try {
       const db = admin.firestore();
       const subscriptionRef = db.doc(`users/${userId}/profile/subscription`);
-      const TRIAL_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+      const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000; // 14-day trial — keep in sync with src/utils/trialConfig.ts
 
       const result = await db.runTransaction(async (transaction) => {
         const subscriptionDoc = await transaction.get(subscriptionRef);
@@ -10169,67 +10170,11 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
         }
       }
 
-      // Step 2: Build invoice line items
-      const lineItems: any[] = [];
-
-      // Material line items
-      if (invoice.materials && Array.isArray(invoice.materials)) {
-        for (const mat of invoice.materials) {
-          lineItems.push({
-            Description: mat.name || 'Material',
-            Quantity: mat.quantity || 1,
-            UnitAmount: mat.price || 0,
-            AccountCode: '200',
-            TaxType: 'OUTPUT',
-          });
-        }
-      }
-
-      // Labour line items — one per section if sectioned, otherwise one from top-level
-      if (Array.isArray(invoice.sections) && invoice.sections.length > 0) {
-        for (const s of invoice.sections) {
-          const totalHours = (s.laborHours || 0) * (s.multiplier || 1);
-          if (totalHours > 0 && (s.laborRate || 0) > 0) {
-            lineItems.push({
-              Description: `Labour - ${s.name || 'Section'}`,
-              Quantity: totalHours,
-              UnitAmount: s.laborRate,
-              AccountCode: '200',
-              TaxType: 'OUTPUT',
-            });
-          }
-        }
-      } else if (invoice.laborHours > 0 && invoice.laborRate > 0) {
-        lineItems.push({
-          Description: `Labour - ${invoice.job?.name || 'General'}`,
-          Quantity: invoice.laborHours,
-          UnitAmount: invoice.laborRate,
-          AccountCode: '200',
-          TaxType: 'OUTPUT',
-        });
-      }
-
-      // Markup line item
-      if (invoice.markupAmount > 0) {
-        lineItems.push({
-          Description: 'Markup',
-          Quantity: 1,
-          UnitAmount: invoice.markupAmount,
-          AccountCode: '200',
-          TaxType: 'OUTPUT',
-        });
-      }
-
-      // Fallback: if no line items, create a summary line
-      if (lineItems.length === 0) {
-        lineItems.push({
-          Description: invoice.job?.name || 'Services',
-          Quantity: 1,
-          UnitAmount: invoice.subtotal || invoice.total || 0,
-          AccountCode: '200',
-          TaxType: 'OUTPUT',
-        });
-      }
+      // Step 2: Build invoice line items via the shared builder so quotes and
+      // invoices stay in lock-step (and so showLaborCosts / showMaterialCosts
+      // collapse Xero to a single total line, matching the PDF the customer
+      // signed off on).
+      const lineItems = buildXeroLineItems(invoice);
 
       // Step 3: Determine Xero invoice status
       let xeroStatus = 'DRAFT';
@@ -12142,7 +12087,7 @@ async function getUserPlanServerSide(userId: string): Promise<'trial' | 'free' |
     if (data.plan === 'pro' || data.plan === 'free' || data.plan === 'trial') return data.plan;
     if (data.isPro) return 'pro';
     if (data.trialStartedAt) {
-      const trialMs = 7 * 24 * 60 * 60 * 1000;
+      const trialMs = 14 * 24 * 60 * 60 * 1000; // 14-day trial — keep in sync with src/utils/trialConfig.ts
       const startedAt = data.trialStartedAt.toDate
         ? data.trialStartedAt.toDate()
         : new Date(data.trialStartedAt);
@@ -12163,7 +12108,7 @@ async function getUserPlanServerSide(userId: string): Promise<'trial' | 'free' |
  *
  * Pro users pay the lower platform fee; free users pay the higher rate (the
  * freemium model's revenue source). Trial users get the Pro rate while in
- * their 7-day window.
+ * their trial window (see TRIAL_DURATION_MS).
  *
  * All percentages are hardcoded in shared/pdf/squareFees.ts — not editable
  * per-tradie because the passthrough is bounded by ACCC cost-of-acceptance

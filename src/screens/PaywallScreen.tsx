@@ -24,6 +24,7 @@ import { auth } from '../config/firebase';
 import { WebContainer } from '../components/WebContainer';
 import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
 import { CancellationReasonModal } from '../components/CancellationReasonModal';
+import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
 
 const PRO_NUDGES = [
   "Your quotes deserve the VIP treatment",
@@ -67,11 +68,11 @@ export function PaywallScreen() {
   const trialExpired = subscriptionStatus?.trialExpired || false;
   const trialStartedAt = subscriptionStatus?.trialStartedAt;
   const getTrialDaysRemaining = () => {
-    if (!trialStartedAt) return 7;
+    if (!trialStartedAt) return TRIAL_DAYS;
     const start = new Date(trialStartedAt);
     const now = new Date();
     const elapsed = now.getTime() - start.getTime();
-    const remaining = Math.ceil((7 * 24 * 60 * 60 * 1000 - elapsed) / (24 * 60 * 60 * 1000));
+    const remaining = Math.ceil((TRIAL_MS - elapsed) / (24 * 60 * 60 * 1000));
     return Math.max(0, remaining);
   };
   const trialDaysRemaining = getTrialDaysRemaining();
@@ -698,6 +699,11 @@ export function PaywallScreen() {
           <View style={styles.feature}>
             <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
             <Text style={styles.featureText}>Unlimited quotes and invoices</Text>
+          </View>
+
+          <View style={styles.feature}>
+            <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
+            <Text style={styles.featureText}>Any payment method — bank, PayID, PayPal, Square</Text>
           </View>
 
           <View style={styles.feature}>

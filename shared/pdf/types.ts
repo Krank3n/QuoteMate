@@ -84,6 +84,11 @@ export interface QuotePdfData {
   // Square hosted-checkout URL. Rendered as a large "Pay Now" button when
   // present. Threaded all the way from the doc → pdfGenerator → here.
   squarePaymentLinkUrl?: string;
+  // When true the customer-facing Square checkout amount has been bumped by
+  // PASSTHROUGH_SURCHARGE_PCT to cover the card cost. Renders a subtle
+  // disclosure line under the Pay button so the customer isn't surprised on
+  // checkout (ACCC pre-commit surcharge disclosure).
+  surchargePaymentFees?: boolean;
   // Terms & Conditions text. Rendered as its own section at the end of the
   // document. The business's current T&Cs are snapshotted to the quote/invoice
   // at send time and passed through here so later edits don't rewrite history.

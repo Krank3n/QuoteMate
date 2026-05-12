@@ -626,6 +626,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     depositPercentage: depositPctForEmail || undefined,
     depositPayNowUrl,
     hasTerms: !!termsToSend,
+    surchargePaymentFees: business.surchargePaymentFees === true,
     business: businessData,
   });
 
@@ -667,6 +668,8 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
       showLaborBreakdown: quote.showLaborBreakdown !== false,
       groupMaterialsBySection: business.groupMaterialsBySection,
       paymentMethods: business.paymentMethods,
+      squarePaymentLinkUrl: depositPayNowUrl || quote.squarePaymentLinkUrl,
+      surchargePaymentFees: business.surchargePaymentFees === true,
       terms: termsToSend || undefined,
     },
     {
@@ -823,6 +826,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     payNowUrl,
     depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
     hasTerms: !!termsToSend,
+    surchargePaymentFees: business.surchargePaymentFees === true,
     business: businessData,
   });
 
@@ -870,6 +874,8 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       showLaborBreakdown: invoice.showLaborBreakdown !== false,
       groupMaterialsBySection: business.groupMaterialsBySection,
       paymentMethods: business.paymentMethods,
+      squarePaymentLinkUrl: payNowUrl || invoice.squarePaymentLinkUrl,
+      surchargePaymentFees: business.surchargePaymentFees === true,
       terms: termsToSend || undefined,
     },
     {

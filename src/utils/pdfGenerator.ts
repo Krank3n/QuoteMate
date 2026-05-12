@@ -28,6 +28,7 @@ import {
   BusinessPdfData,
 } from '../../shared/pdf';
 import { useStore } from '../store/useStore';
+import { checkSquareConnection } from '../services/squareService';
 
 /**
  * Prepare the logo HTML tag from business settings (platform-specific)
@@ -128,6 +129,27 @@ export async function generateDocumentPDF(
   const plan = useStore.getState().getEffectivePlan();
   const squarePaymentLinkUrl = doc.squarePaymentLinkUrl;
 
+  // Gate watermark: a free-tier user whose trial has expired and who hasn't
+  // connected Square can still locally preview / share a PDF, but it gets a
+  // diagonal DRAFT overlay so they can't screenshot a clean copy to text to
+  // their customer. Pro and in-trial users get a clean PDF. The Send path
+  // never reaches here for gated users — quoteDeliveryGuard blocks first.
+  //
+  // Crucially: only watermark DRAFTS. If the doc has already been sent (any
+  // stage past 'draft'), the customer already has a clean copy — a watermark
+  // now would only scare the tradie into thinking the customer saw it. Sent
+  // docs are records, not deliverables.
+  let watermark: string | undefined;
+  if (plan === 'free' && useStore.getState().isTrialExpired() && doc.stage === 'draft') {
+    try {
+      const sq = await checkSquareConnection();
+      if (!sq.connected) watermark = 'UPGRADE TO SEND';
+    } catch {
+      watermark = 'UPGRADE TO SEND';
+    }
+  }
+  const pdfOptions = watermark ? { watermark } : undefined;
+
   if (doc.type === 'invoice') {
     const pdfData: InvoicePdfData = {
       customerName: doc.customerName,
@@ -186,9 +208,10 @@ export async function generateDocumentPDF(
       paymentMethods: businessSettings?.paymentMethods,
       plan,
       squarePaymentLinkUrl,
+      surchargePaymentFees: businessSettings?.surchargePaymentFees === true,
       terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
     };
-    return buildInvoicePdfHtml(pdfData, business);
+    return buildInvoicePdfHtml(pdfData, business, pdfOptions);
   }
 
   const pdfData: QuotePdfData = {
@@ -244,9 +267,10 @@ export async function generateDocumentPDF(
     paymentMethods: businessSettings?.paymentMethods,
     plan,
     squarePaymentLinkUrl,
+    surchargePaymentFees: businessSettings?.surchargePaymentFees === true,
     terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
   };
-  return buildQuotePdfHtml(pdfData, business);
+  return buildQuotePdfHtml(pdfData, business, pdfOptions);
 }
 
 /**

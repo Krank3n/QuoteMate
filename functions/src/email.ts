@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
+import { PASSTHROUGH_SURCHARGE_PCT } from './shared/pdf';
 
 // Brevo API configuration
 const getBrevoApiKey = (): string => {
@@ -996,6 +997,9 @@ interface QuoteEmailData {
   // True when the attached PDF carries a T&Cs section — drives whether the
   // CTA renders the "By paying you accept the terms…" footnote.
   hasTerms?: boolean;
+  // True when the tradie has surchargePaymentFees on — the Square checkout
+  // amount has been bumped, so we surface a subtle disclosure under the CTA.
+  surchargePaymentFees?: boolean;
   business: {
     name: string;
     abn?: string;
@@ -1197,13 +1201,17 @@ interface QuoteCtaInput {
   depositPercentage?: number;
   depositPayNowUrl?: string;
   hasTerms?: boolean;
+  // When true the tradie has opted into surcharging card payments — Square's
+  // checkout shows the inflated total. We surface the disclosure under the
+  // Pay button so the customer isn't surprised on click-through.
+  surchargePaymentFees?: boolean;
   accent: string;
 }
 
 function renderQuoteCta(input: QuoteCtaInput): string {
   if (!input.acceptanceUrl) return '';
   const esc = escapeHtml;
-  const { acceptanceUrl, depositAmount, depositPercentage, depositPayNowUrl, hasTerms, accent } = input;
+  const { acceptanceUrl, depositAmount, depositPercentage, depositPayNowUrl, hasTerms, surchargePaymentFees, accent } = input;
 
   // Deposit notice — shown above the CTA so the customer knows what they'll
   // be asked to pay. Copy changes depending on whether we mint a Pay Now link
@@ -1246,6 +1254,11 @@ function renderQuoteCta(input: QuoteCtaInput): string {
                 <a href="${esc(primaryHref)}" target="_blank" style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">${primaryLabel}</a>
               </td>
             </tr>
+            ${depositPayNowUrl && surchargePaymentFees ? `<tr>
+              <td style="text-align:center;padding-top:6px;">
+                <span style="color:#9ca3af;font-size:11px;font-style:italic;">Card payments include a ${PASSTHROUGH_SURCHARGE_PCT}% processing fee.</span>
+              </td>
+            </tr>` : ''}
             ${depositPayNowUrl && hasTerms ? `<tr>
               <td style="text-align:center;padding-top:6px;">
                 <span style="color:#6b7280;font-size:11px;">By paying you accept the Terms &amp; Conditions in the attached quote.</span>
@@ -1265,7 +1278,7 @@ function renderQuoteCta(input: QuoteCtaInput): string {
     </table>`;
 }
 
-function renderInvoicePayNowCta(payNowUrl: string | undefined, hasTerms: boolean | undefined, accent: string): string {
+function renderInvoicePayNowCta(payNowUrl: string | undefined, hasTerms: boolean | undefined, surchargePaymentFees: boolean | undefined, accent: string): string {
   if (!payNowUrl) return '';
   const esc = escapeHtml;
   return `
@@ -1276,6 +1289,7 @@ function renderInvoicePayNowCta(payNowUrl: string | undefined, hasTerms: boolean
             Pay Now
           </a>
           <p style="color:#6b7280;font-size:12px;margin:8px 0 0;">Secure card payment via Square</p>
+          ${surchargePaymentFees ? `<p style="color:#9ca3af;font-size:11px;font-style:italic;margin:6px 0 0;">Card payments include a ${PASSTHROUGH_SURCHARGE_PCT}% processing fee.</p>` : ''}
           ${hasTerms ? `<p style="color:#6b7280;font-size:11px;margin:6px 0 0;">By paying you accept the Terms &amp; Conditions in the attached invoice.</p>` : ''}
         </td>
       </tr>
@@ -1321,7 +1335,7 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
   });
 
   const postPricingCta = isInvoice
-    ? renderInvoicePayNowCta(data.payNowUrl, data.hasTerms, accent)
+    ? renderInvoicePayNowCta(data.payNowUrl, data.hasTerms, data.surchargePaymentFees, accent)
     : '';
 
   // For quotes the accept/decline CTA sits below the "PDF attached" line; for
@@ -1334,6 +1348,7 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
         depositPercentage: data.depositPercentage,
         depositPayNowUrl: data.depositPayNowUrl,
         hasTerms: data.hasTerms,
+        surchargePaymentFees: data.surchargePaymentFees,
         accent,
       })
     : '';
@@ -1421,6 +1436,9 @@ interface InvoiceEmailData {
   // True when the attached PDF carries a T&Cs section — drives whether the
   // Pay Now button renders the "By paying you accept the terms…" footnote.
   hasTerms?: boolean;
+  // True when the tradie has surchargePaymentFees on — the Square checkout
+  // amount has been bumped, so we surface a subtle disclosure under the CTA.
+  surchargePaymentFees?: boolean;
   // Deposit credit carried over from a quote that had a deposit paid. Rendered
   // as a "Deposit already paid" line above the total.
   depositCredit?: number;

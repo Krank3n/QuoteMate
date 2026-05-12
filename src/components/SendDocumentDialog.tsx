@@ -24,6 +24,8 @@ import { useStore } from '../store/useStore';
 import { ensureCanDeliver } from '../utils/quoteDeliveryGuard';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
 import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
+import { SendGateModal } from './SendGateModal';
+import { trackEvent } from '../services/analyticsService';
 import {
   generateQuoteEmail,
   getDefaultEmailBody,
@@ -57,6 +59,7 @@ export function SendDocumentDialog({
 
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
   const [emailPreviewVisible, setEmailPreviewVisible] = useState(false);
+  const [sendGateVisible, setSendGateVisible] = useState(false);
   const [emailBody, setEmailBody] = useState('');
   const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
 
@@ -130,8 +133,11 @@ export function SendDocumentDialog({
 
   /**
    * Free-tier delivery gate. Returns true when the caller can proceed.
-   * On failure, prompts the user to Connect Square (or upgrade) and dismisses
-   * the send dialog. Pro / trial users always pass without a network round-trip.
+   * On `connect_square` failure, opens the two-option SendGateModal so the
+   * user has already-invested-time pushing them toward Square or Pro. On
+   * `mint_link_failed`, falls back to a plain alert — that's a transient
+   * Square API error, not an entitlement issue. Pro / trial users always
+   * pass without a network round-trip.
    */
   const passesDeliveryGate = async (): Promise<boolean> => {
     const gate = await ensureCanDeliver(
@@ -139,32 +145,14 @@ export function SendDocumentDialog({
     );
     if (gate.ok) return true;
     setActionSheetVisible(false);
-    Alert.alert(
-      gate.reason === 'connect_square' ? 'Connect Square to send' : 'Square link unavailable',
-      gate.message,
-      [
-        { text: 'Not now', style: 'cancel', onPress: onDismiss },
-        gate.reason === 'connect_square'
-          ? {
-              text: 'Connect Square',
-              onPress: () => {
-                onDismiss();
-                navigation.navigate('SquareIntegration' as never);
-              },
-            }
-          : {
-              text: 'Try again',
-              onPress: () => {},
-            },
-        {
-          text: 'Upgrade to Pro',
-          onPress: () => {
-            onDismiss();
-            navigation.navigate('Paywall' as never);
-          },
-        },
-      ]
-    );
+    if (gate.reason === 'connect_square') {
+      trackEvent('send_gate_shown', { doc_type: isInvoice ? 'invoice' : 'quote' });
+      setSendGateVisible(true);
+    } else {
+      Alert.alert('Square link unavailable', gate.message, [
+        { text: 'OK', onPress: onDismiss },
+      ]);
+    }
     return false;
   };
 
@@ -288,6 +276,27 @@ export function SendDocumentDialog({
         onRegenerate={handleRegenerateEmail}
         isPro={isPro}
         isRegenerating={isGeneratingEmail}
+      />
+
+      <SendGateModal
+        visible={sendGateVisible}
+        onDismiss={() => {
+          trackEvent('send_gate_abandoned', { doc_type: isInvoice ? 'invoice' : 'quote' });
+          setSendGateVisible(false);
+          onDismiss();
+        }}
+        onConnectSquare={() => {
+          trackEvent('send_gate_resolved', { method: 'square_connected', doc_type: isInvoice ? 'invoice' : 'quote' });
+          setSendGateVisible(false);
+          onDismiss();
+          navigation.navigate('SquareIntegration' as never);
+        }}
+        onUpgrade={() => {
+          trackEvent('send_gate_resolved', { method: 'pro_upgrade', doc_type: isInvoice ? 'invoice' : 'quote' });
+          setSendGateVisible(false);
+          onDismiss();
+          navigation.navigate('Paywall' as never);
+        }}
       />
     </>
   );

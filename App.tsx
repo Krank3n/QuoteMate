@@ -18,9 +18,12 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
 import { KeyboardProvider, KeyboardToolbar } from 'react-native-keyboard-controller';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useStore } from './src/store/useStore';
 import { useJobStore } from './src/store/useJobStore';
+
+const LAST_USER_UID_KEY = '@quotemate:lastUserUid';
 import { theme, colors } from './src/theme';
 
 // Custom navigation theme to match our dark theme
@@ -74,6 +77,30 @@ export default function App() {
   useEffect(() => {
     // Listen to authentication state changes
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      // If a *different* user lands here than the last session, wipe the
+      // previous user's locally-cached data first. Otherwise loadQuotes /
+      // loadBusinessSettings fall through to AsyncStorage when the new user's
+      // Firestore returns empty, showing (and re-uploading) the old user's
+      // quotes/settings under the new account.
+      const newUid = currentUser?.uid ?? null;
+      let lastUid: string | null = null;
+      try {
+        lastUid = await AsyncStorage.getItem(LAST_USER_UID_KEY);
+      } catch {
+        // ignore - treat as no last user
+      }
+      if (lastUid && lastUid !== newUid) {
+        await useStore.getState().clearAllData();
+        useJobStore.getState().cleanup();
+      }
+      if (newUid) {
+        try {
+          await AsyncStorage.setItem(LAST_USER_UID_KEY, newUid);
+        } catch {
+          // best-effort
+        }
+      }
+
       setUser(currentUser);
 
       // When user signs in, reload data from Firestore and set up listeners
