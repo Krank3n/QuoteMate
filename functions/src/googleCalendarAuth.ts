@@ -11,14 +11,8 @@
  * mobile) because mobile clients don't have a secret and Google's token
  * endpoint accepts the WEB client's id+secret pair against any refresh
  * token issued by the same project. (Refresh tokens are project-scoped,
- * not client-scoped.) The web client ID + secret are read from
- * functions config:
- *
- *   firebase functions:secrets:set GOOGLE_OAUTH_CLIENT_SECRET
- *   firebase functions:config:set google.client_id="…apps.googleusercontent.com"
- *
- * (Or use a single `google.web_client_id` env var — see getOauthClient
- * below for the resolution order.)
+ * not client-scoped.) The web client ID + secret come from functions/.env
+ * as GOOGLE_OAUTH_WEB_CLIENT_ID / GOOGLE_OAUTH_WEB_CLIENT_SECRET.
  */
 
 import * as functions from 'firebase-functions';
@@ -38,24 +32,12 @@ interface OauthClient {
 }
 
 /**
- * Read the OAuth web-client credentials from Firebase Functions config.
- * `firebase functions:config:set google.web_client_id="…" google.web_client_secret="…"`
- *
- * Falls through to env vars (`GOOGLE_OAUTH_WEB_CLIENT_ID` /
- * `GOOGLE_OAUTH_WEB_CLIENT_SECRET`) so local emulator runs work too.
+ * Read the OAuth web-client credentials from functions/.env. Returns null
+ * when either side is missing so callers can short-circuit cleanly.
  */
 function getOauthClient(): OauthClient | null {
-  const cfg = (functions.config() as any).google || {};
-  const id =
-    cfg.web_client_id ||
-    process.env.GOOGLE_OAUTH_WEB_CLIENT_ID ||
-    cfg.client_id ||
-    '';
-  const secret =
-    cfg.web_client_secret ||
-    process.env.GOOGLE_OAUTH_WEB_CLIENT_SECRET ||
-    cfg.client_secret ||
-    '';
+  const id = process.env.GOOGLE_OAUTH_WEB_CLIENT_ID || '';
+  const secret = process.env.GOOGLE_OAUTH_WEB_CLIENT_SECRET || '';
   if (!id || !secret) return null;
   return { id, secret };
 }
