@@ -45,6 +45,7 @@ import { colors } from '../theme';
 import { OnboardingProgress, OnboardingStep } from '../components/OnboardingProgress';
 import { CelebrationAnimation } from '../components/CelebrationAnimation';
 import { AlertModal } from '../components/AlertModal';
+import { WebContainer } from '../components/WebContainer';
 import { TRADE_CATEGORIES } from '../constants/tradeCategories';
 import { auth } from '../config/firebase';
 import * as squareService from '../services/squareService';
@@ -55,6 +56,10 @@ import { lightTap, successTap, errorTap, selectionTap } from '../utils/haptics';
 import { SuppliersStep, type AddedSupplier } from './onboarding/SuppliersStep';
 
 const STORAGE_KEY = 'onboarding:draft';
+
+// Matches the max width used elsewhere in the app (e.g. Settings) so the
+// onboarding flow doesn't stretch full-width on desktop browsers.
+const ONBOARDING_MAX_WIDTH = 600;
 
 // The static base of the onboarding flow. The Reece step is inserted
 // dynamically inside the component when the user picks plumbing, so it isn't
@@ -1061,11 +1066,13 @@ export function NewOnboardingScreen() {
             keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
             {/* Progress Indicator */}
-            <OnboardingProgress
-                currentStep={currentStep}
-                totalSteps={TOTAL_STEPS}
-                steps={ONBOARDING_STEPS}
-            />
+            <WebContainer maxWidth={ONBOARDING_MAX_WIDTH}>
+                <OnboardingProgress
+                    currentStep={currentStep}
+                    totalSteps={TOTAL_STEPS}
+                    steps={ONBOARDING_STEPS}
+                />
+            </WebContainer>
 
             {/* Step Content - Scrollable */}
             <ScrollView
@@ -1075,7 +1082,9 @@ export function NewOnboardingScreen() {
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
             >
-                {renderStepContent()}
+                <WebContainer maxWidth={ONBOARDING_MAX_WIDTH}>
+                    {renderStepContent()}
+                </WebContainer>
             </ScrollView>
 
             {/* Navigation Buttons - Fixed to Bottom */}
@@ -1083,35 +1092,37 @@ export function NewOnboardingScreen() {
                 styles.navigationContainer,
                 { paddingBottom: Math.max(insets.bottom, 12) }
             ]}>
-                {currentStep > 1 && (
-                    <Button
-                        mode="outlined"
-                        onPress={handleBack}
-                        style={styles.backButton}
-                        icon="arrow-left"
-                    >
-                        Back
-                    </Button>
-                )}
-
-                <View style={styles.navigationRight}>
-                    {currentStep >= 3 && !(isFinalStep && squareConnected) && (
-                        <Button mode="text" onPress={handleSkip} style={styles.skipButton}>
-                            {skipLabel}
+                <WebContainer maxWidth={ONBOARDING_MAX_WIDTH} style={styles.navigationInner}>
+                    {currentStep > 1 && (
+                        <Button
+                            mode="outlined"
+                            onPress={handleBack}
+                            style={styles.backButton}
+                            icon="arrow-left"
+                        >
+                            Back
                         </Button>
                     )}
-                    <Button
-                        mode="contained"
-                        onPress={handleNext}
-                        style={styles.nextButton}
-                        loading={isLoading}
-                        disabled={isLoading}
-                        icon={nextIcon}
-                        contentStyle={styles.nextButtonContent}
-                    >
-                        {nextLabel}
-                    </Button>
-                </View>
+
+                    <View style={styles.navigationRight}>
+                        {currentStep >= 3 && !(isFinalStep && squareConnected) && (
+                            <Button mode="text" onPress={handleSkip} style={styles.skipButton}>
+                                {skipLabel}
+                            </Button>
+                        )}
+                        <Button
+                            mode="contained"
+                            onPress={handleNext}
+                            style={styles.nextButton}
+                            loading={isLoading}
+                            disabled={isLoading}
+                            icon={nextIcon}
+                            contentStyle={styles.nextButtonContent}
+                        >
+                            {nextLabel}
+                        </Button>
+                    </View>
+                </WebContainer>
             </View>
 
             {/* Success Animation */}
@@ -1470,13 +1481,15 @@ const styles = StyleSheet.create({
     },
     // Navigation
     navigationContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
         paddingHorizontal: 20,
         paddingTop: 16,
         borderTopWidth: 1,
         borderTopColor: colors.outline,
         backgroundColor: colors.background,
+    },
+    navigationInner: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
     },
     navigationRight: {
         flexDirection: 'row',
