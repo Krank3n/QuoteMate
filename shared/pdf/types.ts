@@ -22,7 +22,14 @@ export interface PdfMaterial {
 
 export interface LaborSection {
   name: string;
+  // Per-unit labour hours/days for this section (matches QuoteSection.laborHours).
   laborHours: number;
+  // Multiplier applied to laborHours to get the section total. Optional for
+  // legacy data; treat missing as 1.
+  multiplier?: number;
+  // Total labour hours/days for the section (laborHours × multiplier). Prefer
+  // this when displaying section duration in the PDF.
+  laborHoursTotal?: number;
   laborRate: number;
   laborUnit?: 'hours' | 'days';
   laborTotal: number;

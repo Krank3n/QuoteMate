@@ -261,6 +261,45 @@ describe('invoiceToDocument round-trip', () => {
   });
 });
 
+describe('section labour round-trip', () => {
+  const sectionQuote = (): Quote =>
+    makeQuote({
+      laborHours: 0,
+      laborTotal: 0,
+      sections: [
+        {
+          id: 's1',
+          name: 'Deck Surface',
+          multiplier: 12,
+          laborHours: 2,
+          laborHoursTotal: 24,
+          laborRate: 110,
+          laborUnit: 'hours',
+          laborTotal: 2640,
+          sortOrder: 0,
+        },
+      ],
+    } as Partial<Quote>);
+
+  it('does not inflate section.laborHours after one save/load', () => {
+    const q = sectionQuote();
+    const restored = documentToQuote(quoteToDocument(q));
+    expect(restored.sections![0].laborHours).toBe(2);
+    expect(restored.sections![0].laborHoursTotal).toBe(24);
+    expect(restored.sections![0].laborTotal).toBe(2640);
+  });
+
+  it('does not inflate after repeated save/load cycles', () => {
+    let q = sectionQuote();
+    for (let i = 0; i < 5; i++) {
+      q = documentToQuote(quoteToDocument(q));
+    }
+    expect(q.sections![0].laborHours).toBe(2);
+    expect(q.sections![0].laborTotal).toBe(2640);
+  });
+
+});
+
 describe('cross-type drop behaviour', () => {
   it('drops invoice-only fields when going document → quote', () => {
     const invoice = makeInvoice({ paymentTerms: 'net_30', xeroInvoiceId: 'xero-1' });

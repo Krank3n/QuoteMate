@@ -118,16 +118,19 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     laborUnit: s.laborUnit,
     laborTotal: Number(s.laborTotal ?? 0),
     laborExtraHours: s.laborExtraHours,
-    // Inline section laborHours × multiplier so PDFs/HTML show the total
-    // hours for the section, not the per-unit value (e.g. "3.8 days" for
-    // a 50 m² deck section, not "0.076 days").
-    sections: s.sections?.map((sec: any) => ({
-      ...sec,
-      laborHours:
-        Math.round(
-          Number(sec.laborHours ?? 0) * Number(sec.multiplier ?? 1) * 100,
-        ) / 100,
-    })),
+    // Write the totalled hours into laborHoursTotal so PDFs/HTML can show
+    // the section total without re-deriving it. Leave laborHours as the
+    // per-unit value the editor stores — overwriting it here used to corrupt
+    // sections on the next save/load round-trip, multiplying labour by the
+    // section multiplier on every cycle until figures hit the millions.
+    sections: s.sections?.map((sec: any) => {
+      const perUnit = Number(sec.laborHours ?? 0);
+      const mul = Number(sec.multiplier ?? 1);
+      return {
+        ...sec,
+        laborHoursTotal: Math.round(perUnit * mul * 100) / 100,
+      };
+    }),
     materialsSubtotal: Number(s.materialsSubtotal ?? 0),
     markup: Number(s.markup ?? 0),
     laborMarkup: s.laborMarkup,

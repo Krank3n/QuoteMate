@@ -388,6 +388,8 @@ function buildPdfSections(sections: any[]): any[] {
   return (sections || []).map((s: any) => ({
     name: s.name,
     laborHours: s.laborHours,
+    multiplier: s.multiplier,
+    laborHoursTotal: s.laborHoursTotal,
     laborRate: s.laborRate,
     laborUnit: s.laborUnit,
     laborTotal: s.laborTotal,

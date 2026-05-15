@@ -384,8 +384,12 @@ function buildLaborHTML(data: QuotePdfData): string {
               const sUnit = s.laborUnit || 'hours';
               const sLabel = sUnit === 'days' ? 'days' : 'hours';
               const sRate = sUnit === 'days' ? '/day' : '/hr';
+              const sTotalUnits =
+                typeof s.laborHoursTotal === 'number'
+                  ? s.laborHoursTotal
+                  : Math.round((s.laborHours || 0) * (s.multiplier || 1) * 100) / 100;
               return `<tr>
-                <td>${data.showLaborHours ? `${s.name} (${s.laborHours} ${sLabel} @ ${formatCurrency(s.laborRate * laborMul)}${sRate})` : s.name}</td>
+                <td>${data.showLaborHours ? `${s.name} (${sTotalUnits} ${sLabel} @ ${formatCurrency(s.laborRate * laborMul)}${sRate})` : s.name}</td>
                 <td style="text-align: right;">${formatCurrency(s.laborTotal * laborMul)}</td>
               </tr>`;
             }).join('') : `<tr>
