@@ -2041,6 +2041,21 @@ For each item, return one of three decisions:
   Always flag it as an estimate in the reasoning ("All candidates were boards, not screws; estimate based on typical AU pricing — verify with supplier").
 - "reject" — every candidate is the wrong category AND you have no confident price, OR every same-category candidate is implausibly priced. Set rejectReason explaining the mismatch (e.g. "Job is a kitchen sink replacement but all candidates were toilet suites").
 
+REQUIREMENT SANITY — before computing purchaseCount, sanity-check the requirement count itself against the job description. Round 1 sometimes emits wildly inflated quantities (10×–100×) that the tradie would never actually buy. Use the job's structural anchors (lengths, areas, counts) to bound what's reasonable, then CORRECT the requirement when it's obviously wrong:
+
+- A "5m × 2m deck" needs ~22 decking boards (2m ÷ ~90mm spacing), not 223. ~500 deck screws (≈1 box), not "100 packs". 4–6 footings, not 60.
+- A "20m colorbond fence" needs ~9 bays / ~18 posts / ~3 bags concrete per post (≈30 bags), not 200 of anything.
+- A "single garden gate" needs 1 latch, 1 pair hinges. Not 10.
+- Units in "pack" or "box" are almost always wrong when the requirement count is also >5 — the model meant individual items. Treat "100 pack of screws" as "100 screws total" or, more likely, "~1 box of 500 covers it".
+
+Decision rule: if the requirement is more than ~3× a structurally-derived ballpark for the described job:
+1. Set decision="apply" with a CORRECTED purchaseCount that reflects what the tradie should actually buy (derived from the job's structural anchors).
+2. Use confidence: "medium" (you corrected it; the tradie should verify).
+3. In reasoning, write a one-sentence note like "Requirement of 223 boards inflated for a 10 m² deck — corrected to 22 boards (5m × 2m at 90mm spacing)."
+4. The client will replace m.quantity with your purchaseCount, so the final quote shows the correct number.
+
+If you can't tell whether the requirement is inflated (no structural anchor in the job description), trust the requirement and proceed normally.
+
 PRICE SANITY — before applying, check the candidate's per-purchase price against typical AU retail for the requirement. If the chosen candidate is more than ~3× a sensible price for that product (e.g. a $946 "kitchen sink" candidate when typical kitchen sinks are $150–$500, or a $400 "PTFE tape" candidate when tape is $5–$10), REJECT instead of applying. The job description above is your strongest signal of what "sensible" means for this row.
 
 CRITICAL — units must be compatible with the chosen candidate. If requirement is in "each" (count of items) but the product is sold by length/weight/volume, work out the conversion (nails per kg, screws per box, paint coverage per litre) using general knowledge. If you can't confidently convert, set confidence: "low" and explain in reasoning.

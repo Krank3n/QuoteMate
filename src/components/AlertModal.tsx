@@ -107,6 +107,7 @@ export function AlertModal({
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const checkScaleAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   // Confetti is enabled for success type by default, can be overridden
   const enableConfetti = showConfetti !== undefined ? showConfetti : type === 'success';
@@ -163,7 +164,7 @@ export function AlertModal({
       }
 
       // Start all animations together for snappy feel
-      Animated.parallel([
+      const introAnim = Animated.parallel([
         Animated.spring(scaleAnim, {
           toValue: 1,
           tension: 65,
@@ -185,9 +186,12 @@ export function AlertModal({
             useNativeDriver: true,
           }),
         ]),
-      ]).start(() => {
-        // Pulse animation after everything settles
-        Animated.loop(
+      ]);
+      introAnim.start(() => {
+        // Pulse animation after everything settles. Stored on the ref so the
+        // cleanup below can stop it — previously this loop ran forever after
+        // every modal show, stacking 1 loop per show across the session.
+        const loop = Animated.loop(
           Animated.sequence([
             Animated.timing(pulseAnim, {
               toValue: 1.1,
@@ -200,7 +204,9 @@ export function AlertModal({
               useNativeDriver: true,
             }),
           ])
-        ).start();
+        );
+        pulseLoopRef.current = loop;
+        loop.start();
       });
 
       // Start confetti immediately
@@ -237,7 +243,16 @@ export function AlertModal({
           ]).start();
         });
       }
+    } else if (pulseLoopRef.current) {
+      // Modal hidden — stop the pulse loop so it doesn't keep running while
+      // the parent screen is still mounted.
+      pulseLoopRef.current.stop();
+      pulseLoopRef.current = null;
     }
+    return () => {
+      pulseLoopRef.current?.stop();
+      pulseLoopRef.current = null;
+    };
   }, [visible]);
 
   const themeColors = getThemeColors(type);

@@ -27,7 +27,8 @@ import { useStore } from '../../store/useStore';
 import { useDocumentMode } from '../../utils/documentMode';
 import { checkSquareConnection } from '../../services/squareService';
 import { colors } from '../../theme';
-import { generateDocumentPDF } from '../../utils/pdfGenerator';
+// pdfGenerator is lazy-imported in handleViewPDF to defer its parse cost
+// until the user actually requests a PDF preview.
 import { quoteToDocument, invoiceToDocument } from '../../types/documentAdapter';
 import { calculateDueDate, formatPaymentTerms } from '../../utils/invoiceCalculator';
 import type { PaymentTerms } from '../../types';
@@ -98,23 +99,21 @@ export function JobPreviewScreen() {
   // wizard. Suppresses the "Quote saved!" celebration + auto-save so
   // re-entering doesn't bump updatedAt or replay the success banner.
   const viewing = route.params?.viewing === true;
-  const {
-    currentQuote,
-    currentInvoice,
-    saveQuote,
-    saveInvoice,
-    updateInvoice,
-    businessSettings,
-    setCurrentQuote,
-    setCurrentInvoice,
-    nextQuoteNumber,
-    nextInvoiceNumber,
-    documents,
-    quotes,
-    invoices,
-    unifiedTourActive,
-    unifiedTourPhase,
-  } = useStore();
+  const currentQuote = useStore((s) => s.currentQuote);
+  const currentInvoice = useStore((s) => s.currentInvoice);
+  const businessSettings = useStore((s) => s.businessSettings);
+  const nextQuoteNumber = useStore((s) => s.nextQuoteNumber);
+  const nextInvoiceNumber = useStore((s) => s.nextInvoiceNumber);
+  const documents = useStore((s) => s.documents);
+  const quotes = useStore((s) => s.quotes);
+  const invoices = useStore((s) => s.invoices);
+  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
+  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
+  const saveQuote = useStore((s) => s.saveQuote);
+  const saveInvoice = useStore((s) => s.saveInvoice);
+  const updateInvoice = useStore((s) => s.updateInvoice);
+  const setCurrentQuote = useStore((s) => s.setCurrentQuote);
+  const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
   const insets = useSafeAreaInsets();
 
   // Tour refs
@@ -217,97 +216,109 @@ export function JobPreviewScreen() {
     if (unifiedTourActive) return;
     if (viewing) return;
 
-    // Start celebration immediately — don't wait for save
-    setShowSuccess(true);
-    successTap();
+    // Celebration must fire exactly once per document — the *first* time
+    // this screen mounts after the wizard creates it. Re-entering via a
+    // section "Edit" button pops back through the wizard then re-pushes
+    // JobPreview, which is a fresh mount; without this guard the confetti
+    // would replay on every loop. Source of truth is whether the doc has
+    // already been persisted into quotes/invoices.
+    const alreadySaved = isInvoiceMode
+      ? invoices.some((i) => i.id === currentInvoice?.id)
+      : quotes.some((q) => q.id === currentQuote?.id);
 
-    // Animate banner in — backdrop + card in parallel for snappier feel
-    Animated.parallel([
-      Animated.timing(backdropOpacity, {
-        toValue: 1,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-      Animated.spring(bannerScale, {
-        toValue: 1,
-        tension: 80,
-        friction: 8,
-        useNativeDriver: true,
-      }),
-      Animated.timing(bannerOpacity, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.spring(checkScale, {
-        toValue: 1,
-        tension: 100,
-        friction: 6,
-        delay: 150,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      // Fade in subtitle after card appears
-      Animated.timing(subtitleOpacity, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
-    });
+    if (!alreadySaved) {
+      // Start celebration immediately — don't wait for save
+      setShowSuccess(true);
+      successTap();
 
-    // Animate confetti
-    confetti.forEach((piece, index) => {
-      const anim = confettiAnims[index];
-      Animated.sequence([
-        Animated.delay(piece.delay),
-        Animated.parallel([
-          Animated.timing(anim.translateY, {
-            toValue: 500,
-            duration: piece.duration,
-            useNativeDriver: true,
-          }),
-          Animated.timing(anim.rotate, {
-            toValue: (Math.random() - 0.5) * 720,
-            duration: piece.duration,
-            useNativeDriver: true,
-          }),
-          Animated.sequence([
-            Animated.timing(anim.opacity, {
-              toValue: 0.9,
-              duration: 200,
-              useNativeDriver: true,
-            }),
-            Animated.delay(piece.duration * 0.5),
-            Animated.timing(anim.opacity, {
-              toValue: 0,
-              duration: piece.duration * 0.3,
-              useNativeDriver: true,
-            }),
-          ]),
-        ]),
-      ]).start();
-    });
-
-    // Auto-dismiss banner
-    setTimeout(() => {
+      // Animate banner in — backdrop + card in parallel for snappier feel
       Animated.parallel([
-        Animated.timing(bannerOpacity, {
-          toValue: 0,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-        Animated.timing(bannerScale, {
-          toValue: 0.8,
-          duration: 400,
-          useNativeDriver: true,
-        }),
         Animated.timing(backdropOpacity, {
-          toValue: 0,
-          duration: 500,
+          toValue: 1,
+          duration: 250,
           useNativeDriver: true,
         }),
-      ]).start(() => setShowSuccess(false));
-    }, 2000);
+        Animated.spring(bannerScale, {
+          toValue: 1,
+          tension: 80,
+          friction: 8,
+          useNativeDriver: true,
+        }),
+        Animated.timing(bannerOpacity, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.spring(checkScale, {
+          toValue: 1,
+          tension: 100,
+          friction: 6,
+          delay: 150,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        // Fade in subtitle after card appears
+        Animated.timing(subtitleOpacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }).start();
+      });
+
+      // Animate confetti
+      confetti.forEach((piece, index) => {
+        const anim = confettiAnims[index];
+        Animated.sequence([
+          Animated.delay(piece.delay),
+          Animated.parallel([
+            Animated.timing(anim.translateY, {
+              toValue: 500,
+              duration: piece.duration,
+              useNativeDriver: true,
+            }),
+            Animated.timing(anim.rotate, {
+              toValue: (Math.random() - 0.5) * 720,
+              duration: piece.duration,
+              useNativeDriver: true,
+            }),
+            Animated.sequence([
+              Animated.timing(anim.opacity, {
+                toValue: 0.9,
+                duration: 200,
+                useNativeDriver: true,
+              }),
+              Animated.delay(piece.duration * 0.5),
+              Animated.timing(anim.opacity, {
+                toValue: 0,
+                duration: piece.duration * 0.3,
+                useNativeDriver: true,
+              }),
+            ]),
+          ]),
+        ]).start();
+      });
+
+      // Auto-dismiss banner
+      setTimeout(() => {
+        Animated.parallel([
+          Animated.timing(bannerOpacity, {
+            toValue: 0,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+          Animated.timing(bannerScale, {
+            toValue: 0.8,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+          Animated.timing(backdropOpacity, {
+            toValue: 0,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+        ]).start(() => setShowSuccess(false));
+      }, 2000);
+    }
 
     // Save in the background — branch on mode so invoices go through
     // saveInvoice (which assigns invoiceNumbers) and quotes through
@@ -491,6 +502,7 @@ export function JobPreviewScreen() {
     if (!liveDoc) return;
     setIsPdfLoading(true);
     try {
+      const { generateDocumentPDF } = await import('../../utils/pdfGenerator');
       const html = await generateDocumentPDF(liveDoc, businessSettings);
 
       if (Platform.OS === 'web') {

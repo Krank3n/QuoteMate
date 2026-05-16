@@ -37,7 +37,11 @@ export function RecordPaymentScreen() {
   const route = useRoute<any>();
   const invoiceId = route.params?.invoiceId;
 
-  const { invoices, currentInvoice, recordPayment, xeroConnection, pushPaymentToXero } = useStore();
+  const invoices = useStore((s) => s.invoices);
+  const currentInvoice = useStore((s) => s.currentInvoice);
+  const xeroConnection = useStore((s) => s.xeroConnection);
+  const recordPayment = useStore((s) => s.recordPayment);
+  const pushPaymentToXero = useStore((s) => s.pushPaymentToXero);
 
   // Check both saved invoices and currentInvoice (for unsaved invoices)
   const invoice = invoices.find((i) => i.id === invoiceId) ||

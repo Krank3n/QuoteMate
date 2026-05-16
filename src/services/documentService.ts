@@ -19,6 +19,7 @@ import {
   Unsubscribe,
   query,
   orderBy,
+  limit,
   Timestamp,
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
@@ -142,8 +143,12 @@ class DocumentService {
     const userId = getUserId();
     if (!userId) return null;
     try {
+      this.documentsUnsubscribe?.();
       const ref = collection(db, 'users', userId, 'documents');
-      const q = query(ref, orderBy('createdAt', 'desc'));
+      // Cap the live listener at 100 most-recent docs so the snapshot replay
+      // doesn't grow with usage history. Older docs remain reachable via
+      // loadDocuments() and archive views.
+      const q = query(ref, orderBy('createdAt', 'desc'), limit(100));
       this.documentsUnsubscribe = onSnapshot(q, (snapshot) => {
         const docs = snapshot.docs.map((d) => normaliseDocument(d.data(), d.id));
         callback(docs);

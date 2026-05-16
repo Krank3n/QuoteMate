@@ -37,7 +37,10 @@ export function LaborMarkupScreen() {
   const isEditFromPreview = route.params?.editing === true;
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { saveDraft, businessSettings, unifiedTourActive, unifiedTourPhase } = useStore();
+  const saveDraft = useStore((s) => s.saveDraft);
+  const businessSettings = useStore((s) => s.businessSettings);
+  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
+  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
 
   // For compatibility, alias to currentQuote (used throughout this file)
   const currentQuote = currentDocument;

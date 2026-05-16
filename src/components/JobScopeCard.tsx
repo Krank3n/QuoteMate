@@ -33,7 +33,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { STAGE_META } from './StageSheet';
 import { PaymentChip } from './PaymentChip';
 import { selectionTap } from '../utils/haptics';
-import { previewDocumentPDF } from '../utils/pdfGenerator';
+// pdfGenerator lazy-loaded inside the preview handler.
 import { useStore } from '../store/useStore';
 import { useAlertModal } from '../hooks/useAlertModal';
 import {
@@ -153,6 +153,7 @@ export function JobScopeCard({
     selectionTap();
     setPreviewing(true);
     try {
+      const { previewDocumentPDF } = await import('../utils/pdfGenerator');
       await previewDocumentPDF(doc, businessSettings, { isPro });
     } catch {
       showAlert({

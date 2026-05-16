@@ -31,6 +31,7 @@ import { useNavigation, useIsFocused, useRoute } from '@react-navigation/native'
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import LottieView from 'lottie-react-native';
 import { generateId } from '../../utils/generateId';
+import { lightTap } from '../../utils/haptics';
 
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode, UnifiedDocument } from '../../utils/documentMode';
@@ -42,7 +43,8 @@ import { parsePackInfo } from '../../utils/parsePackInfo';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice, searchReeceMaterialCandidates, getReeceConnectionStatus } from '../../services/reeceApi';
 import { shouldRunReeceFirst } from '../../services/supplierPriority';
-import { analyzeJobDescription, convertLLMMaterialsToMaterials, reconcilePricedMaterials } from '../../services/llmService';
+// llmService is lazy-imported inside the handlers that need it to keep this
+// screen's mount cheap — see Phase 7 of the perf plan.
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
 import { NestableScrollContainer, NestableDraggableFlatList, RenderItemParams } from 'react-native-draggable-flatlist';
@@ -396,7 +398,14 @@ export function MaterialsListScreen() {
   const isFocused = useIsFocused();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { businessSettings, subscriptionStatus, saveDraft, unifiedTourActive, unifiedTourPhase, updateQuote: storeUpdateQuote } = useStore();
+  // Per-field selectors so MaterialsListScreen only re-renders when its
+  // actual reads change — not on every quote/invoice/contact store write.
+  const businessSettings = useStore((s) => s.businessSettings);
+  const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
+  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
+  const saveDraft = useStore((s) => s.saveDraft);
+  const storeUpdateQuote = useStore((s) => s.updateQuote);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -449,7 +458,6 @@ export function MaterialsListScreen() {
   const cancelFetchRef = useRef(false);
   const cancelFetchResolverRef = useRef<(() => void) | null>(null);
   const [recentlyPricedIds, setRecentlyPricedIds] = useState<Set<string>>(new Set());
-  const batchProgressAnim = useRef(new Animated.Value(0)).current;
   const priceFlashAnims = useRef<Map<string, Animated.Value>>(new Map());
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   const [initialMaterialCount, setInitialMaterialCount] = useState(0);
@@ -530,22 +538,6 @@ export function MaterialsListScreen() {
       }
     },
   });
-
-  // Animate indeterminate progress bar during batch fetch phase
-  useEffect(() => {
-    if (fetchPhase === 'batch') {
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(batchProgressAnim, { toValue: 1, duration: 1200, useNativeDriver: false }),
-          Animated.timing(batchProgressAnim, { toValue: 0, duration: 1200, useNativeDriver: false }),
-        ])
-      );
-      loop.start();
-      return () => loop.stop();
-    } else {
-      batchProgressAnim.setValue(0);
-    }
-  }, [fetchPhase]);
 
   // Unified tour: show brief fake AI loading when transitioning materialsList → materialsListItems
   useEffect(() => {
@@ -909,6 +901,7 @@ export function MaterialsListScreen() {
             }))
         : [];
 
+      const { analyzeJobDescription, convertLLMMaterialsToMaterials } = await import('../../services/llmService');
       const analysis = await analyzeJobDescription(jobDescription, tradeContext, photoUrlsForAi, existingMatsForAi, templateDataForAi, userSavedRatesForAi);
 
       // Check if user canceled during AI analysis
@@ -969,12 +962,23 @@ export function MaterialsListScreen() {
         };
       });
 
-      // Create QuoteSection objects from unique AI-generated sections with multipliers + labor
+      // Create QuoteSection objects from unique AI-generated sections with multipliers + labor.
+      // Every section the LLM names should become a QuoteSection so its labour
+      // shows on the Pricing screen — one-off sections (multiplier=1, e.g. a
+      // single gate latch) used to be silently dropped, which lost their labour
+      // entirely and left users staring at "DISTRIBUTION ACROSS 1 SECTIONS"
+      // even when the materials list had several.
       const sectionMultipliers = new Map<string, number>();
       const sectionLaborHours = new Map<string, number>();
       baseMaterials.forEach(m => {
-        if (m.section && m.sectionMultiplier && m.sectionMultiplier > 1) {
-          sectionMultipliers.set(m.section, m.sectionMultiplier);
+        if (m.section) {
+          const candidate = m.sectionMultiplier && m.sectionMultiplier > 0
+            ? m.sectionMultiplier
+            : 1;
+          const existing = sectionMultipliers.get(m.section);
+          if (existing === undefined || candidate > existing) {
+            sectionMultipliers.set(m.section, candidate);
+          }
         }
         if (m.section && m.sectionLaborHours && m.sectionLaborHours > 0) {
           sectionLaborHours.set(m.section, m.sectionLaborHours);
@@ -1824,6 +1828,7 @@ export function MaterialsListScreen() {
         if (reconcileItems.length > 0) {
           try {
             setCurrentFetchingName('Reconciling pack sizes...');
+            const { reconcilePricedMaterials } = await import('../../services/llmService');
             const results = await reconcilePricedMaterials(reconcileItems, {
               jobName: currentQuote?.job?.name,
               jobDescription: currentQuote?.job?.description,
@@ -2983,16 +2988,16 @@ export function MaterialsListScreen() {
         {/* Action buttons */}
         {materials.length > 0 && !isAiAnalyzing && (
           <View style={styles.materialsActionRow}>
-            <TouchableOpacity ref={addMaterialButtonRef as any} style={styles.addMaterialButtonFull} onPress={handleAddMaterial}>
+            <TouchableOpacity ref={addMaterialButtonRef as any} style={styles.addMaterialButtonFull} onPress={() => { lightTap(); handleAddMaterial(); }}>
               <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
               <Text style={styles.addMaterialButtonText}>Add Material</Text>
             </TouchableOpacity>
             <View style={styles.materialsActionHalfRow}>
-              <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={handleLoadTemplate}>
+              <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { lightTap(); handleLoadTemplate(); }}>
                 <MaterialCommunityIcons name="puzzle-outline" size={18} color={colors.primary} />
                 <Text style={styles.addMaterialButtonText}>Load Template</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { setNewSectionName(''); setShowNewSectionModal(true); }}>
+              <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { lightTap(); setNewSectionName(''); setShowNewSectionModal(true); }}>
                 <MaterialCommunityIcons name="folder-plus-outline" size={18} color={colors.primary} />
                 <Text style={styles.addMaterialButtonText}>New Section</Text>
               </TouchableOpacity>
@@ -3020,7 +3025,9 @@ export function MaterialsListScreen() {
         secondaryRef={fetchPricesButtonRef}
       />
 
-      {/* New Section Modal */}
+      {/* New Section Modal — conditional render so the form's children aren't
+          sitting in memory while hidden. */}
+      {showNewSectionModal && (
       <Portal>
         <Modal
           visible={showNewSectionModal}
@@ -3075,8 +3082,10 @@ export function MaterialsListScreen() {
           </View>
         </Modal>
       </Portal>
+      )}
 
       {/* Template Picker Modal */}
+      {templatePickerVisible && (
       <Portal>
         <Modal
           visible={templatePickerVisible}
@@ -3152,6 +3161,7 @@ export function MaterialsListScreen() {
           )}
         </Modal>
       </Portal>
+      )}
 
       {/* Delete Material Confirmation */}
       <AlertModal
@@ -3192,7 +3202,10 @@ export function MaterialsListScreen() {
         onCancel={handleMatchCanceled}
       />
 
-      {/* Fetch Time Estimate Modal */}
+      {/* Fetch Time Estimate Modal — heaviest of the bunch, keeps a list of
+          per-item status rows. Conditional render means it doesn't sit in
+          memory after fetch completes. */}
+      {showFetchEstimateModal && (
       <Portal>
         <Modal
           visible={showFetchEstimateModal}
@@ -3331,6 +3344,7 @@ export function MaterialsListScreen() {
           </View>
         </Modal>
       </Portal>
+      )}
 
       {/* Minimized fetch progress pill */}
       {fetchMinimized && isFetchingPrices && (
@@ -3363,6 +3377,7 @@ export function MaterialsListScreen() {
       )}
 
       {/* Save Section as Template Modal */}
+      {saveTemplateModalVisible && (
       <Portal>
         <Modal
           visible={saveTemplateModalVisible}
@@ -3442,6 +3457,7 @@ export function MaterialsListScreen() {
           </View>
         </Modal>
       </Portal>
+      )}
 
       {/* Delete Section Confirmation Modal */}
       <AlertModal

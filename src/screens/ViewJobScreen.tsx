@@ -25,7 +25,7 @@ import { DocumentRow } from '../components/DocumentRow';
 import { JobScopeCard, type ScopeStep } from '../components/JobScopeCard';
 import { JobDetailHeader } from '../components/JobDetailHeader';
 import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
-import { exportDocumentPDF } from '../utils/pdfGenerator';
+// pdfGenerator lazy-loaded inside the handler that exports PDF.
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
 import {
@@ -65,19 +65,17 @@ export function ViewJobScreen() {
   const saveJob = useJobStore((s) => s.saveJob);
   const deleteJob = useJobStore((s) => s.deleteJob);
 
-  const {
-    documents,
-    saveQuote,
-    saveInvoice,
-    createInvoiceFromQuote,
-    subscriptionStatus,
-    businessSettings,
-    duplicateDocumentForJob,
-    setCurrentQuote,
-    setCurrentInvoice,
-    deleteQuote,
-    deleteInvoice,
-  } = useStore();
+  const documents = useStore((s) => s.documents);
+  const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  const businessSettings = useStore((s) => s.businessSettings);
+  const saveQuote = useStore((s) => s.saveQuote);
+  const saveInvoice = useStore((s) => s.saveInvoice);
+  const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
+  const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
+  const setCurrentQuote = useStore((s) => s.setCurrentQuote);
+  const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
+  const deleteQuote = useStore((s) => s.deleteQuote);
+  const deleteInvoice = useStore((s) => s.deleteInvoice);
   const duplicateJob = useJobStore((s) => s.duplicateJob);
   const xeroConnection = useStore((s) => s.xeroConnection);
   const pushInvoiceToXero = useStore((s) => s.pushInvoiceToXero);
@@ -545,6 +543,7 @@ export function ViewJobScreen() {
       case 'exportPdf':
         if (primaryDoc) {
           try {
+            const { exportDocumentPDF } = await import('../utils/pdfGenerator');
             await exportDocumentPDF(primaryDoc, businessSettings, 'export', {
               isPro,
             });

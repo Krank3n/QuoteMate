@@ -53,7 +53,13 @@ type AlertConfig = {
 type FilterType = 'all' | 'saved' | 'xero';
 
 export function ContactsScreen() {
-  const { contacts, xeroContacts, xeroConnection, saveContact, deleteContact, syncXeroContacts, importContacts } = useStore();
+  const contacts = useStore((s) => s.contacts);
+  const xeroContacts = useStore((s) => s.xeroContacts);
+  const xeroConnection = useStore((s) => s.xeroConnection);
+  const saveContact = useStore((s) => s.saveContact);
+  const deleteContact = useStore((s) => s.deleteContact);
+  const syncXeroContacts = useStore((s) => s.syncXeroContacts);
+  const importContacts = useStore((s) => s.importContacts);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
@@ -401,6 +407,10 @@ export function ContactsScreen() {
         renderItem={renderContact}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        removeClippedSubviews
+        initialNumToRender={12}
+        maxToRenderPerBatch={8}
+        windowSize={7}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <MaterialCommunityIcons name="account-group-outline" size={48} color={colors.onSurface} />

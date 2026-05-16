@@ -50,7 +50,7 @@ interface MaterialItemCardProps {
   onPress?: () => void;
 }
 
-export function MaterialItemCard({
+function MaterialItemCardImpl({
   material,
   isExpanded = false,
   isFetching = false,
@@ -352,6 +352,23 @@ export function MaterialItemCard({
     </View>
   );
 }
+
+// Memo with a comparator that ignores function-prop identity. Parents commonly
+// pass inline arrow handlers (`onEdit={() => …}`) which would otherwise bust
+// memoization on every render — but the closure logic is stable and the data
+// props are the ones that determine what to render.
+export const MaterialItemCard = React.memo(MaterialItemCardImpl, (prev, next) => {
+  return (
+    prev.material === next.material &&
+    prev.isExpanded === next.isExpanded &&
+    prev.isFetching === next.isFetching &&
+    prev.isRecentlyPriced === next.isRecentlyPriced &&
+    prev.isActive === next.isActive &&
+    prev.localQuantity === next.localQuantity &&
+    prev.readOnly === next.readOnly &&
+    prev.drag === next.drag
+  );
+});
 
 const styles = StyleSheet.create({
   listItem: {

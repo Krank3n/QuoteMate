@@ -63,7 +63,13 @@ export function CustomerDetailsScreen() {
   const isEditFromPreview = route.params?.editing === true;
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { saveDraft, businessSettings, hasSeenScreenTour, unifiedTourActive, unifiedTourPhase, contacts, xeroContacts } = useStore();
+  const saveDraft = useStore((s) => s.saveDraft);
+  const businessSettings = useStore((s) => s.businessSettings);
+  const hasSeenScreenTour = useStore((s) => s.hasSeenScreenTour);
+  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
+  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
+  const contacts = useStore((s) => s.contacts);
+  const xeroContacts = useStore((s) => s.xeroContacts);
   const documentList = useDocumentList();
 
   // For compatibility, alias to currentQuote (used throughout this file)
@@ -291,14 +297,9 @@ export function CustomerDetailsScreen() {
     // Fire-and-forget: calculate travel distance in background
     const trimmedJobAddress = jobAddress.trim();
     if (businessSettings?.address && trimmedJobAddress) {
-      console.log('[travel] kicking off calculation', {
-        businessAddress: businessSettings.address,
-        jobAddress: trimmedJobAddress,
-      });
       calculateTravelAdjustment(businessSettings.address, trimmedJobAddress)
         .then((result) => {
           if (result) {
-            console.log('[travel] result', result);
             // Only set travel adjustment if user hasn't already manually adjusted it
             const hasExistingAdjustment = updatedQuote.travelAdjustment !== undefined && updatedQuote.travelAdjustment > 0;
             updateDocument({
@@ -324,11 +325,6 @@ export function CustomerDetailsScreen() {
             travelGeocodeFailed: true,
           });
         });
-    } else {
-      console.log('[travel] skipped — missing address', {
-        hasBusinessAddress: !!businessSettings?.address,
-        hasJobAddress: !!trimmedJobAddress,
-      });
     }
   };
 

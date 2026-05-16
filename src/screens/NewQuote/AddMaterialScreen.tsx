@@ -6,7 +6,6 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
-  StyleSheet,
   ScrollView,
   FlatList,
   SectionList,
@@ -17,6 +16,8 @@ import {
   Linking,
   Keyboard,
 } from 'react-native';
+import { styles } from './AddMaterial/styles';
+import { ManualEntrySection } from './AddMaterial/ManualEntrySection';
 import {
   Text,
   TextInput,
@@ -85,6 +86,148 @@ import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/t
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
 type TabValue = 'search' | 'saved';
+
+// Memoized row for the search-results FlatList. Pulled out so the parent's
+// re-renders don't force every visible row to re-render — the row only changes
+// when its `item` reference or selected/disabled props change.
+interface SearchResultRowProps {
+  item: any;
+  onSelect: (item: any) => void;
+}
+
+const SearchResultRow = React.memo(function SearchResultRow({ item, onSelect }: SearchResultRowProps) {
+  return (
+    <TouchableOpacity
+      style={styles.resultItem}
+      onPress={() => onSelect(item)}
+    >
+      {item.imageUrl && (
+        <Image
+          source={{ uri: item.imageUrl }}
+          style={styles.resultImage}
+          resizeMode="contain"
+        />
+      )}
+      <View style={styles.resultInfo}>
+        <Text style={styles.resultName}>
+          {item.productName || item.description}
+        </Text>
+        <Text style={styles.resultDetails}>
+          {item.itemNumber && `Item #: ${item.itemNumber}`}
+          {item.brand && item.brand.toLowerCase() !== 'bunnings' && ` • ${item.brand}`}
+        </Text>
+        {item.price > 0 && (
+          <Text style={styles.resultPrice}>
+            {formatCurrency(item.price)}
+          </Text>
+        )}
+        {item.isAiEstimate && (
+          <Chip
+            icon="robot"
+            mode="outlined"
+            compact
+            style={styles.aiChip}
+            textStyle={styles.aiChipText}
+          >
+            AI Estimate
+          </Chip>
+        )}
+        {item.isLocalSource && (
+          <Chip
+            icon={item.localSource === 'template' ? 'shape-outline' : 'bookmark-outline'}
+            mode="outlined"
+            compact
+            style={styles.aiChip}
+            textStyle={styles.aiChipText}
+          >
+            {item.localSourceLabel}
+          </Chip>
+        )}
+      </View>
+      <IconButton icon="chevron-right" size={20} />
+    </TouchableOpacity>
+  );
+});
+
+// Stable separator — the previous `() => <Divider />` inline literal created a
+// new function every render, defeating FlatList's renderer cache.
+const ResultDivider = () => <Divider />;
+
+// Memoized row for the Saved Items SectionList. Lifted out of the parent so
+// the synthetic Material can be useMemo'd per `item` — previously rebuilt on
+// every parent render, which busted MaterialItemCard's React.memo. With this
+// row stable, scroll/state changes elsewhere in AddMaterialScreen no longer
+// re-render every saved row.
+interface SavedItemRowProps {
+  item: any;
+  isExpanded: boolean;
+  selectable: boolean;
+  editRouteName: string;
+  onToggleExpand: (key: string) => void;
+  onSelect: (item: any) => void;
+  onEdit: (key: string) => void;
+  onDelete: (item: any) => void;
+}
+
+const SavedItemRow = React.memo(function SavedItemRow({
+  item,
+  isExpanded,
+  selectable,
+  editRouteName,
+  onToggleExpand,
+  onSelect,
+  onEdit,
+  onDelete,
+}: SavedItemRowProps) {
+  const synthetic: Material = useMemo(() => {
+    const storeLower = (item.store || '').toLowerCase();
+    const isReeceItem = storeLower.includes('reece');
+    const isBunningsItem = storeLower.includes('bunnings');
+    return {
+      id: item.key,
+      name: item.productName,
+      quantity: 1,
+      unit: (item.unit || 'each') as Material['unit'],
+      price: item.price ?? 0,
+      totalPrice: item.price ?? 0,
+      manualPriceOverride: item.isPersonalRate === true,
+      searchTerm: item.productName,
+      imageUrl: item.imageUrl,
+      productUrl: item.productUrl,
+      description: item.notes || undefined,
+      brand: item.brand || undefined,
+      bunningsItemNumber: !item.isPersonalRate && isBunningsItem ? item.itemNumber : undefined,
+      reeceItemNumber: !item.isPersonalRate && isReeceItem ? item.itemNumber : undefined,
+      pricingSource: item.isPersonalRate ? 'manual' : 'scraper',
+      favoriteProduct: item as FavoriteProductMapping,
+    };
+  }, [item]);
+
+  return (
+    <SwipeableCard
+      rightActions={[
+        {
+          icon: 'delete-outline',
+          label: 'Delete',
+          color: colors.error,
+          bgColor: colors.error + '18',
+          onPress: () => onDelete(item),
+        },
+      ]}
+    >
+      <MaterialItemCard
+        material={synthetic}
+        readOnly
+        isExpanded={isExpanded}
+        onToggleExpand={() => onToggleExpand(item.key)}
+        onPress={selectable ? () => onSelect(item) : undefined}
+        onOpenInStore={item.productUrl ? () => Linking.openURL(item.productUrl) : undefined}
+        onEdit={() => onEdit(item.key)}
+        onDelete={() => onDelete(item)}
+      />
+    </SwipeableCard>
+  );
+});
 
 export function AddMaterialScreen() {
   const navigation = useNavigation<any>();
@@ -663,11 +806,6 @@ export function AddMaterialScreen() {
         ? scopedToBunnings
         : (hasBunningsInHardwareStores || supplierGroups.length === 0);
 
-      console.log('[search] shouldTryBunnings:', shouldTryBunnings,
-        '| scopedToOne:', scopedToOne,
-        '| hasBunningsInHardwareStores:', hasBunningsInHardwareStores,
-        '| hardwareStores:', hardwareStores);
-
       // Web-scraping store list:
       //  - scoped: just the selected supplier's searchUrl (if it has one)
       //  - unscoped: all configured suppliers' websites, falling back to the
@@ -810,7 +948,7 @@ export function AddMaterialScreen() {
     }
   }, [searchQuery, businessSettings, isPro, navigation, supplierGroups, selectedSupplierGroup]);
 
-  const handleSelectProduct = async (item: any) => {
+  const handleSelectProductImpl = async (item: any) => {
     let newMaterial: Material;
     const inclusive = currentQuote?.pricesIncludeGst === true;
     const adjustedPrice = supplierPriceForGstMode(item.price || 0, inclusive);
@@ -896,6 +1034,21 @@ export function AddMaterialScreen() {
     // Ask if user wants to save as a favorite for future quotes
     setSaveFavoriteDialog({ visible: true, material: newMaterial, item });
   };
+  // Latest-ref + stable wrapper so SearchResultRow's React.memo isn't busted by
+  // a new function identity every parent render.
+  const handleSelectProductRef = useRef(handleSelectProductImpl);
+  handleSelectProductRef.current = handleSelectProductImpl;
+  const handleSelectProduct = useCallback(
+    (item: any) => handleSelectProductRef.current(item),
+    [],
+  );
+
+  const renderSearchResult = useCallback(
+    ({ item }: { item: any }) => (
+      <SearchResultRow item={item} onSelect={handleSelectProduct} />
+    ),
+    [handleSelectProduct],
+  );
 
   const handleConfirmSaveFavorite = async () => {
     const { material, item } = saveFavoriteDialog;
@@ -1113,7 +1266,11 @@ export function AddMaterialScreen() {
   // works in either context.
   const editRouteName = supplierBookOnly ? 'AddMaterialStandalone' : 'AddMaterial';
 
-  const handleSelectSavedItem = async (item: any) => {
+  // Latest-ref pattern: keep handleSelectSavedItem stable for SavedItemRow's
+  // memo, while still calling the latest closure (state/refs may change between
+  // renders). Without this, every render of AddMaterialScreen would bust the
+  // saved-rows memo via prop-identity churn.
+  const handleSelectSavedItemImpl = async (item: any) => {
     // Standalone "manage supplier book" mode (opened from Settings) has no
     // active quote — tapping an item should open it for editing instead.
     if (supplierBookOnly) {
@@ -1133,24 +1290,23 @@ export function AddMaterialScreen() {
       unit: (item.unit || 'each') as Material['unit'],
       price: price,
       totalPrice: price * 1,
-      // Personal rates and imported supplier-list items must NOT be re-priced
-      // against Bunnings/Reece — flag as a manual override so the pricing
-      // fallback chain in MaterialsListScreen skips them.
       manualPriceOverride: isPersonalRate,
       searchTerm: item.productName,
-      // Only retail product mappings carry productUrl / bunningsItemNumber.
-      // Imported supplier-list items are not Bunnings products.
       productUrl: isPersonalRate ? undefined : item.productUrl,
       bunningsItemNumber: isPersonalRate ? undefined : item.itemNumber,
       imageUrl: item.imageUrl,
       pricingSource: isPersonalRate || item.store === 'manual' ? 'manual' : 'scraper',
-      // Link back to the supplier book entry so editing this quote material
-      // syncs the price/unit/etc changes back to the supplier book.
       favoriteProduct: favShape as FavoriteProductMapping,
     };
 
     addMaterialToQuote(newMaterial);
   };
+  const handleSelectSavedItemRef = useRef(handleSelectSavedItemImpl);
+  handleSelectSavedItemRef.current = handleSelectSavedItemImpl;
+  const handleSelectSavedItem = useCallback(
+    (item: any) => handleSelectSavedItemRef.current(item),
+    [],
+  );
 
   const handleSelectRecentMaterial = (material: Material) => {
     const newMaterial: Material = {
@@ -1162,9 +1318,9 @@ export function AddMaterialScreen() {
     addMaterialToQuote(newMaterial);
   };
 
-  const handleDeleteSavedItem = (item: any) => {
+  const handleDeleteSavedItem = useCallback((item: any) => {
     setDeleteItemDialog({ visible: true, item });
-  };
+  }, []);
 
   const confirmDeleteSavedItem = async () => {
     const item = deleteItemDialog.item;
@@ -1427,58 +1583,12 @@ export function AddMaterialScreen() {
             data={searchResults}
             keyExtractor={(item, index) => item.itemNumber || `result-${index}`}
             scrollEnabled={false}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.resultItem}
-                onPress={() => handleSelectProduct(item)}
-              >
-                {item.imageUrl && (
-                  <Image
-                    source={{ uri: item.imageUrl }}
-                    style={styles.resultImage}
-                    resizeMode="contain"
-                  />
-                )}
-                <View style={styles.resultInfo}>
-                  <Text style={styles.resultName}>
-                    {item.productName || item.description}
-                  </Text>
-                  <Text style={styles.resultDetails}>
-                    {item.itemNumber && `Item #: ${item.itemNumber}`}
-                    {item.brand && item.brand.toLowerCase() !== 'bunnings' && ` • ${item.brand}`}
-                  </Text>
-                  {item.price > 0 && (
-                    <Text style={styles.resultPrice}>
-                      {formatCurrency(item.price)}
-                    </Text>
-                  )}
-                  {item.isAiEstimate && (
-                    <Chip
-                      icon="robot"
-                      mode="outlined"
-                      compact
-                      style={styles.aiChip}
-                      textStyle={styles.aiChipText}
-                    >
-                      AI Estimate
-                    </Chip>
-                  )}
-                  {item.isLocalSource && (
-                    <Chip
-                      icon={item.localSource === 'template' ? 'shape-outline' : 'bookmark-outline'}
-                      mode="outlined"
-                      compact
-                      style={styles.aiChip}
-                      textStyle={styles.aiChipText}
-                    >
-                      {item.localSourceLabel}
-                    </Chip>
-                  )}
-                </View>
-                <IconButton icon="chevron-right" size={20} />
-              </TouchableOpacity>
-            )}
-            ItemSeparatorComponent={() => <Divider />}
+            removeClippedSubviews
+            initialNumToRender={10}
+            maxToRenderPerBatch={6}
+            windowSize={5}
+            renderItem={renderSearchResult}
+            ItemSeparatorComponent={ResultDivider}
           />
         </View>
       )}
@@ -1501,308 +1611,42 @@ export function AddMaterialScreen() {
   const linkedToSupplierBook = isEditMode && !!editingMaterial?.favoriteProduct;
 
   const renderManualEntrySection = () => (
-    <View ref={manualEntrySectionRef} style={styles.section}>
-      {linkedToSupplierBook && (
-        <View style={styles.linkedBanner}>
-          <MaterialCommunityIcons name="link-variant" size={16} color={colors.primary} />
-          <Text style={styles.linkedBannerText}>
-            Linked to your supplier book — changes save to both
-          </Text>
-        </View>
-      )}
-      {!isEditMode && !isSavedItemMode && (
-        <View style={styles.manualEntryHeader}>
-          <View style={styles.manualEntryDividerLine} />
-          <Text style={styles.manualEntryHeaderText}>
-            {isPro ? 'add manually' : 'Add Material'}
-          </Text>
-          <View style={styles.manualEntryDividerLine} />
-        </View>
-      )}
-
-      <TextInput
-        ref={materialNameRef}
-        label={isSavedItemMode ? 'Item name *' : 'Material Name *'}
-        value={manualName}
-        onChangeText={setManualName}
-        mode="outlined"
-        style={styles.input}
-        placeholder="e.g., Custom timber piece"
-      />
-
-      {isSavedItemMode ? (
-        <TextInput
-          label="Price per unit"
-          value={manualPrice}
-          onChangeText={setManualPrice}
-          mode="outlined"
-          keyboardType="decimal-pad"
-          placeholder="Optional"
-          left={<TextInput.Affix text="$" />}
-          style={styles.input}
-        />
-      ) : (
-        <View style={styles.row}>
-          <View style={[styles.halfWidth, styles.quantityStepperContainer]}>
-            <Text style={styles.quantityLabel}>Quantity *</Text>
-            <View style={styles.quantityStepper}>
-              <TouchableOpacity
-                style={styles.stepperButton}
-                onPress={() => {
-                  const current = parseFloat(manualQuantity) || 1;
-                  if (current > 1) setManualQuantity((current - 1).toString());
-                }}
-              >
-                <MaterialCommunityIcons name="minus" size={20} color={colors.primary} />
-              </TouchableOpacity>
-              <TextInput
-                value={manualQuantity}
-                onChangeText={setManualQuantity}
-                mode="flat"
-                keyboardType="decimal-pad"
-                style={styles.quantityInput}
-                contentStyle={styles.quantityInputContent}
-                underlineStyle={{ display: 'none' }}
-              />
-              <TouchableOpacity
-                style={styles.stepperButton}
-                onPress={() => {
-                  const current = parseFloat(manualQuantity) || 0;
-                  setManualQuantity((current + 1).toString());
-                }}
-              >
-                <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <TextInput
-            label="Price per Unit"
-            value={manualPrice}
-            onChangeText={setManualPrice}
-            mode="outlined"
-            keyboardType="decimal-pad"
-            placeholder="Optional"
-            left={<TextInput.Affix text="$" />}
-            style={[styles.input, styles.halfWidth]}
-          />
-        </View>
-      )}
-
-      <View style={styles.unitSelector}>
-        <Text style={styles.unitLabel}>Unit</Text>
-        <View style={styles.unitButtons}>
-          <SegmentedButtons
-            value={manualUnit}
-            onValueChange={(value) => setManualUnit(value as Material['unit'])}
-            buttons={[
-              { value: 'each', label: 'Each' },
-              { value: 'm', label: 'M' },
-              { value: 'm²', label: 'm²' },
-              { value: 'm³', label: 'm³' },
-            ]}
-            style={styles.unitRow}
-          />
-          <SegmentedButtons
-            value={manualUnit}
-            onValueChange={(value) => setManualUnit(value as Material['unit'])}
-            buttons={[
-              { value: 'L', label: 'L' },
-              { value: 'kg', label: 'Kg' },
-              { value: 'box', label: 'Box' },
-              { value: 'pack', label: 'Pack' },
-            ]}
-            style={styles.unitRow}
-          />
-        </View>
-      </View>
-
-
-      {/* Section Picker */}
-      {!isSavedItemMode && existingSections.length > 0 && (
-        <View style={styles.categorySelector}>
-          <Text style={styles.unitLabel}>Section (for grouping)</Text>
-          <TouchableOpacity
-            style={styles.categoryButton}
-            onPress={() => setShowSectionPicker(!showSectionPicker)}
-          >
-            <MaterialCommunityIcons
-              name="folder-outline"
-              size={20}
-              color={colors.primary}
-            />
-            <Text style={styles.categoryButtonText}>
-              {selectedSection || 'No Section'}
-            </Text>
-            <MaterialCommunityIcons
-              name={showSectionPicker ? 'chevron-up' : 'chevron-down'}
-              size={20}
-              color={colors.onSurface}
-            />
-          </TouchableOpacity>
-          {showSectionPicker && (
-            <View style={styles.categoryList}>
-              <TouchableOpacity
-                style={[styles.categoryItem, !selectedSection && styles.categoryItemSelected]}
-                onPress={() => { setSelectedSection(''); setShowSectionPicker(false); }}
-              >
-                <Text style={[styles.categoryItemText, !selectedSection && styles.categoryItemTextSelected]}>No Section</Text>
-              </TouchableOpacity>
-              {existingSections.map((name) => (
-                <TouchableOpacity
-                  key={name}
-                  style={[styles.categoryItem, selectedSection === name && styles.categoryItemSelected]}
-                  onPress={() => { setSelectedSection(name); setShowSectionPicker(false); }}
-                >
-                  <Text style={[styles.categoryItemText, selectedSection === name && styles.categoryItemTextSelected]}>{name}</Text>
-                  {selectedSection === name && (
-                    <MaterialCommunityIcons name="check" size={18} color={colors.primary} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
-      )}
-
-      {/* "Save to supplier book" toggle — only in normal add-to-quote mode.
-          In supplier-book edit/create mode the form IS the supplier-book editor,
-          so the toggle is redundant. */}
-      {!isSavedItemMode && (
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Save to supplier book</Text>
-          <Switch
-            value={isPersonalRate}
-            onValueChange={setIsPersonalRate}
-            color={colors.primary}
-          />
-        </View>
-      )}
-
-      {(isPersonalRate || isSavedItemMode) && (
-        <View style={isSavedItemMode ? undefined : styles.personalRateFields}>
-          {!isSavedItemMode && (
-            <Text style={styles.personalRateHelper}>
-              When auto-generate sees a matching job, it will use this rate instead of searching retail.
-            </Text>
-          )}
-
-          {/* Supplier picker — dropdown of existing suppliers, with free-text fallback */}
-          <View style={styles.categorySelector}>
-            <Text style={styles.unitLabel}>Supplier</Text>
-            <TouchableOpacity
-              style={styles.categoryButton}
-              onPress={() => setSupplierPickerOpen(!supplierPickerOpen)}
-              activeOpacity={0.7}
-            >
-              <MaterialCommunityIcons name="store-outline" size={20} color={colors.primary} />
-              <Text style={styles.categoryButtonText}>
-                {supplierName || 'Choose or type a supplier'}
-              </Text>
-              <MaterialCommunityIcons
-                name={supplierPickerOpen ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color={colors.onSurface}
-              />
-            </TouchableOpacity>
-            {supplierPickerOpen && (
-              <View style={styles.categoryList}>
-                {savedItemSupplierOptions.length === 0 && (
-                  <View style={styles.categoryItem}>
-                    <Text style={[styles.categoryItemText, { color: colors.textMuted }]}>
-                      No saved suppliers yet — type a name below
-                    </Text>
-                  </View>
-                )}
-                {savedItemSupplierOptions.map((name) => (
-                  <TouchableOpacity
-                    key={name}
-                    style={[styles.categoryItem, supplierName === name && styles.categoryItemSelected]}
-                    onPress={() => {
-                      setSupplierName(name);
-                      setSupplierPickerOpen(false);
-                    }}
-                  >
-                    <Text style={[styles.categoryItemText, supplierName === name && styles.categoryItemTextSelected]}>
-                      {name}
-                    </Text>
-                    {supplierName === name && (
-                      <MaterialCommunityIcons name="check" size={18} color={colors.primary} />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-            <TextInput
-              value={supplierName}
-              onChangeText={setSupplierName}
-              mode="outlined"
-              dense
-              placeholder="Or type a new supplier name"
-              style={[styles.input, { marginTop: 8 }]}
-            />
-          </View>
-
-          <TextInput
-            label="Match keywords (comma-separated)"
-            value={rateKeywords}
-            onChangeText={setRateKeywords}
-            mode="outlined"
-            placeholder="e.g. concrete, slab, footing"
-            style={styles.input}
-          />
-
-          {/* Coverage is an advanced concept — only relevant when one purchasable
-              unit contains a fixed amount of work-volume (e.g. a half-cube mulch
-              bag, a 13 m² FC sheet). Hidden behind a disclosure to keep the form
-              clean for the common case. */}
-          <TouchableOpacity
-            style={styles.advancedToggle}
-            onPress={() => setShowCoverageOptions(!showCoverageOptions)}
-            activeOpacity={0.7}
-          >
-            <MaterialCommunityIcons
-              name={showCoverageOptions ? 'chevron-up' : 'chevron-down'}
-              size={18}
-              color={colors.primary}
-            />
-            <Text style={styles.advancedToggleText}>
-              {showCoverageOptions ? 'Hide' : 'Show'} coverage settings
-            </Text>
-          </TouchableOpacity>
-
-          {showCoverageOptions && (
-            <View>
-              <Text style={styles.coverageHelper}>
-                Use this only when one purchasable unit covers a fixed amount of work
-                — e.g. a sheet that covers 13 m², or a bag that contains ½ m³ of mulch.
-              </Text>
-              <TextInput
-                label="Coverage per unit"
-                value={coveragePerUnit}
-                onChangeText={setCoveragePerUnit}
-                mode="outlined"
-                keyboardType="decimal-pad"
-                placeholder="e.g. 13"
-                style={styles.input}
-              />
-              <Text style={styles.unitLabel}>Coverage unit</Text>
-              <SegmentedButtons
-                value={coverageUnit}
-                onValueChange={(value) => setCoverageUnit(value as 'm²' | 'm³' | 'm' | 'none')}
-                buttons={[
-                  { value: 'm²', label: 'm²' },
-                  { value: 'm³', label: 'm³' },
-                  { value: 'm', label: 'm' },
-                  { value: 'none', label: 'None' },
-                ]}
-                style={styles.unitRow}
-              />
-            </View>
-          )}
-        </View>
-      )}
-    </View>
+    <ManualEntrySection
+      sectionRef={manualEntrySectionRef}
+      materialNameRef={materialNameRef}
+      linkedToSupplierBook={linkedToSupplierBook}
+      isEditMode={isEditMode}
+      isSavedItemMode={isSavedItemMode}
+      isPro={isPro}
+      existingSections={existingSections}
+      savedItemSupplierOptions={savedItemSupplierOptions}
+      manualName={manualName}
+      setManualName={setManualName}
+      manualPrice={manualPrice}
+      setManualPrice={setManualPrice}
+      manualQuantity={manualQuantity}
+      setManualQuantity={setManualQuantity}
+      manualUnit={manualUnit}
+      setManualUnit={setManualUnit}
+      selectedSection={selectedSection}
+      setSelectedSection={setSelectedSection}
+      showSectionPicker={showSectionPicker}
+      setShowSectionPicker={setShowSectionPicker}
+      isPersonalRate={isPersonalRate}
+      setIsPersonalRate={setIsPersonalRate}
+      supplierName={supplierName}
+      setSupplierName={setSupplierName}
+      supplierPickerOpen={supplierPickerOpen}
+      setSupplierPickerOpen={setSupplierPickerOpen}
+      rateKeywords={rateKeywords}
+      setRateKeywords={setRateKeywords}
+      showCoverageOptions={showCoverageOptions}
+      setShowCoverageOptions={setShowCoverageOptions}
+      coveragePerUnit={coveragePerUnit}
+      setCoveragePerUnit={setCoveragePerUnit}
+      coverageUnit={coverageUnit}
+      setCoverageUnit={setCoverageUnit}
+    />
   );
 
   // Recently Used section
@@ -1936,6 +1780,40 @@ export function AddMaterialScreen() {
     </TouchableOpacity>
   );
 
+  // Stable callbacks used by SavedItemRow. Keeping them out of the inline
+  // renderItem lets React.memo on SavedItemRow actually skip re-renders.
+  const handleToggleSavedExpand = useCallback((key: string) => {
+    setExpandedSavedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const handleEditSavedItem = useCallback(
+    (key: string) => {
+      (navigation as any).push(editRouteName, { savedItemKey: key });
+    },
+    [navigation, editRouteName],
+  );
+
+  const renderSavedItem = useCallback(
+    ({ item }: { item: any }) => (
+      <SavedItemRow
+        item={item}
+        isExpanded={expandedSavedItems.has(item.key)}
+        selectable={!supplierBookOnly}
+        editRouteName={editRouteName}
+        onToggleExpand={handleToggleSavedExpand}
+        onSelect={handleSelectSavedItem}
+        onEdit={handleEditSavedItem}
+        onDelete={handleDeleteSavedItem}
+      />
+    ),
+    [expandedSavedItems, supplierBookOnly, editRouteName, handleToggleSavedExpand, handleSelectSavedItem, handleEditSavedItem, handleDeleteSavedItem],
+  );
+
   // Group saved items by supplier (`store`) for the SectionList. Personal-rate
   // suppliers come first (alphabetical), then any "manual" / unspecified bucket
   // last. Items within a section keep their original order. Collapsed sections
@@ -2025,6 +1903,10 @@ export function AddMaterialScreen() {
           keyExtractor={(item) => item.key}
           contentContainerStyle={[styles.savedList, { paddingBottom: safeInsets.bottom + 24 }]}
           stickySectionHeadersEnabled={false}
+          removeClippedSubviews
+          initialNumToRender={12}
+          maxToRenderPerBatch={8}
+          windowSize={7}
           renderSectionHeader={({ section }) => {
             const title = section.title;
             const isEditable = title !== 'Other items';
@@ -2106,60 +1988,7 @@ export function AddMaterialScreen() {
               </View>
             );
           }}
-          renderItem={({ item }) => {
-            // Adapt the saved favorite to the Material shape MaterialItemCard
-            // expects so the Saved tab renders consistently with the main
-            // materials list (and any future card improvements land here too).
-            const storeLower = (item.store || '').toLowerCase();
-            const isReeceItem = storeLower.includes('reece');
-            const isBunningsItem = storeLower.includes('bunnings');
-            const synthetic: Material = {
-              id: item.key,
-              name: item.productName,
-              quantity: 1,
-              unit: (item.unit || 'each') as Material['unit'],
-              price: item.price ?? 0,
-              totalPrice: item.price ?? 0,
-              manualPriceOverride: item.isPersonalRate === true,
-              searchTerm: item.productName,
-              imageUrl: item.imageUrl,
-              productUrl: item.productUrl,
-              description: item.notes || undefined,
-              brand: item.brand || undefined,
-              bunningsItemNumber: !item.isPersonalRate && isBunningsItem ? item.itemNumber : undefined,
-              reeceItemNumber: !item.isPersonalRate && isReeceItem ? item.itemNumber : undefined,
-              pricingSource: item.isPersonalRate ? 'manual' : 'scraper',
-              favoriteProduct: item as FavoriteProductMapping,
-            };
-            return (
-              <SwipeableCard
-                rightActions={[
-                  {
-                    icon: 'delete-outline',
-                    label: 'Delete',
-                    color: colors.error,
-                    bgColor: colors.error + '18',
-                    onPress: () => handleDeleteSavedItem(item),
-                  },
-                ]}
-              >
-                <MaterialItemCard
-                  material={synthetic}
-                  readOnly
-                  isExpanded={expandedSavedItems.has(item.key)}
-                  onToggleExpand={() => setExpandedSavedItems(prev => {
-                    const next = new Set(prev);
-                    next.has(item.key) ? next.delete(item.key) : next.add(item.key);
-                    return next;
-                  })}
-                  onPress={supplierBookOnly ? undefined : () => handleSelectSavedItem(item)}
-                  onOpenInStore={item.productUrl ? () => Linking.openURL(item.productUrl) : undefined}
-                  onEdit={() => (navigation as any).push(editRouteName, { savedItemKey: item.key })}
-                  onDelete={() => handleDeleteSavedItem(item)}
-                />
-              </SwipeableCard>
-            );
-          }}
+          renderItem={renderSavedItem}
           ItemSeparatorComponent={() => <View style={styles.savedItemSeparator} />}
         />
       )}
@@ -2438,706 +2267,3 @@ export function AddMaterialScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  tabBar: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  tabContent: {
-    flex: 1,
-  },
-  syncedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: colors.primary + '1A',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    marginLeft: 6,
-  },
-  syncedBadgeText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  discoverCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginBottom: 4,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: colors.surface,
-    borderRadius: 10,
-  },
-  discoverCardText: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.text,
-    fontWeight: '500',
-  },
-  importCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    backgroundColor: colors.primary + '14',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.primary + '38',
-  },
-  importCardIconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: colors.primary + '22',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  importCardBody: {
-    flex: 1,
-  },
-  importCardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.onSurface,
-  },
-  importCardSubtitle: {
-    marginTop: 2,
-    fontSize: 12,
-    color: colors.textMuted,
-  },
-  importCardChevron: {
-    marginLeft: 4,
-  },
-  addManuallyLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    marginBottom: 4,
-  },
-  addManuallyLinkText: {
-    marginLeft: 6,
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  advancedToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    marginTop: 4,
-  },
-  advancedToggleText: {
-    marginLeft: 4,
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  coverageHelper: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginBottom: 8,
-    lineHeight: 16,
-  },
-  linkedBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.primary + '14',
-    borderColor: colors.primary + '38',
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
-  },
-  linkedBannerText: {
-    flex: 1,
-    marginLeft: 8,
-    fontSize: 12,
-    color: colors.text,
-    fontWeight: '500',
-  },
-  // Pill toggle — same shape as the Hours/Days control on the labor screen.
-  pillToggleRow: {
-    flexDirection: 'row',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
-  },
-  pillToggleBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    paddingVertical: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-  },
-  pillToggleIcon: {
-    marginRight: 6,
-  },
-  pillToggleBtnActive: {
-    backgroundColor: colors.primary,
-  },
-  pillToggleText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textMuted,
-  },
-  pillToggleTextActive: {
-    color: '#FFFFFF',
-  },
-  // Supplier section header — modeled on the materials-list section card header
-  supplierHeader: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginTop: 12,
-    marginBottom: 8,
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-  },
-  supplierHeaderTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  supplierHeaderContactRow: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-  },
-  supplierHeaderChevron: {
-    width: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  supplierHeaderNameWrap: {
-    flex: 1,
-    paddingHorizontal: 4,
-  },
-  supplierHeaderName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  supplierHeaderCount: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  supplierHeaderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  supplierHeaderActionBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  savedItemSeparator: {
-    height: 0,
-  },
-  scrollContent: {
-    paddingBottom: 140,
-  },
-  section: {
-    padding: 16,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 12,
-  },
-  manualEntryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    gap: 12,
-  },
-  manualEntryDividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.border,
-  },
-  manualEntryHeaderText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.onSurface,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  searchTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  proSearchPrompt: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    gap: 8,
-  },
-  proSearchPromptText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    textAlign: 'center',
-  },
-  proSearchPromptCta: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  searchInput: {
-    marginBottom: 16,
-  },
-  searchBarContainer: {
-    marginBottom: 16,
-    gap: 10,
-  },
-  searchBarInputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingLeft: 12,
-  },
-  searchBarIcon: {
-    marginRight: 4,
-  },
-  searchBarInput: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    height: 48,
-  },
-  searchBarInputContent: {
-    paddingLeft: 0,
-  },
-  searchBarButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    gap: 8,
-  },
-  searchBarButtonCancel: {
-    backgroundColor: colors.textMuted,
-  },
-  searchBarButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  supplierChipsRow: {
-    flexDirection: 'row',
-    marginBottom: 12,
-    maxHeight: 36,
-  },
-  supplierChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    marginRight: 8,
-  },
-  supplierChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  supplierChipText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.textMuted,
-  },
-  supplierChipTextActive: {
-    color: '#FFFFFF',
-  },
-  loadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  loadingText: {
-    marginLeft: 12,
-    fontSize: 14,
-    color: colors.onSurface,
-  },
-  resultsContainer: {
-    marginTop: 8,
-  },
-  resultsHeader: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 12,
-    color: colors.onSurface,
-  },
-  resultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  resultImage: {
-    width: 60,
-    height: 60,
-    marginRight: 12,
-    borderRadius: 8,
-    backgroundColor: colors.surfaceLight,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  resultInfo: {
-    flex: 1,
-  },
-  resultName: {
-    fontSize: 15,
-    fontWeight: '500',
-    marginBottom: 4,
-    color: colors.text,
-  },
-  resultDetails: {
-    fontSize: 12,
-    color: colors.onSurface,
-    marginBottom: 4,
-  },
-  resultPrice: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
-    marginBottom: 4,
-  },
-  aiChip: {
-    alignSelf: 'flex-start',
-    marginTop: 4,
-  },
-  aiChipText: {
-    fontSize: 10,
-  },
-  recentChipsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  recentChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    gap: 6,
-  },
-  recentChipName: {
-    fontSize: 13,
-    color: colors.text,
-    maxWidth: 150,
-  },
-  recentChipPrice: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  divider: {
-    marginVertical: 8,
-  },
-  input: {
-    marginBottom: 12,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  halfWidth: {
-    flex: 1,
-  },
-  quantityStepperContainer: {
-    marginBottom: 12,
-  },
-  quantityLabel: {
-    fontSize: 12,
-    color: colors.onSurface,
-    marginBottom: 6,
-    marginLeft: 4,
-  },
-  quantityStepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    height: 48,
-  },
-  stepperButton: {
-    width: 44,
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quantityInput: {
-    flex: 1,
-    textAlign: 'center',
-    backgroundColor: 'transparent',
-    height: 48,
-  },
-  quantityInputContent: {
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  unitSelector: {
-    marginBottom: 16,
-  },
-  unitLabel: {
-    fontSize: 12,
-    color: colors.onSurface,
-    marginBottom: 8,
-    marginLeft: 4,
-  },
-  unitButtons: {
-    gap: 8,
-  },
-  unitRow: {
-    marginBottom: 4,
-  },
-  categorySelector: {
-    marginBottom: 16,
-  },
-  categoryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    padding: 12,
-    gap: 8,
-  },
-  categoryButtonText: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.text,
-  },
-  categoryList: {
-    marginTop: 8,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    maxHeight: 250,
-    overflow: 'hidden',
-  },
-  categoryItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    gap: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  categoryItemSelected: {
-    backgroundColor: colors.primaryBg,
-  },
-  categoryItemText: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.text,
-  },
-  categoryItemTextSelected: {
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-    paddingVertical: 8,
-  },
-  toggleLabel: {
-    fontSize: 14,
-    color: colors.text,
-    flex: 1,
-    marginRight: 12,
-  },
-  savedList: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  savedItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    marginBottom: 8,
-    borderRadius: 8,
-    overflow: 'hidden',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-  },
-  savedIcon: {
-    marginRight: 12,
-  },
-  savedItemImage: {
-    width: 50,
-    height: 50,
-    marginRight: 12,
-    borderRadius: 8,
-    backgroundColor: colors.surfaceLight,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  savedInfo: {
-    flex: 1,
-  },
-  savedNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  savedName: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: colors.text,
-    flexShrink: 1,
-  },
-  myRateChip: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  myRateChipText: {
-    color: colors.surface,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  personalRateFields: {
-    marginTop: 4,
-    marginBottom: 8,
-    padding: 12,
-    backgroundColor: colors.surfaceLight,
-    borderRadius: 8,
-    gap: 8,
-  },
-  personalRateHelper: {
-    fontSize: 12,
-    color: colors.onSurface,
-    marginBottom: 4,
-    lineHeight: 16,
-  },
-  savedDetails: {
-    fontSize: 12,
-    color: colors.onSurface,
-    marginBottom: 2,
-  },
-  savedPrice: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-  },
-  emptyStateTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  cantFindItPrompt: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    marginTop: 8,
-  },
-  cantFindItText: {
-    marginLeft: 8,
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  addManuallySearchLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 12,
-    marginTop: 8,
-  },
-  addManuallySearchLinkText: {
-    marginLeft: 8,
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  addFromInvoiceLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-  },
-  addFromInvoiceLinkText: {
-    marginLeft: 8,
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  manualSheetFooter: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  manualSheetButton: {
-    borderRadius: 12,
-  },
-  manualSheetButtonContent: {
-    paddingVertical: 6,
-  },
-});

@@ -3,8 +3,8 @@
  * Shows materials vs labor vs markup split for accepted quotes
  */
 
-import React, { useEffect, useRef, useMemo } from 'react';
-import { View, StyleSheet, Animated } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, StyleSheet } from 'react-native';
 import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -23,8 +23,6 @@ const SEGMENTS = [
 ];
 
 export function CostBreakdownChart({ quotes }: CostBreakdownChartProps) {
-  const animatedWidths = useRef(SEGMENTS.map(() => new Animated.Value(0))).current;
-
   const breakdown = useMemo(() => {
     const accepted = quotes.filter((q) => q.status === 'accepted' || q.status === 'completed');
     const materials = accepted.reduce((sum, q) => sum + q.materialsSubtotal, 0);
@@ -44,19 +42,6 @@ export function CostBreakdownChart({ quotes }: CostBreakdownChartProps) {
     };
   }, [quotes]);
 
-  useEffect(() => {
-    const animations = animatedWidths.map((anim, i) => {
-      anim.setValue(0);
-      return Animated.timing(anim, {
-        toValue: breakdown.percentages[i],
-        duration: 800,
-        delay: 200 + i * 100,
-        useNativeDriver: false,
-      });
-    });
-    Animated.parallel(animations).start();
-  }, [breakdown]);
-
   if (breakdown.jobCount === 0) {
     return null;
   }
@@ -72,26 +57,20 @@ export function CostBreakdownChart({ quotes }: CostBreakdownChartProps) {
 
       {/* Stacked bar */}
       <View style={styles.stackedBar}>
-        {SEGMENTS.map((seg, i) => {
-          const width = animatedWidths[i].interpolate({
-            inputRange: [0, 100],
-            outputRange: ['0%', '100%'],
-          });
-          return (
-            <Animated.View
-              key={seg.key}
-              style={[
-                styles.stackedSegment,
-                {
-                  width,
-                  backgroundColor: seg.color,
-                },
-                i === 0 && styles.stackedFirst,
-                i === SEGMENTS.length - 1 && styles.stackedLast,
-              ]}
-            />
-          );
-        })}
+        {SEGMENTS.map((seg, i) => (
+          <View
+            key={seg.key}
+            style={[
+              styles.stackedSegment,
+              {
+                width: `${breakdown.percentages[i]}%`,
+                backgroundColor: seg.color,
+              },
+              i === 0 && styles.stackedFirst,
+              i === SEGMENTS.length - 1 && styles.stackedLast,
+            ]}
+          />
+        ))}
       </View>
 
       {/* Legend rows */}

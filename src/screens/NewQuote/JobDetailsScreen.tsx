@@ -50,7 +50,7 @@ import { getTradeCategoryById, getTradeNicheById, PRICING_METHODS } from '../../
 import { createJobFromTemplate } from '../../utils/materialsEstimator';
 import { colors } from '../../theme';
 import { JobTemplate, QuotePhoto } from '../../types';
-import { analyzeJobDescription, convertLLMMaterialsToMaterials, cleanupTranscriptionAndGenerateTitle, TemplateMatchInput } from '../../services/llmService';
+import type { TemplateMatchInput } from '../../services/llmService';
 import { loadTemplates } from '../../services/sectionTemplateService';
 import { generateId } from '../../utils/generateId';
 import { getRecentJobTypeIds, recordJobTypeUsed, sortByRecency } from '../../utils/recentJobTypes';
@@ -78,7 +78,13 @@ export function JobDetailsScreen() {
   const isEditFromPreview = route.params?.editing === true;
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { quotes, invoices, businessSettings, subscriptionStatus, saveDraft, unifiedTourActive, unifiedTourPhase } = useStore();
+  const quotes = useStore((s) => s.quotes);
+  const invoices = useStore((s) => s.invoices);
+  const businessSettings = useStore((s) => s.businessSettings);
+  const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  const saveDraft = useStore((s) => s.saveDraft);
+  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
+  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -375,90 +381,55 @@ export function JobDetailsScreen() {
     Alert.alert('Voice Recognition Error', event.error || 'Could not recognize speech');
   });
 
-  // Beautiful animations for recording button
+  // Beautiful animations for recording button. The four loops were previously
+  // started without being stored, so toggling isRecording or unmounting the
+  // screen left them running forever — every Start/Stop press stacked another
+  // 4 loops on top of the previous, eventually causing GPU compositing thrash.
   useEffect(() => {
-    if (isRecording) {
-      // Pulse animation - smooth breathing effect
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.15,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-
-      // Glow animation - pulsing glow effect
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(glowAnim, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(glowAnim, {
-            toValue: 0,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-
-      // Ripple animation - expanding rings
-      Animated.loop(
-        Animated.timing(rippleAnim, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        })
-      ).start();
-
-      // Subtle rotation for microphone icon
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(rotateAnim, {
-            toValue: 1,
-            duration: 2000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(rotateAnim, {
-            toValue: 0,
-            duration: 2000,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    } else {
-      // Reset all animations smoothly
+    if (!isRecording) {
+      // Reset all animations smoothly back to idle.
       Animated.parallel([
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(glowAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(rippleAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(rotateAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(rippleAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(rotateAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
       ]).start();
+      return;
     }
+
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.15, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ])
+    );
+    const glowLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 0, duration: 1500, useNativeDriver: true }),
+      ])
+    );
+    const rippleLoop = Animated.loop(
+      Animated.timing(rippleAnim, { toValue: 1, duration: 2000, useNativeDriver: true })
+    );
+    const rotateLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(rotateAnim, { toValue: 1, duration: 2000, useNativeDriver: true }),
+        Animated.timing(rotateAnim, { toValue: 0, duration: 2000, useNativeDriver: true }),
+      ])
+    );
+
+    pulseLoop.start();
+    glowLoop.start();
+    rippleLoop.start();
+    rotateLoop.start();
+
+    return () => {
+      pulseLoop.stop();
+      glowLoop.stop();
+      rippleLoop.stop();
+      rotateLoop.stop();
+    };
   }, [isRecording]);
 
   useEffect(() => {
@@ -727,6 +698,7 @@ export function JobDetailsScreen() {
       const pillSpecInput = nichePills.length > 0
         ? nichePills.map(p => ({ id: p.id, label: p.label }))
         : undefined;
+      const { cleanupTranscriptionAndGenerateTitle } = await import('../../services/llmService');
       const result = await cleanupTranscriptionAndGenerateTitle(jobDescription, templateInputs, pillSpecInput);
       setJobDescription(result.cleanedDescription);
       if (result.suggestedTitle && !jobName) {
@@ -953,7 +925,8 @@ export function JobDetailsScreen() {
       ? jobPhotos.map(p => p.storageUrl).filter(Boolean)
       : undefined;
 
-    analyzeJobDescription(jobDescription, tradeContext, photoUrlsForAi)
+    import('../../services/llmService').then(({ analyzeJobDescription, convertLLMMaterialsToMaterials }) =>
+      analyzeJobDescription(jobDescription, tradeContext, photoUrlsForAi)
       .then((analysis) => {
         // Convert LLM materials to app materials format
         const baseMaterials = convertLLMMaterialsToMaterials(analysis.materials);
@@ -1001,7 +974,8 @@ export function JobDetailsScreen() {
       })
       .finally(() => {
         setIsAnalyzing(false);
-      });
+      })
+    );
   };
 
   const handleSaveAndReturn = () => {

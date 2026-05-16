@@ -264,7 +264,29 @@ export function DashboardScreen() {
   }, []);
   const navigation = useNavigation<any>();
   const jobActions = useJobActionsSheet(navigation);
-  const { quotes, businessSettings, createNewQuote, setCurrentQuote, duplicateQuote, deleteQuote, saveQuote, canCreateQuote, subscriptionStatus, createInvoiceFromQuote, saveInvoice, loadQuotes, saveDraft, hasSeenTour, unifiedTourActive, unifiedTourPhase, startUnifiedTour } = useStore();
+  // Selector-form subscriptions — each field tracks independently so the
+  // screen only re-renders when its actual reads change, not on any store
+  // mutation. Replaces a single useStore() destructure that re-rendered on
+  // every store write (the prime "janky return to home" suspect).
+  const quotes = useStore((s) => s.quotes);
+  const businessSettings = useStore((s) => s.businessSettings);
+  const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  const hasSeenTour = useStore((s) => s.hasSeenTour);
+  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
+  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
+  // Action handles are stable Zustand fn refs — subscribing is a no-op
+  // re-render-wise but keeps the call sites unchanged.
+  const createNewQuote = useStore((s) => s.createNewQuote);
+  const setCurrentQuote = useStore((s) => s.setCurrentQuote);
+  const duplicateQuote = useStore((s) => s.duplicateQuote);
+  const deleteQuote = useStore((s) => s.deleteQuote);
+  const saveQuote = useStore((s) => s.saveQuote);
+  const canCreateQuote = useStore((s) => s.canCreateQuote);
+  const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
+  const saveInvoice = useStore((s) => s.saveInvoice);
+  const loadQuotes = useStore((s) => s.loadQuotes);
+  const saveDraft = useStore((s) => s.saveDraft);
+  const startUnifiedTour = useStore((s) => s.startUnifiedTour);
   const { registerRef } = useTourRefs();
   const [tourActive, setTourActive] = useState(false);
 

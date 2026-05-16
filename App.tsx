@@ -4,8 +4,8 @@
  */
 
 import 'react-native-gesture-handler';
-import React, { useEffect, useState } from 'react';
-import { Platform, View, Image, StyleSheet, LogBox } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Platform, View, Image, StyleSheet, LogBox, InteractionManager } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -68,6 +68,13 @@ export default function App() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [userDataLoaded, setUserDataLoaded] = useState(false);
+  // Tracks which uid we've already completed first-sign-in setup for.
+  // Firebase fires onAuthStateChanged on EVERY token refresh — including the
+  // refresh that getIdToken() in xeroService.ts (and others) triggers shortly
+  // after sign-in. Without this guard, the splash flashes back into view a
+  // few seconds after the dashboard mounts, and the data-load Promise.all
+  // runs twice — which feels (and looks) like the app reloading itself.
+  const initialisedForUidRef = useRef<string | null>(null);
   const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, checkTourStatus, loadXeroConnection, loadContacts, loadDocuments, listenToDocuments } = useStore();
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [showUpdateSheet, setShowUpdateSheet] = useState(false);
@@ -105,22 +112,43 @@ export default function App() {
 
       // When user signs in, reload data from Firestore and set up listeners
       if (currentUser) {
+        // Token-refresh re-fires this callback for the same user. Without this
+        // short-circuit the splash would reappear (`setUserDataLoaded(false)`)
+        // and Promise.all would run again every ~hour or whenever getIdToken()
+        // refreshes — felt like "the app reloaded itself" after sign-in,
+        // triggered by Xero's getIdToken() call from the deferred batch.
+        if (initialisedForUidRef.current === newUid && newUid !== null) {
+          return;
+        }
+        initialisedForUidRef.current = newUid;
+
         setUserDataLoaded(false); // Reset when new user signs in
 
+        // Critical-for-first-paint: dashboard needs quotes, business settings,
+        // subscription (trial banner), onboarding flag (router gate), tour
+        // status, and the quote-number counter. Everything else gets deferred
+        // until after first paint so the splash dismisses sooner.
         await Promise.all([
           loadQuotes(),
-          loadDocuments(),
-          useJobStore.getState().loadJobs(),
           loadBusinessSettings(),
           checkOnboarding(),
           loadSubscription(),
           loadNextQuoteNumber(),
           checkTourStatus(),
-          loadXeroConnection(),
-          loadContacts(),
         ]);
 
-        setUserDataLoaded(true); // Mark user data as loaded
+        setUserDataLoaded(true); // Mark user data as loaded — dashboard can render
+
+        // Deferred batch — fires after the first interaction frame so the
+        // splash → dashboard transition isn't gated on these.
+        InteractionManager.runAfterInteractions(() => {
+          Promise.all([
+            loadDocuments(),
+            useJobStore.getState().loadJobs(),
+            loadXeroConnection(),
+            loadContacts(),
+          ]).catch(() => {});
+        });
 
         // Check for deferred deep link (QR code scanned before app install)
         checkDeferredLink().then((supplierId) => {
@@ -191,6 +219,7 @@ export default function App() {
         });
       } else {
         // User signed out, clean up listeners and notification token
+        initialisedForUidRef.current = null;
         firestoreService.cleanup();
         documentService.cleanup();
         useJobStore.getState().cleanup();
@@ -209,27 +238,33 @@ export default function App() {
   useEffect(() => {
     async function initialize() {
       try {
-        // Load saved data
+        // First-paint critical: cached state from AsyncStorage for instant UI.
         await Promise.all([
           checkOnboarding(),
           loadQuotes(),
           loadBusinessSettings(),
           loadSubscription(),
           loadNextQuoteNumber(),
-          loadContacts(),
         ]);
 
-        // Initialize subscription sync (syncs across all platforms)
-        await subscriptionSyncService.initialize();
+        setIsLoading(false);
 
-        // Check for app updates (slight delay so dashboard renders first)
-        const update = await checkForUpdate();
-        if (update) {
-          setUpdateInfo(update);
-          setTimeout(() => setShowUpdateSheet(true), 800);
-        }
+        // Non-critical: contacts list, subscription sync init, update check —
+        // run after first paint so the splash doesn't stall on them.
+        InteractionManager.runAfterInteractions(async () => {
+          loadContacts().catch(() => {});
+          try {
+            await subscriptionSyncService.initialize();
+          } catch {}
+          try {
+            const update = await checkForUpdate();
+            if (update) {
+              setUpdateInfo(update);
+              setTimeout(() => setShowUpdateSheet(true), 800);
+            }
+          } catch {}
+        });
       } catch (error) {
-      } finally {
         setIsLoading(false);
       }
     }

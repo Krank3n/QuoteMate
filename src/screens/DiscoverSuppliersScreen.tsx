@@ -244,6 +244,10 @@ export function DiscoverSuppliersScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderSupplier}
         contentContainerStyle={styles.list}
+        removeClippedSubviews
+        initialNumToRender={10}
+        maxToRenderPerBatch={6}
+        windowSize={7}
         ListEmptyComponent={
           <View style={styles.centered}>
             <MaterialCommunityIcons name="store-search-outline" size={48} color={colors.placeholder} />

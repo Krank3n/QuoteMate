@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, LayoutAnimation, Platform, ScrollView, StyleSheet, UIManager } from 'react-native';
+import { LayoutAnimation, Platform, ScrollView, StyleSheet, UIManager, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../theme';
@@ -45,8 +45,6 @@ interface PillProps {
 }
 
 function Pill({ label, active }: PillProps) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const colorAnim = useRef(new Animated.Value(active ? 1 : 0)).current;
   const prevActive = useRef(active);
 
   useEffect(() => {
@@ -57,36 +55,18 @@ function Pill({ label, active }: PillProps) {
     LayoutAnimation.configureNext(
       LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity)
     );
+  }, [active]);
 
-    Animated.parallel([
-      Animated.sequence([
-        Animated.timing(scale, { toValue: 1.06, duration: 110, useNativeDriver: false }),
-        Animated.timing(scale, { toValue: 1,    duration: 130, useNativeDriver: false }),
-      ]),
-      Animated.timing(colorAnim, {
-        toValue: active ? 1 : 0,
-        duration: 200,
-        useNativeDriver: false,
-      }),
-    ]).start();
-  }, [active, scale, colorAnim]);
-
-  const backgroundColor = colorAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [colors.surfaceGray2, colors.primary],
-  });
-  const borderColor = colorAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [colors.border, colors.primary],
-  });
+  const backgroundColor = active ? colors.primary : colors.surfaceGray2;
+  const borderColor = active ? colors.primary : colors.border;
 
   return (
-    <Animated.View
+    <View
       accessibilityLabel={`${label} ${active ? 'checked' : 'unchecked'}`}
       style={[
         styles.pill,
         active && styles.pillActive,
-        { backgroundColor, borderColor, transform: [{ scale }] },
+        { backgroundColor, borderColor },
       ]}
     >
       <MaterialCommunityIcons
@@ -100,7 +80,7 @@ function Pill({ label, active }: PillProps) {
           {label}
         </Text>
       )}
-    </Animated.View>
+    </View>
   );
 }
 

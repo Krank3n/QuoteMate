@@ -104,8 +104,6 @@ export async function calculateTravelAdjustment(
   businessAddress: string,
   jobAddress: string
 ): Promise<TravelAdjustmentResult | null> {
-  console.log('[travel] calculateTravelAdjustment start', { businessAddress, jobAddress });
-
   const businessLocation = await geocodeAddress(businessAddress);
   if (!businessLocation) {
     console.warn('[travel] business address could not be geocoded:', businessAddress);

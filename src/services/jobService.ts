@@ -17,6 +17,7 @@ import {
   Unsubscribe,
   query,
   orderBy,
+  limit,
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import type { Job } from '../../shared/job/types';
@@ -74,8 +75,12 @@ class JobService {
     const uid = getUserId();
     if (!uid) return null;
     try {
+      // Release prior listener — token-refresh re-invokes this every ~hour.
+      this.unsubscribe?.();
       const ref = collection(db, 'users', uid, 'jobs');
-      const q = query(ref, orderBy('updatedAt', 'desc'));
+      // Cap at 100 most-recent jobs for the live listener — older jobs are still
+      // available via loadJobs() / archive flow and don't need real-time sync.
+      const q = query(ref, orderBy('updatedAt', 'desc'), limit(100));
       this.unsubscribe = onSnapshot(
         q,
         (snap) => {

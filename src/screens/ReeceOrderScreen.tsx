@@ -151,7 +151,10 @@ export function ReeceOrderScreen() {
   // Resolve the doc from wherever it currently lives. The wizard writes to
   // currentQuote / currentInvoice; saved jobs read from documents. Try all
   // three so a single docId param works for every entry point.
-  const { businessSettings, currentQuote, currentInvoice, documents } = useStore();
+  const businessSettings = useStore((s) => s.businessSettings);
+  const currentQuote = useStore((s) => s.currentQuote);
+  const currentInvoice = useStore((s) => s.currentInvoice);
+  const documents = useStore((s) => s.documents);
   const doc = useMemo(() => {
     if (!docId) return null;
     if (currentQuote?.id === docId) return currentQuote as any;

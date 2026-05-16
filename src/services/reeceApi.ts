@@ -172,10 +172,6 @@ export async function searchReeceMaterialCandidates(
     if (!searchResponse.ok) return [];
     const searchData = await searchResponse.json();
 
-    if (searchData._debug) {
-      console.log('[reece search]', searchData._debug);
-    }
-
     if (searchData.error === 'reece_reauth_required') {
       return [{ price: null, reauthRequired: true }];
     }

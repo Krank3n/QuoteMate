@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { colors } from '../theme';
 import { FooterButton } from './FooterButton';
+import { lightTap } from '../utils/haptics';
 
 interface FixedBottomButtonProps {
   /** Button label text */
@@ -205,6 +206,17 @@ export function FixedBottomButton({
 }: FixedBottomButtonProps) {
   const insets = useSafeAreaInsets();
 
+  const handlePrimaryPress = () => {
+    lightTap();
+    onPress();
+  };
+  const handleSecondaryPress = secondaryOnPress
+    ? () => {
+        lightTap();
+        secondaryOnPress();
+      }
+    : undefined;
+
   // On iOS, KeyboardStickyView translates the bar above the keyboard.
   // On Android, soft-input "adjustResize" already handles it; on web it's static.
   const useSticky = Platform.OS === 'ios' && !disableKeyboardSticky;
@@ -239,7 +251,7 @@ export function FixedBottomButton({
                 <FooterButton
                   mode="outlined"
                   label={secondaryLabel}
-                  onPress={secondaryOnPress}
+                  onPress={handleSecondaryPress!}
                   disabled={secondaryDisabled}
                 />
               )}
@@ -248,7 +260,7 @@ export function FixedBottomButton({
           <FooterButton
             mode={mode === 'contained' || mode === 'outlined' || mode === 'text' ? mode : 'contained'}
             label={label}
-            onPress={onPress}
+            onPress={handlePrimaryPress}
             icon={icon}
             loading={loading}
             disabled={disabled}

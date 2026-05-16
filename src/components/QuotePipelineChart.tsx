@@ -3,8 +3,8 @@
  * Shows quote funnel by status with win rate
  */
 
-import React, { useEffect, useRef, useMemo } from 'react';
-import { View, StyleSheet, Animated } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, StyleSheet } from 'react-native';
 import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -24,10 +24,6 @@ const STATUS_CONFIG = [
 ];
 
 export function QuotePipelineChart({ quotes }: QuotePipelineChartProps) {
-  const animatedValues = useRef(
-    STATUS_CONFIG.map(() => new Animated.Value(0))
-  ).current;
-
   const statusData = useMemo(() => {
     const total = Math.max(quotes.length, 1);
     return STATUS_CONFIG.map(({ key, label, color, icon }) => {
@@ -50,19 +46,6 @@ export function QuotePipelineChart({ quotes }: QuotePipelineChartProps) {
     return decided > 0 ? Math.round((won / decided) * 100) : 0;
   }, [quotes]);
 
-  useEffect(() => {
-    const animations = animatedValues.map((anim, i) => {
-      anim.setValue(0);
-      return Animated.spring(anim, {
-        toValue: statusData[i].ratio,
-        tension: 30,
-        friction: 8,
-        useNativeDriver: false,
-      });
-    });
-    Animated.stagger(100, animations).start();
-  }, [statusData]);
-
   if (quotes.length === 0) {
     return null;
   }
@@ -80,30 +63,23 @@ export function QuotePipelineChart({ quotes }: QuotePipelineChartProps) {
         </View>
       </View>
 
-      {statusData.map((item, i) => {
-        const barWidth = animatedValues[i].interpolate({
-          inputRange: [0, 1],
-          outputRange: ['0%', '100%'],
-        });
-
-        return (
-          <View key={item.key} style={styles.row}>
-            <View style={styles.rowLabel}>
-              <MaterialCommunityIcons name={item.icon} size={16} color={item.color} />
-              <Text style={styles.rowLabelText}>{item.label}</Text>
-            </View>
-            <View style={styles.barTrack}>
-              <Animated.View
-                style={[
-                  styles.barFill,
-                  { width: barWidth, backgroundColor: item.color },
-                ]}
-              />
-            </View>
-            <Text style={styles.rowCount}>{item.count}</Text>
+      {statusData.map((item) => (
+        <View key={item.key} style={styles.row}>
+          <View style={styles.rowLabel}>
+            <MaterialCommunityIcons name={item.icon} size={16} color={item.color} />
+            <Text style={styles.rowLabelText}>{item.label}</Text>
           </View>
-        );
-      })}
+          <View style={styles.barTrack}>
+            <View
+              style={[
+                styles.barFill,
+                { width: `${item.ratio * 100}%`, backgroundColor: item.color },
+              ]}
+            />
+          </View>
+          <Text style={styles.rowCount}>{item.count}</Text>
+        </View>
+      ))}
     </Surface>
   );
 }

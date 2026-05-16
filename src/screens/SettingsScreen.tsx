@@ -40,7 +40,9 @@ interface SettingsSection {
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
-  const { subscriptionStatus, setHasSeenTour, seenScreenTours } = useStore();
+  const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  const seenScreenTours = useStore((s) => s.seenScreenTours);
+  const setHasSeenTour = useStore((s) => s.setHasSeenTour);
 
   const sections: SettingsSection[] = [
     {

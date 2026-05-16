@@ -230,6 +230,10 @@ export function JobsListScreen() {
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}
             style={styles.flatList}
+            removeClippedSubviews
+            initialNumToRender={8}
+            maxToRenderPerBatch={5}
+            windowSize={7}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}

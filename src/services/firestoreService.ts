@@ -14,6 +14,7 @@ import {
   Unsubscribe,
   query,
   orderBy,
+  limit,
   runTransaction,
   increment,
   Timestamp,
@@ -490,8 +491,16 @@ class FirestoreService {
     }
 
     try {
+      // Release the prior listener before creating a new one. Firebase auth
+      // token-refresh fires onAuthStateChanged every hour, which re-invokes
+      // this method — without this release, listeners stack and every Firestore
+      // write triggers N parallel snapshot replays after N hours of use.
+      this.quotesUnsubscribe?.();
       const quotesRef = collection(db, 'users', userId, 'quotes');
-      const q = query(quotesRef, orderBy('createdAt', 'desc'));
+      // Cap the live listener at 100 most-recent quotes so power users with
+      // years of history don't pay a full-tree re-render on every write.
+      // Older docs are still fetchable via getQuotes() / archive views.
+      const q = query(quotesRef, orderBy('createdAt', 'desc'), limit(100));
 
       this.quotesUnsubscribe = onSnapshot(q, (snapshot) => {
         const quotes: Quote[] = snapshot.docs.map((doc) => {
@@ -529,6 +538,7 @@ class FirestoreService {
     }
 
     try {
+      this.settingsUnsubscribe?.();
       const settingsRef = doc(db, 'users', userId, 'settings', 'business');
 
       this.settingsUnsubscribe = onSnapshot(settingsRef, (snapshot) => {
@@ -557,6 +567,7 @@ class FirestoreService {
     }
 
     try {
+      this.onboardingUnsubscribe?.();
       const profileRef = doc(db, 'users', userId, 'profile', 'onboarding');
 
       this.onboardingUnsubscribe = onSnapshot(profileRef, (snapshot) => {
@@ -585,6 +596,7 @@ class FirestoreService {
     }
 
     try {
+      this.subscriptionUnsubscribe?.();
       const subscriptionRef = doc(db, 'users', userId, 'profile', 'subscription');
 
       this.subscriptionUnsubscribe = onSnapshot(subscriptionRef, (snapshot) => {
@@ -712,8 +724,9 @@ class FirestoreService {
     }
 
     try {
+      this.invoicesUnsubscribe?.();
       const invoicesRef = collection(db, 'users', userId, 'invoices');
-      const q = query(invoicesRef, orderBy('createdAt', 'desc'));
+      const q = query(invoicesRef, orderBy('createdAt', 'desc'), limit(100));
 
       this.invoicesUnsubscribe = onSnapshot(q, (snapshot) => {
         const invoices: Invoice[] = snapshot.docs.map((doc) => {

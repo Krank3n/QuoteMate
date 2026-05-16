@@ -30,7 +30,7 @@ import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { PDF_TEMPLATES, printMediaCSS, getTemplateCSS, PdfTemplateId, buildTermsHTML } from '../../../shared/pdf';
-import { prepareLogoHtml } from '../../utils/pdfGenerator';
+// pdfGenerator lazy-loaded inside the preview render below.
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PREVIEW_WIDTH = Math.min(SCREEN_WIDTH - 64, 340);
@@ -497,6 +497,7 @@ export function PDFTemplateScreen() {
       };
 
       const css = getTemplateCSS(templateId, businessSettings?.brandColor);
+      const { prepareLogoHtml } = await import('../../utils/pdfGenerator');
       const logoHtml = await prepareLogoHtml(businessSettings, isPro);
       const html = `
         <!DOCTYPE html>

@@ -3,8 +3,8 @@
  * Beautiful animated bar chart with revenue breakdown for Dashboard
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, StyleSheet, Animated, Pressable, TouchableOpacity } from 'react-native';
+import React, { useState, useMemo } from 'react';
+import { View, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
 import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { format, subMonths, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
@@ -29,9 +29,6 @@ interface MonthData {
 
 export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
   const [showBreakdown, setShowBreakdown] = useState(false);
-  const animatedValues = useRef(
-    Array.from({ length: 6 }, () => new Animated.Value(0))
-  ).current;
 
   // Calculate monthly data for last 6 months
   const monthlyData = useMemo(() => {
@@ -80,22 +77,6 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
   // Total across all 6 months
   const sixMonthTotal = monthlyData.reduce((sum, m) => sum + m.revenue, 0);
   const avgMonthly = sixMonthTotal / 6;
-
-  // Animate bars on mount / data change
-  useEffect(() => {
-    const animations = animatedValues.map((anim, i) => {
-      anim.setValue(0);
-      return Animated.spring(anim, {
-        toValue: monthlyData[i].revenue / maxRevenue,
-        tension: 30,
-        friction: 8,
-        delay: i * 80,
-        useNativeDriver: false,
-      });
-    });
-
-    Animated.stagger(80, animations).start();
-  }, [monthlyData, maxRevenue]);
 
   return (
     <View style={styles.container}>
@@ -148,11 +129,7 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
           {/* Bars */}
           <View style={styles.barsContainer}>
             {monthlyData.map((month, i) => {
-              const barHeight = animatedValues[i].interpolate({
-                inputRange: [0, 1],
-                outputRange: ['0%', '100%'],
-              });
-
+              const heightPct = `${(month.revenue / maxRevenue) * 100}%` as const;
               const isCurrentMonth = i === 5;
 
               return (
@@ -162,11 +139,11 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
                   onPress={() => onMonthPress?.(month.label)}
                 >
                   <View style={styles.barWrapper}>
-                    <Animated.View
+                    <View
                       style={[
                         styles.bar,
                         {
-                          height: barHeight,
+                          height: heightPct,
                           backgroundColor: isCurrentMonth
                             ? colors.primary
                             : colors.surfaceLight,
@@ -174,7 +151,7 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
                       ]}
                     >
                       {isCurrentMonth && <View style={styles.barGlow} />}
-                    </Animated.View>
+                    </View>
                   </View>
                   <Text
                     style={[

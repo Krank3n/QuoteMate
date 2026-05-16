@@ -30,6 +30,11 @@ import {
 import { useStore } from '../store/useStore';
 import { checkSquareConnection } from '../services/squareService';
 
+// Module-level cache for the base64-encoded logo HTML keyed by source URI.
+// Logos rarely change but reading + base64-encoding the file on every PDF
+// export blocks the main thread — caching for the app session is a clean win.
+const logoHtmlCache = new Map<string, string>();
+
 /**
  * Prepare the logo HTML tag from business settings (platform-specific)
  */
@@ -45,12 +50,18 @@ export async function prepareLogoHtml(businessSettings: BusinessSettings | null,
     return `<img src="${uri}" alt="${alt}" class="logo" />`;
   }
 
+  const cacheKey = `${uri}::${alt}`;
+  const cached = logoHtmlCache.get(cacheKey);
+  if (cached) return cached;
+
   // Local file URIs need to be converted to base64 for the PDF renderer
   try {
     const base64 = await FileSystem.readAsStringAsync(uri, {
       encoding: FileSystem.EncodingType.Base64,
     });
-    return `<img src="data:image/png;base64,${base64}" alt="${alt}" class="logo" />`;
+    const html = `<img src="data:image/png;base64,${base64}" alt="${alt}" class="logo" />`;
+    logoHtmlCache.set(cacheKey, html);
+    return html;
   } catch (error) {
     return '';
   }

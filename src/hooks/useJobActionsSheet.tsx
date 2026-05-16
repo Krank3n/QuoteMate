@@ -33,7 +33,7 @@ import {
   documentToInvoice,
   documentToQuote,
 } from '../types/documentAdapter';
-import { exportDocumentPDF } from '../utils/pdfGenerator';
+// pdfGenerator lazy-loaded inside the exportPdf case below.
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { useAlertModal } from './useAlertModal';
 
@@ -159,6 +159,7 @@ export function useJobActionsSheet(
         );
         const isPro = subscriptionStatus?.isPro || isTrialActive;
         try {
+          const { exportDocumentPDF } = await import('../utils/pdfGenerator');
           await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
         } catch {
           Alert.alert('Error', 'Failed to export PDF. Please try again.');
