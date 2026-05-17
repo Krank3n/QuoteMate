@@ -35,6 +35,7 @@ import {
 } from '../types/documentAdapter';
 // pdfGenerator lazy-loaded inside the exportPdf case below.
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
+import { ensureSquareConnectedForPayment } from '../utils/quoteDeliveryGuard';
 import { useAlertModal } from './useAlertModal';
 
 interface UseJobActionsSheetOptions {
@@ -127,6 +128,7 @@ export function useJobActionsSheet(
       case 'takePayment': {
         const doc = primaryDocForJob(job);
         if (!doc) return;
+        if (!(await ensureSquareConnectedForPayment(navigation))) break;
         if (doc.type === 'invoice') {
           setTakePaymentTarget({
             kind: 'invoice',

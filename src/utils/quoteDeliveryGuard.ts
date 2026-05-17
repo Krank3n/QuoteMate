@@ -89,3 +89,23 @@ export async function ensureCanDeliver(target: DeliveryDoc): Promise<DeliveryGat
     };
   }
 }
+
+/**
+ * Gate for in-person payment / Tap to Pay flows. If Square isn't connected
+ * yet, routes to the SquareIntegration settings screen so the tradie can
+ * wire it up before retrying. Stack navigation handles "back" naturally —
+ * the user lands back where they started. Returns true when the caller may
+ * proceed, false when it must abort because the user has been redirected.
+ */
+export async function ensureSquareConnectedForPayment(
+  navigation: { navigate: (route: string) => void },
+): Promise<boolean> {
+  try {
+    const conn = await checkSquareConnection();
+    if (conn.connected) return true;
+  } catch {
+    // Treat errors as "not connected" — send them to settings to recover.
+  }
+  navigation.navigate('SquareIntegration');
+  return false;
+}

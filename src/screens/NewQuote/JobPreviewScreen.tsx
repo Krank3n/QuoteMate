@@ -26,6 +26,7 @@ import * as Print from 'expo-print';
 import { useStore } from '../../store/useStore';
 import { useDocumentMode } from '../../utils/documentMode';
 import { checkSquareConnection } from '../../services/squareService';
+import { ensureSquareConnectedForPayment } from '../../utils/quoteDeliveryGuard';
 import { colors } from '../../theme';
 // pdfGenerator is lazy-imported in handleViewPDF to defer its parse cost
 // until the user actually requests a PDF preview.
@@ -835,7 +836,8 @@ export function JobPreviewScreen() {
                       ? 'Take Deposit'
                       : 'Tap to Pay'
                 }
-                onPress={() => {
+                onPress={async () => {
+                  if (!(await ensureSquareConnectedForPayment(navigation))) return;
                   if (liveDoc.type === 'invoice') {
                     setTakePaymentTarget({
                       kind: 'invoice',

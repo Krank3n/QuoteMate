@@ -50,6 +50,7 @@ import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { applyStageChange } from '../utils/applyStageChange';
+import { ensureSquareConnectedForPayment } from '../utils/quoteDeliveryGuard';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { formatScheduledDateLong } from '../utils/formatSchedule';
@@ -253,9 +254,10 @@ export function ViewJobScreen() {
   // Chip tap routing: an unpaid doc with a real total has nothing useful to
   // show in the history sheet, so jump straight to TakePaymentSheet. Anything
   // already paid (or a $0 draft) falls through to the history view.
-  const handlePaymentChipPress = (doc: Document) => {
+  const handlePaymentChipPress = async (doc: Document) => {
     const state = derivePaymentState(doc);
     if (state === 'unpaid' && Number(doc.total) > 0) {
+      if (!(await ensureSquareConnectedForPayment(navigation))) return;
       openTakePaymentForDoc(doc);
       return;
     }
@@ -327,6 +329,7 @@ export function ViewJobScreen() {
           break;
         case 'takeDeposit':
           if (actionableDoc && actionableDoc.type === 'quote') {
+            if (!(await ensureSquareConnectedForPayment(navigation))) break;
             openTakePaymentForDoc(actionableDoc);
           }
           break;
@@ -336,6 +339,10 @@ export function ViewJobScreen() {
           // state is consistent regardless of whether the tap succeeds.
           // (If they back out, the tradie can revert via the stage sheet.)
           if (actionableDoc && actionableDoc.type === 'quote') {
+            // Guard before the stage flip — if Square isn't connected,
+            // route to settings instead of accepting a quote we can't
+            // collect on.
+            if (!(await ensureSquareConnectedForPayment(navigation))) break;
             await applyStageChange(actionableDoc, 'quote_accepted', {
               saveQuote,
               saveInvoice,
@@ -389,6 +396,7 @@ export function ViewJobScreen() {
           break;
         case 'takeFinalPayment':
           if (actionableDoc && actionableDoc.type === 'invoice') {
+            if (!(await ensureSquareConnectedForPayment(navigation))) break;
             openTakePaymentForDoc(actionableDoc);
           }
           break;
@@ -521,7 +529,10 @@ export function ViewJobScreen() {
     setActionsSheetVisible(false);
     switch (action) {
       case 'takePayment':
-        if (primaryDoc) openTakePaymentForDoc(primaryDoc);
+        if (primaryDoc) {
+          if (!(await ensureSquareConnectedForPayment(navigation))) break;
+          openTakePaymentForDoc(primaryDoc);
+        }
         break;
       case 'followUp':
         if (primaryDoc) {

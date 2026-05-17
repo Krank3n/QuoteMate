@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Pressable, TextInput as RNTextInput, Switch } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, Pressable, TextInput as RNTextInput, Switch } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
   TextInput,
@@ -1115,9 +1116,12 @@ export function LaborMarkupScreen() {
   }
 
   return (
+    // keyboard-controller's KeyboardAvoidingView handles Android properly —
+    // the RN built-in needed behavior=undefined to avoid layout glitches on
+    // Android, which made it a no-op there (keyboard overlapped inputs).
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       {scrollContent}

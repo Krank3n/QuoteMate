@@ -10,10 +10,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  KeyboardAvoidingView,
   Platform,
   Animated,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Text,
@@ -1106,8 +1106,8 @@ export function JobDetailsScreen() {
       />
       <KeyboardAvoidingView
         style={[styles.container]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={-48}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === 'ios' ? -48 : 0}
       >
         <ScrollView
           ref={scrollRef}

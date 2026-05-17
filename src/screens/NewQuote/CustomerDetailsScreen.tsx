@@ -7,12 +7,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
-  KeyboardAvoidingView,
   Platform,
   Linking,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import {
   Text,
   TextInput,
@@ -356,11 +355,15 @@ export function CustomerDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView
+      <KeyboardAwareScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!tourActive}
+        // Distance from the keyboard top to the focused input bottom edge.
+        // Gives a bit of breathing room so the field isn't flush against the
+        // keyboard — covers the AddressSearchInput suggestions dropdown too.
+        bottomOffset={24}
       >
         <WebContainer>
           <Surface style={styles.section}>
@@ -556,7 +559,7 @@ export function CustomerDetailsScreen() {
             </View>
           </Surface>
         </WebContainer>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <FixedBottomButton
         label={isEditFromPreview ? 'Save' : 'Next: Materials'}
