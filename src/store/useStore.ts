@@ -1090,57 +1090,41 @@ export const useStore = create<AppState>((set, get) => ({
 
   checkTourStatus: async () => {
     try {
-      // If user is signed in, try loading from Firestore first
+      // Hydrate from AsyncStorage first so hasSeenTour is correct on the very
+      // first render after app launch. Without this, the dashboard's 800ms
+      // auto-start timer can race the Firestore round-trip and re-trigger the
+      // tour on every app restart/update for users who've already seen it.
+      const localStored = await AsyncStorage.getItem(STORAGE_KEYS.TOUR_SEEN);
+      const localScreenStored = await AsyncStorage.getItem('@quotemate:seen_screen_tours');
+      if (localStored) set({ hasSeenTour: JSON.parse(localStored) });
+      if (localScreenStored) set({ seenScreenTours: JSON.parse(localScreenStored) });
+
+      // If user is signed in, reconcile with Firestore
       if (auth.currentUser) {
         const cloudTourStatus = await firestoreService.loadTourStatus();
         if (cloudTourStatus !== null) {
           await AsyncStorage.setItem(STORAGE_KEYS.TOUR_SEEN, JSON.stringify(cloudTourStatus));
           set({ hasSeenTour: cloudTourStatus });
-        } else {
-          // Fallback to local, and sync up if local says seen
-          const stored = await AsyncStorage.getItem(STORAGE_KEYS.TOUR_SEEN);
-          if (stored) {
-            const hasSeenTour = JSON.parse(stored);
-            set({ hasSeenTour });
-            if (hasSeenTour) {
-              await firestoreService.saveTourStatus(hasSeenTour);
-            }
+        } else if (localStored) {
+          // Cloud has no record but local says seen — sync up
+          const hasSeenTour = JSON.parse(localStored);
+          if (hasSeenTour) {
+            await firestoreService.saveTourStatus(hasSeenTour);
           }
         }
 
         const cloudScreenTours = await firestoreService.loadSeenScreenTours();
+        const localTours: string[] = localScreenStored ? JSON.parse(localScreenStored) : [];
         if (cloudScreenTours) {
-          // Merge cloud and local screen tours
-          const localStored = await AsyncStorage.getItem('@quotemate:seen_screen_tours');
-          const localTours: string[] = localStored ? JSON.parse(localStored) : [];
           const merged = [...new Set([...localTours, ...cloudScreenTours])];
           await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(merged));
           set({ seenScreenTours: merged });
-          // Sync merged list back if local had extras
           if (merged.length > cloudScreenTours.length) {
             await firestoreService.saveSeenScreenTours(merged);
           }
-        } else {
-          const screenToursStored = await AsyncStorage.getItem('@quotemate:seen_screen_tours');
-          if (screenToursStored) {
-            const parsed = JSON.parse(screenToursStored);
-            set({ seenScreenTours: parsed });
-            if (parsed.length > 0) {
-              await firestoreService.saveSeenScreenTours(parsed);
-            }
-          }
+        } else if (localTours.length > 0) {
+          await firestoreService.saveSeenScreenTours(localTours);
         }
-        return;
-      }
-
-      // Fallback to local storage only
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.TOUR_SEEN);
-      if (stored) {
-        set({ hasSeenTour: JSON.parse(stored) });
-      }
-      const screenToursStored = await AsyncStorage.getItem('@quotemate:seen_screen_tours');
-      if (screenToursStored) {
-        set({ seenScreenTours: JSON.parse(screenToursStored) });
       }
     } catch (error) {
       // silently ignore
