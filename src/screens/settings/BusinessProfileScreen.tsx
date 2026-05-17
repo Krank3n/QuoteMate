@@ -59,7 +59,7 @@ export function BusinessProfileScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
-  const initialSnapshotRef = React.useRef<string | null>(null);
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
 
   useEffect(() => {
     if (businessSettings) {
@@ -81,12 +81,12 @@ export function BusinessProfileScreen() {
       setLogoUri(logo);
       setBrandColor(brand);
 
-      initialSnapshotRef.current = JSON.stringify({ name, a, e, p, w, addr, logo, brand });
+      setInitialSnapshot(JSON.stringify({ name, a, e, p, w, addr, logo, brand }));
     }
   }, [businessSettings]);
 
   const isDirty = React.useMemo(() => {
-    if (!initialSnapshotRef.current) return false;
+    if (!initialSnapshot) return false;
     const current = JSON.stringify({
       name: businessName,
       a: abn,
@@ -97,8 +97,8 @@ export function BusinessProfileScreen() {
       logo: logoUri,
       brand: brandColor,
     });
-    return current !== initialSnapshotRef.current;
-  }, [businessName, abn, email, phone, website, address, logoUri, brandColor]);
+    return current !== initialSnapshot;
+  }, [businessName, abn, email, phone, website, address, logoUri, brandColor, initialSnapshot]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
     isDirty,
@@ -212,7 +212,7 @@ export function BusinessProfileScreen() {
       }
 
       // The store update triggers the hydration useEffect to re-derive form
-      // state from the new businessSettings and refresh initialSnapshotRef.
+      // state from the new businessSettings and refresh initialSnapshot.
       // Refreshing the snapshot here with closure values would race with the
       // useEffect's normalized re-derive and leave isDirty stuck true.
 

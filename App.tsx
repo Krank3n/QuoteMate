@@ -325,51 +325,33 @@ export default function App() {
     }
   }, [user]);
 
-  // Show loading screen while initializing OR while user data is being loaded after auth
-  if (isLoading || !fontsLoaded || (user && !userDataLoaded)) {
-    return (
-      <GestureHandlerRootView style={appStyles.flex}>
-        <SafeAreaProvider>
-          <PaperProvider theme={theme}>
-            <View style={appStyles.loadingContainer}>
-              <StatusBar style="light" />
-              <Image
-                source={require('./assets/logo-scaled.png')}
-                style={appStyles.loadingLogo}
-                resizeMode="contain"
-              />
-              <ActivityIndicator size="large" color={theme.colors.primary} style={appStyles.loadingSpinner} />
-            </View>
-          </PaperProvider>
-        </SafeAreaProvider>
-      </GestureHandlerRootView>
-    );
-  }
-
-  // Require authentication on all platforms before showing the app
-  if (requiresAuth && !user) {
-    return (
-      <GestureHandlerRootView style={appStyles.flex}>
-        <SafeAreaProvider>
-          <PaperProvider theme={theme}>
-            <NavigationContainer key="auth" theme={navigationTheme}>
-              <StatusBar style="light" />
-              <AuthScreen />
-            </NavigationContainer>
-          </PaperProvider>
-        </SafeAreaProvider>
-      </GestureHandlerRootView>
-    );
-  }
+  // Unified render tree — providers + NavigationContainer mount ONCE for the
+  // app's lifetime. Children swap inside (AuthScreen ↔ onboarding ↔ main app)
+  // so signing in doesn't tear down and rebuild the entire React tree, which
+  // is what caused the "app reloads on sign-in" symptom.
+  const splashVisible =
+    isLoading || !fontsLoaded || (!!user && !userDataLoaded);
+  const showAuthScreen = requiresAuth && !user;
 
   return (
     <GestureHandlerRootView style={appStyles.flex}>
       <SafeAreaProvider>
         <KeyboardProvider>
           <PaperProvider theme={theme}>
-            <NavigationContainer key="main" theme={navigationTheme} linking={linking} ref={navigationRef}>
+            <NavigationContainer
+              key="root"
+              theme={navigationTheme}
+              linking={linking}
+              ref={navigationRef}
+            >
               <StatusBar style="light" />
-              {isOnboarded ? <RootNavigator /> : <NewOnboardingScreen />}
+              {showAuthScreen ? (
+                <AuthScreen />
+              ) : isOnboarded ? (
+                <RootNavigator />
+              ) : (
+                <NewOnboardingScreen />
+              )}
             </NavigationContainer>
             {Platform.OS === 'ios' && <KeyboardToolbar />}
             {showUpdateSheet && updateInfo && (
@@ -378,6 +360,27 @@ export default function App() {
                 onDismiss={() => setShowUpdateSheet(false)}
                 info={updateInfo}
               />
+            )}
+            {/* Splash overlay — covers the app during cold start and during
+                the brief post-sign-in data load. As an overlay (not a separate
+                React tree) the NavigationContainer underneath stays mounted,
+                so when the splash hides the app is already there. */}
+            {splashVisible && (
+              <View
+                style={[StyleSheet.absoluteFillObject, appStyles.loadingContainer]}
+                pointerEvents="auto"
+              >
+                <Image
+                  source={require('./assets/logo-scaled.png')}
+                  style={appStyles.loadingLogo}
+                  resizeMode="contain"
+                />
+                <ActivityIndicator
+                  size="large"
+                  color={theme.colors.primary}
+                  style={appStyles.loadingSpinner}
+                />
+              </View>
             )}
           </PaperProvider>
         </KeyboardProvider>

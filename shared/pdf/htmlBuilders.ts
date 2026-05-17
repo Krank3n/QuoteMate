@@ -529,29 +529,30 @@ export function buildQuotePdfHtml(
       ${watermark ? buildWatermarkHTML(watermark) : ''}
       <div class="content-wrapper">
       <div class="header">
-        <div class="header-content">
-          ${business.logoHtml || ''}
-          <div class="header-text">
-            <h1>${business.businessName}</h1>
-            <p>
-              ${business.abn ? `ABN: ${business.abn}<br>` : ''}
-              ${business.address ? `${business.address.replace(/\n/g, '<br>')}<br>` : ''}
-              ${business.email ? `Email: ${business.email}<br>` : ''}
-              ${business.phone ? `Phone: ${business.phone}${business.website ? '<br>' : ''}` : ''}
-              ${business.website ? `Web: ${business.website}` : ''}
-            </p>
+        <div class="header-business">
+          <div class="header-content">
+            ${business.logoHtml || ''}
+            <div class="header-text">
+              <h1>${business.businessName}</h1>
+              <p>
+                ${business.abn ? `<strong>ABN:</strong> ${business.abn}<br>` : ''}
+                ${business.address ? `<strong>Address:</strong> ${business.address.replace(/\n/g, '<br>')}<br>` : ''}
+                ${business.email ? `<strong>Email:</strong> ${business.email}<br>` : ''}
+                ${business.phone ? `<strong>Phone:</strong> ${business.phone}${business.website ? '<br>' : ''}` : ''}
+                ${business.website ? `<strong>Web:</strong> ${business.website}` : ''}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
-
-      <div class="info-section">
-        <h2>QUOTATION</h2>
-        ${quote.quoteNumber ? `<p><strong>Quote #:</strong> ${quote.quoteNumber}</p>` : ''}
-        <p><strong>Quote Date:</strong> ${quote.quoteDate}</p>
-        <p><strong>Customer:</strong> ${quote.customerName}</p>
-        ${quote.customerEmail ? `<p><strong>Email:</strong> ${quote.customerEmail}</p>` : ''}
-        ${quote.customerPhone ? `<p><strong>Phone:</strong> ${quote.customerPhone}</p>` : ''}
-        ${quote.jobAddress ? `<p><strong>Job Address:</strong> ${quote.jobAddress}</p>` : ''}
+        <div class="header-meta">
+          <h2>QUOTATION</h2>
+          ${quote.quoteNumber ? `<p><strong>Quote #:</strong> ${quote.quoteNumber}</p>` : ''}
+          <p><strong>Quote Date:</strong> ${quote.quoteDate}</p>
+          <p><strong>Customer:</strong> ${quote.customerName}</p>
+          ${quote.customerEmail ? `<p><strong>Email:</strong> ${quote.customerEmail}</p>` : ''}
+          ${quote.customerPhone ? `<p><strong>Phone:</strong> ${quote.customerPhone}</p>` : ''}
+          ${quote.jobAddress ? `<p><strong>Job Address:</strong> ${quote.jobAddress}</p>` : ''}
+        </div>
       </div>
 
       <div class="info-section">
@@ -623,35 +624,32 @@ export function buildInvoicePdfHtml(
       ${watermark ? buildWatermarkHTML(watermark) : ''}
       <div class="content-wrapper">
       <div class="header">
-        <div class="header-content">
-          ${business.logoHtml || ''}
-          <div class="header-text">
-            <h1>${business.businessName}</h1>
-            <p>
-              ${business.abn ? `ABN: ${business.abn}<br>` : ''}
-              ${business.address ? `${business.address.replace(/\n/g, '<br>')}<br>` : ''}
-              ${business.email ? `Email: ${business.email}<br>` : ''}
-              ${business.phone ? `Phone: ${business.phone}${business.website ? '<br>' : ''}` : ''}
-              ${business.website ? `Web: ${business.website}` : ''}
-            </p>
+        <div class="header-business">
+          <div class="header-content">
+            ${business.logoHtml || ''}
+            <div class="header-text">
+              <h1>${business.businessName}</h1>
+              <p>
+                ${business.abn ? `<strong>ABN:</strong> ${business.abn}<br>` : ''}
+                ${business.address ? `<strong>Address:</strong> ${business.address.replace(/\n/g, '<br>')}<br>` : ''}
+                ${business.email ? `<strong>Email:</strong> ${business.email}<br>` : ''}
+                ${business.phone ? `<strong>Phone:</strong> ${business.phone}${business.website ? '<br>' : ''}` : ''}
+                ${business.website ? `<strong>Web:</strong> ${business.website}` : ''}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
-
-      <div class="info-section">
-        <h2>INVOICE</h2>
-        <div class="invoice-details">
-          <div class="invoice-details-left">
-            ${invoice.invoiceNumber ? `<p><strong>Invoice #:</strong> ${invoice.invoiceNumber}</p>` : ''}
-            <p><strong>Issue Date:</strong> ${invoice.issueDate}</p>
-            <p><strong>Due Date:</strong> ${invoice.dueDate}</p>
-            ${invoice.paymentTerms ? `<p><strong>Payment Terms:</strong> ${invoice.paymentTerms}</p>` : ''}
-          </div>
+        <div class="header-meta">
+          <h2>INVOICE</h2>
+          ${invoice.invoiceNumber ? `<p><strong>Invoice #:</strong> ${invoice.invoiceNumber}</p>` : ''}
+          <p><strong>Issue Date:</strong> ${invoice.issueDate}</p>
+          <p><strong>Due Date:</strong> ${invoice.dueDate}</p>
+          ${invoice.paymentTerms ? `<p><strong>Payment Terms:</strong> ${invoice.paymentTerms}</p>` : ''}
+          <p><strong>Customer:</strong> ${invoice.customerName}</p>
+          ${invoice.customerEmail ? `<p><strong>Email:</strong> ${invoice.customerEmail}</p>` : ''}
+          ${invoice.customerPhone ? `<p><strong>Phone:</strong> ${invoice.customerPhone}</p>` : ''}
+          ${invoice.jobAddress ? `<p><strong>Job Address:</strong> ${invoice.jobAddress}</p>` : ''}
         </div>
-        <p><strong>Customer:</strong> ${invoice.customerName}</p>
-        ${invoice.customerEmail ? `<p><strong>Email:</strong> ${invoice.customerEmail}</p>` : ''}
-        ${invoice.customerPhone ? `<p><strong>Phone:</strong> ${invoice.customerPhone}</p>` : ''}
-        ${invoice.jobAddress ? `<p><strong>Job Address:</strong> ${invoice.jobAddress}</p>` : ''}
       </div>
 
       <div class="info-section">

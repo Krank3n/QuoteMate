@@ -28,7 +28,7 @@ import { useDocumentMode } from '../../utils/documentMode';
 import { checkSquareConnection } from '../../services/squareService';
 import { ensureSquareConnectedForPayment } from '../../utils/quoteDeliveryGuard';
 import { colors } from '../../theme';
-// pdfGenerator is lazy-imported in handleViewPDF to defer its parse cost
+import { generateDocumentPDF } from '../../utils/pdfGenerator';
 // until the user actually requests a PDF preview.
 import { quoteToDocument, invoiceToDocument } from '../../types/documentAdapter';
 import { calculateDueDate, formatPaymentTerms } from '../../utils/invoiceCalculator';
@@ -503,7 +503,6 @@ export function JobPreviewScreen() {
     if (!liveDoc) return;
     setIsPdfLoading(true);
     try {
-      const { generateDocumentPDF } = await import('../../utils/pdfGenerator');
       const html = await generateDocumentPDF(liveDoc, businessSettings);
 
       if (Platform.OS === 'web') {

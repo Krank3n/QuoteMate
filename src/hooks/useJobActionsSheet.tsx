@@ -29,11 +29,11 @@ import {
   type FollowUpTone,
 } from '../components/FollowUpSheet';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
+import { exportDocumentPDF } from '../utils/pdfGenerator';
 import {
   documentToInvoice,
   documentToQuote,
 } from '../types/documentAdapter';
-// pdfGenerator lazy-loaded inside the exportPdf case below.
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { ensureSquareConnectedForPayment } from '../utils/quoteDeliveryGuard';
 import { useAlertModal } from './useAlertModal';
@@ -161,7 +161,6 @@ export function useJobActionsSheet(
         );
         const isPro = subscriptionStatus?.isPro || isTrialActive;
         try {
-          const { exportDocumentPDF } = await import('../utils/pdfGenerator');
           await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
         } catch {
           Alert.alert('Error', 'Failed to export PDF. Please try again.');

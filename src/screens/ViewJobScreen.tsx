@@ -25,7 +25,7 @@ import { DocumentRow } from '../components/DocumentRow';
 import { JobScopeCard, type ScopeStep } from '../components/JobScopeCard';
 import { JobDetailHeader } from '../components/JobDetailHeader';
 import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
-// pdfGenerator lazy-loaded inside the handler that exports PDF.
+import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
 import {
@@ -554,7 +554,6 @@ export function ViewJobScreen() {
       case 'exportPdf':
         if (primaryDoc) {
           try {
-            const { exportDocumentPDF } = await import('../utils/pdfGenerator');
             await exportDocumentPDF(primaryDoc, businessSettings, 'export', {
               isPro,
             });

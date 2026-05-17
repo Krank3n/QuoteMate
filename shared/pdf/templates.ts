@@ -54,6 +54,37 @@ export const printMediaCSS = `
     color: #666666;
     text-align: center;
   }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 30px;
+  }
+  .header-business {
+    flex: 1;
+    min-width: 0;
+  }
+  .header-meta {
+    flex-shrink: 0;
+    min-width: 240px;
+    max-width: 45%;
+    text-align: right;
+  }
+  .header-meta h2 {
+    margin: 0 0 14px 0;
+    font-size: 28px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    border: none;
+    padding: 0;
+    line-height: 1.1;
+  }
+  .header-meta p {
+    margin: 1px 0;
+    font-size: 13px;
+    line-height: 1.3;
+  }
   @page {
     size: A4;
     margin: 40px;
@@ -63,7 +94,7 @@ export const printMediaCSS = `
       size: A4;
       margin: 40px;
     }
-    .header, .info-section, .summary, .section-wrapper, .payment-methods-section, .payment-method {
+    .header, .info-section, .summary, .payment-methods-section, .payment-method {
       page-break-inside: avoid;
       break-inside: avoid;
     }
@@ -85,6 +116,8 @@ export const printMediaCSS = `
     table {
       page-break-before: auto;
       break-before: auto;
+      page-break-inside: auto;
+      break-inside: auto;
       margin-top: 15px;
     }
     table thead {
@@ -476,6 +509,7 @@ const boldCSS = `
   }
   .header {
     background-color: #1F2937;
+    color: #FFFFFF;
     padding: 52px 50px 56px 50px;
     margin-bottom: 44px;
     border-bottom: none;

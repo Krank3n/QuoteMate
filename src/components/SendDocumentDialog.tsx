@@ -19,7 +19,7 @@ import { Quote, Invoice, BusinessSettings } from '../types';
 import { Document } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { formatCurrency } from '../utils/quoteCalculator';
-// pdfGenerator lazy-loaded inside the send handler.
+import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
 import { ensureCanDeliver } from '../utils/quoteDeliveryGuard';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
@@ -242,7 +242,6 @@ export function SendDocumentDialog({
     if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
     try {
-      const { exportDocumentPDF } = await import('../utils/pdfGenerator');
       await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
     } catch {
       Alert.alert('Error', 'Failed to export PDF. Please try again.');

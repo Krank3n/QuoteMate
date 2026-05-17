@@ -3,7 +3,7 @@
  * Choose document style for quotes and invoices
  */
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -30,7 +30,7 @@ import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { PDF_TEMPLATES, printMediaCSS, getTemplateCSS, PdfTemplateId, buildTermsHTML } from '../../../shared/pdf';
-// pdfGenerator lazy-loaded inside the preview render below.
+import { prepareLogoHtml } from '../../utils/pdfGenerator';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PREVIEW_WIDTH = Math.min(SCREEN_WIDTH - 64, 340);
@@ -424,7 +424,7 @@ export function PDFTemplateScreen() {
   const [previewLoading, setPreviewLoading] = useState<PdfTemplateId | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
-  const initialSnapshotRef = useRef<string | null>(null);
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
 
   // Cost/markup visibility toggles live in BusinessDefaults → Document Display.
   // Here we read the current values to drive the live preview so the tradie
@@ -443,18 +443,18 @@ export function PDFTemplateScreen() {
       }
       setShowLaborHours(slh);
       setGroupMaterialsBySection(gm);
-      initialSnapshotRef.current = JSON.stringify({ tpl, slh, gm });
+      setInitialSnapshot(JSON.stringify({ tpl, slh, gm }));
     }
   }, [businessSettings]);
 
   const isDirty = useMemo(() => {
-    if (!initialSnapshotRef.current) return false;
+    if (!initialSnapshot) return false;
     return JSON.stringify({
       tpl: selectedTemplate,
       slh: showLaborHours,
       gm: groupMaterialsBySection,
-    }) !== initialSnapshotRef.current;
-  }, [selectedTemplate, showLaborHours, groupMaterialsBySection]);
+    }) !== initialSnapshot;
+  }, [selectedTemplate, showLaborHours, groupMaterialsBySection, initialSnapshot]);
 
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
@@ -465,11 +465,11 @@ export function PDFTemplateScreen() {
         showLaborHours,
         groupMaterialsBySection,
       });
-      initialSnapshotRef.current = JSON.stringify({
+      setInitialSnapshot(JSON.stringify({
         tpl: selectedTemplate,
         slh: showLaborHours,
         gm: groupMaterialsBySection,
-      });
+      }));
       if (!opts?.silent) setShowSuccessModal(true);
       return true;
     } catch (error) {
@@ -497,7 +497,6 @@ export function PDFTemplateScreen() {
       };
 
       const css = getTemplateCSS(templateId, businessSettings?.brandColor);
-      const { prepareLogoHtml } = await import('../../utils/pdfGenerator');
       const logoHtml = await prepareLogoHtml(businessSettings, isPro);
       const html = `
         <!DOCTYPE html>

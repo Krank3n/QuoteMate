@@ -3,7 +3,7 @@
  * Trade categories, niches, and hardware store selection
  */
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -53,7 +53,7 @@ export function TradePricingScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
-  const initialSnapshotRef = useRef<string | null>(null);
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
 
   // Compose the unified ordered supplier list any time inputs change. Drives
   // both the visible list and the saved priority that gets persisted.
@@ -93,11 +93,11 @@ export function TradePricingScreen() {
       setSelectedCategories(cats);
       setSelectedNiches(niches);
       setSupplierPriority(priority);
-      initialSnapshotRef.current = JSON.stringify({
+      setInitialSnapshot(JSON.stringify({
         cats: [...cats].sort(),
         niches: [...niches].sort(),
         priority,
-      });
+      }));
     }
   }, [businessSettings]);
 
@@ -121,14 +121,14 @@ export function TradePricingScreen() {
   );
 
   const isDirty = useMemo(() => {
-    if (!initialSnapshotRef.current) return false;
+    if (!initialSnapshot) return false;
     const current = JSON.stringify({
       cats: [...selectedCategories].sort(),
       niches: [...selectedNiches].sort(),
       priority: supplierPriority,
     });
-    return current !== initialSnapshotRef.current;
-  }, [selectedCategories, selectedNiches, supplierPriority]);
+    return current !== initialSnapshot;
+  }, [selectedCategories, selectedNiches, supplierPriority, initialSnapshot]);
 
   const handleCategoryToggle = (categoryId: string) => {
     setSelectedCategories(prev => {
@@ -182,11 +182,11 @@ export function TradePricingScreen() {
         tradeNiches: selectedNiches.length > 0 ? selectedNiches : undefined,
         supplierPriority: supplierPriority.length > 0 ? supplierPriority : undefined,
       });
-      initialSnapshotRef.current = JSON.stringify({
+      setInitialSnapshot(JSON.stringify({
         cats: [...selectedCategories].sort(),
         niches: [...selectedNiches].sort(),
         priority: supplierPriority,
-      });
+      }));
       if (!opts?.silent) setShowSuccessModal(true);
       return true;
     } catch (error) {

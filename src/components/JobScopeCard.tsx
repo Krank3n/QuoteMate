@@ -33,7 +33,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { STAGE_META } from './StageSheet';
 import { PaymentChip } from './PaymentChip';
 import { selectionTap } from '../utils/haptics';
-// pdfGenerator lazy-loaded inside the preview handler.
+import { previewDocumentPDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
 import { useAlertModal } from '../hooks/useAlertModal';
 import {
@@ -153,9 +153,9 @@ export function JobScopeCard({
     selectionTap();
     setPreviewing(true);
     try {
-      const { previewDocumentPDF } = await import('../utils/pdfGenerator');
       await previewDocumentPDF(doc, businessSettings, { isPro });
-    } catch {
+    } catch (err) {
+      console.error('[PDF preview] failed:', err);
       showAlert({
         type: 'error',
         title: 'Preview failed',

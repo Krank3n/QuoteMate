@@ -4,7 +4,7 @@
  * Reusable for both creating new templates and editing existing ones.
  */
 
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -51,7 +51,7 @@ export function JobTemplateEditorScreen() {
 
   const { pendingTemplateMaterial, setPendingTemplateMaterial } = useStore();
 
-  const initialSnapshotRef = useRef<string>(JSON.stringify({
+  const [initialSnapshot, setInitialSnapshot] = useState<string>(() => JSON.stringify({
     name: existingTemplate?.name || '',
     description: existingTemplate?.description || '',
     laborHours: existingTemplate?.laborHours?.toString() || '',
@@ -64,8 +64,8 @@ export function JobTemplateEditorScreen() {
   const isDirty = useMemo(() => {
     return JSON.stringify({
       name, description, laborHours, laborRate, laborUnit, keywords, materials,
-    }) !== initialSnapshotRef.current;
-  }, [name, description, laborHours, laborRate, laborUnit, keywords, materials]);
+    }) !== initialSnapshot;
+  }, [name, description, laborHours, laborRate, laborUnit, keywords, materials, initialSnapshot]);
 
   // Pick up material from AddMaterialScreen
   useFocusEffect(
@@ -132,16 +132,20 @@ export function JobTemplateEditorScreen() {
       updatedAt: now,
     };
     await saveTemplate(template);
-    initialSnapshotRef.current = JSON.stringify({
+    setInitialSnapshot(JSON.stringify({
       name, description, laborHours, laborRate, laborUnit, keywords, materials,
-    });
+    }));
     if (!opts?.silent) {
+      // Snapshot setState is async, so the beforeRemove listener's closure
+      // still has isDirty=true at this synchronous goBack. Bypass via the
+      // allow-flag so the unsaved-changes modal doesn't pop after a save.
+      allowNextNavigation();
       navigation.goBack();
     }
     return true;
   };
 
-  const { unsavedModalProps } = useUnsavedChangesGuard({
+  const { unsavedModalProps, allowNextNavigation } = useUnsavedChangesGuard({
     isDirty,
     onSave: () => handleSave({ silent: true }),
   });

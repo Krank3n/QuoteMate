@@ -3,7 +3,7 @@
  * Bank transfer, PayID, BPAY, PayPal, Other
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -59,7 +59,7 @@ export function PaymentMethodsScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
-  const initialSnapshotRef = useRef<string | null>(null);
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
 
   useEffect(() => {
     if (businessSettings?.paymentMethods) {
@@ -96,14 +96,14 @@ export function PaymentMethodsScreen() {
       setOtherEnabled(oE);
       setOtherPaymentInstructions(oI);
 
-      initialSnapshotRef.current = JSON.stringify({
+      setInitialSnapshot(JSON.stringify({
         sod, bE, bAN, bB, bAcc, piE, piT, piV, bpE, bpBC, bpRef, ppE, ppEmail, oE, oI,
-      });
+      }));
     }
   }, [businessSettings]);
 
   const isDirty = useMemo(() => {
-    if (!initialSnapshotRef.current) return false;
+    if (!initialSnapshot) return false;
     const current = JSON.stringify({
       sod: showPaymentOnDocuments,
       bE: bankEnabled, bAN: bankAccountName, bB: bankBsb, bAcc: bankAccountNumber,
@@ -112,7 +112,7 @@ export function PaymentMethodsScreen() {
       ppE: paypalEnabled, ppEmail: paypalEmail,
       oE: otherEnabled, oI: otherPaymentInstructions,
     });
-    return current !== initialSnapshotRef.current;
+    return current !== initialSnapshot;
   }, [
     showPaymentOnDocuments,
     bankEnabled, bankAccountName, bankBsb, bankAccountNumber,
@@ -120,6 +120,7 @@ export function PaymentMethodsScreen() {
     bpayEnabled, bpayBillerCode, bpayReference,
     paypalEnabled, paypalEmail,
     otherEnabled, otherPaymentInstructions,
+    initialSnapshot,
   ]);
 
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
@@ -157,14 +158,14 @@ export function PaymentMethodsScreen() {
         ...businessSettings!,
         paymentMethods: paymentMethods,
       });
-      initialSnapshotRef.current = JSON.stringify({
+      setInitialSnapshot(JSON.stringify({
         sod: showPaymentOnDocuments,
         bE: bankEnabled, bAN: bankAccountName, bB: bankBsb, bAcc: bankAccountNumber,
         piE: payIdEnabled, piT: payIdType, piV: payIdValue,
         bpE: bpayEnabled, bpBC: bpayBillerCode, bpRef: bpayReference,
         ppE: paypalEnabled, ppEmail: paypalEmail,
         oE: otherEnabled, oI: otherPaymentInstructions,
-      });
+      }));
       if (!opts?.silent) setShowSuccessModal(true);
       return true;
     } catch (error) {

@@ -51,7 +51,7 @@ export function BusinessDefaultsScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
-  const initialSnapshotRef = React.useRef<string | null>(null);
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
 
   useEffect(() => {
     if (!businessSettings) return;
@@ -83,7 +83,7 @@ export function BusinessDefaultsScreen() {
     setAutoCustomerFollowUp(acf);
     setTermsAndConditions(tc);
 
-    initialSnapshotRef.current = JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, acf, tc });
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, acf, tc }));
   }, [businessSettings]);
 
   // Re-check on focus so the deposit + surcharge toggles unlock the moment
@@ -99,7 +99,7 @@ export function BusinessDefaultsScreen() {
   );
 
   const isDirty = React.useMemo(() => {
-    if (!initialSnapshotRef.current) return false;
+    if (!initialSnapshot) return false;
     const current = JSON.stringify({
       lr: laborRate,
       mk: markup,
@@ -115,11 +115,12 @@ export function BusinessDefaultsScreen() {
       acf: autoCustomerFollowUp,
       tc: termsAndConditions,
     });
-    return current !== initialSnapshotRef.current;
+    return current !== initialSnapshot;
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
     transportMarkupEnabled, surchargePaymentFees, pricesIncludeGst,
     showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, autoCustomerFollowUp, termsAndConditions,
+    initialSnapshot,
   ]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
@@ -154,7 +155,7 @@ export function BusinessDefaultsScreen() {
             : businessSettings?.termsUpdatedAt,
       });
       // The store update triggers the hydration useEffect to re-derive form
-      // state from the new businessSettings and refresh initialSnapshotRef.
+      // state from the new businessSettings and refresh initialSnapshot.
       // Setting a second snapshot here would capture pre-normalization values
       // (e.g. '30.00' vs the re-derived '30') and leave isDirty true.
       if (!opts?.silent) setShowSuccessModal(true);
