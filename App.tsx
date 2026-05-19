@@ -63,6 +63,41 @@ const linking: LinkingOptions<any> = {
   },
 };
 
+// React Native Web renders TextInput as <input>, which inherits Chrome's
+// thick blue :focus glow — looks broken next to our bordered View wrappers.
+// Replace it once at startup with a subtle brand-green ring that only shows
+// for keyboard focus, so click/tap focus stays clean.
+if (Platform.OS === 'web' && typeof document !== 'undefined') {
+  const STYLE_ID = 'qm-web-form-focus-reset';
+  if (!document.getElementById(STYLE_ID)) {
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      input, textarea, select {
+        outline: none !important;
+        box-shadow: none !important;
+        -webkit-tap-highlight-color: transparent;
+      }
+      input:focus, input:focus-visible,
+      textarea:focus, textarea:focus-visible,
+      select:focus, select:focus-visible {
+        outline: none !important;
+        box-shadow: none !important;
+      }
+      button { outline: none; }
+      button:focus-visible {
+        outline: 2px solid rgba(0, 152, 104, 0.55);
+        outline-offset: 2px;
+      }
+      [contenteditable]:focus,
+      [contenteditable]:focus-visible {
+        outline: none;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [fontsLoaded, setFontsLoaded] = useState(false);

@@ -516,6 +516,11 @@ export function MaterialsListScreen() {
   const [invoiceTargetSection, setInvoiceTargetSection] = useState<string | undefined>(undefined);
   const [invoiceSnackbar, setInvoiceSnackbar] = useState<string | null>(null);
 
+  // The material currently being edited in-place (its row swaps from
+  // MaterialItemCard to InlineAddMaterialRow in edit mode). null = no row
+  // is being edited.
+  const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
+
   // Shared "append a material to the current quote" used by both the inline
   // quick-add row and the invoice importer. Spread pattern matches every
   // other mutation in this screen so the same React-batched update flow
@@ -2462,9 +2467,21 @@ export function MaterialsListScreen() {
   };
 
   const handleEditMaterial = (material: Material) => {
-    // Navigate to AddMaterial screen in edit mode
-    navigation.navigate('AddMaterial', { materialId: material.id });
+    // Edit in place — swap the row's MaterialItemCard for the inline form.
+    // The full-screen edit on AddMaterialScreen is still reachable via a
+    // long-press on the row if/when we want a deeper edit surface.
+    setEditingMaterialId(material.id);
   };
+
+  const handleUpdateMaterial = useCallback((updated: Material) => {
+    if (!currentQuote) return;
+    updateQuote({
+      ...currentQuote,
+      materials: currentQuote.materials.map(m => (m.id === updated.id ? updated : m)),
+    });
+  }, [currentQuote, updateQuote]);
+
+  const exitEdit = useCallback(() => setEditingMaterialId(null), []);
 
 
   const handleQuickQuantityUpdate = useCallback((materialId: string, delta: number) => {
@@ -2807,7 +2824,27 @@ export function MaterialsListScreen() {
                   );
                 }
 
-                // Material — draggable
+                // Material — draggable. While being edited the row swaps to
+                // the inline edit card.
+                if (editingMaterialId === item.material.id) {
+                  return (
+                    <View collapsable={false} style={styles.inlineEditWrap}>
+                      <InlineAddMaterialRow
+                        sectionName={item.material.section || ''}
+                        mode="edit"
+                        initialMaterial={item.material}
+                        onAdd={() => { /* unused in edit mode */ }}
+                        onUpdate={handleUpdateMaterial}
+                        onExitEdit={exitEdit}
+                        pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
+                        businessSettings={businessSettings}
+                        supplierGroups={supplierGroups}
+                        reeceConnected={reeceConnected === true}
+                        onReeceReauthRequired={() => setReeceConnected(false)}
+                      />
+                    </View>
+                  );
+                }
                 return (
                   <View collapsable={false}>
                     <MaterialItemCard
@@ -3042,7 +3079,27 @@ export function MaterialsListScreen() {
                   );
                 }
 
-                // Material — web draggable
+                // Material — web draggable. While being edited the row
+                // swaps to the inline edit card.
+                if (editingMaterialId === item.material.id) {
+                  return (
+                    <View style={styles.inlineEditWrap}>
+                      <InlineAddMaterialRow
+                        sectionName={item.material.section || ''}
+                        mode="edit"
+                        initialMaterial={item.material}
+                        onAdd={() => { /* unused in edit mode */ }}
+                        onUpdate={handleUpdateMaterial}
+                        onExitEdit={exitEdit}
+                        pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
+                        businessSettings={businessSettings}
+                        supplierGroups={supplierGroups}
+                        reeceConnected={reeceConnected === true}
+                        onReeceReauthRequired={() => setReeceConnected(false)}
+                      />
+                    </View>
+                  );
+                }
                 return (
                   <WebDraggableItem
                     keyProp={item.key}
@@ -4257,6 +4314,10 @@ const styles = StyleSheet.create({
   inlineAddRow: {
     marginHorizontal: 12,
     marginVertical: 8,
+  },
+  inlineEditWrap: {
+    marginHorizontal: 12,
+    marginVertical: 6,
   },
   sectionAddMaterialBtn: {
     flexDirection: 'row',
