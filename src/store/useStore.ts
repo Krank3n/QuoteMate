@@ -14,6 +14,14 @@ import { calculateDueDate } from '../utils/invoiceCalculator';
 import { reconcileNextNumber } from '../utils/nextNumber';
 import { firestoreService } from '../services/firestoreService';
 import { documentService } from '../services/documentService';
+// Static import — see note on the call sites below. Dynamic `import()` here
+// (the previous shape) created a Metro lazy chunk that, in Android dev with
+// Hermes + Fast Refresh, re-evaluated module boundaries when the chunk loaded
+// after sign-in. That re-ran App.tsx's auth useEffect (unsubscribe →
+// resubscribe → full data load) and put the user through splash → home —
+// "the app rebooted itself a few seconds after Xero kicked off". Static
+// import bundles xeroService into the main graph and dodges the issue.
+import * as xeroService from '../services/xeroService';
 import { TRIAL_MS } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
 import { ensureJobForDocument, ensureJobForQuote } from './useJobStore';
@@ -1948,7 +1956,6 @@ export const useStore = create<AppState>((set, get) => ({
 
   syncXeroContacts: async () => {
     try {
-      const xeroService = await import('../services/xeroService');
       const xeroContacts = await xeroService.fetchXeroContacts();
       set({ xeroContacts });
     } catch (error) {
@@ -2037,7 +2044,6 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       if (!auth.currentUser) return;
-      const xeroService = await import('../services/xeroService');
       const status = await xeroService.checkXeroConnection();
       if (status.connected) {
         const conn: XeroConnection = {
@@ -2072,7 +2078,6 @@ export const useStore = create<AppState>((set, get) => ({
 
   pushInvoiceToXero: async (invoice: Invoice) => {
     const { invoices } = get();
-    const xeroService = await import('../services/xeroService');
 
     // Mark as syncing
     const syncingInvoices = invoices.map((i) =>
@@ -2123,7 +2128,6 @@ export const useStore = create<AppState>((set, get) => ({
 
   pushQuoteToXero: async (quote: Quote) => {
     const { quotes } = get();
-    const xeroService = await import('../services/xeroService');
 
     const syncingQuotes = quotes.map((q) =>
       q.id === quote.id ? { ...q, xeroSyncStatus: 'syncing' as XeroSyncStatus } : q
@@ -2169,14 +2173,12 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   pushPaymentToXero: async (invoiceId: string, xeroInvoiceId: string, amount: number, date: Date, method?: string) => {
-    const xeroService = await import('../services/xeroService');
     await xeroService.pushPaymentToXero(invoiceId, xeroInvoiceId, amount, date, method);
   },
 
   xeroBulkSync: async (invoiceIds: string[]) => {
     set({ xeroLoading: true });
     try {
-      const xeroService = await import('../services/xeroService');
       const result = await xeroService.xeroBulkSync(invoiceIds);
 
       // Reload invoices to get updated Xero fields from Firestore

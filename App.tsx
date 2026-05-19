@@ -84,6 +84,19 @@ export default function App() {
   useEffect(() => {
     // Listen to authentication state changes
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      // Firebase's React Native AsyncStorage persistence sometimes refires
+      // this listener with a transient `null` during an ID-token refresh
+      // (e.g. when `getIdToken()` runs inside xeroService.loadXeroConnection
+      // shortly after sign-in) even though the user is still signed in.
+      // `auth.currentUser` remains the source of truth in that window — if
+      // it still has the user, ignore the spurious null. Without this guard
+      // `setUser(null)` flips `showAuthScreen` true for one render, the
+      // RootNavigator unmounts, and when the listener immediately fires
+      // back with the real user the navigator remounts at its initial
+      // route — the "splash + back to home" symptom.
+      if (!currentUser && auth.currentUser) {
+        return;
+      }
       // If a *different* user lands here than the last session, wipe the
       // previous user's locally-cached data first. Otherwise loadQuotes /
       // loadBusinessSettings fall through to AsyncStorage when the new user's

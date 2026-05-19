@@ -40,19 +40,7 @@ import { Material, FavoriteProductMapping } from '../../types';
 import { colors } from '../../theme';
 import { formatCurrency, supplierPriceForGstMode } from '../../utils/quoteCalculator';
 import { ProBadge } from '../../components/ProBadge';
-import { searchMaterialPrice } from '../../services/webSearchPricing';
-import {
-  searchMaterialWithWebScraping,
-  getBestMatch,
-} from '../../services/webScrapingPricing';
-import {
-  searchBunningsProducts,
-  type ScraperSearchResponse,
-} from '../../services/bunningsScraperClient';
-import {
-  searchReeceMaterialPrice,
-  getReeceConnectionStatus,
-} from '../../services/reeceApi';
+import { getReeceConnectionStatus } from '../../services/reeceApi';
 import {
   loadFavoritesFromLocal,
   saveFavoriteProduct,
@@ -77,7 +65,7 @@ import { WebContainer } from '../../components/WebContainer';
 import { SwipeableCard } from '../../components/SwipeableCard';
 import { SupplierGroup } from '../../types';
 import { loadGroups, deleteGroup } from '../../services/supplierGroupService';
-import { searchLocalSources, type LocalSearchResult } from '../../services/localMaterialSearch';
+import { runMaterialSearch } from '../../services/materialSearch';
 import { ContactActionsBar } from '../../components/document/ContactActionsBar';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
@@ -746,207 +734,24 @@ export function AddMaterialScreen() {
     setSearchResults([]);
     setHasSearched(false);
 
-    // Search order:
-    //  1. Local sources — section templates + favorites scoped to the user's
-    //     configured suppliers. Always tried first; the user's own prices
-    //     beat any retail lookup.
-    //  2. Bunnings scraper — only if Bunnings is in the supplier list, OR the
-    //     user has no suppliers configured at all (default behavior).
-    //  3. Web scraping — driven by the user's configured supplier websites,
-    //     falling back to the legacy hardwareStores setting if none are set.
-    //  4. AI estimation — last resort.
-    //
-    // Local results are always shown alongside remote ones so the user can
-    // compare; remote results are appended below local hits.
-    //
-    // If a supplier chip is selected, the entire chain narrows to JUST that
-    // supplier — local favorites tagged with it, and the appropriate remote
-    // path for it (scraper if Bunnings, web-scrape its searchUrl otherwise).
-    try {
-      // Resolve scope from the selected chip (if any).
-      const scopedSupplier = selectedSupplierGroup
-        ? supplierGroups.find(g => g.id === selectedSupplierGroup) ?? null
-        : null;
-      const scopedToOne = !!scopedSupplier;
-      const supplierScope = scopedSupplier ? [scopedSupplier] : supplierGroups;
+    const outcome = await runMaterialSearch(searchQuery, {
+      businessSettings,
+      supplierGroups,
+      selectedSupplierGroupId: selectedSupplierGroup,
+      reeceConnected,
+      onReeceReauthRequired: () => setReeceConnected(false),
+    });
 
-      // ── Step 1: local sources ──
-      let localResults: LocalSearchResult[] = [];
-      try {
-        // When narrowed to one supplier, skip templates — the user is asking
-        // "what does THIS supplier carry", not "what bundles do I have".
-        localResults = await searchLocalSources(searchQuery, supplierScope, {
-          includeTemplates: !scopedToOne,
-        });
-        if (searchCancelledRef.current) return;
-        if (localResults.length > 0) {
-          setSearchResults(localResults);
-        }
-      } catch {
-        // Local search must never block the remote fallback chain.
-        localResults = [];
-      }
-      if (searchCancelledRef.current) return;
+    if (searchCancelledRef.current) return;
 
-      // ── Step 2/3/4: remote fallback ──
-      const hardwareStores = businessSettings?.hardwareStores || ['bunnings.com.au'];
-      const fallbackStore = hardwareStores[0];
-
-      // Bunnings scraper runs when:
-      //  - the user is scoped to a supplier whose name contains "bunnings", OR
-      //  - no chip is selected AND Bunnings is in their hardware stores or
-      //    they have no suppliers configured at all.
-      // When scoped to a non-Bunnings supplier, skip Bunnings entirely.
-      const hasBunningsInHardwareStores = hardwareStores.some(s =>
-        s.toLowerCase().includes('bunnings'));
-      const scopedToBunnings = scopedSupplier
-        ? scopedSupplier.name.toLowerCase().includes('bunnings')
-        : false;
-      const shouldTryBunnings = scopedToOne
-        ? scopedToBunnings
-        : (hasBunningsInHardwareStores || supplierGroups.length === 0);
-
-      // Web-scraping store list:
-      //  - scoped: just the selected supplier's searchUrl (if it has one)
-      //  - unscoped: all configured suppliers' websites, falling back to the
-      //    hardwareStores setting only when nothing is configured.
-      const scopedStores = scopedSupplier?.searchUrl?.trim()
-        ? [scopedSupplier.searchUrl.trim()]
-        : [];
-      const supplierStores = supplierGroups
-        .map(g => g.searchUrl?.trim())
-        .filter((url): url is string => !!url);
-      const storesToScrape = scopedToOne
-        ? scopedStores
-        : (supplierStores.length > 0 ? supplierStores : [fallbackStore]);
-
-      let remoteResults: any[] = [];
-
-      // ── Step 2 (Reece priority when connected): plumber's maX account ──
-      // Reece runs alongside the Bunnings backbone. If the user has connected
-      // their maX account, we fetch their trade-discounted price first. Reece
-      // returns one best-match result, so this short-circuits the rest of the
-      // chain when we get a hit; otherwise we fall through to Bunnings as
-      // normal. Skipped when the user scoped the search to a specific
-      // supplier chip — they're explicitly asking for that supplier's catalog.
-      if (reeceConnected && !scopedToOne) {
-        try {
-          const reeceResult = await searchReeceMaterialPrice(searchQuery);
-          if (searchCancelledRef.current) return;
-          if (reeceResult.reauthRequired) {
-            setReeceConnected(false);
-          } else if (reeceResult.price && reeceResult.itemNumber) {
-            remoteResults = [{
-              productName: reeceResult.productName || searchQuery,
-              description: 'Reece trade price',
-              itemNumber: reeceResult.itemNumber,
-              brand: '',
-              price: reeceResult.price,
-              productUrl: reeceResult.productUrl || '',
-              imageUrl: reeceResult.imageUrl || '',
-              store: reeceResult.store || 'Reece Plumbing',
-              isScraperResult: true,
-              // Surface so the eventual Material write picks up Reece-specific
-              // order identifiers without needing a re-query at order time.
-              reeceItemNumber: reeceResult.itemNumber,
-              reeceUnitOfMeasure: reeceResult.unitOfMeasure || null,
-            }];
-          }
-        } catch {
-          // Reece miss — fall through to the existing chain.
-        }
-      }
-      if (searchCancelledRef.current) return;
-
-      if (remoteResults.length === 0 && shouldTryBunnings) {
-        // searchBunningsProducts throws on error; preserve the old null-on-
-        // error contract so the fallback flow still kicks in.
-        let scraperResponse: ScraperSearchResponse | null = null;
-        try {
-          scraperResponse = await searchBunningsProducts(searchQuery, 10);
-        } catch {
-          scraperResponse = null;
-        }
-        if (searchCancelledRef.current) return;
-
-        if (scraperResponse && scraperResponse.success && scraperResponse.results.length > 0) {
-          remoteResults = scraperResponse.results.map(product => ({
-            productName: product.productName,
-            description: product.description || '',
-            itemNumber: product.itemNumber || '',
-            brand: product.brand || '',
-            price: product.price,
-            productUrl: product.productUrl,
-            imageUrl: product.imageUrl,
-            store: 'bunnings.com.au',
-            stockLevel: product.stockLevel,
-            isScraperResult: true,
-            confidence: product.confidence,
-          }));
-        }
-      }
-      if (searchCancelledRef.current) return;
-
-      // Web scraping only runs if we have stores to scrape against. When the
-      // user is scoped to a non-Bunnings supplier with no searchUrl, this
-      // step is skipped and we fall straight through to AI estimation.
-      if (remoteResults.length === 0 && storesToScrape.length > 0) {
-        const scraperResults = await searchMaterialWithWebScraping(
-          searchQuery,
-          searchQuery,
-          1,
-          'each',
-          storesToScrape
-        );
-        if (searchCancelledRef.current) return;
-
-        remoteResults = scraperResults.flatMap(r => r.matches).map(match => ({
-          productName: match.productName,
-          description: match.description || '',
-          itemNumber: match.itemNumber || '',
-          brand: match.brand || '',
-          price: match.price,
-          productUrl: match.productUrl,
-          imageUrl: match.imageUrl,
-          store: match.store,
-          isScraperResult: true,
-        }));
-      }
-      if (searchCancelledRef.current) return;
-
-      if (remoteResults.length === 0 && localResults.length === 0) {
-        // Final fallback to AI estimation — only when we have nothing else.
-        const aiStores = storesToScrape.length > 0 ? storesToScrape : [fallbackStore];
-        const aiResult = await searchMaterialPrice(searchQuery, aiStores);
-        if (searchCancelledRef.current) return;
-        if (aiResult.price) {
-          remoteResults = [{
-            productName: aiResult.productName || searchQuery,
-            description: 'AI reckons about this much',
-            itemNumber: '',
-            brand: '',
-            price: aiResult.price,
-            productUrl: undefined,
-            imageUrl: undefined,
-            store: aiResult.store || aiStores[0],
-            isScraperResult: false,
-            isAiEstimate: true,
-          }];
-        }
-      }
-      if (searchCancelledRef.current) return;
-
-      setSearchResults([...localResults, ...remoteResults]);
-    } catch (error) {
-      if (searchCancelledRef.current) return;
+    if (outcome.error) {
       Alert.alert('Search Error', 'Failed to search products. Please try again.');
-    } finally {
-      if (!searchCancelledRef.current) {
-        setIsSearching(false);
-        setHasSearched(true);
-      }
+    } else {
+      setSearchResults(outcome.results);
     }
-  }, [searchQuery, businessSettings, isPro, navigation, supplierGroups, selectedSupplierGroup]);
+    setIsSearching(false);
+    setHasSearched(true);
+  }, [searchQuery, businessSettings, isPro, navigation, supplierGroups, selectedSupplierGroup, reeceConnected]);
 
   const handleSelectProductImpl = async (item: any) => {
     let newMaterial: Material;
@@ -1894,7 +1699,7 @@ export function AddMaterialScreen() {
           <MaterialCommunityIcons name="format-list-bulleted" size={64} color={colors.onSurface} />
           <Text style={styles.emptyStateTitle}>Your supplier book is empty</Text>
           <Text style={styles.emptyStateText}>
-            Import a supplier price list, or save materials from the Search tab, to build your supplier book
+            Snap a supplier's price sheet, or save items from the Search tab as you go — once it's stocked, every quote gets a head start.
           </Text>
         </View>
       ) : (
@@ -2124,6 +1929,11 @@ export function AddMaterialScreen() {
         visible={importSheetVisible}
         onDismiss={() => setImportSheetVisible(false)}
         title={importMode === 'refresh' ? 'Refresh existing list' : 'Import price list'}
+        subtitle={
+          importMode === 'refresh'
+            ? "Prices crept up again? Snap the new sheet and we'll refresh your book without you bashing in a single line."
+            : "Snap your supplier's price sheet — every page, smudges and all. We'll sort it into your book so next time you're quoting, the prices are already in your pocket."
+        }
         options={importSheetOptions}
       />
 

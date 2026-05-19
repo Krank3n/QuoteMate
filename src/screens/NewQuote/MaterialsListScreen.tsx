@@ -26,6 +26,7 @@ import {
   TextInput,
   ActivityIndicator,
   Surface,
+  Snackbar,
 } from 'react-native-paper';
 import { useNavigation, useIsFocused, useRoute } from '@react-navigation/native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -35,7 +36,7 @@ import { lightTap } from '../../utils/haptics';
 
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode, UnifiedDocument } from '../../utils/documentMode';
-import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapping } from '../../types';
+import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapping, SupplierGroup } from '../../types';
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice, supplierPriceForGstMode } from '../../utils/quoteCalculator';
@@ -47,6 +48,11 @@ import { shouldRunReeceFirst } from '../../services/supplierPriority';
 // screen's mount cheap — see Phase 7 of the perf plan.
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
+import { InlineAddMaterialRow } from '../../components/InlineAddMaterialRow';
+import { ActionSheet, type ActionSheetOption } from '../../components/ActionSheet';
+import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
+import { InvoiceReviewModal } from '../../components/InvoiceReviewModal';
+import { useInvoiceImport } from '../../hooks/useInvoiceImport';
 import { NestableScrollContainer, NestableDraggableFlatList, RenderItemParams } from 'react-native-draggable-flatlist';
 import { CollapsibleSection } from '../../components/CollapsibleSection';
 import { useTourRefs } from '../../components/tour/useTourRefs';
@@ -484,6 +490,73 @@ export function MaterialsListScreen() {
       cancelled = true;
     };
   }, [isFocused]);
+
+  // Supplier groups powering the inline-add row's catalog search and the
+  // invoice-importer's per-supplier review. Loaded once on focus so new
+  // suppliers added on the settings screen reflect when returning.
+  const [supplierGroups, setSupplierGroups] = useState<SupplierGroup[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    loadSupplierGroups()
+      .then((groups) => {
+        if (!cancelled) setSupplierGroups(groups);
+      })
+      .catch(() => {
+        /* non-blocking */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isFocused]);
+
+  // Invoice import — surfaces a 📄 button next to each section's inline add
+  // row. The targeted section is captured before opening the ActionSheet so
+  // the extracted line items land in the section they were triggered from.
+  const [invoiceSheetVisible, setInvoiceSheetVisible] = useState(false);
+  const [invoiceTargetSection, setInvoiceTargetSection] = useState<string | undefined>(undefined);
+  const [invoiceSnackbar, setInvoiceSnackbar] = useState<string | null>(null);
+
+  // Shared "append a material to the current quote" used by both the inline
+  // quick-add row and the invoice importer. Spread pattern matches every
+  // other mutation in this screen so the same React-batched update flow
+  // applies.
+  const addMaterialToQuoteInline = useCallback((material: Material) => {
+    if (!currentQuote) return;
+    updateQuote({
+      ...currentQuote,
+      materials: [...(currentQuote.materials || []), material],
+    });
+  }, [currentQuote, updateQuote]);
+
+  const invoiceImporter = useInvoiceImport({
+    addMaterialToQuote: (material) => addMaterialToQuoteInline(material),
+    selectedSection: invoiceTargetSection,
+    onError: (msg) => Alert.alert('Import Failed', msg),
+    onAddedToQuote: ({ supplierName, itemCount }) => {
+      const label = supplierName ? ` from ${supplierName}` : '';
+      setInvoiceSnackbar(
+        itemCount > 0
+          ? `Added ${itemCount} item${itemCount === 1 ? '' : 's'}${label} to quote`
+          : 'No items added',
+      );
+    },
+  });
+
+  const launchInvoiceImport = useCallback((source: 'camera' | 'gallery' | 'pdf') => {
+    setInvoiceSheetVisible(false);
+    invoiceImporter.startImport(source);
+  }, [invoiceImporter]);
+
+  const invoiceSheetOptions: ActionSheetOption[] = [
+    { icon: 'camera', label: 'Take photo', onPress: () => launchInvoiceImport('camera') },
+    { icon: 'image-multiple', label: 'Pick from gallery', onPress: () => launchInvoiceImport('gallery') },
+    { icon: 'file-pdf-box', label: 'Pick PDF', onPress: () => launchInvoiceImport('pdf') },
+  ];
+
+  const openInvoiceForSection = useCallback((sectionName: string) => {
+    setInvoiceTargetSection(sectionName || undefined);
+    setInvoiceSheetVisible(true);
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────
   // Unsaved-changes guard
@@ -2694,10 +2767,34 @@ export function MaterialsListScreen() {
                         isCollapsed && styles.sectionCardFooterCollapsed,
                       ]}>
                         {!isCollapsed && (
-                          <TouchableOpacity style={styles.sectionAddMaterialBtn} onPress={() => navigation.navigate('AddMaterial', { section: item.sectionName })}>
-                            <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
-                            <Text style={styles.sectionAddMaterialText}>Add Material</Text>
-                          </TouchableOpacity>
+                          <View style={styles.inlineAddRow}>
+                            <InlineAddMaterialRow
+                              sectionName={item.sectionName}
+                              onAdd={addMaterialToQuoteInline}
+                              pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
+                              businessSettings={businessSettings}
+                              supplierGroups={supplierGroups}
+                              reeceConnected={reeceConnected === true}
+                              onReeceReauthRequired={() => setReeceConnected(false)}
+                              trailingActions={[
+                                {
+                                  icon: 'receipt',
+                                  label: 'From invoice',
+                                  accessibilityLabel: 'Add from invoice',
+                                  onPress: () => openInvoiceForSection(item.sectionName),
+                                },
+                                {
+                                  icon: 'book-open-page-variant',
+                                  label: 'Supplier book',
+                                  accessibilityLabel: 'Open Supplier Book',
+                                  onPress: () => navigation.navigate('AddMaterial', {
+                                    section: item.sectionName,
+                                    supplierBookOnly: true,
+                                  }),
+                                },
+                              ]}
+                            />
+                          </View>
                         )}
                         <View style={styles.sectionCardFooter}>
                           <Text style={styles.sectionCardFooterLabel}>
@@ -2905,10 +3002,34 @@ export function MaterialsListScreen() {
                         isCollapsed && styles.sectionCardFooterCollapsed,
                       ]}>
                         {!isCollapsed && (
-                          <TouchableOpacity style={styles.sectionAddMaterialBtn} onPress={() => navigation.navigate('AddMaterial', { section: item.sectionName })}>
-                            <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
-                            <Text style={styles.sectionAddMaterialText}>Add Material</Text>
-                          </TouchableOpacity>
+                          <View style={styles.inlineAddRow}>
+                            <InlineAddMaterialRow
+                              sectionName={item.sectionName}
+                              onAdd={addMaterialToQuoteInline}
+                              pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
+                              businessSettings={businessSettings}
+                              supplierGroups={supplierGroups}
+                              reeceConnected={reeceConnected === true}
+                              onReeceReauthRequired={() => setReeceConnected(false)}
+                              trailingActions={[
+                                {
+                                  icon: 'receipt',
+                                  label: 'From invoice',
+                                  accessibilityLabel: 'Add from invoice',
+                                  onPress: () => openInvoiceForSection(item.sectionName),
+                                },
+                                {
+                                  icon: 'book-open-page-variant',
+                                  label: 'Supplier book',
+                                  accessibilityLabel: 'Open Supplier Book',
+                                  onPress: () => navigation.navigate('AddMaterial', {
+                                    section: item.sectionName,
+                                    supplierBookOnly: true,
+                                  }),
+                                },
+                              ]}
+                            />
+                          </View>
                         )}
                         <View style={styles.sectionCardFooter}>
                           <Text style={styles.sectionCardFooterLabel}>
@@ -3554,6 +3675,38 @@ export function MaterialsListScreen() {
         </>
       )}
 
+      {/* Invoice/receipt source picker — fires from the 📄 icon button on
+          each section's inline-add row. */}
+      <ActionSheet
+        visible={invoiceSheetVisible}
+        onDismiss={() => setInvoiceSheetVisible(false)}
+        title="Add from invoice"
+        subtitle="Snap any supplier docket — even the crumpled one from the ute floor. We'll squint at it and pull out the line items so you're not bashing them in one by one."
+        options={invoiceSheetOptions}
+      />
+      <SupplierListCaptureModal
+        visible={invoiceImporter.captureModalVisible}
+        onCancel={invoiceImporter.cancelCapture}
+        onComplete={invoiceImporter.handleCaptureComplete}
+        processing={invoiceImporter.phase === 'extracting'}
+        processingLabel={invoiceImporter.loadingLabel}
+      />
+      <InvoiceReviewModal
+        visible={invoiceImporter.reviewModalVisible}
+        initialSupplierName={invoiceImporter.extractedSupplierName}
+        initialItems={invoiceImporter.extractedItems}
+        saving={invoiceImporter.saving}
+        onCancel={invoiceImporter.cancelReview}
+        onConfirm={invoiceImporter.handleAddToQuote}
+      />
+      <Snackbar
+        visible={!!invoiceSnackbar}
+        onDismiss={() => setInvoiceSnackbar(null)}
+        duration={3000}
+      >
+        {invoiceSnackbar ?? ''}
+      </Snackbar>
+
       {/* Unsaved-changes confirmation when navigating away */}
       <AlertModal {...unsavedModalProps} />
     </View>
@@ -4100,6 +4253,10 @@ const styles = StyleSheet.create({
   sectionCardActions: {
     flexDirection: 'row',
     gap: 12,
+  },
+  inlineAddRow: {
+    marginHorizontal: 12,
+    marginVertical: 8,
   },
   sectionAddMaterialBtn: {
     flexDirection: 'row',

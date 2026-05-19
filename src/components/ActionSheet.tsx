@@ -55,6 +55,8 @@ interface ActionSheetProps {
   visible: boolean;
   onDismiss: () => void;
   title?: string;
+  /** Optional one-liner shown beneath the title. */
+  subtitle?: string;
   options: ActionSheetOption[];
   /**
    * When true (default), tapping an option auto-dismisses the sheet via
@@ -71,6 +73,7 @@ export function ActionSheet({
   visible,
   onDismiss,
   title,
+  subtitle,
   options,
   dismissOnSelect = true,
 }: ActionSheetProps) {
@@ -108,6 +111,7 @@ export function ActionSheet({
       visible={visible}
       onDismiss={onDismiss}
       title={title}
+      subtitle={subtitle}
       footer={footer}
       scrollable
       maxHeightRatio={0.7}
