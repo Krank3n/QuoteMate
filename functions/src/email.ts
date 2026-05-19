@@ -56,16 +56,30 @@ function wrapEmailTemplate(content: string, options?: { unsubscribeUrl?: string;
   <!--[if mso]>
   <style>table,td{font-family:Arial,sans-serif!important}</style>
   <![endif]-->
+  <style>
+    @media only screen and (max-width: 600px) {
+      .qm-outer-pad { padding: 16px 8px !important; }
+      .qm-card-pad { padding: 24px 18px !important; }
+      .qm-logo-pad { padding: 0 0 20px !important; }
+      .qm-day-cell { padding: 0 3px !important; }
+      .qm-day-link { padding: 12px 4px !important; }
+      .qm-day-num { font-size: 17px !important; }
+      .qm-day-wd { font-size: 11px !important; }
+      .qm-h1 { font-size: 22px !important; line-height: 1.25 !important; }
+      .qm-body { font-size: 14.5px !important; line-height: 1.6 !important; }
+      .qm-video-card-pad { padding: 16px 18px !important; }
+    }
+  </style>
 </head>
 <body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   ${preheader ? `<div style="display:none;font-size:1px;color:#0f172a;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${preheader}</div>` : ''}
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f172a;">
     <tr>
-      <td align="center" style="padding:32px 16px;">
+      <td align="center" class="qm-outer-pad" style="padding:32px 16px;">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
           <!-- Logo -->
           <tr>
-            <td align="center" style="padding:0 0 32px;">
+            <td align="center" class="qm-logo-pad" style="padding:0 0 32px;">
               <img src="https://hansendev.web.app/email-assets/logo.png" alt="QuoteMate" width="160" style="display:block;width:160px;height:auto;border-radius:20px;" />
             </td>
           </tr>
@@ -74,7 +88,7 @@ function wrapEmailTemplate(content: string, options?: { unsubscribeUrl?: string;
             <td>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:16px;overflow:hidden;border:1px solid #334155;">
                 <tr>
-                  <td style="padding:40px 36px;">
+                  <td class="qm-card-pad" style="padding:40px 36px;">
                     ${content}
                   </td>
                 </tr>
@@ -142,24 +156,6 @@ function infoCard(rows: string, accentColor?: string): string {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             ${rows}
           </table>
-        </td>
-      </tr>
-    </table>`;
-}
-
-// Reusable component: numbered step
-function step(number: number, title: string, description: string, isLast = false): string {
-  return `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="${!isLast ? 'margin-bottom:20px;' : ''}">
-      <tr>
-        <td width="40" valign="top">
-          <div style="background:#009868;width:32px;height:32px;border-radius:50%;text-align:center;line-height:32px;">
-            <span style="color:#fff;font-size:14px;font-weight:700;">${number}</span>
-          </div>
-        </td>
-        <td valign="top" style="padding-left:12px;">
-          <p style="color:#f1f5f9;font-size:15px;font-weight:600;margin:0 0 4px;">${title}</p>
-          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.5;">${description}</p>
         </td>
       </tr>
     </table>`;
@@ -373,31 +369,124 @@ export async function getUserEmail(userId: string): Promise<string | null> {
 // EMAIL TEMPLATES
 // ============================================================
 
+// Tom's Calendly for the new-signup walkthrough. Override via env if the slug
+// changes so we don't have to redeploy just to update a link.
+const TOM_CALENDLY_BASE = process.env.TOM_CALENDLY_URL
+  || 'https://calendly.com/thomas-andrew-hansen/30min';
+
+// Returns the next `count` weekdays in Sydney time. Used to build deep-linked
+// Calendly buttons in the welcome email — Calendly accepts `?date=YYYY-MM-DD`
+// so the booker lands directly on that day's slot picker.
+function getNextWeekdaysSydney(count: number): Array<{ iso: string; month: string; weekday: string; dayNum: number; monthShort: string }> {
+  const todaySydney = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Sydney',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const [y, m, d] = todaySydney.split('-').map(Number);
+  // Anchor at UTC noon so day increments stay on the right calendar day
+  // regardless of DST shifts when we read .getUTCDay().
+  const cursor = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const result: Array<{ iso: string; month: string; weekday: string; dayNum: number; monthShort: string }> = [];
+
+  while (result.length < count) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const dow = cursor.getUTCDay();
+    if (dow === 0 || dow === 6) continue;
+    const yy = cursor.getUTCFullYear();
+    const mm = String(cursor.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(cursor.getUTCDate()).padStart(2, '0');
+    result.push({
+      iso: `${yy}-${mm}-${dd}`,
+      month: `${yy}-${mm}`,
+      weekday: weekdays[dow],
+      dayNum: cursor.getUTCDate(),
+      monthShort: months[cursor.getUTCMonth()],
+    });
+  }
+  return result;
+}
+
+// Renders a single "pick this day" button for the welcome-email calendar row.
+// Bulletproof email layout: nested table, no flex/grid.
+function calendarDayButton(weekday: string, dayNum: number, monthShort: string, href: string): string {
+  return `
+    <td valign="top" class="qm-day-cell" style="width:33.33%;padding:0 4px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border:1px solid #009868;border-radius:10px;">
+        <tr>
+          <td align="center" style="padding:0;">
+            <a href="${href}" target="_blank" class="qm-day-link" style="display:block;padding:14px 6px;text-decoration:none;color:#f8fafc;">
+              <span class="qm-day-wd" style="display:block;color:#00c897;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin:0 0 4px;">${weekday}</span>
+              <span class="qm-day-num" style="display:block;color:#f8fafc;font-size:19px;font-weight:700;line-height:1.1;">${dayNum} ${monthShort}</span>
+            </a>
+          </td>
+        </tr>
+      </table>
+    </td>`;
+}
+
 export function sendWelcomeEmail(to: string, businessName: string, userId: string): Promise<boolean> {
   const greeting = businessName || 'there';
+  const days = getNextWeekdaysSydney(3);
+  const dayButtons = days
+    .map(d => calendarDayButton(
+      d.weekday,
+      d.dayNum,
+      d.monthShort,
+      `${TOM_CALENDLY_BASE}?month=${d.month}&date=${d.iso}`,
+    ))
+    .join('');
+
   const content = wrapEmailTemplate(`
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">Welcome aboard</p>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
-      G'day${businessName ? `, ${greeting}` : ''}! Ready to quote like a pro?
+    <p style="color:#00c897;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">A quick hello</p>
+    <h1 class="qm-h1" style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;line-height:1.3;">
+      G'day${businessName ? `, ${greeting}` : ''} &mdash; I'm Tom, I built QuoteMate.
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 28px;">
-      You're all set to create professional quotes in seconds. Here's how to hit the ground running:
+    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 16px;">
+      Most tradies pick QuoteMate up in about 8 minutes once someone walks them through it. I'd love to do that with you &mdash; show you the bits that matter for your trade and answer anything you're stuck on.
+    </p>
+    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 20px;">
+      Pick a day that suits and I'll send through a time:
     </p>
 
-    ${step(1, 'Set up your business', 'Add your logo, ABN, and contact info so every quote looks professional.')}
-    ${step(2, 'Create your first quote', 'Describe the job in plain English (or use voice!) and we\'ll generate materials, labour, and pricing.')}
-    ${step(3, 'Send it to your client', 'Share via email or PDF with one tap. Clients can accept online instantly.', true)}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 14px;table-layout:fixed;">
+      <tr>
+        ${dayButtons}
+      </tr>
+    </table>
 
-    ${ctaButton('Open QuoteMate')}
-
-    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 0;">
-      Questions? Just reply to this email &mdash; we're here to help.
+    <p style="text-align:center;margin:0 0 28px;">
+      <a href="${TOM_CALENDLY_BASE}" target="_blank" style="color:#5ab9ea;font-size:14px;text-decoration:underline;">Or pick another time &rarr;</a>
     </p>
-  `, { preheader: 'Your professional quoting toolkit is ready. Here\'s how to get started.' });
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border-radius:12px;border-left:4px solid #5ab9ea;margin:0 0 22px;">
+      <tr>
+        <td class="qm-video-card-pad" style="padding:18px 22px;">
+          <p style="color:#f8fafc;font-size:15px;font-weight:600;margin:0 0 4px;">Prefer to suss it out solo first?</p>
+          <p style="color:#94a3b8;font-size:14px;line-height:1.55;margin:0 0 14px;">
+            There's a 5-minute walkthrough on the homepage that covers the basics.
+          </p>
+          <a href="https://quotemateapp.au" target="_blank" style="display:inline-block;background:#5ab9ea;color:#0f172a;font-size:14px;font-weight:700;padding:10px 18px;border-radius:8px;text-decoration:none;">
+            Watch the walkthrough &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 4px;">
+      Either way &mdash; if anything trips you up, just reply to this email. Goes straight to me.
+    </p>
+    <p style="color:#f8fafc;font-size:15px;line-height:1.65;margin:20px 0 0;">
+      Cheers,<br/>
+      <strong>Tom</strong>
+    </p>
+  `, { preheader: 'I built QuoteMate. Want an 8-minute walkthrough? Pick a day below.' });
 
   return sendEmail({
     to,
-    subject: `Welcome to QuoteMate, ${greeting}!`,
+    subject: `${businessName ? `${greeting}, ` : ''}keen for an 8-min QuoteMate walkthrough?`,
     htmlContent: content,
     category: 'transactional',
     userId,
