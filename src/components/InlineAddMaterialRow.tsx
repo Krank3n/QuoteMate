@@ -544,7 +544,7 @@ export function InlineAddMaterialRow({
         </TouchableOpacity>
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
           <MaterialCommunityIcons name="check" size={16} color="#FFFFFF" />
-          <Text style={styles.saveText}>{isEdit ? 'Save changes' : 'Save to List'}</Text>
+          <Text style={styles.saveText}>Save</Text>
         </TouchableOpacity>
       </View>
 
