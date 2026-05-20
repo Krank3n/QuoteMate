@@ -1673,7 +1673,7 @@ Provide a JSON response with the following structure:
       "section": "Descriptive section name (e.g. Colorbond Fence Bay, Merbau Deck Section, Concrete Footings)",
       "sectionMultiplier": 8,
       "sectionLaborHours": 1.5,
-      "reasoning": "Why this material is needed",
+      "reasoning": "Why this material is needed AND the derivation math for any per-area, per-volume, or repeating-unit quantity (e.g. 'Pavers: 25m² ÷ 0.16m²-per-paver × 1.1 waste = 172'). For simple one-off items a short justification is fine.",
       "savedRateName": "(only set when matched to a saved rate)",
       "pricingSource": "(set to 'saved_rate' when matched)",
       "reeceProductId": "(only set when a Reece catalogue line clearly matches — copy the integer productId from the catalogue listing. Leave empty if unsure; the search layer will look it up.)"
@@ -1683,28 +1683,40 @@ Provide a JSON response with the following structure:
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
 
-CRITICAL — emit quantities in the SMALLEST INDIVIDUAL UNIT, not in guessed packs:
+CRITICAL — emit quantities in the SMALLEST PHYSICAL UNIT, not in guessed packs/bags:
 - Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
-- Concrete / sand / cement → emit the count of bags and unit "each" (e.g. 20 each for 20 bags).
+- BULK AGGREGATES (sand, crusher dust, road base, gravel, cement, mortar mix) → emit TOTAL MASS in kg with unit "kg" (e.g. "1275 kg of bedding sand" for 25m² × 30mm @ 1700kg/m³). DO NOT guess bag counts. You don't know whether the SKU is a 20kg, 25kg, or 30kg bag — the pricing layer reads bag size from the product page and divides. If you emit "60 each" thinking it means bags but the scraper returns a 20kg-bag SKU, the system multiplies bag_price × 60 = wrong by ~20×.
+- READY-MIX / POURED CONCRETE sold loose by volume → emit m³ with unit "m³" (e.g. "0.054 m³" for one footing).
+- SHEET / ROLL MATERIALS sold by area (geotextile, weed mat, sarking-by-area, sisalation) → emit total area in m² with unit "m²" (e.g. "30 m²" for 25m² + 20% overlap). The pricing layer converts to roll count using the SKU's coverage.
 - Timber / decking / fascia → emit linear metres and unit "m" (e.g. 75 m).
-- Tape / membrane / sarking → emit linear metres and unit "m" (e.g. 150 m).
+- Tape / membrane sold by linear metre → emit linear metres and unit "m" (e.g. 150 m).
 - Paint / oil / sealer → emit total litres and unit "L" (e.g. 8 L).
-The pricing layer reads pack/length size from the product page (e.g. "Box of 500", "5.4m length", "20m roll") and computes how many packs to buy. If you guess pack counts yourself you will get them wrong — you have no way to know how many clips are in a pack.
+The pricing layer reads pack/length/area/mass size from the product page (e.g. "Box of 500", "5.4m length", "20m² roll", "20kg bag") and computes how many packs to buy. If you guess pack counts yourself you will get them wrong — you have no way to know how many clips are in a pack or how heavy a bag is.
 
-DO NOT use units "pack" or "box" in the materials output unless the item is genuinely sold and counted as discrete packs (e.g. one mixed wall-plug pack). Default to "each", "m", "kg", or "L".
+DO NOT use units "pack" or "box" in the materials output unless the item is genuinely sold and counted as discrete packs (e.g. one mixed wall-plug pack). Default to "each", "m", "m²", "m³", "kg", or "L".
 
 DO NOT set sectionMultiplier equal to a material's own quantity — sectionMultiplier is the count of repeating WORK UNITS (bays, footings, square metres of deck), not the count of items.
 
 SANITY-CHECK every quantity before returning. The most common failure is over-spec'ing repeating elements by 3-10×. For ANY job in ANY trade, derive each quantity from a structural anchor — never guess:
 
 - REPEATING LINEAR ELEMENTS (deck joists, fence posts, wall studs, ceiling battens, roof rafters): count = ceil(span / centres) + 1. A 5m-wide deck with joists at 450mm = 12 joists, NOT 60. A 30m fence at 2.4m bays = 13 posts, NOT 30.
-- PER-AREA ELEMENTS (decking clips, tiles, plasterboard sheets, paving, downlights, GPOs): count = area × density. Hidden deck clips ~17/m². 600x600 tiles ~2.78/m². Don't multiply density by 5.
+- PER-AREA ELEMENTS (decking clips, tiles, plasterboard sheets, paving, downlights, GPOs): count = area × density. A 400x400 paver covers 0.16m² → density = 6.25/m². 25m² needs ~157, +10% waste = 172. NOT 430. 600x600 tiles ~2.78/m². Don't multiply density by 5.
 - LINEAR MATERIAL FROM AREA (decking boards, weatherboard, cladding): linear metres = area / board_width. 50m² of 137mm decking = ~365 lm, NOT 1000+.
 - ONE-PER-UNIT ITEMS (hinges per door, taps per basin, downpipes per roof side, post stirrups per post): count = N units × items_per_unit (usually 1-3).
 - FASTENERS / CONSUMABLES: tie to a structural anchor too — nails per joist hanger × hangers, screws per metre of trim × metres, sealer at coverage rate × area. Never invent thousands.
-- VOLUMETRIC (concrete bags, sand, gravel): bags = volume / bag_yield. A 0.054m³ footing = 3 × 20kg bags, NOT 12.
+- BULK AGGREGATES (sand, crusher dust, gravel, road base): emit TOTAL MASS in kg, not bag counts. Mass = area × depth × density. Typical densities: sand ~1700 kg/m³, crusher dust / road base ~1600 kg/m³, gravel ~1500 kg/m³. The pricing layer handles bag math — see the CRITICAL rule above.
+- POURED CONCRETE / READY-MIX sold loose by volume: emit m³. A 0.054 m³ footing = 0.054, unit "m³". For a slab: m³ = area × thickness.
 
-Round up by 10-15% for waste, not by 5-10×. After listing each material ask yourself: "Did I derive this from a structural anchor or did I guess?" If guessed, redo it.
+Round up by 10-15% for waste, not by 5-10×. After listing each material ask yourself: "Did I derive this from a structural anchor or did I guess?" If guessed, redo it. Write the derivation math into the "reasoning" field for every per-area, per-volume, or repeating-unit quantity — no math = the row will be flagged.
+
+WORKED EXAMPLE — 25m² (5m × 5m) paver patio, a previously-broken case the system used to inflate to $80k. Correct outputs:
+- Concrete pavers 400x400mm: 25 ÷ 0.16 = 157, ×1.1 waste = 172. quantity 172, unit "each". reasoning: "25m² ÷ 0.16m² per paver × 1.1 waste = 172".
+- Crusher dust base @ 100mm: 25 × 0.1 × 1600 = 4000. quantity 4000, unit "kg". reasoning: "25m² × 0.1m × 1600kg/m³ = 4000kg".
+- Bedding sand @ 30mm: 25 × 0.03 × 1700 = 1275. quantity 1275, unit "kg".
+- Jointing sand for 400x400 pavers: ~1 kg/m² → 25 kg. quantity 25, unit "kg".
+- Geotextile / weed mat: 25 × 1.2 = 30. quantity 30, unit "m²". reasoning: "25m² + 20% overlap = 30m²".
+- Plate compactor hire (half day): quantity 1, unit "each".
+WRONG outputs to avoid: "1575 each" of crusher dust, "1050 each" of bedding sand, "100 each" of jointing sand, "430 each" of pavers — these label bulk quantities as "each" and inflate cost ~20×.
 
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).

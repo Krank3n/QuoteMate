@@ -15,7 +15,7 @@
  * refocuses, and the row stays expanded for rapid entry.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -38,14 +38,6 @@ import { ActionSheet, ActionSheetOption } from './ActionSheet';
 
 const UNITS: Material['unit'][] = ['each', 'm', 'm²', 'm³', 'L', 'kg', 'box', 'pack'];
 
-export interface InlineAddMaterialAction {
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  /** Short label shown alongside the icon when the row is expanded. */
-  label: string;
-  onPress: () => void;
-  accessibilityLabel: string;
-}
-
 export interface InlineAddMaterialRowProps {
   sectionName: string;
   onAdd: (material: Material) => void;
@@ -58,10 +50,13 @@ export interface InlineAddMaterialRowProps {
   selectedSupplierGroupId?: string;
   reeceConnected: boolean;
   onReeceReauthRequired?: () => void;
-  /** Trailing icon buttons rendered alongside the row. Sit to the right of
-   *  the collapsed pill, and underneath the form once it's expanded so the
-   *  inputs get the full row width. */
-  trailingActions?: InlineAddMaterialAction[];
+  /** Trailing action handlers — built into icon+label buttons internally so
+   *  the parent passes one stable function (useCallback) and identity is
+   *  preserved across renders. The handler receives the row's
+   *  `sectionName`, so the same callback can be shared across every
+   *  section. Pass `undefined` to hide an action. */
+  onInvoicePress?: (sectionName: string) => void;
+  onSupplierBookPress?: (sectionName: string) => void;
   /** When 'edit', the same card is used to edit an existing material in
    *  place: starts expanded, fields prefill from `initialMaterial`, no
    *  trailing actions, Save commits via `onUpdate`, Cancel calls
@@ -72,7 +67,124 @@ export interface InlineAddMaterialRowProps {
   onExitEdit?: () => void;
 }
 
-export function InlineAddMaterialRow({
+interface ResolvedAction {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  accessibilityLabel: string;
+  onPress: () => void;
+}
+
+/**
+ * Outer wrapper for the inline add row. When the row is collapsed in 'add'
+ * mode it renders a lightweight pill that owns no hooks beyond a single
+ * useState — important because the materials list mounts one of these per
+ * section, and the previous all-in-one component dragged `useMaterialSearch`
+ * (with its own state, refs, callbacks, effects) along even when idle. The
+ * heavy `InlineAddMaterialForm` now only mounts when the user taps to expand
+ * or when the row is being used in 'edit' mode.
+ */
+function InlineAddMaterialRowImpl(props: InlineAddMaterialRowProps) {
+  const isEdit = props.mode === 'edit';
+  const [expanded, setExpanded] = useState(isEdit);
+
+  // Build the trailing-action list from the primitive handlers. Stable so
+  // long as the handlers and sectionName are stable — which they should be
+  // when the parent uses useCallback (see MaterialsListScreen).
+  const trailingActions = useMemo<ResolvedAction[]>(() => {
+    if (isEdit) return [];
+    const out: ResolvedAction[] = [];
+    if (props.onInvoicePress) {
+      const cb = props.onInvoicePress;
+      const sn = props.sectionName;
+      out.push({
+        icon: 'receipt',
+        label: 'From invoice',
+        accessibilityLabel: 'Add from invoice',
+        onPress: () => cb(sn),
+      });
+    }
+    if (props.onSupplierBookPress) {
+      const cb = props.onSupplierBookPress;
+      const sn = props.sectionName;
+      out.push({
+        icon: 'book-open-page-variant',
+        label: 'Supplier book',
+        accessibilityLabel: 'Open Supplier Book',
+        onPress: () => cb(sn),
+      });
+    }
+    return out;
+  }, [isEdit, props.onInvoicePress, props.onSupplierBookPress, props.sectionName]);
+
+  if (!expanded && !isEdit) {
+    return (
+      <CollapsedAddPill
+        trailingActions={trailingActions}
+        onExpand={() => setExpanded(true)}
+      />
+    );
+  }
+
+  return (
+    <InlineAddMaterialForm
+      {...props}
+      trailingActions={trailingActions}
+      onRequestCollapse={() => setExpanded(false)}
+    />
+  );
+}
+
+/**
+ * Memoized so the per-section row doesn't re-render every time the parent
+ * `MaterialsListScreen` re-renders. Relies on the parent passing stable
+ * (useCallback'd) `onAdd`, `onInvoicePress`, `onSupplierBookPress`, and
+ * `onReeceReauthRequired` callbacks and stable `businessSettings` /
+ * `supplierGroups` references.
+ */
+export const InlineAddMaterialRow = React.memo(InlineAddMaterialRowImpl);
+
+function CollapsedAddPill({
+  trailingActions,
+  onExpand,
+}: {
+  trailingActions?: ResolvedAction[];
+  onExpand: () => void;
+}) {
+  return (
+    <View style={styles.collapsedRow}>
+      <TouchableOpacity style={styles.collapsedBtn} onPress={onExpand} activeOpacity={0.7}>
+        <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
+        <Text style={styles.collapsedText}>Add Material</Text>
+      </TouchableOpacity>
+      {trailingActions && trailingActions.length > 0 && (
+        <View style={styles.actionsStrip}>
+          {trailingActions.map((action, idx) => (
+            <TouchableOpacity
+              key={`${action.icon}-${idx}`}
+              style={styles.actionIconBtn}
+              onPress={action.onPress}
+              accessibilityLabel={action.accessibilityLabel}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <MaterialCommunityIcons name={action.icon} size={20} color={colors.primary} />
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+interface InlineAddMaterialFormProps extends InlineAddMaterialRowProps {
+  /** Resolved trailing-action descriptors, built once by the wrapper from
+   *  the primitive `on*Press` props above. */
+  trailingActions: ResolvedAction[];
+  /** Called by the form's Cancel button in add mode. Edit mode uses
+   *  `onExitEdit` from the public props instead. */
+  onRequestCollapse: () => void;
+}
+
+function InlineAddMaterialForm({
   sectionName,
   onAdd,
   pricesIncludeGst = false,
@@ -86,11 +198,9 @@ export function InlineAddMaterialRow({
   initialMaterial,
   onUpdate,
   onExitEdit,
-}: InlineAddMaterialRowProps) {
+  onRequestCollapse,
+}: InlineAddMaterialFormProps) {
   const isEdit = mode === 'edit';
-  // Edit mode is always expanded — there's no collapsed pill, the parent
-  // mounts this in place of the material row.
-  const [expanded, setExpanded] = useState(isEdit);
   const [name, setName] = useState(initialMaterial?.name ?? '');
   const [qty, setQty] = useState(initialMaterial ? String(initialMaterial.quantity) : '1');
   const [price, setPrice] = useState(initialMaterial ? String(initialMaterial.price ?? '') : '');
@@ -147,12 +257,6 @@ export function InlineAddMaterialRow({
     search.setQuery(next);
   }, [nameError, search]);
 
-  const expand = useCallback(() => {
-    setExpanded(true);
-    // Focus on the next tick so the input has mounted.
-    setTimeout(() => nameInputRef.current?.focus(), 0);
-  }, []);
-
   const resetForm = useCallback(() => {
     setName('');
     setQty('1');
@@ -169,10 +273,12 @@ export function InlineAddMaterialRow({
       onExitEdit?.();
       return;
     }
+    // resetForm/saveToBook reset are unnecessary since the wrapper unmounts
+    // this form on collapse, but we keep them in case of in-place reuse.
     resetForm();
     setSaveToBook(false);
-    setExpanded(false);
-  }, [isEdit, onExitEdit, resetForm]);
+    onRequestCollapse();
+  }, [isEdit, onExitEdit, onRequestCollapse, resetForm]);
 
   const pickResult = useCallback((item: any) => {
     selectedResultRef.current = item;
@@ -340,33 +446,6 @@ export function InlineAddMaterialRow({
     onPress: () => setUnit(u),
   }));
 
-  // Reset search when the row collapses externally (e.g. a parent unmount).
-  useEffect(() => {
-    if (!expanded) {
-      // Clear hook state when collapsed so a future expansion starts clean.
-      search.clearResults();
-    }
-    // search instance is stable per render; not adding to deps to avoid
-    // re-running clearResults on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded]);
-
-  const collapsedActionsStrip = trailingActions && trailingActions.length > 0 ? (
-    <View style={styles.actionsStrip}>
-      {trailingActions.map((action, idx) => (
-        <TouchableOpacity
-          key={`${action.icon}-${idx}`}
-          style={styles.actionIconBtn}
-          onPress={action.onPress}
-          accessibilityLabel={action.accessibilityLabel}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <MaterialCommunityIcons name={action.icon} size={20} color={colors.primary} />
-        </TouchableOpacity>
-      ))}
-    </View>
-  ) : null;
-
   // When the row is expanded the trailing actions get a full-width labeled
   // strip below the form — there's no compact pill to sit next to, so we
   // use the real estate for an icon + short label per action. Hidden in
@@ -387,18 +466,6 @@ export function InlineAddMaterialRow({
       ))}
     </View>
   ) : null;
-
-  if (!expanded && !isEdit) {
-    return (
-      <View style={styles.collapsedRow}>
-        <TouchableOpacity style={styles.collapsedBtn} onPress={expand} activeOpacity={0.7}>
-          <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
-          <Text style={styles.collapsedText}>Add Material</Text>
-        </TouchableOpacity>
-        {collapsedActionsStrip}
-      </View>
-    );
-  }
 
   const visibleResults = search.results.slice(0, 5);
   // Only offer "Add as custom" alongside actual search results — without

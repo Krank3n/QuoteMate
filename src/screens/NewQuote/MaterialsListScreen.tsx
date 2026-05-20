@@ -15,6 +15,7 @@ import {
   Animated,
   TextInput as RNTextInput,
   Alert,
+  FlatList,
 } from 'react-native';
 import {
   Text,
@@ -53,7 +54,6 @@ import { ActionSheet, type ActionSheetOption } from '../../components/ActionShee
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
 import { InvoiceReviewModal } from '../../components/InvoiceReviewModal';
 import { useInvoiceImport } from '../../hooks/useInvoiceImport';
-import { NestableScrollContainer, NestableDraggableFlatList, RenderItemParams } from 'react-native-draggable-flatlist';
 import { CollapsibleSection } from '../../components/CollapsibleSection';
 import { useTourRefs } from '../../components/tour/useTourRefs';
 import { ScreenTour } from '../../components/tour/ScreenTour';
@@ -62,6 +62,14 @@ import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/t
 import { getTourMaterialsPriced } from '../../components/tour/tourDummyData';
 import { notificationService } from '../../services/notificationService';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
+
+// Row item shape consumed by the materials list renderer. Lifted to module
+// scope so React.memo'd row components can refer to it without rebuilding
+// the type each render.
+type FlatItem =
+  | { type: 'header'; key: string; sectionName: string }
+  | { type: 'material'; key: string; material: Material }
+  | { type: 'footer'; key: string; sectionName: string; subtotal: number };
 
 // Helper to get section display info
 function getSectionInfo(sectionName: string | undefined): { name: string; color: string } {
@@ -151,15 +159,19 @@ import { ProBadge } from '../../components/ProBadge';
  * than from a stale pack count.
  *
  * Only applies pack division when the requirement unit is compatible with the
- * pack unit (each↔each, m↔m, kg↔kg, L↔L). Without this guard, a "60 each"
- * concrete-bag requirement priced against a "20kg" SKU would divide 60/20=3
- * bags — wrong, because "60 each" already means 60 bags.
+ * pack unit (each↔each, m↔m, m²↔m², m³↔m³, kg↔kg, L↔L). Without this guard,
+ * a "60 each" concrete-bag requirement priced against a "20kg" SKU would
+ * divide 60/20=3 bags — wrong, because "60 each" already means 60 bags. With
+ * the guard, a "1275 kg" bedding-sand requirement priced against a "20kg bag"
+ * SKU divides to 64 bags (correct).
  */
 const PACK_UNIT_EQUIVALENT: Partial<Record<Material['unit'], Material['unit']>> = {
   each: 'each',
   pack: 'each',
   box: 'each',
   m: 'm',
+  'm²': 'm²',
+  'm³': 'm³',
   kg: 'kg',
   L: 'L',
 };
@@ -193,7 +205,7 @@ function applyPackAwarePricing(
   if (packSize && packSize > 1 && packUnit && unitsCompatible) {
     const packsNeeded = Math.max(1, Math.ceil(required / packSize));
     material.quantity = packsNeeded;
-    material.unit = packUnit === 'm' ? 'each' : 'pack';
+    material.unit = packUnit === 'm' || packUnit === 'm²' || packUnit === 'm³' ? 'each' : 'pack';
     material.packSize = packSize;
     material.packUnit = packUnit;
   } else {
@@ -422,7 +434,19 @@ export function MaterialsListScreen() {
   const firstMaterialItemRef = useRef<View>(null);
   const addMaterialButtonRef = useRef<View>(null);
   const fetchPricesButtonRef = useRef<View>(null);
-  const materialsScrollRef = useRef<ScrollView>(null);
+  // The screen used to scroll via a ScrollView, and ScreenTour still calls
+  // `scrollRef.current.scrollTo({ y, animated })`. The list is now a FlatList
+  // (uses `scrollToOffset({ offset, animated })`), so we expose an adapter
+  // ref with the old ScrollView surface that proxies to the FlatList.
+  const materialsFlatListRef = useRef<FlatList<FlatItem>>(null);
+  const materialsScrollRef = useRef<any>({
+    scrollTo: (opts: { y: number; animated?: boolean }) => {
+      materialsFlatListRef.current?.scrollToOffset({
+        offset: opts.y,
+        animated: opts.animated ?? true,
+      });
+    },
+  });
   const [tourActive, setTourActive] = useState(false);
   const tourPastFetchRef = useRef(false);
 
@@ -563,6 +587,18 @@ export function MaterialsListScreen() {
     setInvoiceSheetVisible(true);
   }, []);
 
+  const openSupplierBookForSection = useCallback((sectionName: string) => {
+    navigation.navigate('AddMaterial', {
+      section: sectionName,
+      supplierBookOnly: true,
+    });
+  }, [navigation]);
+
+  // Stable handler for the rare Reece-reauth case — passing the setter
+  // directly would be unstable on every render. Tradies don't hit this
+  // often but the memoized inline-add row relies on identity stability.
+  const handleReeceReauthRequired = useCallback(() => setReeceConnected(false), []);
+
   // ─────────────────────────────────────────────────────────────────────
   // Unsaved-changes guard
   //
@@ -672,9 +708,6 @@ export function MaterialsListScreen() {
   const [renamingSectionKey, setRenamingSectionKey] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
-
-  // Web drag-and-drop ref (must be at top level to avoid conditional hook call)
-  const webDragRef = React.useRef<{ materialId: string } | null>(null);
 
   // Save section as template modal
   const [saveTemplateModalVisible, setSaveTemplateModalVisible] = useState(false);
@@ -822,6 +855,72 @@ export function MaterialsListScreen() {
     () => (materials && Array.isArray(materials)) ? materials.some((m) => m.price === 0) : false,
     [materials]
   );
+
+  // ── Materials list shape: memoized so the IIFE inside the JSX doesn't
+  // rebuild on every parent render (the renderer was the hot path on
+  // Android with 15+ items). Recomputes only when the underlying data —
+  // materials, sections, or which sections are collapsed — actually
+  // changes. `renderFlatItem` (and its inline JSX for header/footer) is
+  // still rebuilt each render because it captures lots of mutable state;
+  // memoizing the data alone is the safe, high-leverage win.
+  const quoteSections = currentQuote?.sections;
+  const flatData: FlatItem[] = React.useMemo(() => {
+    const groupedMaterials = groupMaterialsByCategory(materials);
+
+    const sectionedGroups = Array.from(groupedMaterials.entries()).filter(([key]) => key !== '');
+    const unsectionedGroup = groupedMaterials.get('');
+    const existingSectionNames = new Set(sectionedGroups.map(([key]) => key));
+    if (quoteSections) {
+      quoteSections.forEach(s => {
+        if (!existingSectionNames.has(s.name)) {
+          sectionedGroups.push([s.name, { info: { name: s.name, color: colors.primary }, materials: [] }]);
+        }
+      });
+    }
+
+    const sortOrderByName = new Map(
+      (quoteSections || []).map(s => [s.name, s.sortOrder ?? 999])
+    );
+    sectionedGroups.sort(([a], [b]) => {
+      const oa = sortOrderByName.get(a) ?? 999;
+      const ob = sortOrderByName.get(b) ?? 999;
+      if (oa !== ob) return oa - ob;
+      return a.localeCompare(b);
+    });
+
+    const out: FlatItem[] = [];
+    sectionedGroups.forEach(([groupKey, group]) => {
+      const subtotal = group.materials.reduce((sum, m) => sum + m.totalPrice, 0);
+      out.push({ type: 'header', key: `h-${groupKey}`, sectionName: groupKey });
+      if (!collapsedSections.has(groupKey)) {
+        group.materials.forEach(m => out.push({ type: 'material', key: m.id, material: m }));
+      }
+      out.push({ type: 'footer', key: `f-${groupKey}`, sectionName: groupKey, subtotal });
+    });
+    if (unsectionedGroup) {
+      unsectionedGroup.materials.forEach(m => out.push({ type: 'material', key: m.id, material: m }));
+    }
+    return out;
+  }, [materials, quoteSections, collapsedSections]);
+
+  // Stable list of section names used by the per-card "Move to section"
+  // dropdown. Memoised so MaterialItemCard's memo comparator (which checks
+  // ref equality) doesn't re-render every card on unrelated state changes.
+  const availableSections = useMemo(() => {
+    const names = new Set<string>();
+    (quoteSections || []).forEach(s => names.add(s.name));
+    materials.forEach(m => { if (m.section) names.add(m.section); });
+    return Array.from(names).sort();
+  }, [quoteSections, materials]);
+
+  const toggleSectionCollapsed = useCallback((sectionName: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(sectionName)) next.delete(sectionName);
+      else next.add(sectionName);
+      return next;
+    });
+  }, []);
 
   const triggerPriceFlash = useCallback((materialId: string) => {
     // Add to recently priced set
@@ -2365,47 +2464,19 @@ export function MaterialsListScreen() {
     setDeleteSectionModalVisible(false);
   };
 
-  const handleMoveToSection = (materialId: string) => {
+  // Move a material to a different section. Driven by the box-icon dropdown
+  // on each MaterialItemCard (previously this was a native Alert with a list
+  // of buttons; the dropdown is the replacement for the removed drag-handle).
+  // `targetSection === null` means "Unsectioned".
+  const handleMoveMaterialToSection = useCallback((materialId: string, targetSection: string | null) => {
     if (!currentQuote) return;
-    const material = currentQuote.materials.find(m => m.id === materialId);
-    const currentSection = material?.section || '';
-
-    const sectionNames = new Set<string>();
-    if (currentQuote.sections) currentQuote.sections.forEach(s => sectionNames.add(s.name));
-    currentQuote.materials.forEach(m => { if (m.section) sectionNames.add(m.section); });
-
-    // Build options: all sections except current, plus "Unsectioned"
-    const buttons: { text: string; onPress: () => void }[] = [];
-    Array.from(sectionNames).sort().forEach(name => {
-      if (name === currentSection) return; // Skip current section
-      buttons.push({
-        text: name,
-        onPress: () => {
-          const updatedMaterials = currentQuote.materials.map(m =>
-            m.id === materialId ? { ...m, section: name, templateBaseQuantity: undefined } : m
-          );
-          updateQuote({ ...currentQuote, materials: updatedMaterials });
-        },
-      });
-    });
-    if (currentSection) {
-      buttons.push({
-        text: 'Unsectioned',
-        onPress: () => {
-          const updatedMaterials = currentQuote.materials.map(m =>
-            m.id === materialId ? { ...m, section: undefined, templateBaseQuantity: undefined } : m
-          );
-          updateQuote({ ...currentQuote, materials: updatedMaterials });
-        },
-      });
-    }
-    if (buttons.length === 0) {
-      Alert.alert('No Other Sections', 'Create another section first.');
-      return;
-    }
-    buttons.push({ text: 'Cancel', onPress: () => {} });
-    Alert.alert('Move to Section', 'Choose a section:', buttons as any);
-  };
+    const updatedMaterials = currentQuote.materials.map(m =>
+      m.id === materialId
+        ? { ...m, section: targetSection ?? undefined, templateBaseQuantity: undefined }
+        : m
+    );
+    updateQuote({ ...currentQuote, materials: updatedMaterials });
+  }, [currentQuote, updateQuote]);
 
 
   const handleOpenInStore = (material: Material) => {
@@ -2578,615 +2649,285 @@ export function MaterialsListScreen() {
     return null;
   }
 
+  // ───────────────────────────────────────────────────────────────────────
+  // Materials list — virtualised FlatList.
+  //
+  // Previously this screen used NestableScrollContainer wrapping a
+  // NestableDraggableFlatList, which disabled virtualisation on the inner
+  // list (the parent scroll handled scrolling, so the nested list ran with
+  // scrollEnabled=false). At ~20+ items every MaterialItemCard sat mounted
+  // in the native view tree and Android scroll got janky.
+  //
+  // Drag-and-drop reorder was removed (per-card "Move to section" still
+  // covers the cross-section flow), letting us collapse to a single
+  // virtualising FlatList. Stuff above the list moves into
+  // ListHeaderComponent, stuff below into ListFooterComponent, and the
+  // empty/loading/analyzing states into ListEmptyComponent.
+  // ───────────────────────────────────────────────────────────────────────
+  const renderFlatItem = ({ item }: { item: FlatItem }) => {
+    if (item.type === 'header') {
+      const sd = currentQuote?.sections?.find(s => s.name === item.sectionName);
+      const sectionMats = materials.filter(m => m.section === item.sectionName);
+      const showMultiplier = sd && sd.multiplier > 0 && sectionMats.some(m => m.templateBaseQuantity);
+      const isCollapsed = collapsedSections.has(item.sectionName);
+      return (
+        <View collapsable={false}>
+          <View style={[
+            styles.sectionCardHeaderStandalone,
+            isCollapsed && styles.sectionCardHeaderCollapsed,
+          ]}>
+            <TouchableOpacity onPress={() => toggleSectionCollapsed(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ marginRight: 8 }}>
+              <MaterialCommunityIcons name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={22} color={colors.textMuted} />
+            </TouchableOpacity>
+            {renamingSectionKey === item.sectionName ? (
+              <RNTextInput
+                style={styles.sectionCardNameInput}
+                value={renameValue}
+                onChangeText={setRenameValue}
+                onSubmitEditing={() => handleRenameSection(item.sectionName)}
+                onBlur={() => handleRenameSection(item.sectionName)}
+                autoFocus selectTextOnFocus returnKeyType="done"
+              />
+            ) : (
+              <TouchableOpacity onPress={() => { setRenamingSectionKey(item.sectionName); setRenameValue(item.sectionName); }} activeOpacity={0.7} style={styles.sectionCardNameRow}>
+                <Text style={styles.sectionCardName}>{item.sectionName}</Text>
+              </TouchableOpacity>
+            )}
+            {showMultiplier && (
+              <View style={styles.multiplierStepper}>
+                <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) - 1)}>
+                  <MaterialCommunityIcons name="minus" size={14} color={colors.text} />
+                </Pressable>
+                <Text style={styles.multiplierValue}>{sd?.multiplier || 1}</Text>
+                <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) + 1)}>
+                  <MaterialCommunityIcons name="plus" size={14} color={colors.text} />
+                </Pressable>
+              </View>
+            )}
+            <View style={styles.sectionCardActions}>
+              <TouchableOpacity onPress={() => handleSaveSectionAsTemplate(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <MaterialCommunityIcons name="content-save-outline" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => handleDeleteSection(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    if (item.type === 'footer') {
+      const isCollapsed = collapsedSections.has(item.sectionName);
+      return (
+        <View collapsable={false}>
+          <View style={[
+            styles.sectionCardFooterStandalone,
+            isCollapsed && styles.sectionCardFooterCollapsed,
+          ]}>
+            {!isCollapsed && (
+              <View style={styles.inlineAddRow}>
+                <InlineAddMaterialRow
+                  sectionName={item.sectionName}
+                  onAdd={addMaterialToQuoteInline}
+                  pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
+                  businessSettings={businessSettings}
+                  supplierGroups={supplierGroups}
+                  reeceConnected={reeceConnected === true}
+                  onReeceReauthRequired={handleReeceReauthRequired}
+                  onInvoicePress={openInvoiceForSection}
+                  onSupplierBookPress={openSupplierBookForSection}
+                />
+              </View>
+            )}
+            <View style={styles.sectionCardFooter}>
+              <Text style={styles.sectionCardFooterLabel}>
+                {isCollapsed ? `${materials.filter(m => m.section === item.sectionName).length} items` : 'Section Total'}
+              </Text>
+              <Text style={styles.sectionCardFooterValue}>{formatCurrency(item.subtotal)}</Text>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    // Material card — while being edited the row swaps to the inline edit card.
+    if (editingMaterialId === item.material.id) {
+      return (
+        <View collapsable={false} style={styles.inlineEditWrap}>
+          <InlineAddMaterialRow
+            sectionName={item.material.section || ''}
+            mode="edit"
+            initialMaterial={item.material}
+            onAdd={() => { /* unused in edit mode */ }}
+            onUpdate={handleUpdateMaterial}
+            onExitEdit={exitEdit}
+            pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
+            businessSettings={businessSettings}
+            supplierGroups={supplierGroups}
+            reeceConnected={reeceConnected === true}
+            onReeceReauthRequired={handleReeceReauthRequired}
+          />
+        </View>
+      );
+    }
+    return (
+      <View collapsable={false}>
+        <MaterialItemCard
+          material={item.material}
+          isExpanded={expandedMaterials.has(item.material.id)}
+          isFetching={isMaterialFetching(item.material)}
+          isRecentlyPriced={recentlyPricedIds.has(item.material.id)}
+          localQuantity={localQuantities[item.material.id]}
+          onToggleExpand={() => toggleMaterialExpanded(item.material.id)}
+          onQuantityUpdate={(delta) => handleQuickQuantityUpdate(item.material.id, delta)}
+          onQuantityBlur={(value) => handleQuantityBlur(item.material.id, value)}
+          onMoveToSection={(target) => handleMoveMaterialToSection(item.material.id, target)}
+          availableSections={availableSections}
+          onOpenInStore={() => handleOpenInStore(item.material)}
+          onEdit={() => handleEditMaterial(item.material)}
+          onDelete={() => handleDeleteMaterial(item.material.id)}
+        />
+      </View>
+    );
+  };
+
+  const showMaterialsList = !isAiAnalyzing && materials.length > 0;
+
+  const reeceBanner = (businessSettings?.tradeCategories?.includes('plumbing') || reeceReauthNeeded) &&
+    (reeceConnected === false || reeceReauthNeeded) ? (
+    <TouchableOpacity
+      style={styles.reeceBanner}
+      onPress={() => navigation.navigate('ReeceIntegration' as never)}
+      activeOpacity={0.7}
+    >
+      <MaterialCommunityIcons name="link-variant-off" size={20} color={colors.primary} />
+      <View style={styles.reeceBannerText}>
+        <Text style={styles.reeceBannerTitle}>
+          {reeceReauthNeeded ? 'Reconnect Reece' : 'Connect your Reece account'}
+        </Text>
+        <Text style={styles.reeceBannerSubtitle}>
+          {reeceReauthNeeded
+            ? 'Your Reece sign-in expired. Reconnect to keep getting trade prices.'
+            : 'Get your real Reece trade prices flowing into every quote.'}
+        </Text>
+      </View>
+      <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
+    </TouchableOpacity>
+  ) : null;
+
+  const listHeader = <WebContainer>{reeceBanner}</WebContainer>;
+
+  const listEmpty = (
+    <WebContainer>
+      {isAiAnalyzing ? (
+        <AiAnalyzingState />
+      ) : materials.length === 0 && !templatesLoaded ? (
+        <View style={styles.emptyState}>
+          <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 40 }} />
+        </View>
+      ) : materials.length === 0 ? (
+        <View style={styles.emptyState}>
+          <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
+            if (!isPro) { navigation.navigate('Paywall' as never); return; }
+            handleGenerateMaterialsList();
+          }} activeOpacity={0.7}>
+            <View style={styles.emptyActionIconWrap}>
+              <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
+            </View>
+            <View style={styles.emptyActionContent}>
+              <View style={styles.emptyActionTitleRow}>
+                <Text style={styles.emptyActionTitle}>Get recommended gear</Text>
+                {!isPro && <ProBadge size="small" />}
+              </View>
+              <Text style={styles.emptyActionDesc}>
+                We'll read your notes and pull the right gear, templates, and local suppliers.
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
+            <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
+              <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
+            </View>
+            <View style={styles.emptyActionContent}>
+              <Text style={styles.emptyActionTitle}>I'll build it myself</Text>
+              <Text style={styles.emptyActionDesc}>
+                Start empty and pull from your templates and local suppliers by hand.
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.skipMaterialsButton}
+            onPress={handleNext}
+            activeOpacity={0.6}
+            hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+          >
+            <Text style={styles.skipMaterialsText}>Labour only · skip materials</Text>
+            <MaterialCommunityIcons name="arrow-right" size={16} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+    </WebContainer>
+  );
+
+  const listFooter = (
+    <WebContainer>
+      {showMaterialsList && (
+        <View style={styles.summary}>
+          <Text style={styles.summaryLabel}>Materials Subtotal:</Text>
+          <Text style={styles.summaryValue}>
+            {formatCurrency(materialsSubtotal)}
+          </Text>
+        </View>
+      )}
+
+      {showMaterialsList && (
+        <View style={styles.materialsActionRow}>
+          <TouchableOpacity ref={addMaterialButtonRef as any} style={styles.addMaterialButtonFull} onPress={() => { lightTap(); handleAddMaterial(); }}>
+            <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
+            <Text style={styles.addMaterialButtonText}>Add Material</Text>
+          </TouchableOpacity>
+          <View style={styles.materialsActionHalfRow}>
+            <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { lightTap(); handleLoadTemplate(); }}>
+              <MaterialCommunityIcons name="puzzle-outline" size={18} color={colors.primary} />
+              <Text style={styles.addMaterialButtonText}>Load Template</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { lightTap(); setNewSectionName(''); setShowNewSectionModal(true); }}>
+              <MaterialCommunityIcons name="folder-plus-outline" size={18} color={colors.primary} />
+              <Text style={styles.addMaterialButtonText}>New Section</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Spacer for fixed bottom button */}
+      <View style={{ height: 120 }} />
+    </WebContainer>
+  );
+
   return (
     <View style={styles.container}>
-      <NestableScrollContainer
-          ref={materialsScrollRef as any}
+      <FlatList
+          ref={materialsFlatListRef}
+          data={showMaterialsList ? flatData : []}
+          keyExtractor={(item) => item.key}
+          renderItem={renderFlatItem}
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
           scrollEnabled={!tourActive}
-      >
-        <WebContainer>
-        {/* Reece-not-connected banner. Shown to plumbers who haven't yet
-            connected (so they get nudged to plug in their trade-pricing) and
-            to anyone who hit a 401 mid-fetch (token revoked). Hidden once
-            connected. */}
-        {(businessSettings?.tradeCategories?.includes('plumbing') || reeceReauthNeeded) &&
-         (reeceConnected === false || reeceReauthNeeded) ? (
-          <TouchableOpacity
-            style={styles.reeceBanner}
-            onPress={() => navigation.navigate('ReeceIntegration' as never)}
-            activeOpacity={0.7}
-          >
-            <MaterialCommunityIcons name="link-variant-off" size={20} color={colors.primary} />
-            <View style={styles.reeceBannerText}>
-              <Text style={styles.reeceBannerTitle}>
-                {reeceReauthNeeded ? 'Reconnect Reece' : 'Connect your Reece account'}
-              </Text>
-              <Text style={styles.reeceBannerSubtitle}>
-                {reeceReauthNeeded
-                  ? 'Your Reece sign-in expired. Reconnect to keep getting trade prices.'
-                  : 'Get your real Reece trade prices flowing into every quote.'}
-              </Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
-        ) : null}
-        {isAiAnalyzing ? (
-            <AiAnalyzingState />
-        ) : materials.length === 0 && !templatesLoaded ? (
-          <View style={styles.emptyState}>
-            <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 40 }} />
-          </View>
-        ) : materials.length === 0 ? (
-          <View style={styles.emptyState}>
-            <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
-              if (!isPro) { navigation.navigate('Paywall' as never); return; }
-              handleGenerateMaterialsList();
-            }} activeOpacity={0.7}>
-              <View style={styles.emptyActionIconWrap}>
-                <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
-              </View>
-              <View style={styles.emptyActionContent}>
-                <View style={styles.emptyActionTitleRow}>
-                  <Text style={styles.emptyActionTitle}>Get recommended gear</Text>
-                  {!isPro && <ProBadge size="small" />}
-                </View>
-                <Text style={styles.emptyActionDesc}>
-                  We'll read your notes and pull the right gear, templates, and local suppliers.
-                </Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-            </TouchableOpacity>
-
-            <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
-              <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
-                <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
-              </View>
-              <View style={styles.emptyActionContent}>
-                <Text style={styles.emptyActionTitle}>I'll build it myself</Text>
-                <Text style={styles.emptyActionDesc}>
-                  Start empty and pull from your templates and local suppliers by hand.
-                </Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.skipMaterialsButton}
-              onPress={handleNext}
-              activeOpacity={0.6}
-              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
-            >
-              <Text style={styles.skipMaterialsText}>Labour only · skip materials</Text>
-              <MaterialCommunityIcons name="arrow-right" size={16} color={colors.primary} />
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <List.Section style={styles.listView}>
-            {(() => {
-              const groupedMaterials = groupMaterialsByCategory(materials);
-
-              // Build flat list: section-header, materials, section-footer interleaved
-              type FlatItem =
-                | { type: 'header'; key: string; sectionName: string }
-                | { type: 'material'; key: string; material: Material }
-                | { type: 'footer'; key: string; sectionName: string; subtotal: number }
-
-              const sectionedGroups = Array.from(groupedMaterials.entries()).filter(([key]) => key !== '');
-              const unsectionedGroup = groupedMaterials.get('');
-              const existingSectionNames = new Set(sectionedGroups.map(([key]) => key));
-              if (currentQuote?.sections) {
-                currentQuote.sections.forEach(s => {
-                  if (!existingSectionNames.has(s.name)) {
-                    sectionedGroups.push([s.name, { info: { name: s.name, color: colors.primary }, materials: [] }]);
-                  }
-                });
-              }
-
-              // Order sections by their stored sortOrder. groupMaterialsByCategory
-              // returns them alphabetically, but the user expects to see them in
-              // the order they laid out (and reordered) on screen. Sections with
-              // no record (orphan materials whose section name was never added to
-              // currentQuote.sections) drop to the end.
-              const sortOrderByName = new Map(
-                (currentQuote?.sections || []).map(s => [s.name, s.sortOrder ?? 999])
-              );
-              sectionedGroups.sort(([a], [b]) => {
-                const oa = sortOrderByName.get(a) ?? 999;
-                const ob = sortOrderByName.get(b) ?? 999;
-                if (oa !== ob) return oa - ob;
-                return a.localeCompare(b);
-              });
-
-              const toggleSectionCollapsed = (sectionName: string) => {
-                setCollapsedSections(prev => {
-                  const next = new Set(prev);
-                  if (next.has(sectionName)) next.delete(sectionName);
-                  else next.add(sectionName);
-                  return next;
-                });
-              };
-
-              const flatData: FlatItem[] = [];
-              sectionedGroups.forEach(([groupKey, group]) => {
-                const subtotal = group.materials.reduce((sum, m) => sum + m.totalPrice, 0);
-                flatData.push({ type: 'header', key: `h-${groupKey}`, sectionName: groupKey });
-                if (!collapsedSections.has(groupKey)) {
-                  group.materials.forEach(m => flatData.push({ type: 'material', key: m.id, material: m }));
-                }
-                flatData.push({ type: 'footer', key: `f-${groupKey}`, sectionName: groupKey, subtotal });
-              });
-              if (unsectionedGroup) {
-                unsectionedGroup.materials.forEach(m => flatData.push({ type: 'material', key: m.id, material: m }));
-              }
-
-              const renderFlatItem = ({ item, drag, isActive }: RenderItemParams<FlatItem>) => {
-                if (item.type === 'header') {
-                  const sd = currentQuote?.sections?.find(s => s.name === item.sectionName);
-                  const sectionMats = materials.filter(m => m.section === item.sectionName);
-                  const showMultiplier = sd && sd.multiplier > 0 && sectionMats.some(m => m.templateBaseQuantity);
-                  const isCollapsed = collapsedSections.has(item.sectionName);
-                  return (
-                    <View collapsable={false}>
-                      <View style={[
-                        styles.sectionCardHeaderStandalone,
-                        isCollapsed && styles.sectionCardHeaderCollapsed,
-                      ]}>
-                        <TouchableOpacity onPress={() => toggleSectionCollapsed(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ marginRight: 8 }}>
-                          <MaterialCommunityIcons name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={22} color={colors.textMuted} />
-                        </TouchableOpacity>
-                        {renamingSectionKey === item.sectionName ? (
-                          <RNTextInput
-                            style={styles.sectionCardNameInput}
-                            value={renameValue}
-                            onChangeText={setRenameValue}
-                            onSubmitEditing={() => handleRenameSection(item.sectionName)}
-                            onBlur={() => handleRenameSection(item.sectionName)}
-                            autoFocus selectTextOnFocus returnKeyType="done"
-                          />
-                        ) : (
-                          <TouchableOpacity onPress={() => { setRenamingSectionKey(item.sectionName); setRenameValue(item.sectionName); }} activeOpacity={0.7} style={styles.sectionCardNameRow}>
-                            <Text style={styles.sectionCardName}>{item.sectionName}</Text>
-                          </TouchableOpacity>
-                        )}
-                        {showMultiplier && (
-                          <View style={styles.multiplierStepper}>
-                            <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) - 1)}>
-                              <MaterialCommunityIcons name="minus" size={14} color={colors.text} />
-                            </Pressable>
-                            <Text style={styles.multiplierValue}>{sd?.multiplier || 1}</Text>
-                            <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) + 1)}>
-                              <MaterialCommunityIcons name="plus" size={14} color={colors.text} />
-                            </Pressable>
-                          </View>
-                        )}
-                        <View style={styles.sectionCardActions}>
-                          <TouchableOpacity onPress={() => handleSaveSectionAsTemplate(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                            <MaterialCommunityIcons name="content-save-outline" size={18} color={colors.textMuted} />
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={() => handleDeleteSection(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                            <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </View>
-                  );
-                }
-
-                if (item.type === 'footer') {
-                  const isCollapsed = collapsedSections.has(item.sectionName);
-                  return (
-                    <View collapsable={false}>
-                      <View style={[
-                        styles.sectionCardFooterStandalone,
-                        isCollapsed && styles.sectionCardFooterCollapsed,
-                      ]}>
-                        {!isCollapsed && (
-                          <View style={styles.inlineAddRow}>
-                            <InlineAddMaterialRow
-                              sectionName={item.sectionName}
-                              onAdd={addMaterialToQuoteInline}
-                              pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
-                              businessSettings={businessSettings}
-                              supplierGroups={supplierGroups}
-                              reeceConnected={reeceConnected === true}
-                              onReeceReauthRequired={() => setReeceConnected(false)}
-                              trailingActions={[
-                                {
-                                  icon: 'receipt',
-                                  label: 'From invoice',
-                                  accessibilityLabel: 'Add from invoice',
-                                  onPress: () => openInvoiceForSection(item.sectionName),
-                                },
-                                {
-                                  icon: 'book-open-page-variant',
-                                  label: 'Supplier book',
-                                  accessibilityLabel: 'Open Supplier Book',
-                                  onPress: () => navigation.navigate('AddMaterial', {
-                                    section: item.sectionName,
-                                    supplierBookOnly: true,
-                                  }),
-                                },
-                              ]}
-                            />
-                          </View>
-                        )}
-                        <View style={styles.sectionCardFooter}>
-                          <Text style={styles.sectionCardFooterLabel}>
-                            {isCollapsed ? `${materials.filter(m => m.section === item.sectionName).length} items` : 'Section Total'}
-                          </Text>
-                          <Text style={styles.sectionCardFooterValue}>{formatCurrency(item.subtotal)}</Text>
-                        </View>
-                      </View>
-                    </View>
-                  );
-                }
-
-                // Material — draggable. While being edited the row swaps to
-                // the inline edit card.
-                if (editingMaterialId === item.material.id) {
-                  return (
-                    <View collapsable={false} style={styles.inlineEditWrap}>
-                      <InlineAddMaterialRow
-                        sectionName={item.material.section || ''}
-                        mode="edit"
-                        initialMaterial={item.material}
-                        onAdd={() => { /* unused in edit mode */ }}
-                        onUpdate={handleUpdateMaterial}
-                        onExitEdit={exitEdit}
-                        pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
-                        businessSettings={businessSettings}
-                        supplierGroups={supplierGroups}
-                        reeceConnected={reeceConnected === true}
-                        onReeceReauthRequired={() => setReeceConnected(false)}
-                      />
-                    </View>
-                  );
-                }
-                return (
-                  <View collapsable={false}>
-                    <MaterialItemCard
-                      material={item.material}
-                      isExpanded={expandedMaterials.has(item.material.id)}
-                      isFetching={isMaterialFetching(item.material)}
-                      isRecentlyPriced={recentlyPricedIds.has(item.material.id)}
-                      localQuantity={localQuantities[item.material.id]}
-                      isActive={isActive}
-                      drag={drag}
-                      onToggleExpand={() => toggleMaterialExpanded(item.material.id)}
-                      onQuantityUpdate={(delta) => handleQuickQuantityUpdate(item.material.id, delta)}
-                      onQuantityBlur={(value) => handleQuantityBlur(item.material.id, value)}
-                      onMoveToSection={() => handleMoveToSection(item.material.id)}
-                      onOpenInStore={() => handleOpenInStore(item.material)}
-                      onEdit={() => handleEditMaterial(item.material)}
-                      onDelete={() => handleDeleteMaterial(item.material.id)}
-                    />
-                  </View>
-                );
-              };
-
-              // After drag: walk the reordered flat list, assign sections based on which header each material is under.
-              // Materials dropped before the first header get assigned to the first section.
-              const handleFlatDragEnd = ({ data }: { data: FlatItem[] }) => {
-                if (!currentQuote) return;
-
-                // Find the first section name so orphan materials get assigned there
-                const firstSectionName = data.find(d => d.type === 'header')?.sectionName;
-
-                let currentSection: string | undefined = firstSectionName;
-                const newMaterials: Material[] = [];
-                data.forEach(item => {
-                  if (item.type === 'header') currentSection = item.sectionName;
-                  else if (item.type === 'material') {
-                    const assignedSection = currentSection || firstSectionName;
-                    newMaterials.push({
-                      ...item.material,
-                      section: assignedSection,
-                      templateBaseQuantity: item.material.section !== assignedSection ? undefined : item.material.templateBaseQuantity,
-                    });
-                  }
-                });
-                // Only update if something actually changed
-                let changed = false;
-                for (let i = 0; i < newMaterials.length; i++) {
-                  const orig = currentQuote.materials[i];
-                  if (!orig || newMaterials[i].id !== orig.id || newMaterials[i].section !== orig.section) {
-                    changed = true;
-                    break;
-                  }
-                }
-                if (changed) {
-                  updateQuote({ ...currentQuote, materials: newMaterials });
-                }
-              };
-
-              const WebDropZone = ({ children, onDropMaterial, style, keyProp }: {
-                children: React.ReactNode;
-                onDropMaterial?: (matId: string) => void;
-                style?: any;
-                keyProp: string;
-              }) => {
-                const ref = React.useRef<any>(null);
-                React.useEffect(() => {
-                  const el = ref.current;
-                  if (!el) return;
-                  const handleDragOver = (e: DragEvent) => { e.preventDefault(); };
-                  const handleDrop = (e: DragEvent) => {
-                    e.preventDefault();
-                    if (webDragRef.current && onDropMaterial) {
-                      onDropMaterial(webDragRef.current.materialId);
-                      webDragRef.current = null;
-                    }
-                  };
-                  el.addEventListener('dragover', handleDragOver);
-                  el.addEventListener('drop', handleDrop);
-                  return () => { el.removeEventListener('dragover', handleDragOver); el.removeEventListener('drop', handleDrop); };
-                });
-                return <View ref={ref} key={keyProp} style={style}>{children}</View>;
-              };
-
-              const WebDraggableItem = ({ children, materialId, onDropOnto, keyProp }: {
-                children: React.ReactNode;
-                materialId: string;
-                onDropOnto: (draggedId: string) => void;
-                keyProp: string;
-              }) => {
-                const ref = React.useRef<any>(null);
-                React.useEffect(() => {
-                  const el = ref.current;
-                  if (!el) return;
-                  el.draggable = true;
-                  el.style.cursor = 'grab';
-                  const handleDragStart = () => { webDragRef.current = { materialId }; };
-                  const handleDragOver = (e: DragEvent) => { e.preventDefault(); };
-                  const handleDrop = (e: DragEvent) => {
-                    e.preventDefault();
-                    if (webDragRef.current) {
-                      onDropOnto(webDragRef.current.materialId);
-                      webDragRef.current = null;
-                    }
-                  };
-                  el.addEventListener('dragstart', handleDragStart);
-                  el.addEventListener('dragover', handleDragOver);
-                  el.addEventListener('drop', handleDrop);
-                  return () => { el.removeEventListener('dragstart', handleDragStart); el.removeEventListener('dragover', handleDragOver); el.removeEventListener('drop', handleDrop); };
-                });
-                return <View ref={ref} key={keyProp}>{children}</View>;
-              };
-
-              const renderWebFlatItem = (item: FlatItem) => {
-                if (item.type === 'header') {
-                  const sd = currentQuote?.sections?.find(s => s.name === item.sectionName);
-                  const showMultiplier = !!sd;
-                  const isCollapsed = collapsedSections.has(item.sectionName);
-                  return (
-                    <WebDropZone
-                      keyProp={item.key}
-                      onDropMaterial={(matId) => {
-                        if (!currentQuote) return;
-                        const mat = currentQuote.materials.find(m => m.id === matId);
-                        if (!mat || mat.section === item.sectionName) return;
-                        const updated = currentQuote.materials.map(m =>
-                          m.id === matId ? { ...m, section: item.sectionName, templateBaseQuantity: undefined } : m
-                        );
-                        updateQuote({ ...currentQuote, materials: updated });
-                      }}
-                    >
-                      <View style={[
-                        styles.sectionCardHeaderStandalone,
-                        isCollapsed && styles.sectionCardHeaderCollapsed,
-                      ]}>
-                        <TouchableOpacity onPress={() => toggleSectionCollapsed(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ marginRight: 8 }}>
-                          <MaterialCommunityIcons name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={22} color={colors.textMuted} />
-                        </TouchableOpacity>
-                        {renamingSectionKey === item.sectionName ? (
-                          <RNTextInput
-                            style={styles.sectionCardNameInput}
-                            value={renameValue}
-                            onChangeText={setRenameValue}
-                            onSubmitEditing={() => handleRenameSection(item.sectionName)}
-                            onBlur={() => handleRenameSection(item.sectionName)}
-                            autoFocus selectTextOnFocus returnKeyType="done"
-                          />
-                        ) : (
-                          <TouchableOpacity onPress={() => { setRenamingSectionKey(item.sectionName); setRenameValue(item.sectionName); }} activeOpacity={0.7} style={styles.sectionCardNameRow}>
-                            <Text style={styles.sectionCardName}>{item.sectionName}</Text>
-                          </TouchableOpacity>
-                        )}
-                        {showMultiplier && (
-                          <View style={styles.multiplierStepper}>
-                            <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) - 1)}>
-                              <MaterialCommunityIcons name="minus" size={14} color={colors.text} />
-                            </Pressable>
-                            <Text style={styles.multiplierValue}>{sd?.multiplier || 1}</Text>
-                            <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) + 1)}>
-                              <MaterialCommunityIcons name="plus" size={14} color={colors.text} />
-                            </Pressable>
-                          </View>
-                        )}
-                        <View style={styles.sectionCardActions}>
-                          <TouchableOpacity onPress={() => handleSaveSectionAsTemplate(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                            <MaterialCommunityIcons name="content-save-outline" size={18} color={colors.textMuted} />
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={() => handleDeleteSection(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                            <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </WebDropZone>
-                  );
-                }
-
-                if (item.type === 'footer') {
-                  const isCollapsed = collapsedSections.has(item.sectionName);
-                  return (
-                    <WebDropZone
-                      keyProp={item.key}
-                      onDropMaterial={(matId) => {
-                        if (!currentQuote) return;
-                        const mat = currentQuote.materials.find(m => m.id === matId);
-                        if (!mat || mat.section === item.sectionName) return;
-                        const updated = currentQuote.materials.map(m =>
-                          m.id === matId ? { ...m, section: item.sectionName, templateBaseQuantity: undefined } : m
-                        );
-                        updateQuote({ ...currentQuote, materials: updated });
-                      }}
-                    >
-                      <View style={[
-                        styles.sectionCardFooterStandalone,
-                        isCollapsed && styles.sectionCardFooterCollapsed,
-                      ]}>
-                        {!isCollapsed && (
-                          <View style={styles.inlineAddRow}>
-                            <InlineAddMaterialRow
-                              sectionName={item.sectionName}
-                              onAdd={addMaterialToQuoteInline}
-                              pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
-                              businessSettings={businessSettings}
-                              supplierGroups={supplierGroups}
-                              reeceConnected={reeceConnected === true}
-                              onReeceReauthRequired={() => setReeceConnected(false)}
-                              trailingActions={[
-                                {
-                                  icon: 'receipt',
-                                  label: 'From invoice',
-                                  accessibilityLabel: 'Add from invoice',
-                                  onPress: () => openInvoiceForSection(item.sectionName),
-                                },
-                                {
-                                  icon: 'book-open-page-variant',
-                                  label: 'Supplier book',
-                                  accessibilityLabel: 'Open Supplier Book',
-                                  onPress: () => navigation.navigate('AddMaterial', {
-                                    section: item.sectionName,
-                                    supplierBookOnly: true,
-                                  }),
-                                },
-                              ]}
-                            />
-                          </View>
-                        )}
-                        <View style={styles.sectionCardFooter}>
-                          <Text style={styles.sectionCardFooterLabel}>
-                            {isCollapsed ? `${materials.filter(m => m.section === item.sectionName).length} items` : 'Section Total'}
-                          </Text>
-                          <Text style={styles.sectionCardFooterValue}>{formatCurrency(item.subtotal)}</Text>
-                        </View>
-                      </View>
-                    </WebDropZone>
-                  );
-                }
-
-                // Material — web draggable. While being edited the row
-                // swaps to the inline edit card.
-                if (editingMaterialId === item.material.id) {
-                  return (
-                    <View style={styles.inlineEditWrap}>
-                      <InlineAddMaterialRow
-                        sectionName={item.material.section || ''}
-                        mode="edit"
-                        initialMaterial={item.material}
-                        onAdd={() => { /* unused in edit mode */ }}
-                        onUpdate={handleUpdateMaterial}
-                        onExitEdit={exitEdit}
-                        pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
-                        businessSettings={businessSettings}
-                        supplierGroups={supplierGroups}
-                        reeceConnected={reeceConnected === true}
-                        onReeceReauthRequired={() => setReeceConnected(false)}
-                      />
-                    </View>
-                  );
-                }
-                return (
-                  <WebDraggableItem
-                    keyProp={item.key}
-                    materialId={item.material.id}
-                    onDropOnto={(draggedId) => {
-                      if (!currentQuote || draggedId === item.material.id) return;
-                      const targetSection = item.material.section;
-                      const mats = [...currentQuote.materials];
-                      const fromIdx = mats.findIndex(m => m.id === draggedId);
-                      const toIdx = mats.findIndex(m => m.id === item.material.id);
-                      if (fromIdx === -1 || toIdx === -1) return;
-                      const [moved] = mats.splice(fromIdx, 1);
-                      const insertIdx = mats.findIndex(m => m.id === item.material.id);
-                      mats.splice(insertIdx, 0, {
-                        ...moved,
-                        section: targetSection,
-                        templateBaseQuantity: moved.section !== targetSection ? undefined : moved.templateBaseQuantity,
-                      });
-                      updateQuote({ ...currentQuote, materials: mats });
-                    }}
-                  >
-                    <MaterialItemCard
-                      material={item.material}
-                      isExpanded={expandedMaterials.has(item.material.id)}
-                      isFetching={isMaterialFetching(item.material)}
-                      isRecentlyPriced={recentlyPricedIds.has(item.material.id)}
-                      localQuantity={localQuantities[item.material.id]}
-                      isActive={false}
-                      onToggleExpand={() => toggleMaterialExpanded(item.material.id)}
-                      onQuantityUpdate={(delta) => handleQuickQuantityUpdate(item.material.id, delta)}
-                      onQuantityBlur={(value) => handleQuantityBlur(item.material.id, value)}
-                      onMoveToSection={() => handleMoveToSection(item.material.id)}
-                      onOpenInStore={() => handleOpenInStore(item.material)}
-                      onEdit={() => handleEditMaterial(item.material)}
-                      onDelete={() => handleDeleteMaterial(item.material.id)}
-                    />
-                  </WebDraggableItem>
-                );
-              };
-
-              return Platform.OS !== 'web' ? (
-                <NestableDraggableFlatList
-                  data={flatData}
-                  keyExtractor={(item) => item.key}
-                  renderItem={renderFlatItem}
-                  onDragEnd={handleFlatDragEnd}
-                />
-              ) : (
-                flatData.map(item => renderWebFlatItem(item))
-              );
-            })()}
-          </List.Section>
-        )}
-
-        {materials.length > 0 && !isAiAnalyzing && (
-          <View style={styles.summary}>
-            <Text style={styles.summaryLabel}>Materials Subtotal:</Text>
-            <Text style={styles.summaryValue}>
-              {formatCurrency(materialsSubtotal)}
-            </Text>
-          </View>
-        )}
-
-        {/* Action buttons */}
-        {materials.length > 0 && !isAiAnalyzing && (
-          <View style={styles.materialsActionRow}>
-            <TouchableOpacity ref={addMaterialButtonRef as any} style={styles.addMaterialButtonFull} onPress={() => { lightTap(); handleAddMaterial(); }}>
-              <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
-              <Text style={styles.addMaterialButtonText}>Add Material</Text>
-            </TouchableOpacity>
-            <View style={styles.materialsActionHalfRow}>
-              <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { lightTap(); handleLoadTemplate(); }}>
-                <MaterialCommunityIcons name="puzzle-outline" size={18} color={colors.primary} />
-                <Text style={styles.addMaterialButtonText}>Load Template</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { lightTap(); setNewSectionName(''); setShowNewSectionModal(true); }}>
-                <MaterialCommunityIcons name="folder-plus-outline" size={18} color={colors.primary} />
-                <Text style={styles.addMaterialButtonText}>New Section</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {/* Spacer for fixed bottom button */}
-        <View style={{ height: 120 }} />
-        </WebContainer>
-       </NestableScrollContainer>
+          windowSize={5}
+          initialNumToRender={10}
+          maxToRenderPerBatch={8}
+          removeClippedSubviews
+          ListHeaderComponent={listHeader}
+          ListEmptyComponent={listEmpty}
+          ListFooterComponent={listFooter}
+      />
 
       <FixedBottomButton
         label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labor & Markup")}
@@ -3791,6 +3532,13 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 140,
     flexGrow: 1,
+    // Cap the materials list on iPad/large screens (and web) so cards don't
+    // stretch edge-to-edge on landscape tablets. Matches WebContainer's 800px
+    // default — set on the FlatList's contentContainerStyle so it applies to
+    // the rows themselves, not just the header/empty/footer slots.
+    width: '100%',
+    maxWidth: 800,
+    alignSelf: 'center',
     ...(Platform.OS === 'web' && {
       height: '0px' as any,
     }),

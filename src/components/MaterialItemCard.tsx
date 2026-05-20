@@ -4,9 +4,9 @@
  * Supports interactive mode (qty stepper, edit, delete) and read-only mode (templates).
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, Pressable, Image, Platform, TextInput as RNTextInput, ActivityIndicator } from 'react-native';
-import { Text } from 'react-native-paper';
+import { Text, Menu, Divider } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
@@ -29,13 +29,23 @@ interface MaterialItemCardProps {
   isExpanded?: boolean;
   isFetching?: boolean;
   isRecentlyPriced?: boolean;
-  isActive?: boolean; // From draggable-flatlist — true when this card is being dragged
   localQuantity?: number;
-  drag?: () => void; // From draggable-flatlist — call to start dragging
   onToggleExpand?: () => void;
   onQuantityUpdate?: (delta: number) => void;
   onQuantityBlur?: (value: string) => void;
-  onMoveToSection?: () => void;
+  /**
+   * Move this material to a different section. Pass the target section name,
+   * or `null` for "Unsectioned". Triggered by the box-icon dropdown on the
+   * left of the card — see the Menu wired around `package-variant` below.
+   */
+  onMoveToSection?: (sectionName: string | null) => void;
+  /**
+   * Section names the box-icon dropdown should offer (sorted, includes the
+   * material's current section so we can render it with a checkmark). Pass
+   * a memoised reference from the parent so the memo'd card doesn't re-render
+   * on every parent tick.
+   */
+  availableSections?: string[];
   onOpenInStore?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -55,19 +65,22 @@ function MaterialItemCardImpl({
   isExpanded = false,
   isFetching = false,
   isRecentlyPriced = false,
-  isActive = false,
   localQuantity,
-  drag,
   onToggleExpand,
   onQuantityUpdate,
   onQuantityBlur,
   onMoveToSection,
+  availableSections,
   onOpenInStore,
   onEdit,
   onDelete,
   readOnly = false,
   onPress,
 }: MaterialItemCardProps) {
+  // Anchored dropdown for the box icon — lets the user move this material
+  // to another section without leaving the card. Closed by default; opens on
+  // tap, closes on selection or outside tap.
+  const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
   const hasMeaningfulBrand = material.brand &&
     material.brand.toLowerCase() !== 'bunnings' &&
     material.brand.toLowerCase() !== 'bunnings.com.au' &&
@@ -92,22 +105,73 @@ function MaterialItemCardImpl({
 
   const qty = localQuantity ?? material.quantity;
 
+  // Box icon's interactive behaviour is gated by `onMoveToSection` —
+  // without that callback (e.g. readOnly cards in the supplier book) we
+  // render the same icon as a static decoration. During fetch the icon
+  // becomes a spinner, so suppress tap then too.
+  const sectionMenuEnabled = !!onMoveToSection && !isFetching && !readOnly;
+  const currentSection = material.section || null;
+
+  const statusIconNode = isFetching ? (
+    <ActivityIndicator size={20} color={colors.primary} />
+  ) : isRecentlyPriced ? (
+    <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+  ) : (
+    <MaterialCommunityIcons name="package-variant" size={20} color={colors.textMuted} />
+  );
+
   const topRow = (
     <View style={styles.itemTopRow}>
-      {drag && (
-        <TouchableOpacity onLongPress={drag} delayLongPress={150} style={styles.dragHandle}>
-          <MaterialCommunityIcons name="drag" size={18} color={colors.textMuted} />
-        </TouchableOpacity>
+      {sectionMenuEnabled ? (
+        <Menu
+          visible={sectionMenuOpen}
+          onDismiss={() => setSectionMenuOpen(false)}
+          anchor={
+            <TouchableOpacity
+              onPress={() => setSectionMenuOpen(true)}
+              style={styles.itemStatusIcon}
+              accessibilityLabel="Move to section"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              {statusIconNode}
+            </TouchableOpacity>
+          }
+          contentStyle={styles.sectionMenuContent}
+        >
+          <Menu.Item
+            title="Move to…"
+            disabled
+            titleStyle={styles.sectionMenuHeader}
+          />
+          <Divider />
+          {(availableSections || []).map((name) => {
+            const isCurrent = name === currentSection;
+            return (
+              <Menu.Item
+                key={name}
+                onPress={() => {
+                  setSectionMenuOpen(false);
+                  if (!isCurrent) onMoveToSection?.(name);
+                }}
+                title={name}
+                disabled={isCurrent}
+                leadingIcon={isCurrent ? 'check' : undefined}
+              />
+            );
+          })}
+          {currentSection && (
+            <Menu.Item
+              onPress={() => {
+                setSectionMenuOpen(false);
+                onMoveToSection?.(null);
+              }}
+              title="Unsectioned"
+            />
+          )}
+        </Menu>
+      ) : (
+        <View style={styles.itemStatusIcon}>{statusIconNode}</View>
       )}
-      <View style={styles.itemStatusIcon}>
-        {isFetching ? (
-          <ActivityIndicator size={20} color={colors.primary} />
-        ) : isRecentlyPriced ? (
-          <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
-        ) : (
-          <MaterialCommunityIcons name="package-variant" size={20} color={colors.textMuted} />
-        )}
-      </View>
       <View style={styles.itemNameWrap}>
         <Text style={styles.itemName} numberOfLines={2}>{material.name}</Text>
         {isFetching ? (
@@ -259,7 +323,6 @@ function MaterialItemCardImpl({
       style={[
         styles.listItem,
         isFetching && styles.listItemFetching,
-        isActive && styles.listItemDragging,
       ]}
     >
       <TouchableOpacity
@@ -363,10 +426,11 @@ export const MaterialItemCard = React.memo(MaterialItemCardImpl, (prev, next) =>
     prev.isExpanded === next.isExpanded &&
     prev.isFetching === next.isFetching &&
     prev.isRecentlyPriced === next.isRecentlyPriced &&
-    prev.isActive === next.isActive &&
     prev.localQuantity === next.localQuantity &&
     prev.readOnly === next.readOnly &&
-    prev.drag === next.drag
+    // Ref equality is fine here — the parent memoises `availableSections`
+    // so it only changes when the section list actually changes.
+    prev.availableSections === next.availableSections
   );
 });
 
@@ -382,16 +446,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderLeftWidth: 3,
     borderLeftColor: colors.primary,
-  },
-  listItemDragging: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 10,
-    borderWidth: 2,
-    borderColor: colors.primary,
-    transform: [{ scale: 1.02 }],
   },
   listItemReadOnly: {
     marginBottom: 8,
@@ -431,6 +485,17 @@ const styles = StyleSheet.create({
   itemStatusIcon: {
     width: 28,
     marginTop: 2,
+  },
+  sectionMenuContent: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sectionMenuHeader: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
   },
   itemNameWrap: {
     flex: 1,
@@ -476,11 +541,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: 12,
     paddingTop: 6,
-  },
-  dragHandle: {
-    paddingRight: 4,
-    paddingVertical: 6,
-    marginTop: 2,
   },
   qtyRow: {
     flexDirection: 'row',

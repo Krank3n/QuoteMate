@@ -18,7 +18,8 @@ export interface PackInfo {
 
 const NUM = String.raw`(\d+(?:\.\d+)?)`;
 
-// Order matters — more specific patterns first.
+// Order matters — more specific patterns first. m²/m³ MUST come before m so
+// "30m²" doesn't match the plain "m" pattern first.
 const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit'] }> = [
   // "Box of 500", "Pack of 100", "Bag of 60", "Tub of 250"
   { re: new RegExp(String.raw`\b(?:box|pack|packet|bag|tub|carton|case)\s+of\s+${NUM}\b`, 'i'), unit: 'each' },
@@ -26,6 +27,10 @@ const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit'] }> = [
   { re: new RegExp(String.raw`\b${NUM}\s*[- ]?(?:pack|pk)\b`, 'i'), unit: 'each' },
   // "500 pieces", "500pc", "500 pcs"
   { re: new RegExp(String.raw`\b${NUM}\s*(?:pieces|piece|pcs|pc)\b`, 'i'), unit: 'each' },
+  // Area: "30m²", "30 sqm", "30 sq m", "30m2 roll". Must precede the linear-m pattern.
+  { re: new RegExp(String.raw`${NUM}\s*(?:m²|m2|sqm|sq\s*m|square\s+(?:metres?|meters?))\b`, 'i'), unit: 'm²' },
+  // Volume: "0.054m³", "0.5m3 bag", "1 cubic metre". Must precede the linear-m pattern.
+  { re: new RegExp(String.raw`${NUM}\s*(?:m³|m3|cubic\s+(?:metres?|meters?))\b`, 'i'), unit: 'm³' },
   // Length: "5.4m length", "5.4m long", or just trailing "5.4m" / "2400mm" at end
   { re: new RegExp(String.raw`\b${NUM}\s*m(?:etres?|eters?)?\b(?:\s+(?:length|long|roll))?`, 'i'), unit: 'm' },
   { re: new RegExp(String.raw`\b${NUM}\s*mm\s+(?:length|long)\b`, 'i'), unit: 'm' }, // mm length → convert below
