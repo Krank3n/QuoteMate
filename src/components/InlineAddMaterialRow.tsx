@@ -23,6 +23,7 @@ import {
   Pressable,
   TextInput as RNTextInput,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -492,19 +493,22 @@ function InlineAddMaterialForm({
           autoFocus
         />
         <TouchableOpacity
-          style={styles.searchIconBtn}
+          style={[
+            styles.searchIconBtn,
+            name.trim() ? styles.searchIconBtnActive : styles.searchIconBtnIdle,
+          ]}
           onPress={runFullSearch}
           disabled={!name.trim() || fullSearchActive}
           accessibilityLabel="Search supplier catalogs"
           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
           {fullSearchActive ? (
-            <ActivityIndicator size="small" color={colors.primary} />
+            <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
             <MaterialCommunityIcons
               name="magnify"
-              size={20}
-              color={name.trim() ? colors.primary : colors.textMuted}
+              size={22}
+              color={name.trim() ? '#FFFFFF' : colors.primary}
             />
           )}
         </TouchableOpacity>
@@ -531,11 +535,21 @@ function InlineAddMaterialForm({
               onPress={() => pickResult(item)}
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons
-                name={item.isAiEstimate ? 'robot' : (item.isLocalSource ? 'bookmark-outline' : 'magnify')}
-                size={16}
-                color={colors.textMuted}
-              />
+              {item.imageUrl ? (
+                <Image
+                  source={{ uri: item.imageUrl }}
+                  style={styles.resultRowThumb}
+                  resizeMode="contain"
+                />
+              ) : (
+                <View style={styles.resultRowThumbFallback}>
+                  <MaterialCommunityIcons
+                    name={item.isAiEstimate ? 'robot' : (item.isLocalSource ? 'bookmark-outline' : 'magnify')}
+                    size={18}
+                    color={colors.textMuted}
+                  />
+                </View>
+              )}
               <View style={styles.resultRowBody}>
                 <Text style={styles.resultRowName} numberOfLines={1}>
                   {item.productName || item.description}
@@ -708,7 +722,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     paddingLeft: 10,
-    paddingRight: 4,
+    paddingRight: 0,
+    overflow: 'hidden',
   },
   nameRowError: {
     borderColor: colors.error,
@@ -720,10 +735,24 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   searchIconBtn: {
-    width: 36,
-    height: 36,
+    width: 44,
+    height: '100%',
+    minHeight: 36,
     alignItems: 'center',
     justifyContent: 'center',
+    // Pinned to the right edge of the input — radius only on the right
+    // corners so it tucks into the bordered nameRow without floating.
+    borderTopRightRadius: 7,
+    borderBottomRightRadius: 7,
+  },
+  // Idle: empty name → faint primary-tinted pill so the button still reads as
+  // tappable (just clearly inactive). Active state below takes over once the
+  // user types something.
+  searchIconBtnIdle: {
+    backgroundColor: colors.primary + '1F',
+  },
+  searchIconBtnActive: {
+    backgroundColor: colors.primary,
   },
   resultsList: {
     borderRadius: 8,
@@ -735,11 +764,29 @@ const styles = StyleSheet.create({
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+  },
+  resultRowThumb: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF',
+  },
+  // Same footprint as the thumbnail so result rows don't shift when some
+  // results have images and others (AI estimates / favourites) don't.
+  resultRowThumbFallback: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   resultRowCustom: {
     backgroundColor: colors.primary + '14',

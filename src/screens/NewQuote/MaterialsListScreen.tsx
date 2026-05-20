@@ -2664,7 +2664,16 @@ export function MaterialsListScreen() {
   // ListHeaderComponent, stuff below into ListFooterComponent, and the
   // empty/loading/analyzing states into ListEmptyComponent.
   // ───────────────────────────────────────────────────────────────────────
-  const renderFlatItem = ({ item }: { item: FlatItem }) => {
+  const renderFlatItem = ({ item, index }: { item: FlatItem; index: number }) => {
+    // First / last material in the current section, so the wrapper can add
+    // a bit of top/bottom breathing only at the section edges (regular cards
+    // already have 10px marginBottom from listItem; without this the first
+    // card sits flush against the header divider and the last card visually
+    // collides with the inline-add row above the section total).
+    const prevType = flatData[index - 1]?.type;
+    const nextType = flatData[index + 1]?.type;
+    const isFirstMaterialInSection = item.type === 'material' && prevType === 'header';
+    const isLastMaterialInSection = item.type === 'material' && nextType === 'footer';
     if (item.type === 'header') {
       const sd = currentQuote?.sections?.find(s => s.name === item.sectionName);
       const sectionMats = materials.filter(m => m.section === item.sectionName);
@@ -2754,7 +2763,7 @@ export function MaterialsListScreen() {
     // Material card — while being edited the row swaps to the inline edit card.
     if (editingMaterialId === item.material.id) {
       return (
-        <View collapsable={false} style={styles.inlineEditWrap}>
+        <View collapsable={false} style={[styles.materialItemWrap, styles.inlineEditWrap]}>
           <InlineAddMaterialRow
             sectionName={item.material.section || ''}
             mode="edit"
@@ -2772,7 +2781,14 @@ export function MaterialsListScreen() {
       );
     }
     return (
-      <View collapsable={false}>
+      <View
+        collapsable={false}
+        style={[
+          styles.materialItemWrap,
+          isFirstMaterialInSection && styles.materialItemWrapFirst,
+          isLastMaterialInSection && styles.materialItemWrapLast,
+        ]}
+      >
         <MaterialItemCard
           material={item.material}
           isExpanded={expandedMaterials.has(item.material.id)}
@@ -3973,7 +3989,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginHorizontal: 4,
     marginTop: 16,
-    marginBottom: 8,
+    // No marginBottom — material rows below share the same section tint and
+    // sit flush against the header, so the whole section reads as one block.
     backgroundColor: colors.surfaceDark,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
@@ -3982,7 +3999,6 @@ const styles = StyleSheet.create({
   },
   sectionCardHeaderCollapsed: {
     borderBottomWidth: 0,
-    marginBottom: 0,
   },
   sectionCardFooterStandalone: {
     marginHorizontal: 4,
@@ -4061,12 +4077,35 @@ const styles = StyleSheet.create({
   },
   inlineAddRow: {
     marginHorizontal: 12,
-    marginVertical: 8,
+    // Tightened from 8 so the gap above the dashed Add Material pill matches
+    // the gap between material cards inside the section (last card's
+    // marginBottom + footer paddingTop already supply enough breathing).
+    marginTop: 2,
+    marginBottom: 8,
   },
   inlineEditWrap: {
-    marginHorizontal: 12,
-    marginVertical: 6,
+    // Horizontal margin comes from materialItemWrap (section tint), so just
+    // pad to give the edit form roughly the same inset as a regular card.
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
+  // Wraps each material row inside a section. Shares colors.surfaceDark
+  // with the section header/footer so the whole group reads as a single
+  // rounded container instead of cards floating on the dark screen.
+  materialItemWrap: {
+    marginHorizontal: 4,
+    backgroundColor: colors.surfaceDark,
+  },
+  // First material in a section — listItem has no marginTop, so without
+  // this the card sits flush against the header's bottom divider.
+  materialItemWrapFirst: {
+    paddingTop: 10,
+  },
+  // Last material in a section — keeps the gap above the inline-add row
+  // matching the gap between cards (listItem already has marginBottom: 10).
+  // No padding here because the card's own marginBottom carries the space;
+  // kept as a hook so we can dial it independently if the design shifts.
+  materialItemWrapLast: {},
   sectionAddMaterialBtn: {
     flexDirection: 'row',
     alignItems: 'center',
