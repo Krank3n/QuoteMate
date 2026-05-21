@@ -280,8 +280,9 @@ export const styles = StyleSheet.create({
   },
   searchBarContainer: {
     marginBottom: 16,
-    gap: 10,
   },
+  // Mirrors InlineAddMaterialRow's `nameRow` — bordered pill with the input
+  // on the left and the search button tucked into the right edge.
   searchBarInputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -290,9 +291,8 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     paddingLeft: 12,
-  },
-  searchBarIcon: {
-    marginRight: 4,
+    paddingRight: 0,
+    overflow: 'hidden',
   },
   searchBarInput: {
     flex: 1,
@@ -303,21 +303,22 @@ export const styles = StyleSheet.create({
     paddingLeft: 0,
   },
   searchBarButton: {
-    flexDirection: 'row',
+    width: 56,
+    height: '100%',
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
+    borderTopRightRadius: 11,
+    borderBottomRightRadius: 11,
+  },
+  searchBarButtonIdle: {
+    backgroundColor: colors.primary + '1F',
+  },
+  searchBarButtonActive: {
     backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    gap: 8,
   },
   searchBarButtonCancel: {
     backgroundColor: colors.textMuted,
-  },
-  searchBarButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
   },
   supplierChipsRow: {
     flexDirection: 'row',
@@ -664,32 +665,32 @@ export const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  addManuallySearchLink: {
+  // Horizontal action strip beneath the search results — mirrors the
+  // `expandedActionsStrip` from InlineAddMaterialRow so the Search & Add tab
+  // and the inline-add card on MaterialsListScreen feel like the same UI.
+  searchActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 8,
+    marginTop: 16,
+  },
+  searchActionBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 12,
-    marginTop: 8,
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
-  addManuallySearchLinkText: {
-    marginLeft: 8,
-    color: colors.primary,
-    fontSize: 14,
+  searchActionLabel: {
+    fontSize: 13,
     fontWeight: '600',
-  },
-  addFromInvoiceLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-  },
-  addFromInvoiceLinkText: {
-    marginLeft: 8,
     color: colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
   },
   manualSheetFooter: {
     paddingHorizontal: 16,

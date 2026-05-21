@@ -1343,12 +1343,11 @@ export function AddMaterialScreen() {
       ) : (
       <View style={styles.searchBarContainer}>
         <View style={styles.searchBarInputWrap}>
-          <MaterialCommunityIcons name="magnify" size={20} color={colors.textMuted} style={styles.searchBarIcon} />
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
             mode="flat"
-            placeholder={selectedSupplierGroup ? `Search ${supplierGroups.find(g => g.id === selectedSupplierGroup)?.name || 'supplier'}` : "Search for materials..."}
+            placeholder={selectedSupplierGroup ? `Search ${supplierGroups.find(g => g.id === selectedSupplierGroup)?.name || 'supplier'}` : 'Material name'}
             placeholderTextColor={colors.textMuted}
             style={styles.searchBarInput}
             contentStyle={styles.searchBarInputContent}
@@ -1357,25 +1356,36 @@ export function AddMaterialScreen() {
             returnKeyType="search"
             editable={!isSearching}
           />
+          <TouchableOpacity
+            style={[
+              styles.searchBarButton,
+              isSearching
+                ? styles.searchBarButtonCancel
+                : searchQuery.trim()
+                  ? styles.searchBarButtonActive
+                  : styles.searchBarButtonIdle,
+            ]}
+            onPress={
+              isSearching
+                ? cancelSearch
+                : () => { Keyboard.dismiss(); handleSearch(); }
+            }
+            disabled={!isSearching && !searchQuery.trim()}
+            activeOpacity={0.7}
+            accessibilityLabel={isSearching ? 'Cancel search' : 'Search supplier catalogs'}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            {isSearching ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <MaterialCommunityIcons
+                name="magnify"
+                size={22}
+                color={searchQuery.trim() ? '#FFFFFF' : colors.primary}
+              />
+            )}
+          </TouchableOpacity>
         </View>
-        {isSearching ? (
-          <TouchableOpacity
-            style={[styles.searchBarButton, styles.searchBarButtonCancel]}
-            onPress={cancelSearch}
-            activeOpacity={0.7}
-          >
-            <ActivityIndicator size="small" color="#FFFFFF" />
-            <Text style={styles.searchBarButtonText}>Cancel</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={styles.searchBarButton}
-            onPress={() => { Keyboard.dismiss(); handleSearch(); }}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.searchBarButtonText}>Search</Text>
-          </TouchableOpacity>
-        )}
       </View>
       )}
 
@@ -1501,33 +1511,37 @@ export function AddMaterialScreen() {
         <>
           {renderSearchSection()}
           {renderRecentlyUsedSection()}
-          {/* Persistent "Add manually" link at the bottom */}
-          <TouchableOpacity
-            style={styles.addManuallySearchLink}
-            onPress={() => setManualEntrySheetVisible(true)}
-            activeOpacity={0.7}
-          >
-            <MaterialCommunityIcons name="pencil-plus-outline" size={18} color={colors.primary} />
-            <Text style={styles.addManuallySearchLinkText}>Add manually</Text>
-          </TouchableOpacity>
-          {/* Snap an invoice / receipt and append the line items to this quote */}
-          <TouchableOpacity
-            style={styles.addFromInvoiceLink}
-            onPress={openInvoiceSheet}
-            disabled={invoiceImporter.phase === 'extracting' || invoiceImporter.phase === 'capturing'}
-            activeOpacity={0.7}
-          >
-            {invoiceImporter.phase === 'extracting' ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <MaterialCommunityIcons name="receipt" size={18} color={colors.primary} />
-            )}
-            <Text style={styles.addFromInvoiceLinkText}>
-              {invoiceImporter.phase === 'extracting'
-                ? (invoiceImporter.loadingLabel || 'Reading…')
-                : 'Add from invoice'}
-            </Text>
-          </TouchableOpacity>
+          {/* Persistent fallback actions — mirrors the inline-add row's
+              labelled action strip so the two surfaces feel consistent. */}
+          <View style={styles.searchActionsRow}>
+            <TouchableOpacity
+              style={styles.searchActionBtn}
+              onPress={() => setManualEntrySheetVisible(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="Add manually"
+            >
+              <MaterialCommunityIcons name="pencil-plus-outline" size={18} color={colors.primary} />
+              <Text style={styles.searchActionLabel} numberOfLines={1}>Add manually</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.searchActionBtn}
+              onPress={openInvoiceSheet}
+              disabled={invoiceImporter.phase === 'extracting' || invoiceImporter.phase === 'capturing'}
+              activeOpacity={0.7}
+              accessibilityLabel="Add from invoice"
+            >
+              {invoiceImporter.phase === 'extracting' ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <MaterialCommunityIcons name="receipt" size={18} color={colors.primary} />
+              )}
+              <Text style={styles.searchActionLabel} numberOfLines={1}>
+                {invoiceImporter.phase === 'extracting'
+                  ? (invoiceImporter.loadingLabel || 'Reading…')
+                  : 'Add from invoice'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </>
       )}
       </WebContainer>

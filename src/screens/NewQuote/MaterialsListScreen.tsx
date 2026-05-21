@@ -2281,10 +2281,29 @@ export function MaterialsListScreen() {
     setPendingMaterialName('');
   }, []);
 
-  const handleAddMaterial = () => {
-    // Navigate to the new AddMaterial screen
-    navigation.navigate('AddMaterial');
-  };
+  // "I'll build it myself" on the empty-state card — instead of jumping to
+  // the full AddMaterial screen, drop a blank material into the quote and
+  // open it inline in edit mode. The user can fill name/qty/price right
+  // there. If they cancel without typing a name, exitEdit cleans up the
+  // dangling row so the list doesn't end up with an empty line.
+  const handleStartManualBuild = useCallback(() => {
+    if (!currentQuote) return;
+    const draft: Material = {
+      id: generateId(),
+      name: '',
+      quantity: 1,
+      unit: 'each',
+      price: 0,
+      totalPrice: 0,
+      manualPriceOverride: true,
+      pricingSource: 'manual',
+    } as Material;
+    updateQuote({
+      ...currentQuote,
+      materials: [...(currentQuote.materials || []), draft],
+    });
+    setEditingMaterialId(draft.id);
+  }, [currentQuote, updateQuote]);
 
   const handleCreateSection = () => {
     if (!newSectionName.trim() || !currentQuote) return;
@@ -2552,7 +2571,23 @@ export function MaterialsListScreen() {
     });
   }, [currentQuote, updateQuote]);
 
-  const exitEdit = useCallback(() => setEditingMaterialId(null), []);
+  // Exit inline edit. If the row being closed is still nameless (the
+  // "I'll build it myself" draft path creates one with name === '') drop it
+  // so we don't leave an empty placeholder in the list.
+  const exitEdit = useCallback(() => {
+    setEditingMaterialId(prev => {
+      if (prev && currentQuote) {
+        const target = currentQuote.materials.find(m => m.id === prev);
+        if (target && !target.name?.trim()) {
+          updateQuote({
+            ...currentQuote,
+            materials: currentQuote.materials.filter(m => m.id !== prev),
+          });
+        }
+      }
+      return null;
+    });
+  }, [currentQuote, updateQuote]);
 
 
   const handleQuickQuantityUpdate = useCallback((materialId: string, delta: number) => {
@@ -2665,15 +2700,18 @@ export function MaterialsListScreen() {
   // empty/loading/analyzing states into ListEmptyComponent.
   // ───────────────────────────────────────────────────────────────────────
   const renderFlatItem = ({ item, index }: { item: FlatItem; index: number }) => {
-    // First / last material in the current section, so the wrapper can add
-    // a bit of top/bottom breathing only at the section edges (regular cards
-    // already have 10px marginBottom from listItem; without this the first
-    // card sits flush against the header divider and the last card visually
-    // collides with the inline-add row above the section total).
+    // First / last material in the current section — adds top/bottom
+    // breathing at the section edges (cards already have 10px marginBottom
+    // from listItem, but the first card has no marginTop). `undefined`
+    // covers the unsectioned-only path (e.g. the "I'll build it myself"
+    // draft) where a lone material sits in flatData with no header above
+    // and no footer below.
     const prevType = flatData[index - 1]?.type;
     const nextType = flatData[index + 1]?.type;
-    const isFirstMaterialInSection = item.type === 'material' && prevType === 'header';
-    const isLastMaterialInSection = item.type === 'material' && nextType === 'footer';
+    const isFirstMaterialInSection =
+      item.type === 'material' && (prevType === 'header' || prevType === undefined);
+    const isLastMaterialInSection =
+      item.type === 'material' && (nextType === 'footer' || nextType === undefined);
     if (item.type === 'header') {
       const sd = currentQuote?.sections?.find(s => s.name === item.sectionName);
       const sectionMats = materials.filter(m => m.section === item.sectionName);
@@ -2760,10 +2798,22 @@ export function MaterialsListScreen() {
       );
     }
 
+    // Unsectioned materials live at the bottom of the list with no section
+    // header/footer, so skip the section-tinted wrap that would otherwise
+    // paint a "ghost section" background around them.
+    const isUnsectioned = !item.material.section;
+
     // Material card — while being edited the row swaps to the inline edit card.
     if (editingMaterialId === item.material.id) {
       return (
-        <View collapsable={false} style={[styles.materialItemWrap, styles.inlineEditWrap]}>
+        <View
+          collapsable={false}
+          style={
+            isUnsectioned
+              ? styles.inlineEditWrapUnsectioned
+              : [styles.materialItemWrap, styles.inlineEditWrap]
+          }
+        >
           <InlineAddMaterialRow
             sectionName={item.material.section || ''}
             mode="edit"
@@ -2783,11 +2833,15 @@ export function MaterialsListScreen() {
     return (
       <View
         collapsable={false}
-        style={[
-          styles.materialItemWrap,
-          isFirstMaterialInSection && styles.materialItemWrapFirst,
-          isLastMaterialInSection && styles.materialItemWrapLast,
-        ]}
+        style={
+          isUnsectioned
+            ? undefined
+            : [
+                styles.materialItemWrap,
+                isFirstMaterialInSection && styles.materialItemWrapFirst,
+                isLastMaterialInSection && styles.materialItemWrapLast,
+              ]
+        }
       >
         <MaterialItemCard
           material={item.material}
@@ -2863,7 +2917,7 @@ export function MaterialsListScreen() {
             <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
           </TouchableOpacity>
 
-          <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleAddMaterial} activeOpacity={0.7}>
+          <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleStartManualBuild} activeOpacity={0.7}>
             <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
               <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
             </View>
@@ -2903,10 +2957,23 @@ export function MaterialsListScreen() {
 
       {showMaterialsList && (
         <View style={styles.materialsActionRow}>
-          <TouchableOpacity ref={addMaterialButtonRef as any} style={styles.addMaterialButtonFull} onPress={() => { lightTap(); handleAddMaterial(); }}>
-            <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
-            <Text style={styles.addMaterialButtonText}>Add Material</Text>
-          </TouchableOpacity>
+          {/* Inline quick-add for an unsectioned material. Same component
+              used in each section's footer — the collapsed state mirrors
+              the old dashed "Add Material" pill, so the UI shape is
+              unchanged until tapped. */}
+          <View ref={addMaterialButtonRef as any}>
+            <InlineAddMaterialRow
+              sectionName=""
+              onAdd={addMaterialToQuoteInline}
+              pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
+              businessSettings={businessSettings}
+              supplierGroups={supplierGroups}
+              reeceConnected={reeceConnected === true}
+              onReeceReauthRequired={handleReeceReauthRequired}
+              onInvoicePress={openInvoiceForSection}
+              onSupplierBookPress={openSupplierBookForSection}
+            />
+          </View>
           <View style={styles.materialsActionHalfRow}>
             <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { lightTap(); handleLoadTemplate(); }}>
               <MaterialCommunityIcons name="puzzle-outline" size={18} color={colors.primary} />
@@ -3546,6 +3613,10 @@ const styles = StyleSheet.create({
     }),
   },
   scrollContent: {
+    // Top breathing room so the first item (section header, unsectioned
+    // card, or an inline edit form) doesn't sit flush against the screen
+    // header — applies uniformly regardless of what row 0 happens to be.
+    paddingTop: 12,
     paddingBottom: 140,
     flexGrow: 1,
     // Cap the materials list on iPad/large screens (and web) so cards don't
@@ -4089,6 +4160,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
+  // Unsectioned edit — no surrounding tint, so own the horizontal margin
+  // so the card lines up with a regular MaterialItemCard (listItem uses
+  // marginHorizontal: 12, marginBottom: 10).
+  inlineEditWrapUnsectioned: {
+    marginHorizontal: 12,
+    marginBottom: 10,
+  },
   // Wraps each material row inside a section. Shares colors.surfaceDark
   // with the section header/footer so the whole group reads as a single
   // rounded container instead of cards floating on the dark screen.
@@ -4320,11 +4398,18 @@ const styles = StyleSheet.create({
   },
   summary: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
+    // Card-style instead of edge-to-edge bar — matches the surrounding
+    // material cards so the row doesn't look cropped on wide screens.
+    marginHorizontal: 12,
+    marginTop: 4,
+    marginBottom: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1,
     borderColor: colors.border,
   },
   summaryLabel: {
