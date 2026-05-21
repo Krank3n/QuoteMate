@@ -21,14 +21,12 @@ import {
   ActivityIndicator,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import * as Print from 'expo-print';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useStore } from '../../store/useStore';
 import { useDocumentMode } from '../../utils/documentMode';
-import { checkSquareConnection } from '../../services/squareService';
 import { ensureSquareConnectedForPayment } from '../../utils/quoteDeliveryGuard';
 import { colors } from '../../theme';
-import { generateDocumentPDF } from '../../utils/pdfGenerator';
+import { previewDocumentPDF } from '../../utils/pdfGenerator';
 // until the user actually requests a PDF preview.
 import { quoteToDocument, invoiceToDocument } from '../../types/documentAdapter';
 import { calculateDueDate, formatPaymentTerms } from '../../utils/invoiceCalculator';
@@ -103,6 +101,15 @@ export function JobPreviewScreen() {
   const currentQuote = useStore((s) => s.currentQuote);
   const currentInvoice = useStore((s) => s.currentInvoice);
   const businessSettings = useStore((s) => s.businessSettings);
+  const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  // Match JobScopeCard's derivation so previewDocumentPDF gets the same
+  // isPro flag and produces identical HTML — without this, the logo
+  // (Pro-only) leaks into the PDF for free users and the Firebase
+  // Storage URL stalls Android's print bridge.
+  const isTrialActiveForPdf = !!(
+    subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired
+  );
+  const isProForPdf = subscriptionStatus?.isPro || isTrialActiveForPdf;
   const nextQuoteNumber = useStore((s) => s.nextQuoteNumber);
   const nextInvoiceNumber = useStore((s) => s.nextInvoiceNumber);
   const documents = useStore((s) => s.documents);
@@ -128,10 +135,6 @@ export function JobPreviewScreen() {
     if (editSectionsRef.current) registerRef('editSections', editSectionsRef.current);
     if (sendButtonRef.current) registerRef('sendButton', sendButtonRef.current);
   });
-
-  const isTrialExpired = useStore((s) => s.isTrialExpired);
-  const getEffectivePlan = useStore((s) => s.getEffectivePlan);
-  const [previewWatermark, setPreviewWatermark] = useState(false);
 
   // The wizard writes one or the other — prefer whichever is set. mode is the
   // tiebreaker for the route-declared intent.
@@ -440,44 +443,6 @@ export function JobPreviewScreen() {
     return null;
   }, [workingDoc?.id, documents, currentInvoice, currentQuote]);
 
-  // Watermark gate: free-tier + trial expired + no Square + DOC STILL IN
-  // DRAFT = obscure the preview with a diagonal DRAFT overlay. Prevents
-  // screenshot bypass while the user is in the sunk-cost build window. Pro
-  // users and in-trial users see no watermark; once Square connects, they
-  // upgrade, or the doc is sent, it disappears.
-  //
-  // Crucially: never watermark a doc that's already been sent. The customer
-  // has a clean copy — a watermark now would only panic the tradie into
-  // thinking the customer saw "UPGRADE TO SEND" on the version they got.
-  // Sent docs are records to re-open, not deliverables.
-  //
-  // useFocusEffect (not useEffect): zustand selectors are stable refs, so a
-  // dep array of [isTrialExpired, getEffectivePlan] never re-runs. The user
-  // connects Square via SquareIntegrationScreen (a stack push) — when they
-  // pop back to this preview, the screen re-focuses without remounting, so
-  // useEffect wouldn't refire. focus-effect catches that path.
-  const liveStage = liveDoc?.stage;
-  useFocusEffect(
-    React.useCallback(() => {
-      let cancelled = false;
-      const plan = getEffectivePlan();
-      if (!isTrialExpired() || plan === 'pro' || liveStage !== 'draft') {
-        setPreviewWatermark(false);
-        return;
-      }
-      checkSquareConnection()
-        .then((c) => {
-          if (!cancelled) setPreviewWatermark(!c.connected);
-        })
-        .catch(() => {
-          if (!cancelled) setPreviewWatermark(true);
-        });
-      return () => {
-        cancelled = true;
-      };
-    }, [isTrialExpired, getEffectivePlan, liveStage])
-  );
-
   // After a Quote → Invoice convert, liveDoc.type flips to 'invoice' and
   // liveDoc.number gets the new INV-NNN. The route param `mode` and the
   // initial refNumber state were captured at mount and don't follow, so
@@ -503,33 +468,11 @@ export function JobPreviewScreen() {
     if (!liveDoc) return;
     setIsPdfLoading(true);
     try {
-      const html = await generateDocumentPDF(liveDoc, businessSettings);
-
-      if (Platform.OS === 'web') {
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        document.body.appendChild(iframe);
-
-        const iframeDoc = iframe.contentWindow?.document;
-        if (iframeDoc) {
-          iframeDoc.open();
-          iframeDoc.write(html);
-          iframeDoc.close();
-
-          iframe.onload = () => {
-            setTimeout(() => {
-              iframe.contentWindow?.print();
-              setTimeout(() => {
-                document.body.removeChild(iframe);
-              }, 1000);
-            }, 250);
-          };
-        }
-      } else {
-        // System print preview UI — full-screen rendered PDF with zoom,
-        // page navigation, and Save-as-PDF / Share from the overflow menu.
-        await Print.printAsync({ html });
-      }
+      // isPro mirrors JobScopeCard's derivation. Critical, not cosmetic:
+      // when isPro is undefined the PDF gets the business logo (a Pro
+      // feature) as a Firebase Storage <img src>, which stalls Android's
+      // print bridge — Preview PDF hangs forever.
+      await previewDocumentPDF(liveDoc, businessSettings, { isPro: isProForPdf });
     } catch (error: any) {
       Alert.alert('Could not open preview', error?.message || 'Please try again.');
     } finally {
@@ -808,13 +751,6 @@ export function JobPreviewScreen() {
         </WebContainer>
       </ScrollView>
 
-      {previewWatermark ? (
-        <View pointerEvents="none" style={styles.watermarkOverlay}>
-          <Text style={styles.watermarkText}>DRAFT</Text>
-          <Text style={styles.watermarkSubText}>CONNECT SQUARE TO SEND</Text>
-        </View>
-      ) : null}
-
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <View style={styles.bottomButtonsRow}>
           {/* Take Payment — in-person capture path. Same shared sheet
@@ -976,31 +912,6 @@ const styles = StyleSheet.create({
       display: 'flex' as any,
       flexDirection: 'column' as any,
     }),
-  },
-  watermarkOverlay: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    transform: [{ rotate: '-28deg' }],
-  },
-  watermarkText: {
-    fontSize: 96,
-    fontWeight: '900',
-    letterSpacing: 6,
-    color: colors.error,
-    opacity: 0.18,
-  },
-  watermarkSubText: {
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: 2,
-    color: colors.error,
-    opacity: 0.28,
-    marginTop: 4,
   },
   container: {
     flex: 1,

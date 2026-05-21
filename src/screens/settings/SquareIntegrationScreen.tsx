@@ -24,7 +24,6 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as WebBrowser from 'expo-web-browser';
 import { format } from 'date-fns';
 
-import { useStore } from '../../store/useStore';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
@@ -34,12 +33,6 @@ import type { SquareConnectionStatus } from '../../services/squareService';
 import { primeTapToPayOnDevice } from '../../services/squarePayments';
 
 export function SquareIntegrationScreen() {
-  const { subscriptionStatus, getEffectivePlan } = useStore();
-  const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
-  const isPro = subscriptionStatus?.isPro || isTrialActive;
-  const plan = getEffectivePlan();
-  const isFreeTier = plan === 'free';
-
   const [connection, setConnection] = useState<SquareConnectionStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkingConnection, setCheckingConnection] = useState(true);
@@ -189,26 +182,6 @@ export function SquareIntegrationScreen() {
             <SquareReconnectBanner reason={connection.disconnectedReason} />
           ) : null}
 
-          {/* Free-tier mandatory-connection callout. Free users can't send
-              quotes or invoices without a Square link embedded; this card
-              makes the requirement obvious before they hit a delivery gate. */}
-          {isFreeTier && !connection?.connected && (
-            <Surface style={styles.requiredCallout}>
-              <MaterialCommunityIcons
-                name="information-outline"
-                size={20}
-                color={colors.primary}
-                style={{ marginRight: 10, marginTop: 2 }}
-              />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.requiredCalloutTitle}>Required on the free plan</Text>
-                <Text style={styles.requiredCalloutBody}>
-                  Connect Square so customers can pay your quotes online. We take a 1.7% platform fee on the free plan — drops to 1% when you upgrade to Pro.
-                </Text>
-              </View>
-            </Surface>
-          )}
-
           {/* Header */}
           <Surface style={styles.card}>
             <View style={styles.headerRow}>
@@ -305,19 +278,6 @@ export function SquareIntegrationScreen() {
                 <Text style={styles.disconnectedText}>
                   Connect your Square account to add a Pay Now button to invoice emails. Customers pay by card, money lands straight in your Square account.
                 </Text>
-
-                {!isPro && (
-                  <View style={styles.proNotice}>
-                    <MaterialCommunityIcons
-                      name="crown"
-                      size={18}
-                      color={colors.warning}
-                    />
-                    <Text style={styles.proNoticeText}>
-                      Pro feature — upgrade to connect
-                    </Text>
-                  </View>
-                )}
 
                 <Button
                   mode="contained"
@@ -442,28 +402,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     elevation: 2,
   },
-  requiredCallout: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.primary + '40',
-    elevation: 1,
-  },
-  requiredCalloutTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  requiredCalloutBody: {
-    fontSize: 13,
-    color: colors.onSurface,
-    lineHeight: 18,
-  },
   headerRow: { flexDirection: 'row', alignItems: 'center' },
   squareIcon: {
     width: 56,
@@ -546,20 +484,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     lineHeight: 20,
     marginBottom: 16,
-  },
-  proNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.warningBg,
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  proNoticeText: {
-    fontSize: 13,
-    color: colors.warning,
-    marginLeft: 8,
-    fontWeight: '500',
   },
   connectButton: { marginTop: 4 },
   tapToPayButton: { marginTop: 4, marginBottom: 12 },

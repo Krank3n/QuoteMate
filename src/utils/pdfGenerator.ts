@@ -45,8 +45,8 @@ export async function prepareLogoHtml(businessSettings: BusinessSettings | null,
   const uri = businessSettings.logoUri;
   const alt = businessSettings.businessName || '';
 
-  // Remote URLs (Firebase Storage) can be used directly as src
-  if (uri.startsWith('https://') || uri.startsWith('http://') || Platform.OS === 'web') {
+  // Web: the browser fetches remote images natively, embed URL as-is.
+  if (Platform.OS === 'web') {
     return `<img src="${uri}" alt="${alt}" class="logo" />`;
   }
 
@@ -54,11 +54,30 @@ export async function prepareLogoHtml(businessSettings: BusinessSettings | null,
   const cached = logoHtmlCache.get(cacheKey);
   if (cached) return cached;
 
-  // Local file URIs need to be converted to base64 for the PDF renderer
+  // Mobile (iOS + Android): embed the logo as a base64 data URI.
+  //
+  // Why we can't just embed a remote URL: Android's print/PDF bridge
+  // tries to fetch <img src="https://…"> inside the native print
+  // process. On real devices this stalls indefinitely — Preview PDF
+  // hangs forever with no error. Local files are fast; remote logos
+  // (Firebase Storage) must be downloaded + inlined here first.
   try {
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    const isRemote = uri.startsWith('http://') || uri.startsWith('https://');
+    let base64: string;
+    if (isRemote) {
+      const tmp = `${FileSystem.cacheDirectory}logo-${Date.now()}.img`;
+      const downloaded = await FileSystem.downloadAsync(uri, tmp);
+      base64 = await FileSystem.readAsStringAsync(downloaded.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    } else {
+      base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    }
+    // image/png decodes correctly for both PNG and JPEG payloads in
+    // the renderers expo-print uses (WebKit on iOS, Android print's
+    // WebView). No need to sniff the actual content type.
     const html = `<img src="data:image/png;base64,${base64}" alt="${alt}" class="logo" />`;
     logoHtmlCache.set(cacheKey, html);
     return html;
