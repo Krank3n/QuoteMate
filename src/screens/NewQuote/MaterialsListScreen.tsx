@@ -2281,6 +2281,28 @@ export function MaterialsListScreen() {
     setPendingMaterialName('');
   }, []);
 
+  // Tracks the "I'll build it myself" rapid-entry mode: while true, saving a
+  // material in inline-edit immediately spawns a fresh blank draft and rolls
+  // the inline-edit form onto that one, so the user can keep typing line
+  // after line without round-tripping through Cancel.
+  const buildModeRef = useRef(false);
+  // Set by handleUpdateMaterial when it chains a new draft in buildMode, so
+  // the immediately-following onExitEdit (called by InlineAddMaterialRow's
+  // edit-mode save flow) knows to NOT clear editingMaterialId — the chain
+  // already advanced it to the new draft.
+  const buildModeJustChainedRef = useRef(false);
+
+  const createBlankDraftMaterial = useCallback((): Material => ({
+    id: generateId(),
+    name: '',
+    quantity: 1,
+    unit: 'each',
+    price: 0,
+    totalPrice: 0,
+    manualPriceOverride: true,
+    pricingSource: 'manual',
+  } as Material), []);
+
   // "I'll build it myself" on the empty-state card — instead of jumping to
   // the full AddMaterial screen, drop a blank material into the quote and
   // open it inline in edit mode. The user can fill name/qty/price right
@@ -2288,22 +2310,14 @@ export function MaterialsListScreen() {
   // dangling row so the list doesn't end up with an empty line.
   const handleStartManualBuild = useCallback(() => {
     if (!currentQuote) return;
-    const draft: Material = {
-      id: generateId(),
-      name: '',
-      quantity: 1,
-      unit: 'each',
-      price: 0,
-      totalPrice: 0,
-      manualPriceOverride: true,
-      pricingSource: 'manual',
-    } as Material;
+    buildModeRef.current = true;
+    const draft = createBlankDraftMaterial();
     updateQuote({
       ...currentQuote,
       materials: [...(currentQuote.materials || []), draft],
     });
     setEditingMaterialId(draft.id);
-  }, [currentQuote, updateQuote]);
+  }, [currentQuote, updateQuote, createBlankDraftMaterial]);
 
   const handleCreateSection = () => {
     if (!newSectionName.trim() || !currentQuote) return;
@@ -2565,16 +2579,39 @@ export function MaterialsListScreen() {
 
   const handleUpdateMaterial = useCallback((updated: Material) => {
     if (!currentQuote) return;
-    updateQuote({
-      ...currentQuote,
-      materials: currentQuote.materials.map(m => (m.id === updated.id ? updated : m)),
-    });
-  }, [currentQuote, updateQuote]);
+    const nextMaterials = currentQuote.materials.map(m =>
+      m.id === updated.id ? updated : m,
+    );
+    if (buildModeRef.current) {
+      // Rapid-entry: the user just saved a material via the "I'll build it
+      // myself" flow. Spawn a fresh blank draft and roll the inline-edit
+      // onto it so they can keep typing without dismissing.
+      const draft = createBlankDraftMaterial();
+      updateQuote({
+        ...currentQuote,
+        materials: [...nextMaterials, draft],
+      });
+      setEditingMaterialId(draft.id);
+      // Signal to the immediately-following exitEdit (InlineAddMaterialRow's
+      // edit-mode save flow calls onUpdate then onExitEdit) to leave the
+      // editingMaterialId alone — we already advanced it.
+      buildModeJustChainedRef.current = true;
+      return;
+    }
+    updateQuote({ ...currentQuote, materials: nextMaterials });
+  }, [currentQuote, updateQuote, createBlankDraftMaterial]);
 
-  // Exit inline edit. If the row being closed is still nameless (the
-  // "I'll build it myself" draft path creates one with name === '') drop it
-  // so we don't leave an empty placeholder in the list.
+  // Exit inline edit. Three paths:
+  //   1. Build-mode save just chained → noop (keep the new draft id).
+  //   2. Build-mode cancel on a nameless draft → drop the draft, exit
+  //      build mode, clear editingMaterialId.
+  //   3. Regular edit exit → clear editingMaterialId. If the row is still
+  //      nameless (e.g. the one-shot "build it myself" draft), drop it.
   const exitEdit = useCallback(() => {
+    if (buildModeJustChainedRef.current) {
+      buildModeJustChainedRef.current = false;
+      return;
+    }
     setEditingMaterialId(prev => {
       if (prev && currentQuote) {
         const target = currentQuote.materials.find(m => m.id === prev);
@@ -2585,6 +2622,7 @@ export function MaterialsListScreen() {
           });
         }
       }
+      buildModeRef.current = false;
       return null;
     });
   }, [currentQuote, updateQuote]);
