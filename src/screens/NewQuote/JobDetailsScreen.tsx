@@ -40,7 +40,7 @@ try {
 }
 
 import { useStore } from '../../store/useStore';
-import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
+import { useCurrentDocument, useDocumentMode, usePersistDocument } from '../../utils/documentMode';
 import { JOB_TEMPLATES } from '../../data/jobTemplates';
 import { NICHE_TEMPLATES, getTemplatesForNiche, getNicheTemplateById, NicheJobTemplate, getDescriptionPlaceholder, getVoicePromptHint } from '../../data/nicheTemplates';
 import { getPillsForNiche } from '../../data/nichePills';
@@ -82,7 +82,7 @@ export function JobDetailsScreen() {
   const invoices = useStore((s) => s.invoices);
   const businessSettings = useStore((s) => s.businessSettings);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
-  const saveDraft = useStore((s) => s.saveDraft);
+  const saveDraft = usePersistDocument();
   const unifiedTourActive = useStore((s) => s.unifiedTourActive);
   const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);

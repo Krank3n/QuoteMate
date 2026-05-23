@@ -68,7 +68,7 @@ export type NewQuoteStackParamList = {
   MaterialsList: { mode?: 'quote' | 'invoice' } | undefined;
   AddMaterial: { materialId?: string; mode?: 'quote' | 'invoice' } | undefined;
   LaborMarkup: { mode?: 'quote' | 'invoice' } | undefined;
-  JobPreview: undefined;
+  JobPreview: { mode?: 'quote' | 'invoice'; viewing?: boolean; editing?: boolean } | undefined;
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -209,6 +209,7 @@ function NewInvoiceNavigator() {
         name="JobPreview"
         component={JobPreviewScreen}
         options={{ title: 'Job Preview' }}
+        initialParams={{ mode: 'invoice' }}
       />
     </NewQuoteStack.Navigator>
   );

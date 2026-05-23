@@ -36,7 +36,7 @@ import { generateId } from '../../utils/generateId';
 import { lightTap } from '../../utils/haptics';
 
 import { useStore } from '../../store/useStore';
-import { useCurrentDocument, useDocumentMode, UnifiedDocument } from '../../utils/documentMode';
+import { useCurrentDocument, useDocumentMode, usePersistDocument, UnifiedDocument } from '../../utils/documentMode';
 import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapping, SupplierGroup } from '../../types';
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
@@ -422,7 +422,7 @@ export function MaterialsListScreen() {
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
   const unifiedTourActive = useStore((s) => s.unifiedTourActive);
   const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
-  const saveDraft = useStore((s) => s.saveDraft);
+  const saveDraft = usePersistDocument();
   const storeUpdateQuote = useStore((s) => s.updateQuote);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;

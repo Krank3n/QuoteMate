@@ -12,17 +12,16 @@ import {
   Surface,
   Divider,
 } from 'react-native-paper';
-import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useStore } from '../../store/useStore';
-import { useCurrentDocument, useDocumentMode, getPreviewScreenName } from '../../utils/documentMode';
+import { useCurrentDocument, useDocumentMode, usePersistDocument, getPreviewScreenName } from '../../utils/documentMode';
 import { LaborUnit } from '../../types';
 
 import { colors } from '../../theme';
 import { formatCurrency, calculateQuote } from '../../utils/quoteCalculator';
 import { estimateFuelCost, DEFAULT_FUEL_PRICE } from '../../utils/travelCalculator';
-import { checkSquareConnection } from '../../services/squareService';
 import { QuoteSentBanner } from '../../components/QuoteSentBanner';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
@@ -38,7 +37,7 @@ export function LaborMarkupScreen() {
   const isEditFromPreview = route.params?.editing === true;
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const saveDraft = useStore((s) => s.saveDraft);
+  const persistDocument = usePersistDocument();
   const businessSettings = useStore((s) => s.businessSettings);
   const unifiedTourActive = useStore((s) => s.unifiedTourActive);
   const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
@@ -66,28 +65,6 @@ export function LaborMarkupScreen() {
     if (markupSectionRef.current) registerRef('markupSection', markupSectionRef.current);
   });
 
-  // Deposit collection goes through Square — gate the toggle on connection.
-  // Re-checked on every focus so returning from the Connect Square CTA flips
-  // the toggle's availability without needing a reload.
-  useFocusEffect(
-    React.useCallback(() => {
-      let cancelled = false;
-      checkSquareConnection()
-        .then((res) => {
-          if (cancelled) return;
-          setSquareConnected(!!res.connected);
-          if (!res.connected) setRequireDeposit(false);
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setSquareConnected(false);
-            setRequireDeposit(false);
-          }
-        });
-      return () => { cancelled = true; };
-    }, []),
-  );
-
   const [laborHours, setLaborHours] = useState('');
   const [laborRate, setLaborRate] = useState('');
   const [laborUnit, setLaborUnit] = useState<LaborUnit>('hours');
@@ -102,13 +79,7 @@ export function LaborMarkupScreen() {
   const [travelAdjustment, setTravelAdjustment] = useState('0');
   const [travelDismissed, setTravelDismissed] = useState(false);
   const [lastTravelValue, setLastTravelValue] = useState('0');
-  const [showMarkup, setShowMarkup] = useState(false);
-  const [showMaterialCosts, setShowMaterialCosts] = useState(true);
-  const [showLaborCosts, setShowLaborCosts] = useState(true);
   const [showLaborBreakdown, setShowLaborBreakdown] = useState(true);
-  const [depositPercentage, setDepositPercentage] = useState('');
-  const [requireDeposit, setRequireDeposit] = useState(false);
-  const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
   const [warningDialogVisible, setWarningDialogVisible] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
 
@@ -176,34 +147,7 @@ export function LaborMarkupScreen() {
       setMarkup(currentQuote.markup.toString());
       const lm = currentQuote.laborMarkup ?? currentQuote.markup ?? 0;
       setLaborMarkup(lm.toString());
-      // Per-doc value wins; otherwise inherit the business default.
-      setShowMarkup(
-        currentQuote.showMarkup !== undefined
-          ? currentQuote.showMarkup === true
-          : (businessSettings?.showMarkup === true)
-      );
-      // Quote-level override > business default > true (show)
-      setShowMaterialCosts(
-        currentQuote.showMaterialCosts !== undefined
-          ? currentQuote.showMaterialCosts
-          : (businessSettings?.showMaterialCostsByDefault !== false)
-      );
-      setShowLaborCosts(
-        currentQuote.showLaborCosts !== undefined
-          ? currentQuote.showLaborCosts
-          : (businessSettings?.showLaborCostsByDefault !== false)
-      );
       setShowLaborBreakdown(currentQuote.showLaborBreakdown !== false);
-      const dp = currentQuote.depositPercentage ?? businessSettings?.defaultDepositPercentage ?? 0;
-      setDepositPercentage(dp ? dp.toString() : '30');
-      // Require-deposit toggle: quote-level override if set, otherwise business
-      // default. Undefined on the quote means "inherit" — distinct from
-      // explicit false. Once Square status is known, we'll force-off below if
-      // disconnected so we never save requireDeposit=true without Square.
-      const rd = currentQuote.requireDeposit !== undefined
-        ? currentQuote.requireDeposit
-        : (businessSettings?.requireDepositByDefault === true);
-      setRequireDeposit(rd);
       const ta = (currentQuote.travelAdjustment || 0).toString();
       setTravelAdjustment(ta);
       setLastTravelValue(ta);
@@ -328,9 +272,6 @@ export function LaborMarkupScreen() {
         laborExtraHours: extraHoursLocal,
         markup: markupPercent,
         laborMarkup: laborMarkupPercent,
-        showMarkup,
-        showMaterialCosts,
-        showLaborCosts,
         showLaborBreakdown,
         travelAdjustment: travelPct,
         laborTotal: calculation.laborTotal,
@@ -339,20 +280,13 @@ export function LaborMarkupScreen() {
         markupAmount: calculation.markupAmount,
         gst: calculation.gst,
         total: calculation.total,
-        requireDeposit,
-        depositPercentage: Math.max(0, Math.min(100, parseFloat(depositPercentage) || 0)),
-        depositAmount: (() => {
-          if (!requireDeposit) return 0;
-          const pct = Math.max(0, Math.min(100, parseFloat(depositPercentage) || 0));
-          return pct > 0 ? Math.round(calculation.total * (pct / 100) * 100) / 100 : 0;
-        })(),
       };
       updateQuote(updatedQuote);
-      saveDraft(updatedQuote);
+      persistDocument(updatedQuote);
     });
 
     return unsubscribe;
-  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showMarkup, showMaterialCosts, showLaborCosts, showLaborBreakdown, travelAdjustment, travelDismissed, depositPercentage, requireDeposit, updateQuote, saveDraft]);
+  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showLaborBreakdown, travelAdjustment, travelDismissed, updateQuote, persistDocument]);
 
   if (!currentQuote) {
     return null;
@@ -434,7 +368,6 @@ export function LaborMarkupScreen() {
       laborExtraHours: extraHoursDerived,
       markup: markupPercent,
       laborMarkup: laborMarkupPercent,
-      showMarkup,
       showLaborBreakdown,
       travelAdjustment: travelPct,
       laborTotal: calculation.laborTotal,
@@ -445,7 +378,7 @@ export function LaborMarkupScreen() {
       total: calculation.total,
     };
     updateQuote(updatedQuote);
-    saveDraft(updatedQuote);
+    persistDocument(updatedQuote);
     navigation.goBack();
   };
 
@@ -480,7 +413,6 @@ export function LaborMarkupScreen() {
       laborExtraHours: extraHoursDerived,
       markup: markupPercent,
       laborMarkup: laborMarkupPercent,
-      showMarkup,
       showLaborBreakdown,
       travelAdjustment: travelPct,
       laborTotal: calculation.laborTotal,
@@ -493,7 +425,7 @@ export function LaborMarkupScreen() {
     };
 
     updateQuote(updatedQuote);
-    saveDraft(updatedQuote);
+    persistDocument(updatedQuote);
     setWarningDialogVisible(false);
     navigation.navigate(previewScreenName);
   };
@@ -750,120 +682,6 @@ export function LaborMarkupScreen() {
             {formatCurrency(calculation.markupAmount)}
           </Text>
         </Surface>
-
-        <View style={styles.showMarkupToggle}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.showMarkupTitle}>Show markup on quote</Text>
-            <Text style={styles.showMarkupSubtitle}>
-              When off, markup is included in the total but not shown as a separate line to the customer
-            </Text>
-          </View>
-          <Switch
-            value={showMarkup}
-            onValueChange={setShowMarkup}
-            trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
-            thumbColor={showMarkup ? colors.primary : '#F3F4F6'}
-          />
-        </View>
-
-        <View style={styles.showMarkupToggle}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.showMarkupTitle}>Show material costs on {mode === 'invoice' ? 'invoice' : 'quote'}</Text>
-            <Text style={styles.showMarkupSubtitle}>
-              When off, the materials breakdown and subtotal are hidden. Turn both this and labour off to show only the grand total.
-            </Text>
-          </View>
-          <Switch
-            value={showMaterialCosts}
-            onValueChange={setShowMaterialCosts}
-            trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
-            thumbColor={showMaterialCosts ? colors.primary : '#F3F4F6'}
-          />
-        </View>
-
-        <View style={styles.showMarkupToggle}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.showMarkupTitle}>Show labour costs on {mode === 'invoice' ? 'invoice' : 'quote'}</Text>
-            <Text style={styles.showMarkupSubtitle}>
-              When off, the labour breakdown and subtotal are hidden. Turn both this and materials off to show only the grand total.
-            </Text>
-          </View>
-          <Switch
-            value={showLaborCosts}
-            onValueChange={setShowLaborCosts}
-            trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
-            thumbColor={showLaborCosts ? colors.primary : '#F3F4F6'}
-          />
-        </View>
-      </View>
-
-      {/* Deposit Section */}
-      <View style={styles.sectionHeader}>
-        <View style={styles.sectionLine} />
-        <Text style={styles.sectionHeaderTitle}>DEPOSIT</Text>
-        <View style={styles.sectionLine} />
-      </View>
-
-      <View style={styles.section}>
-        <View style={styles.showMarkupToggle}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.showMarkupTitle, squareConnected === false && { color: colors.textSecondary }]}>Require deposit on acceptance</Text>
-            <Text style={styles.showMarkupSubtitle}>
-              {squareConnected === false
-                ? 'Connect Square to collect deposits from customers when they accept.'
-                : "Customer pays a deposit via Square to lock in the job. Remainder is invoiced when work's done."}
-            </Text>
-          </View>
-          <Switch
-            value={requireDeposit && squareConnected !== false}
-            onValueChange={setRequireDeposit}
-            trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
-            thumbColor={requireDeposit ? colors.primary : '#F3F4F6'}
-            disabled={squareConnected !== true}
-          />
-        </View>
-
-        {squareConnected === false && (
-          <TouchableOpacity
-            onPress={() => navigation.navigate('SquareIntegration' as never)}
-            style={{
-              alignSelf: 'flex-start',
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-              borderRadius: 8,
-              backgroundColor: colors.primary,
-              marginTop: 8,
-            }}
-          >
-            <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '600' }}>Connect Square</Text>
-          </TouchableOpacity>
-        )}
-
-        {requireDeposit && squareConnected === true && (
-          <>
-            <TextInput
-              label="Deposit"
-              value={depositPercentage}
-              onChangeText={setDepositPercentage}
-              mode="outlined"
-              keyboardType="decimal-pad"
-              placeholder="30"
-              right={<TextInput.Affix text="%" />}
-              style={styles.input}
-            />
-            {(() => {
-              const pct = Math.max(0, Math.min(100, parseFloat(depositPercentage) || 0));
-              if (pct <= 0) return null;
-              const amount = Math.round(calculation.total * (pct / 100) * 100) / 100;
-              return (
-                <Surface style={styles.calculationRow}>
-                  <Text style={styles.calculationLabel}>Deposit due on acceptance</Text>
-                  <Text style={styles.calculationValue}>{formatCurrency(amount)}</Text>
-                </Surface>
-              );
-            })()}
-          </>
-        )}
       </View>
 
       {/* Travel Adjustment Section */}
@@ -1010,10 +828,10 @@ export function LaborMarkupScreen() {
         </View>
       )}
 
-      {/* Quote Summary */}
+      {/* Summary */}
       <View style={styles.sectionHeader}>
         <View style={styles.sectionLine} />
-        <Text style={styles.sectionHeaderTitle}>QUOTE SUMMARY</Text>
+        <Text style={styles.sectionHeaderTitle}>{mode === 'invoice' ? 'INVOICE SUMMARY' : 'QUOTE SUMMARY'}</Text>
         <View style={styles.sectionLine} />
       </View>
 

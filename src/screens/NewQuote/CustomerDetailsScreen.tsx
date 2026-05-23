@@ -27,7 +27,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 
 import { useStore } from '../../store/useStore';
-import { useCurrentDocument, useDocumentMode, useDocumentList } from '../../utils/documentMode';
+import { useCurrentDocument, useDocumentMode, useDocumentList, usePersistDocument } from '../../utils/documentMode';
 import { calculateTravelAdjustment } from '../../utils/travelCalculator';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
@@ -62,7 +62,7 @@ export function CustomerDetailsScreen() {
   const isEditFromPreview = route.params?.editing === true;
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const saveDraft = useStore((s) => s.saveDraft);
+  const saveDraft = usePersistDocument();
   const businessSettings = useStore((s) => s.businessSettings);
   const hasSeenScreenTour = useStore((s) => s.hasSeenScreenTour);
   const unifiedTourActive = useStore((s) => s.unifiedTourActive);

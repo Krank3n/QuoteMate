@@ -332,6 +332,7 @@ export function DocumentEmailPreviewModal({
   // so the user's latest in-memory edits are sent rather than waiting for a
   // Firestore round-trip.
   const buildRequestBody = (recipient: string, isTestSend: boolean) => {
+    const trimmedSubject = subject.trim();
     if (isInvoice) {
       const invoice = documentToInvoice(doc);
       return {
@@ -341,6 +342,7 @@ export function DocumentEmailPreviewModal({
         recipientEmail: recipient,
         ...(isTestSend ? { isTestSend: true } : {}),
         includePhotos: hasPhotos && includePhotos,
+        ...(trimmedSubject ? { subject: trimmedSubject } : {}),
       };
     }
     const quote = documentToQuote(doc);
@@ -351,6 +353,7 @@ export function DocumentEmailPreviewModal({
       recipientEmail: recipient,
       ...(isTestSend ? { isTestSend: true } : {}),
       includePhotos: hasPhotos && includePhotos,
+      ...(trimmedSubject ? { subject: trimmedSubject } : {}),
     };
   };
 

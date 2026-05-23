@@ -424,6 +424,12 @@ export interface SendDocumentEmailInput {
   isTestSend?: boolean;
   includePhotos?: boolean;
   /**
+   * Client-edited email subject. When present (and non-empty after trim) it
+   * replaces the hardcoded "Quotation from … - …" / "Invoice from … - …"
+   * default. The [TEST] prefix is still applied on top for test sends.
+   */
+  subject?: string;
+  /**
    * Override fields the client may have edited locally and wants persisted as
    * part of this send. Mirrors the legacy `quote: ...` / `invoice: ...` body
    * field on the old endpoints.
@@ -464,12 +470,46 @@ export interface SendDocumentEmailResult {
  * matches what the legacy sendQuoteEmail / sendInvoiceEmail returned so the
  * shims can pass it through unmodified.
  */
+// The email HTML template always prepends "Hi {customerName}," above the
+// body. Strip a single leading greeting line off whatever the client sent so
+// older drafts (saved before the AI prompt was tightened) don't render a
+// duplicate greeting.
+function stripLeadingGreeting(text: string): string {
+  const greetingLine = /^\s*(hi|hello|hey|g'?day|dear|good (?:morning|afternoon|evening))\b[^\n]*[,!.:]?\s*\n+/i;
+  return text.replace(greetingLine, '').trimStart();
+}
+
+// Mirror of getUserPlanServerSide in index.ts — duplicated here to keep
+// documentHandlers free of index.ts imports. Used to gate the Payment Methods
+// block in invoice emails (pro/trial only). Resolves to 'trial' on profile
+// miss so we err on the generous side.
+async function resolveUserPlan(userId: string): Promise<'trial' | 'free' | 'pro'> {
+  try {
+    const snap = await db().doc(`users/${userId}/profile/subscription`).get();
+    if (!snap.exists) return 'trial';
+    const data = snap.data() || {};
+    if (data.plan === 'pro' || data.plan === 'free' || data.plan === 'trial') return data.plan;
+    if (data.isPro) return 'pro';
+    if (data.trialStartedAt) {
+      const trialMs = 14 * 24 * 60 * 60 * 1000;
+      const startedAt = data.trialStartedAt.toDate
+        ? data.trialStartedAt.toDate()
+        : new Date(data.trialStartedAt);
+      return Date.now() - startedAt.getTime() < trialMs ? 'trial' : 'free';
+    }
+    return 'trial';
+  } catch {
+    return 'trial';
+  }
+}
+
 export async function sendDocumentEmail(
   doc: DocumentRecord,
   input: SendDocumentEmailInput,
 ): Promise<SendDocumentEmailResult> {
   const firestore = db();
-  const { userId, docId, emailBody, recipientEmail, isTestSend, includePhotos } = input;
+  const { userId, docId, recipientEmail, isTestSend, includePhotos, subject } = input;
+  const emailBody = stripLeadingGreeting(input.emailBody || '');
 
   // Settings + terms snapshot
   const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
@@ -482,12 +522,12 @@ export async function sendDocumentEmail(
 
   if (doc.type === 'quote') {
     return sendQuoteFlavour({
-      userId, docId, emailBody, recipientEmail, isTestSend, includePhotos,
+      userId, docId, emailBody, recipientEmail, isTestSend, includePhotos, subject,
       doc, business, termsToSend, termsVersionHash, input,
     });
   }
   return sendInvoiceFlavour({
-    userId, docId, emailBody, recipientEmail, isTestSend, includePhotos,
+    userId, docId, emailBody, recipientEmail, isTestSend, includePhotos, subject,
     doc, business, termsToSend, termsVersionHash, input,
   });
 }
@@ -499,6 +539,7 @@ interface FlavourArgs {
   recipientEmail: string;
   isTestSend?: boolean;
   includePhotos?: boolean;
+  subject?: string;
   doc: DocumentRecord;
   business: BusinessSettings;
   termsToSend: string | null;
@@ -508,7 +549,7 @@ interface FlavourArgs {
 
 async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailResult> {
   const firestore = db();
-  const { userId, docId, emailBody, recipientEmail, isTestSend, includePhotos,
+  const { userId, docId, emailBody, recipientEmail, isTestSend, includePhotos, subject,
           doc, business, termsToSend, termsVersionHash, input } = args;
 
   // Quote-shaped projection for downstream PDF/email builders that still
@@ -612,6 +653,13 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     }
   }
 
+  const showMaterialCostsEmail = quote.showMaterialCosts !== undefined
+    ? quote.showMaterialCosts !== false
+    : business.showMaterialCostsByDefault !== false;
+  const showLaborCostsEmail = quote.showLaborCosts !== undefined
+    ? quote.showLaborCosts !== false
+    : business.showLaborCostsByDefault !== false;
+
   const htmlContent = buildQuoteEmailHtml({
     customerName: quote.customerName || 'Client',
     emailBody,
@@ -629,6 +677,8 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     depositPayNowUrl,
     hasTerms: !!termsToSend,
     surchargePaymentFees: business.surchargePaymentFees === true,
+    showMaterialCosts: showMaterialCostsEmail,
+    showLaborCosts: showLaborCostsEmail,
     business: businessData,
   });
 
@@ -703,9 +753,12 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
   const tradieReplyEmail = await resolveTradieReplyEmail(userId, business.email);
   const tradieDisplayName = business.businessName || undefined;
 
+  const trimmedSubject = (subject || '').trim();
+  const baseSubject = trimmedSubject
+    || `Quotation from ${business.businessName || 'Your Tradie'} - ${quote.job?.name || 'Job'}`;
   const sent = await sendEmail({
     to: recipientEmail,
-    subject: `${isTestSend ? '[TEST] ' : ''}Quotation from ${business.businessName || 'Your Tradie'} - ${quote.job?.name || 'Job'}`,
+    subject: `${isTestSend ? '[TEST] ' : ''}${baseSubject}`,
     htmlContent,
     category: 'transactional',
     userId,
@@ -735,7 +788,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
 
 async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailResult> {
   const firestore = db();
-  const { userId, docId, emailBody, recipientEmail, isTestSend, includePhotos,
+  const { userId, docId, emailBody, recipientEmail, isTestSend, includePhotos, subject,
           doc, business, termsToSend, termsVersionHash, input } = args;
 
   const invoice: AnyData = documentRecordToInvoiceRecord(doc as DocumentRecord);
@@ -813,6 +866,15 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     address: business.address, logoUrl, brandColor: business.brandColor,
   };
 
+  const showMaterialCostsEmail = invoice.showMaterialCosts !== undefined
+    ? invoice.showMaterialCosts !== false
+    : business.showMaterialCostsByDefault !== false;
+  const showLaborCostsEmail = invoice.showLaborCosts !== undefined
+    ? invoice.showLaborCosts !== false
+    : business.showLaborCostsByDefault !== false;
+
+  const plan = await resolveUserPlan(userId);
+
   const htmlContent = buildInvoiceEmailHtml({
     customerName: invoice.customerName || 'Client',
     emailBody,
@@ -829,6 +891,10 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
     hasTerms: !!termsToSend,
     surchargePaymentFees: business.surchargePaymentFees === true,
+    showMaterialCosts: showMaterialCostsEmail,
+    showLaborCosts: showLaborCostsEmail,
+    paymentMethods: business.paymentMethods,
+    plan,
     business: businessData,
   });
 
@@ -913,9 +979,12 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
   const tradieReplyEmail = await resolveTradieReplyEmail(userId, business.email);
   const tradieDisplayName = business.businessName || undefined;
 
+  const trimmedSubject = (subject || '').trim();
+  const baseSubject = trimmedSubject
+    || `Invoice from ${business.businessName || 'Your Tradie'} - ${invoice.job?.name || 'Job'}`;
   const sent = await sendEmail({
     to: recipientEmail,
-    subject: `${isTestSend ? '[TEST] ' : ''}Invoice from ${business.businessName || 'Your Tradie'} - ${invoice.job?.name || 'Job'}`,
+    subject: `${isTestSend ? '[TEST] ' : ''}${baseSubject}`,
     htmlContent,
     category: 'transactional',
     userId,

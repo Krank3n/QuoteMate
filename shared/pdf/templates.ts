@@ -71,18 +71,18 @@ export const printMediaCSS = `
     text-align: right;
   }
   .header-meta h2 {
-    margin: 0 0 14px 0;
-    font-size: 28px;
+    margin: 0 0 10px 0;
+    font-size: 22px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 3px;
+    letter-spacing: 2.5px;
     border: none;
     padding: 0;
     line-height: 1.1;
   }
   .header-meta p {
     margin: 1px 0;
-    font-size: 13px;
+    font-size: 12px;
     line-height: 1.3;
   }
   @page {
@@ -138,29 +138,30 @@ export const printMediaCSS = `
 const professionalCSS = `
   body {
     font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    padding: 40px;
+    padding: 24px;
     color: #1a1a1a;
+    font-size: 12px;
   }
   .section-label {
     background-color: #059669;
     color: white;
-    font-size: 13px;
-    padding-top: 14px;
-    padding-bottom: 6px;
+    font-size: 11px;
+    padding-top: 10px;
+    padding-bottom: 5px;
   }
   .header {
     border-bottom: 3px solid #059669;
-    padding-bottom: 20px;
-    margin-bottom: 30px;
+    padding-bottom: 16px;
+    margin-bottom: 22px;
   }
   .header-content {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 16px;
   }
   .logo {
-    width: 80px;
-    height: 80px;
+    width: 64px;
+    height: 64px;
     object-fit: contain;
     flex-shrink: 0;
   }
@@ -169,66 +170,75 @@ const professionalCSS = `
   }
   .header h1 {
     color: #059669;
-    margin: 0 0 10px 0;
+    margin: 0 0 8px 0;
+    font-size: 24px;
+    line-height: 1.1;
   }
   .header p {
     color: #333333;
-    margin: 5px 0;
+    margin: 3px 0;
+    font-size: 12px;
+    line-height: 1.4;
   }
   .info-section {
-    margin-bottom: 30px;
+    margin-bottom: 22px;
   }
   .info-section h2 {
     color: #1a1a1a;
-    margin-bottom: 15px;
+    margin-bottom: 12px;
+    font-size: 16px;
   }
   .info-section h3 {
     color: #059669;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
+    font-size: 14px;
   }
   .info-section p {
     color: #333333;
-    margin: 5px 0;
+    margin: 4px 0;
+    font-size: 12px;
   }
   .invoice-details {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
   table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
   th {
     background-color: #059669;
     color: white;
-    padding: 10px;
+    padding: 8px 10px;
     text-align: left;
+    font-size: 12px;
   }
   td {
-    padding: 8px;
+    padding: 7px 10px;
     border-bottom: 1px solid #e0e0e0;
     color: #333333;
+    font-size: 12px;
   }
   .total-row {
     font-weight: bold;
     background-color: #f5f5f5;
   }
   .grand-total {
-    font-size: 18px;
+    font-size: 16px;
     color: #059669;
     font-weight: bold;
   }
   .balance-due {
-    font-size: 16px;
+    font-size: 14px;
     color: #dc3545;
     font-weight: bold;
     border-top: 2px solid #dc3545;
-    padding-top: 8px;
-    margin-top: 8px;
+    padding-top: 7px;
+    margin-top: 7px;
   }
   .summary {
-    margin-top: 30px;
-    padding: 20px;
+    margin-top: 22px;
+    padding: 16px 18px;
     background-color: #f9f9f9;
     border-radius: 8px;
     border: 1px solid #e0e0e0;
@@ -236,19 +246,21 @@ const professionalCSS = `
   .summary-row {
     display: flex;
     justify-content: space-between;
-    padding: 8px 0;
+    padding: 6px 0;
     color: #333333;
+    font-size: 12px;
   }
   h3 {
     color: #059669;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
+    font-size: 14px;
   }
   .section-wrapper {
-    margin-bottom: 20px;
+    margin-bottom: 18px;
   }
   .payment-box {
-    margin-top: 30px;
-    padding: 20px;
+    margin-top: 22px;
+    padding: 16px 18px;
     background-color: #f0f9ff;
     border: 2px solid #059669;
     border-radius: 8px;
@@ -257,28 +269,28 @@ const professionalCSS = `
     margin-top: 0;
   }
   .payment-methods-section {
-    margin-top: 30px;
-    padding: 20px;
+    margin-top: 22px;
+    padding: 16px 18px;
     background-color: #f0f9ff;
     border: 2px solid #059669;
     border-radius: 8px;
   }
   .payment-methods-section h3 {
     margin-top: 0;
-    margin-bottom: 15px;
+    margin-bottom: 12px;
   }
   .payment-methods-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 20px;
+    gap: 16px;
   }
   .payment-method {
     flex: 1;
-    min-width: 200px;
-    padding: 10px;
+    min-width: 180px;
+    padding: 10px 12px;
     background-color: white;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 12px;
     line-height: 1.5;
   }
   .payment-method strong {
@@ -290,106 +302,107 @@ const cleanCSS = `
   .section-label {
     background-color: transparent;
     color: #6B7280;
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 3px;
-    padding-top: 18px;
-    padding-bottom: 10px;
+    letter-spacing: 2.5px;
+    padding-top: 14px;
+    padding-bottom: 8px;
     border-bottom: 1px solid #111827;
   }
   body {
     font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, sans-serif;
-    padding: 64px 56px;
+    padding: 36px 32px;
     color: #111827;
-    line-height: 1.65;
+    line-height: 1.6;
     background-color: #FFFFFF;
+    font-size: 12px;
   }
   .header {
     border-bottom: 1px solid #E5E7EB;
-    padding-bottom: 40px;
-    margin-bottom: 48px;
+    padding-bottom: 26px;
+    margin-bottom: 32px;
   }
   .header-content {
     display: flex;
     align-items: flex-start;
-    gap: 28px;
+    gap: 22px;
   }
   .logo {
-    width: 72px;
-    height: 72px;
+    width: 56px;
+    height: 56px;
     object-fit: contain;
     flex-shrink: 0;
-    margin-top: 8px;
+    margin-top: 6px;
   }
   .header-text {
     flex: 1;
   }
   .header h1 {
     color: #111827;
-    margin: 0 0 14px 0;
+    margin: 0 0 10px 0;
     font-weight: 200;
-    font-size: 44px;
-    letter-spacing: -0.8px;
+    font-size: 30px;
+    letter-spacing: -0.5px;
     line-height: 1.05;
   }
   .header p {
     color: #6B7280;
     margin: 2px 0;
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: 0.2px;
   }
   .info-section {
-    margin-bottom: 36px;
+    margin-bottom: 26px;
   }
   .info-section h2 {
     color: #9CA3AF;
-    margin-bottom: 18px;
+    margin-bottom: 14px;
     font-weight: 600;
-    font-size: 10px;
+    font-size: 9px;
     text-transform: uppercase;
-    letter-spacing: 3px;
+    letter-spacing: 2.5px;
     border-bottom: 1px solid #E5E7EB;
-    padding-bottom: 12px;
+    padding-bottom: 10px;
   }
   .info-section h3 {
     color: #111827;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     padding-left: 0;
     border-left: none;
     font-weight: 600;
-    font-size: 18px;
+    font-size: 15px;
     letter-spacing: -0.2px;
   }
   .info-section p {
     color: #4B5563;
-    margin: 4px 0;
-    font-size: 14px;
+    margin: 3px 0;
+    font-size: 12px;
   }
   .invoice-details {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
   table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
   }
   th {
     background-color: transparent;
     color: #9CA3AF;
-    padding: 16px 10px 12px 10px;
+    padding: 12px 10px 10px 10px;
     text-align: left;
     font-weight: 600;
-    font-size: 10px;
+    font-size: 9px;
     text-transform: uppercase;
-    letter-spacing: 2.5px;
+    letter-spacing: 2px;
     border-bottom: 1px solid #111827;
   }
   td {
-    padding: 14px 10px;
+    padding: 10px;
     border-bottom: 1px solid #F3F4F6;
     color: #1F2937;
-    font-size: 14px;
+    font-size: 12px;
   }
   .total-row {
     font-weight: 600;
@@ -398,25 +411,25 @@ const cleanCSS = `
   }
   .total-row td {
     border-bottom: none;
-    padding-top: 18px;
+    padding-top: 14px;
   }
   .grand-total {
-    font-size: 24px;
+    font-size: 20px;
     color: #111827;
     font-weight: 300;
-    letter-spacing: -0.4px;
+    letter-spacing: -0.3px;
   }
   .balance-due {
-    font-size: 16px;
+    font-size: 14px;
     color: #B91C1C;
     font-weight: 600;
     border-top: 1px solid #B91C1C;
-    padding-top: 10px;
-    margin-top: 10px;
+    padding-top: 8px;
+    margin-top: 8px;
   }
   .summary {
-    margin-top: 40px;
-    padding: 32px 0 0 0;
+    margin-top: 28px;
+    padding: 22px 0 0 0;
     background-color: transparent;
     border-radius: 0;
     border: none;
@@ -425,25 +438,25 @@ const cleanCSS = `
   .summary-row {
     display: flex;
     justify-content: space-between;
-    padding: 8px 0;
+    padding: 6px 0;
     color: #4B5563;
-    font-size: 14px;
+    font-size: 12px;
   }
   h3 {
     color: #111827;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     padding-left: 0;
     border-left: none;
     font-weight: 600;
-    font-size: 17px;
+    font-size: 14px;
     letter-spacing: -0.2px;
   }
   .section-wrapper {
-    margin-bottom: 32px;
+    margin-bottom: 24px;
   }
   .payment-box {
-    margin-top: 40px;
-    padding: 28px 32px;
+    margin-top: 28px;
+    padding: 20px 22px;
     background-color: #FAFAF9;
     border: none;
     border-left: 2px solid #6B7280;
@@ -455,8 +468,8 @@ const cleanCSS = `
     padding-left: 0;
   }
   .payment-methods-section {
-    margin-top: 40px;
-    padding: 28px 32px;
+    margin-top: 28px;
+    padding: 20px 22px;
     background-color: #FAFAF9;
     border: none;
     border-left: 2px solid #6B7280;
@@ -464,23 +477,23 @@ const cleanCSS = `
   }
   .payment-methods-section h3 {
     margin-top: 0;
-    margin-bottom: 18px;
+    margin-bottom: 14px;
     border-left: none;
     padding-left: 0;
   }
   .payment-methods-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 20px;
+    gap: 16px;
   }
   .payment-method {
     flex: 1;
-    min-width: 200px;
-    padding: 16px 18px;
+    min-width: 180px;
+    padding: 14px 16px;
     background-color: #FFFFFF;
     border-radius: 0;
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: 12px;
+    line-height: 1.55;
     border: 1px solid #E5E7EB;
   }
   .payment-method strong {
@@ -493,110 +506,111 @@ const boldCSS = `
   .section-label {
     background-color: #1F2937;
     color: white;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: 2px;
-    padding-top: 14px;
-    padding-bottom: 10px;
-    padding-left: 14px;
+    letter-spacing: 1.8px;
+    padding-top: 10px;
+    padding-bottom: 7px;
+    padding-left: 12px;
   }
   body {
     font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
     padding: 0;
     color: #111827;
     background-color: #FFFFFF;
+    font-size: 12px;
   }
   .header {
     background-color: #1F2937;
     color: #FFFFFF;
-    padding: 52px 50px 56px 50px;
-    margin-bottom: 44px;
+    padding: 24px 28px 26px 28px;
+    margin-bottom: 28px;
     border-bottom: none;
   }
   .header-content {
     display: flex;
     align-items: center;
-    gap: 26px;
+    gap: 20px;
   }
   .logo {
-    width: 88px;
-    height: 88px;
+    width: 64px;
+    height: 64px;
     object-fit: contain;
     flex-shrink: 0;
-    border-radius: 10px;
+    border-radius: 8px;
     background-color: rgba(255, 255, 255, 0.06);
-    padding: 6px;
+    padding: 5px;
   }
   .header-text {
     flex: 1;
   }
   .header h1 {
     color: #FFFFFF;
-    margin: 0 0 12px 0;
-    font-size: 40px;
+    margin: 0 0 8px 0;
+    font-size: 28px;
     font-weight: 900;
-    letter-spacing: -0.5px;
+    letter-spacing: -0.3px;
     text-transform: uppercase;
     line-height: 1;
   }
   .header p {
     color: #D1D5DB;
-    margin: 3px 0;
-    font-size: 13px;
-    letter-spacing: 0.3px;
+    margin: 2px 0;
+    font-size: 11px;
+    letter-spacing: 0.2px;
   }
   .info-section {
-    margin-bottom: 36px;
-    padding: 0 50px;
+    margin-bottom: 24px;
+    padding: 0 28px;
   }
   .info-section h2 {
     color: #111827;
-    margin-bottom: 18px;
-    font-size: 12px;
+    margin-bottom: 14px;
+    font-size: 11px;
     font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: 2.5px;
-    padding-bottom: 10px;
-    border-bottom: 3px solid #1F2937;
+    letter-spacing: 2px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #1F2937;
   }
   .info-section h3 {
     color: #1F2937;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     font-weight: 800;
-    font-size: 17px;
+    font-size: 14px;
   }
   .info-section p {
     color: #4B5563;
-    margin: 5px 0;
-    font-size: 14px;
+    margin: 4px 0;
+    font-size: 12px;
   }
   .invoice-details {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
   table {
-    width: calc(100% - 100px);
-    margin-left: 50px;
-    margin-right: 50px;
+    width: calc(100% - 56px);
+    margin-left: 28px;
+    margin-right: 28px;
     border-collapse: collapse;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
     background-color: #FFFFFF;
   }
   th {
     background-color: #1F2937;
     color: white;
-    padding: 14px 12px;
+    padding: 10px;
     text-align: left;
     font-weight: 800;
-    font-size: 11px;
+    font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.2px;
   }
   td {
-    padding: 12px;
+    padding: 9px 10px;
     border-bottom: 1px solid #E5E7EB;
     color: #1F2937;
-    font-size: 14px;
+    font-size: 12px;
   }
   tr:nth-child(even) td {
     background-color: #F9FAFB;
@@ -609,50 +623,50 @@ const boldCSS = `
     color: #FFFFFF !important;
     background-color: #111827 !important;
     border-bottom: none;
-    padding: 16px 12px;
+    padding: 12px 10px;
   }
   .grand-total {
-    font-size: 22px;
+    font-size: 18px;
     color: #FFFFFF;
     font-weight: 900;
-    letter-spacing: -0.3px;
+    letter-spacing: -0.2px;
   }
   .balance-due {
-    font-size: 16px;
+    font-size: 14px;
     color: #FCA5A5;
     font-weight: 800;
     border-top: 2px solid #FCA5A5;
-    padding-top: 10px;
-    margin-top: 10px;
+    padding-top: 8px;
+    margin-top: 8px;
   }
   .summary {
-    margin: 40px 50px 0 50px;
-    padding: 28px 32px;
+    margin: 28px 28px 0 28px;
+    padding: 20px 24px;
     background-color: #FFFFFF;
     border-radius: 0;
-    border: 3px solid #1F2937;
-    box-shadow: 0 6px 18px rgba(17, 24, 39, 0.08);
+    border: 2px solid #1F2937;
+    box-shadow: 0 4px 12px rgba(17, 24, 39, 0.06);
   }
   .summary-row {
     display: flex;
     justify-content: space-between;
-    padding: 10px 0;
+    padding: 7px 0;
     color: #1F2937;
     font-weight: 600;
-    font-size: 14px;
+    font-size: 12px;
     border-bottom: 1px solid #F3F4F6;
   }
   h3 {
     color: #1F2937;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     font-weight: 800;
-    font-size: 14px;
+    font-size: 12px;
     text-transform: uppercase;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.2px;
   }
   .section-wrapper {
-    margin-bottom: 28px;
-    padding: 0 50px;
+    margin-bottom: 22px;
+    padding: 0 28px;
   }
   .section-wrapper table {
     width: 100%;
@@ -660,49 +674,49 @@ const boldCSS = `
     margin-right: 0;
   }
   .payment-box {
-    margin: 40px 50px 0 50px;
-    padding: 28px 32px;
+    margin: 28px 28px 0 28px;
+    padding: 20px 24px;
     background-color: #F9FAFB;
     border: none;
-    border-top: 6px solid #1F2937;
+    border-top: 5px solid #1F2937;
     border-radius: 0;
   }
   .payment-box h3 {
     margin-top: 0;
   }
   .payment-methods-section {
-    margin: 40px 50px 0 50px;
-    padding: 28px 32px;
+    margin: 28px 28px 0 28px;
+    padding: 20px 24px;
     background-color: #F9FAFB;
     border: none;
-    border-top: 6px solid #1F2937;
+    border-top: 5px solid #1F2937;
     border-radius: 0;
   }
   .payment-methods-section h3 {
     margin-top: 0;
-    margin-bottom: 18px;
+    margin-bottom: 14px;
   }
   .payment-methods-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 18px;
+    gap: 16px;
   }
   .payment-method {
     flex: 1;
-    min-width: 200px;
-    padding: 16px 18px;
+    min-width: 180px;
+    padding: 14px 16px;
     background-color: #FFFFFF;
     border-radius: 0;
-    font-size: 13px;
-    line-height: 1.6;
-    border-left: 4px solid #1F2937;
+    font-size: 12px;
+    line-height: 1.55;
+    border-left: 3px solid #1F2937;
   }
   .payment-method strong {
     color: #1F2937;
     font-weight: 800;
     text-transform: uppercase;
-    font-size: 11px;
-    letter-spacing: 1.5px;
+    font-size: 10px;
+    letter-spacing: 1.2px;
   }
 `;
 
@@ -710,36 +724,37 @@ const tradesmanCSS = `
   .section-label {
     background-color: transparent;
     color: #1C1917;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 3px;
-    padding-top: 16px;
-    padding-bottom: 8px;
+    letter-spacing: 2.5px;
+    padding-top: 12px;
+    padding-bottom: 6px;
     border-top: 3px double #374151;
     border-bottom: 1px solid #A8A29E;
     font-variant: small-caps;
   }
   body {
     font-family: Georgia, 'Times New Roman', Times, serif;
-    padding: 52px 46px;
+    padding: 32px 28px;
     color: #1C1917;
     background-color: #FDFCF8;
-    line-height: 1.6;
+    line-height: 1.55;
+    font-size: 12px;
   }
   .header {
     border-bottom: 3px double #374151;
-    padding-bottom: 24px;
-    margin-bottom: 32px;
+    padding-bottom: 18px;
+    margin-bottom: 24px;
   }
   .header-content {
     display: flex;
     align-items: center;
-    gap: 24px;
+    gap: 18px;
   }
   .logo {
-    width: 76px;
-    height: 76px;
+    width: 60px;
+    height: 60px;
     object-fit: contain;
     flex-shrink: 0;
     border: 1px solid #D6D3D1;
@@ -751,71 +766,71 @@ const tradesmanCSS = `
   }
   .header h1 {
     color: #1C1917;
-    margin: 0 0 10px 0;
-    font-size: 34px;
+    margin: 0 0 8px 0;
+    font-size: 26px;
     font-weight: 700;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.2px;
     font-variant: small-caps;
     line-height: 1.1;
   }
   .header p {
     color: #44403C;
-    margin: 3px 0;
-    font-size: 13px;
+    margin: 2px 0;
+    font-size: 12px;
     font-style: italic;
   }
   .info-section {
-    margin-bottom: 28px;
+    margin-bottom: 22px;
   }
   .info-section h2 {
     color: #1C1917;
-    margin-bottom: 14px;
-    font-size: 14px;
+    margin-bottom: 12px;
+    font-size: 12px;
     text-transform: uppercase;
-    letter-spacing: 3px;
+    letter-spacing: 2.5px;
     font-weight: 700;
     border-bottom: 1px solid #A8A29E;
-    padding-bottom: 10px;
+    padding-bottom: 8px;
     font-variant: small-caps;
   }
   .info-section h3 {
     color: #1C1917;
-    margin-bottom: 10px;
-    font-size: 17px;
+    margin-bottom: 8px;
+    font-size: 14px;
     font-weight: 700;
     font-style: italic;
   }
   .info-section p {
     color: #44403C;
-    margin: 4px 0;
-    font-size: 14px;
+    margin: 3px 0;
+    font-size: 12px;
   }
   .invoice-details {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
   table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 22px;
+    margin-bottom: 18px;
   }
   th {
     background-color: transparent;
     color: #1C1917;
-    padding: 12px 8px;
+    padding: 10px 8px;
     text-align: left;
     font-weight: 700;
-    font-size: 12px;
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 2px;
+    letter-spacing: 1.6px;
     border-top: 3px double #374151;
     border-bottom: 3px double #374151;
     font-variant: small-caps;
   }
   td {
-    padding: 10px 8px;
+    padding: 8px;
     border-bottom: 1px solid #D6D3D1;
     color: #1C1917;
-    font-size: 14px;
+    font-size: 12px;
   }
   .total-row {
     font-weight: 700;
@@ -825,28 +840,28 @@ const tradesmanCSS = `
   .total-row td {
     color: #1C1917;
     border-bottom: none;
-    padding-top: 14px;
+    padding-top: 11px;
   }
   .grand-total {
-    font-size: 22px;
+    font-size: 18px;
     color: #1C1917;
     font-weight: 700;
     font-variant: small-caps;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.2px;
   }
   .balance-due {
-    font-size: 16px;
+    font-size: 14px;
     color: #991B1B;
     font-weight: 700;
     border-top: 3px double #991B1B;
-    padding-top: 10px;
-    margin-top: 10px;
+    padding-top: 8px;
+    margin-top: 8px;
     font-variant: small-caps;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.2px;
   }
   .summary {
-    margin-top: 32px;
-    padding: 22px 28px;
+    margin-top: 24px;
+    padding: 18px 22px;
     background-color: #FAF7EE;
     border-radius: 0;
     border: none;
@@ -856,23 +871,23 @@ const tradesmanCSS = `
   .summary-row {
     display: flex;
     justify-content: space-between;
-    padding: 7px 0;
+    padding: 6px 0;
     color: #44403C;
-    font-size: 14px;
+    font-size: 12px;
   }
   h3 {
     color: #1C1917;
-    margin-bottom: 10px;
-    font-size: 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
     font-weight: 700;
     font-style: italic;
   }
   .section-wrapper {
-    margin-bottom: 24px;
+    margin-bottom: 20px;
   }
   .payment-box {
-    margin-top: 32px;
-    padding: 22px 28px;
+    margin-top: 24px;
+    padding: 18px 22px;
     background-color: #FAF7EE;
     border: none;
     border-top: 3px double #374151;
@@ -882,14 +897,14 @@ const tradesmanCSS = `
   .payment-box h3 {
     margin-top: 0;
     font-variant: small-caps;
-    letter-spacing: 2px;
+    letter-spacing: 1.6px;
     font-style: normal;
-    font-size: 14px;
+    font-size: 12px;
     text-transform: uppercase;
   }
   .payment-methods-section {
-    margin-top: 32px;
-    padding: 22px 28px;
+    margin-top: 24px;
+    padding: 18px 22px;
     background-color: #FAF7EE;
     border: none;
     border-top: 3px double #374151;
@@ -898,34 +913,34 @@ const tradesmanCSS = `
   }
   .payment-methods-section h3 {
     margin-top: 0;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     font-variant: small-caps;
-    letter-spacing: 2px;
+    letter-spacing: 1.6px;
     font-style: normal;
-    font-size: 14px;
+    font-size: 12px;
     text-transform: uppercase;
   }
   .payment-methods-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 18px;
+    gap: 16px;
   }
   .payment-method {
     flex: 1;
-    min-width: 200px;
-    padding: 14px 16px;
+    min-width: 180px;
+    padding: 12px 14px;
     background-color: #FFFFFF;
     border-radius: 0;
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: 12px;
+    line-height: 1.55;
     border: 1px solid #D6D3D1;
   }
   .payment-method strong {
     color: #1C1917;
     font-weight: 700;
     text-transform: uppercase;
-    font-size: 11px;
-    letter-spacing: 2px;
+    font-size: 10px;
+    letter-spacing: 1.6px;
   }
 `;
 

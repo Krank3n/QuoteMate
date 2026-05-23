@@ -1089,6 +1089,9 @@ interface QuoteEmailData {
   // True when the tradie has surchargePaymentFees on — the Square checkout
   // amount has been bumped, so we surface a subtle disclosure under the CTA.
   surchargePaymentFees?: boolean;
+  // Per-doc visibility toggles for the pricing breakdown rows.
+  showMaterialCosts?: boolean;
+  showLaborCosts?: boolean;
   business: {
     name: string;
     abn?: string;
@@ -1215,6 +1218,115 @@ function renderBusinessFooter(business: DocEmailBusiness, accent: string): strin
     </table>`;
 }
 
+interface InvoicePaymentInfoInput {
+  total: number;
+  depositCredit?: number;
+  dueDate: string;
+  invoiceNumber?: string;
+  accent: string;
+}
+
+// Headline "Payment Information" block rendered on every invoice email so the
+// customer always sees the bottom line, due date, and reference to quote when
+// transferring funds — even before scrolling to the PDF.
+function renderInvoicePaymentInfo(input: InvoicePaymentInfoInput): string {
+  const { total, depositCredit, dueDate, invoiceNumber, accent } = input;
+  const dueLabel = (depositCredit && depositCredit > 0) ? 'Balance Due' : 'Amount Due';
+  const dueFormatted = new Date(dueDate).toLocaleDateString('en-AU', {
+    day: '2-digit', month: 'long', year: 'numeric',
+  });
+  const referenceLine = invoiceNumber
+    ? `<p style="color:#6b7280;font-size:13px;line-height:1.5;margin:10px 0 0;">
+         Please reference invoice number <strong style="color:#1f2937;">${escapeHtml(invoiceNumber)}</strong> with your payment.
+       </p>`
+    : '';
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;margin:20px 0 0;">
+      <tr><td style="padding:16px;">
+        <p style="color:#1f2937;font-size:13px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;margin:0 0 12px;">Payment Information</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="padding:4px 0;color:#6b7280;font-size:14px;">${dueLabel}</td>
+            <td style="padding:4px 0;color:${accent};font-size:16px;font-weight:700;text-align:right;">$${total.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 0;color:#6b7280;font-size:14px;">Due Date</td>
+            <td style="padding:4px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;">${dueFormatted}</td>
+          </tr>
+        </table>
+        ${referenceLine}
+      </td></tr>
+    </table>`;
+}
+
+interface InvoicePaymentMethodsInput {
+  paymentMethods?: any;
+  plan?: 'trial' | 'free' | 'pro';
+  accent: string;
+}
+
+// Pro/trial-only Payment Methods block. Free-tier tradies are intentionally
+// excluded so paid quotes funnel through Square (where the platform fee is
+// collected), matching the PDF generator's rendering rules.
+function renderInvoicePaymentMethods(input: InvoicePaymentMethodsInput): string {
+  const { paymentMethods: pm, plan } = input;
+  if (!pm || plan === 'free') return '';
+  if (!pm.showOnDocuments) return '';
+
+  const esc = escapeHtml;
+  const sections: string[] = [];
+
+  const bankHasData = pm.bankAccount?.accountName || pm.bankAccount?.bsb || pm.bankAccount?.accountNumber;
+  if (pm.bankAccount?.enabled && bankHasData) {
+    const lines: string[] = [];
+    if (pm.bankAccount.accountName) lines.push(`Account Name: ${esc(pm.bankAccount.accountName)}`);
+    if (pm.bankAccount.bsb) lines.push(`BSB: ${esc(pm.bankAccount.bsb)}`);
+    if (pm.bankAccount.accountNumber) lines.push(`Account: ${esc(pm.bankAccount.accountNumber)}`);
+    sections.push(renderPaymentMethodCard('Bank Transfer', lines.join('<br/>')));
+  }
+
+  if (pm.payId?.enabled && pm.payId?.payIdValue) {
+    const payIdLabel = pm.payId.payIdType === 'phone' ? 'Phone'
+                     : pm.payId.payIdType === 'email' ? 'Email'
+                     : 'ABN';
+    sections.push(renderPaymentMethodCard('PayID', `${payIdLabel}: ${esc(pm.payId.payIdValue)}`));
+  }
+
+  const bpayHasData = pm.bpay?.billerCode || pm.bpay?.referenceNumber;
+  if (pm.bpay?.enabled && bpayHasData) {
+    const lines: string[] = [];
+    if (pm.bpay.billerCode) lines.push(`Biller Code: ${esc(pm.bpay.billerCode)}`);
+    if (pm.bpay.referenceNumber) lines.push(`Reference: ${esc(pm.bpay.referenceNumber)}`);
+    sections.push(renderPaymentMethodCard('BPAY', lines.join('<br/>')));
+  }
+
+  if (pm.paypal?.enabled && pm.paypal?.email) {
+    sections.push(renderPaymentMethodCard('PayPal', esc(pm.paypal.email)));
+  }
+
+  if (pm.other?.enabled && pm.other?.instructions) {
+    sections.push(renderPaymentMethodCard('Other Payment Options', esc(pm.other.instructions).replace(/\n/g, '<br/>')));
+  }
+
+  if (sections.length === 0) return '';
+
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:12px 0 0;">
+      <tr><td style="padding:0 0 8px;">
+        <p style="color:#1f2937;font-size:13px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;margin:0;">Payment Methods</p>
+      </td></tr>
+      ${sections.map(s => `<tr><td style="padding:6px 0;">${s}</td></tr>`).join('')}
+    </table>`;
+}
+
+function renderPaymentMethodCard(title: string, bodyHtml: string): string {
+  return `
+    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;">
+      <p style="color:#1f2937;font-size:14px;font-weight:700;margin:0 0 4px;">${title}</p>
+      <p style="color:#374151;font-size:13px;line-height:1.6;margin:0;">${bodyHtml}</p>
+    </div>`;
+}
+
 interface PricingRowsInput {
   materialsSubtotal: number;
   laborTotal: number;
@@ -1225,32 +1337,36 @@ interface PricingRowsInput {
   // When set and > 0, render a "Deposit already paid" line and rename the
   // total label to "Balance due". Invoice-only.
   depositCredit?: number;
+  // Per-doc visibility toggles — when false, the breakdown row is hidden so
+  // the client only sees the totals. Default true preserves existing behaviour
+  // for callers that don't pass them.
+  showMaterialCosts?: boolean;
+  showLaborCosts?: boolean;
 }
 
 function renderPricingRows(input: PricingRowsInput): string {
   const { materialsSubtotal, laborTotal, subtotal, gst, total, accent, depositCredit } = input;
   const hasDeposit = !!(depositCredit && depositCredit > 0);
+  const showMaterials = input.showMaterialCosts !== false;
+  const showLabor = input.showLaborCosts !== false;
+  // The Subtotal row is only meaningful when at least one of its components
+  // is visible AND there's something separating it from the final Total —
+  // i.e. when the breakdown actually shows something distinct.
+  const showSubtotalRow = showMaterials || showLabor;
+  const row = (label: string, value: string, valueColor = '#1f2937') => `
+            <tr>
+              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">${label}</td>
+              <td style="padding:8px 0;color:${valueColor};font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">${value}</td>
+            </tr>`;
   return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;margin:20px 0;">
       <tr>
         <td style="padding:16px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Materials</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${materialsSubtotal.toFixed(2)}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Labour</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${laborTotal.toFixed(2)}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">Subtotal</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${subtotal.toFixed(2)}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">GST</td>
-              <td style="padding:8px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">$${gst.toFixed(2)}</td>
-            </tr>
+            ${showMaterials ? row('Materials', `$${materialsSubtotal.toFixed(2)}`) : ''}
+            ${showLabor ? row('Labour', `$${laborTotal.toFixed(2)}`) : ''}
+            ${showSubtotalRow ? row('Subtotal', `$${subtotal.toFixed(2)}`) : ''}
+            ${row('GST', `$${gst.toFixed(2)}`)}
             ${hasDeposit ? `
             <tr>
               <td style="padding:8px 0;color:#059669;font-size:14px;border-bottom:1px solid #e5e7eb;">Deposit already paid</td>
@@ -1421,10 +1537,32 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     total: data.total,
     accent,
     depositCredit: isInvoice ? data.depositCredit : undefined,
+    showMaterialCosts: data.showMaterialCosts,
+    showLaborCosts: data.showLaborCosts,
   });
 
   const postPricingCta = isInvoice
     ? renderInvoicePayNowCta(data.payNowUrl, data.hasTerms, data.surchargePaymentFees, accent)
+    : '';
+
+  // Payment information & methods are invoice-only. Information renders the
+  // headline amount/date/reference for every plan; methods (bank / PayID /
+  // BPAY / PayPal / other) are gated to pro & trial — matches the PDF.
+  const paymentInfoBlock = isInvoice
+    ? renderInvoicePaymentInfo({
+        total: data.total,
+        depositCredit: data.depositCredit,
+        dueDate: data.dueDate,
+        invoiceNumber: data.invoiceNumber,
+        accent,
+      })
+    : '';
+  const paymentMethodsBlock = isInvoice
+    ? renderInvoicePaymentMethods({
+        paymentMethods: data.paymentMethods,
+        plan: data.plan,
+        accent,
+      })
     : '';
 
   // For quotes the accept/decline CTA sits below the "PDF attached" line; for
@@ -1443,13 +1581,7 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     : '';
 
   const closingNotice = isInvoice
-    ? `<p style="color:#374151;font-size:14px;font-weight:600;line-height:1.6;margin:16px 0 0;">
-      Payment is due by ${new Date(data.dueDate).toLocaleDateString('en-AU', {
-        day: 'numeric', month: 'long', year: 'numeric',
-      })}.
-    </p>
-
-    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:16px 0 0;">
+    ? `<p style="color:#6b7280;font-size:14px;line-height:1.6;margin:16px 0 0;">
       If you have any questions, please don't hesitate to get in touch.
     </p>`
     : `<p style="color:#6b7280;font-size:14px;line-height:1.6;margin:24px 0 0;">
@@ -1474,6 +1606,10 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     ${pricingRows}
 
     ${postPricingCta}
+
+    ${paymentInfoBlock}
+
+    ${paymentMethodsBlock}
 
     <p style="color:#6b7280;font-size:13px;font-style:italic;margin:0 0 4px;">
       A detailed PDF ${typeLabel.toLowerCase()} is attached for your records.
@@ -1531,6 +1667,14 @@ interface InvoiceEmailData {
   // Deposit credit carried over from a quote that had a deposit paid. Rendered
   // as a "Deposit already paid" line above the total.
   depositCredit?: number;
+  // Per-doc visibility toggles for the pricing breakdown rows.
+  showMaterialCosts?: boolean;
+  showLaborCosts?: boolean;
+  // Payment Information block — always rendered for invoices when an
+  // invoiceNumber/dueDate is known. paymentMethods/plan only render the
+  // bank/PayID/BPAY/PayPal/other details for pro & trial tradies.
+  paymentMethods?: any;
+  plan?: 'trial' | 'free' | 'pro';
   business: DocEmailBusiness;
 }
 

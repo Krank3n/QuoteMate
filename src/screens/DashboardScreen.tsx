@@ -40,6 +40,7 @@ import { applyStageChange } from '../utils/applyStageChange';
 import type { Document, DocumentStage } from '../types/document';
 import { SwipeableCard } from '../components/SwipeableCard';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
+import { useIsAppActive } from '../hooks/useIsAppActive';
 import { lightTap, successTap } from '../utils/haptics';
 import { TrialBanner } from '../components/TrialBanner';
 import { TRIAL_MS } from '../utils/trialConfig';
@@ -116,10 +117,13 @@ export function DashboardScreen() {
   const draftWiggle = useRef(new RNAnimated.Value(0)).current;
 
   const isFocused = useIsFocused();
+  const isAppActive = useIsAppActive();
   const animsRef = useRef<RNAnimated.CompositeAnimation[]>([]);
   const animTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // Start/stop ambient animations based on screen focus
+  // Start/stop ambient animations based on screen focus + app foreground.
+  // Pausing on background prevents loops accumulating cost while the user
+  // is away — they otherwise keep ticking until iOS suspends the process.
   useEffect(() => {
     // Stop previous animations
     animTimersRef.current.forEach(clearTimeout);
@@ -127,7 +131,7 @@ export function DashboardScreen() {
     animsRef.current = [];
     animTimersRef.current = [];
 
-    if (!isFocused) return;
+    if (!isFocused || !isAppActive) return;
 
     const allAnims: RNAnimated.CompositeAnimation[] = [];
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -227,10 +231,10 @@ export function DashboardScreen() {
       timers.forEach(clearTimeout);
       allAnims.forEach((a) => a.stop());
     };
-  }, [isFocused]);
+  }, [isFocused, isAppActive]);
 
   useEffect(() => {
-    if (!isFocused) return;
+    if (!isFocused || !isAppActive) return;
     const CYCLE_MS = 12000;
     const interval = setInterval(() => {
       RNAnimated.timing(subtitleFade, {
@@ -251,7 +255,7 @@ export function DashboardScreen() {
       });
     }, CYCLE_MS);
     return () => clearInterval(interval);
-  }, [subtitleFade, isFocused]);
+  }, [subtitleFade, isFocused, isAppActive]);
 
   // Track user activity for re-engagement emails (once per app session)
   const activityTracked = useRef(false);

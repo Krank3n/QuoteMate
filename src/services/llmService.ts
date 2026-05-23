@@ -598,7 +598,7 @@ async function generateEmailViaFirebaseFunction(prompt: string): Promise<string>
   }
 
   const data = await response.json();
-  return data.emailBody || '';
+  return stripLeadingGreeting(data.emailBody || '');
 }
 
 async function generateEmailViaGemini(prompt: string): Promise<string> {
@@ -632,7 +632,16 @@ function parseEmailResponse(content: string): string {
   if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
     text = text.slice(1, -1);
   }
-  return text.trim();
+  return stripLeadingGreeting(text.trim());
+}
+
+// The email template always renders "Hi {customerName}," above the body, so any
+// greeting the model emits — despite being told not to — would double up. Also
+// trips when a tradie writes their own greeting after the prefilled one. Match
+// only a single leading greeting line; anything mid-body is left alone.
+function stripLeadingGreeting(text: string): string {
+  const greetingLine = /^\s*(hi|hello|hey|g'?day|dear|good (?:morning|afternoon|evening))\b[^\n]*[,!.:]?\s*\n+/i;
+  return text.replace(greetingLine, '').trimStart();
 }
 
 /**

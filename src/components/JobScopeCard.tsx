@@ -37,6 +37,10 @@ import { previewDocumentPDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
 import { useAlertModal } from '../hooks/useAlertModal';
 import {
+  InvoiceDisplaySettings,
+  type InvoiceDisplaySettingsChange,
+} from './InvoiceDisplaySettings';
+import {
   JobSection,
   MaterialsSection,
   LaborSection,
@@ -138,10 +142,33 @@ export function JobScopeCard({
     subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired
   );
   const isPro = subscriptionStatus?.isPro || isTrialActive;
+  // Display/deposit toggles persist back through the legacy quote/invoice
+  // collections. Look the underlying record up by id and dispatch through
+  // saveQuote/saveInvoice so the mirror + Firestore stay in sync. Selector
+  // returns the matching record so the card re-renders when it changes.
+  const persistedRecord = useStore((s) => {
+    if (isInvoice) return s.invoices.find((i) => i.id === doc.id) || null;
+    return s.quotes.find((q) => q.id === doc.id) || null;
+  });
+  const saveQuote = useStore((s) => s.saveQuote);
+  const saveInvoice = useStore((s) => s.saveInvoice);
 
   const [expanded, setExpanded] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const { showAlert, alertNode } = useAlertModal();
+
+  const handleDisplaySettingsChange = React.useCallback(
+    (partial: InvoiceDisplaySettingsChange) => {
+      if (!persistedRecord) return;
+      const next = { ...persistedRecord, ...partial, updatedAt: new Date() } as any;
+      if (isInvoice) {
+        saveInvoice(next).catch(() => {});
+      } else {
+        saveQuote(next).catch(() => {});
+      }
+    },
+    [persistedRecord, isInvoice, saveInvoice, saveQuote],
+  );
 
   const handleToggle = () => {
     selectionTap();
@@ -257,6 +284,36 @@ export function JobScopeCard({
           />
         </>
       )}
+
+      {persistedRecord ? (
+        <View style={styles.settingsBlock}>
+          <InvoiceDisplaySettings
+            mode={isInvoice ? 'invoice' : 'quote'}
+            total={Number(doc.total ?? 0)}
+            showMarkup={
+              doc.showMarkup !== undefined
+                ? doc.showMarkup === true
+                : businessSettings?.showMarkup === true
+            }
+            showMaterialCosts={
+              doc.showMaterialCosts !== undefined
+                ? doc.showMaterialCosts
+                : businessSettings?.showMaterialCostsByDefault !== false
+            }
+            showLaborCosts={
+              doc.showLaborCosts !== undefined
+                ? doc.showLaborCosts
+                : businessSettings?.showLaborCostsByDefault !== false
+            }
+            requireDeposit={doc.requireDeposit === true}
+            depositPercentage={Number(doc.depositPercentage ?? 0)}
+            onChange={handleDisplaySettingsChange}
+            variant="collapsible"
+            expanded={expanded}
+            onToggleExpand={handleToggle}
+          />
+        </View>
+      ) : null}
 
       <Pressable
         onPress={handlePreview}
@@ -558,5 +615,9 @@ const styles = StyleSheet.create({
   expanded: {
     marginTop: 4,
     gap: 0,
+  },
+  settingsBlock: {
+    // Sits in the card's `gap: 8` flow — no extra margin needed so the
+    // row spaces the same as Materials / Labour above it.
   },
 });

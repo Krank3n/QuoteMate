@@ -28,6 +28,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { formatScheduledDateTime, formatScheduledDuration } from '../utils/formatSchedule';
 import { deriveDuration } from '../utils/deriveDuration';
 import { useNavigation } from '@react-navigation/native';
+import { useIsAppActive } from '../hooks/useIsAppActive';
 
 import { JOB_STAGE_META } from './JobStageSheet';
 import { ShimmerOverlay } from './ShimmerOverlay';
@@ -163,7 +164,9 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
   const tiltDirRef = useRef(Math.random() > 0.5 ? 1 : -1);
   const delayRef = useRef(Math.random() * 1500);
 
+  const isAppActive = useIsAppActive();
   useEffect(() => {
+    if (!isAppActive) return;
     const bobD = bobDurationRef.current;
     const tiltD = tiltDurationRef.current;
     const tiltDir = tiltDirRef.current;
@@ -191,7 +194,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
       tiltAnim.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAppActive]);
 
   // Pull the primary attached doc so duration on the card matches the
   // labour quoted on the linked Document — single source of truth.

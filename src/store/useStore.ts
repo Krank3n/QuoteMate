@@ -1233,6 +1233,22 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   createInvoiceFromQuote: async (quote: Quote) => {
+    // Recovery path: a prior bug let the wizard's saveDraft overwrite an
+    // invoice as a quote in the legacy collections (mirror trigger then
+    // flipped the unified doc to type='quote'). The original Invoice with
+    // the same id usually survives in state.invoices — restore that rather
+    // than minting a brand-new invoice with a fresh id. saveInvoice nudges
+    // the mirror trigger to put the unified doc back to type='invoice'.
+    {
+      const { invoices } = get();
+      const orphanedInvoice = invoices.find((i) => i.id === quote.id);
+      if (orphanedInvoice) {
+        await get().saveInvoice(orphanedInvoice);
+        set({ currentInvoice: orphanedInvoice });
+        return orphanedInvoice;
+      }
+    }
+
     // Phase-5: prefer the unified convertDocumentToInvoice path when a
     // matching document exists (server canonicalises via setDocumentStage,
     // mirror trigger projects to the legacy invoices collection).

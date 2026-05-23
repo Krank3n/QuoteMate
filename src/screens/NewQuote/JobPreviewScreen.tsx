@@ -49,6 +49,10 @@ import {
   documentStyles,
 } from '../../components/document';
 import { useTourRefs } from '../../components/tour/useTourRefs';
+import {
+  InvoiceDisplaySettings,
+  type InvoiceDisplaySettingsChange,
+} from '../../components/InvoiceDisplaySettings';
 import { ScreenTour } from '../../components/tour/ScreenTour';
 import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
 import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
@@ -119,6 +123,7 @@ export function JobPreviewScreen() {
   const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
+  const updateQuote = useStore((s) => s.updateQuote);
   const updateInvoice = useStore((s) => s.updateInvoice);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
@@ -480,6 +485,32 @@ export function JobPreviewScreen() {
     }
   };
 
+  // Display/deposit toggles persist immediately. Apply via the right
+  // update*-then-save* pair so calculations stay in sync and the change
+  // hits both AsyncStorage and Firestore.
+  const handleDisplaySettingsChange = useCallback(
+    (partial: InvoiceDisplaySettingsChange) => {
+      if (isInvoiceMode && currentInvoice) {
+        const next = { ...currentInvoice, ...partial, updatedAt: new Date() };
+        updateInvoice(next);
+        saveInvoice(next).catch(() => {});
+      } else if (currentQuote) {
+        const next = { ...currentQuote, ...partial, updatedAt: new Date() };
+        updateQuote(next);
+        saveQuote(next).catch(() => {});
+      }
+    },
+    [
+      isInvoiceMode,
+      currentInvoice,
+      currentQuote,
+      updateInvoice,
+      updateQuote,
+      saveInvoice,
+      saveQuote,
+    ],
+  );
+
   if (!workingDoc) {
     return null;
   }
@@ -652,6 +683,32 @@ export function JobPreviewScreen() {
               </View>
             </View>
           ) : null}
+
+          <View style={styles.headerCardDivider} />
+
+          <InvoiceDisplaySettings
+            mode={liveIsInvoice ? 'invoice' : 'quote'}
+            total={Number(workingDoc.total ?? 0)}
+            showMarkup={
+              workingDoc.showMarkup !== undefined
+                ? workingDoc.showMarkup === true
+                : businessSettings?.showMarkup === true
+            }
+            showMaterialCosts={
+              workingDoc.showMaterialCosts !== undefined
+                ? workingDoc.showMaterialCosts
+                : businessSettings?.showMaterialCostsByDefault !== false
+            }
+            showLaborCosts={
+              workingDoc.showLaborCosts !== undefined
+                ? workingDoc.showLaborCosts
+                : businessSettings?.showLaborCostsByDefault !== false
+            }
+            requireDeposit={(workingDoc as any).requireDeposit === true}
+            depositPercentage={Number((workingDoc as any).depositPercentage ?? 0)}
+            onChange={handleDisplaySettingsChange}
+            variant="embedded"
+          />
         </Surface>
 
         <View ref={editSectionsRef}>
@@ -983,6 +1040,13 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     elevation: 2,
     backgroundColor: colors.surface,
+  },
+  headerCardDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    opacity: 0.6,
+    marginTop: 14,
+    marginBottom: 2,
   },
   headerRow: {
     flexDirection: 'row',

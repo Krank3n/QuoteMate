@@ -6,6 +6,7 @@
 import { useRoute } from '@react-navigation/native';
 import { useStore } from '../store/useStore';
 import { Quote, Invoice, Material } from '../types';
+import { useCallback } from 'react';
 
 export type DocumentMode = 'quote' | 'invoice';
 
@@ -77,6 +78,26 @@ export function useCurrentDocument() {
     update: updateQuote as (doc: Partial<UnifiedDocument> & { materials: Material[] }) => void,
     mode,
   };
+}
+
+/**
+ * Hook to persist the current draft to the right collection. In invoice mode
+ * this routes to saveInvoice — calling saveDraft (which writes to the quotes
+ * collection) would convert the invoice back into a quote.
+ */
+export function usePersistDocument() {
+  const mode = useDocumentMode();
+  const saveDraft = useStore((s) => s.saveDraft);
+  const saveInvoice = useStore((s) => s.saveInvoice);
+  return useCallback(
+    (doc: any) => {
+      if (mode === 'invoice') {
+        return saveInvoice(doc as Invoice);
+      }
+      return saveDraft(doc as Quote);
+    },
+    [mode, saveDraft, saveInvoice],
+  );
 }
 
 /**

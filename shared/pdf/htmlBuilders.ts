@@ -680,11 +680,6 @@ export function buildInvoicePdfHtml(
 
       ${generatePaymentMethodsHTML(invoice.paymentMethods, { plan: invoice.plan, squarePaymentLinkUrl: invoice.squarePaymentLinkUrl, surchargePaymentFees: invoice.surchargePaymentFees })}
 
-      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
-        <p>Payment is due by ${invoice.dueDate}.</p>
-        <p>Thank you for your business!</p>
-      </div>
-
       ${buildTermsHTML(invoice.terms)}
       </div>
 

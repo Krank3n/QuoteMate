@@ -5389,7 +5389,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { quoteId, quote: quoteFromClient, emailBody, recipientEmail, isTestSend, includePhotos } = req.body;
+    const { quoteId, quote: quoteFromClient, emailBody, recipientEmail, isTestSend, includePhotos, subject } = req.body;
 
     if (!quoteId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: quoteId, emailBody, recipientEmail' });
@@ -5423,6 +5423,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         recipientEmail,
         isTestSend,
         includePhotos,
+        subject: typeof subject === 'string' ? subject : undefined,
         overrides: quoteFromClient && typeof quoteFromClient === 'object' ? quoteFromClient : undefined,
         squareDepositLinkMint: async (uid, qid) => {
           const r = await mintAndRotate(uid, qid, 'deposit');
@@ -5471,7 +5472,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { invoiceId, invoice: invoiceFromClient, emailBody, recipientEmail, isTestSend, includePhotos } = req.body;
+    const { invoiceId, invoice: invoiceFromClient, emailBody, recipientEmail, isTestSend, includePhotos, subject } = req.body;
 
     if (!invoiceId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: invoiceId, emailBody, recipientEmail' });
@@ -5503,6 +5504,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         recipientEmail,
         isTestSend,
         includePhotos,
+        subject: typeof subject === 'string' ? subject : undefined,
         overrides: invoiceFromClient && typeof invoiceFromClient === 'object' ? invoiceFromClient : undefined,
         squareInvoiceLinkMint: async (uid, iid) => {
           const r = await mintAndRotate(uid, iid, 'invoice');
@@ -5568,7 +5570,13 @@ export const generateQuoteEmail = functions.https.onRequest((req, res) => {
       }
 
       const data = await response.json() as any;
-      const emailBody = data.content?.[0]?.text || '';
+      const rawBody = data.content?.[0]?.text || '';
+      // Strip a single leading greeting line — the customer email template
+      // already renders "Hi {customerName}," above the body, and the model
+      // occasionally emits one despite the prompt telling it not to. Leaving
+      // it in produces a duplicate greeting in the editor and the sent email.
+      const greetingLine = /^\s*(hi|hello|hey|g'?day|dear|good (?:morning|afternoon|evening))\b[^\n]*[,!.:]?\s*\n+/i;
+      const emailBody = rawBody.replace(greetingLine, '').trimStart();
 
       res.json({ emailBody });
     } catch (error: any) {
