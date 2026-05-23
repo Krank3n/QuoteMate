@@ -48,11 +48,16 @@ export const printMediaCSS = `
   }
   .pdf-footer {
     margin-top: auto;
-    padding-top: 20px;
-    border-top: 1px solid #e0e0e0;
-    font-size: 12px;
-    color: #666666;
+    padding-top: 16px;
+    font-size: 8px;
+    font-weight: 600;
+    color: #c8ccd1;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
     text-align: center;
+  }
+  .pdf-footer p {
+    margin: 0;
   }
   .header {
     display: flex;

@@ -19,17 +19,20 @@ import {
   View,
   StyleSheet,
   Pressable,
+  TouchableOpacity,
   LayoutAnimation,
   Platform,
   UIManager,
 } from 'react-native';
-import { Text, ActivityIndicator } from 'react-native-paper';
+import { Text, ActivityIndicator, Menu } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { formatDistanceToNowStrict } from 'date-fns';
 
 import type { Document } from '../types/document';
+import type { Invoice, PaymentTerms } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
+import { calculateDueDate, formatPaymentTerms } from '../utils/invoiceCalculator';
 import { STAGE_META } from './StageSheet';
 import { PaymentChip } from './PaymentChip';
 import { selectionTap } from '../utils/haptics';
@@ -285,6 +288,15 @@ export function JobScopeCard({
         </>
       )}
 
+      {isInvoice && persistedRecord ? (
+        <PaymentTermsRow
+          invoice={persistedRecord as Invoice}
+          onChange={(next) => {
+            saveInvoice(next).catch(() => {});
+          }}
+        />
+      ) : null}
+
       {persistedRecord ? (
         <View style={styles.settingsBlock}>
           <InvoiceDisplaySettings
@@ -407,6 +419,89 @@ function ExpandedSections({
         style={sectionOverride}
       />
     </View>
+  );
+}
+
+function PaymentTermsRow({
+  invoice,
+  onChange,
+}: {
+  invoice: Invoice;
+  onChange: (next: Invoice) => void;
+}) {
+  const [menuVisible, setMenuVisible] = useState(false);
+  const currentTerms: PaymentTerms = invoice.paymentTerms || 'net_14';
+  const customDays = invoice.customPaymentDays;
+  const issueDate = invoice.issueDate
+    ? new Date(invoice.issueDate)
+    : new Date();
+  const dueDate = invoice.dueDate
+    ? new Date(invoice.dueDate)
+    : calculateDueDate(issueDate, currentTerms, customDays);
+
+  const applyTerms = (terms: PaymentTerms) => {
+    setMenuVisible(false);
+    const days = terms === 'custom' ? customDays ?? 7 : undefined;
+    const newDueDate = calculateDueDate(issueDate, terms, days);
+    onChange({
+      ...invoice,
+      paymentTerms: terms,
+      customPaymentDays: days,
+      dueDate: newDueDate,
+      updatedAt: new Date(),
+    });
+  };
+
+  const dueDateText = dueDate.toLocaleDateString('en-AU', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+
+  // Paper Menu anchors don't recover cleanly from a backdrop dismiss when
+  // the anchor is a Pressable — the next press gets swallowed and the
+  // menu won't re-open. TouchableOpacity sidesteps that.
+  return (
+    <Menu
+      visible={menuVisible}
+      onDismiss={() => setMenuVisible(false)}
+      anchor={
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => {
+            selectionTap();
+            setMenuVisible(true);
+          }}
+          style={styles.row}
+          accessibilityRole="button"
+          accessibilityLabel="Edit payment terms"
+        >
+          <View style={styles.rowIcon}>
+            <MaterialCommunityIcons
+              name={'clock-outline' as any}
+              size={18}
+              color={colors.primary}
+            />
+          </View>
+          <View style={styles.rowBody}>
+            <Text style={styles.rowLabel}>Payment terms</Text>
+            <Text style={styles.rowBodyText} numberOfLines={1}>
+              {formatPaymentTerms(currentTerms, customDays)} · Due {dueDateText}
+            </Text>
+          </View>
+          <MaterialCommunityIcons
+            name={'chevron-down' as any}
+            size={18}
+            color={colors.inactive}
+          />
+        </TouchableOpacity>
+      }
+    >
+      <Menu.Item onPress={() => applyTerms('due_on_receipt')} title="Due on Receipt" />
+      <Menu.Item onPress={() => applyTerms('net_7')} title="Net 7 (7 days)" />
+      <Menu.Item onPress={() => applyTerms('net_14')} title="Net 14 (14 days)" />
+      <Menu.Item onPress={() => applyTerms('net_30')} title="Net 30 (30 days)" />
+    </Menu>
   );
 }
 

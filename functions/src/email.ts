@@ -1131,24 +1131,40 @@ function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string;
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <title>${escapeHtml(businessName || 'Quote')}</title>
+  <style>
+    /* On mobile, merge the page background into the card so the email reads as one
+       continuous surface instead of a card-on-a-page. */
+    @media screen and (max-width: 600px) {
+      .qm-c-body { background-color: #ffffff !important; }
+      .qm-c-bg { background-color: #ffffff !important; }
+      .qm-c-outer { padding: 0 !important; }
+      .qm-c-card-shell {
+        border-left: 0 !important;
+        border-right: 0 !important;
+        border-bottom: 0 !important;
+        border-radius: 0 !important;
+      }
+      .qm-c-card { padding: 24px 18px !important; }
+    }
+  </style>
   <!--[if mso]>
   <style>table,td{font-family:Arial,sans-serif!important}</style>
   <![endif]-->
 </head>
-<body style="margin:0;padding:0;background-color:#f7f7f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<body class="qm-c-body" style="margin:0;padding:0;background-color:#f7f7f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   ${preheader ? `<div style="display:none;font-size:1px;color:#f7f7f7;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${preheader}</div>` : ''}
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f7f7f7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="qm-c-bg" style="background-color:#f7f7f7;">
     <tr>
-      <td align="center" style="padding:32px 16px;">
+      <td align="center" class="qm-c-outer" style="padding:32px 16px;">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
           ${logoSection}
           ${businessNameSection}
           <!-- Main Card -->
           <tr>
             <td>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;border-top:4px solid ${brandColor};">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="qm-c-card-shell" style="background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;border-top:4px solid ${brandColor};">
                 <tr>
-                  <td style="padding:36px 32px;">
+                  <td class="qm-c-card" style="padding:36px 32px;">
                     ${content}
                   </td>
                 </tr>
@@ -1157,10 +1173,8 @@ function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string;
           </tr>
           <!-- Footer -->
           <tr>
-            <td style="padding:24px 0 0;text-align:center;">
-              <p style="color:#9ca3af;font-size:11px;margin:0;line-height:1.5;">
-                Powered by <a href="https://hansendev.web.app" style="color:#9ca3af;text-decoration:underline;">QuoteMate</a>
-              </p>
+            <td style="padding:20px 0 0;text-align:center;">
+              <a href="https://quotemateapp.au" target="_blank" style="display:inline-block;background:#111827;color:#ffffff;font-size:10px;font-weight:600;letter-spacing:0.6px;padding:5px 10px;border-radius:999px;text-decoration:none;">QuoteMate</a>
             </td>
           </tr>
         </table>
@@ -1236,22 +1250,22 @@ function renderInvoicePaymentInfo(input: InvoicePaymentInfoInput): string {
     day: '2-digit', month: 'long', year: 'numeric',
   });
   const referenceLine = invoiceNumber
-    ? `<p style="color:#6b7280;font-size:13px;line-height:1.5;margin:10px 0 0;">
-         Please reference invoice number <strong style="color:#1f2937;">${escapeHtml(invoiceNumber)}</strong> with your payment.
+    ? `<p style="color:#6b7280;font-size:12px;line-height:1.5;margin:14px 0 0;padding-top:12px;border-top:1px solid #e5e7eb;">
+         Please reference invoice number <strong style="color:#111827;">${escapeHtml(invoiceNumber)}</strong> with your payment.
        </p>`
     : '';
   return `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;margin:20px 0 0;">
-      <tr><td style="padding:16px;">
-        <p style="color:#1f2937;font-size:13px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;margin:0 0 12px;">Payment Information</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-left:4px solid ${accent};border-radius:10px;margin:24px 0 0;">
+      <tr><td style="padding:20px 22px;">
+        <p style="color:${accent};font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;margin:0 0 14px;">Payment Information</p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            <td style="padding:4px 0;color:#6b7280;font-size:14px;">${dueLabel}</td>
-            <td style="padding:4px 0;color:${accent};font-size:16px;font-weight:700;text-align:right;">$${total.toFixed(2)}</td>
+            <td style="padding:6px 0;color:#6b7280;font-size:13px;vertical-align:middle;">${dueLabel}</td>
+            <td style="padding:6px 0;color:${accent};font-size:20px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums;letter-spacing:-0.2px;vertical-align:middle;">$${total.toFixed(2)}</td>
           </tr>
           <tr>
-            <td style="padding:4px 0;color:#6b7280;font-size:14px;">Due Date</td>
-            <td style="padding:4px 0;color:#1f2937;font-size:14px;font-weight:600;text-align:right;">${dueFormatted}</td>
+            <td style="padding:6px 0;color:#6b7280;font-size:13px;vertical-align:middle;">Due Date</td>
+            <td style="padding:6px 0;color:#111827;font-size:14px;font-weight:700;text-align:right;vertical-align:middle;">${dueFormatted}</td>
           </tr>
         </table>
         ${referenceLine}
@@ -1321,9 +1335,9 @@ function renderInvoicePaymentMethods(input: InvoicePaymentMethodsInput): string 
 
 function renderPaymentMethodCard(title: string, bodyHtml: string): string {
   return `
-    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;">
-      <p style="color:#1f2937;font-size:14px;font-weight:700;margin:0 0 4px;">${title}</p>
-      <p style="color:#374151;font-size:13px;line-height:1.6;margin:0;">${bodyHtml}</p>
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-left:3px solid #111827;border-radius:8px;padding:14px 16px;">
+      <p style="color:#111827;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;margin:0 0 6px;">${title}</p>
+      <p style="color:#374151;font-size:13px;line-height:1.65;margin:0;font-variant-numeric:tabular-nums;">${bodyHtml}</p>
     </div>`;
 }
 
@@ -1353,15 +1367,16 @@ function renderPricingRows(input: PricingRowsInput): string {
   // is visible AND there's something separating it from the final Total —
   // i.e. when the breakdown actually shows something distinct.
   const showSubtotalRow = showMaterials || showLabor;
-  const row = (label: string, value: string, valueColor = '#1f2937') => `
+  const row = (label: string, value: string, valueColor = '#111827') => `
             <tr>
-              <td style="padding:8px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #e5e7eb;">${label}</td>
-              <td style="padding:8px 0;color:${valueColor};font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">${value}</td>
+              <td style="padding:10px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #eef0f3;">${label}</td>
+              <td style="padding:10px 0;color:${valueColor};font-size:14px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;border-bottom:1px solid #eef0f3;">${value}</td>
             </tr>`;
   return `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;margin:20px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;margin:24px 0;overflow:hidden;">
       <tr>
-        <td style="padding:16px;">
+        <td style="padding:18px 22px 6px;">
+          <p style="color:#9ca3af;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;margin:0 0 6px;">Summary</p>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             ${showMaterials ? row('Materials', `$${materialsSubtotal.toFixed(2)}`) : ''}
             ${showLabor ? row('Labour', `$${laborTotal.toFixed(2)}`) : ''}
@@ -1369,12 +1384,18 @@ function renderPricingRows(input: PricingRowsInput): string {
             ${row('GST', `$${gst.toFixed(2)}`)}
             ${hasDeposit ? `
             <tr>
-              <td style="padding:8px 0;color:#059669;font-size:14px;border-bottom:1px solid #e5e7eb;">Deposit already paid</td>
-              <td style="padding:8px 0;color:#059669;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #e5e7eb;">−$${depositCredit!.toFixed(2)}</td>
+              <td style="padding:10px 0;color:#059669;font-size:13px;border-bottom:1px solid #eef0f3;">Deposit already paid</td>
+              <td style="padding:10px 0;color:#059669;font-size:14px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;border-bottom:1px solid #eef0f3;">−$${depositCredit!.toFixed(2)}</td>
             </tr>` : ''}
+          </table>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:14px 22px 18px;background:#f9fafb;border-top:2px solid #111827;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="padding:10px 0;color:#1f2937;font-size:16px;font-weight:700;">${hasDeposit ? 'Balance due' : 'Total (inc GST)'}</td>
-              <td style="padding:10px 0;color:${accent};font-size:18px;font-weight:700;text-align:right;">$${total.toFixed(2)}</td>
+              <td style="color:#111827;font-size:14px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;">${hasDeposit ? 'Balance Due' : 'Total (inc GST)'}</td>
+              <td style="color:${accent};font-size:22px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums;letter-spacing:-0.3px;">$${total.toFixed(2)}</td>
             </tr>
           </table>
         </td>
@@ -1523,9 +1544,16 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
   // Type-specific blocks. The framing (header / greeting / body / pricing /
   // attachment notice / sign-off / business footer) is identical between
   // quote and invoice — only the middle inserts and the closing copy differ.
-  const subHeader = isInvoice && data.invoiceNumber
-    ? `<p style="color:#6b7280;font-size:13px;margin:0 0 16px;">Invoice #${esc(data.invoiceNumber)}</p>`
-    : '';
+  const docNumber = isInvoice ? data.invoiceNumber : undefined;
+  const headerStrip = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;">
+      <tr>
+        <td style="vertical-align:middle;">
+          <span style="display:inline-block;background:${accent};color:#ffffff;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;padding:5px 10px;border-radius:4px;">${headerLabel}</span>
+        </td>
+        ${docNumber ? `<td style="vertical-align:middle;text-align:right;color:#9ca3af;font-size:12px;font-weight:600;letter-spacing:0.3px;">#${esc(docNumber)}</td>` : ''}
+      </tr>
+    </table>`;
 
   const preBodyExtras = !isInvoice ? renderPhotosSection(data.photoUrls) : '';
 
@@ -1581,19 +1609,19 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     : '';
 
   const closingNotice = isInvoice
-    ? `<p style="color:#6b7280;font-size:14px;line-height:1.6;margin:16px 0 0;">
+    ? `<p style="color:#374151;font-size:15px;line-height:1.7;margin:16px 0 0;">
       If you have any questions, please don't hesitate to get in touch.
     </p>`
-    : `<p style="color:#6b7280;font-size:14px;line-height:1.6;margin:24px 0 0;">
+    : `<p style="color:#374151;font-size:15px;line-height:1.7;margin:24px 0 0;">
       This quote is valid for 30 days. If you have any questions, please don't hesitate to get in touch.
     </p>`;
 
   const content = `
-    <h1 style="color:#1f2937;font-size:24px;font-weight:700;margin:0 0 8px;line-height:1.3;">
+    ${headerStrip}
+    <h1 style="color:#111827;font-size:26px;font-weight:800;margin:0 0 18px;line-height:1.25;letter-spacing:-0.3px;">
       ${headerLabel} for ${esc(data.jobName)}
     </h1>
-    ${subHeader}
-    <p style="color:#6b7280;font-size:14px;margin:0 0 24px;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 22px;">
       Hi ${esc(data.customerName)},
     </p>
 
@@ -1619,9 +1647,9 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
 
     ${closingNotice}
 
-    <p style="color:#6b7280;font-size:14px;margin:16px 0 0;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:20px 0 0;">
       Kind regards,<br/>
-      <strong style="color:#1f2937;">${esc(data.business.name)}</strong>
+      <strong style="color:#111827;">${esc(data.business.name)}</strong>
     </p>
 
     ${renderBusinessFooter(data.business, accent)}

@@ -262,6 +262,7 @@ export interface Quote {
   // a fresh AI generation. The Regenerate button overwrites this. Distinct
   // from aiEmailBody, which is the canonical record of what was sent.
   draftEmailBody?: string;
+  draftEmailSubject?: string;
 
   // Deposit / pre-payment (paid against the quote before work starts).
   // requireDeposit is the authoritative toggle — when false, no deposit is
@@ -721,6 +722,7 @@ export interface Invoice {
   // Generated (or typed) on first open and persisted so reopening doesn't
   // trigger a fresh AI generation. Regenerate overwrites it.
   draftEmailBody?: string;
+  draftEmailSubject?: string;
 }
 
 // Xero integration types

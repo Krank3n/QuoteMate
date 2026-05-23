@@ -485,6 +485,32 @@ export function JobPreviewScreen() {
     }
   };
 
+  // Payment terms persist immediately so liveDoc (used by Preview PDF)
+  // stays in sync with the dropdown. Without this the menu only nudged
+  // local state and the PDF kept the previous dueDate.
+  const handlePaymentTermsChange = useCallback(
+    (nextTerms: PaymentTerms, nextCustomDays?: number) => {
+      if (!currentInvoice) return;
+      const days =
+        nextTerms === 'custom'
+          ? (nextCustomDays ?? (parseInt(customDays) || 0))
+          : undefined;
+      const newDueDate = calculateDueDate(issueDate, nextTerms, days);
+      const next = {
+        ...currentInvoice,
+        paymentTerms: nextTerms,
+        customPaymentDays: days,
+        dueDate: newDueDate,
+        updatedAt: new Date(),
+      };
+      setPaymentTerms(nextTerms);
+      if (days !== undefined) setCustomDays(days.toString());
+      updateInvoice(next);
+      saveInvoice(next).catch(() => {});
+    },
+    [currentInvoice, customDays, issueDate, updateInvoice, saveInvoice],
+  );
+
   // Display/deposit toggles persist immediately. Apply via the right
   // update*-then-save* pair so calculations stay in sync and the change
   // hits both AsyncStorage and Firestore.
@@ -617,35 +643,35 @@ export function JobPreviewScreen() {
               >
                 <Menu.Item
                   onPress={() => {
-                    setPaymentTerms('due_on_receipt');
+                    handlePaymentTermsChange('due_on_receipt');
                     setPaymentTermsMenuVisible(false);
                   }}
                   title="Due on Receipt"
                 />
                 <Menu.Item
                   onPress={() => {
-                    setPaymentTerms('net_7');
+                    handlePaymentTermsChange('net_7');
                     setPaymentTermsMenuVisible(false);
                   }}
                   title="Net 7 (7 days)"
                 />
                 <Menu.Item
                   onPress={() => {
-                    setPaymentTerms('net_14');
+                    handlePaymentTermsChange('net_14');
                     setPaymentTermsMenuVisible(false);
                   }}
                   title="Net 14 (14 days)"
                 />
                 <Menu.Item
                   onPress={() => {
-                    setPaymentTerms('net_30');
+                    handlePaymentTermsChange('net_30');
                     setPaymentTermsMenuVisible(false);
                   }}
                   title="Net 30 (30 days)"
                 />
                 <Menu.Item
                   onPress={() => {
-                    setPaymentTerms('custom');
+                    handlePaymentTermsChange('custom');
                     setPaymentTermsMenuVisible(false);
                   }}
                   title="Custom"
@@ -658,13 +684,7 @@ export function JobPreviewScreen() {
                   value={customDays}
                   onChangeText={(text) => {
                     setCustomDays(text);
-                    const days = parseInt(text) || 0;
-                    const newDueDate = calculateDueDate(issueDate, 'custom', days);
-                    updateInvoice({
-                      ...currentInvoice,
-                      customPaymentDays: days,
-                      dueDate: newDueDate,
-                    });
+                    handlePaymentTermsChange('custom', parseInt(text) || 0);
                   }}
                   mode="outlined"
                   keyboardType="number-pad"

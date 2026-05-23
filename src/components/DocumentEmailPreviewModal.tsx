@@ -172,6 +172,8 @@ interface Props {
   businessSettings: BusinessSettings | null;
   emailBody: string;
   onEmailBodyChange: (body: string) => void;
+  subject: string;
+  onSubjectChange: (subject: string) => void;
   onRegenerate: () => void;
   isPro: boolean;
   isRegenerating: boolean;
@@ -184,6 +186,8 @@ export function DocumentEmailPreviewModal({
   businessSettings,
   emailBody,
   onEmailBodyChange,
+  subject,
+  onSubjectChange,
   onRegenerate,
   isPro,
   isRegenerating,
@@ -215,7 +219,6 @@ export function DocumentEmailPreviewModal({
       })()
     : (documentToQuote(doc).photos || []);
 
-  const subjectPrefix = isInvoice ? 'Invoice from' : 'Quotation from';
   const headerTitle = isInvoice ? 'Invoice Email' : 'Email Preview';
   const sendButtonLabel = isInvoice ? 'Send Invoice' : 'Send Email';
   const sentTitle = isInvoice ? 'Invoice Sent!' : 'Quote Sent!';
@@ -228,9 +231,6 @@ export function DocumentEmailPreviewModal({
     : `The email will include a pricing table, ${photos.length > 0 ? 'job photos, ' : ''}accept/decline buttons, and your business details.`;
 
   const [recipientEmail, setRecipientEmail] = useState(doc.customerEmail || '');
-  const [subject, setSubject] = useState(
-    `${subjectPrefix} ${businessSettings?.businessName || 'Your Business'} - ${doc.job.name}`
-  );
   const [sending, setSending] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
   const [sent, setSent] = useState(false);
@@ -303,16 +303,18 @@ export function DocumentEmailPreviewModal({
     return '';
   };
 
-  // Reset state when modal opens
+  // Reset transient state when modal opens. Subject is owned by the parent
+  // (SendDocumentDialog) and seeded from draftEmailSubject there, so it
+  // intentionally isn't touched here — otherwise edits would be wiped on
+  // close/reopen.
   React.useEffect(() => {
     if (visible) {
       setRecipientEmail(doc.customerEmail || '');
-      setSubject(`${subjectPrefix} ${businessSettings?.businessName || 'Your Business'} - ${doc.job.name}`);
       setSent(false);
       setEmailTouched(false);
       setEmailError('');
     }
-  }, [visible, doc.customerEmail, doc.job.name, businessSettings?.businessName, subjectPrefix]);
+  }, [visible, doc.customerEmail]);
 
   const handleEmailChange = (text: string) => {
     setRecipientEmail(text);
@@ -512,7 +514,7 @@ export function DocumentEmailPreviewModal({
               </View>
               <TextInput
                 value={subject}
-                onChangeText={setSubject}
+                onChangeText={onSubjectChange}
                 mode="outlined"
                 style={styles.subjectInput}
               />

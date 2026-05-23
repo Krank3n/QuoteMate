@@ -61,7 +61,16 @@ export function SendDocumentDialog({
   const [emailPreviewVisible, setEmailPreviewVisible] = useState(false);
   const [sendGateVisible, setSendGateVisible] = useState(false);
   const [emailBody, setEmailBody] = useState('');
+  const [emailSubject, setEmailSubject] = useState('');
   const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
+
+  const defaultSubject = (() => {
+    const businessName = businessSettings?.businessName || 'Your Business';
+    const jobName = (isInvoice ? invoice.job.name : quote.job.name) || 'Job';
+    return isInvoice
+      ? `Invoice from ${businessName} - ${jobName}`
+      : `Quotation from ${businessName} - ${jobName}`;
+  })();
 
   // Mirror external `visible` → internal ActionSheet open. Tapping a
   // row in the sheet (Email) may swap us over to the email preview,
@@ -77,14 +86,17 @@ export function SendDocumentDialog({
 
   type EmailHandler = {
     draftBody: string | undefined;
+    draftSubject: string | undefined;
     generate: () => Promise<string>;
     fallback: () => string;
     persistBody: (body: string) => void;
+    persistSubject: (subject: string) => void;
   };
 
   const emailHandler: EmailHandler = isInvoice
     ? {
         draftBody: invoice.draftEmailBody,
+        draftSubject: invoice.draftEmailSubject,
         generate: () => generateInvoiceEmail({
           jobName: invoice.job.name,
           jobDescription: invoice.job.description || '',
@@ -104,9 +116,11 @@ export function SendDocumentDialog({
           new Date(invoice.dueDate).toISOString(),
         ),
         persistBody: (body) => { saveInvoice({ ...invoice, draftEmailBody: body }); },
+        persistSubject: (subject) => { saveInvoice({ ...invoice, draftEmailSubject: subject }); },
       }
     : {
         draftBody: quote.draftEmailBody,
+        draftSubject: quote.draftEmailSubject,
         generate: () => generateQuoteEmail({
           jobName: quote.job.name,
           jobDescription: quote.job.description || '',
@@ -123,6 +137,7 @@ export function SendDocumentDialog({
           businessSettings?.businessName || 'Your Business',
         ),
         persistBody: (body) => { saveDraft({ ...quote, draftEmailBody: body }); },
+        persistSubject: (subject) => { saveDraft({ ...quote, draftEmailSubject: subject }); },
       };
 
   const closeAll = () => {
@@ -159,6 +174,7 @@ export function SendDocumentDialog({
   const handleEmailOption = async () => {
     if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
+    setEmailSubject(emailHandler.draftSubject || defaultSubject);
     if (emailHandler.draftBody) {
       setEmailBody(emailHandler.draftBody);
       setEmailPreviewVisible(true);
@@ -194,13 +210,27 @@ export function SendDocumentDialog({
 
   const handleEmailPreviewDismiss = () => {
     setEmailPreviewVisible(false);
+    // Persist body + subject together so a single write covers both edits
+    // and they stay in sync on reopen.
+    const trimmedSubject = emailSubject.trim();
+    const subjectChanged = trimmedSubject !== (isInvoice ? invoice.draftEmailSubject : quote.draftEmailSubject) && trimmedSubject !== '';
     if (isInvoice) {
-      if (emailBody && emailBody !== (invoice.draftEmailBody || '')) {
-        saveInvoice({ ...invoice, draftEmailBody: emailBody });
+      const bodyChanged = emailBody && emailBody !== (invoice.draftEmailBody || '');
+      if (bodyChanged || subjectChanged) {
+        saveInvoice({
+          ...invoice,
+          ...(bodyChanged ? { draftEmailBody: emailBody } : {}),
+          ...(subjectChanged ? { draftEmailSubject: trimmedSubject } : {}),
+        });
       }
     } else {
-      if (emailBody && emailBody !== (quote.draftEmailBody || '')) {
-        saveDraft({ ...quote, draftEmailBody: emailBody });
+      const bodyChanged = emailBody && emailBody !== (quote.draftEmailBody || '');
+      if (bodyChanged || subjectChanged) {
+        saveDraft({
+          ...quote,
+          ...(bodyChanged ? { draftEmailBody: emailBody } : {}),
+          ...(subjectChanged ? { draftEmailSubject: trimmedSubject } : {}),
+        });
       }
     }
     onDismiss();
@@ -273,6 +303,8 @@ export function SendDocumentDialog({
         businessSettings={businessSettings}
         emailBody={emailBody}
         onEmailBodyChange={setEmailBody}
+        subject={emailSubject}
+        onSubjectChange={setEmailSubject}
         onRegenerate={handleRegenerateEmail}
         isPro={isPro}
         isRegenerating={isGeneratingEmail}

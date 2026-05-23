@@ -2362,8 +2362,9 @@ export const useStore = create<AppState>((set, get) => ({
       sections: (source.sections ?? []).map((s) => ({ ...s, id: generateId() })),
       // Photos are visit-specific; drop them.
       photos: [],
-      // Draft email body — stale for a new visit.
+      // Draft email body/subject — stale for a new visit.
       draftEmailBody: undefined,
+      draftEmailSubject: undefined,
     };
     // If the source was an invoice, its `total` had any paid deposit
     // subtracted (see convertDocumentToInvoice). Add it back so the cloned

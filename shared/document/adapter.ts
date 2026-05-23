@@ -154,6 +154,7 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     tcAccepted: s.tcAccepted,
     notes: s.notes,
     draftEmailBody: s.draftEmailBody,
+    draftEmailSubject: s.draftEmailSubject,
     paymentSyncError: s.paymentSyncError,
     disputeStatus: s.disputeStatus,
     disputeId: s.disputeId,
@@ -497,6 +498,7 @@ export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocument
     photos: doc.photos,
     aiEmailBody: doc.aiEmailBody,
     draftEmailBody: doc.draftEmailBody,
+    draftEmailSubject: doc.draftEmailSubject,
     requireDeposit: doc.requireDeposit,
     depositPercentage: doc.depositPercentage,
     depositAmount: doc.depositAmount,
@@ -622,5 +624,6 @@ export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocume
     disputeStatus: doc.disputeStatus,
     disputeId: doc.disputeId,
     draftEmailBody: doc.draftEmailBody,
+    draftEmailSubject: doc.draftEmailSubject,
   };
 }

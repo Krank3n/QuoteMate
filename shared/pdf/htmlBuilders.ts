@@ -584,7 +584,7 @@ export function buildQuotePdfHtml(
       </div>
 
       <div class="pdf-footer">
-        <p>Powered by QuoteMate | quotemateapp.au</p>
+        <p>QuoteMate</p>
       </div>
     </body>
     </html>
@@ -684,7 +684,7 @@ export function buildInvoicePdfHtml(
       </div>
 
       <div class="pdf-footer">
-        <p>Powered by QuoteMate | quotemateapp.au</p>
+        <p>QuoteMate</p>
       </div>
     </body>
     </html>

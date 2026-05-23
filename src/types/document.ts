@@ -101,6 +101,7 @@ export interface Document {
 
   notes?: string;
   draftEmailBody?: string;
+  draftEmailSubject?: string;
 
   // ===== Quote-side optionals =====
   acceptanceToken?: string;
