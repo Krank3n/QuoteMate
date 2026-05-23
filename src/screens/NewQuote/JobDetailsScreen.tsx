@@ -1374,13 +1374,7 @@ export function JobDetailsScreen() {
         {/* Clean-up Button below Job Description */}
         {jobDescription.trim() && !isRecording && (
           <TouchableOpacity
-            onPress={() => {
-              if (!isPro) {
-                navigation.navigate('Paywall' as never);
-                return;
-              }
-              handleCleanupDescription();
-            }}
+            onPress={handleCleanupDescription}
             disabled={isProcessingVoice}
             style={[
               styles.cleanupButtonBelow,
@@ -1402,7 +1396,6 @@ export function JobDetailsScreen() {
                   color={colors.primary}
                 />
                 <Text style={styles.cleanupButtonBelowText}>Clean-up & Generate Title</Text>
-                {!isPro && <ProBadge size="small" />}
               </>
             )}
           </TouchableOpacity>
