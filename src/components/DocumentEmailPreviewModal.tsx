@@ -247,6 +247,61 @@ export function DocumentEmailPreviewModal({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const isEditingBody = isBodyFocused && isKeyboardVisible;
 
+  // Body formatting toolbar. We track the last known caret/selection in a
+  // ref (cheap, no re-renders) and only set the controlled `selection`
+  // prop briefly after a toolbar action so the caret lands inside the
+  // inserted markup. The pending value clears on the next event loop so
+  // the user can move the caret freely afterwards.
+  const bodySelectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+  const [pendingBodySelection, setPendingBodySelection] = useState<{ start: number; end: number } | undefined>(undefined);
+
+  useEffect(() => {
+    if (!pendingBodySelection) return;
+    const id = setTimeout(() => setPendingBodySelection(undefined), 50);
+    return () => clearTimeout(id);
+  }, [pendingBodySelection]);
+
+  const applyBold = () => {
+    const { start, end } = bodySelectionRef.current;
+    const safeStart = Math.min(start, emailBody.length);
+    const safeEnd = Math.min(end, emailBody.length);
+    const before = emailBody.slice(0, safeStart);
+    const selected = emailBody.slice(safeStart, safeEnd);
+    const after = emailBody.slice(safeEnd);
+    if (selected.length > 0) {
+      onEmailBodyChange(`${before}**${selected}**${after}`);
+      setPendingBodySelection({ start: safeStart + 2, end: safeEnd + 2 });
+    } else {
+      const placeholder = 'bold text';
+      onEmailBodyChange(`${before}**${placeholder}**${after}`);
+      const cursor = safeStart + 2;
+      setPendingBodySelection({ start: cursor, end: cursor + placeholder.length });
+    }
+  };
+
+  const applyBullet = () => {
+    const { start, end } = bodySelectionRef.current;
+    const safeStart = Math.min(start, emailBody.length);
+    const safeEnd = Math.min(end, emailBody.length);
+    const lineStart = emailBody.lastIndexOf('\n', safeStart - 1) + 1;
+    let lineEnd = emailBody.indexOf('\n', safeEnd);
+    if (lineEnd === -1) lineEnd = emailBody.length;
+    const block = emailBody.slice(lineStart, lineEnd);
+    const lines = block.split('\n');
+    const allBulleted = lines.every((l) => /^\s*[-*•]\s+/.test(l) || l.trim() === '');
+    const transformed = lines
+      .map((l) => {
+        if (l.trim() === '') return l;
+        if (allBulleted) return l.replace(/^(\s*)[-*•]\s+/, '$1');
+        return `- ${l}`;
+      })
+      .join('\n');
+    const next = `${emailBody.slice(0, lineStart)}${transformed}${emailBody.slice(lineEnd)}`;
+    onEmailBodyChange(next);
+    const cursor = lineStart + transformed.length;
+    setPendingBodySelection({ start: cursor, end: cursor });
+  };
+
   useEffect(() => {
     const showSub = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
@@ -544,11 +599,24 @@ export function DocumentEmailPreviewModal({
             <EmailGeneratingState steps={generatingSteps} />
           ) : (
             <View style={[styles.bodyCard, isEditingBody && styles.bodyCardEditing]}>
+              <View style={styles.formatToolbar}>
+                <TouchableOpacity onPress={applyBold} style={styles.formatButton} accessibilityLabel="Bold">
+                  <Text style={styles.formatButtonBold}>B</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={applyBullet} style={styles.formatButton} accessibilityLabel="Bullet list">
+                  <MaterialCommunityIcons name="format-list-bulleted" size={18} color={colors.text} />
+                </TouchableOpacity>
+                <Text style={styles.formatHint}>**bold**  •  - bullet</Text>
+              </View>
               <TextInput
                 value={emailBody}
                 onChangeText={onEmailBodyChange}
                 onFocus={handleBodyFocus}
                 onBlur={handleBodyBlur}
+                onSelectionChange={(e) => {
+                  bodySelectionRef.current = e.nativeEvent.selection;
+                }}
+                selection={pendingBodySelection}
                 mode="flat"
                 style={[styles.bodyInput, isEditingBody && styles.bodyInputEditing]}
                 multiline
@@ -772,6 +840,34 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderRadius: 10,
     overflow: 'hidden',
+  },
+  formatToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  formatButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  formatButtonBold: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  formatHint: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginLeft: 'auto',
+    paddingRight: 6,
   },
   bodyCardEditing: {
     flex: 1,

@@ -1210,10 +1210,53 @@ interface DocEmailBusiness {
   brandColor?: string;
 }
 
+// Renders the user-authored email body. Input is plain text with a tiny
+// markdown subset: `**bold**` becomes <strong>, and lines starting with
+// `- `, `* ` or `• ` group into a <ul>. Blank lines split paragraphs;
+// single newlines become <br/>. HTML is escaped first so the markdown
+// pass cannot inject tags.
 function renderEmailBodyHtml(emailBody: string): string {
-  return escapeHtml(stripAbnFromBody(emailBody))
-    .replace(/\n\n/g, '</p><p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">')
-    .replace(/\n/g, '<br/>');
+  const paraStyle = 'color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;';
+  const listStyle = 'color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;padding-left:24px;';
+  const itemStyle = 'margin:0 0 4px;';
+
+  const escaped = escapeHtml(stripAbnFromBody(emailBody));
+  const formatInline = (s: string): string =>
+    s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+
+  const blocks: string[] = [];
+  let listItems: string[] = [];
+  let paraLines: string[] = [];
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    const items = listItems.map((it) => `<li style="${itemStyle}">${it}</li>`).join('');
+    blocks.push(`<ul style="${listStyle}">${items}</ul>`);
+    listItems = [];
+  };
+  const flushPara = () => {
+    if (!paraLines.length) return;
+    blocks.push(`<p style="${paraStyle}">${paraLines.join('<br/>')}</p>`);
+    paraLines = [];
+  };
+
+  for (const line of escaped.split('\n')) {
+    const bulletMatch = line.match(/^\s*[-*•]\s+(.+)$/);
+    if (bulletMatch) {
+      flushPara();
+      listItems.push(formatInline(bulletMatch[1]));
+    } else if (line.trim() === '') {
+      flushList();
+      flushPara();
+    } else {
+      flushList();
+      paraLines.push(formatInline(line));
+    }
+  }
+  flushList();
+  flushPara();
+
+  return blocks.join('');
 }
 
 function renderBusinessFooter(business: DocEmailBusiness, accent: string): string {
@@ -1625,9 +1668,7 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
       Hi ${esc(data.customerName)},
     </p>
 
-    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
-      ${renderEmailBodyHtml(data.emailBody)}
-    </p>
+    ${renderEmailBodyHtml(data.emailBody)}
 
     ${preBodyExtras}
 

@@ -112,26 +112,18 @@ export function AlertModal({
   // Confetti is enabled for success type by default, can be overridden
   const enableConfetti = showConfetti !== undefined ? showConfetti : type === 'success';
 
-  const [confetti] = useState<ConfettiPiece[]>(() => {
-    if (!enableConfetti) return [];
-    const confettiColors = [colors.success, colors.secondary, colors.info, colors.primary];
-    return Array.from({ length: 25 }, (_, i) => ({
-      id: i,
-      x: Math.random() * 100,
-      color: confettiColors[Math.floor(Math.random() * confettiColors.length)],
-      size: Math.random() * 6 + 4,
-      delay: i * 50,
-      duration: 2000 + Math.random() * 1000,
-    }));
-  });
-
-  const confettiAnims = useRef(
-    confetti.map(() => ({
-      translateY: new Animated.Value(-100),
-      rotate: new Animated.Value(0),
-      opacity: new Animated.Value(0),
-    }))
-  ).current;
+  // Lazy-init: pieces + their Animated.Values aren't allocated until the
+  // modal actually opens with confetti enabled. Previously every mounted
+  // AlertModal allocated 25 pieces × 3 Animated.Values regardless of
+  // whether it ever showed.
+  const [confetti, setConfetti] = useState<ConfettiPiece[]>([]);
+  const confettiAnimsRef = useRef<
+    Array<{ translateY: Animated.Value; rotate: Animated.Value; opacity: Animated.Value }>
+  >([]);
+  // Holds in-flight confetti sequences so cleanup can cancel them. Without
+  // this, dismissing mid-celebration leaves ~75 Animated callbacks queued
+  // against the (potentially unmounting) Animated.Values.
+  const confettiSeqRef = useRef<Animated.CompositeAnimation[]>([]);
 
   // Android back button closes the modal
   useEffect(() => {
@@ -155,8 +147,32 @@ export function AlertModal({
       checkScaleAnim.setValue(0);
       pulseAnim.setValue(1);
 
+      // Lazy-allocate confetti pieces + values the first time we show with
+      // confetti enabled. Subsequent shows reuse the same arrays.
+      if (enableConfetti && confetti.length === 0) {
+        const confettiColors = [colors.success, colors.secondary, colors.info, colors.primary];
+        const pieces: ConfettiPiece[] = Array.from({ length: 25 }, (_, i) => ({
+          id: i,
+          x: Math.random() * 100,
+          color: confettiColors[Math.floor(Math.random() * confettiColors.length)],
+          size: Math.random() * 6 + 4,
+          delay: i * 50,
+          duration: 2000 + Math.random() * 1000,
+        }));
+        confettiAnimsRef.current = pieces.map(() => ({
+          translateY: new Animated.Value(-100),
+          rotate: new Animated.Value(0),
+          opacity: new Animated.Value(0),
+        }));
+        setConfetti(pieces);
+        // Bail this run — the setConfetti above triggers a re-render that
+        // will re-enter this effect with the arrays populated and start
+        // the animations on the same frame the JSX paints them.
+        return;
+      }
+
       if (enableConfetti) {
-        confettiAnims.forEach(anim => {
+        confettiAnimsRef.current.forEach(anim => {
           anim.translateY.setValue(-100);
           anim.rotate.setValue(0);
           anim.opacity.setValue(0);
@@ -211,9 +227,13 @@ export function AlertModal({
 
       // Start confetti immediately
       if (enableConfetti) {
+        // Cancel any sequences still in flight from a previous show before
+        // we start a new batch — prevents the timings overlapping.
+        confettiSeqRef.current.forEach((s) => s.stop());
+        confettiSeqRef.current = [];
         confetti.forEach((piece, index) => {
-          const anim = confettiAnims[index];
-          Animated.sequence([
+          const anim = confettiAnimsRef.current[index];
+          const seq = Animated.sequence([
             Animated.delay(piece.delay),
             Animated.parallel([
               Animated.timing(anim.translateY, {
@@ -240,20 +260,30 @@ export function AlertModal({
                 }),
               ]),
             ]),
-          ]).start();
+          ]);
+          confettiSeqRef.current.push(seq);
+          seq.start();
         });
       }
-    } else if (pulseLoopRef.current) {
-      // Modal hidden — stop the pulse loop so it doesn't keep running while
-      // the parent screen is still mounted.
-      pulseLoopRef.current.stop();
-      pulseLoopRef.current = null;
+    } else {
+      if (pulseLoopRef.current) {
+        // Modal hidden — stop the pulse loop so it doesn't keep running while
+        // the parent screen is still mounted.
+        pulseLoopRef.current.stop();
+        pulseLoopRef.current = null;
+      }
+      // Cancel any confetti still falling — otherwise sequences keep firing
+      // callbacks for up to ~3s after the modal closes.
+      confettiSeqRef.current.forEach((s) => s.stop());
+      confettiSeqRef.current = [];
     }
     return () => {
       pulseLoopRef.current?.stop();
       pulseLoopRef.current = null;
+      confettiSeqRef.current.forEach((s) => s.stop());
+      confettiSeqRef.current = [];
     };
-  }, [visible]);
+  }, [visible, enableConfetti, confetti]);
 
   const themeColors = getThemeColors(type);
   const displayIcon = icon || getDefaultIcon(type);
@@ -278,7 +308,8 @@ export function AlertModal({
         {enableConfetti && (
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             {confetti.map((piece, index) => {
-              const anim = confettiAnims[index];
+              const anim = confettiAnimsRef.current[index];
+              if (!anim) return null;
               return (
                 <Animated.View
                   key={piece.id}

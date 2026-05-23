@@ -1,25 +1,39 @@
 /**
  * FollowUpSheet — "nudge the customer" sheet.
  *
- * Three rows: SMS (opens the phone's SMS composer prefilled), Email
- * (opens the shared SendDocumentDialog with the follow-up body drafted
- * in), and Copy Link (drops the Square pay link onto the clipboard).
+ * Three rows:
+ *  - SMS: native opens the prefilled SMS composer; web copies the
+ *    message to the clipboard (browsers can't dial sms:).
+ *  - Email: sends via the Brevo backend (same endpoint as the main
+ *    Send flow), so delivery doesn't depend on a mailto: handler.
+ *  - Pay Link: native share sheet, with a clipboard fallback when
+ *    Web Share API isn't available (desktop browsers).
  *
  * Message copy gets progressively firmer as the doc ages past
  * reasonable follow-up thresholds.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, StyleSheet, Pressable, Linking, Platform, Share, Alert } from 'react-native';
-import { Text } from 'react-native-paper';
+import { Text, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
+import * as Clipboard from 'expo-clipboard';
 
 import type { Document } from '../types/document';
+import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { colors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { ensureCanDeliver } from '../utils/quoteDeliveryGuard';
+import { auth } from '../config/firebase';
+
+const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
+const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
+  ? 'http://127.0.0.1:5001/hansendev/us-central1'
+  : 'https://us-central1-hansendev.cloudfunctions.net';
+
+const IS_WEB = Platform.OS === 'web';
 
 export type FollowUpTone = 'gentle' | 'firm' | 'overdue';
 
@@ -103,6 +117,8 @@ export function FollowUpSheet({
     [tone, doc.type, customerName, businessName, jobName, payLink],
   );
 
+  const [sendingEmail, setSendingEmail] = useState(false);
+
   const subtitle = doc.type === 'quote' ? 'Nudge on the quote' : 'Nudge on the invoice';
 
   /**
@@ -148,6 +164,24 @@ export function FollowUpSheet({
       return;
     }
     if (!(await passesDeliveryGate())) return;
+
+    // Desktop browsers don't handle sms:, so copy the message + phone to the
+    // clipboard and let the tradie paste into whichever messaging app they
+    // use. Mobile native (iOS/Android) keeps the prefilled sms: composer.
+    if (IS_WEB) {
+      try {
+        await Clipboard.setStringAsync(message);
+        Alert.alert(
+          'Message copied',
+          `Phone: ${customerPhone}\n\nThe follow-up message is on your clipboard — paste it into your SMS or messaging app.`,
+        );
+        onDismiss();
+      } catch {
+        Alert.alert('Error', 'Could not copy the message.');
+      }
+      return;
+    }
+
     const url =
       Platform.OS === 'ios'
         ? `sms:${phone}&body=${encodeURIComponent(message)}`
@@ -164,24 +198,79 @@ export function FollowUpSheet({
     selectionTap();
     if (!(await passesDeliveryGate())) return;
     if (!customerEmail) {
-      // No email? Share sheet is the next best — works in WhatsApp /
-      // Messenger / anything installed. We'll still draft the same body.
+      // No email on file — fall back to the OS share sheet so the tradie
+      // can punt the drafted body into WhatsApp / Messenger / whatever.
+      // On desktop web (no native share), copy to clipboard instead.
+      if (IS_WEB && typeof navigator !== 'undefined' && !(navigator as any).share) {
+        try {
+          await Clipboard.setStringAsync(message);
+          Alert.alert('Message copied', 'The follow-up message is on your clipboard.');
+          onDismiss();
+        } catch {
+          Alert.alert('Error', 'Could not copy the message.');
+        }
+        return;
+      }
       await Share.share({ message, title: subtitle });
       onDismiss();
       return;
     }
+
     const subject =
       doc.type === 'quote'
         ? `Quote for ${jobName} — ${businessName}`
         : `Invoice for ${jobName} — ${businessName}`;
-    const url = `mailto:${encodeURIComponent(customerEmail)}?subject=${encodeURIComponent(
-      subject,
-    )}&body=${encodeURIComponent(message)}`;
+
+    // Send via Brevo backend so it actually works everywhere (no reliance
+    // on a mailto: handler being configured on the device). Same endpoint
+    // the main "Send" flow uses.
+    setSendingEmail(true);
     try {
-      await Linking.openURL(url);
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        Alert.alert('Not signed in', 'Sign in again to send the follow-up.');
+        return;
+      }
+      const endpoint =
+        doc.type === 'invoice'
+          ? `${FIREBASE_FUNCTIONS_URL}/sendInvoiceEmail`
+          : `${FIREBASE_FUNCTIONS_URL}/sendQuoteEmail`;
+      const body =
+        doc.type === 'invoice'
+          ? {
+              invoiceId: doc.id,
+              invoice: documentToInvoice(doc),
+              emailBody: message,
+              recipientEmail: customerEmail.trim(),
+              subject,
+              includePhotos: false,
+            }
+          : {
+              quoteId: doc.id,
+              quote: documentToQuote(doc),
+              emailBody: message,
+              recipientEmail: customerEmail.trim(),
+              subject,
+              includePhotos: false,
+            };
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to send follow-up.');
+      }
+      Alert.alert('Follow-up sent', `Sent to ${customerEmail}.`);
       onDismiss();
-    } catch {
-      Alert.alert('Error', 'Could not open the email composer.');
+    } catch (error: any) {
+      Alert.alert('Send Failed', error?.message || 'Could not send the follow-up email.');
+    } finally {
+      setSendingEmail(false);
     }
   };
 
@@ -194,6 +283,21 @@ export function FollowUpSheet({
       );
       return;
     }
+
+    // On web, Share.share routes to the Web Share API. Desktop Chrome/
+    // Firefox don't expose it, so feature-detect and fall back to the
+    // clipboard. Mobile native gets the OS share sheet as before.
+    if (IS_WEB && typeof navigator !== 'undefined' && !(navigator as any).share) {
+      try {
+        await Clipboard.setStringAsync(payLink);
+        Alert.alert('Link copied', 'The Square pay link is on your clipboard.');
+        onDismiss();
+      } catch {
+        Alert.alert('Error', 'Could not copy the pay link.');
+      }
+      return;
+    }
+
     try {
       await Share.share({
         message: payLink,
@@ -209,6 +313,15 @@ export function FollowUpSheet({
 
   const handleShareMessage = async () => {
     lightTap();
+    if (IS_WEB && typeof navigator !== 'undefined' && !(navigator as any).share) {
+      try {
+        await Clipboard.setStringAsync(message);
+        Alert.alert('Message copied', 'The follow-up message is on your clipboard.');
+      } catch {
+        Alert.alert('Error', 'Could not copy the message.');
+      }
+      return;
+    }
     try {
       await Share.share({ message, title: subtitle });
     } catch {
@@ -226,30 +339,48 @@ export function FollowUpSheet({
           </Text>
           <Pressable onPress={handleShareMessage} hitSlop={8} style={styles.copyMessage}>
             <MaterialCommunityIcons
-              name={'share-variant' as any}
+              name={(IS_WEB ? 'content-copy' : 'share-variant') as any}
               size={14}
               color={colors.primary}
             />
-            <Text style={styles.copyMessageLabel}>Share message</Text>
+            <Text style={styles.copyMessageLabel}>
+              {IS_WEB ? 'Copy message' : 'Share message'}
+            </Text>
           </Pressable>
         </View>
 
         <Row
           icon="message-text"
-          label="Send SMS"
-          sub={customerPhone ? customerPhone : 'No phone on file'}
+          label={IS_WEB ? 'Copy SMS message' : 'Send SMS'}
+          sub={
+            customerPhone
+              ? IS_WEB
+                ? `${customerPhone} — copy & paste`
+                : customerPhone
+              : 'No phone on file'
+          }
           disabled={!customerPhone}
           onPress={handleSMS}
         />
         <Row
           icon="email-outline"
-          label="Send Email"
-          sub={customerEmail ? customerEmail : 'Use the share sheet'}
+          label={sendingEmail ? 'Sending…' : 'Send Email'}
+          sub={
+            customerEmail
+              ? sendingEmail
+                ? 'Delivering via QuoteMate'
+                : customerEmail
+              : IS_WEB
+                ? 'No email on file — message will be copied'
+                : 'Use the share sheet'
+          }
           onPress={handleEmail}
+          disabled={sendingEmail}
+          rightAccessory={sendingEmail ? <ActivityIndicator size={16} /> : undefined}
         />
         <Row
           icon="link-variant"
-          label="Share Pay Link"
+          label={IS_WEB ? 'Copy Pay Link' : 'Share Pay Link'}
           sub={payLink ? 'Square payment link' : 'No link yet — send the doc first'}
           disabled={!payLink}
           onPress={handleSharePayLink}
@@ -265,12 +396,14 @@ function Row({
   sub,
   onPress,
   disabled,
+  rightAccessory,
 }: {
   icon: string;
   label: string;
   sub?: string;
   onPress: () => void;
   disabled?: boolean;
+  rightAccessory?: React.ReactNode;
 }) {
   return (
     <Pressable
@@ -293,11 +426,15 @@ function Row({
         <Text style={[styles.rowLabel, disabled && { color: colors.inactive }]}>{label}</Text>
         {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
       </View>
-      <MaterialCommunityIcons
-        name={'chevron-right' as any}
-        size={20}
-        color={colors.inactive}
-      />
+      {rightAccessory !== undefined ? (
+        rightAccessory
+      ) : (
+        <MaterialCommunityIcons
+          name={'chevron-right' as any}
+          size={20}
+          color={colors.inactive}
+        />
+      )}
     </Pressable>
   );
 }

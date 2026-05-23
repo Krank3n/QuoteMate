@@ -210,6 +210,10 @@ export function JobPreviewScreen() {
       opacity: new Animated.Value(0),
     }))
   ).current;
+  // Track in-flight confetti sequences so we can cancel them if the user
+  // navigates away mid-celebration — otherwise ~75 Animated callbacks keep
+  // ticking against Animated.Values attached to an unmounted screen.
+  const confettiSeqRef = useRef<Animated.CompositeAnimation[]>([]);
 
   // Banner animations
   const bannerScale = useRef(new Animated.Value(0.3)).current;
@@ -274,10 +278,11 @@ export function JobPreviewScreen() {
         }).start();
       });
 
-      // Animate confetti
+      // Animate confetti — each piece's sequence is tracked so the unmount
+      // cleanup below can cancel anything still in flight.
       confetti.forEach((piece, index) => {
         const anim = confettiAnims[index];
-        Animated.sequence([
+        const seq = Animated.sequence([
           Animated.delay(piece.delay),
           Animated.parallel([
             Animated.timing(anim.translateY, {
@@ -304,7 +309,9 @@ export function JobPreviewScreen() {
               }),
             ]),
           ]),
-        ]).start();
+        ]);
+        confettiSeqRef.current.push(seq);
+        seq.start();
       });
 
       // Auto-dismiss banner
@@ -368,6 +375,13 @@ export function JobPreviewScreen() {
     };
 
     autoSave();
+
+    return () => {
+      // Cancel any confetti sequences still in flight on unmount so the
+      // ~75 Animated callbacks aren't ticking against unmounted values.
+      confettiSeqRef.current.forEach((s) => s.stop());
+      confettiSeqRef.current = [];
+    };
   }, []); // Run once on mount
 
   const handleBackToDashboard = useCallback(async () => {
