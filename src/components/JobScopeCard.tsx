@@ -157,6 +157,10 @@ export function JobScopeCard({
   const saveInvoice = useStore((s) => s.saveInvoice);
 
   const [expanded, setExpanded] = useState(false);
+  // Display & deposit has its own expand state so tapping its chevron
+  // doesn't drag the Materials/Labour sections open with it. The parent
+  // chevron still controls everything (see handleToggle).
+  const [displayExpanded, setDisplayExpanded] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const { showAlert, alertNode } = useAlertModal();
 
@@ -176,7 +180,17 @@ export function JobScopeCard({
   const handleToggle = () => {
     selectionTap();
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setExpanded((v) => !v);
+    const next = !expanded;
+    setExpanded(next);
+    // Parent chevron is "expand/collapse all" — sync the child sections
+    // so the card reads as a single unit when fully open or fully closed.
+    setDisplayExpanded(next);
+  };
+
+  const handleDisplayToggle = () => {
+    selectionTap();
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setDisplayExpanded((v) => !v);
   };
 
   const handlePreview = async () => {
@@ -321,8 +335,8 @@ export function JobScopeCard({
             depositPercentage={Number(doc.depositPercentage ?? 0)}
             onChange={handleDisplaySettingsChange}
             variant="collapsible"
-            expanded={expanded}
-            onToggleExpand={handleToggle}
+            expanded={displayExpanded}
+            onToggleExpand={handleDisplayToggle}
           />
         </View>
       ) : null}

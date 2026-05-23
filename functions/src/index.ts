@@ -1671,7 +1671,7 @@ Provide a JSON response with the following structure:
       "quantity": 2,
       "unit": "each|m|m²|m³|L|kg|box|pack",
       "section": "Descriptive section name (e.g. Colorbond Fence Bay, Merbau Deck Section, Concrete Footings)",
-      "sectionMultiplier": 8,
+      "sectionMultiplier": 1,
       "sectionLaborHours": 1.5,
       "reasoning": "Why this material is needed AND the derivation math for any per-area, per-volume, or repeating-unit quantity (e.g. 'Pavers: 25m² ÷ 0.16m²-per-paver × 1.1 waste = 172'). For simple one-off items a short justification is fine.",
       "savedRateName": "(only set when matched to a saved rate)",

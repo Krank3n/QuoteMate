@@ -1145,21 +1145,33 @@ export function MaterialsListScreen() {
       // single gate latch) used to be silently dropped, which lost their labour
       // entirely and left users staring at "DISTRIBUTION ACROSS 1 SECTIONS"
       // even when the materials list had several.
-      const sectionMultipliers = new Map<string, number>();
+      // Collect every distinct sectionMultiplier the LLM emitted for each
+      // section. The prompt requires all materials in a section to share the
+      // same multiplier, but the LLM sometimes echoes the JSON template's
+      // example value on a subset of items — so taking the MAX previously
+      // propagated that stray inflated value across the whole section's
+      // labour (e.g. one 8× hose in a vanity section made the vanity labour 8×).
+      // Now we trust the multiplier only when it's unanimous; on disagreement
+      // we fall back to the MIN, which the user can dial up in LaborMarkup.
+      const sectionMultiplierCandidates = new Map<string, Set<number>>();
       const sectionLaborHours = new Map<string, number>();
       baseMaterials.forEach(m => {
         if (m.section) {
           const candidate = m.sectionMultiplier && m.sectionMultiplier > 0
             ? m.sectionMultiplier
             : 1;
-          const existing = sectionMultipliers.get(m.section);
-          if (existing === undefined || candidate > existing) {
-            sectionMultipliers.set(m.section, candidate);
-          }
+          const set = sectionMultiplierCandidates.get(m.section) || new Set<number>();
+          set.add(candidate);
+          sectionMultiplierCandidates.set(m.section, set);
         }
         if (m.section && m.sectionLaborHours && m.sectionLaborHours > 0) {
           sectionLaborHours.set(m.section, m.sectionLaborHours);
         }
+      });
+      const sectionMultipliers = new Map<string, number>();
+      sectionMultiplierCandidates.forEach((set, sectionName) => {
+        const values = Array.from(set);
+        sectionMultipliers.set(sectionName, Math.min(...values));
       });
       const existingSections = currentQuote.sections || [];
       const existingSectionNames = new Set(existingSections.map(s => s.name));
