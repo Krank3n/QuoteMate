@@ -75,6 +75,7 @@ import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './sh
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
+import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
 import {
   QM_APP_FEE_PCT_ONLINE,
   QM_APP_FEE_PCT_ONLINE_FREE,
@@ -1682,6 +1683,8 @@ Provide a JSON response with the following structure:
 }
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
+- EVERY section MUST have sectionLaborHours > 0. A section with zero labour hours is invalid output — if the work is materials-only with no labour (rare), put those materials under an existing labour-bearing section instead of creating a zero-hour section.
+- PER-AREA WORK AS A SECTION (paving installation, tiling, plastering, screeding, concreting): set sectionMultiplier = total area in m² and sectionLaborHours = hours PER m² (typical: paving install 0.4–0.6 h/m², tiling 0.5 h/m², plastering 0.3 h/m², screeding 0.2 h/m²). Never set sectionLaborHours: 0 on the assumption that "the section is per m² so there is no per-unit hour value" — that is the most common mistake. Per-m² IS a per-unit value: one m² is one unit.
 
 CRITICAL — emit quantities in the SMALLEST PHYSICAL UNIT, not in guessed packs/bags:
 - Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
@@ -1701,6 +1704,7 @@ SANITY-CHECK every quantity before returning. The most common failure is over-sp
 
 - REPEATING LINEAR ELEMENTS (deck joists, fence posts, wall studs, ceiling battens, roof rafters): count = ceil(span / centres) + 1. A 5m-wide deck with joists at 450mm = 12 joists, NOT 60. A 30m fence at 2.4m bays = 13 posts, NOT 30.
 - PER-AREA ELEMENTS (decking clips, tiles, plasterboard sheets, paving, downlights, GPOs): count = area × density. A 400x400 paver covers 0.16m² → density = 6.25/m². 25m² needs ~157, +10% waste = 172. NOT 430. 600x600 tiles ~2.78/m². Don't multiply density by 5.
+- PIECE-GOODS UNIT IS ALWAYS "each" — pavers, tiles, decking boards, plasterboard sheets, weatherboard, downlights, GPOs, hinges. NEVER emit unit "m²" or "m³" for a discrete piece-good. If you find yourself writing "83 m³ of concrete pavers" you got the unit wrong — convert to a count using area ÷ piece-coverage.
 - LINEAR MATERIAL FROM AREA (decking boards, weatherboard, cladding): linear metres = area / board_width. 50m² of 137mm decking = ~365 lm, NOT 1000+.
 - ONE-PER-UNIT ITEMS (hinges per door, taps per basin, downpipes per roof side, post stirrups per post): count = N units × items_per_unit (usually 1-3).
 - FASTENERS / CONSUMABLES: tie to a structural anchor too — nails per joist hanger × hangers, screws per metre of trim × metres, sealer at coverage rate × area. Never invent thousands.
@@ -1835,10 +1839,13 @@ Return ONLY valid JSON, no other text.`;
         });
       }
 
+      const { materials: repairedMaterials, flags: aiFlags } = validateAndRepairAiOutput(validatedMaterials);
+
       res.status(200).json({
-        materials: validatedMaterials,
+        materials: repairedMaterials,
         estimatedHours: parsed.estimatedHours || 8,
         jobSummary: parsed.jobSummary || '',
+        flags: aiFlags,
       });
     } catch (error: any) {
       const userEmail = await getUserEmail(decodedToken.uid);

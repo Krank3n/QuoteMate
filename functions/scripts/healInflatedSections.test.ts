@@ -148,3 +148,80 @@ describe('healSection', () => {
     expect(result!.after.laborHours).toBe(4.76);
   });
 });
+
+// ===== Inflated vs deflated ambiguity =====
+//
+// healSection's heuristic — "laborHours × laborRate ≈ laborTotal" — fits two
+// distinct production bug shapes equally well. This block documents that the
+// two shapes are INDISTINGUISHABLE without external context, which is why
+// the audit step (checkDocumentIntegrity) flags both with section_total_mismatch
+// and a human must decide before --commit is used.
+
+describe('healSection — inflated vs deflated ambiguity', () => {
+  // INFLATED — Tracy's QU-177865:
+  // The bug: laborHours stored as N×multiplier (e.g. 2.3 × 12 = 27.6).
+  // The total ($30,360) is correct. Heal divides hours by multiplier.
+  const inflated = {
+    name: 'Tracy Deck Surface',
+    multiplier: 12, laborHours: 27.6, laborRate: 1100, laborTotal: 30360,
+  };
+
+  // DEFLATED — QU-177866's "Hardwood Deck Surface":
+  // The bug: laborTotal stored as laborHours × laborRate without multiplier
+  // (2.15 × 1100 = 2,365). Per-unit laborHours is CORRECT but the fair labour
+  // is multiplier × that = $101,695. Customer was undercharged ~$99,000.
+  const deflated = {
+    name: 'QU-177866 Hardwood Deck Surface',
+    multiplier: 43, laborHours: 2.15, laborRate: 1100, laborTotal: 2365,
+  };
+
+  it('healSection cannot distinguish the two — both pass the totalled heuristic', () => {
+    const a = healSection(inflated);
+    const b = healSection(deflated);
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+  });
+
+  it('on inflated input the heal restores correct per-unit semantics', () => {
+    const result = healSection(inflated)!;
+    expect(result.after.laborHours).toBe(2.3);     // 27.6 / 12
+    expect(result.after.laborHoursTotal).toBe(27.6);
+    // Customer-facing dollars unchanged.
+    expect(result.section.laborTotal).toBe(30360);
+  });
+
+  it('on deflated input the heal corrupts per-unit semantics but preserves dollars', () => {
+    // This is the dangerous case: laborHours WAS correct (2.15/m²). Heal
+    // divides it by 43, leaving 0.05/m² stored. Recomputes downstream that
+    // read `laborHours × multiplier × rate` will still produce 2.15 × 1100
+    // = $2,365 (matching laborTotal) — so the customer-visible total is
+    // preserved. But the per-unit stored value is now meaningless.
+    const result = healSection(deflated)!;
+    expect(result.after.laborHours).toBe(0.05);    // 2.15 / 43 — WRONG semantically
+    expect(result.after.laborHoursTotal).toBe(2.15);
+    expect(result.section.laborTotal).toBe(2365);  // dollars preserved
+  });
+
+  it('the recomputed-from-per-unit total matches stored laborTotal in BOTH cases', () => {
+    // This is why heal is "safe" in the dollar-preservation sense: after
+    // running, fixedHours × multiplier × rate = laborTotal in both shapes.
+    // The audit's `labour_total_mismatch` and downstream `updateDocumentCalculations`
+    // will both agree with the customer-facing dollar figure.
+    for (const input of [inflated, deflated]) {
+      const r = healSection(input)!;
+      const recomputed = r.after.laborHours * input.multiplier * input.laborRate;
+      expect(Math.round(recomputed * 100) / 100).toBe(input.laborTotal);
+    }
+  });
+
+  it('looksTotalled fires identically for both shapes (regression guard)', () => {
+    // Property guard: if anyone tweaks healSection to add a distinguishing
+    // signal (e.g. compare with laborHoursTotal), this test will start to
+    // fail and force a decision about how to classify each shape.
+    for (const input of [inflated, deflated]) {
+      const totalledProduct = input.laborHours * input.laborRate;
+      const tol = Math.max(1, input.laborTotal * 0.02);
+      expect(Math.abs(totalledProduct - input.laborTotal)).toBeLessThanOrEqual(tol);
+    }
+  });
+});

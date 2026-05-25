@@ -25,6 +25,10 @@ web-build/
 # Firebase
 .firebase/
 
+# Audit script output (contains sanitized customer quote data)
+audit-recent-quotes.json
+audit-*.json
+
 # OS
 .DS_Store
 *.swp

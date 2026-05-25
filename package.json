@@ -10,6 +10,8 @@
     "ios": "npm run ios:clean && expo run:ios",
     "ios:clean": "xcrun simctl uninstall booted com.hansendev.quotemate 2>/dev/null || true",
     "web": "expo start --web",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "postinstall": "patch-package"
   },
   "dependencies": {
@@ -86,8 +88,10 @@
   "devDependencies": {
     "@babel/core": "^7.23.5",
     "@types/react": "~19.0.10",
+    "@vitest/expect": "^4.1.7",
     "baseline-browser-mapping": "^2.9.18",
     "patch-package": "^8.0.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.7"
   }
 }

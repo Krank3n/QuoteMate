@@ -1224,7 +1224,17 @@ export function MaterialsListScreen() {
           : analysis.estimatedHours,
       };
 
-      updateQuote(updatedQuote);
+      // Persist immediately rather than just updating local state. saveDraft:
+      //   1. writes to AsyncStorage BEFORE calling set({ quotes, currentQuote }),
+      //      so the next render sees the fully-populated list (the old
+      //      updateQuote-only path could leave the FlatList rendering against a
+      //      stale `quotes` slice while currentQuote alone was up-to-date);
+      //   2. sets pendingQuoteWrites[id] before the Firestore listener can
+      //      echo a pre-generation snapshot back over our local state;
+      //   3. ensures `quotes[]` matches `currentQuote` so any downstream
+      //      navigation (success modal → labour screen → back) reads the
+      //      same data the user just saw being generated.
+      await saveDraft(updatedQuote);
 
       setSuccessTitle('Materials Generated!');
       setSuccessMessage(`Generated ${generatedMaterials.length} material${generatedMaterials.length !== 1 ? 's' : ''} from your job description.`);
@@ -2127,9 +2137,13 @@ export function MaterialsListScreen() {
         }
       }
 
-      // Final update to ensure all changes are saved
+      // Final persist to ensure all fetched prices reach Firestore. The
+      // intermediate chunk-callback updateQuote() calls only mutate local
+      // state; without saveDraft here a screen close / app restart loses
+      // every price we just scraped (Firestore would still show $0 for
+      // every material). Same pattern as the post-generation save.
       if (currentQuote) {
-        updateQuote({
+        await saveDraft({
           ...currentQuote,
           materials: [...updatedMaterials],
         } as any);
@@ -2167,9 +2181,11 @@ export function MaterialsListScreen() {
       }
     } catch (error: any) {
       if (error?.message === '__FETCH_CANCELLED__') {
-        // Cancelled via the cancel promise — save any progress made so far
+        // Cancelled via the cancel promise — persist any partial progress
+        // so the user doesn't lose prices that did come through. Same
+        // saveDraft reasoning as the success-path persist above.
         if (currentQuote) {
-          updateQuote({
+          await saveDraft({
             ...currentQuote,
             materials: [...updatedMaterials],
           } as any);
@@ -3054,8 +3070,8 @@ export function MaterialsListScreen() {
           keyboardShouldPersistTaps="handled"
           scrollEnabled={!tourActive}
           windowSize={5}
-          initialNumToRender={10}
-          maxToRenderPerBatch={8}
+          initialNumToRender={50}
+          maxToRenderPerBatch={16}
           removeClippedSubviews
           ListHeaderComponent={listHeader}
           ListEmptyComponent={listEmpty}

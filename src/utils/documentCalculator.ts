@@ -9,8 +9,10 @@
  * from here so existing callers don't need to change their imports.
  */
 
-import { Material, QuoteSection } from '../types';
+import { Material, QuoteSection, LaborUnit, JobSpec } from '../types';
 import type { Document } from '../types/document';
+
+const STANDARD_DAY_HOURS = 8;
 
 /** Round a number to 2 decimal places. */
 export function roundToTwoDecimals(num: number): number {
@@ -119,6 +121,65 @@ export function calculateDocumentTotals(
   };
 }
 
+/**
+ * Convert a labour value to hours given its unit. Days are billed as
+ * STANDARD_DAY_HOURS (8h) for the purpose of the JobSpec.estimatedHours
+ * field, which is the unit the rest of the app (scheduling, GCal export)
+ * already assumes.
+ */
+function laborValueToHours(value: number, unit: LaborUnit | undefined): number {
+  return unit === 'days' ? value * STANDARD_DAY_HOURS : value;
+}
+
+/**
+ * Recompute total labour hours for a document from the source of truth —
+ * sections + laborExtraHours when sections exist, otherwise the top-level
+ * laborHours field. Used to keep JobSpec.estimatedHours in sync so the
+ * "est. Xh" header doesn't drift from the actual labour billed.
+ */
+export function deriveTotalLabourHours<
+  T extends {
+    sections?: QuoteSection[];
+    laborHours: number;
+    laborUnit?: LaborUnit;
+    laborExtraHours?: number;
+  },
+>(doc: T): number {
+  const hasSections = Array.isArray(doc.sections) && doc.sections.length > 0;
+  if (hasSections) {
+    const sectionHours = doc.sections!.reduce((sum, s) => {
+      const total = typeof s.laborHoursTotal === 'number'
+        ? s.laborHoursTotal
+        : (s.laborHours || 0) * (s.multiplier || 1);
+      return sum + laborValueToHours(total, s.laborUnit);
+    }, 0);
+    const extra = laborValueToHours(doc.laborExtraHours ?? 0, doc.laborUnit);
+    return sectionHours + extra;
+  }
+  return laborValueToHours(doc.laborHours || 0, doc.laborUnit);
+}
+
+/**
+ * Resync JobSpec.estimatedHours from the document's labour data. Sections
+ * (when present) are the source of truth; the field on JobSpec is just a
+ * cached headline number. Returns a new JobSpec object only when the value
+ * changed, so callers can preserve referential equality otherwise.
+ */
+export function syncJobEstimatedHours<
+  T extends {
+    job: JobSpec;
+    sections?: QuoteSection[];
+    laborHours: number;
+    laborUnit?: LaborUnit;
+    laborExtraHours?: number;
+  },
+>(doc: T): JobSpec {
+  const totalHours = deriveTotalLabourHours(doc);
+  const rounded = Math.round(totalHours);
+  if (doc.job.estimatedHours === rounded) return doc.job;
+  return { ...doc.job, estimatedHours: rounded };
+}
+
 /** Recalculate and merge totals onto a Document in place. */
 export function updateDocumentCalculations(doc: Document): Document {
   const calc = calculateDocumentTotals(
@@ -134,6 +195,7 @@ export function updateDocumentCalculations(doc: Document): Document {
   );
   return {
     ...doc,
+    job: syncJobEstimatedHours(doc),
     materialsSubtotal: calc.materialsSubtotal,
     laborTotal: calc.laborTotal,
     subtotal: calc.subtotal,

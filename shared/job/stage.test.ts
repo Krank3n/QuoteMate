@@ -31,11 +31,16 @@ describe('job stage machine', () => {
       expect(canTransition('closed', 'closed')).toBe(true);
     });
 
-    it('treats closed and cancelled as terminal', () => {
-      expect(JOB_STAGE_TRANSITIONS.closed).toEqual([]);
-      expect(JOB_STAGE_TRANSITIONS.cancelled).toEqual([]);
-      expect(canTransition('closed', 'paid')).toBe(false);
-      expect(canTransition('cancelled', 'inquiry')).toBe(false);
+    it('allows the documented reactivation paths out of closed/cancelled', () => {
+      // closed → paid is an "unarchive"; cancelled → inquiry is "reactivate".
+      // Both are intentional per the table in stage.ts.
+      expect(JOB_STAGE_TRANSITIONS.closed).toEqual(['paid']);
+      expect(JOB_STAGE_TRANSITIONS.cancelled).toEqual(['inquiry']);
+      expect(canTransition('closed', 'paid')).toBe(true);
+      expect(canTransition('cancelled', 'inquiry')).toBe(true);
+      // But no other transitions out of these stages are legal.
+      expect(canTransition('closed', 'in_progress')).toBe(false);
+      expect(canTransition('cancelled', 'quoted')).toBe(false);
     });
 
     it('allows cancelling from any non-terminal stage', () => {

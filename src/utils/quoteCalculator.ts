@@ -11,6 +11,7 @@ import { Material, Quote, QuoteSection, QuoteCalculation } from '../types';
 import {
   calculateDocumentTotals,
   roundToTwoDecimals,
+  syncJobEstimatedHours,
 } from './documentCalculator';
 
 export {
@@ -59,42 +60,84 @@ export function calculateQuote(
 }
 
 /**
- * One-time recovery for the legacy "$0 labour bug" — quotes saved before the
- * sectionLaborHours fix had sections with laborTotal: 0 even though the user
- * had top-level labour values from LaborMarkupScreen. This helper detects that
- * exact broken state and redistributes the top-level labour back across the
- * sections proportionally to each section's multiplier, preserving the total.
+ * Recovery for the "$0 labour bug" — quotes that ended up with one or more
+ * sections at laborTotal: 0. Two branches:
  *
- * Heuristic is intentionally narrow:
- *   - Sections exist
- *   - EVERY section has laborTotal === 0 (no exceptions)
- *   - Top-level laborHours × laborRate > 0
- * Otherwise the quote is left untouched.
+ *  1. ALL-ZERO — legacy case (pre-sectionLaborHours fix). The user set
+ *     top-level labour from LaborMarkupScreen but no section absorbed it.
+ *     Redistribute the top-level hours across every section proportional
+ *     to multiplier.
+ *
+ *  2. PARTIAL-ZERO — some sections have real labour, some are zero (e.g.
+ *     a per-m² "Paver Installation" section the AI returned with 0 hours).
+ *     If top-level (laborHours × laborRate) exceeds the sum of non-zero
+ *     section totals, the gap belongs to the zero sections — distribute
+ *     it across them proportional to multiplier, using the rate/unit of
+ *     the first non-zero section (since per-section rate is normally
+ *     uniform across a single quote).
+ *
+ * Both branches require top-level laborHours × laborRate > 0. If no
+ * top-level value is set there's nothing to redistribute and the quote
+ * passes through unchanged.
  */
 export function healBrokenLabourSections<T extends { sections?: QuoteSection[]; laborHours: number; laborRate: number }>(quote: T): T {
   if (!quote.sections || quote.sections.length === 0) return quote;
-  const allZero = quote.sections.every((s) => (s.laborTotal || 0) === 0);
-  if (!allZero) return quote;
   const topLevelTotal = (quote.laborHours || 0) * (quote.laborRate || 0);
   if (topLevelTotal <= 0) return quote;
 
-  const sumMul = quote.sections.reduce((sum, s) => sum + (s.multiplier || 1), 0);
-  if (sumMul <= 0) return quote;
+  const allZero = quote.sections.every((s) => (s.laborTotal || 0) === 0);
+  if (allZero) {
+    const sumMul = quote.sections.reduce((sum, s) => sum + (s.multiplier || 1), 0);
+    if (sumMul <= 0) return quote;
+    const perUnitHours = (quote.laborHours || 0) / sumMul;
+    const rate = quote.laborRate || 0;
+    const healedSections = quote.sections.map((s) => {
+      const mul = s.multiplier || 1;
+      return {
+        ...s,
+        laborHours: perUnitHours,
+        laborHoursTotal: roundToTwoDecimals(perUnitHours * mul),
+        laborRate: rate,
+        laborUnit: s.laborUnit || 'hours',
+        laborTotal: roundToTwoDecimals(perUnitHours * rate * mul),
+      };
+    });
+    return { ...quote, sections: healedSections };
+  }
 
-  const perUnitHours = (quote.laborHours || 0) / sumMul;
-  const rate = quote.laborRate || 0;
+  // Partial-zero path
+  const zeroSections = quote.sections.filter((s) => (s.laborTotal || 0) === 0);
+  if (zeroSections.length === 0) return quote;
+
+  const sumNonZero = quote.sections.reduce((sum, s) => sum + (s.laborTotal || 0), 0);
+  const gap = topLevelTotal - sumNonZero;
+  if (gap <= 0) return quote;
+
+  const sumZeroMul = zeroSections.reduce((sum, s) => sum + (s.multiplier || 1), 0);
+  if (sumZeroMul <= 0) return quote;
+
+  // Inherit rate/unit from a non-zero section so distributed hours are
+  // expressed in the same units as the rest of the quote. Fall back to
+  // top-level values when nothing else is available.
+  const reference = quote.sections.find((s) => (s.laborTotal || 0) > 0);
+  const rate = reference?.laborRate ?? quote.laborRate ?? 0;
+  const unit = reference?.laborUnit ?? 'hours';
+  if (rate <= 0) return quote;
+
+  const totalUnits = gap / rate;
+  const perUnitForZero = totalUnits / sumZeroMul;
   const healedSections = quote.sections.map((s) => {
+    if ((s.laborTotal || 0) > 0) return s;
     const mul = s.multiplier || 1;
     return {
       ...s,
-      laborHours: perUnitHours,
-      laborHoursTotal: roundToTwoDecimals(perUnitHours * mul),
+      laborHours: perUnitForZero,
+      laborHoursTotal: roundToTwoDecimals(perUnitForZero * mul),
       laborRate: rate,
-      laborUnit: s.laborUnit || 'hours',
-      laborTotal: roundToTwoDecimals(perUnitHours * rate * mul),
+      laborUnit: unit,
+      laborTotal: roundToTwoDecimals(perUnitForZero * rate * mul),
     };
   });
-
   return { ...quote, sections: healedSections };
 }
 
@@ -117,6 +160,7 @@ export function updateQuoteCalculations(quote: Quote): Quote {
 
   return {
     ...healed,
+    job: syncJobEstimatedHours(healed),
     materialsSubtotal: calculation.materialsSubtotal,
     laborTotal: calculation.laborTotal,
     subtotal: calculation.subtotal,
