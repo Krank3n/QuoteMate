@@ -42,6 +42,12 @@ import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityF
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice, supplierPriceForGstMode } from '../../utils/quoteCalculator';
 import { parsePackInfo } from '../../utils/parsePackInfo';
+import { applyPackAwarePricing } from '../../utils/packAwarePricing';
+import {
+  generateMaterialsForQuote,
+  fetchPricesForQuote,
+  PipelineCancelled,
+} from '../../services/materialsPipeline';
 import { searchMaterialPrice } from '../../services/webSearchPricing';
 import { searchReeceMaterialPrice, searchReeceMaterialCandidates, getReeceConnectionStatus } from '../../services/reeceApi';
 import { shouldRunReeceFirst } from '../../services/supplierPriority';
@@ -165,57 +171,6 @@ import { ProBadge } from '../../components/ProBadge';
  * the guard, a "1275 kg" bedding-sand requirement priced against a "20kg bag"
  * SKU divides to 64 bags (correct).
  */
-const PACK_UNIT_EQUIVALENT: Partial<Record<Material['unit'], Material['unit']>> = {
-  each: 'each',
-  pack: 'each',
-  box: 'each',
-  m: 'm',
-  'm²': 'm²',
-  'm³': 'm³',
-  kg: 'kg',
-  L: 'L',
-};
-
-function applyPackAwarePricing(
-  material: Material,
-  product: { productName?: string; packSize?: number; packUnit?: string }
-): void {
-  if (material.requiredQty === undefined) {
-    material.requiredQty = material.quantity;
-  }
-  const required = material.requiredQty;
-
-  let packSize = product.packSize;
-  let packUnit = product.packUnit as Material['unit'] | undefined;
-  if (!packSize || !packUnit) {
-    const parsed = parsePackInfo(product.productName);
-    if (parsed) {
-      packSize = parsed.packSize;
-      packUnit = parsed.packUnit;
-    }
-  }
-
-  const requiredUnitNormalised = PACK_UNIT_EQUIVALENT[material.unit];
-  const packUnitNormalised = packUnit ? PACK_UNIT_EQUIVALENT[packUnit] : undefined;
-  const unitsCompatible =
-    !!requiredUnitNormalised &&
-    !!packUnitNormalised &&
-    requiredUnitNormalised === packUnitNormalised;
-
-  if (packSize && packSize > 1 && packUnit && unitsCompatible) {
-    const packsNeeded = Math.max(1, Math.ceil(required / packSize));
-    material.quantity = packsNeeded;
-    material.unit = packUnit === 'm' || packUnit === 'm²' || packUnit === 'm³' ? 'each' : 'pack';
-    material.packSize = packSize;
-    material.packUnit = packUnit;
-  } else {
-    material.quantity = required;
-    material.packSize = undefined;
-    material.packUnit = undefined;
-  }
-  material.totalPrice = material.quantity * material.price;
-}
-
 // AI Analysis Loading State with Lottie Animation and scrolling progress steps
 const AI_STEPS = [
   { icon: 'file-document-outline', text: 'Reading job description...' },
@@ -492,6 +447,15 @@ export function MaterialsListScreen() {
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   const [initialMaterialCount, setInitialMaterialCount] = useState(0);
   const [cancelGeneration, setCancelGeneration] = useState(false);
+  // Mirror cancelGeneration as a ref so the running pipeline's shouldCancel
+  // callback can see the latest value — reading the state directly inside
+  // an in-flight async closure always returns the value captured at call time
+  // (always false here, since we setCancelGeneration(false) immediately
+  // before invoking the pipeline). The ref bridges that gap.
+  const cancelGenerationRef = useRef(false);
+  useEffect(() => {
+    cancelGenerationRef.current = cancelGeneration;
+  }, [cancelGeneration]);
 
   // Whether the user has connected their Reece account. Drives the Reece
   // pricing branch in fetchPrices() and the "Connect Reece" banner shown
@@ -976,268 +940,37 @@ export function MaterialsListScreen() {
     setIsAiAnalyzing(true);
 
     try {
-      const jobDescription = currentQuote.job.description;
-
-      // Prepare trade context from business settings (supports multi-select)
-      const tradeContext = businessSettings ? (() => {
-        let categoryNames: string[] = [];
-        let nicheNames: string[] = [];
-        let allSuggestedMaterials: string[] = [];
-        let pricingMethod: string | undefined;
-
-        // Try new multi-select fields first
-        if (businessSettings.tradeCategories && businessSettings.tradeCategories.length > 0) {
-          categoryNames = businessSettings.tradeCategories
-            .map(id => getTradeCategoryById(id)?.name)
-            .filter((n): n is string => !!n);
-
-          if (businessSettings.tradeNiches && businessSettings.tradeNiches.length > 0) {
-            businessSettings.tradeCategories.forEach(catId => {
-              businessSettings.tradeNiches?.forEach(nicheId => {
-                const niche = getTradeNicheById(catId, nicheId);
-                if (niche) {
-                  nicheNames.push(niche.name);
-                  allSuggestedMaterials.push(...(niche.commonServices || []));
-                  if (!pricingMethod && niche.pricingMethods && niche.pricingMethods.length > 0) {
-                    pricingMethod = niche.pricingMethods[0].label;
-                  }
-                }
-              });
-            });
-          }
-        } else if (businessSettings.tradeCategory) {
-          // Fallback to legacy single-select
-          const category = getTradeCategoryById(businessSettings.tradeCategory);
-          if (category) categoryNames.push(category.name);
-
-          if (businessSettings.tradeNiche) {
-            const niche = getTradeNicheById(businessSettings.tradeCategory, businessSettings.tradeNiche);
-            if (niche) {
-              nicheNames.push(niche.name);
-              allSuggestedMaterials.push(...(niche.commonServices || []));
-              if (niche.pricingMethods && niche.pricingMethods.length > 0) {
-                pricingMethod = niche.pricingMethods[0].label;
-              }
-            }
-          }
-        }
-
-        // Remove duplicates from suggested materials
-        const uniqueMaterials = Array.from(new Set(allSuggestedMaterials));
-
-        return {
-          categoryName: categoryNames.join(', '),
-          nicheName: nicheNames.join(', '),
-          suggestedMaterials: uniqueMaterials.length > 0 ? uniqueMaterials : undefined,
-          pricingMethod,
-          selectedStore: businessSettings.selectedStore || 'bunnings',
-        };
-      })() : undefined;
-
-      // Pass photo URLs for vision analysis if available (Pro feature)
-      const quotePhotos = (currentQuote as any).photos;
-      const photoUrlsForAi = (isPro && quotePhotos?.length)
-        ? quotePhotos.map((p: any) => p.storageUrl).filter(Boolean)
-        : undefined;
-
-      // Pass existing materials so AI doesn't duplicate them (gap-fill mode).
-      // Use requiredQty when present so the LLM sees the underlying need (e.g.
-      // "1100 each clips") rather than the pack count after pricing ("11 pack").
-      const existingMatsForAi = currentQuote.materials.length > 0
-        ? currentQuote.materials.map(m => ({
-            name: m.name,
-            quantity: m.requiredQty ?? m.quantity,
-            unit: (m.packUnit ?? m.unit) as Material['unit'],
-            section: m.section,
-          }))
-        : undefined;
-
-      // Pass saved templates so AI can reuse their section names and materials
-      const templateDataForAi = allTemplates.length > 0
-        ? allTemplates.map(t => ({
-            name: t.name,
-            materials: t.materials.map(m => ({ name: m.name, quantity: m.quantity, unit: m.unit })),
-            laborHours: t.laborHours,
-          }))
-        : undefined;
-
-      // Pass user's personal supplier rates so the LLM prefers them over retail
-      const savedRateFavorites = await loadAllFavoritesForLLM();
-      const userSavedRatesForAi = savedRateFavorites.length > 0
-        ? savedRateFavorites
-            .filter(f => typeof f.price === 'number' && f.price > 0 && f.unit)
-            .map(f => ({
-              name: f.productName,
-              store: f.store,
-              unit: f.unit as string,
-              price: f.price as number,
-              coveragePerUnit: f.coveragePerUnit,
-              coverageUnit: f.coverageUnit,
-              keywords: f.keywords,
-              notes: f.notes,
-            }))
-        : [];
-
-      const { analyzeJobDescription, convertLLMMaterialsToMaterials } = await import('../../services/llmService');
-      const analysis = await analyzeJobDescription(jobDescription, tradeContext, photoUrlsForAi, existingMatsForAi, templateDataForAi, userSavedRatesForAi);
-
-      // Check if user canceled during AI analysis
-      if (cancelGeneration) {
-        return;
-      }
-
-      // Convert LLM materials to app materials format
-      const baseMaterials = convertLLMMaterialsToMaterials(analysis.materials);
-
-      // Build a name->favorite map of personal supplier rates so we can hydrate
-      // any LLM-matched items directly from the local cache.
-      const localFavoritesById = await loadFavoritesFromLocal();
-      const savedRateByName = new Map<string, FavoriteProductMapping>();
-      Object.values(localFavoritesById).forEach((f) => {
-        if (f.isPersonalRate && f.productName) {
-          savedRateByName.set(f.productName.toLowerCase().trim(), f);
-        }
+      // Pipeline orchestration now lives in src/services/materialsPipeline.ts
+      // so Mate's chat-side apply path can stream the same events. This
+      // screen just feeds it the dependencies, polls cancelGeneration via the
+      // shouldCancel callback, then persists the result via saveDraft.
+      const result = await generateMaterialsForQuote(
+        {
+          quote: currentQuote,
+          businessSettings,
+          isPro,
+          templates: allTemplates,
+        },
+        {
+          shouldCancel: () => cancelGenerationRef.current,
+        },
+      ).catch((err) => {
+        if (err instanceof PipelineCancelled) return null;
+        throw err;
       });
 
-      // Add IDs to materials and ensure all required fields are present
-      const generatedMaterials = baseMaterials.map((m) => {
-        const matchedRate = m.savedRateName
-          ? savedRateByName.get(m.savedRateName.toLowerCase().trim())
-          : undefined;
-
-        const baseQty = m.quantity || 1;
-
-        if (matchedRate && typeof matchedRate.price === 'number' && matchedRate.price > 0) {
-          return {
-            id: generateId(),
-            name: m.name || matchedRate.productName,
-            quantity: baseQty,
-            unit: (matchedRate.unit || m.unit || 'each') as Material['unit'],
-            searchTerm: m.searchTerm,
-            price: matchedRate.price,
-            totalPrice: matchedRate.price * baseQty,
-            manualPriceOverride: false,
-            pricingSource: 'manual' as const,
-            priceConfidence: 'high' as const,
-            favoriteProduct: matchedRate,
-            ...(m.section && { section: m.section }),
-            ...(m.templateBaseQuantity && { templateBaseQuantity: m.templateBaseQuantity }),
-          };
-        }
-
-        return {
-          id: generateId(),
-          name: m.name || 'Unknown Material',
-          quantity: baseQty,
-          unit: (m.unit || 'each') as Material['unit'],
-          searchTerm: m.searchTerm,
-          price: 0,
-          totalPrice: 0,
-          manualPriceOverride: false,
-          ...(m.section && { section: m.section }),
-          ...(m.templateBaseQuantity && { templateBaseQuantity: m.templateBaseQuantity }),
-        };
-      });
-
-      // Create QuoteSection objects from unique AI-generated sections with multipliers + labor.
-      // Every section the LLM names should become a QuoteSection so its labour
-      // shows on the Pricing screen — one-off sections (multiplier=1, e.g. a
-      // single gate latch) used to be silently dropped, which lost their labour
-      // entirely and left users staring at "DISTRIBUTION ACROSS 1 SECTIONS"
-      // even when the materials list had several.
-      // Collect every distinct sectionMultiplier the LLM emitted for each
-      // section. The prompt requires all materials in a section to share the
-      // same multiplier, but the LLM sometimes echoes the JSON template's
-      // example value on a subset of items — so taking the MAX previously
-      // propagated that stray inflated value across the whole section's
-      // labour (e.g. one 8× hose in a vanity section made the vanity labour 8×).
-      // Now we trust the multiplier only when it's unanimous; on disagreement
-      // we fall back to the MIN, which the user can dial up in LaborMarkup.
-      const sectionMultiplierCandidates = new Map<string, Set<number>>();
-      const sectionLaborHours = new Map<string, number>();
-      baseMaterials.forEach(m => {
-        if (m.section) {
-          const candidate = m.sectionMultiplier && m.sectionMultiplier > 0
-            ? m.sectionMultiplier
-            : 1;
-          const set = sectionMultiplierCandidates.get(m.section) || new Set<number>();
-          set.add(candidate);
-          sectionMultiplierCandidates.set(m.section, set);
-        }
-        if (m.section && m.sectionLaborHours && m.sectionLaborHours > 0) {
-          sectionLaborHours.set(m.section, m.sectionLaborHours);
-        }
-      });
-      const sectionMultipliers = new Map<string, number>();
-      sectionMultiplierCandidates.forEach((set, sectionName) => {
-        const values = Array.from(set);
-        sectionMultipliers.set(sectionName, Math.min(...values));
-      });
-      const existingSections = currentQuote.sections || [];
-      const existingSectionNames = new Set(existingSections.map(s => s.name));
-      const defaultRate = businessSettings?.defaultLaborRate || 85;
-      // Fallback when the LLM omits sectionLaborHours: distribute the job's
-      // estimatedHours across sections proportionally to their multiplier so
-      // we never persist zero-labour sections (the cause of the $0 bug).
-      const totalMultipliers = Array.from(sectionMultipliers.values()).reduce((a, b) => a + b, 0);
-      const fallbackPerUnitHours = totalMultipliers > 0
-        ? (analysis.estimatedHours || 8) / totalMultipliers
-        : 1;
-      const newSections: QuoteSection[] = [];
-      sectionMultipliers.forEach((multiplier, sectionName) => {
-        if (!existingSectionNames.has(sectionName)) {
-          const perUnitHours = sectionLaborHours.get(sectionName) || fallbackPerUnitHours;
-          const useDays = perUnitHours >= 5;
-          const laborRate = useDays ? defaultRate * 8 : defaultRate;
-          const laborHoursValue = useDays ? perUnitHours / 8 : perUnitHours;
-          newSections.push({
-            id: `section-${Date.now()}-${sectionName.replace(/\s/g, '')}`,
-            name: sectionName,
-            multiplier,
-            laborHours: laborHoursValue,
-            laborHoursTotal: Math.round(laborHoursValue * multiplier * 100) / 100,
-            laborRate,
-            laborUnit: useDays ? 'days' : 'hours',
-            laborTotal: laborHoursValue * laborRate * multiplier,
-            sortOrder: existingSections.length + newSections.length,
-          });
-        }
-      });
-
-      // Update the quote with analyzed data
-      const updatedJob = {
-        ...currentQuote.job,
-        estimatedHours: analysis.estimatedHours,
-      };
-
-      // If materials already exist (gap-fill mode), append instead of replace
-      const hasExistingMaterials = currentQuote.materials.length > 0;
-      const updatedQuote = {
-        ...currentQuote,
-        job: updatedJob,
-        sections: [...existingSections, ...newSections],
-        materials: hasExistingMaterials
-          ? [...currentQuote.materials, ...generatedMaterials]
-          : generatedMaterials,
-        laborHours: hasExistingMaterials
-          ? currentQuote.laborHours + (analysis.estimatedHours || 0)
-          : analysis.estimatedHours,
-      };
+      if (!result) return; // cancelled
 
       // Persist immediately rather than just updating local state. saveDraft:
       //   1. writes to AsyncStorage BEFORE calling set({ quotes, currentQuote }),
-      //      so the next render sees the fully-populated list (the old
-      //      updateQuote-only path could leave the FlatList rendering against a
-      //      stale `quotes` slice while currentQuote alone was up-to-date);
+      //      so the next render sees the fully-populated list;
       //   2. sets pendingQuoteWrites[id] before the Firestore listener can
-      //      echo a pre-generation snapshot back over our local state;
-      //   3. ensures `quotes[]` matches `currentQuote` so any downstream
-      //      navigation (success modal → labour screen → back) reads the
-      //      same data the user just saw being generated.
-      await saveDraft(updatedQuote);
+      //      echo a pre-generation snapshot back over local state;
+      //   3. keeps quotes[] in sync with currentQuote for downstream nav.
+      await saveDraft(result.updatedQuote);
 
       setSuccessTitle('Materials Generated!');
-      setSuccessMessage(`Generated ${generatedMaterials.length} material${generatedMaterials.length !== 1 ? 's' : ''} from your job description.`);
+      setSuccessMessage(`Generated ${result.generatedMaterialCount} material${result.generatedMaterialCount !== 1 ? 's' : ''} from your job description.`);
       setSuccessShowFetchPrices(true);
       setShowSuccessModal(true);
     } catch (error: any) {
@@ -1260,6 +993,34 @@ export function MaterialsListScreen() {
       setCancelGeneration(false);
     }
   };
+
+  // Auto-trigger entry points used by Mate's apply path.
+  //   autoGenerate     → empty quote + description → call Get Recommended Gear
+  //   autoFetchPrices  → materials already populated → call Fetch Prices
+  // Each runs at most once per mount via a ref guard.
+  const autoGenTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (autoGenTriggeredRef.current) return;
+    if (!route.params || (route.params as any).autoGenerate !== true) return;
+    if (!currentQuote?.job?.description) return;
+    if (materials.length > 0) return;
+    if (isAiAnalyzing) return;
+    autoGenTriggeredRef.current = true;
+    handleGenerateMaterialsList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params, currentQuote?.job?.description, materials.length, isAiAnalyzing]);
+
+  const autoFetchTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (autoFetchTriggeredRef.current) return;
+    if (!route.params || (route.params as any).autoFetchPrices !== true) return;
+    if (!currentQuote) return;
+    if (materials.length === 0) return;
+    if (isFetchingPrices) return;
+    autoFetchTriggeredRef.current = true;
+    handleFetchPrices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params, currentQuote?.id, materials.length, isFetchingPrices]);
 
   const handleCancelGeneration = () => {
     setCancelGeneration(true);
@@ -1309,28 +1070,21 @@ export function MaterialsListScreen() {
       return;
     }
 
-    // Calculate estimated time and show modal
+    // Pricing orchestration now lives in src/services/materialsPipeline.ts as
+    // fetchPricesForQuote. This screen handler:
+    //   - Sets up the wizard's UI state (modal, countdown, batch grid, etc.)
+    //   - Maps PricingEvents back to that state via the onEvent callback
+    //   - Persists the result via saveDraft
+    //   - Surfaces success/error modals based on the returned counts
+    // Mate's chat-side apply path calls the same service and renders the same
+    // events into its working card.
+
     const materialsNeedingPrices = materials.filter(m => !(m.price > 0 && !m.manualPriceOverride));
-    const useScraperApiBatch = true; // Always available via Firebase proxy
-    // Batch mode processes 3 at a time (~35s per batch of 3) vs 35s per item individually
-    const estimatedSeconds = useScraperApiBatch
-      ? Math.max(Math.ceil(materialsNeedingPrices.length / 3) * 35, 35)
-      : Math.max(materialsNeedingPrices.length * 35, 35);
+    const estimatedSeconds = Math.max(Math.ceil(materialsNeedingPrices.length / 3) * 35, 35);
     setFetchedItemNames([]);
     setFetchPhase('idle');
     setCurrentFetchingName('');
     startFetchCountdown(estimatedSeconds);
-
-    // Set up cancel promise so in-flight requests can be interrupted instantly
-    let cancelPromiseReject: (() => void) | null = null;
-    const cancelPromise = new Promise<never>((_, reject) => {
-      cancelPromiseReject = () => reject(new Error('__FETCH_CANCELLED__'));
-    });
-    cancelFetchResolverRef.current = cancelPromiseReject;
-
-    // Helper to race any async call against the cancel promise
-    const withCancel = <T,>(promise: Promise<T>): Promise<T> =>
-      Promise.race([promise, cancelPromise]);
 
     setIsFetchingPrices(true);
     setNotifyWhenDone(false);
@@ -1340,804 +1094,92 @@ export function MaterialsListScreen() {
     let skippedCount = 0;
     let failedCount = 0;
 
-    // Count materials that need pricing
-    const materialsToFetch = materials.filter(m => !(m.price > 0 && !m.manualPriceOverride));
-    setFetchProgress({ current: 0, total: materialsToFetch.length });
+    // Run the pricing pipeline. Events stream UI state updates back here
+    // (batch grid, per-item progress, countdown). Persistence and the
+    // success modal stay below.
 
-    // Pricing model: Bunnings is the always-on backbone. Reece, when the
-    // user has connected, runs either BEFORE or AFTER the Bunnings batch
-    // depending on the user's saved supplier priority order. If Reece is
-    // above Bunnings, do the Reece pre-pass (trade-discounted prices win).
-    // If Bunnings is above Reece, do the Bunnings batch first and only ask
-    // Reece for items Bunnings missed.
-    //
-    // Resolve connection state on demand instead of relying on the on-mount
-    // useEffect — otherwise tapping Generate before that effect resolves
-    // captures `reeceConnected === null`, silently demoting Reece to a
-    // post-pass gap-filler instead of running it first.
-    let liveReeceConnected = reeceConnected;
-    if (liveReeceConnected === null) {
-      try {
-        const status = await getReeceConnectionStatus();
-        liveReeceConnected = !!status.connected;
-        setReeceConnected(liveReeceConnected);
-      } catch {
-        liveReeceConnected = false;
-      }
-    }
-    const useReeceApi = liveReeceConnected === true;
-    const reeceFirst = useReeceApi && shouldRunReeceFirst(businessSettings?.supplierPriority);
-    const useScraperApi = true; // Bunnings backbone via Firebase proxy
-    const hardwareStores = ['bunnings.com.au']; // backbone, always
-
-    const updatedMaterials = [...materials];
-
-    // ── Local source preflight ──
-    // Try the user's saved templates + supplier-tagged favorites BEFORE any
-    // remote work. Materials filled in here are excluded from the scraper
-    // batch and the per-item fallback chain. Same priority logic as the
-    // single-item search in AddMaterialScreen — the user's own prices win.
-    const locallyPricedTerms = new Set<string>();
+    let updatedMaterials = [...materials];
+    let cancelled = false;
     try {
-      const supplierList = await loadSupplierGroups();
-      for (let i = 0; i < updatedMaterials.length; i++) {
-        const m = updatedMaterials[i];
-        if (m.price > 0 && !m.manualPriceOverride) continue;
-        const term = m.searchTerm || m.name;
-        let hits: LocalSearchResult[] = [];
-        try {
-          hits = await searchLocalSources(term, supplierList);
-        } catch {
-          hits = [];
-        }
-        if (hits.length === 0) continue;
-        const top = hits[0];
-        m.price = supplierPriceForGstMode(top.price, currentQuote?.pricesIncludeGst === true);
-        m.manualPriceOverride = false;
-        m.pricingSource = 'manual';
-        if (top.productUrl) m.productUrl = top.productUrl;
-        if (top.imageUrl) m.imageUrl = top.imageUrl;
-        if (top.unit) m.unit = top.unit as Material['unit'];
-        applyPackAwarePricing(m, { productName: top.productName });
-        fetchedCount++;
-        locallyPricedTerms.add(term);
-        triggerPriceFlash(m.id);
-      }
-    } catch {
-      // Best-effort — fall through to remote on any failure.
-    }
-
-    // ── Reece pass (when connected) ──
-    // Runs as a pre-pass when the user has placed Reece above Bunnings in
-    // their supplier priority (the trade-pricing-first preference). When
-    // Bunnings is above Reece, this pass runs AFTER the Bunnings batch
-    // below — we only ask Reece for items Bunnings missed.
-    const reecePricedTerms = new Set<string>();
-    // Per-material candidate cache, keyed by material.id, used by the
-    // reconciliation pass once all price-fetch passes finish. Declared up
-    // here so the Reece pass (defined just below) can also push into it —
-    // otherwise Reece-priced rows skip reconciliation entirely.
-    const candidatesByMaterialId = new Map<string, ScraperProduct[]>();
-    // overrideExisting: when Reece is the preferred supplier (pre-pass), we
-    // upgrade items already priced by Bunnings/local — the user explicitly
-    // ranked Reece higher, so a Bunnings price shouldn't block a Reece one.
-    // The post-pass leaves it false so Reece only fills gaps Bunnings missed.
-    const reecePass = async (
-      eligibleTerms: Set<string> | null = null,
-      overrideExisting = false,
-    ) => {
-      for (let i = 0; i < updatedMaterials.length; i++) {
-        if (cancelFetchRef.current) break;
-        const m = updatedMaterials[i];
-        // User-edited prices are sacred — never auto-replace.
-        if (m.manualPriceOverride) continue;
-        // Already priced from Reece in a prior run — nothing to upgrade.
-        if (m.reeceItemNumber && m.pricingSource === 'api') continue;
-        // Post-pass mode: leave Bunnings/local prices alone, only fill gaps.
-        if (!overrideExisting && m.price > 0) continue;
-        const term = m.searchTerm || m.name;
-        if (locallyPricedTerms.has(term)) continue;
-        if (reecePricedTerms.has(term)) continue;
-        if (eligibleTerms && !eligibleTerms.has(term)) continue;
-
-        // Surface what's being searched in the fetch modal so the user sees
-        // "Checking Reece for X" instead of a blank "Warming up the ute..."
-        setFetchingMaterialId(m.id);
-        setCurrentFetchingName(m.name);
-
-        let candidates;
-        try {
-          candidates = await withCancel(searchReeceMaterialCandidates(term));
-        } catch (err: any) {
-          if (err?.message === '__FETCH_CANCELLED__') throw err;
-          setFetchedItemNames(prev => [...prev, { name: m.name, success: false }]);
-          continue;
-        }
-        if (candidates[0]?.reauthRequired) {
-          setReeceReauthNeeded(true);
-          setReeceConnected(false);
-          break;
-        }
-        const result = candidates[0];
-        if (!result || !result.price || !result.itemNumber) {
-          setFetchedItemNames(prev => [...prev, { name: m.name, success: false }]);
-          continue;
-        }
-
-        // Preserve the original requirement so the reconciliation pass sees
-        // the user/AI's intent ("Kitchen Double Bowl Sink"), not the matched
-        // product name we're about to overwrite m.name with.
-        if (!m.searchTerm) m.searchTerm = m.name;
-
-        // Push every Reece candidate into the reconciliation cache, mapped
-        // into the ScraperProduct shape reconcile expects. Reconcile can then
-        // reject category mismatches (drainage fitting vs sink) or pick a
-        // better candidate from the same list.
-        candidatesByMaterialId.set(
-          m.id,
-          candidates
-            .filter(c => c.price != null && c.price > 0 && c.itemNumber)
-            .map(c => ({
-              productName: c.productName || '',
-              description: c.productName,
-              price: c.price as number,
-              priceIncGst: c.price as number,
-              unit: c.unitOfMeasure || 'each',
-              itemNumber: c.itemNumber as string,
-              stockLevel: 'unknown' as const,
-              productUrl: c.productUrl || '',
-              imageUrl: c.imageUrl || undefined,
-              confidence: 'medium' as const,
-            })),
-        );
-
-        const reecePrice = supplierPriceForGstMode(result.price, currentQuote?.pricesIncludeGst === true);
-        m.price = reecePrice;
-        m.totalPrice = reecePrice * m.quantity;
-        m.manualPriceOverride = false;
-        m.pricingSource = 'api';
-        // Clear stale Bunnings-only state when upgrading to Reece.
-        m.bunningsItemNumber = undefined;
-        m.priceConfidence = undefined;
-        m.reeceItemNumber = result.itemNumber;
-        if (result.unitOfMeasure) m.reeceUnitOfMeasure = result.unitOfMeasure;
-        if (result.productName) m.name = result.productName;
-        if (result.store) m.description = `Available at ${result.store}`;
-        if (result.imageUrl) m.imageUrl = result.imageUrl;
-        if (result.productUrl) m.productUrl = result.productUrl;
-        fetchedCount++;
-        reecePricedTerms.add(term);
-        setFetchedItemNames(prev => [...prev, { name: m.name, success: true }]);
-        setFetchProgress(prev => ({
-          current: Math.min(prev.current + 1, prev.total || materialsToFetch.length),
-          total: prev.total || materialsToFetch.length,
-        }));
-        triggerPriceFlash(m.id);
-      }
-    };
-
-    if (reeceFirst) {
-      await reecePass(null, true);
-    }
-
-    try {
-
-      // --- BATCH FETCH: Progressive chunking (3 items at a time) ---
-      // batchResults now holds the full candidate list per term so the
-      // reconciliation pass at the end can pick across alternatives.
-      let batchResults: Map<string, ScraperProduct[]> | null = null;
-      const batchSucceededTerms = new Set<string>();
-      // Skip terms we just filled from local sources or Reece — no point
-      // asking the scraper for prices we already have.
-      const remainingTerms = materialsToFetch
-        .map(m => m.searchTerm || m.name)
-        .filter(term => !locallyPricedTerms.has(term) && !reecePricedTerms.has(term));
-      if (remainingTerms.length > 0) {
-        try {
-          const searchTermsToFetch = remainingTerms;
-          const chunkSize = 3;
-          const totalChunks = Math.ceil(searchTermsToFetch.length / chunkSize);
-          setFetchPhase('batch');
-          setBatchChunkProgress({ current: 0, total: totalChunks });
-
-          // Initialize per-item statuses: first chunk "searching", rest "pending"
-          const initialStatuses = new Map<string, 'pending' | 'searching' | 'done' | 'failed'>();
-          searchTermsToFetch.forEach((term, idx) => {
-            initialStatuses.set(term, idx < chunkSize ? 'searching' : 'pending');
-          });
-          setBatchItemStatuses(new Map(initialStatuses));
-          setCurrentFetchingName(`Searching batch 1 of ${totalChunks}...`);
-
-          // Helper to apply a scraper product to a material
-          const applyProduct = (material: any, product: any) => {
-            material.price = product.price;
-            material.manualPriceOverride = false;
-            material.pricingSource = 'scraper';
-            // Preserve scraper confidence so low-confidence results (Claude
-            // guesses) get the "Est. — verify price" badge in the row.
-            if (product.confidence) material.priceConfidence = product.confidence;
-            if (product.itemNumber) material.bunningsItemNumber = product.itemNumber;
-            if (product.productUrl) material.productUrl = product.productUrl;
-            if (product.imageUrl) material.imageUrl = product.imageUrl;
-            if (product.description) material.description = product.description;
-            if (product.brand &&
-                product.brand.toLowerCase() !== 'bunnings' &&
-                product.brand.toLowerCase() !== 'bunnings.com.au') {
-              material.brand = product.brand;
-            }
-            if (product.stockCheckedAt) material.stockCheckedAt = product.stockCheckedAt;
-            applyPackAwarePricing(material, {
-              productName: product.productName,
-              packSize: product.packSize,
-              packUnit: product.packUnit,
-            });
-          };
-
-          batchResults = await withCancel(batchFindBestMatchesProgressive(
-            searchTermsToFetch,
-            5,
-            chunkSize,
-            (chunkResults: Map<string, ScraperProduct[]>, chunkTerms: string[], chunkIndex: number, totalChunks: number) => {
-              // Apply prices from this chunk immediately. Use the top
-              // candidate now so the UI shows something fast; the
-              // reconciliation pass at the end of the loop may swap in a
-              // different candidate from the same list.
-              for (const [searchTerm, candidates] of chunkResults) {
-                const matIndex = updatedMaterials.findIndex(
-                  m => (m.searchTerm || m.name) === searchTerm
-                );
-                if (matIndex === -1) continue;
-                const material = updatedMaterials[matIndex];
-                const product = candidates[0] || null;
-
-                if (candidates.length > 0) {
-                  candidatesByMaterialId.set(material.id, candidates);
-                }
-
-                if (product && product.price > 0) {
-                  applyProduct(material, product);
-                  fetchedCount++;
-                  batchSucceededTerms.add(searchTerm);
-                  triggerPriceFlash(material.id);
-                }
-              }
-
-              // Update statuses: mark this chunk done/failed, next chunk searching
-              setBatchItemStatuses(prev => {
-                const next = new Map(prev);
-                for (const [term, candidates] of chunkResults) {
-                  const product = candidates[0] || null;
-                  next.set(term, product && product.price > 0 ? 'done' : 'failed');
-                }
-                // Mark next chunk as searching
-                const nextChunkStart = (chunkIndex + 1) * chunkSize;
-                for (let j = nextChunkStart; j < Math.min(nextChunkStart + chunkSize, searchTermsToFetch.length); j++) {
-                  next.set(searchTermsToFetch[j], 'searching');
-                }
-                return next;
-              });
-
-              const completedCount = (chunkIndex + 1) * chunkSize;
-              const doneCount = Math.min(completedCount, searchTermsToFetch.length);
-              setBatchChunkProgress({ current: chunkIndex + 1, total: totalChunks });
-              setFetchProgress({ current: doneCount, total: materialsToFetch.length });
-              setCurrentFetchingName(`Searching batch ${Math.min(chunkIndex + 2, totalChunks)} of ${totalChunks}...`);
-
-              // Add completed items to the fetched list
-              for (const [term, candidates] of chunkResults) {
-                const product = candidates[0] || null;
-                setFetchedItemNames(prev => [...prev, {
-                  name: term,
-                  success: !!(product && product.price > 0),
-                }]);
-              }
-
-              // Persist partial results to store
-              if (currentQuote) {
-                updateQuote({
-                  ...currentQuote,
-                  materials: [...updatedMaterials],
-                } as any);
-              }
-
-              // Recalculate time estimate
+      const result = await fetchPricesForQuote(
+        {
+          quote: currentQuote!,
+          businessSettings,
+          reeceConnected,
+        },
+        {
+          shouldCancel: () => cancelFetchRef.current,
+          onEvent: (event) => {
+            if (event.kind === 'phase-start') {
+              if (event.phase === 'batch') setFetchPhase('batch');
+              else if (event.phase === 'individual') setFetchPhase('individual');
+              else if (event.phase === 'reconcile') setCurrentFetchingName(event.status);
+              else setCurrentFetchingName(event.status);
+            } else if (event.kind === 'batch-chunk') {
+              setBatchItemStatuses(new Map(event.termStatuses));
+              setBatchChunkProgress({ current: event.chunkIndex, total: event.totalChunks });
+              setFetchProgress(event.progress);
+              if (event.currentName) setCurrentFetchingName(event.currentName);
+              // Re-estimate countdown based on actual chunk pace.
               if (fetchCountdownRef.current) {
-                const chunksRemaining = totalChunks - (chunkIndex + 1);
+                const chunksRemaining = event.totalChunks - event.chunkIndex;
                 if (chunksRemaining <= 0) {
                   fetchEstimateSecondsRef.current = 0;
                   setFetchEstimateSeconds(0);
                 } else {
                   const elapsedMs = Date.now() - fetchStartTimeRef.current;
-                  const avgMsPerChunk = elapsedMs / (chunkIndex + 1);
+                  const avgMsPerChunk = elapsedMs / Math.max(event.chunkIndex, 1);
                   const newEstimate = Math.ceil((avgMsPerChunk * chunksRemaining) / 1000);
                   fetchEstimateSecondsRef.current = newEstimate;
                   setFetchEstimateSeconds(newEstimate);
                 }
               }
-            },
-            () => cancelFetchRef.current,
-          ));
-
-          setBatchItemStatuses(new Map());
-          setFetchPhase('individual');
-        } catch (error: any) {
-          if (error?.message === '__FETCH_CANCELLED__') throw error;
-          batchResults = null;
-          setBatchItemStatuses(new Map());
-          setFetchPhase('individual');
-        }
+              // (Intermediate materials snapshot intentionally omitted —
+              // see Phase 2 notes. The price-flash animation per item still
+              // gives the user feedback during the fetch.)
+            } else if (event.kind === 'item-priced') {
+              setFetchingMaterialId(event.materialId);
+              setCurrentFetchingName(event.name);
+              setFetchedItemNames(prev => [...prev, { name: event.name, success: event.success }]);
+              if (event.success) triggerPriceFlash(event.materialId);
+              if (event.progress) setFetchProgress(event.progress);
+            } else if (event.kind === 'reece-reauth') {
+              setReeceReauthNeeded(true);
+              setReeceConnected(false);
+            } else if (event.kind === 'reconcile-start') {
+              setFetchPhase('applying');
+              setCurrentFetchingName('Reconciling pack sizes...');
+            } else if (event.kind === 'complete') {
+              fetchedCount = event.fetched;
+              failedCount = event.failed;
+              skippedCount = event.skipped;
+              cancelled = event.cancelled;
+            }
+          },
+        },
+      );
+      updatedMaterials = result.updatedQuote.materials;
+      fetchedCount = result.fetchedCount;
+      failedCount = result.failedCount;
+      skippedCount = result.skippedCount;
+      cancelled = result.cancelled;
+      if (result.reeceReauthNeeded) {
+        setReeceReauthNeeded(true);
+        setReeceConnected(false);
       }
+    } catch (err: any) {
+      // Pipeline-level error (auth, network, etc.). Fall through to the
+      // catch handler below by re-throwing with the same message shape the
+      // original code surfaced.
+      throw err;
+    }
 
-      // ── Reece post-pass — only when the user has placed Bunnings above
-      // Reece in their priority order. Reece picks up anything Bunnings
-      // missed. Skipped entirely when Reece ran as the pre-pass earlier.
-      if (useReeceApi && !reeceFirst) {
-        const unpriced = new Set<string>();
-        for (const m of updatedMaterials) {
-          if (m.price > 0 && !m.manualPriceOverride) continue;
-          unpriced.add(m.searchTerm || m.name);
-        }
-        if (unpriced.size > 0) {
-          await reecePass(unpriced);
-        }
-      }
+    try {
+      // Mark cancelled as a thrown sentinel so the existing catch branch
+      // handles partial-progress save + success message.
+      if (cancelled) throw new Error('__FETCH_CANCELLED__');
 
-      let fetchIndex = 0;
-      for (let i = 0; i < updatedMaterials.length; i++) {
-        // Check for cancellation
-        if (cancelFetchRef.current) {
-          break;
-        }
-
-        const material = updatedMaterials[i];
-
-        // Skip if price already set and not overridden
-        if (material.price > 0 && !material.manualPriceOverride) {
-          skippedCount++;
-          continue;
-        }
-
-        fetchIndex++;
-        setFetchProgress({ current: fetchIndex, total: materialsToFetch.length });
-        setFetchingMaterialId(material.id);
-        setCurrentFetchingName(material.name);
-
-        const searchTerm = material.searchTerm || material.name;
-
-        if (useScraperApi) {
-          // Use Bunnings Scraper API (Priority #1 - Real Prices)
-          // Try batch result first (instant), fall back to individual search
-          try {
-            let candidates = batchResults?.get(searchTerm) ?? [];
-
-            if (!candidates || candidates.length === 0) {
-              // Batch missed this one — try individual candidate search
-              candidates = await withCancel(findCandidatesForMaterial(searchTerm));
-            }
-
-            if (candidates.length > 0) {
-              candidatesByMaterialId.set(material.id, candidates);
-            }
-            const product = candidates[0] || null;
-
-            if (product && product.price > 0) {
-              material.price = supplierPriceForGstMode(product.price, currentQuote?.pricesIncludeGst === true);
-              material.manualPriceOverride = false;
-              material.pricingSource = 'scraper';
-
-              if (product.itemNumber) {
-                material.bunningsItemNumber = product.itemNumber;
-              }
-
-              if (product.productUrl) {
-                material.productUrl = product.productUrl;
-              }
-
-              if (product.imageUrl) {
-                material.imageUrl = product.imageUrl;
-              }
-
-              if (product.description) {
-                material.description = product.description;
-              }
-
-              // Only save brand if it's not just the store name
-              if (product.brand &&
-                  product.brand.toLowerCase() !== 'bunnings' &&
-                  product.brand.toLowerCase() !== 'bunnings.com.au') {
-                material.brand = product.brand;
-              }
-
-              if (product.stockCheckedAt) {
-                material.stockCheckedAt = product.stockCheckedAt;
-              }
-
-              applyPackAwarePricing(material, {
-                productName: product.productName,
-                packSize: (product as any).packSize,
-                packUnit: (product as any).packUnit,
-              });
-
-              fetchedCount++;
-              triggerPriceFlash(material.id);
-            } else {
-              throw new Error('No product found with price');
-            }
-          } catch (error: any) {
-            // Re-throw cancellation so the outer catch handles it instantly
-            if (error?.message === '__FETCH_CANCELLED__') throw error;
-            // Scraper missed — fall back to AI estimation directly. The dead
-            // bunningsApi.findAndPriceMaterial path used to sit in between
-            // here; it's been removed because we never had working creds.
-            const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
-
-            if (aiResult.price) {
-              material.price = supplierPriceForGstMode(aiResult.price, currentQuote?.pricesIncludeGst === true);
-              material.manualPriceOverride = false;
-              material.pricingSource = 'ai';
-              material.priceConfidence = aiResult.confidence || 'medium';
-
-              if (aiResult.productName) {
-                material.name = aiResult.productName;
-              }
-              if (aiResult.store) {
-                material.description = `AI reckons about this much`;
-              }
-
-              applyPackAwarePricing(material, { productName: aiResult.productName });
-
-              fetchedCount++;
-              triggerPriceFlash(material.id);
-            } else {
-              failedCount++;
-            }
-          }
-        } else if (useReeceApi) {
-          // Use Reece API for plumbing supplies
-          const result = await withCancel(searchReeceMaterialPrice(searchTerm));
-
-          if (result.price) {
-            material.price = supplierPriceForGstMode(result.price, currentQuote?.pricesIncludeGst === true);
-            material.manualPriceOverride = false;
-            material.pricingSource = 'api';
-
-            // Store additional info if available
-            if (result.productName) {
-              material.name = result.productName;
-            }
-            if (result.store) {
-              material.description = `Available at ${result.store}`;
-            }
-
-            applyPackAwarePricing(material, { productName: result.productName });
-
-            fetchedCount++;
-            triggerPriceFlash(material.id);
-          } else {
-            failedCount++;
-          }
-        } else {
-          // Use Web Scraping with Favorites (NEW METHOD)
-
-          // 1. Check for saved favorite first
-          const favorite = await withCancel(getFavoriteProduct(material.name, material.searchTerm));
-
-          if (favorite) {
-            // Use favorite product's last known price (user can manually update if needed)
-            material.favoriteProduct = favorite;
-            // Note: Favorite stores the product info but not price (prices change)
-            // So we still need to search, but we'll auto-select the favorite
-          }
-
-          // 2. Search hardware stores with web scraping
-          const results = await withCancel(searchMaterialWithWebScraping(
-            material.name,
-            searchTerm,
-            material.quantity,
-            material.unit,
-            hardwareStores
-          ));
-
-          if (results.length > 0 && results[0].matches.length > 0) {
-            const allMatches = results.flatMap(r => r.matches);
-            const quantityAdj = results[0].quantityAdjustment;
-
-            // 3. Check if we have a favorite match in results
-            let selectedMatch: ProductMatch | null = null;
-
-            if (favorite) {
-              // Try to find the favorite product in matches
-              selectedMatch = allMatches.find(
-                m =>
-                  m.productName === favorite.productName ||
-                  m.itemNumber === favorite.itemNumber
-              ) || null;
-            }
-
-            // 4. If no favorite or favorite not found, get best match
-            if (!selectedMatch) {
-              selectedMatch = getBestMatch(results);
-            }
-
-            // 5. If multiple high-confidence matches and no favorite, prompt user
-            const highConfidenceMatches = allMatches.filter(m => m.confidence === 'high');
-            if (!favorite && highConfidenceMatches.length > 1 && !selectedMatch) {
-              // Pause and ask user to select
-              setPendingMatches(highConfidenceMatches);
-              setPendingMaterialIndex(i);
-              setPendingMaterialName(material.name);
-              setMatchSelectorVisible(true);
-
-              // Wait for user selection before continuing
-              // (This will be handled by the modal callback)
-              stopFetchCountdown();
-              setCurrentFetchingName('');
-              setIsFetchingPrices(false);
-              setFetchPhase('idle');
-              return; // Exit early, user will resume after selection
-            }
-
-            // 6. Apply selected product to material
-            if (selectedMatch) {
-              material.price = selectedMatch.price;
-              material.manualPriceOverride = false;
-              material.pricingSource = 'scraper';
-
-              // Apply quantity adjustment if needed (resets requirement so pack
-              // math derives off the adjusted requirement, not the original).
-              if (quantityAdj && quantityAdj.adjustedQuantity !== material.quantity) {
-                material.quantity = quantityAdj.adjustedQuantity;
-                material.requiredQty = quantityAdj.adjustedQuantity;
-              }
-
-              // Store product details
-              if (selectedMatch.itemNumber) {
-                material.bunningsItemNumber = selectedMatch.itemNumber;
-              }
-              if (selectedMatch.productUrl) {
-                material.productUrl = selectedMatch.productUrl;
-              }
-              if (selectedMatch.description) {
-                material.description = selectedMatch.description;
-              }
-              // Only save brand if it's not just the store name
-              if (selectedMatch.brand &&
-                  selectedMatch.brand.toLowerCase() !== 'bunnings' &&
-                  selectedMatch.brand.toLowerCase() !== 'bunnings.com.au' &&
-                  selectedMatch.brand.toLowerCase() !== 'reece' &&
-                  selectedMatch.brand.toLowerCase() !== 'mitre 10') {
-                material.brand = selectedMatch.brand;
-              }
-              if (selectedMatch.stockCheckedAt) {
-                material.stockCheckedAt = selectedMatch.stockCheckedAt;
-              }
-
-              applyPackAwarePricing(material, {
-                productName: selectedMatch.productName,
-                packSize: (selectedMatch as any).packSize,
-                packUnit: (selectedMatch as any).packUnit,
-              });
-
-              fetchedCount++;
-              triggerPriceFlash(material.id);
-            } else {
-              failedCount++;
-            }
-          } else {
-            // Web scraping failed, fall back to AI estimation
-            const aiResult = await withCancel(searchMaterialPrice(searchTerm, hardwareStores));
-
-            if (aiResult.price) {
-              material.price = supplierPriceForGstMode(aiResult.price, currentQuote?.pricesIncludeGst === true);
-              material.manualPriceOverride = false;
-              material.pricingSource = 'ai';
-              material.priceConfidence = aiResult.confidence || 'medium';
-
-              if (aiResult.productName) {
-                material.name = aiResult.productName;
-              }
-              if (aiResult.store) {
-                material.description = `AI reckons about this much`;
-              }
-
-              applyPackAwarePricing(material, { productName: aiResult.productName });
-
-              fetchedCount++;
-              triggerPriceFlash(material.id);
-            } else {
-              failedCount++;
-            }
-          }
-        }
-
-        // Track completed item for the estimate modal
-        setFetchedItemNames(prev => [...prev, {
-          name: material.name,
-          success: material.price > 0,
-        }]);
-
-        // Recalculate remaining time based on actual pace
-        const itemsCompleted = fetchIndex;
-        const itemsRemaining = materialsToFetch.length - itemsCompleted;
-        if (itemsCompleted > 0 && fetchCountdownRef.current) {
-          if (itemsRemaining <= 0) {
-            fetchEstimateSecondsRef.current = 0;
-            setFetchEstimateSeconds(0);
-          } else {
-            const elapsedMs = Date.now() - fetchStartTimeRef.current;
-            const avgMsPerItem = elapsedMs / itemsCompleted;
-            const newEstimate = Math.ceil((avgMsPerItem * itemsRemaining) / 1000);
-            fetchEstimateSecondsRef.current = newEstimate;
-            setFetchEstimateSeconds(newEstimate);
-          }
-        }
-
-        // Update UI progressively (skip if dialogs are open to avoid flickering)
-        if (!matchSelectorVisible && currentQuote) {
-          updateQuote({
-            ...currentQuote,
-            materials: [...updatedMaterials],
-          } as any);
-        }
-
-        // Small delay to avoid overwhelming the API (skip if just applying batch results)
-        if (!batchResults) {
-          await withCancel(new Promise(resolve => setTimeout(resolve, 1000)));
-        } else {
-          // Brief delay so UI can render each item update
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      }
-
-      // ── Reconciliation pass ─────────────────────────────────────────────
-      // For every row that has scraper candidates, ask Gemini Flash Lite to
-      // pick the best-fitting candidate (or reject all of them) and compute
-      // the correct purchase count + total. The price-search returned the
-      // top candidate to the UI for fast feedback; reconciliation may swap
-      // in a different candidate from the same ranked list. Catches
-      // wrong-SKU matches and pack-as-unit-price bugs uniformly across
-      // trades, where regex parsing of pack info from titles can't.
-      if (!cancelFetchRef.current) {
-        const reconcileItems = updatedMaterials
-          .filter(m => {
-            if (m.manualPriceOverride) return false;
-            if (m.pricingSource === 'manual') return false;
-            const cands = candidatesByMaterialId.get(m.id);
-            return !!cands && cands.length > 0;
-          })
-          .map(m => {
-            const cands = candidatesByMaterialId.get(m.id) || [];
-            // Use searchTerm for the requirement when available — the Reece
-            // path overwrites m.name with the matched product name, which
-            // would otherwise hide the original intent from reconcile.
-            return {
-              id: m.id,
-              name: m.searchTerm || m.name,
-              requirement: m.requiredQty ?? m.quantity,
-              requirementUnit: (m.packUnit ?? m.unit) as string,
-              candidates: cands.slice(0, 5).map(c => ({
-                name: c.productName,
-                price: c.price,
-                url: c.productUrl,
-                description: c.description,
-              })),
-            };
-          });
-
-        if (reconcileItems.length > 0) {
-          try {
-            setCurrentFetchingName('Reconciling pack sizes...');
-            const { reconcilePricedMaterials } = await import('../../services/llmService');
-            const results = await reconcilePricedMaterials(reconcileItems, {
-              jobName: currentQuote?.job?.name,
-              jobDescription: currentQuote?.job?.description,
-            });
-            const byId = new Map(results.map(r => [r.id, r]));
-            for (const m of updatedMaterials) {
-              const r = byId.get(m.id);
-              if (!r) continue;
-              if (r.decision === 'reject') {
-                m.price = 0;
-                m.totalPrice = 0;
-                m.priceConfidence = 'low';
-                m.description = r.rejectReason || 'Product mismatch — verify before sending';
-                continue;
-              }
-              if (
-                r.decision === 'estimate' &&
-                typeof r.estimatedUnitPrice === 'number' &&
-                r.estimatedUnitPrice > 0 &&
-                typeof r.purchaseCount === 'number' &&
-                r.purchaseCount > 0
-              ) {
-                // No candidate matched but the LLM gave a sensible price guess
-                // from general knowledge. Apply it as a low-confidence estimate
-                // — the row gets a starting price the tradie can verify with
-                // their supplier instead of a $0 hole. Don't swap in product
-                // info; there's no real candidate to point at.
-                if (m.requiredQty === undefined) m.requiredQty = m.quantity;
-                m.quantity = r.purchaseCount;
-                if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
-                const estimatedUnit = supplierPriceForGstMode(
-                  r.estimatedUnitPrice,
-                  currentQuote?.pricesIncludeGst === true,
-                );
-                m.price = estimatedUnit;
-                m.totalPrice =
-                  typeof r.totalPrice === 'number' && r.totalPrice > 0
-                    ? supplierPriceForGstMode(r.totalPrice, currentQuote?.pricesIncludeGst === true)
-                    : estimatedUnit * r.purchaseCount;
-                m.priceConfidence = 'low';
-                m.pricingSource = 'ai';
-                m.description = r.coverageNote || r.reasoning || 'Estimated — verify with supplier';
-                // Strip ALL product references from the rejected candidate —
-                // the estimate isn't tied to a real SKU and showing a wrong
-                // image/brand alongside an estimate ("Galintel Outdoors"
-                // retaining-wall image next to "estimated $15 per post
-                // stirrup") is misleading.
-                m.bunningsItemNumber = undefined;
-                m.productUrl = undefined;
-                m.imageUrl = undefined;
-                m.brand = undefined;
-                m.stockCheckedAt = undefined;
-                continue;
-              }
-              if (r.decision === 'apply' && typeof r.purchaseCount === 'number' && r.purchaseCount > 0) {
-                // Swap in the chosen candidate's product info if it differs
-                // from the one we showed during the fetch loop.
-                const cands = candidatesByMaterialId.get(m.id) || [];
-                const idx = typeof r.chosenIndex === 'number' ? r.chosenIndex : 0;
-                const chosen = cands[idx];
-                if (chosen) {
-                  // Route the item number to the right field based on the
-                  // material's pricing source — Reece-priced rows already had
-                  // bunningsItemNumber cleared, so writing the chosen
-                  // candidate to bunningsItemNumber would mis-tag it.
-                  if (chosen.itemNumber) {
-                    if (m.pricingSource === 'api') {
-                      m.reeceItemNumber = chosen.itemNumber;
-                    } else {
-                      m.bunningsItemNumber = chosen.itemNumber;
-                    }
-                  }
-                  if (chosen.productUrl) m.productUrl = chosen.productUrl;
-                  if (chosen.imageUrl) m.imageUrl = chosen.imageUrl;
-                  if (chosen.description) m.description = chosen.description;
-                  if (
-                    chosen.brand &&
-                    chosen.brand.toLowerCase() !== 'bunnings' &&
-                    chosen.brand.toLowerCase() !== 'bunnings.com.au' &&
-                    chosen.brand.toLowerCase() !== 'reece'
-                  ) {
-                    m.brand = chosen.brand;
-                  }
-                  if (chosen.stockCheckedAt) m.stockCheckedAt = chosen.stockCheckedAt;
-                }
-
-                if (m.requiredQty === undefined) m.requiredQty = m.quantity;
-                m.quantity = r.purchaseCount;
-                if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
-                if (typeof r.totalPrice === 'number' && r.totalPrice > 0) {
-                  const adjustedTotal = supplierPriceForGstMode(
-                    r.totalPrice,
-                    currentQuote?.pricesIncludeGst === true,
-                  );
-                  m.totalPrice = adjustedTotal;
-                  // Keep price as the per-purchase price so display stays consistent.
-                  m.price = adjustedTotal / r.purchaseCount;
-                }
-                if (r.confidence) m.priceConfidence = r.confidence;
-                if (r.coverageNote) m.description = r.coverageNote;
-              }
-            }
-          } catch (err) {
-            // Reconciliation is best-effort — if it fails, fall back to
-            // whatever pack-aware regex worked out. Don't block the quote.
-          }
-        }
-      }
-
-      // Final persist to ensure all fetched prices reach Firestore. The
+            // Final persist to ensure all fetched prices reach Firestore. The
       // intermediate chunk-callback updateQuote() calls only mutate local
       // state; without saveDraft here a screen close / app restart loses
       // every price we just scraped (Firestore would still show $0 for

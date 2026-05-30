@@ -863,14 +863,40 @@ class FirestoreService {
       const q = query(contactsRef, orderBy('name'));
       const snapshot = await getDocs(q);
 
-      const contacts: Contact[] = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return data as Contact;
-      });
+      // Always use the Firestore document id as the contact id. The doc
+      // data may carry its own `id` field (saveContact spreads ...contact)
+      // but if those two ever drift — legacy migration, partial write,
+      // server-side seed — every other read in the app (and Mate's
+      // find_customer tool, which returns doc.id) breaks because the local
+      // contact.id doesn't match anything on the server. doc.id is the
+      // source of truth.
+      const contacts: Contact[] = snapshot.docs.map((doc) => ({
+        ...(doc.data() as Contact),
+        id: doc.id,
+      }));
 
       return contacts;
     } catch (error) {
       return [];
+    }
+  }
+
+  /**
+   * Fetch a single contact by doc id. Used by Mate's applyProposal as a
+   * fallback when find_customer returned a contactId that isn't yet in the
+   * local cache — without this, the chat would dead-end with a stale-contact
+   * error even though the contact exists server-side.
+   */
+  async getContactById(contactId: string): Promise<Contact | null> {
+    const userId = this.getUserId();
+    if (!userId || !contactId) return null;
+    try {
+      const ref = doc(db, 'users', userId, 'contacts', contactId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return null;
+      return { ...(snap.data() as Contact), id: snap.id };
+    } catch {
+      return null;
     }
   }
 

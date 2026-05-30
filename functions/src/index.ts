@@ -50,6 +50,7 @@ export {
   leadUnsubscribe,
 } from './leadOutreach';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
+export { assistantChat } from './assistantChat';
 import {
   buildXeroAuthHeaders,
   buildXeroLineItems,
@@ -1684,7 +1685,9 @@ Provide a JSON response with the following structure:
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
 - EVERY section MUST have sectionLaborHours > 0. A section with zero labour hours is invalid output — if the work is materials-only with no labour (rare), put those materials under an existing labour-bearing section instead of creating a zero-hour section.
-- PER-AREA WORK AS A SECTION (paving installation, tiling, plastering, screeding, concreting): set sectionMultiplier = total area in m² and sectionLaborHours = hours PER m² (typical: paving install 0.4–0.6 h/m², tiling 0.5 h/m², plastering 0.3 h/m², screeding 0.2 h/m²). Never set sectionLaborHours: 0 on the assumption that "the section is per m² so there is no per-unit hour value" — that is the most common mistake. Per-m² IS a per-unit value: one m² is one unit.
+- PER-AREA SURFACE-COVERING SECTIONS ONLY (paving installation, tiling, plastering, rendering, screeding): set sectionMultiplier = total surface area in m² and sectionLaborHours = hours PER m² (typical: paving install 0.4–0.6 h/m², tiling 0.5 h/m², plastering 0.3 h/m², screeding 0.2 h/m²). Per-m² IS a per-unit value: one m² is one unit. Material quantities inside these sections are PER m² (e.g. 6.25 pavers per m²) and get multiplied by sectionMultiplier at save time — do NOT pre-multiply.
+- DISCRETE-UNIT SECTIONS (fence bays, gates, post footings, framing, joists, footings, slabs poured per-pour, doors, windows, decks measured per board): sectionMultiplier = COUNT of those repeating units (e.g. 9 bays, 13 post holes, 1 deck), NOT an area. Material quantities are PER UNIT (e.g. 4 bags concrete per post hole × 13 holes). This applies to fencing, framing, and ALL concrete work that goes into individual holes/footings/footings-beams — those are per-hole not per-m².
+- DO NOT include concreting/footings under the per-m² surface-covering rule above. A 13-post fence is 13 discrete footings, not a "concreting per m²" job. If you find yourself emitting >50 bags of concrete per post, your multiplier or per-unit quantity is wrong — recalculate.
 
 CRITICAL — emit quantities in the SMALLEST PHYSICAL UNIT, not in guessed packs/bags:
 - Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
@@ -1877,7 +1880,7 @@ Return ONLY valid JSON, no other text.`;
  * A small Gemini Flash Lite call given the requirement + product can use
  * general knowledge to handle all of these uniformly across trades.
  */
-const GEMINI_RECONCILE_MODEL = 'gemini-3.1-flash-lite-preview';
+const GEMINI_RECONCILE_MODEL = 'gemini-3.1-flash-lite';
 
 /**
  * Quantity sanity-check pass — review the materials list emitted by the
@@ -1981,6 +1984,43 @@ async function callGeminiLiteJson(apiKey: string, prompt: string): Promise<any> 
   return parseLLMJson(content);
 }
 
+/**
+ * Claude Haiku fallback for the lite-JSON tier. Mirrors callGeminiLiteJson —
+ * same prompt-in, parsed-JSON-out contract. Used by reconcilePricedMaterials
+ * (and any other structured-reasoning lite call) when Gemini is unavailable
+ * (key revoked, model retired, quota hit). The reconcile pass is what
+ * converts AI mass quantities (e.g. "400 kg of concrete") into pack counts
+ * (e.g. "20 bags of 20kg"); without it, the pricing pipeline silently leaves
+ * inflated quantities like the QU-177971 "400 packs of concrete" bug.
+ */
+async function callClaudeLiteJson(apiKey: string, prompt: string): Promise<any> {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      // Haiku tier — reconcile work is structured reasoning over a small
+      // JSON payload, doesn't need Opus/Sonnet capability and Haiku is
+      // ~10× cheaper + ~3× faster, matching Gemini Flash Lite's profile.
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 8000,
+      temperature: 0.1,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Claude Lite returned ${response.status}: ${errorText}`);
+  }
+  const data = await response.json();
+  const content = data.content?.[0]?.text;
+  if (!content) throw new Error('No content in Claude Lite response');
+  return parseLLMJson(content);
+}
+
 export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
@@ -2021,8 +2061,9 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
       }
 
       const geminiApiKey = process.env.GEMINI_API_KEY;
-      if (!geminiApiKey) {
-        res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+      if (!geminiApiKey && !anthropicApiKey) {
+        res.status(500).json({ error: 'No LLM API keys configured (GEMINI_API_KEY / ANTHROPIC_API_KEY)' });
         return;
       }
 
@@ -2105,7 +2146,47 @@ ${JSON.stringify(items, null, 2)}
 
 Return ONLY the JSON object, no other text.`;
 
-      const parsed = await callGeminiLiteJson(geminiApiKey, prompt);
+      // Gemini Flash Lite primary, Claude Haiku fallback — same dual-provider
+      // pattern as analyzeJobDescription. When the QU-177971 incident hit
+      // (Gemini key revoked + model retired), this function returned 500 and
+      // the client fell back to leaving raw mass quantities in place,
+      // producing the "400 packs of concrete" bug. Having a second provider
+      // keeps the pricing pipeline working through single-vendor outages.
+      let parsed: any | null = null;
+      let primaryError: Error | null = null;
+      if (geminiApiKey) {
+        try {
+          parsed = await callGeminiLiteJson(geminiApiKey, prompt);
+        } catch (err: any) {
+          primaryError = err;
+          console.warn('Gemini Lite failed for reconcile, falling back to Claude Haiku:', err?.message);
+        }
+      }
+      if (!parsed) {
+        if (!anthropicApiKey) {
+          throw primaryError || new Error('Gemini failed and no Anthropic fallback key configured');
+        }
+        try {
+          parsed = await callClaudeLiteJson(anthropicApiKey, prompt);
+        } catch (fallbackErr: any) {
+          console.error('Gemini primary error:', primaryError?.message);
+          console.error('Claude fallback error:', fallbackErr?.message);
+          const summarize = (msg: string): string => {
+            if (!msg) return 'unknown';
+            const m = msg.match(/returned (\d{3})/);
+            const status = m ? m[1] : '';
+            if (status === '429' || /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(msg)) return `${status || '429'} quota exceeded`;
+            if (status === '400' && /credit balance/i.test(msg)) return '400 out of credit';
+            if (status === '401' || status === '403') return `${status} auth denied`;
+            if (status === '500' || status === '503') return `${status} unavailable`;
+            return status ? `${status} error` : msg.slice(0, 60);
+          };
+          const geminiShort = primaryError ? `Gemini ${summarize(primaryError.message)}` : 'Gemini not attempted';
+          const claudeShort = `Claude ${summarize(fallbackErr.message)}`;
+          throw new Error(`Both LLM providers failed — ${geminiShort}; ${claudeShort}`);
+        }
+      }
+
       const results = Array.isArray(parsed.results) ? parsed.results : [];
       res.status(200).json({ results });
     } catch (error: any) {

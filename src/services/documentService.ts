@@ -13,6 +13,7 @@ import {
   collection,
   doc,
   setDoc,
+  getDoc,
   getDocs,
   deleteDoc,
   onSnapshot,
@@ -135,6 +136,25 @@ class DocumentService {
       return snapshot.docs.map((d) => normaliseDocument(d.data(), d.id));
     } catch (error) {
       return [];
+    }
+  }
+
+  /**
+   * Fetch a single document by id. Used by Mate's applyProposal as a fallback
+   * when the model emits a quoteId that isn't in the local cache yet — the
+   * server-side find / list / get_quote tools read from this same collection,
+   * so a Firestore round-trip will always resolve a freshly-minted doc.
+   */
+  async getDocumentById(docId: string): Promise<Document | null> {
+    const userId = getUserId();
+    if (!userId || !docId) return null;
+    try {
+      const ref = doc(db, 'users', userId, 'documents', docId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return null;
+      return normaliseDocument(snap.data(), snap.id);
+    } catch {
+      return null;
     }
   }
 

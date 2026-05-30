@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { JobsListScreen } from '../screens/JobsListScreen';
+import { AssistantScreen } from '../screens/AssistantScreen';
 import { ViewJobScreen } from '../screens/ViewJobScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
@@ -59,13 +60,14 @@ import { useStore } from '../store/useStore';
 export type RootTabParamList = {
   Dashboard: undefined;
   Jobs: undefined;
+  Mate: undefined;
   Settings: undefined;
 };
 
 export type NewQuoteStackParamList = {
   Details: { mode?: 'quote' | 'invoice' } | undefined;
   CustomerDetails: { mode?: 'quote' | 'invoice' } | undefined;
-  MaterialsList: { mode?: 'quote' | 'invoice' } | undefined;
+  MaterialsList: { mode?: 'quote' | 'invoice'; autoGenerate?: boolean; autoFetchPrices?: boolean } | undefined;
   AddMaterial: { materialId?: string; mode?: 'quote' | 'invoice' } | undefined;
   LaborMarkup: { mode?: 'quote' | 'invoice' } | undefined;
   JobPreview: { mode?: 'quote' | 'invoice'; viewing?: boolean; editing?: boolean } | undefined;
@@ -218,6 +220,7 @@ function NewInvoiceNavigator() {
 const TAB_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
   Dashboard: 'home',
   Jobs: 'briefcase',
+  Mate: 'chat-processing',
   Settings: 'cog',
 };
 
@@ -426,6 +429,11 @@ function MainTabs() {
         name="Jobs"
         component={JobsListScreen}
         options={{ title: 'Jobs' }}
+      />
+      <Tab.Screen
+        name="Mate"
+        component={AssistantScreen}
+        options={{ title: 'Mate' }}
       />
       <Tab.Screen
         name="Settings"

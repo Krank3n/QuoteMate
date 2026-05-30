@@ -92,6 +92,113 @@ describe('validateAndRepairAiOutput', () => {
     expect(flags.hasZeroPricedMaterial).toBe(false);
   });
 
+  // QU-177971 regression — the $94k fencing quote where the AI emitted
+  // 6760 packs of concrete for 13 fence post holes. The deterministic
+  // absurd-quantity ceiling catches this without any LLM intervention.
+  it('flags 6760 packs of concrete as absurd (QU-177971 reproduction)', () => {
+    const { materials, flags } = validateAndRepairAiOutput(
+      [{ name: 'Concrete post footing (pre-mix concrete)', quantity: 6760, unit: 'pack', price: 9.20 }],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(true);
+    expect(flags.absurdQuantityCount).toBe(1);
+    expect(materials[0].pricingSource).toBe('absurd_quantity');
+  });
+
+  // Round-2 QU-177971 — same job, AI now emits quantity=40 per work unit
+  // with sectionMultiplier=10. Per-unit quantity (40) is below the ceiling
+  // but the effective total (400) is well over. Ceiling must check the
+  // multiplied total, otherwise the bug recurs at smaller scale.
+  it('flags quantity × sectionMultiplier when the per-unit slips under the ceiling', () => {
+    const { materials, flags } = validateAndRepairAiOutput(
+      [{
+        name: 'Quick-Set Post Concrete 20kg',
+        quantity: 40,           // per work unit (per post hole)
+        sectionMultiplier: 10,  // 10 post holes
+        unit: 'pack',
+        price: 9.20,
+        section: 'Fence Post Footings',
+        sectionLaborHours: 0.6,
+      }],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(true);
+    expect(materials[0].pricingSource).toBe('absurd_quantity');
+  });
+
+  it('still passes a realistic per-unit × multiplier through cleanly', () => {
+    // 3 bags of concrete per post × 10 posts = 30 bags total. Normal.
+    const { flags } = validateAndRepairAiOutput(
+      [{
+        name: 'Quick-Set Post Concrete 20kg',
+        quantity: 3,
+        sectionMultiplier: 10,
+        unit: 'pack',
+        price: 9.20,
+        section: 'Fence Post Footings',
+      }],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(false);
+  });
+
+  it('treats missing sectionMultiplier as 1 (no inflation)', () => {
+    // sectionMultiplier missing — quantity itself is the effective total.
+    // 150 packs of mortar mix on a brick wall job, no multiplier — passes.
+    const { flags } = validateAndRepairAiOutput(
+      [{ name: 'Mortar mix 20kg', quantity: 150, unit: 'pack', price: 9.50 }],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(false);
+  });
+
+  it('allows a large-but-realistic pack count under the ceiling', () => {
+    // 150 packs of mortar mix for a brick wall job — large but plausible
+    const { flags } = validateAndRepairAiOutput(
+      [{ name: 'Mortar mix 20kg', quantity: 150, unit: 'pack', price: 9.50 }],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(false);
+  });
+
+  it('catches 5000+ fasteners as absurd', () => {
+    const { flags } = validateAndRepairAiOutput(
+      [{ name: 'Galvanised tek screws', quantity: 50000, unit: 'each', price: 0.05 }],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(true);
+  });
+
+  it('catches 100+ m³ of concrete as absurd', () => {
+    const { flags } = validateAndRepairAiOutput(
+      [{ name: 'Ready-mix concrete', quantity: 200, unit: 'm³', price: 280 }],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(true);
+  });
+
+  it('does not flag normal-sized quantities', () => {
+    const { flags } = validateAndRepairAiOutput(
+      [
+        { name: 'Pavers', quantity: 172, unit: 'each', price: 8.5 },
+        { name: 'Crusher dust', quantity: 4000, unit: 'kg', price: 0.12 },
+        { name: 'Geotextile', quantity: 30, unit: 'm²', price: 4 },
+        { name: 'Treated pine 90x45', quantity: 75, unit: 'm', price: 5.5 },
+      ],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(false);
+  });
+
+  it('ignores ceiling check for unknown units', () => {
+    // Custom unit "box" not in the ceiling map — no enforcement, passes through
+    const { flags } = validateAndRepairAiOutput(
+      [{ name: 'Whatever', quantity: 999999, unit: 'box', price: 1 }],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(false);
+  });
+
   it('flags a section whose minimum sectionLaborHours is zero', () => {
     const { flags } = validateAndRepairAiOutput(
       [

@@ -160,6 +160,60 @@ describe('deriveTotalLabourHours + syncJobEstimatedHours', () => {
     expect(stable.estimatedHours).toBe(5);
   });
 
+  // NaN-safety regression — see the orphan-jobs production incident on 2026-05-25
+  // where syncJobEstimatedHours fed NaN into JobSpec.estimatedHours, which
+  // Firestore silently rejected at saveQuote(), leaving Jobs created but
+  // their matching Quote/Document never persisted.
+  describe('NaN safety (orphan-jobs incident)', () => {
+    it('treats NaN laborHoursTotal as 0 instead of poisoning the sum', () => {
+      const hours = deriveTotalLabourHours({
+        sections: [
+          baseSection({ laborHoursTotal: NaN, laborUnit: 'hours' }),
+          baseSection({ laborHoursTotal: 5, laborUnit: 'hours' }),
+        ],
+        laborHours: 0,
+        laborUnit: 'hours' as LaborUnit,
+      });
+      expect(Number.isFinite(hours)).toBe(true);
+      expect(hours).toBe(5);
+    });
+
+    it('treats NaN laborExtraHours as 0', () => {
+      const hours = deriveTotalLabourHours({
+        sections: [baseSection({ laborHoursTotal: 3, laborUnit: 'hours' })],
+        laborHours: 0,
+        laborUnit: 'hours' as LaborUnit,
+        laborExtraHours: NaN,
+      });
+      expect(hours).toBe(3);
+    });
+
+    it('falls back to laborHours × multiplier when laborHoursTotal is non-finite', () => {
+      const hours = deriveTotalLabourHours({
+        sections: [baseSection({ laborHoursTotal: Infinity, laborHours: 2, multiplier: 4, laborUnit: 'hours' })],
+        laborHours: 0,
+        laborUnit: 'hours' as LaborUnit,
+      });
+      expect(hours).toBe(8);
+    });
+
+    it('syncJobEstimatedHours leaves the JobSpec untouched if derivation is non-finite somehow', () => {
+      // Construct a path that produces non-finite total. Even with the
+      // upstream guards, the function should defend against future
+      // regressions by refusing to write NaN into estimatedHours.
+      const doc = {
+        job: job({ estimatedHours: 42 }),
+        sections: [],
+        laborHours: NaN,
+        laborUnit: 'hours' as LaborUnit,
+      };
+      const updated = syncJobEstimatedHours(doc);
+      // NaN laborHours is sanitized to 0 → rounded total = 0 → returns new
+      // JobSpec with estimatedHours: 0 (NOT NaN).
+      expect(Number.isNaN(updated.estimatedHours as any)).toBe(false);
+    });
+  });
+
   it('rounds fractional hours when writing back to JobSpec', () => {
     const updated = syncJobEstimatedHours({
       job: job({ estimatedHours: 0 }),

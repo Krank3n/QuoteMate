@@ -8,6 +8,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
 import { Document } from '../types/document';
+import {
+  ChatMessage,
+  Conversation,
+  Proposal,
+  ProposalStatus,
+  WorkingStatus,
+} from '../types/assistant';
+import {
+  generateMaterialsForQuote,
+  fetchPricesForQuote,
+  PipelineCancelled,
+} from '../services/materialsPipeline';
+import { loadTemplates } from '../services/sectionTemplateService';
 import { TourPhase } from '../components/tour/tourFlow';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
@@ -212,9 +225,56 @@ interface AppState {
     newJobId: string,
   ) => Promise<Document>;
 
+  // Mate assistant — chat history lives client-only in v1. The model never
+  // writes here directly; it returns Proposal payloads that applyProposal
+  // routes through the existing store actions.
+  conversations: Conversation[];
+  currentConversationId: string | null;
+  startConversation: () => string;
+  endConversation: () => void;
+  appendMessage: (conversationId: string, message: ChatMessage) => void;
+  /**
+   * Patch a single message in place — used to update a "working" card as
+   * pipeline events arrive (analyse → building → done) without spawning a
+   * new bubble per phase.
+   */
+  updateMessage: (
+    conversationId: string,
+    messageId: string,
+    patch: Partial<ChatMessage>,
+  ) => void;
+  updateProposalStatus: (
+    conversationId: string,
+    messageId: string,
+    proposalId: string,
+    status: ProposalStatus,
+  ) => void;
+  // Apply a proposal through the existing store actions. Returns a follow-up
+  // hint the caller can use to drive navigation — keeps the store free of
+  // navigation imports. The optional onProgress callback receives pipeline
+  // events for proposals that run the materials pipeline (draft quote);
+  // the AssistantScreen wires it into a working-card message so the user
+  // sees what's happening without leaving the chat.
+  applyProposal: (
+    proposal: Proposal,
+    onProgress?: (status: WorkingStatus) => void,
+  ) => Promise<ApplyProposalResult>;
+  loadConversations: () => Promise<void>;
+
   // Cleanup
   clearAllData: () => Promise<void>;
 }
+
+export type ApplyProposalResult =
+  | { ok: true; navigate?: NavigateHint; note?: string }
+  | { ok: false; error: string };
+
+export type NavigateHint =
+  | { kind: 'job_preview'; quoteId: string }
+  | { kind: 'quote_materials_list'; quoteId: string }
+  | { kind: 'open_send_modal'; documentId: string; recipientEmail?: string }
+  | { kind: 'open_contact'; contactId: string }
+  | { kind: 'open_invoice'; invoiceId: string };
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -229,6 +289,7 @@ const STORAGE_KEYS = {
   XERO_CONNECTION: '@quotemate:xero_connection',
   CONTACTS: '@quotemate:contacts',
   CONTACTS_MIGRATED: '@quotemate:contacts_migrated',
+  CONVERSATIONS: '@quotemate:mate_conversations',
 };
 
 /**
@@ -248,6 +309,38 @@ export function logSyncError(kind: SyncError['kind'], id: string, error: unknown
   });
 }
 
+/**
+ * Recursively replace NaN/Infinity numeric fields with 0 so Firestore's JS
+ * SDK doesn't reject the write. Mutates in place. Logs the path of every
+ * scrubbed field so we can find the upstream calc that produced the bad
+ * number. Skips Date and Array-of-non-object values to keep traversal cheap.
+ *
+ * Why this lives here: previously a single NaN anywhere in a Quote would
+ * trip `setDoc(...)` silently — Firestore rejects, the .catch logs a sync
+ * error, the user sees no UI feedback, and ensureJobForQuote has already
+ * created a Job. The result: orphan jobs in production with no linked
+ * quote/invoice. This scrub keeps the save path resilient.
+ */
+function sanitizeNonFiniteNumbers(target: any, label: string, path: string = ''): void {
+  if (target === null || target === undefined) return;
+  if (target instanceof Date) return;
+  if (Array.isArray(target)) {
+    target.forEach((v, i) => sanitizeNonFiniteNumbers(v, label, `${path}[${i}]`));
+    return;
+  }
+  if (typeof target !== 'object') return;
+  for (const key of Object.keys(target)) {
+    const value = target[key];
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+      // eslint-disable-next-line no-console
+      console.warn(`[sanitize] ${label}: ${path}${path ? '.' : ''}${key} was ${value} → 0`);
+      target[key] = 0;
+    } else if (value && typeof value === 'object') {
+      sanitizeNonFiniteNumbers(value, label, `${path}${path ? '.' : ''}${key}`);
+    }
+  }
+}
+
 // Helper to check if we need to reset monthly count
 const getMonthStart = () => {
   const now = new Date();
@@ -258,6 +351,22 @@ const getMonthEnd = () => {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 };
+
+// Map free-form units from Mate proposals to the strict Material unit union.
+// The model is allowed to emit "m2"/"sqm"/"hr"/"L" — we coerce to the closest
+// known unit so the wizard's calculator doesn't choke on an unknown literal.
+function normalizeMaterialUnit(raw: string): Material['unit'] {
+  const s = (raw || '').trim().toLowerCase();
+  if (!s) return 'each';
+  if (s === 'm2' || s === 'sqm' || s === 'sq m' || s === 'm²') return 'm²';
+  if (s === 'm3' || s === 'm³' || s === 'cubic m') return 'm³';
+  if (s === 'm' || s === 'metre' || s === 'meter' || s === 'metres' || s === 'lm' || s === 'lin m') return 'm';
+  if (s === 'kg' || s === 'kilogram' || s === 'kilograms') return 'kg';
+  if (s === 'l' || s === 'litre' || s === 'liter' || s === 'litres') return 'L';
+  if (s === 'box' || s === 'boxes') return 'box';
+  if (s === 'pack' || s === 'packs') return 'pack';
+  return 'each';
+}
 
 // Cached map keyed on the documents array identity. Rebuilt whenever the
 // store swaps in a new array (every set({ documents })), so lookups stay
@@ -310,6 +419,8 @@ export const useStore = create<AppState>((set, get) => ({
   unifiedTourQuoteId: null,
   documents: [],
   documentsLoaded: false,
+  conversations: [],
+  currentConversationId: null,
 
   // Business settings
   setBusinessSettings: async (settings: BusinessSettings) => {
@@ -421,6 +532,15 @@ export const useStore = create<AppState>((set, get) => ({
         ...withJob,
         updatedAt: new Date(),
       });
+
+      // Defensive scrub: Firestore's JS SDK silently fails on NaN/Infinity
+      // (the saveQuote.catch surfaces it via logSyncError but the user only
+      // sees an orphan Job and no quote in the docs collection). If any
+      // numeric field on the calculated quote ended up non-finite, fix it
+      // before we try to persist. Most common sources: a legacy section
+      // with a missing laborHours/multiplier feeding into syncJobEstimatedHours,
+      // or a divide-by-zero in markup math when materialsSubtotal is 0.
+      sanitizeNonFiniteNumbers(calculatedQuote, `quote ${calculatedQuote.id}`);
 
       const existingIndex = quotes.findIndex((q) => q.id === quote.id);
       let updatedQuotes: Quote[];
@@ -2390,6 +2510,470 @@ export const useStore = create<AppState>((set, get) => ({
     return finalDoc;
   },
 
+  // Mate assistant ---------------------------------------------------------
+  loadConversations: async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.CONVERSATIONS);
+      if (!stored) return;
+      const parsed: Conversation[] = JSON.parse(stored);
+      // Merge into any in-memory conversations (mostly: the empty one a focus
+      // effect may have just minted). Replacing wholesale clobbered the freshly
+      // minted conversation X, leaving currentConversationId='X' pointing at
+      // nothing in the array — appendMessage then silently no-ops because its
+      // .map can't find a matching id, and the user types into a black hole.
+      const { conversations: inMemory, currentConversationId } = get();
+      const parsedIds = new Set(parsed.map((c) => c.id));
+      const surviving = inMemory.filter((c) => !parsedIds.has(c.id));
+      const merged = [...surviving, ...parsed]
+        .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
+        .slice(0, 20);
+      // If the active id was lost during merge, clear it so the next focus
+      // creates a fresh one instead of writing into the void.
+      const stillExists = merged.some((c) => c.id === currentConversationId);
+      set({
+        conversations: merged,
+        ...(currentConversationId && !stillExists ? { currentConversationId: null } : {}),
+      });
+    } catch {
+      // silently ignore — chat history is local-only convenience data
+    }
+  },
+
+  startConversation: () => {
+    const id = generateId();
+    const now = new Date().toISOString();
+    const convo: Conversation = { id, createdAt: now, updatedAt: now, messages: [] };
+    // Keep the last 20 conversations only — chat history isn't core data.
+    const trimmed = [convo, ...get().conversations].slice(0, 20);
+    set({ conversations: trimmed, currentConversationId: id });
+    AsyncStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(trimmed)).catch(() => {});
+    return id;
+  },
+
+  endConversation: () => {
+    set({ currentConversationId: null });
+  },
+
+  appendMessage: (conversationId: string, message: ChatMessage) => {
+    const existing = get().conversations.find((c) => c.id === conversationId);
+    let next: Conversation[];
+    if (existing) {
+      next = get().conversations.map((c) =>
+        c.id === conversationId
+          ? { ...c, messages: [...c.messages, message], updatedAt: new Date().toISOString() }
+          : c,
+      );
+    } else {
+      // Defensive: a previous bug let conversationId point at a missing
+      // conversation (loadConversations clobbered the in-memory copy). Self-heal
+      // by minting a new conversation with this id so the message isn't lost.
+      const now = new Date().toISOString();
+      const fresh: Conversation = { id: conversationId, createdAt: now, updatedAt: now, messages: [message] };
+      next = [fresh, ...get().conversations].slice(0, 20);
+      set({ currentConversationId: conversationId });
+    }
+    set({ conversations: next });
+    AsyncStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(next)).catch(() => {});
+  },
+
+  updateMessage: (conversationId, messageId, patch) => {
+    const next = get().conversations.map((c) => {
+      if (c.id !== conversationId) return c;
+      return {
+        ...c,
+        updatedAt: new Date().toISOString(),
+        messages: c.messages.map((m) => (m.id === messageId ? { ...m, ...patch } : m)),
+      };
+    });
+    set({ conversations: next });
+    AsyncStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(next)).catch(() => {});
+  },
+
+  updateProposalStatus: (conversationId, messageId, proposalId, status) => {
+    const next = get().conversations.map((c) => {
+      if (c.id !== conversationId) return c;
+      return {
+        ...c,
+        updatedAt: new Date().toISOString(),
+        messages: c.messages.map((m) => {
+          if (m.id !== messageId) return m;
+          return {
+            ...m,
+            proposalStatus: { ...(m.proposalStatus || {}), [proposalId]: status },
+          };
+        }),
+      };
+    });
+    set({ conversations: next });
+    AsyncStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(next)).catch(() => {});
+  },
+
+  applyProposal: async (
+    proposal: Proposal,
+    onProgress?: (status: WorkingStatus) => void,
+  ): Promise<ApplyProposalResult> => {
+    // Resolve a unified Document by id — local cache first, then a Firestore
+    // round-trip if missing. Mate's server-side tools always return doc ids
+    // from users/{uid}/documents/{docId}, so a local-cache miss (listener
+    // hasn't synced, doc was just minted, another device added it) should
+    // not kill the apply path. If we fetch from Firestore we also seed the
+    // local cache so subsequent reads are fast.
+    const resolveDocument = async (docId: string): Promise<Document | undefined> => {
+      const cached = get().getDocumentById(docId) || get().getDocumentByLegacyId(docId);
+      if (cached) return cached;
+      // eslint-disable-next-line no-console
+      console.log('[Mate] doc not in local cache, fetching from Firestore', docId);
+      const fetched = await documentService.getDocumentById(docId);
+      if (fetched) {
+        set((state) => {
+          const existing = state.documents.find((d) => d.id === fetched.id);
+          const documents = existing
+            ? state.documents.map((d) => (d.id === fetched.id ? fetched : d))
+            : [...state.documents, fetched];
+          return { documents };
+        });
+      }
+      return fetched || undefined;
+    };
+
+    try {
+      switch (proposal.type) {
+        case 'propose_create_contact': {
+          const newContact: Contact = {
+            id: generateId(),
+            name: proposal.name,
+            email: proposal.email,
+            phone: proposal.phone,
+            address: proposal.address,
+            source: 'manual',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          await get().saveContact(newContact);
+          return { ok: true, navigate: { kind: 'open_contact', contactId: newContact.id } };
+        }
+
+        case 'propose_draft_quote': {
+          // Resolve customer. If customerId was provided, prefer the local
+          // contacts cache, then fall back to a direct Firestore fetch —
+          // find_customer reads from server-side users/{uid}/contacts, so a
+          // miss in the local cache (stale loadContacts, phone-book contact
+          // not yet synced, contact added on another device) shouldn't kill
+          // the apply path.
+          let contact: Contact | undefined;
+          if (proposal.customerId) {
+            contact = get().contacts.find((c) => c.id === proposal.customerId);
+            if (!contact) {
+              // eslint-disable-next-line no-console
+              console.log('[Mate] contact not in local cache, fetching from Firestore', proposal.customerId);
+              const fetched = await firestoreService.getContactById(proposal.customerId);
+              if (fetched) {
+                contact = fetched;
+                // Add to the local cache so subsequent reads + future tabs see it.
+                const next = [...get().contacts.filter((c) => c.id !== fetched.id), fetched];
+                set({ contacts: next });
+                AsyncStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(next)).catch(() => {});
+              }
+            }
+            if (!contact) {
+              return {
+                ok: false,
+                error: 'Couldn\'t find that contact in Firestore. Ask again so Mate can re-search.',
+              };
+            }
+          } else if (proposal.customerDraft?.name) {
+            contact = {
+              id: generateId(),
+              name: proposal.customerDraft.name,
+              email: proposal.customerDraft.email,
+              phone: proposal.customerDraft.phone,
+              address: proposal.customerDraft.address,
+              source: 'manual',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            await get().saveContact(contact);
+          }
+
+          // Mint a new quote so business defaults (labour rate, markup, GST)
+          // are stamped from settings.
+          get().createNewQuote();
+          const fresh = get().currentQuote;
+          if (!fresh) return { ok: false, error: 'Failed to create draft quote.' };
+
+          // Stamp customer + scope. Materials come from the pipeline.
+          const seeded: Quote = {
+            ...fresh,
+            customerName: contact?.name || proposal.customerDraft?.name || '',
+            customerEmail: contact?.email,
+            customerPhone: contact?.phone,
+            jobAddress: contact?.address,
+            contactId: contact?.id,
+            job: {
+              ...fresh.job,
+              name: proposal.jobName,
+              description: proposal.jobDescription,
+            },
+            laborHours: proposal.estimatedDurationHours ?? fresh.laborHours,
+          };
+          get().updateQuote(seeded);
+          await get().saveDraft(get().currentQuote!);
+          const quoteId = get().currentQuote!.id;
+
+          // Run the FULL pipeline (analyse + pricing) IN CHAT via the shared
+          // materialsPipeline service. The onProgress callback streams events
+          // into the working card the chat already mounted. After both phases
+          // complete, navigate to JobPreview so the tradie sees the priced
+          // draft instead of an empty materials screen.
+          let materialCount = 0;
+          let pricingSummary: string | undefined;
+          try {
+            // Track the current working status so partial updates (e.g. an
+            // item-priced event that only changes the detail line) don't blow
+            // away the phase headline. Without merging, fast per-item events
+            // overwrite the user-visible phase and the card looks like it's
+            // flashing between item names with no context for what's happening.
+            let currentWorking: WorkingStatus = {
+              phase: 'preflight',
+              status: 'Getting ready…',
+              done: false,
+            };
+            const reportProgress = (next: Partial<WorkingStatus>) => {
+              currentWorking = { ...currentWorking, ...next };
+              onProgress?.(currentWorking);
+            };
+            reportProgress({});
+            const templates = await loadTemplates().catch(() => []);
+            const isPro = get().getEffectivePlan() === 'pro';
+
+            // ── Phase 1: analyse ──
+            const analyseResult = await generateMaterialsForQuote(
+              {
+                quote: get().currentQuote!,
+                businessSettings: get().businessSettings,
+                isPro,
+                templates,
+              },
+              {
+                onEvent: (event) => {
+                  reportProgress({
+                    phase: event.phase,
+                    status: event.status,
+                    detail: event.detail,
+                  });
+                },
+              },
+            ).catch((err) => {
+              if (err instanceof PipelineCancelled) return null;
+              throw err;
+            });
+
+            if (!analyseResult) {
+              return { ok: false, error: 'Pipeline was cancelled.' };
+            }
+
+            get().updateQuote(analyseResult.updatedQuote);
+            await get().saveDraft(get().currentQuote!);
+            materialCount = analyseResult.generatedMaterialCount;
+
+            // ── Phase 2: pricing ──
+            // Reuse the same working card. Map PricingEvents → WorkingStatus.
+            // status holds the phase headline (slow-changing) while detail
+            // carries the rapid per-item progress.
+            reportProgress({
+              phase: 'pricing',
+              status: `Pricing ${materialCount} item${materialCount === 1 ? '' : 's'}…`,
+              detail: undefined,
+            });
+
+            const pricedResult = await fetchPricesForQuote(
+              {
+                quote: get().currentQuote!,
+                businessSettings: get().businessSettings,
+                reeceConnected: null, // pipeline resolves on demand
+              },
+              {
+                onEvent: (event) => {
+                  if (event.kind === 'phase-start') {
+                    reportProgress({
+                      phase: 'pricing',
+                      status: event.status,
+                      detail: undefined,
+                    });
+                  } else if (event.kind === 'batch-chunk') {
+                    reportProgress({
+                      status:
+                        event.currentName ||
+                        `Checking Bunnings (batch ${event.chunkIndex} of ${event.totalChunks})…`,
+                      detail: `${event.progress.current}/${event.progress.total} items priced`,
+                    });
+                  } else if (event.kind === 'item-priced') {
+                    // Update detail only — keep the phase status stable.
+                    const progressLine = event.progress
+                      ? `${event.progress.current}/${event.progress.total} priced`
+                      : undefined;
+                    const itemLine = event.success
+                      ? `${progressLine ? progressLine + ' · ' : ''}Just priced ${event.name}`
+                      : `${progressLine ? progressLine + ' · ' : ''}Couldn't find ${event.name}`;
+                    reportProgress({ detail: itemLine });
+                  } else if (event.kind === 'reconcile-start') {
+                    reportProgress({
+                      status: 'Sorting pack sizes and quantities…',
+                      detail: 'Mate is double-checking every line.',
+                    });
+                  } else if (event.kind === 'reece-reauth') {
+                    reportProgress({
+                      status: 'Reece sign-in expired — sort it in Settings to use Reece prices.',
+                      detail: undefined,
+                    });
+                  }
+                },
+              },
+            );
+
+            get().updateQuote(pricedResult.updatedQuote);
+            await get().saveDraft(get().currentQuote!);
+
+            const parts: string[] = [];
+            if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
+            if (pricedResult.failedCount > 0) parts.push(`${pricedResult.failedCount} need pricing`);
+            if (pricedResult.skippedCount > 0) parts.push(`${pricedResult.skippedCount} already priced`);
+            pricingSummary = parts.join(' · ') || 'Nothing to price.';
+
+            onProgress?.({
+              phase: 'done',
+              status: `Drafted ${materialCount} item${materialCount === 1 ? '' : 's'}.`,
+              done: true,
+              summary: pricingSummary,
+            });
+          } catch (err: any) {
+            // eslint-disable-next-line no-console
+            console.warn('[Mate] pipeline failed', err);
+            onProgress?.({
+              phase: 'failed',
+              status: 'Pipeline hit a snag.',
+              detail: err?.message,
+              done: true,
+            });
+            return {
+              ok: true,
+              navigate: { kind: 'job_preview', quoteId },
+              note: `Pipeline snag — opened the draft, tap Fetch Prices in the wizard. (${err?.message || 'unknown'})`,
+            };
+          }
+
+          // Land on JobPreview (the final review screen) instead of
+          // MaterialsList — pricing is already done.
+          return {
+            ok: true,
+            navigate: { kind: 'job_preview', quoteId },
+          };
+        }
+
+        case 'propose_add_line_item': {
+          // We don't price line items here — stamp a placeholder material with
+          // the searchTerm + qty + unit and let MaterialsList's pricing pass
+          // resolve the price when the tradie next opens the quote. The
+          // tradie can also edit the placeholder before pricing runs.
+          const stub: Material = {
+            id: generateId(),
+            name: proposal.searchTerm,
+            searchTerm: proposal.searchTerm,
+            quantity: proposal.qty,
+            unit: normalizeMaterialUnit(proposal.unit),
+            price: 0,
+            totalPrice: 0,
+            manualPriceOverride: false,
+            ...(proposal.section ? { section: proposal.section } : {}),
+          };
+
+          const target = await resolveDocument(proposal.quoteId);
+          if (target) {
+            const nextDoc: Document = {
+              ...target,
+              materials: [...(target.materials ?? []), stub],
+            };
+            await get().saveDocument(nextDoc);
+            return { ok: true };
+          }
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (!quote) return { ok: false, error: 'Quote not found.' };
+          await get().saveQuote({ ...quote, materials: [...quote.materials, stub], updatedAt: new Date() });
+          return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
+        }
+
+        case 'propose_delete_line_item': {
+          // Prefer the unified Document path so the legacy mirror tracks the
+          // change; fall back to legacy quote/invoice arrays.
+          const target = await resolveDocument(proposal.quoteId);
+          if (target) {
+            const before = (target.materials ?? []).length;
+            const nextMaterials = (target.materials ?? []).filter((m) => m.id !== proposal.materialId);
+            if (nextMaterials.length === before) {
+              return { ok: false, error: 'Line not found — it may have already been removed.' };
+            }
+            const nextDoc: Document = { ...target, materials: nextMaterials };
+            await get().saveDocument(nextDoc);
+            return { ok: true };
+          }
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (quote) {
+            const before = quote.materials.length;
+            const nextMaterials = quote.materials.filter((m) => m.id !== proposal.materialId);
+            if (nextMaterials.length === before) {
+              return { ok: false, error: 'Line not found — it may have already been removed.' };
+            }
+            await get().saveQuote({ ...quote, materials: nextMaterials, updatedAt: new Date() });
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
+          }
+          const invoice = get().invoices.find((i) => i.id === proposal.quoteId);
+          if (invoice) {
+            const before = invoice.materials.length;
+            const nextMaterials = invoice.materials.filter((m) => m.id !== proposal.materialId);
+            if (nextMaterials.length === before) {
+              return { ok: false, error: 'Line not found — it may have already been removed.' };
+            }
+            await get().saveInvoice({ ...invoice, materials: nextMaterials, updatedAt: new Date() });
+            return { ok: true };
+          }
+          return { ok: false, error: 'Quote not found.' };
+        }
+
+        case 'propose_send_quote': {
+          const doc = await resolveDocument(proposal.quoteId);
+          if (!doc) return { ok: false, error: 'Quote not found.' };
+          return {
+            ok: true,
+            navigate: {
+              kind: 'open_send_modal',
+              documentId: doc.id,
+              recipientEmail: proposal.recipientEmail || doc.customerEmail,
+            },
+          };
+        }
+
+        case 'propose_convert_to_invoice': {
+          const doc = await resolveDocument(proposal.quoteId);
+          if (doc) {
+            const converted = await get().convertDocumentToInvoice(doc.id);
+            return { ok: true, navigate: { kind: 'open_invoice', invoiceId: converted.id } };
+          }
+          // Fall back to legacy quotes array (very old drafts not yet mirrored
+          // to the unified collection).
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (!quote) return { ok: false, error: 'Quote not found.' };
+          const invoice = await get().createInvoiceFromQuote(quote);
+          return { ok: true, navigate: { kind: 'open_invoice', invoiceId: invoice.id } };
+        }
+
+        default:
+          return { ok: false, error: 'Unknown proposal type.' };
+      }
+    } catch (err: any) {
+      return { ok: false, error: err?.message || 'Failed to apply proposal.' };
+    }
+  },
+
   // Clear all data (for logout)
   clearAllData: async () => {
     try {
@@ -2406,6 +2990,7 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.XERO_CONNECTION,
         STORAGE_KEYS.CONTACTS,
         STORAGE_KEYS.CONTACTS_MIGRATED,
+        STORAGE_KEYS.CONVERSATIONS,
         '@quotemate:seen_screen_tours',
       ]);
       // Reset store state to initial values
@@ -2429,6 +3014,8 @@ export const useStore = create<AppState>((set, get) => ({
         xeroContacts: [],
         documents: [],
         documentsLoaded: false,
+        conversations: [],
+        currentConversationId: null,
       });
     } catch (error) {
       throw error;
