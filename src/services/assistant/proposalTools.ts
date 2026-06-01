@@ -1,88 +1,41 @@
-// Proposal-tool handlers. These never write — they validate the payload the
-// model emitted and bundle it as a Proposal for the client to render. The
-// client's applyProposal() is the only path that touches store actions.
+// Mate proposal-tool validators — client-side mirror of
+// functions/src/assistant/proposalTools.ts. These don't mutate state; they
+// turn a tool-call payload into a typed Proposal that the chat surface
+// renders as a confirmation card. The store's applyProposal() is the only
+// path that touches data.
 
-import { generateProposalId } from './ids';
-
-export interface BaseProposal {
-  id: string;
-  toolUseId: string;
-  createdAt: string;
-}
-
-export interface DraftQuoteProposal extends BaseProposal {
-  type: 'propose_draft_quote';
-  customerId?: string;
-  customerDraft?: { name: string; phone?: string; email?: string; address?: string };
-  jobName: string;
-  jobDescription: string;
-  estimatedDurationHours?: number;
-}
-
-export interface AddLineItemProposal extends BaseProposal {
-  type: 'propose_add_line_item';
-  quoteId: string;
-  searchTerm: string;
-  qty: number;
-  unit: string;
-  section?: string;
-}
-
-export interface DeleteLineItemProposal extends BaseProposal {
-  type: 'propose_delete_line_item';
-  quoteId: string;
-  materialId: string;
-  displayName?: string;
-  displayQty?: number;
-  displayUnit?: string;
-  displayTotal?: number;
-}
-
-export interface CreateContactProposal extends BaseProposal {
-  type: 'propose_create_contact';
-  name: string;
-  phone?: string;
-  email?: string;
-  address?: string;
-}
-
-export interface SendQuoteProposal extends BaseProposal {
-  type: 'propose_send_quote';
-  quoteId: string;
-  recipientEmail?: string;
-}
-
-export interface ConvertToInvoiceProposal extends BaseProposal {
-  type: 'propose_convert_to_invoice';
-  quoteId: string;
-}
-
-export type Proposal =
-  | DraftQuoteProposal
-  | AddLineItemProposal
-  | DeleteLineItemProposal
-  | CreateContactProposal
-  | SendQuoteProposal
-  | ConvertToInvoiceProposal;
+import {
+  AddLineItemProposal,
+  ConvertToInvoiceProposal,
+  CreateContactProposal,
+  DeleteLineItemProposal,
+  DraftQuoteProposal,
+  Proposal,
+  RepriceQuoteProposal,
+  SendQuoteProposal,
+} from '../../types/assistant';
 
 export interface ProposalResult {
   proposal?: Proposal;
   error?: string;
 }
 
-export function buildProposal(
-  toolName: string,
-  toolUseId: string,
-  input: any,
-): ProposalResult {
+function newProposalId(): string {
+  return `prop_${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function buildProposal(toolName: string, toolUseId: string, input: any): ProposalResult {
   const now = new Date().toISOString();
-  const id = generateProposalId();
+  const id = newProposalId();
 
   switch (toolName) {
     case 'propose_draft_quote': {
-      if (!input.jobName) return { error: 'propose_draft_quote requires jobName.' };
-      if (!input.jobDescription || String(input.jobDescription).trim().length < 10) {
-        return { error: 'propose_draft_quote requires a real jobDescription — the pipeline needs the scope to generate materials.' };
+      if (!input?.jobName) return { error: 'propose_draft_quote requires jobName.' };
+      if (!input?.jobDescription || String(input.jobDescription).trim().length < 10) {
+        return {
+          error:
+            'propose_draft_quote requires a real jobDescription — the pipeline needs the scope to generate materials.',
+        };
       }
       if (!input.customerId && !input.customerDraft?.name) {
         return { error: 'Provide customerId (from find_customer) or customerDraft.name.' };
@@ -105,8 +58,8 @@ export function buildProposal(
     }
 
     case 'propose_add_line_item': {
-      if (!input.quoteId) return { error: 'propose_add_line_item requires quoteId.' };
-      if (!input.searchTerm) return { error: 'propose_add_line_item requires searchTerm — the pipeline prices it.' };
+      if (!input?.quoteId) return { error: 'propose_add_line_item requires quoteId.' };
+      if (!input?.searchTerm) return { error: 'propose_add_line_item requires searchTerm — the pipeline prices it.' };
       const proposal: AddLineItemProposal = {
         id,
         toolUseId,
@@ -122,8 +75,10 @@ export function buildProposal(
     }
 
     case 'propose_delete_line_item': {
-      if (!input.quoteId) return { error: 'propose_delete_line_item requires quoteId.' };
-      if (!input.materialId) return { error: 'propose_delete_line_item requires materialId — fetch the quote first to get it.' };
+      if (!input?.quoteId) return { error: 'propose_delete_line_item requires quoteId.' };
+      if (!input?.materialId) {
+        return { error: 'propose_delete_line_item requires materialId — fetch the quote first to get it.' };
+      }
       const proposal: DeleteLineItemProposal = {
         id,
         toolUseId,
@@ -140,7 +95,7 @@ export function buildProposal(
     }
 
     case 'propose_create_contact': {
-      if (!input.name) return { error: 'propose_create_contact requires name.' };
+      if (!input?.name) return { error: 'propose_create_contact requires name.' };
       const proposal: CreateContactProposal = {
         id,
         toolUseId,
@@ -155,7 +110,7 @@ export function buildProposal(
     }
 
     case 'propose_send_quote': {
-      if (!input.quoteId) return { error: 'propose_send_quote requires quoteId.' };
+      if (!input?.quoteId) return { error: 'propose_send_quote requires quoteId.' };
       const proposal: SendQuoteProposal = {
         id,
         toolUseId,
@@ -168,13 +123,27 @@ export function buildProposal(
     }
 
     case 'propose_convert_to_invoice': {
-      if (!input.quoteId) return { error: 'propose_convert_to_invoice requires quoteId.' };
+      if (!input?.quoteId) return { error: 'propose_convert_to_invoice requires quoteId.' };
       const proposal: ConvertToInvoiceProposal = {
         id,
         toolUseId,
         createdAt: now,
         type: 'propose_convert_to_invoice',
         quoteId: String(input.quoteId),
+      };
+      return { proposal };
+    }
+
+    case 'propose_reprice': {
+      if (!input?.quoteId) return { error: 'propose_reprice requires quoteId.' };
+      const proposal: RepriceQuoteProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_reprice',
+        quoteId: String(input.quoteId),
+        displayName: input.displayName ? String(input.displayName) : undefined,
+        displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
       };
       return { proposal };
     }

@@ -19,8 +19,11 @@ import {
 } from '../types';
 import { generateId } from '../utils/generateId';
 import { buildTradeContext } from '../utils/buildTradeContext';
-import { supplierPriceForGstMode } from '../utils/quoteCalculator';
+import { supplierPriceForGstMode, roundToTwoDecimals } from '../utils/quoteCalculator';
 import { applyPackAwarePricing } from '../utils/packAwarePricing';
+import { parsePackInfo } from '../utils/parsePackInfo';
+import { coverageSanePurchaseCount } from '../utils/purchaseCoverage';
+import { parseJobAreaM2, geometricSanePieceCount } from '../utils/geometricCoverage';
 import {
   analyzeJobDescription,
   convertLLMMaterialsToMaterials,
@@ -538,7 +541,7 @@ export async function fetchPricesForQuote(
 
       const reecePrice = supplierPriceForGstMode(result.price, gstInclusive);
       m.price = reecePrice;
-      m.totalPrice = reecePrice * m.quantity;
+      m.totalPrice = roundToTwoDecimals(reecePrice * m.quantity);
       m.manualPriceOverride = false;
       m.pricingSource = 'api';
       m.bunningsItemNumber = undefined;
@@ -823,12 +826,20 @@ export async function fetchPricesForQuote(
           name: m.searchTerm || m.name,
           requirement: m.requiredQty ?? m.quantity,
           requirementUnit: (m.packUnit ?? m.unit) as string,
-          candidates: cands.slice(0, 5).map((c) => ({
-            name: c.productName,
-            price: c.price,
-            url: c.productUrl,
-            description: c.description,
-          })),
+          candidates: cands.slice(0, 5).map((c) => {
+            // Forward the product's pack/volume size so the reconcile LLM can
+            // see that a $151 product is a 500-screw tub rather than guessing
+            // coverage from the name. Fall back to parsing it from the title.
+            const parsed = parsePackInfo(c.productName);
+            return {
+              name: c.productName,
+              price: c.price,
+              url: c.productUrl,
+              description: c.description,
+              packSize: c.packSize ?? parsed?.packSize,
+              packUnit: c.packUnit ?? parsed?.packUnit,
+            };
+          }),
         };
       });
 
@@ -859,14 +870,23 @@ export async function fetchPricesForQuote(
             r.purchaseCount > 0
           ) {
             if (m.requiredQty === undefined) m.requiredQty = m.quantity;
-            m.quantity = r.purchaseCount;
+            // Deterministic coverage guard — no candidate matched, so no pack
+            // size is known; relies on the estimated unit price being bulk.
+            let estPurchaseCount = r.purchaseCount;
+            const estSane = coverageSanePurchaseCount({
+              requirement: m.requiredQty,
+              name: m.name,
+              perPurchasePrice: r.estimatedUnitPrice,
+            });
+            if (estSane !== null && estSane < estPurchaseCount) estPurchaseCount = estSane;
+            m.quantity = estPurchaseCount;
             if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
-            const estimatedUnit = supplierPriceForGstMode(r.estimatedUnitPrice, gstInclusive);
+            // Unit price is the source of truth at 2dp; derive the line total
+            // from it so quantity × price === totalPrice always holds. (Stop
+            // trusting the LLM's r.totalPrice, which drifts from the unit price.)
+            const estimatedUnit = roundToTwoDecimals(supplierPriceForGstMode(r.estimatedUnitPrice, gstInclusive));
             m.price = estimatedUnit;
-            m.totalPrice =
-              typeof r.totalPrice === 'number' && r.totalPrice > 0
-                ? supplierPriceForGstMode(r.totalPrice, gstInclusive)
-                : estimatedUnit * r.purchaseCount;
+            m.totalPrice = roundToTwoDecimals(estimatedUnit * estPurchaseCount);
             m.priceConfidence = 'low';
             m.pricingSource = 'ai';
             m.description = r.coverageNote || r.reasoning || 'Estimated — verify with supplier';
@@ -903,12 +923,39 @@ export async function fetchPricesForQuote(
               if (chosen.stockCheckedAt) m.stockCheckedAt = chosen.stockCheckedAt;
             }
             if (m.requiredQty === undefined) m.requiredQty = m.quantity;
-            m.quantity = r.purchaseCount;
+            const originalCount = r.purchaseCount;
+            // Per-purchase price: prefer the chosen candidate's real shelf price,
+            // else the LLM's implied unit price (its total ÷ its count).
+            const candidatePrice = chosen && chosen.price > 0 ? chosen.price : 0;
+            const impliedUnitInc =
+              candidatePrice > 0
+                ? candidatePrice
+                : typeof r.totalPrice === 'number' && r.totalPrice > 0
+                  ? r.totalPrice / originalCount
+                  : 0;
+            // Deterministic coverage guard against bulk fastener/oil over-buys
+            // (e.g. 19 tubs of decking screws when 1 covers a 10 m² deck). Uses
+            // the candidate's real pack size when known, else a conservative
+            // bulk assumption for high-priced fastener/liquid rows only.
+            const candidatePackSize =
+              (chosen as { packSize?: number } | undefined)?.packSize ??
+              parsePackInfo(chosen?.productName)?.packSize;
+            const sane = coverageSanePurchaseCount({
+              requirement: m.requiredQty,
+              name: m.name,
+              perPurchasePrice: impliedUnitInc,
+              packSize: candidatePackSize ?? undefined,
+            });
+            const purchaseCount = sane !== null && sane < originalCount ? sane : originalCount;
+            m.quantity = purchaseCount;
             if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
-            if (typeof r.totalPrice === 'number' && r.totalPrice > 0) {
-              const adjustedTotal = supplierPriceForGstMode(r.totalPrice, gstInclusive);
-              m.totalPrice = adjustedTotal;
-              m.price = adjustedTotal / r.purchaseCount;
+            // Establish a 2dp unit price and derive the line total from it so
+            // quantity × price === totalPrice always holds — this also kills the
+            // float drift that printed $182.22 next to "96 × $1.90".
+            if (impliedUnitInc > 0) {
+              const unitPrice = roundToTwoDecimals(supplierPriceForGstMode(impliedUnitInc, gstInclusive));
+              m.price = unitPrice;
+              m.totalPrice = roundToTwoDecimals(unitPrice * purchaseCount);
             }
             if (r.confidence) m.priceConfidence = r.confidence;
             if (r.coverageNote) m.description = r.coverageNote;
@@ -917,6 +964,48 @@ export async function fetchPricesForQuote(
       } catch {
         // Reconciliation is best-effort — fall back to whatever the per-row
         // pack-aware regex worked out.
+      }
+    }
+
+    // ── Final deterministic coverage sweep ──
+    // Catches bulk fastener/oil over-buys on rows the reconcile pass skips
+    // (locally- and Reece-priced rows), reducing the count without overwriting
+    // the resolved unit price. Idempotent — rows already at a sane count, and
+    // every non-fastener/non-liquid row, are left untouched.
+    //
+    // The same loop also runs a geometric clamp for area-derived board
+    // piece-goods (e.g. 891 decking boards on a 30 m² deck) — the piece-good
+    // case the bulk guard above deliberately skips. Needs the job area, parsed
+    // from the description ("15 metre by 2 metre" → 30 m²); null when absent.
+    const jobAreaM2 = parseJobAreaM2(quote.job?.description)?.areaM2 ?? null;
+    for (const m of updatedMaterials) {
+      if (m.manualPriceOverride) continue;
+      if (m.requiredQty === undefined || !(m.price > 0)) continue;
+      const sane = coverageSanePurchaseCount({
+        requirement: m.requiredQty,
+        name: m.name,
+        // m.price is in the business's GST mode; compare against inc-GST retail.
+        perPurchasePrice: gstInclusive ? m.price : roundToTwoDecimals(m.price * 1.1),
+        packSize: m.packSize,
+      });
+      if (sane !== null && sane < m.quantity) {
+        m.quantity = sane;
+        m.totalPrice = roundToTwoDecimals(m.price * sane);
+      }
+
+      // Geometric clamp: board piece-goods (decking/weatherboard/cladding)
+      // whose count is wildly over a width-derived ceiling for the job area.
+      // Reasonable counts and every non-board row pass through untouched.
+      if (jobAreaM2 !== null) {
+        const geoMax = geometricSanePieceCount({
+          name: m.name,
+          requirement: m.requiredQty,
+          areaM2: jobAreaM2,
+        });
+        if (geoMax !== null && geoMax < m.quantity) {
+          m.quantity = geoMax;
+          m.totalPrice = roundToTwoDecimals(m.price * geoMax);
+        }
       }
     }
   } catch (err: any) {

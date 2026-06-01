@@ -50,7 +50,7 @@ export {
   leadUnsubscribe,
 } from './leadOutreach';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
-export { assistantChat } from './assistantChat';
+export { assistantToken } from './assistantToken';
 import {
   buildXeroAuthHeaders,
   buildXeroLineItems,

@@ -6,6 +6,7 @@
 
 import { Material } from '../types';
 import { parsePackInfo } from './parsePackInfo';
+import { roundToTwoDecimals } from './documentCalculator';
 
 /**
  * Maps each Material unit to its base unit for equivalence checking. Pack
@@ -62,5 +63,5 @@ export function applyPackAwarePricing(
     material.packSize = undefined;
     material.packUnit = undefined;
   }
-  material.totalPrice = material.quantity * material.price;
+  material.totalPrice = roundToTwoDecimals(material.quantity * material.price);
 }

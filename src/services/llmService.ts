@@ -794,7 +794,17 @@ function getFallbackResponse(jobDescription: string): LLMResponse {
 export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Partial<Material> & { sectionMultiplier?: number; sectionLaborHours?: number; savedRateName?: string })[] {
   return llmMaterials.map((m) => {
     const multiplier = m.sectionMultiplier || 1;
-    const finalQuantity = Math.round(m.quantity * multiplier * 1000) / 1000;
+    let finalQuantity = Math.round(m.quantity * multiplier * 1000) / 1000;
+    // Backstop against the per-unit × multiplier explosion. validateMaterials
+    // caps per-unit qty at 999 and the multiplier at 200 independently, so their
+    // PRODUCT can still reach ~200k (real stored cases: 500 × 25 = 12,500 and
+    // 42,957 "each" decking screws). Bulk units (kg/L/m/m²/m³) can legitimately
+    // be large, so only cap discrete COUNT units; the downstream pack-aware +
+    // coverage passes then collapse this to the real number of packs to buy.
+    const COUNT_UNITS = ['each', 'pack', 'box'];
+    if (COUNT_UNITS.includes(m.unit) && finalQuantity > 5000) {
+      finalQuantity = 5000;
+    }
     // When the backend has already resolved a Reece catalogue match, trust
     // the pre-stamped price/itemNumber/pricingSource — the reece pricing
     // pass in MaterialsListScreen skips materials that already carry these.
@@ -1202,6 +1212,10 @@ export interface ReconcileCandidate {
   price: number;
   url?: string;
   description?: string;
+  /** Pack/volume size the price covers (e.g. 500 each, 10 L), when known.
+   *  Lets the reconcile pass compute packs-needed instead of guessing. */
+  packSize?: number;
+  packUnit?: string;
 }
 
 export interface ReconcileItem {

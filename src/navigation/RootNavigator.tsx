@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Animated, StyleSheet, View, TouchableOpacity, LayoutChangeEvent, Platform } from 'react-native';
+import { Animated, StyleSheet, View, Text, TouchableOpacity, LayoutChangeEvent, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -376,6 +376,11 @@ function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             >
               <Animated.View style={{ transform: [{ scale: iconScales[index] }] }}>
                 <MaterialCommunityIcons name={iconName} size={26} color={tintColor} />
+                {route.name === 'Mate' && (
+                  <View style={styles.betaBadge}>
+                    <Text style={styles.betaBadgeText}>BETA</Text>
+                  </View>
+                )}
               </Animated.View>
               <Animated.Text
                 style={[
@@ -426,14 +431,14 @@ function MainTabs() {
         options={{ title: 'QuoteMate' }}
       />
       <Tab.Screen
-        name="Jobs"
-        component={JobsListScreen}
-        options={{ title: 'Jobs' }}
-      />
-      <Tab.Screen
         name="Mate"
         component={AssistantScreen}
         options={{ title: 'Mate' }}
+      />
+      <Tab.Screen
+        name="Jobs"
+        component={JobsListScreen}
+        options={{ title: 'Jobs' }}
       />
       <Tab.Screen
         name="Settings"
@@ -904,6 +909,21 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontSize: 11,
     marginTop: 3,
+  },
+  betaBadge: {
+    position: 'absolute',
+    top: -7,
+    right: -20,
+    backgroundColor: colors.primary,
+    borderRadius: 6,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  betaBadgeText: {
+    fontSize: 7,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    color: colors.white,
   },
   liquidPill: {
     position: 'absolute',

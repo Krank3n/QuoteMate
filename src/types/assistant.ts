@@ -8,7 +8,8 @@ export type ProposalType =
   | 'propose_delete_line_item'
   | 'propose_create_contact'
   | 'propose_send_quote'
-  | 'propose_convert_to_invoice';
+  | 'propose_convert_to_invoice'
+  | 'propose_reprice';
 
 export interface BaseProposal {
   id: string;
@@ -64,13 +65,23 @@ export interface ConvertToInvoiceProposal extends BaseProposal {
   quoteId: string;
 }
 
+export interface RepriceQuoteProposal extends BaseProposal {
+  type: 'propose_reprice';
+  quoteId: string;
+  // Display-only — lets the card name the quote being re-priced without a
+  // round-trip. The pipeline re-prices the flagged rows on Apply regardless.
+  displayName?: string;
+  displayTotal?: number;
+}
+
 export type Proposal =
   | DraftQuoteProposal
   | AddLineItemProposal
   | DeleteLineItemProposal
   | CreateContactProposal
   | SendQuoteProposal
-  | ConvertToInvoiceProposal;
+  | ConvertToInvoiceProposal
+  | RepriceQuoteProposal;
 
 export type ProposalStatus = 'pending' | 'applied' | 'dismissed' | 'failed';
 

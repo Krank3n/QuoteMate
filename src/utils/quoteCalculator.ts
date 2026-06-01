@@ -16,6 +16,7 @@ import {
 
 export {
   formatCurrency,
+  roundToTwoDecimals,
   updateMaterialTotalPrice,
   updateAllMaterialPrices,
   calculateEffectiveHourlyRate,

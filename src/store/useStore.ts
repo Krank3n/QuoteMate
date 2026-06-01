@@ -19,7 +19,9 @@ import {
   generateMaterialsForQuote,
   fetchPricesForQuote,
   PipelineCancelled,
+  PricingEvent,
 } from '../services/materialsPipeline';
+import { reviewQuoteMaterials, isFlaggedRow, QuoteReview } from '../utils/quoteReview';
 import { loadTemplates } from '../services/sectionTemplateService';
 import { TourPhase } from '../components/tour/tourFlow';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
@@ -266,7 +268,7 @@ interface AppState {
 }
 
 export type ApplyProposalResult =
-  | { ok: true; navigate?: NavigateHint; note?: string }
+  | { ok: true; navigate?: NavigateHint; note?: string; review?: QuoteReview }
   | { ok: false; error: string };
 
 export type NavigateHint =
@@ -366,6 +368,53 @@ function normalizeMaterialUnit(raw: string): Material['unit'] {
   if (s === 'box' || s === 'boxes') return 'box';
   if (s === 'pack' || s === 'packs') return 'pack';
   return 'each';
+}
+
+// Map a pricing-pipeline event onto a partial WorkingStatus update. Shared by
+// the draft and reprice apply paths so their chat progress cards read the same;
+// `status` carries the slow-changing phase headline, `detail` the rapid per-item
+// progress (kept separate so fast item events don't blow away the headline).
+function pricingEventToProgress(event: PricingEvent): Partial<WorkingStatus> | null {
+  if (event.kind === 'phase-start') {
+    return { phase: 'pricing', status: event.status, detail: undefined };
+  }
+  if (event.kind === 'batch-chunk') {
+    return {
+      status:
+        event.currentName || `Checking Bunnings (batch ${event.chunkIndex} of ${event.totalChunks})…`,
+      detail: `${event.progress.current}/${event.progress.total} items priced`,
+    };
+  }
+  if (event.kind === 'item-priced') {
+    const progressLine = event.progress
+      ? `${event.progress.current}/${event.progress.total} priced`
+      : undefined;
+    const itemLine = event.success
+      ? `${progressLine ? progressLine + ' · ' : ''}Just priced ${event.name}`
+      : `${progressLine ? progressLine + ' · ' : ''}Couldn't find ${event.name}`;
+    return { detail: itemLine };
+  }
+  if (event.kind === 'reconcile-start') {
+    return { status: 'Sorting pack sizes and quantities…', detail: 'Mate is double-checking every line.' };
+  }
+  if (event.kind === 'reece-reauth') {
+    return { status: 'Reece sign-in expired — sort it in Settings to use Reece prices.', detail: undefined };
+  }
+  return null;
+}
+
+// Wipe the price off every row the review flags (no price, AI estimate,
+// low-confidence) so fetchPrices re-fetches them — it skips any row already at
+// price > 0. Manual overrides and confident rows are never flagged, so they're
+// left exactly as they were. requiredQty is preserved so pack rounding still works.
+function resetFlaggedRowsForReprice(materials: Material[]): { materials: Material[]; resetCount: number } {
+  let resetCount = 0;
+  const next = materials.map((m) => {
+    if (!isFlaggedRow(m)) return m;
+    resetCount++;
+    return { ...m, price: 0, totalPrice: 0, priceConfidence: undefined, pricingSource: undefined };
+  });
+  return { materials: next, resetCount };
 }
 
 // Cached map keyed on the documents array identity. Rebuilt whenever the
@@ -2727,6 +2776,7 @@ export const useStore = create<AppState>((set, get) => ({
           // draft instead of an empty materials screen.
           let materialCount = 0;
           let pricingSummary: string | undefined;
+          let review: QuoteReview | undefined;
           try {
             // Track the current working status so partial updates (e.g. an
             // item-priced event that only changes the detail line) don't blow
@@ -2794,45 +2844,15 @@ export const useStore = create<AppState>((set, get) => ({
               },
               {
                 onEvent: (event) => {
-                  if (event.kind === 'phase-start') {
-                    reportProgress({
-                      phase: 'pricing',
-                      status: event.status,
-                      detail: undefined,
-                    });
-                  } else if (event.kind === 'batch-chunk') {
-                    reportProgress({
-                      status:
-                        event.currentName ||
-                        `Checking Bunnings (batch ${event.chunkIndex} of ${event.totalChunks})…`,
-                      detail: `${event.progress.current}/${event.progress.total} items priced`,
-                    });
-                  } else if (event.kind === 'item-priced') {
-                    // Update detail only — keep the phase status stable.
-                    const progressLine = event.progress
-                      ? `${event.progress.current}/${event.progress.total} priced`
-                      : undefined;
-                    const itemLine = event.success
-                      ? `${progressLine ? progressLine + ' · ' : ''}Just priced ${event.name}`
-                      : `${progressLine ? progressLine + ' · ' : ''}Couldn't find ${event.name}`;
-                    reportProgress({ detail: itemLine });
-                  } else if (event.kind === 'reconcile-start') {
-                    reportProgress({
-                      status: 'Sorting pack sizes and quantities…',
-                      detail: 'Mate is double-checking every line.',
-                    });
-                  } else if (event.kind === 'reece-reauth') {
-                    reportProgress({
-                      status: 'Reece sign-in expired — sort it in Settings to use Reece prices.',
-                      detail: undefined,
-                    });
-                  }
+                  const next = pricingEventToProgress(event);
+                  if (next) reportProgress(next);
                 },
               },
             );
 
             get().updateQuote(pricedResult.updatedQuote);
             await get().saveDraft(get().currentQuote!);
+            review = reviewQuoteMaterials(pricedResult.updatedQuote.materials);
 
             const parts: string[] = [];
             if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
@@ -2867,6 +2887,7 @@ export const useStore = create<AppState>((set, get) => ({
           return {
             ok: true,
             navigate: { kind: 'job_preview', quoteId },
+            review,
           };
         }
 
@@ -2964,6 +2985,70 @@ export const useStore = create<AppState>((set, get) => ({
           if (!quote) return { ok: false, error: 'Quote not found.' };
           const invoice = await get().createInvoiceFromQuote(quote);
           return { ok: true, navigate: { kind: 'open_invoice', invoiceId: invoice.id } };
+        }
+
+        case 'propose_reprice': {
+          // Re-run the pricing pipeline (price fetch + reconcile) on an EXISTING
+          // quote/invoice to fix the rows review_quote flagged. We wipe the price
+          // off the flagged rows first (fetchPrices skips anything already
+          // priced); manual overrides and confident rows are never flagged so
+          // they're untouched. Materials only — scope/labour aren't re-analysed.
+          let currentWorking: WorkingStatus = { phase: 'pricing', status: 'Re-checking prices…', done: false };
+          const reportProgress = (next: Partial<WorkingStatus>) => {
+            currentWorking = { ...currentWorking, ...next };
+            onProgress?.(currentWorking);
+          };
+
+          const runReprice = async (source: Quote): Promise<{ priced: Quote; resetCount: number }> => {
+            const { materials, resetCount } = resetFlaggedRowsForReprice(source.materials);
+            reportProgress({
+              status: resetCount > 0 ? `Re-pricing ${resetCount} row${resetCount === 1 ? '' : 's'}…` : 'Re-checking prices…',
+            });
+            const priced = await fetchPricesForQuote(
+              {
+                quote: { ...source, materials },
+                businessSettings: get().businessSettings,
+                reeceConnected: null,
+              },
+              {
+                onEvent: (event) => {
+                  const next = pricingEventToProgress(event);
+                  if (next) reportProgress(next);
+                },
+              },
+            );
+            return { priced: updateQuoteCalculations(priced.updatedQuote), resetCount };
+          };
+
+          // Preferred path: unified Document (covers both quotes and invoices).
+          const doc = await resolveDocument(proposal.quoteId);
+          if (doc) {
+            const { documentToQuote } = await import('../types/documentAdapter');
+            const { priced } = await runReprice(documentToQuote(doc));
+            const repricedDoc: Document = {
+              ...doc,
+              materials: priced.materials,
+              materialsSubtotal: priced.materialsSubtotal,
+              laborTotal: priced.laborTotal,
+              subtotal: priced.subtotal,
+              markupAmount: priced.markupAmount,
+              gst: priced.gst,
+              total: priced.total,
+            };
+            await get().saveDocument(repricedDoc);
+            const review = reviewQuoteMaterials(priced.materials);
+            onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: doc.id }, review };
+          }
+
+          // Legacy fallback: a draft still only in the quotes array.
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (!quote) return { ok: false, error: 'Quote not found.' };
+          const { priced } = await runReprice(quote);
+          await get().saveQuote(priced);
+          const review = reviewQuoteMaterials(priced.materials);
+          onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
+          return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, review };
         }
 
         default:

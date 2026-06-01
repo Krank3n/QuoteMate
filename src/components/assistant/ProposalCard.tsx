@@ -75,6 +75,7 @@ function titleFor(p: Proposal): string {
     case 'propose_create_contact': return 'New contact';
     case 'propose_send_quote': return 'Send quote';
     case 'propose_convert_to_invoice': return 'Convert to invoice';
+    case 'propose_reprice': return 'Re-price quote';
   }
 }
 
@@ -86,6 +87,7 @@ function iconFor(p: Proposal): React.ComponentProps<typeof MaterialCommunityIcon
     case 'propose_create_contact': return 'account-plus-outline';
     case 'propose_send_quote': return 'send-outline';
     case 'propose_convert_to_invoice': return 'cash-multiple';
+    case 'propose_reprice': return 'refresh';
   }
 }
 
@@ -94,6 +96,7 @@ function labelFor(p: Proposal): string {
     case 'propose_send_quote': return 'Send';
     case 'propose_delete_line_item': return 'Delete';
     case 'propose_convert_to_invoice': return 'Convert';
+    case 'propose_reprice': return 'Re-price';
     default: return 'Apply';
   }
 }
@@ -162,6 +165,18 @@ function Body({ proposal }: { proposal: Proposal }) {
       );
     case 'propose_convert_to_invoice':
       return <Text style={styles.summary}>Convert the accepted quote into an invoice.</Text>;
+    case 'propose_reprice':
+      return (
+        <View>
+          {proposal.displayName ? (
+            <Text style={styles.summary} numberOfLines={2}>{proposal.displayName}</Text>
+          ) : null}
+          {typeof proposal.displayTotal === 'number' && (
+            <Text style={styles.dim}>Current total {formatCurrency(proposal.displayTotal)}.</Text>
+          )}
+          <Text style={styles.dim}>Apply re-fetches prices for the flagged rows and reconciles again.</Text>
+        </View>
+      );
   }
 }
 

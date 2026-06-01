@@ -54,6 +54,25 @@ import { AppUpdateSheet } from './src/components/AppUpdateSheet';
 
 const navigationRef = createNavigationContainerRef<any>();
 
+// SPA route restore (web only). The app is served from /app on a static host
+// with no per-route files, so a hard refresh of /app/<route> 404s and the
+// website's 404 page bounces back here with the intended route stashed in
+// sessionStorage. Put that route back in the URL before NavigationContainer
+// reads it below, so refresh lands on the right screen instead of the 404.
+// Runs at module eval (before render); no-op on native and on a clean load.
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  try {
+    const k = 'qm_spa_redirect';
+    const v = window.sessionStorage.getItem(k);
+    if (v) {
+      window.sessionStorage.removeItem(k);
+      if (v !== '/') window.history.replaceState(null, '', '/app' + v);
+    }
+  } catch (e) {
+    // sessionStorage/history unavailable — ignore, app loads at default route.
+  }
+}
+
 const linking: LinkingOptions<any> = {
   prefixes: [Linking.createURL('/'), 'https://quotemateapp.au', 'quotemate://'],
   config: {

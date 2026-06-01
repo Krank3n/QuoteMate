@@ -317,6 +317,27 @@ function summarize(jobDescription: string, llm: LLMResponse, expected: TestCase[
   });
   if (converted.length > 30) console.log(`  ... and ${converted.length - 30} more`);
 
+  // Deterministic material-quantity sanity flags (independent of labour). Catch
+  // the count-explosion and suspicious-pack-count failures that produced the
+  // QU-178011 "19 packs of screws / 5 packs of oil" quote.
+  const COUNT_UNITS = ['each', 'pack', 'box'];
+  const matFlags: string[] = [];
+  for (const m of converted) {
+    if (COUNT_UNITS.includes(m.unit) && m.quantity > 5000) {
+      matFlags.push(`${m.name}: ${m.quantity} ${m.unit} (count explosion > 5000)`);
+    }
+    if ((m.unit === 'pack' || m.unit === 'box') && m.quantity > 10) {
+      matFlags.push(`${m.name}: ${m.quantity} ${m.unit} (suspicious pack count > 10 — likely individual items)`);
+    }
+  }
+  console.log('─'.repeat(80));
+  if (matFlags.length === 0) {
+    console.log('MATERIAL SANITY: ✅ no count explosions or suspicious pack counts');
+  } else {
+    console.log(`MATERIAL SANITY: ⚠️ ${matFlags.length} flag(s)`);
+    matFlags.forEach((f) => console.log(`  • ${f}`));
+  }
+
   console.log('─'.repeat(80));
   console.log(`LABOR TOTAL: $${laborTotal.toFixed(2)}`);
   console.log(`EXPECTED RANGE: $${expected.laborBallpark[0]} - $${expected.laborBallpark[1]}`);
