@@ -1694,7 +1694,7 @@ CRITICAL — emit quantities in the SMALLEST PHYSICAL UNIT, not in guessed packs
 - BULK AGGREGATES (sand, crusher dust, road base, gravel, cement, mortar mix) → emit TOTAL MASS in kg with unit "kg" (e.g. "1275 kg of bedding sand" for 25m² × 30mm @ 1700kg/m³). DO NOT guess bag counts. You don't know whether the SKU is a 20kg, 25kg, or 30kg bag — the pricing layer reads bag size from the product page and divides. If you emit "60 each" thinking it means bags but the scraper returns a 20kg-bag SKU, the system multiplies bag_price × 60 = wrong by ~20×.
 - READY-MIX / POURED CONCRETE sold loose by volume → emit m³ with unit "m³" (e.g. "0.054 m³" for one footing).
 - SHEET / ROLL MATERIALS sold by area (geotextile, weed mat, sarking-by-area, sisalation) → emit total area in m² with unit "m²" (e.g. "30 m²" for 25m² + 20% overlap). The pricing layer converts to roll count using the SKU's coverage.
-- Timber / decking / fascia → emit linear metres and unit "m" (e.g. 75 m).
+- Structural timber sold by length (joists, bearers, fascia, handrail, trim) → emit linear metres and unit "m" (e.g. 75 m). EXCEPTION: decking BOARDS are piece-goods — emit a board COUNT with unit "each" (see the piece-goods rule and the deck worked example below), never linear metres.
 - Tape / membrane sold by linear metre → emit linear metres and unit "m" (e.g. 150 m).
 - Paint / oil / sealer → emit total litres and unit "L" (e.g. 8 L).
 The pricing layer reads pack/length/area/mass size from the product page (e.g. "Box of 500", "5.4m length", "20m² roll", "20kg bag") and computes how many packs to buy. If you guess pack counts yourself you will get them wrong — you have no way to know how many clips are in a pack or how heavy a bag is.
@@ -1724,6 +1724,13 @@ WORKED EXAMPLE — 25m² (5m × 5m) paver patio, a previously-broken case the sy
 - Geotextile / weed mat: 25 × 1.2 = 30. quantity 30, unit "m²". reasoning: "25m² + 20% overlap = 30m²".
 - Plate compactor hire (half day): quantity 1, unit "each".
 WRONG outputs to avoid: "1575 each" of crusher dust, "1050 each" of bedding sand, "100 each" of jointing sand, "430 each" of pavers — these label bulk quantities as "each" and inflate cost ~20×.
+
+WORKED EXAMPLE — 30 m² (15m × 2m) merbau deck, no handrails — a previously-broken case that inflated to ~$75k off a single decking line. Correct outputs:
+- Merbau decking board 90x19mm: lineal metres = 30 ÷ 0.094 (90mm board + 4mm gap) = 319 lm; boards = 319 ÷ 5.4m board length × 1.1 waste ≈ 65. quantity 65, unit "each". reasoning: "30m² ÷ 0.094m coverage = 319 lm ÷ 5.4m × 1.1 = 65". WRONG: 891 (that labels lineal-metre or per-m² maths as a board count).
+- Treated pine joists 90x45 @ 450 centres: (2 ÷ 0.45) + 1 = 6 joists × 15m = 90. quantity 90, unit "m".
+- H4 posts 90x90 @ 1.8m: ((15 ÷ 1.8) + 1) ≈ 10 per row × 2 rows ≈ 20. quantity 20, unit "each". WRONG: 70.
+- Decking oil: 30m² × 2 coats ÷ ~8 m²/L = ~8. quantity 8, unit "L". WRONG: "12 tins".
+This deck is ONE discrete unit (sectionMultiplier = 1), NOT a per-m² surface-covering section — do not multiply these per-deck counts by the area.
 
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
