@@ -32,10 +32,10 @@ const QUOTA = {
   pro: { turns: 200 },
 };
 
-interface RateLimitConfig { maxRequests: number; windowMs: number }
+export interface RateLimitConfig { maxRequests: number; windowMs: number }
 const HEAVY: RateLimitConfig = { maxRequests: 10, windowMs: 60_000 };
 
-async function verifyAuth(
+export async function verifyAuth(
   req: functions.https.Request,
   res: functions.Response,
 ): Promise<admin.auth.DecodedIdToken | null> {
@@ -52,7 +52,7 @@ async function verifyAuth(
   }
 }
 
-async function checkRateLimit(key: string, cfg: RateLimitConfig, res: functions.Response): Promise<boolean> {
+export async function checkRateLimit(key: string, cfg: RateLimitConfig, res: functions.Response): Promise<boolean> {
   const now = Date.now();
   const ref = db().collection('rateLimits').doc(key);
   try {
@@ -72,7 +72,7 @@ async function checkRateLimit(key: string, cfg: RateLimitConfig, res: functions.
   }
 }
 
-async function getEffectivePlan(uid: string): Promise<'free' | 'trial' | 'pro'> {
+export async function getEffectivePlan(uid: string): Promise<'free' | 'trial' | 'pro'> {
   try {
     const snap = await db().doc(`users/${uid}/profile/subscription`).get();
     const data = snap.data() || {};
@@ -98,7 +98,7 @@ function todayKey(): string {
 
 interface UsageDoc { turns: number; outputTokens: number; inputTokens: number }
 
-async function checkAndReserveQuota(
+export async function checkAndReserveQuota(
   uid: string,
   plan: 'free' | 'trial' | 'pro',
 ): Promise<{ ok: true } | { ok: false; reason: string }> {

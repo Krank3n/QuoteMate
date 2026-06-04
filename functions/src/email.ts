@@ -2258,6 +2258,105 @@ export function sendFeedbackEmail(
 }
 
 /**
+ * Notify the founder when a tradie registers interest in the call-answering
+ * service (Katie). These leads are handled with a manual/white-glove setup
+ * call for now, so this email is the trigger to reach out.
+ */
+export function sendLeadInterestEmail(
+  userEmail: string,
+  userId: string,
+  details: {
+    businessName: string;
+    contactPhone: string;
+    missedCalls?: string;
+    typicalJobValue?: number | null;
+    estLostPerYear?: number | null;
+    notes?: string;
+  },
+): Promise<boolean> {
+  const businessName = escapeHtmlEmail(details.businessName || 'Unknown business');
+  const contactPhone = escapeHtmlEmail(details.contactPhone || 'Not provided');
+  const missedCalls = escapeHtmlEmail(details.missedCalls || 'Not specified');
+  const fmtMoney = (n?: number | null) =>
+    typeof n === 'number' && Number.isFinite(n)
+      ? '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+      : null;
+  const typicalJobValue = fmtMoney(details.typicalJobValue);
+  const estLostPerYear = fmtMoney(details.estLostPerYear);
+  const notes = details.notes
+    ? escapeHtmlEmail(details.notes).replace(/\n/g, '<br/>')
+    : '—';
+
+  const content = wrapEmailTemplate(`
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">New Lead — Call Answering (Katie)</p>
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      ${businessName} wants Katie set up
+    </h1>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+      <tr>
+        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Business</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${businessName}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Best number to call</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${contactPhone}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Calls missed per week</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${missedCalls}</span>
+              </td>
+            </tr>
+            ${typicalJobValue ? `<tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Typical job value</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${typicalJobValue}</span>
+              </td>
+            </tr>` : ''}
+            ${estLostPerYear ? `<tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Est. lost revenue / year</span><br/>
+                <span style="color:#cfa153;font-size:15px;font-weight:700;">${estLostPerYear}</span>
+              </td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Account email</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${escapeHtmlEmail(userEmail)}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;">
+                <span style="color:#94a3b8;font-size:13px;">Notes</span><br/>
+                <span style="color:#f8fafc;font-size:15px;line-height:1.6;">${notes}</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="color:#64748b;font-size:12px;margin:0;">User ID: ${escapeHtmlEmail(userId)}</p>
+  `);
+
+  return sendEmail({
+    to: ADMIN_EMAIL,
+    subject: `New Katie lead: ${details.businessName || 'Unknown business'}`,
+    htmlContent: content,
+    category: 'transactional',
+    tags: ['lead-interest', 'callkatie'],
+  });
+}
+
+/**
  * Send a one-off affiliate invitation email
  */
 export function sendAffiliateInviteEmail(

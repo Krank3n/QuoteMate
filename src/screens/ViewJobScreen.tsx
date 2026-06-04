@@ -7,7 +7,7 @@
  * Stage chip → JobStageSheet.
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, StyleSheet, Pressable, Linking, Platform, TouchableOpacity } from 'react-native';
 import { NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { Text, Card, Button, TextInput } from 'react-native-paper';
@@ -120,6 +120,20 @@ export function ViewJobScreen() {
       setNotesEditing((job.notes ?? '').trim().length > 0);
     }
   }, [job?.id, job?.notes]);
+
+  // Mate's send proposal routes here with openSendDocId set. Auto-open the
+  // send sheet for that specific doc once it's in the store, exactly once,
+  // then clear the param so a back-nav or re-render doesn't reopen it.
+  const openSendDocId: string | undefined = route.params?.openSendDocId;
+  const handledSendParamRef = useRef(false);
+  useEffect(() => {
+    if (!openSendDocId || handledSendParamRef.current) return;
+    const doc = documents.find((d) => d.id === openSendDocId);
+    if (!doc) return; // wait for the store to sync the doc, then fire
+    handledSendParamRef.current = true;
+    setSendDialogDoc(doc);
+    navigation.setParams({ openSendDocId: undefined });
+  }, [openSendDocId, documents, navigation]);
 
   const attachedDocs = useMemo(
     () => documents.filter((d) => d.jobId === jobId),

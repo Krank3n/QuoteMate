@@ -15,12 +15,21 @@ import {
   reviewQuote,
 } from './readTools';
 import { buildProposal } from './proposalTools';
+import { resolveQuoteId } from './quoteRefMap';
 import { isProposalTool, isReadTool } from './toolSchemas';
 
 export interface ToolCallInput {
   name: string;
   id: string;
   args: any;
+}
+
+// A UI-only action the model asked for that the chat screen carries out (e.g.
+// show a quote on screen). Unlike read tools it returns no data, and unlike
+// proposals it isn't a confirmable card — the screen acts on it directly.
+export interface ViewAction {
+  kind: 'show_quote';
+  quoteId: string;
 }
 
 export interface ToolCallOutput {
@@ -31,6 +40,9 @@ export interface ToolCallOutput {
   // When a propose_* call validated cleanly, the typed Proposal that should
   // be rendered as a card under the assistant message.
   proposal?: Proposal;
+  // When a view tool (show_quote) was called, the action the screen should
+  // carry out. The screen validates the id and overrides `response`.
+  view?: ViewAction;
 }
 
 export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOutput> {
@@ -63,10 +75,28 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
     }
   }
 
+  if (name === 'show_quote') {
+    if (!input?.quoteId) {
+      return { name, id, response: { error: 'show_quote requires quoteId.' } };
+    }
+    // Resolve a proposalId → minted doc id if the model reused one; the screen
+    // confirms the id actually exists and overrides the response.
+    const quoteId = resolveQuoteId(String(input.quoteId));
+    return { name, id, response: { ok: true }, view: { kind: 'show_quote', quoteId } };
+  }
+
   if (isProposalTool(name)) {
     const { proposal, error } = buildProposal(name, id, input);
     if (proposal) {
-      return { name, id, response: { ok: true, proposalId: proposal.id }, proposal };
+      const response: Record<string, unknown> = { ok: true, proposalId: proposal.id };
+      if (proposal.type === 'propose_draft_quote') {
+        // The proposalId is NOT a quote id — no quote exists until the tradie
+        // taps Apply. Spell that out so the model doesn't later pass proposalId
+        // to get_quote / review_quote / propose_reprice.
+        response.note =
+          'Card shown — nothing is saved until the tradie taps Apply. proposalId is not a quote id; the real quote id arrives in a "[context]" line after Apply.';
+      }
+      return { name, id, response, proposal };
     }
     return { name, id, response: { error: error || 'Proposal validation failed.' } };
   }

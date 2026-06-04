@@ -44,8 +44,6 @@ interface FixedBottomButtonProps {
   secondaryLoadingOnPress?: () => void;
   /** Disable the solid background block - useful when transparency is desired */
   disableSolidBackground?: boolean;
-  /** Ref forwarded to the secondary button wrapper for tour targeting */
-  secondaryRef?: React.Ref<View>;
   /** Opt out of the iOS keyboard-sticky wrapper. Set to true when the screen
    *  already handles keyboard avoidance itself (e.g. wraps in
    *  KeyboardAvoidingView), to avoid double-translating the bar. */
@@ -201,7 +199,6 @@ export function FixedBottomButton({
   secondaryLoadingText,
   secondaryLoadingOnPress,
   disableSolidBackground = false,
-  secondaryRef,
   disableKeyboardSticky = false,
 }: FixedBottomButtonProps) {
   const insets = useSafeAreaInsets();
@@ -242,7 +239,7 @@ export function FixedBottomButton({
       >
         <View style={styles.bottomActionsInner}>
           {secondaryLabel && secondaryOnPress && (
-            <View ref={secondaryRef} style={{ flex: 1 }}>
+            <View style={{ flex: 1 }}>
               {secondaryLoading ? (
                 <PulsingBorderButton loadingText={secondaryLoadingText} onPress={secondaryLoadingOnPress}>
                   {secondaryLabel}

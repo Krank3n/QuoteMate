@@ -48,14 +48,10 @@ import {
   TotalsSection,
   documentStyles,
 } from '../../components/document';
-import { useTourRefs } from '../../components/tour/useTourRefs';
 import {
   InvoiceDisplaySettings,
   type InvoiceDisplaySettingsChange,
 } from '../../components/InvoiceDisplaySettings';
-import { ScreenTour } from '../../components/tour/ScreenTour';
-import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
-import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 
 // Confetti piece definition (reused from AlertModal pattern)
 interface ConfettiPiece {
@@ -119,8 +115,6 @@ export function JobPreviewScreen() {
   const documents = useStore((s) => s.documents);
   const quotes = useStore((s) => s.quotes);
   const invoices = useStore((s) => s.invoices);
-  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
-  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
   const updateQuote = useStore((s) => s.updateQuote);
@@ -128,18 +122,6 @@ export function JobPreviewScreen() {
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
   const insets = useSafeAreaInsets();
-
-  // Tour refs
-  const { registerRef } = useTourRefs();
-  const editSectionsRef = useRef<View>(null);
-  const sendButtonRef = useRef<View>(null);
-  const scrollRef = useRef<ScrollView>(null);
-  const [tourActive, setTourActive] = useState(false);
-
-  useEffect(() => {
-    if (editSectionsRef.current) registerRef('editSections', editSectionsRef.current);
-    if (sendButtonRef.current) registerRef('sendButton', sendButtonRef.current);
-  });
 
   // The wizard writes one or the other — prefer whichever is set. mode is the
   // tiebreaker for the route-declared intent.
@@ -222,11 +204,9 @@ export function JobPreviewScreen() {
   const checkScale = useRef(new Animated.Value(0)).current;
   const subtitleOpacity = useRef(new Animated.Value(0)).current;
 
-  // Auto-save on mount (skip during unified tour — dummy doc shouldn't
-  // be saved — and skip when re-entering as a viewer from a price tap).
+  // Auto-save on mount (skip when re-entering as a viewer from a price tap).
   useEffect(() => {
     if (!workingDoc) return;
-    if (unifiedTourActive) return;
     if (viewing) return;
 
     // Celebration must fire exactly once per document — the *first* time
@@ -561,7 +541,6 @@ export function JobPreviewScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView
-        ref={scrollRef}
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -745,7 +724,7 @@ export function JobPreviewScreen() {
           />
         </Surface>
 
-        <View ref={editSectionsRef}>
+        <View>
         <CustomerSection
           customerName={workingDoc.customerName}
           customerEmail={workingDoc.customerEmail}
@@ -890,7 +869,7 @@ export function JobPreviewScreen() {
               />
             </View>
           ) : null}
-          <View ref={sendButtonRef} style={styles.bottomButtonHalfWrapper}>
+          <View style={styles.bottomButtonHalfWrapper}>
             {liveDoc ? (
               <SendDocumentButton
                 doc={liveDoc}
@@ -976,20 +955,6 @@ export function JobPreviewScreen() {
           </>
         )}
       </View>
-
-      {/* Screen Tour */}
-      {unifiedTourActive && unifiedTourPhase === 'quotePreview' && <ScreenTour
-        tourId="quotePreview"
-        delay={1500}
-        onActiveChange={setTourActive}
-        scrollRef={scrollRef}
-        scrollPositions={{ editSections: 0, sendButton: 0 }}
-        unifiedMode={true}
-        onScreenComplete={() => notifyScreenComplete('quotePreview')}
-        onSkipRequest={notifySkipRequest}
-        stepOffset={PHASE_STEP_OFFSETS.quotePreview}
-        globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
-      />}
     </KeyboardAvoidingView>
   );
 }

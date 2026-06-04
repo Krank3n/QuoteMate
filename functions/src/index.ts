@@ -17,6 +17,7 @@ import {
   handleUnsubscribe,
   sendNewUserNotificationEmail,
   sendFeedbackEmail,
+  sendLeadInterestEmail,
   sendQuoteFollowUpEmail,
   sendCustomerQuoteReminderEmail,
   sendAffiliateInviteEmail,
@@ -51,6 +52,7 @@ export {
 } from './leadOutreach';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
 export { assistantToken } from './assistantToken';
+export { assistantChat } from './assistantChat';
 import {
   buildXeroAuthHeaders,
   buildXeroLineItems,
@@ -8950,6 +8952,68 @@ export const submitFeedback = functions.https.onCall(async (data, context) => {
     userEmail,
     category,
     feedback,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { success: true };
+});
+
+/**
+ * Register interest in the call-answering service (Katie).
+ *
+ * The first integrations are done by hand (white-glove setup call), so this
+ * just captures the lead: it emails the founder and stores the submission in
+ * a `leadInterests` collection to follow up. No phone routing happens here.
+ */
+export const submitLeadInterest = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+
+  const userId = context.auth.uid;
+  const businessName = (data?.businessName || '').trim().slice(0, 200);
+  const contactPhone = (data?.contactPhone || '').trim().slice(0, 50);
+  const missedCalls = (data?.missedCalls || '').trim().slice(0, 100);
+  const notes = (data?.notes || '').trim().slice(0, 2000);
+
+  // "Missed money" calculator inputs/output (optional, clamped to sane ranges).
+  const clampNum = (v: unknown, max: number) =>
+    Number.isFinite(Number(v)) ? Math.min(Math.max(Math.round(Number(v)), 0), max) : null;
+  const typicalJobValue = clampNum(data?.typicalJobValue, 1_000_000);
+  const estLostPerYear = clampNum(data?.estLostPerYear, 100_000_000);
+
+  if (!contactPhone) {
+    throw new functions.https.HttpsError('invalid-argument', 'A contact number is required');
+  }
+
+  const userEmail = await getUserEmail(userId) || 'Unknown';
+
+  const success = await sendLeadInterestEmail(userEmail, userId, {
+    businessName,
+    contactPhone,
+    missedCalls,
+    typicalJobValue,
+    estLostPerYear,
+    notes,
+  });
+
+  if (!success) {
+    throw new functions.https.HttpsError('internal', 'Failed to register interest');
+  }
+
+  // Store for follow-up. Kept distinct from the website's marketing `leads`
+  // collection — these are in-app, product-specific (Katie) sign-ups.
+  await admin.firestore().collection('leadInterests').add({
+    userId,
+    userEmail,
+    product: 'callkatie',
+    status: 'new',
+    businessName,
+    contactPhone,
+    missedCalls,
+    typicalJobValue,
+    estLostPerYear,
+    notes,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 

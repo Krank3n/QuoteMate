@@ -61,11 +61,6 @@ import { SupplierListCaptureModal } from '../../components/SupplierListCaptureMo
 import { InvoiceReviewModal } from '../../components/InvoiceReviewModal';
 import { useInvoiceImport } from '../../hooks/useInvoiceImport';
 import { CollapsibleSection } from '../../components/CollapsibleSection';
-import { useTourRefs } from '../../components/tour/useTourRefs';
-import { ScreenTour } from '../../components/tour/ScreenTour';
-import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
-import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
-import { getTourMaterialsPriced } from '../../components/tour/tourDummyData';
 import { notificationService } from '../../services/notificationService';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
@@ -375,43 +370,10 @@ export function MaterialsListScreen() {
   // actual reads change — not on every quote/invoice/contact store write.
   const businessSettings = useStore((s) => s.businessSettings);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
-  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
-  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
   const saveDraft = usePersistDocument();
   const storeUpdateQuote = useStore((s) => s.updateQuote);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
-
-  // Tour refs
-  const { registerRef } = useTourRefs();
-  const aiGenerateRef = useRef<View>(null);
-  const addManualRef = useRef<View>(null);
-  const firstMaterialItemRef = useRef<View>(null);
-  const addMaterialButtonRef = useRef<View>(null);
-  const fetchPricesButtonRef = useRef<View>(null);
-  // The screen used to scroll via a ScrollView, and ScreenTour still calls
-  // `scrollRef.current.scrollTo({ y, animated })`. The list is now a FlatList
-  // (uses `scrollToOffset({ offset, animated })`), so we expose an adapter
-  // ref with the old ScrollView surface that proxies to the FlatList.
-  const materialsFlatListRef = useRef<FlatList<FlatItem>>(null);
-  const materialsScrollRef = useRef<any>({
-    scrollTo: (opts: { y: number; animated?: boolean }) => {
-      materialsFlatListRef.current?.scrollToOffset({
-        offset: opts.y,
-        animated: opts.animated ?? true,
-      });
-    },
-  });
-  const [tourActive, setTourActive] = useState(false);
-  const tourPastFetchRef = useRef(false);
-
-  useEffect(() => {
-    if (aiGenerateRef.current) registerRef('aiGenerateCard', aiGenerateRef.current);
-    if (addManualRef.current) registerRef('addManualCard', addManualRef.current);
-    if (firstMaterialItemRef.current) registerRef('firstMaterialItem', firstMaterialItemRef.current);
-    if (addMaterialButtonRef.current) registerRef('addMaterialButton', addMaterialButtonRef.current);
-    if (fetchPricesButtonRef.current) registerRef('fetchPricesButton', fetchPricesButtonRef.current);
-  });
 
   // For compatibility, alias to currentQuote (used throughout this file)
   const currentQuote = currentDocument;
@@ -616,18 +578,6 @@ export function MaterialsListScreen() {
       }
     },
   });
-
-  // Unified tour: show brief fake AI loading when transitioning materialsList → materialsListItems
-  useEffect(() => {
-    if (unifiedTourActive && unifiedTourPhase === 'materialsListItems' && materials.length > 0 && !isAiAnalyzing) {
-      // Materials were just injected — show fake loading for 2s
-      setIsAiAnalyzing(true);
-      const timer = setTimeout(() => {
-        setIsAiAnalyzing(false);
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [unifiedTourPhase]);
 
   // Product search state - REMOVED: Now handled by AddMaterialScreen
 
@@ -2006,7 +1956,7 @@ export function MaterialsListScreen() {
         </View>
       ) : materials.length === 0 ? (
         <View style={styles.emptyState}>
-          <TouchableOpacity ref={aiGenerateRef} style={styles.emptyActionCard} onPress={() => {
+          <TouchableOpacity style={styles.emptyActionCard} onPress={() => {
             if (!isPro) { navigation.navigate('Paywall' as never); return; }
             handleGenerateMaterialsList();
           }} activeOpacity={0.7}>
@@ -2025,7 +1975,7 @@ export function MaterialsListScreen() {
             <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
           </TouchableOpacity>
 
-          <TouchableOpacity ref={addManualRef} style={styles.emptyActionCard} onPress={handleStartManualBuild} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.emptyActionCard} onPress={handleStartManualBuild} activeOpacity={0.7}>
             <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
               <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
             </View>
@@ -2069,7 +2019,7 @@ export function MaterialsListScreen() {
               used in each section's footer — the collapsed state mirrors
               the old dashed "Add Material" pill, so the UI shape is
               unchanged until tapped. */}
-          <View ref={addMaterialButtonRef as any}>
+          <View>
             <InlineAddMaterialRow
               sectionName=""
               onAdd={addMaterialToQuoteInline}
@@ -2103,14 +2053,12 @@ export function MaterialsListScreen() {
   return (
     <View style={styles.container}>
       <FlatList
-          ref={materialsFlatListRef}
           data={showMaterialsList ? flatData : []}
           keyExtractor={(item) => item.key}
           renderItem={renderFlatItem}
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
-          scrollEnabled={!tourActive}
           windowSize={5}
           initialNumToRender={50}
           maxToRenderPerBatch={16}
@@ -2132,7 +2080,6 @@ export function MaterialsListScreen() {
         secondaryDisabled={isFetchingPrices}
         secondaryLoadingText={isFetchingPrices ? (fetchPhase === 'batch' ? `Searching ${fetchProgress.total || ''} items...` : fetchProgress.total > 0 ? `${chasingTitle.split(' ')[0]} ${fetchProgress.current} of ${fetchProgress.total}...` : undefined) : undefined}
         secondaryLoadingOnPress={isFetchingPrices ? handleCancelFetchPrices : undefined}
-        secondaryRef={fetchPricesButtonRef}
       />
 
       {/* New Section Modal — conditional render so the form's children aren't
@@ -2605,64 +2552,6 @@ export function MaterialsListScreen() {
           setSuccessShowFetchPrices(false);
         } : undefined}
       />
-      {!showSuccessModal && unifiedTourActive && (
-        <>
-          {unifiedTourPhase === 'materialsList' && (
-            <ScreenTour
-              tourId="materialsList"
-              onActiveChange={setTourActive}
-              unifiedMode={true}
-              onScreenComplete={() => notifyScreenComplete('materialsList')}
-              onSkipRequest={notifySkipRequest}
-              stepOffset={PHASE_STEP_OFFSETS.materialsList}
-              globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
-            />
-          )}
-          {materials.length > 0 && !isAiAnalyzing && unifiedTourPhase === 'materialsListItems' && (
-            <ScreenTour
-              tourId="materialsListItems"
-              delay={800}
-              onActiveChange={setTourActive}
-              scrollRef={materialsScrollRef}
-              scrollPositions={{ fetchPricesButton: 99999, firstMaterialItem: 0, addMaterialButton: 99999 }}
-              unifiedMode={true}
-              onScreenComplete={() => notifyScreenComplete('materialsListItems')}
-              onSkipRequest={notifySkipRequest}
-              stepOffset={PHASE_STEP_OFFSETS.materialsListItems}
-              globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
-              onStepChange={(stepId) => {
-                const quote = currentQuote;
-                if (!quote) return;
-                if (stepId === 'addMaterialButton' && materials.length > 0) {
-                  setExpandedMaterials(new Set([materials[0].id]));
-                } else if (stepId === 'firstMaterialItem' && tourPastFetchRef.current) {
-                  const pricedMaterials = getTourMaterialsPriced(quote.materials || []);
-                  storeUpdateQuote({ ...quote, materials: pricedMaterials });
-                  if (pricedMaterials.length > 0) {
-                    setExpandedMaterials(new Set([pricedMaterials[0].id]));
-                  }
-                } else if (stepId === 'fetchPricesButton') {
-                  tourPastFetchRef.current = true;
-                }
-              }}
-            />
-          )}
-          {materials.length > 0 && unifiedTourActive && unifiedTourPhase === 'materialsListAdded' && (
-            <ScreenTour
-              tourId="materialsListAdded"
-              delay={800}
-              onActiveChange={setTourActive}
-              scrollRef={materialsScrollRef}
-              scrollPositions={{ firstMaterialItem: 0 }}
-              unifiedMode={true}
-              onScreenComplete={() => notifyScreenComplete('materialsListAdded')}
-              onSkipRequest={notifySkipRequest}
-              stepOffset={PHASE_STEP_OFFSETS.materialsListAdded}
-              globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
-            />
-          )}
-        </>
-      )}
 
       {/* Invoice/receipt source picker — fires from the 📄 icon button on
           each section's inline-add row. */}

@@ -32,10 +32,6 @@ import { calculateTravelAdjustment } from '../../utils/travelCalculator';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
-import { useTourRefs } from '../../components/tour/useTourRefs';
-import { ScreenTour } from '../../components/tour/ScreenTour';
-import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
-import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 import { useUnifiedContactSearch, SOURCE_COLORS } from '../../hooks/useUnifiedContactSearch';
 import { SearchableContact } from '../../types';
 import { AlertModal } from '../../components/AlertModal';
@@ -64,9 +60,6 @@ export function CustomerDetailsScreen() {
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
   const saveDraft = usePersistDocument();
   const businessSettings = useStore((s) => s.businessSettings);
-  const hasSeenScreenTour = useStore((s) => s.hasSeenScreenTour);
-  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
-  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
   const contacts = useStore((s) => s.contacts);
   const xeroContacts = useStore((s) => s.xeroContacts);
   const documentList = useDocumentList();
@@ -77,20 +70,7 @@ export function CustomerDetailsScreen() {
   // Use combined document list for customer auto-complete
   const quotes = documentList;
 
-  // Tour refs
-  const { registerRef } = useTourRefs();
   const customerNameRef = useRef<any>(null);
-  const jobAddressRef = useRef<any>(null);
-  const recentCustomersRef = useRef<View>(null);
-  const [tourActive, setTourActive] = useState(false);
-  // Only show Davo during the unified tour
-  const showDavo = unifiedTourActive && unifiedTourPhase === 'customerDetails';
-
-  useEffect(() => {
-    if (customerNameRef.current) registerRef('customerName', customerNameRef.current);
-    if (jobAddressRef.current) registerRef('jobAddress', jobAddressRef.current);
-    if (recentCustomersRef.current) registerRef('recentCustomers', recentCustomersRef.current);
-  });
 
   // Add contacts icon to header
   useEffect(() => {
@@ -148,7 +128,7 @@ export function CustomerDetailsScreen() {
   // Runs once only — the quote is always set in the store before navigating here,
   // so mount-time is sufficient. Subsequent currentQuote reference changes (e.g.
   // from a deferred saveDraft on the previous screen) carry the same field values
-  // and must NOT re-run, as they would wipe tour demo data (Davo).
+  // and must NOT re-run.
   useEffect(() => {
     if (currentQuote) {
       const email = currentQuote.customerEmail || '';
@@ -331,27 +311,11 @@ export function CustomerDetailsScreen() {
     return null;
   }
 
-  // Fake customer shown during the tour so there's always a recent customer to demo
-  const TOUR_CUSTOMER = {
-    name: 'Davo Snagsworth',
-    email: 'davo@snagsworth.com.au',
-    phone: '0412 345 678',
-    address: 'Sydney Opera House',
-    searchSource: 'recent' as const,
-  };
-
   // Recent contacts for chips (top 3 saved/recent contacts when input is empty)
-  const recentForChips = filteredCustomers
+  const recentCustomers = filteredCustomers
     .filter((c) => c.searchSource === 'saved' || c.searchSource === 'recent')
     .slice(0, 3);
-  const recentCustomers = showDavo
-    ? [TOUR_CUSTOMER, ...recentForChips].slice(0, 3)
-    : recentForChips;
-  // During the tour, always show recent customers so the section doesn't disappear
-  // when Davo is auto-selected (which would cause layout shifts and unmount the ref)
-  const showRecentCustomers = tourActive
-    ? recentCustomers.length > 0
-    : (!showSuggestions && customerName.length === 0 && recentCustomers.length > 0);
+  const showRecentCustomers = !showSuggestions && customerName.length === 0 && recentCustomers.length > 0;
 
   return (
     <View style={styles.container}>
@@ -359,7 +323,6 @@ export function CustomerDetailsScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
-        scrollEnabled={!tourActive}
         // Distance from the keyboard top to the focused input bottom edge.
         // Gives a bit of breathing room so the field isn't flush against the
         // keyboard — covers the AddressSearchInput suggestions dropdown too.
@@ -384,7 +347,7 @@ export function CustomerDetailsScreen() {
 
             {/* Recent Customers - Show when input is empty */}
             {showRecentCustomers && (
-              <View ref={recentCustomersRef} style={styles.recentCustomersContainer}>
+              <View style={styles.recentCustomersContainer}>
                 <Text style={styles.recentLabel}>Recent Customers:</Text>
                 <View style={styles.chipsContainer}>
                   {recentCustomers.map((customer, index) => (
@@ -548,7 +511,7 @@ export function CustomerDetailsScreen() {
               </HelperText>
             )}
 
-            <View ref={jobAddressRef} collapsable={false}>
+            <View>
               <AddressSearchInput
                 label="Job Address"
                 placeholder="Start typing the job address"
@@ -566,23 +529,6 @@ export function CustomerDetailsScreen() {
         onPress={isEditFromPreview ? handleSaveAndReturn : handleNext}
         disabled={!customerName.trim() || !hasContactMethod || hasValidationErrors}
       />
-
-      {unifiedTourActive && unifiedTourPhase === 'customerDetails' && (
-        <ScreenTour
-          tourId="customerDetails"
-          onActiveChange={setTourActive}
-          unifiedMode={true}
-          onScreenComplete={() => notifyScreenComplete('customerDetails')}
-          onSkipRequest={notifySkipRequest}
-          stepOffset={PHASE_STEP_OFFSETS.customerDetails}
-          globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
-          onStepChange={(stepId) => {
-            if (stepId === 'customerName' && showDavo) {
-              handleSelectCustomer(TOUR_CUSTOMER);
-            }
-          }}
-        />
-      )}
 
       <AlertModal
         visible={settingsAlertVisible}

@@ -19,6 +19,7 @@
 
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
+import { base64ToBytes, bytesToBase64 } from './audioCodec';
 
 const SAMPLE_RATE = 24000;
 const BITS_PER_SAMPLE = 16;
@@ -28,34 +29,6 @@ export interface AudioQueue {
   enqueuePcmChunk(base64Pcm: string): void;
   setOnIdle(cb: (() => void) | null): void;
   stop(): Promise<void>;
-}
-
-// --- shared helpers ---------------------------------------------------
-
-function base64ToBytes(b64: string): Uint8Array {
-  const g: any = globalThis as any;
-  if (typeof g.atob === 'function') {
-    const bin = g.atob(b64);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
-    return out;
-  }
-  const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const lookup: Record<string, number> = {};
-  for (let i = 0; i < alpha.length; i += 1) lookup[alpha[i]] = i;
-  const clean = b64.replace(/=+$/, '');
-  const out = new Uint8Array((clean.length * 3) >> 2);
-  let oi = 0;
-  for (let i = 0; i < clean.length; i += 4) {
-    const c0 = lookup[clean[i]] ?? 0;
-    const c1 = lookup[clean[i + 1]] ?? 0;
-    const c2 = lookup[clean[i + 2]] ?? 0;
-    const c3 = lookup[clean[i + 3]] ?? 0;
-    out[oi++] = (c0 << 2) | (c1 >> 4);
-    if (i + 2 < clean.length) out[oi++] = ((c1 & 15) << 4) | (c2 >> 2);
-    if (i + 3 < clean.length) out[oi++] = ((c2 & 3) << 6) | c3;
-  }
-  return out.subarray(0, oi);
 }
 
 function pcmBytesToFloat32(pcm: Uint8Array): Float32Array {
@@ -215,32 +188,6 @@ function buildWavFromPcm(pcmBytes: Uint8Array): Uint8Array {
   view.setUint32(p, dataSize, true); p += 4;
   buf.set(pcmBytes, 44);
   return buf;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let out = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    const slice = bytes.subarray(i, i + chunk);
-    let s = '';
-    for (let j = 0; j < slice.length; j += 1) s += String.fromCharCode(slice[j]);
-    out += s;
-  }
-  if (typeof (globalThis as any).btoa === 'function') {
-    return (globalThis as any).btoa(out);
-  }
-  const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let r = '';
-  for (let i = 0; i < out.length; i += 3) {
-    const a = out.charCodeAt(i);
-    const b = i + 1 < out.length ? out.charCodeAt(i + 1) : 0;
-    const c = i + 2 < out.length ? out.charCodeAt(i + 2) : 0;
-    r += alpha[a >> 2];
-    r += alpha[((a & 3) << 4) | (b >> 4)];
-    r += i + 1 < out.length ? alpha[((b & 15) << 2) | (c >> 6)] : '=';
-    r += i + 2 < out.length ? alpha[c & 63] : '=';
-  }
-  return r;
 }
 
 class NativeAudioQueue implements AudioQueue {

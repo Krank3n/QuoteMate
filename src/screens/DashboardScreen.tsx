@@ -43,18 +43,12 @@ import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { useIsAppActive } from '../hooks/useIsAppActive';
 import { lightTap, successTap } from '../utils/haptics';
 import { TrialBanner } from '../components/TrialBanner';
+import { LeadsPromoCard } from '../components/LeadsPromoCard';
 import { TRIAL_MS } from '../utils/trialConfig';
 import { SyncErrorBanner } from '../components/SyncErrorBanner';
 import { ShimmerOverlay } from '../components/ShimmerOverlay';
 import { TapRipple } from '../components/TapRipple';
 import { GrainOverlay } from '../components/GrainOverlay';
-import { useTourRefs } from '../components/tour/useTourRefs';
-import { SpotlightTour } from '../components/tour/SpotlightTour';
-import { ScreenTour } from '../components/tour/ScreenTour';
-import { PHASE_STEP_OFFSETS } from '../components/tour/tourFlow';
-import { notifyScreenComplete, notifySkipRequest } from '../components/tour/UnifiedTourController';
-import { UNIFIED_TOUR_TOTAL_STEPS } from '../components/tour/tourFlow';
-import { INTRO_TOUR_TOTAL_STEPS } from '../components/tour/tourSteps';
 
 const GREETINGS = [
   "G'day",
@@ -274,9 +268,6 @@ export function DashboardScreen() {
   const quotes = useStore((s) => s.quotes);
   const businessSettings = useStore((s) => s.businessSettings);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
-  const hasSeenTour = useStore((s) => s.hasSeenTour);
-  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
-  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
   // Action handles are stable Zustand fn refs — subscribing is a no-op
   // re-render-wise but keeps the call sites unchanged.
   const createNewQuote = useStore((s) => s.createNewQuote);
@@ -289,27 +280,6 @@ export function DashboardScreen() {
   const saveInvoice = useStore((s) => s.saveInvoice);
   const loadQuotes = useStore((s) => s.loadQuotes);
   const saveDraft = useStore((s) => s.saveDraft);
-  const startUnifiedTour = useStore((s) => s.startUnifiedTour);
-  const { registerRef } = useTourRefs();
-  const [tourActive, setTourActive] = useState(false);
-
-  // Tour target refs — use useRef + useEffect to register safely (post-mount)
-  const headerRef = useRef<View>(null);
-  const newQuoteRef = useRef<View>(null);
-  const statsRef = useRef<View>(null);
-  const recentRef = useRef<View>(null);
-  const referralRef = useRef<View>(null);
-  const recentQuoteCardRef = useRef<View>(null);
-  const firstQuoteSwipeRef = useRef<any>(null);
-
-  useEffect(() => {
-    if (headerRef.current) registerRef('header', headerRef.current);
-    if (newQuoteRef.current) registerRef('newQuoteButton', newQuoteRef.current);
-    if (statsRef.current) registerRef('statsGrid', statsRef.current);
-    if (recentRef.current) registerRef('recentQuotes', recentRef.current);
-    if (referralRef.current) registerRef('referralButton', referralRef.current);
-    if (recentQuoteCardRef.current) registerRef('recentQuoteCard', recentQuoteCardRef.current);
-  });
 
   const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
@@ -327,26 +297,6 @@ export function DashboardScreen() {
   const [quoteToDelete, setQuoteToDelete] = useState<string | null>(null);
   const [duplicateSuccessVisible, setDuplicateSuccessVisible] = useState(false);
   const [deleteDraftModalVisible, setDeleteDraftModalVisible] = useState(false);
-
-  // Auto-trigger unified tour for first-time users
-  useEffect(() => {
-    if (!hasSeenTour && !unifiedTourActive) {
-      const timer = setTimeout(() => {
-        startUnifiedTour();
-        setTourActive(true);
-      }, 800);
-      return () => clearTimeout(timer);
-    }
-  }, [hasSeenTour]);
-
-  // Scroll to top when tour ends
-  useEffect(() => {
-    if (!unifiedTourActive && hasSeenTour) {
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({ y: 0, animated: true });
-      }, 500);
-    }
-  }, [unifiedTourActive]);
 
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
@@ -405,11 +355,6 @@ export function DashboardScreen() {
     }
   }, [inProgressDraft?.draftStep]);
 
-  // Recent quotes (last 3) — kept so the existing quote-scoped logic
-  // (tour dummy data) still resolves.
-  const recentQuotes = [...quotes]
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .slice(0, 3);
 
   // Recent jobs (last 3) — Phase 12 replaces the "Recent Quotes" card on
   // the dashboard. Jobs are the new primary object.
@@ -492,10 +437,6 @@ export function DashboardScreen() {
     createNewQuote();
     navigation.navigate('NewJob' as never);
   };
-
-  // Alias retained for the resume-draft and tour callsites that already
-  // referenced this name.
-  const handleNewQuote = handleNewJob;
 
   const handleViewQuote = (quoteId: string) => {
     // Post-UX-collapse: ViewQuote/ViewInvoice are gone. Look up the
@@ -644,7 +585,6 @@ export function DashboardScreen() {
       ref={scrollRef}
       style={styles.container}
       contentContainerStyle={{ paddingBottom: 100 }}
-      scrollEnabled={!tourActive}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -655,7 +595,7 @@ export function DashboardScreen() {
       }
     >
       <WebContainer>
-        <View ref={headerRef} style={styles.header}>
+        <View style={styles.header}>
           <View style={styles.headerRow}>
             <View style={styles.headerText}>
               <Title style={styles.greeting}>
@@ -665,7 +605,7 @@ export function DashboardScreen() {
                 <Paragraph numberOfLines={2}>{SUBTITLES[subtitleIndex]}</Paragraph>
               </RNAnimated.View>
             </View>
-            <View ref={referralRef}>
+            <View>
               <TouchableOpacity
                 style={styles.referralButton}
                 onPress={() => { lightTap(); navigation.navigate('Referral' as never); }}
@@ -742,7 +682,7 @@ export function DashboardScreen() {
 
       {/* New Quote Button */}
       <RNAnimated.View style={{ transform: [{ scale: btnPulse }, { rotate: btnTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
-        <View ref={newQuoteRef} style={{
+        <View style={{
           marginHorizontal: 20,
           marginBottom: 24,
           borderRadius: 12,
@@ -771,7 +711,7 @@ export function DashboardScreen() {
       </RNAnimated.View>
 
       {/* Quick Stats */}
-      <View ref={statsRef} style={styles.statsContainer}>
+      <View style={styles.statsContainer}>
         <AnimatedListItem index={0} style={styles.statCardWrapper}>
           <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Earned this month: ${formatCurrency(thisMonthRevenue)}`} rippleColor="rgba(0,152,104,0.25)">
             <RNAnimated.View style={{ transform: [{ scale: cardBreath1 }, { rotate: cardTilt1.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
@@ -837,6 +777,9 @@ export function DashboardScreen() {
         </AnimatedListItem>
       </View>
 
+      {/* Never-miss-a-call promo — dismissible, hides once dismissed or signed up */}
+      <LeadsPromoCard />
+
       {/* Recent Jobs — Phase 12 replaces "Recent Quotes" */}
       <SkeletonCrossfade
         loaded={initialLoaded}
@@ -848,12 +791,12 @@ export function DashboardScreen() {
         }
       >
         {recentJobs.length > 0 ? (
-          <View ref={recentRef} style={styles.section}>
+          <View style={styles.section}>
             <Text style={styles.sectionTitle}>Recent Jobs</Text>
 
             {recentJobs.map((job, index) => (
               <AnimatedListItem key={job.id} index={index}>
-                <View ref={index === 0 ? recentQuoteCardRef : undefined}>
+                <View>
                   <JobCard
                     job={job}
                     onPress={(jobId) => navigation.navigate('ViewJob', { jobId })}
@@ -928,54 +871,6 @@ export function DashboardScreen() {
     )}
 
     {jobActions.element}
-
-    {/* Spotlight Tour — only active during 'dashboard' phase, not 'dashboardComplete' */}
-    <SpotlightTour
-      active={tourActive && (!unifiedTourActive || unifiedTourPhase === 'dashboard')}
-      onFinish={() => {
-        setTourActive(false);
-        if (unifiedTourActive) {
-          // Unified tour — controller handles navigation
-          notifyScreenComplete('dashboard');
-        } else {
-          // Legacy standalone dashboard tour
-          createNewQuote();
-          navigation.navigate('NewJob' as never, { screen: 'Details', params: { fromTour: true } } as never);
-        }
-      }}
-      onSkip={unifiedTourActive ? () => notifySkipRequest() : undefined}
-      scrollRef={scrollRef}
-      stepOffset={0}
-      globalTotalSteps={unifiedTourActive ? UNIFIED_TOUR_TOTAL_STEPS : INTRO_TOUR_TOTAL_STEPS}
-    />
-
-    {/* Dashboard Complete Tour — shown after returning from quote flow */}
-    {unifiedTourActive && unifiedTourPhase === 'dashboardComplete' && (
-      <ScreenTour
-        tourId="dashboardComplete"
-        delay={1000}
-        onActiveChange={setTourActive}
-        unifiedMode={true}
-        onScreenComplete={() => notifyScreenComplete('dashboardComplete')}
-        onSkipRequest={notifySkipRequest}
-        stepOffset={PHASE_STEP_OFFSETS.dashboardComplete}
-        globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
-        scrollRef={scrollRef}
-        scrollPositions={{ recentQuoteCard: 600 }}
-        onStepChange={(() => {
-          let stepCount = 0;
-          return (stepId: string) => {
-            stepCount++;
-            // Second time 'recentQuoteCard' fires = the last step. Auto-swipe to show delete.
-            if (stepId === 'recentQuoteCard' && stepCount > 1) {
-              setTimeout(() => {
-                firstQuoteSwipeRef.current?.openLeft?.();
-              }, 500);
-            }
-          };
-        })()}
-      />
-    )}
 
   </>
   );

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../../theme';
 import { Proposal, ProposalStatus } from '../../types/assistant';
@@ -22,7 +22,6 @@ export function ProposalCard({ proposal, status, onApply, onDismiss }: Props) {
   const applied = status === 'applied';
   const dismissed = status === 'dismissed';
   const failed = status === 'failed';
-  const busy = false;
 
   return (
     <View style={[styles.card, applied && styles.cardApplied, dismissed && styles.cardDismissed]}>
@@ -41,14 +40,9 @@ export function ProposalCard({ proposal, status, onApply, onDismiss }: Props) {
           <TouchableOpacity
             style={[styles.applyBtn, { backgroundColor: applyColor }]}
             onPress={onApply}
-            disabled={busy}
             accessibilityRole="button"
           >
-            {busy ? (
-              <ActivityIndicator size="small" color={colors.white} />
-            ) : (
-              <Text style={styles.applyText}>{applyLabel}</Text>
-            )}
+            <Text style={styles.applyText}>{applyLabel}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -73,6 +67,7 @@ function titleFor(p: Proposal): string {
     case 'propose_add_line_item': return 'Add line item';
     case 'propose_delete_line_item': return 'Delete line item';
     case 'propose_create_contact': return 'New contact';
+    case 'propose_update_customer': return 'Change customer';
     case 'propose_send_quote': return 'Send quote';
     case 'propose_convert_to_invoice': return 'Convert to invoice';
     case 'propose_reprice': return 'Re-price quote';
@@ -85,6 +80,7 @@ function iconFor(p: Proposal): React.ComponentProps<typeof MaterialCommunityIcon
     case 'propose_add_line_item': return 'plus-circle-outline';
     case 'propose_delete_line_item': return 'trash-can-outline';
     case 'propose_create_contact': return 'account-plus-outline';
+    case 'propose_update_customer': return 'account-switch-outline';
     case 'propose_send_quote': return 'send-outline';
     case 'propose_convert_to_invoice': return 'cash-multiple';
     case 'propose_reprice': return 'refresh';
@@ -154,12 +150,27 @@ function Body({ proposal }: { proposal: Proposal }) {
           {!!proposal.address && <Text style={styles.dim}>{proposal.address}</Text>}
         </View>
       );
+    case 'propose_update_customer':
+      return (
+        <View>
+          <Text style={styles.summary}>{proposal.customerName || proposal.customerDraft?.name || 'New customer'}</Text>
+          {!!proposal.customerDraft?.name && !proposal.customerId && (
+            <Text style={styles.dim}>New contact</Text>
+          )}
+          {!!proposal.customerDraft?.phone && <Text style={styles.dim}>{proposal.customerDraft.phone}</Text>}
+          {!!proposal.customerDraft?.email && <Text style={styles.dim}>{proposal.customerDraft.email}</Text>}
+          <Text style={styles.dim}>Apply re-points this quote at this customer.</Text>
+        </View>
+      );
     case 'propose_send_quote':
       return (
         <View>
-          <Text style={styles.warningBanner}>This will send the quote to the customer.</Text>
+          <Text style={styles.warningBanner}>Opens the send preview — you confirm the recipient and tap send.</Text>
           {!!proposal.recipientEmail && (
             <Text style={styles.summary}>To: {proposal.recipientEmail}</Text>
+          )}
+          {!!proposal.draftEmailBody && (
+            <Text style={styles.dim}>Email drafted — edit it in the preview before sending.</Text>
           )}
         </View>
       );

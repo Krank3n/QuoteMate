@@ -26,10 +26,6 @@ import { QuoteSentBanner } from '../../components/QuoteSentBanner';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
-import { useTourRefs } from '../../components/tour/useTourRefs';
-import { ScreenTour } from '../../components/tour/ScreenTour';
-import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
-import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 
 export function LaborMarkupScreen() {
   const navigation = useNavigation<any>();
@@ -39,8 +35,6 @@ export function LaborMarkupScreen() {
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
   const persistDocument = usePersistDocument();
   const businessSettings = useStore((s) => s.businessSettings);
-  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
-  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
 
   // For compatibility, alias to currentQuote (used throughout this file)
   const currentQuote = currentDocument;
@@ -48,22 +42,6 @@ export function LaborMarkupScreen() {
 
   // Get the appropriate preview screen based on mode
   const previewScreenName = getPreviewScreenName(mode);
-
-  // Tour refs
-  const { registerRef } = useTourRefs();
-  const travelSectionRef = useRef<View>(null);
-  const travelAdjustRef = useRef<View>(null);
-  const laborSectionRef = useRef<View>(null);
-  const markupSectionRef = useRef<View>(null);
-  const scrollRef = useRef<ScrollView>(null);
-  const [tourActive, setTourActive] = useState(false);
-
-  useEffect(() => {
-    if (travelSectionRef.current) registerRef('travelSection', travelSectionRef.current);
-    if (travelAdjustRef.current) registerRef('travelAdjust', travelAdjustRef.current);
-    if (laborSectionRef.current) registerRef('laborSection', laborSectionRef.current);
-    if (markupSectionRef.current) registerRef('markupSection', markupSectionRef.current);
-  });
 
   const [laborHours, setLaborHours] = useState('');
   const [laborRate, setLaborRate] = useState('');
@@ -446,7 +424,6 @@ export function LaborMarkupScreen() {
       />
       <View style={styles.outerContainer}>
         <ScrollView
-          ref={scrollRef}
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -460,7 +437,7 @@ export function LaborMarkupScreen() {
           <View style={styles.sectionLine} />
         </View>
 
-        <View ref={laborSectionRef} style={styles.section}>
+        <View style={styles.section}>
         {/* Hours/Days Toggle */}
         <View style={styles.unitToggleRow}>
           <TouchableOpacity
@@ -655,7 +632,7 @@ export function LaborMarkupScreen() {
         <View style={styles.sectionLine} />
       </View>
 
-      <View ref={markupSectionRef} style={styles.section}>
+      <View style={styles.section}>
         <TextInput
           label="Material Markup"
           value={markup}
@@ -692,7 +669,7 @@ export function LaborMarkupScreen() {
       </View>
 
       {estimatedDistance !== undefined ? (
-        <View ref={travelSectionRef} style={styles.section}>
+        <View style={styles.section}>
           {!travelDismissed ? (
             <>
               <Surface style={styles.travelCard}>
@@ -709,7 +686,7 @@ export function LaborMarkupScreen() {
                   <Text style={styles.travelPercent}>+{travelPct}%</Text>
                 </View>
               </Surface>
-              <View ref={travelAdjustRef} style={styles.travelButtonsRow}>
+              <View style={styles.travelButtonsRow}>
                 <View style={styles.travelStepperRow}>
                   <View style={styles.travelStepper}>
                     <Pressable
@@ -910,21 +887,6 @@ export function LaborMarkupScreen() {
           disableKeyboardSticky
         />
       </View>
-
-      {/* Screen Tour */}
-      {unifiedTourActive && unifiedTourPhase === 'laborMarkup' && (
-        <ScreenTour
-          tourId="laborMarkup"
-          onActiveChange={setTourActive}
-          scrollRef={scrollRef}
-          scrollPositions={{ laborSection: 0, markupSection: 300 }}
-          unifiedMode={true}
-          onScreenComplete={() => notifyScreenComplete('laborMarkup')}
-          onSkipRequest={notifySkipRequest}
-          stepOffset={PHASE_STEP_OFFSETS.laborMarkup}
-          globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
-        />
-      )}
     </>
   );
 

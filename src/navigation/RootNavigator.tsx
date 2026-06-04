@@ -37,6 +37,7 @@ import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen
 import { SquareIntegrationScreen } from '../screens/settings/SquareIntegrationScreen';
 import { ReeceIntegrationScreen } from '../screens/settings/ReeceIntegrationScreen';
 import { GoogleCalendarIntegrationScreen } from '../screens/settings/GoogleCalendarIntegrationScreen';
+import { CallKatieScreen } from '../screens/settings/CallKatieScreen';
 import { SectionTemplatesScreen } from '../screens/settings/SectionTemplatesScreen';
 import { JobTemplateEditorScreen } from '../screens/settings/JobTemplateEditorScreen';
 import { EditSupplierScreen } from '../screens/settings/EditSupplierScreen';
@@ -52,9 +53,6 @@ import { JobPreviewScreen } from '../screens/NewQuote/JobPreviewScreen';
 import { ReeceOrderScreen } from '../screens/ReeceOrderScreen';
 
 import { colors } from '../theme';
-import { TourRefsProvider } from '../components/tour/useTourRefs';
-import { UnifiedTourController } from '../components/tour/UnifiedTourController';
-import { useStore } from '../store/useStore';
 
 // Type definitions for navigation
 export type RootTabParamList = {
@@ -452,28 +450,8 @@ function MainTabs() {
 /**
  * Root Navigator - Includes tabs and modal screens
  */
-function TourTouchBlocker() {
-  const { unifiedTourActive } = useStore();
-  if (!unifiedTourActive) return null;
-  // Global touch blocker that sits above the entire navigator stack.
-  // Prevents tapping through to screens underneath during tour step transitions.
-  // The tour tooltip and modals render via Portal/native Modal which sit above this.
-  return (
-    <View
-      style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', zIndex: 9990 }]}
-      pointerEvents="auto"
-      onStartShouldSetResponder={() => true}
-      onStartShouldSetResponderCapture={() => true}
-      onMoveShouldSetResponder={() => true}
-      onMoveShouldSetResponderCapture={() => true}
-      onResponderRelease={() => {}}
-    />
-  );
-}
-
 export function RootNavigator() {
   return (
-    <TourRefsProvider>
     <RootStack.Navigator
       screenOptions={{
         headerShown: false,
@@ -824,6 +802,20 @@ export function RootNavigator() {
         }}
       />
       <RootStack.Screen
+        name="CallKatie"
+        component={CallKatieScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
+          headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Never Miss a Call',
+        }}
+      />
+      <RootStack.Screen
         name="Feedback"
         component={FeedbackScreen}
         options={{
@@ -880,9 +872,6 @@ export function RootNavigator() {
         }}
       />
     </RootStack.Navigator>
-    <TourTouchBlocker />
-    <UnifiedTourController />
-    </TourRefsProvider>
   );
 }
 

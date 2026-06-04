@@ -23,11 +23,10 @@ import {
 } from '../services/materialsPipeline';
 import { reviewQuoteMaterials, isFlaggedRow, QuoteReview } from '../utils/quoteReview';
 import { loadTemplates } from '../services/sectionTemplateService';
-import { TourPhase } from '../components/tour/tourFlow';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { reconcileNextNumber } from '../utils/nextNumber';
-import { firestoreService } from '../services/firestoreService';
+import { firestoreService, ASSISTANT_LOGGING_ENABLED } from '../services/firestoreService';
 import { documentService } from '../services/documentService';
 // Static import — see note on the call sites below. Dynamic `import()` here
 // (the previous shape) created a Metro lazy chunk that, in Android dev with
@@ -39,7 +38,7 @@ import { documentService } from '../services/documentService';
 import * as xeroService from '../services/xeroService';
 import { TRIAL_MS } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
-import { ensureJobForDocument, ensureJobForQuote } from './useJobStore';
+import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
 import { auth } from '../config/firebase';
 
 /**
@@ -126,14 +125,6 @@ interface AppState {
   setOnboarded: (value: boolean) => Promise<void>;
   checkOnboarding: () => Promise<void>;
 
-  // Tour
-  hasSeenTour: boolean;
-  setHasSeenTour: (value: boolean) => Promise<void>;
-  checkTourStatus: () => Promise<void>;
-  seenScreenTours: string[];
-  markScreenTourSeen: (tourId: string) => Promise<void>;
-  hasSeenScreenTour: (tourId: string) => boolean;
-
   // Quote numbering
   nextQuoteNumber: number;
   loadNextQuoteNumber: () => Promise<void>;
@@ -170,15 +161,6 @@ interface AppState {
   // Referral
   referralInfo: ReferralInfo | null;
   loadReferralInfo: () => Promise<void>;
-
-  // Unified guided tour
-  unifiedTourActive: boolean;
-  unifiedTourPhase: TourPhase | null;
-  unifiedTourQuoteId: string | null;
-  startUnifiedTour: () => void;
-  setUnifiedTourPhase: (phase: TourPhase) => void;
-  endUnifiedTour: () => Promise<void>;
-  skipUnifiedTour: () => Promise<void>;
 
   // Template material staging (for adding materials to templates from AddMaterialScreen)
   pendingTemplateMaterial: Material | null;
@@ -234,6 +216,12 @@ interface AppState {
   currentConversationId: string | null;
   startConversation: () => string;
   endConversation: () => void;
+  /**
+   * Discard the current chat and start a blank one. We don't keep chat
+   * history — the durable output is the quote/job/invoice, and transcripts
+   * still sync to Firestore for admin review. Returns the new id.
+   */
+  newChat: () => string;
   appendMessage: (conversationId: string, message: ChatMessage) => void;
   /**
    * Patch a single message in place — used to update a "working" card as
@@ -251,6 +239,7 @@ interface AppState {
     proposalId: string,
     status: ProposalStatus,
   ) => void;
+  // (chat history is in-memory only — no load-from-disk; see newChat)
   // Apply a proposal through the existing store actions. Returns a follow-up
   // hint the caller can use to drive navigation — keeps the store free of
   // navigation imports. The optional onProgress callback receives pipeline
@@ -261,7 +250,6 @@ interface AppState {
     proposal: Proposal,
     onProgress?: (status: WorkingStatus) => void,
   ) => Promise<ApplyProposalResult>;
-  loadConversations: () => Promise<void>;
 
   // Cleanup
   clearAllData: () => Promise<void>;
@@ -287,7 +275,6 @@ const STORAGE_KEYS = {
   NEXT_QUOTE_NUMBER: '@quotemate:next_quote_number',
   INVOICES: '@quotemate:invoices',
   NEXT_INVOICE_NUMBER: '@quotemate:next_invoice_number',
-  TOUR_SEEN: '@quotemate:tour_seen',
   XERO_CONNECTION: '@quotemate:xero_connection',
   CONTACTS: '@quotemate:contacts',
   CONTACTS_MIGRATED: '@quotemate:contacts_migrated',
@@ -437,6 +424,29 @@ function buildLegacyDocIndex(docs: Document[]): Map<string, Document> {
 }
 
 // Create the store
+// --- Mate conversation telemetry -----------------------------------------
+// Mirror Mate conversations to Firestore so transcripts + proposal outcomes
+// can be reviewed to tune accuracy. Streaming text deltas (voice especially)
+// call appendMessage/updateMessage many times per turn, so coalesce the burst
+// into a single write that fires once activity settles and reads the latest
+// conversation state at flush time — never the intermediate half-streamed
+// bubbles. Timers live outside the store so the non-serializable handles never
+// land in state.
+const ASSISTANT_SYNC_DEBOUNCE_MS = 4000;
+const assistantSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleConversationSync(conversationId: string, get: () => AppState): void {
+  if (!ASSISTANT_LOGGING_ENABLED) return;
+  const pending = assistantSyncTimers.get(conversationId);
+  if (pending) clearTimeout(pending);
+  const timer = setTimeout(() => {
+    assistantSyncTimers.delete(conversationId);
+    const convo = get().conversations.find((c) => c.id === conversationId);
+    if (convo) void firestoreService.saveConversation(convo);
+  }, ASSISTANT_SYNC_DEBOUNCE_MS);
+  assistantSyncTimers.set(conversationId, timer);
+}
+
 export const useStore = create<AppState>((set, get) => ({
   // Initial state
   businessSettings: null,
@@ -447,8 +457,6 @@ export const useStore = create<AppState>((set, get) => ({
   setSyncError: (err) => set({ lastSyncError: err }),
   clearSyncError: () => set({ lastSyncError: null }),
   isOnboarded: false,
-  hasSeenTour: false,
-  seenScreenTours: [],
   subscriptionStatus: null,
   nextQuoteNumber: 1,
   invoices: [],
@@ -463,9 +471,6 @@ export const useStore = create<AppState>((set, get) => ({
   contacts: [],
   contactsLoaded: false,
   xeroContacts: [],
-  unifiedTourActive: false,
-  unifiedTourPhase: null,
-  unifiedTourQuoteId: null,
   documents: [],
   documentsLoaded: false,
   conversations: [],
@@ -1250,85 +1255,6 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  // Tour
-  setHasSeenTour: async (value: boolean) => {
-    try {
-      await AsyncStorage.setItem(STORAGE_KEYS.TOUR_SEEN, JSON.stringify(value));
-      set({ hasSeenTour: value });
-
-      // Sync to Firestore if user is signed in
-      if (auth.currentUser) {
-        await firestoreService.saveTourStatus(value);
-      }
-    } catch (error) {
-      // silently ignore
-    }
-  },
-
-  checkTourStatus: async () => {
-    try {
-      // Hydrate from AsyncStorage first so hasSeenTour is correct on the very
-      // first render after app launch. Without this, the dashboard's 800ms
-      // auto-start timer can race the Firestore round-trip and re-trigger the
-      // tour on every app restart/update for users who've already seen it.
-      const localStored = await AsyncStorage.getItem(STORAGE_KEYS.TOUR_SEEN);
-      const localScreenStored = await AsyncStorage.getItem('@quotemate:seen_screen_tours');
-      if (localStored) set({ hasSeenTour: JSON.parse(localStored) });
-      if (localScreenStored) set({ seenScreenTours: JSON.parse(localScreenStored) });
-
-      // If user is signed in, reconcile with Firestore
-      if (auth.currentUser) {
-        const cloudTourStatus = await firestoreService.loadTourStatus();
-        if (cloudTourStatus !== null) {
-          await AsyncStorage.setItem(STORAGE_KEYS.TOUR_SEEN, JSON.stringify(cloudTourStatus));
-          set({ hasSeenTour: cloudTourStatus });
-        } else if (localStored) {
-          // Cloud has no record but local says seen — sync up
-          const hasSeenTour = JSON.parse(localStored);
-          if (hasSeenTour) {
-            await firestoreService.saveTourStatus(hasSeenTour);
-          }
-        }
-
-        const cloudScreenTours = await firestoreService.loadSeenScreenTours();
-        const localTours: string[] = localScreenStored ? JSON.parse(localScreenStored) : [];
-        if (cloudScreenTours) {
-          const merged = [...new Set([...localTours, ...cloudScreenTours])];
-          await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(merged));
-          set({ seenScreenTours: merged });
-          if (merged.length > cloudScreenTours.length) {
-            await firestoreService.saveSeenScreenTours(merged);
-          }
-        } else if (localTours.length > 0) {
-          await firestoreService.saveSeenScreenTours(localTours);
-        }
-      }
-    } catch (error) {
-      // silently ignore
-    }
-  },
-
-  markScreenTourSeen: async (tourId: string) => {
-    try {
-      const { seenScreenTours } = get();
-      if (seenScreenTours.includes(tourId)) return;
-      const updated = [...seenScreenTours, tourId];
-      await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(updated));
-      set({ seenScreenTours: updated });
-
-      // Sync to Firestore if user is signed in
-      if (auth.currentUser) {
-        await firestoreService.saveSeenScreenTours(updated);
-      }
-    } catch (error) {
-      // silently ignore
-    }
-  },
-
-  hasSeenScreenTour: (tourId: string) => {
-    return get().seenScreenTours.includes(tourId);
-  },
-
   // Quote numbering
   loadNextQuoteNumber: async () => {
     try {
@@ -1944,73 +1870,6 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  // Unified guided tour
-  startUnifiedTour: () => {
-    const { createNewQuote, currentQuote } = get();
-    createNewQuote();
-    const newQuote = get().currentQuote;
-    set({
-      unifiedTourActive: true,
-      unifiedTourPhase: 'dashboard',
-      unifiedTourQuoteId: newQuote?.id || null,
-    });
-  },
-
-  setUnifiedTourPhase: (phase: TourPhase) => {
-    set({ unifiedTourPhase: phase });
-  },
-
-  endUnifiedTour: async () => {
-    const { unifiedTourQuoteId, deleteQuote, setHasSeenTour } = get();
-    // Delete the tour dummy quote — user was told to delete it themselves,
-    // but we clean it up to avoid leftovers
-    if (unifiedTourQuoteId) {
-      try {
-        await deleteQuote(unifiedTourQuoteId);
-      } catch (e) {
-        // silently ignore
-      }
-    }
-    // Mark all tours as seen
-    await setHasSeenTour(true);
-    const allScreenTours = ['jobDetails', 'customerDetails', 'materialsList', 'materialsListItems', 'addMaterial', 'materialsListAdded', 'laborMarkup', 'quotePreview', 'dashboardComplete'];
-    const { seenScreenTours } = get();
-    const updated = [...new Set([...seenScreenTours, ...allScreenTours])];
-    await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(updated));
-    set({
-      unifiedTourActive: false,
-      unifiedTourPhase: null,
-      unifiedTourQuoteId: null,
-      currentQuote: null,
-      seenScreenTours: updated,
-    });
-  },
-
-  skipUnifiedTour: async () => {
-    const { unifiedTourQuoteId, deleteQuote, setHasSeenTour } = get();
-    // Delete the dummy quote on skip
-    if (unifiedTourQuoteId) {
-      try {
-        await deleteQuote(unifiedTourQuoteId);
-      } catch (e) {
-        // silently ignore
-      }
-    }
-    // Mark all tours as seen
-    await setHasSeenTour(true);
-    const allScreenTours = ['jobDetails', 'customerDetails', 'materialsList', 'materialsListItems', 'addMaterial', 'materialsListAdded', 'laborMarkup', 'quotePreview', 'dashboardComplete'];
-    const { seenScreenTours } = get();
-    const updated = [...new Set([...seenScreenTours, ...allScreenTours])];
-    await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(updated));
-    set({
-      unifiedTourActive: false,
-      unifiedTourPhase: null,
-      unifiedTourQuoteId: null,
-      currentQuote: null,
-      seenScreenTours: updated,
-    });
-  },
-
   // Contacts
   loadContacts: async () => {
     try {
@@ -2560,42 +2419,26 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // Mate assistant ---------------------------------------------------------
-  loadConversations: async () => {
-    try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.CONVERSATIONS);
-      if (!stored) return;
-      const parsed: Conversation[] = JSON.parse(stored);
-      // Merge into any in-memory conversations (mostly: the empty one a focus
-      // effect may have just minted). Replacing wholesale clobbered the freshly
-      // minted conversation X, leaving currentConversationId='X' pointing at
-      // nothing in the array — appendMessage then silently no-ops because its
-      // .map can't find a matching id, and the user types into a black hole.
-      const { conversations: inMemory, currentConversationId } = get();
-      const parsedIds = new Set(parsed.map((c) => c.id));
-      const surviving = inMemory.filter((c) => !parsedIds.has(c.id));
-      const merged = [...surviving, ...parsed]
-        .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
-        .slice(0, 20);
-      // If the active id was lost during merge, clear it so the next focus
-      // creates a fresh one instead of writing into the void.
-      const stillExists = merged.some((c) => c.id === currentConversationId);
-      set({
-        conversations: merged,
-        ...(currentConversationId && !stillExists ? { currentConversationId: null } : {}),
-      });
-    } catch {
-      // silently ignore — chat history is local-only convenience data
-    }
+  newChat: () => {
+    const id = generateId();
+    const now = new Date().toISOString();
+    const convo: Conversation = { id, createdAt: now, updatedAt: now, messages: [] };
+    // We don't keep chat history: replace everything with one fresh, empty
+    // conversation. The prior turns were already synced to Firestore for
+    // admin review (scheduleConversationSync), so nothing's lost there.
+    set({ conversations: [convo], currentConversationId: id });
+    return id;
   },
 
   startConversation: () => {
     const id = generateId();
     const now = new Date().toISOString();
     const convo: Conversation = { id, createdAt: now, updatedAt: now, messages: [] };
-    // Keep the last 20 conversations only — chat history isn't core data.
+    // Chat history is in-memory only (not persisted): a tab switch keeps the
+    // current chat alive, but a cold launch starts fresh. Cap at 20 so a long
+    // session can't grow the array without bound.
     const trimmed = [convo, ...get().conversations].slice(0, 20);
     set({ conversations: trimmed, currentConversationId: id });
-    AsyncStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(trimmed)).catch(() => {});
     return id;
   },
 
@@ -2613,16 +2456,16 @@ export const useStore = create<AppState>((set, get) => ({
           : c,
       );
     } else {
-      // Defensive: a previous bug let conversationId point at a missing
-      // conversation (loadConversations clobbered the in-memory copy). Self-heal
-      // by minting a new conversation with this id so the message isn't lost.
+      // Defensive: a stale currentConversationId can point at a conversation
+      // that's no longer in the array (e.g. just after newChat). Self-heal by
+      // minting a conversation with this id so the message isn't lost.
       const now = new Date().toISOString();
       const fresh: Conversation = { id: conversationId, createdAt: now, updatedAt: now, messages: [message] };
       next = [fresh, ...get().conversations].slice(0, 20);
       set({ currentConversationId: conversationId });
     }
     set({ conversations: next });
-    AsyncStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(next)).catch(() => {});
+    scheduleConversationSync(conversationId, get);
   },
 
   updateMessage: (conversationId, messageId, patch) => {
@@ -2635,7 +2478,7 @@ export const useStore = create<AppState>((set, get) => ({
       };
     });
     set({ conversations: next });
-    AsyncStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(next)).catch(() => {});
+    scheduleConversationSync(conversationId, get);
   },
 
   updateProposalStatus: (conversationId, messageId, proposalId, status) => {
@@ -2654,7 +2497,7 @@ export const useStore = create<AppState>((set, get) => ({
       };
     });
     set({ conversations: next });
-    AsyncStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(next)).catch(() => {});
+    scheduleConversationSync(conversationId, get);
   },
 
   applyProposal: async (
@@ -2700,6 +2543,112 @@ export const useStore = create<AppState>((set, get) => ({
           };
           await get().saveContact(newContact);
           return { ok: true, navigate: { kind: 'open_contact', contactId: newContact.id } };
+        }
+
+        case 'propose_update_customer': {
+          // Re-point an EXISTING quote/invoice at a different contact. Resolve
+          // the customer the same way propose_draft_quote does: prefer an
+          // existing contact (customerId), fall back to a fresh draft we
+          // create + link. Then stamp the customer onto the document and let
+          // saveDocument → ensureJobForDocument sync the linked job's
+          // customerName/email/phone/address (the in-chat header reads the job).
+          let contact: Contact | undefined;
+          if (proposal.customerId) {
+            contact = get().contacts.find((c) => c.id === proposal.customerId);
+            if (!contact) {
+              // eslint-disable-next-line no-console
+              console.log('[Mate] contact not in local cache, fetching from Firestore', proposal.customerId);
+              const fetched = await firestoreService.getContactById(proposal.customerId);
+              if (fetched) {
+                contact = fetched;
+                const next = [...get().contacts.filter((c) => c.id !== fetched.id), fetched];
+                set({ contacts: next });
+                AsyncStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(next)).catch(() => {});
+              }
+            }
+            if (!contact) {
+              return {
+                ok: false,
+                error: 'Couldn\'t find that contact in Firestore. Ask again so Mate can re-search.',
+              };
+            }
+          } else if (proposal.customerDraft?.name) {
+            contact = {
+              id: generateId(),
+              name: proposal.customerDraft.name,
+              email: proposal.customerDraft.email,
+              phone: proposal.customerDraft.phone,
+              address: proposal.customerDraft.address,
+              source: 'manual',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            await get().saveContact(contact);
+          } else {
+            return { ok: false, error: 'No customer provided.' };
+          }
+
+          // syncJobFromSource only patches non-empty differing fields and never
+          // the contact link, so after the save we also point the linked job's
+          // customerId at the new contact.
+          const syncJobContactId = async (jobId: string | undefined) => {
+            if (!jobId) return;
+            const job = useJobStore.getState().getJobById(jobId);
+            if (job && job.customerId !== contact!.id) {
+              await useJobStore.getState().saveJob({ ...job, customerId: contact!.id });
+            }
+          };
+
+          // Preferred path: unified Document (covers quotes and invoices).
+          const target = await resolveDocument(proposal.quoteId);
+          if (target) {
+            const nextDoc: Document = {
+              ...target,
+              contactId: contact.id,
+              customerName: contact.name,
+              customerEmail: contact.email,
+              customerPhone: contact.phone,
+              jobAddress: contact.address ?? target.jobAddress,
+            };
+            await get().saveDocument(nextDoc);
+            await syncJobContactId(nextDoc.jobId);
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: nextDoc.id } };
+          }
+
+          // Legacy fallback: a draft still only in the quotes array.
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (quote) {
+            const nextQuote: Quote = {
+              ...quote,
+              contactId: contact.id,
+              customerName: contact.name,
+              customerEmail: contact.email,
+              customerPhone: contact.phone,
+              jobAddress: contact.address ?? quote.jobAddress,
+              updatedAt: new Date(),
+            };
+            await get().saveQuote(nextQuote);
+            await syncJobContactId(get().quotes.find((q) => q.id === quote.id)?.jobId);
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
+          }
+
+          const invoice = get().invoices.find((i) => i.id === proposal.quoteId);
+          if (invoice) {
+            const nextInvoice: Invoice = {
+              ...invoice,
+              contactId: contact.id,
+              customerName: contact.name,
+              customerEmail: contact.email,
+              customerPhone: contact.phone,
+              jobAddress: contact.address ?? invoice.jobAddress,
+              updatedAt: new Date(),
+            };
+            await get().saveInvoice(nextInvoice);
+            await syncJobContactId(get().invoices.find((i) => i.id === invoice.id)?.jobId);
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: invoice.id } };
+          }
+
+          return { ok: false, error: 'Quote not found.' };
         }
 
         case 'propose_draft_quote': {
@@ -2963,12 +2912,24 @@ export const useStore = create<AppState>((set, get) => ({
         case 'propose_send_quote': {
           const doc = await resolveDocument(proposal.quoteId);
           if (!doc) return { ok: false, error: 'Quote not found.' };
+          // If Mate pre-wrote the email, persist it onto the doc so the send
+          // preview opens pre-filled (the modal reads draftEmailBody /
+          // draftEmailSubject and skips auto-generation when they're set).
+          let target = doc;
+          if (proposal.draftEmailBody || proposal.draftEmailSubject) {
+            target = {
+              ...doc,
+              ...(proposal.draftEmailBody ? { draftEmailBody: proposal.draftEmailBody } : {}),
+              ...(proposal.draftEmailSubject ? { draftEmailSubject: proposal.draftEmailSubject } : {}),
+            };
+            await get().saveDocument(target);
+          }
           return {
             ok: true,
             navigate: {
               kind: 'open_send_modal',
-              documentId: doc.id,
-              recipientEmail: proposal.recipientEmail || doc.customerEmail,
+              documentId: target.id,
+              recipientEmail: proposal.recipientEmail || target.customerEmail,
             },
           };
         }
@@ -3071,12 +3032,10 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.INVOICES,
         STORAGE_KEYS.NEXT_QUOTE_NUMBER,
         STORAGE_KEYS.NEXT_INVOICE_NUMBER,
-        STORAGE_KEYS.TOUR_SEEN,
         STORAGE_KEYS.XERO_CONNECTION,
         STORAGE_KEYS.CONTACTS,
         STORAGE_KEYS.CONTACTS_MIGRATED,
         STORAGE_KEYS.CONVERSATIONS,
-        '@quotemate:seen_screen_tours',
       ]);
       // Reset store state to initial values
       set({
@@ -3084,8 +3043,6 @@ export const useStore = create<AppState>((set, get) => ({
         quotes: [],
         currentQuote: null,
         isOnboarded: false,
-        hasSeenTour: false,
-        seenScreenTours: [],
         subscriptionStatus: null,
         invoices: [],
         currentInvoice: null,

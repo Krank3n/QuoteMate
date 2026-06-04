@@ -103,6 +103,28 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
         outline: none !important;
         box-shadow: none !important;
       }
+      /* Chrome paints autofilled fields with its own pale background and
+         near-black text, which looks broken on our dark surface. There's no
+         way to set the autofill background directly, so mask it with a
+         surface-coloured inset box-shadow and force the text fill light.
+         The long transition stops Chrome flashing its colour back on focus. */
+      input:-webkit-autofill,
+      input:-webkit-autofill:hover,
+      input:-webkit-autofill:focus,
+      input:-webkit-autofill:active {
+        -webkit-box-shadow: 0 0 0 1000px #1E293B inset !important;
+        box-shadow: 0 0 0 1000px #1E293B inset !important;
+        -webkit-text-fill-color: #E2E8F0 !important;
+        caret-color: #E2E8F0;
+        transition: background-color 9999s ease-in-out 0s;
+        /* Fires an animationstart event the instant Chrome autofills, even
+           before any gesture (when the value still isn't readable). AuthScreen
+           listens for it to drop the floating label that would otherwise sit
+           on top of the autofilled text. */
+        animation-name: qm-autofill;
+        animation-duration: 1ms;
+      }
+      @keyframes qm-autofill { from {} to {} }
       button { outline: none; }
       button:focus-visible {
         outline: 2px solid rgba(0, 152, 104, 0.55);
@@ -129,7 +151,7 @@ export default function App() {
   // few seconds after the dashboard mounts, and the data-load Promise.all
   // runs twice — which feels (and looks) like the app reloading itself.
   const initialisedForUidRef = useRef<string | null>(null);
-  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, checkTourStatus, loadXeroConnection, loadContacts, loadDocuments, listenToDocuments } = useStore();
+  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, loadXeroConnection, loadContacts, loadDocuments, listenToDocuments } = useStore();
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [showUpdateSheet, setShowUpdateSheet] = useState(false);
 
@@ -192,16 +214,15 @@ export default function App() {
         setUserDataLoaded(false); // Reset when new user signs in
 
         // Critical-for-first-paint: dashboard needs quotes, business settings,
-        // subscription (trial banner), onboarding flag (router gate), tour
-        // status, and the quote-number counter. Everything else gets deferred
-        // until after first paint so the splash dismisses sooner.
+        // subscription (trial banner), onboarding flag (router gate), and the
+        // quote-number counter. Everything else gets deferred until after first
+        // paint so the splash dismisses sooner.
         await Promise.all([
           loadQuotes(),
           loadBusinessSettings(),
           checkOnboarding(),
           loadSubscription(),
           loadNextQuoteNumber(),
-          checkTourStatus(),
         ]);
 
         setUserDataLoaded(true); // Mark user data as loaded — dashboard can render

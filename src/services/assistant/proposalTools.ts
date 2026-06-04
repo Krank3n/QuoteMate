@@ -1,8 +1,7 @@
-// Mate proposal-tool validators — client-side mirror of
-// functions/src/assistant/proposalTools.ts. These don't mutate state; they
-// turn a tool-call payload into a typed Proposal that the chat surface
-// renders as a confirmation card. The store's applyProposal() is the only
-// path that touches data.
+// Mate proposal-tool validators — the client-side source of truth (no
+// server-side copy). These don't mutate state; they turn a tool-call payload
+// into a typed Proposal that the chat surface renders as a confirmation card.
+// The store's applyProposal() is the only path that touches data.
 
 import {
   AddLineItemProposal,
@@ -13,7 +12,9 @@ import {
   Proposal,
   RepriceQuoteProposal,
   SendQuoteProposal,
+  UpdateCustomerProposal,
 } from '../../types/assistant';
+import { resolveQuoteId } from './quoteRefMap';
 
 export interface ProposalResult {
   proposal?: Proposal;
@@ -65,7 +66,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         toolUseId,
         createdAt: now,
         type: 'propose_add_line_item',
-        quoteId: String(input.quoteId),
+        quoteId: resolveQuoteId(input.quoteId),
         searchTerm: String(input.searchTerm),
         qty: Number(input.qty) || 1,
         unit: String(input.unit || 'each'),
@@ -84,7 +85,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         toolUseId,
         createdAt: now,
         type: 'propose_delete_line_item',
-        quoteId: String(input.quoteId),
+        quoteId: resolveQuoteId(input.quoteId),
         materialId: String(input.materialId),
         displayName: input.displayName ? String(input.displayName) : undefined,
         displayQty: Number.isFinite(Number(input.displayQty)) ? Number(input.displayQty) : undefined,
@@ -109,6 +110,28 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       return { proposal };
     }
 
+    case 'propose_update_customer': {
+      if (!input?.quoteId) return { error: 'propose_update_customer requires quoteId.' };
+      if (!input.customerId && !input.customerDraft?.name) {
+        return { error: 'Provide customerId (from find_customer) or customerDraft.name.' };
+      }
+      const proposal: UpdateCustomerProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_update_customer',
+        quoteId: resolveQuoteId(input.quoteId),
+        customerId: input.customerId ? String(input.customerId) : undefined,
+        customerDraft: input.customerDraft?.name ? input.customerDraft : undefined,
+        customerName: input.customerName
+          ? String(input.customerName)
+          : input.customerDraft?.name
+            ? String(input.customerDraft.name)
+            : undefined,
+      };
+      return { proposal };
+    }
+
     case 'propose_send_quote': {
       if (!input?.quoteId) return { error: 'propose_send_quote requires quoteId.' };
       const proposal: SendQuoteProposal = {
@@ -116,8 +139,10 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         toolUseId,
         createdAt: now,
         type: 'propose_send_quote',
-        quoteId: String(input.quoteId),
+        quoteId: resolveQuoteId(input.quoteId),
         recipientEmail: input.recipientEmail ? String(input.recipientEmail) : undefined,
+        draftEmailBody: input.draftEmailBody ? String(input.draftEmailBody) : undefined,
+        draftEmailSubject: input.draftEmailSubject ? String(input.draftEmailSubject) : undefined,
       };
       return { proposal };
     }
@@ -129,7 +154,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         toolUseId,
         createdAt: now,
         type: 'propose_convert_to_invoice',
-        quoteId: String(input.quoteId),
+        quoteId: resolveQuoteId(input.quoteId),
       };
       return { proposal };
     }
@@ -141,7 +166,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         toolUseId,
         createdAt: now,
         type: 'propose_reprice',
-        quoteId: String(input.quoteId),
+        quoteId: resolveQuoteId(input.quoteId),
         displayName: input.displayName ? String(input.displayName) : undefined,
         displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
       };

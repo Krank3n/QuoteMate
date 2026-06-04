@@ -13,43 +13,11 @@
 // stays single-shot — burning a token mint per text turn is cheap and
 // the simpler lifecycle keeps that path easy to debug.
 
-import { Platform } from 'react-native';
-import { auth } from '../../config/firebase';
 import { ChatMessage, Proposal } from '../../types/assistant';
 import { MATE_SYSTEM_PROMPT } from './systemPrompt';
-import { TOOL_DECLARATIONS } from './toolSchemas';
+import { TOOL_DECLARATIONS, CONTROL_TOOL_DECLARATIONS, isControlTool } from './toolSchemas';
 import { dispatchToolCall } from './toolDispatcher';
-
-const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
-const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
-  ? 'http://127.0.0.1:5001/hansendev/us-central1'
-  : 'https://us-central1-hansendev.cloudfunctions.net';
-
-const LIVE_WS_BASE =
-  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
-
-const MAX_HISTORY_TURNS = 20;
-
-export class VoiceSessionAuthError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'VoiceSessionAuthError';
-  }
-}
-
-export class VoiceSessionQuotaError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'VoiceSessionQuotaError';
-  }
-}
-
-export class VoiceSessionOfflineError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'VoiceSessionOfflineError';
-  }
-}
+import { LIVE_WS_BASE, MAX_HISTORY_TURNS, LiveOfflineError, mintLiveToken } from './liveSession';
 
 export interface VoiceSessionCallbacks {
   /** Server's transcription of what the user said. May fire multiple times per turn. */
@@ -62,6 +30,24 @@ export interface VoiceSessionCallbacks {
   onAudioChunk?: (base64Pcm: string) => void;
   /** A propose_* tool call validated and ready to render as a card. */
   onProposal?: (proposal: Proposal) => void;
+  /**
+   * The tradie accepted or backed out of the on-screen proposal card by voice.
+   * Mate signals this via the apply_/cancel_pending_proposal control tools; the
+   * screen runs the same Apply / dismiss the card buttons do. The return value
+   * is sent straight back as the tool response so Mate knows whether a card was
+   * actually waiting (so it doesn't claim it sent something when nothing was up).
+   */
+  onControlAction?: (
+    decision: 'apply' | 'cancel',
+    proposalId?: string,
+  ) => { ok: boolean; error?: string };
+  /**
+   * The tradie asked to see a quote and Mate called show_quote. The screen
+   * renders it inline in the chat and returns whether the id actually resolved
+   * — so Mate is told the truth instead of claiming a quote it couldn't find
+   * is on screen.
+   */
+  onShowQuote?: (quoteId: string) => { ok: boolean; error?: string };
   /** One model turn finished; ready for the next user turn. */
   onTurnComplete?: () => void;
   /** Fatal error; the session is closed. */
@@ -90,44 +76,11 @@ export interface VoiceSession {
   isOpen: () => boolean;
 }
 
-async function mintToken(): Promise<{ token: string; model: string }> {
-  const idToken = await auth.currentUser?.getIdToken();
-  if (!idToken) throw new VoiceSessionAuthError('Sign in to use Mate.');
-
-  const url = `${FIREBASE_FUNCTIONS_URL}/assistantToken`;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-      body: JSON.stringify({ platform: Platform.OS, mode: 'voice' }),
-    });
-  } catch (err: any) {
-    throw new VoiceSessionOfflineError(err?.message || 'Network error.');
-  }
-  if (response.status === 402) {
-    const data = await response.json().catch(() => ({}));
-    throw new VoiceSessionQuotaError(data.error || "You've hit today's Mate limit.");
-  }
-  if (response.status === 429) {
-    throw new VoiceSessionOfflineError('Whoa — too many requests. Wait a moment.');
-  }
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new VoiceSessionOfflineError(data.error || `Mate is offline (${response.status}).`);
-  }
-  const data = await response.json();
-  if (!data?.token || !data?.model) {
-    throw new VoiceSessionOfflineError('Mate is offline (bad token response).');
-  }
-  return { token: data.token, model: data.model };
-}
-
 export async function openVoiceSession(
   history: ChatMessage[],
   cb: VoiceSessionCallbacks,
 ): Promise<VoiceSession> {
-  const { token, model } = await mintToken();
+  const { token, model } = await mintLiveToken('voice');
 
   return new Promise<VoiceSession>((resolve, reject) => {
     const url = `${LIVE_WS_BASE}?access_token=${encodeURIComponent(token)}`;
@@ -135,7 +88,7 @@ export async function openVoiceSession(
     try {
       ws = new WebSocket(url);
     } catch (err: any) {
-      reject(new VoiceSessionOfflineError(err?.message || 'WebSocket init failed.'));
+      reject(new LiveOfflineError(err?.message || 'WebSocket init failed.'));
       return;
     }
 
@@ -149,7 +102,7 @@ export async function openVoiceSession(
       try {
         ws.send(JSON.stringify(frame));
       } catch (err: any) {
-        cb.onError?.(new VoiceSessionOfflineError(err?.message || 'Send failed.'));
+        cb.onError?.(new LiveOfflineError(err?.message || 'Send failed.'));
       }
     };
 
@@ -230,7 +183,9 @@ export async function openVoiceSession(
             speechConfig: { languageCode: 'en-US' },
           },
           systemInstruction: { parts: [{ text: MATE_SYSTEM_PROMPT }] },
-          tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+          // Voice gets the control tools on top of the shared set so the tradie
+          // can accept/cancel a card by voice when they can't tap.
+          tools: [{ functionDeclarations: [...TOOL_DECLARATIONS, ...CONTROL_TOOL_DECLARATIONS] }],
           // Server-side VAD — Mate replies when the tradie stops speaking,
           // no client-side turn boundary needed.
           realtimeInputConfig: {
@@ -287,9 +242,28 @@ export async function openVoiceSession(
       if (Array.isArray(toolCalls) && toolCalls.length) {
         try {
           const results = await Promise.all(
-            toolCalls.map((call: any) =>
-              dispatchToolCall({ name: String(call.name), id: String(call.id), args: call.args || {} }),
-            ),
+            toolCalls.map(async (call: any) => {
+              const name = String(call.name);
+              const id = String(call.id);
+              // Control tools (accept/cancel the on-screen card) don't hit the
+              // dispatcher — hand the decision to the screen and ack the model
+              // with whatever it reports back.
+              if (isControlTool(name)) {
+                const decision = name === 'apply_pending_proposal' ? 'apply' : 'cancel';
+                const proposalId = call.args?.proposalId ? String(call.args.proposalId) : undefined;
+                const response =
+                  cb.onControlAction?.(decision, proposalId) ?? { ok: false, error: 'Voice control unavailable.' };
+                return { name, id, response, proposal: undefined as Proposal | undefined };
+              }
+              const r = await dispatchToolCall({ name, id, args: call.args || {} });
+              // show_quote is a screen action — let the screen render it and
+              // tell the model whether the quote actually resolved.
+              if (r.view?.kind === 'show_quote') {
+                const response = cb.onShowQuote?.(r.view.quoteId) ?? { ok: true };
+                return { name: r.name, id: r.id, response, proposal: undefined as Proposal | undefined };
+              }
+              return { name: r.name, id: r.id, response: r.response, proposal: r.proposal };
+            }),
           );
           for (const r of results) {
             if (r.proposal) cb.onProposal?.(r.proposal);
@@ -300,7 +274,7 @@ export async function openVoiceSession(
             },
           });
         } catch (err: any) {
-          cb.onError?.(new VoiceSessionOfflineError(err?.message || 'Tool dispatch failed.'));
+          cb.onError?.(new LiveOfflineError(err?.message || 'Tool dispatch failed.'));
         }
         return;
       }
@@ -332,10 +306,10 @@ export async function openVoiceSession(
     ws.onerror = (event: any) => {
       // eslint-disable-next-line no-console
       console.warn('[Mate voice] ws error', event?.message || event);
-      cb.onError?.(new VoiceSessionOfflineError('Voice connection error.'));
+      cb.onError?.(new LiveOfflineError('Voice connection error.'));
       if (!resolved) {
         resolved = true;
-        reject(new VoiceSessionOfflineError('Voice connection error.'));
+        reject(new LiveOfflineError('Voice connection error.'));
       }
     };
 
@@ -345,7 +319,7 @@ export async function openVoiceSession(
       cb.onClose?.(event?.code);
       if (!resolved && wasOpen) {
         resolved = true;
-        reject(new VoiceSessionOfflineError(`Voice connection closed (${event?.code || 'unknown'}).`));
+        reject(new LiveOfflineError(`Voice connection closed (${event?.code || 'unknown'}).`));
       }
     };
   });

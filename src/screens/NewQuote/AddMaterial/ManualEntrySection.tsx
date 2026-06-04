@@ -18,7 +18,6 @@ type CoverageUnit = 'm²' | 'm³' | 'm' | 'none';
 
 export interface ManualEntrySectionProps {
   // Refs
-  sectionRef: React.RefObject<View | null>;
   materialNameRef: React.RefObject<RNTextInput | null>;
   // Flags
   linkedToSupplierBook: boolean;
@@ -58,7 +57,6 @@ export interface ManualEntrySectionProps {
 }
 
 export function ManualEntrySection({
-  sectionRef,
   materialNameRef,
   linkedToSupplierBook,
   isEditMode,
@@ -94,7 +92,7 @@ export function ManualEntrySection({
   setCoverageUnit,
 }: ManualEntrySectionProps) {
   return (
-    <View ref={sectionRef} style={styles.section}>
+    <View style={styles.section}>
       {linkedToSupplierBook && (
         <View style={styles.linkedBanner}>
           <MaterialCommunityIcons name="link-variant" size={16} color={colors.primary} />

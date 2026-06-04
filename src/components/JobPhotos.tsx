@@ -49,13 +49,9 @@ interface LocalPhoto extends QuotePhoto {
 interface JobPhotosProps {
   photos: QuotePhoto[];
   onPhotosChange: (photos: QuotePhoto[]) => void;
-  /** Ref attached to the first photo's wrapper — for tour spotlight targeting */
-  firstPhotoRef?: React.RefObject<View | null>;
-  /** When true, disable photo taps and add button (during tour) */
-  interactionDisabled?: boolean;
 }
 
-export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDisabled }: JobPhotosProps) {
+export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
   const [annotatingPhoto, setAnnotatingPhoto] = useState<LocalPhoto | null>(null);
   const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
@@ -327,12 +323,12 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
       </Text>
 
       <View style={styles.grid}>
-        {allPhotos.map((photo, index) => {
+        {allPhotos.map((photo) => {
           const displayUri = photo.localUri || photo.storageUrl;
           return (
-            <View key={photo.id} style={styles.photoWrapper} ref={index === 0 ? firstPhotoRef : undefined}>
+            <View key={photo.id} style={styles.photoWrapper}>
               <TouchableOpacity
-                onPress={() => !photo.uploading && !interactionDisabled && setAnnotatingPhoto(photo)}
+                onPress={() => !photo.uploading && setAnnotatingPhoto(photo)}
                 activeOpacity={0.8}
               >
                 <Image source={{ uri: displayUri }} style={styles.photo} />
@@ -368,7 +364,7 @@ export function JobPhotos({ photos, onPhotosChange, firstPhotoRef, interactionDi
           <TouchableOpacity
             style={[styles.addButton, allPhotos.length === 0 && styles.addButtonEmpty]}
             onPress={showAddOptions}
-            disabled={hasAnyUploading || interactionDisabled}
+            disabled={hasAnyUploading}
           >
             <MaterialCommunityIcons name="camera-plus" size={28} color={colors.textMuted} />
             <Text style={styles.addText}>Add</Text>

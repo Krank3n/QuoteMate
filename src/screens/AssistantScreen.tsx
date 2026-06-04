@@ -28,17 +28,10 @@ import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { useStore, NavigateHint } from '../store/useStore';
-import {
-  AssistantOfflineError,
-  AssistantQuotaError,
-  sendAssistantTurn,
-} from '../services/assistantService';
-import {
-  openVoiceSession,
-  VoiceSession,
-  VoiceSessionOfflineError,
-  VoiceSessionQuotaError,
-} from '../services/assistant/voiceSession';
+import { sendAssistantTurn } from '../services/assistantService';
+import { openVoiceSession, VoiceSession } from '../services/assistant/voiceSession';
+import { LiveAuthError, LiveOfflineError, LiveQuotaError } from '../services/assistant/liveSession';
+import { rememberAppliedQuote } from '../services/assistant/quoteRefMap';
 import { startMicCapture, MicCaptureHandle, MicUnavailableError } from '../services/assistant/mic';
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
 import { generateId } from '../utils/generateId';
@@ -264,13 +257,11 @@ export function AssistantScreen() {
   const conversations = useStore((s) => s.conversations);
   const currentConversationId = useStore((s) => s.currentConversationId);
   const startConversation = useStore((s) => s.startConversation);
+  const newChat = useStore((s) => s.newChat);
   const appendMessage = useStore((s) => s.appendMessage);
   const updateMessage = useStore((s) => s.updateMessage);
   const applyProposal = useStore((s) => s.applyProposal);
   const updateProposalStatus = useStore((s) => s.updateProposalStatus);
-  const loadConversations = useStore((s) => s.loadConversations);
-  const markScreenTourSeen = useStore((s) => s.markScreenTourSeen);
-  const hasSeenScreenTour = useStore((s) => s.hasSeenScreenTour);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const quotes = useStore((s) => s.quotes);
   const documents = useStore((s) => s.documents);
@@ -283,7 +274,6 @@ export function AssistantScreen() {
   // the status-row copy. Refs alone don't trigger re-renders.
   const [voiceMode, setVoiceMode] = useState<'sticky' | 'ptt' | null>(null);
   const listRef = useRef<FlatList<ChatItem>>(null);
-  const seenIntro = hasSeenScreenTour('mate_intro');
 
   // Shared 0..1 amplitude that drives the inline waveform. On web while
   // listening it's fed real mic RMS (see openVoiceMode); otherwise a gentle
@@ -309,21 +299,20 @@ export function AssistantScreen() {
   // keep the tradie company. Audio still plays through the queue; text
   // bubbles are suppressed so the chat doesn't fill up with banter.
   const narrationModeRef = useRef(false);
+  // Set when the tradie accepted/cancelled a card by voice this turn (Mate
+  // called a control tool). We run the actual Apply / dismiss on turnComplete
+  // so a draft's narration doesn't collide with Mate's spoken confirmation.
+  const pendingVoiceActionRef = useRef<{
+    decision: 'apply' | 'cancel';
+    message: ChatMessage;
+    proposal: Proposal;
+  } | null>(null);
 
-  useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
-
-  // Lazy-create a conversation on first focus.
+  // Lazy-create a conversation on first focus. Chat history isn't persisted —
+  // a cold launch always starts fresh (see store: in-memory only).
   useEffect(() => {
     if (!currentConversationId) startConversation();
   }, [currentConversationId, startConversation]);
-
-  useEffect(() => {
-    if (!seenIntro) {
-      markScreenTourSeen('mate_intro');
-    }
-  }, [seenIntro, markScreenTourSeen]);
 
   // Drive the inline waveform's overall amplitude. On web while listening the
   // mic chunk callback feeds real RMS in (see openVoiceMode); for every other
@@ -362,14 +351,23 @@ export function AssistantScreen() {
     () => conversations.find((c) => c.id === currentConversationId),
     [conversations, currentConversationId],
   );
+  const isEmpty = !conversation || conversation.messages.length === 0;
+
+  // Native uses an inverted FlatList: newest-first data renders bottom-up and
+  // sticks to the bottom for free. react-native-web's inverted list can't
+  // reliably scroll to the very top once the chat grows long, so on web we run
+  // a normal chronological list and auto-stick to the bottom via
+  // onContentSizeChange instead — which leaves the user free to scroll all the
+  // way up to the start when nothing's streaming.
+  const inverted = Platform.OS !== 'web';
 
   const items: ChatItem[] = useMemo(() => {
     if (!conversation) return [];
-    return conversation.messages
-      .slice()
-      .reverse()
-      .map((m) => ({ key: m.id, message: m }));
-  }, [conversation]);
+    const ordered = inverted
+      ? conversation.messages.slice().reverse()
+      : conversation.messages.slice();
+    return ordered.map((m) => ({ key: m.id, message: m }));
+  }, [conversation, inverted]);
 
   const handleNavigate = useCallback(
     (hint: NavigateHint | undefined) => {
@@ -395,18 +393,25 @@ export function AssistantScreen() {
           break;
         }
         case 'open_send_modal': {
-          const doc = documents.find((d) => d.id === hint.documentId);
-          if (!doc) return;
           // ViewJob is the unified job screen; the send modal lives inside it.
-          navigation.navigate('ViewJob', { documentId: doc.id, openSend: true, prefillEmail: hint.recipientEmail });
+          // It keys off jobId, so resolve the doc to its job and pass
+          // openSendDocId so ViewJob auto-opens the send sheet for this doc.
+          const doc = useStore.getState().getDocumentById(hint.documentId);
+          if (!doc?.jobId) return;
+          navigation.navigate('ViewJob', { jobId: doc.jobId, openSendDocId: doc.id });
           break;
         }
         case 'open_contact':
           navigation.navigate('Contacts', { highlightId: hint.contactId });
           break;
-        case 'open_invoice':
-          navigation.navigate('ViewJob', { documentId: hint.invoiceId });
+        case 'open_invoice': {
+          // The invoice was just minted by Apply; read the freshest store so
+          // we can route to its job (ViewJob keys off jobId, not documentId).
+          const doc = useStore.getState().getDocumentById(hint.invoiceId);
+          if (!doc?.jobId) return;
+          navigation.navigate('ViewJob', { jobId: doc.jobId });
           break;
+        }
       }
     },
     [navigation, quotes, documents, setCurrentQuote],
@@ -524,6 +529,15 @@ export function AssistantScreen() {
         });
       }
 
+      // Remember proposalId -> minted quoteId. The model frequently reuses the
+      // proposal id (the only handle it had pre-Apply) as a quote id on
+      // follow-ups; this lets the read/proposal tools translate it back to the
+      // real quote even if the [context] note below never lands (text mode, or
+      // a re-opened session that dropped the unpersisted note).
+      if (result.navigate && 'quoteId' in result.navigate && result.navigate.quoteId) {
+        rememberAppliedQuote(proposal.id, result.navigate.quoteId);
+      }
+
       // If a voice session is open, feed it the resolved quote id so
       // Mate stops trying to re-find the draft via list_recent_quotes on
       // the next utterance. turnComplete:false means the model logs it
@@ -570,6 +584,12 @@ export function AssistantScreen() {
               );
             }
             break;
+          case 'propose_update_customer':
+            liveSession.sendContextNote(
+              `[context] Changed the customer on quote ${proposal.quoteId}` +
+              (proposal.customerName ? ` to "${proposal.customerName}".` : '.'),
+            );
+            break;
           case 'propose_reprice':
             liveSession.sendContextNote(
               `[context] Re-priced quote ${proposal.quoteId}.` +
@@ -579,13 +599,18 @@ export function AssistantScreen() {
         }
       }
 
-      // For draft + reprice, keep the user in chat. Render the quote inline
-      // (JobScopeCard) so the tradie can review and keep chatting with Mate
-      // to tweak it without leaving — and surface any rows the pricing pass
-      // flagged right there (proactive review). Other proposal types (send,
-      // delete, convert, create contact) still auto-navigate because their
-      // result IS a navigation, not a long-running pipeline.
-      if (proposal.type === 'propose_draft_quote' || proposal.type === 'propose_reprice') {
+      // For draft + reprice + customer change, keep the user in chat. Render
+      // the quote inline (JobScopeCard) so the tradie can review and keep
+      // chatting with Mate to tweak it without leaving — and surface any rows
+      // the pricing pass flagged right there (proactive review). Other
+      // proposal types (send, delete, convert, create contact) still
+      // auto-navigate because their result IS a navigation, not an in-place
+      // edit of the quote on screen.
+      if (
+        proposal.type === 'propose_draft_quote' ||
+        proposal.type === 'propose_reprice' ||
+        proposal.type === 'propose_update_customer'
+      ) {
         if (result.navigate && result.navigate.kind === 'job_preview') {
           const hasIssues = !!result.review && result.review.issues.length > 0;
           const text =
@@ -593,9 +618,11 @@ export function AssistantScreen() {
               ? hasIssues
                 ? `Here's the draft — ${result.review!.summary} Tell me what to tweak, or tap to open it.`
                 : "Here's the draft — have a squiz. Tell me what to tweak, or tap to open it."
-              : hasIssues
-                ? `Re-priced. ${result.review!.summary} Tap to open it, or say the word and I'll have another go.`
-                : 'Re-priced — every line came back clean. Tap to open it.';
+              : proposal.type === 'propose_update_customer'
+                ? `Done — this one's on ${proposal.customerName || 'the new contact'} now. Tap to open it.`
+                : hasIssues
+                  ? `Re-priced. ${result.review!.summary} Tap to open it, or say the word and I'll have another go.`
+                  : 'Re-priced — every line came back clean. Tap to open it.';
           appendMessage(conversation.id, {
             id: generateId(),
             role: 'assistant',
@@ -626,14 +653,34 @@ export function AssistantScreen() {
     [conversation, updateProposalStatus],
   );
 
+  // Put a quote on screen — render it inline in the chat (job header + scope +
+  // materials) so the tradie can actually see it. Mate triggers this via the
+  // show_quote tool. Returns false when the id doesn't resolve to a known
+  // quote/invoice so the caller can say so instead of pretending it worked.
+  const showQuoteInChat = useCallback(
+    (convoId: string, quoteId: string): boolean => {
+      const state = useStore.getState();
+      const exists = !!(state.getDocumentById(quoteId) || state.quotes.find((q) => q.id === quoteId));
+      if (!exists) return false;
+      appendMessage(convoId, {
+        id: generateId(),
+        role: 'assistant',
+        text: '',
+        createdAt: new Date().toISOString(),
+        inlineQuoteId: quoteId,
+      });
+      return true;
+    },
+    [appendMessage],
+  );
+
   const submit = useCallback(
     async (overrideText?: string) => {
       const text = (overrideText ?? input).trim();
       if (!text || sending) return;
       // Resolve the active conversation against the current store, not the
       // closure — `currentConversationId` can point at a missing conversation
-      // after loadConversations runs (it clobbered the freshly minted one).
-      // Always validate before using.
+      // (e.g. right after newChat replaced the array). Always validate first.
       const storeState = useStore.getState();
       let convoId = storeState.conversations.find((c) => c.id === storeState.currentConversationId)?.id;
       if (!convoId) convoId = startConversation();
@@ -686,16 +733,29 @@ export function AssistantScreen() {
           proposalStatus: Object.fromEntries(response.proposals.map((p) => [p.id, 'pending' as ProposalStatus])),
           errorMessage: hasContent ? undefined : fallback,
         });
+        // Render any quotes the model asked to show. Each lands as its own
+        // inline card below the reply; an unresolved id gets a short nudge
+        // instead of a silently missing card.
+        for (const qid of response.showQuoteIds || []) {
+          if (!showQuoteInChat(convoId, qid)) {
+            appendMessage(convoId, {
+              id: generateId(),
+              role: 'assistant',
+              text: "Hmm, couldn't pull that one up — which quote did you mean?",
+              createdAt: new Date().toISOString(),
+            });
+          }
+        }
       } catch (err: any) {
         // eslint-disable-next-line no-console
         console.warn('[Mate] error', err?.name, err?.message);
-        const isQuota = err instanceof AssistantQuotaError;
-        const isOffline = err instanceof AssistantOfflineError;
-        const errorMessage = isQuota
+        const friendly =
+          err instanceof LiveQuotaError ||
+          err instanceof LiveOfflineError ||
+          err instanceof LiveAuthError;
+        const errorMessage = friendly
           ? err.message
-          : isOffline
-            ? err.message
-            : `Mate hit a snag: ${err?.message || 'unknown error'}`;
+          : `Mate hit a snag: ${err?.message || 'unknown error'}`;
         // If we got partial streamed text, keep it visible and append a
         // separate error bubble. Otherwise replace the empty placeholder.
         if (streamedText) {
@@ -713,7 +773,7 @@ export function AssistantScreen() {
         setSending(false);
       }
     },
-    [appendMessage, updateMessage, conversation, currentConversationId, input, sending, startConversation],
+    [appendMessage, updateMessage, conversation, currentConversationId, input, sending, startConversation, showQuoteInChat],
   );
 
   const stopVoiceSession = useCallback(async () => {
@@ -740,6 +800,42 @@ export function AssistantScreen() {
       try { session.close(); } catch { /* noop */ }
     }
   }, []);
+
+  // Clear the chat and start fresh. Tears down any live voice session first so
+  // the mic doesn't keep streaming into a discarded conversation.
+  const handleNewChat = useCallback(async () => {
+    await stopVoiceSession();
+    setInput('');
+    newChat();
+  }, [stopVoiceSession, newChat]);
+
+  // "New chat" button in the header. Disabled while the current chat is empty
+  // (nothing to clear) so it can't spawn a throwaway conversation.
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={handleNewChat}
+          disabled={isEmpty}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            marginRight: 12,
+            padding: 4,
+            opacity: isEmpty ? 0.4 : 1,
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="New chat"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <MaterialCommunityIcons name="square-edit-outline" size={22} color={colors.white} />
+          <Text style={{ color: colors.white, fontSize: 15, fontWeight: '600', marginLeft: 5 }}>
+            New
+          </Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, handleNewChat, isEmpty]);
 
   const openVoiceMode = useCallback(async (mode: 'sticky' | 'ptt') => {
     voiceModeRef.current = mode;
@@ -881,10 +977,65 @@ export function AssistantScreen() {
             ),
           });
         },
+        onControlAction: (decision, proposalId) => {
+          // Resolve which card the tradie just confirmed/cancelled. Newest
+          // pending card wins; an explicit proposalId (if Mate tracked it)
+          // pins a specific one. We stash it and act on turnComplete so the
+          // spoken reply finishes first.
+          const convo = useStore.getState().conversations.find((c) => c.id === convoId);
+          const findPending = (): { message: ChatMessage; proposal: Proposal } | null => {
+            if (!convo) return null;
+            for (let i = convo.messages.length - 1; i >= 0; i--) {
+              const m = convo.messages[i];
+              if (!m.proposals?.length) continue;
+              const status = m.proposalStatus || {};
+              for (let j = m.proposals.length - 1; j >= 0; j--) {
+                const p = m.proposals[j];
+                if ((status[p.id] || 'pending') !== 'pending') continue;
+                if (proposalId && p.id !== proposalId) continue;
+                return { message: m, proposal: p };
+              }
+            }
+            return null;
+          };
+          const found = findPending();
+          if (!found) {
+            return {
+              ok: false,
+              error: proposalId ? 'That card is no longer waiting.' : 'No card is waiting to confirm.',
+            };
+          }
+          pendingVoiceActionRef.current = { decision, message: found.message, proposal: found.proposal };
+          return { ok: true };
+        },
+        onShowQuote: (quoteId) => {
+          // Render it inline straight away — no need to wait for turn end, it's
+          // not a draft and won't collide with narration.
+          const shown = showQuoteInChat(convoId!, quoteId);
+          return shown
+            ? { ok: true }
+            : { ok: false, error: "Couldn't find that quote to put on screen." };
+        },
         onTurnComplete: () => {
           assistantBubbleIdRef.current = null;
           assistantBubbleTextRef.current = '';
           turnProposals = [];
+
+          // The tradie confirmed/cancelled a card by voice this turn — run the
+          // same Apply / dismiss the buttons do, now that Mate's spoken reply
+          // has finished. Deferring to turn end keeps a draft's narration from
+          // colliding with the confirmation reply.
+          const voiceAction = pendingVoiceActionRef.current;
+          pendingVoiceActionRef.current = null;
+          const runVoiceAction = () => {
+            if (!voiceAction) return;
+            if (voiceAction.decision === 'apply') {
+              void handleApply(voiceAction.message, voiceAction.proposal);
+            } else {
+              handleDismiss(voiceAction.message, voiceAction.proposal);
+            }
+          };
+
           // PTT is a single-shot interaction. Close the WS as soon as the
           // model finishes, then wait for the audio queue to drain before
           // the final cleanup so Mate's reply plays out in full instead
@@ -894,6 +1045,9 @@ export function AssistantScreen() {
             try { voiceSessionRef.current?.close(); } catch { /* noop */ }
             voiceSessionRef.current = null;
             setVoiceState('thinking');
+            // Session's closing, so a draft won't narrate here — fine for PTT.
+            // Still resolve the card so the apply/dismiss lands.
+            runVoiceAction();
             if (queue) {
               queue.setOnIdle(() => { void stopVoiceSession(); });
             } else {
@@ -901,6 +1055,9 @@ export function AssistantScreen() {
             }
             return;
           }
+          // Continuous mode: session stays open, so applying a draft here lets
+          // it narrate the pipeline wait as usual.
+          runVoiceAction();
           if (voiceSessionRef.current) setVoiceState('listening');
         },
         onError: (err) => {
@@ -968,11 +1125,11 @@ export function AssistantScreen() {
       // eslint-disable-next-line no-console
       console.warn('[Mate voice] open failed', err?.name, err?.message);
       const message =
-        err instanceof VoiceSessionQuotaError
+        err instanceof LiveQuotaError ||
+        err instanceof LiveOfflineError ||
+        err instanceof LiveAuthError
           ? err.message
-          : err instanceof VoiceSessionOfflineError
-            ? err.message
-            : `Voice mode is offline: ${err?.message || 'unknown error'}`;
+          : `Voice mode is offline: ${err?.message || 'unknown error'}`;
       appendMessage(convoId!, {
         id: generateId(),
         role: 'assistant',
@@ -982,7 +1139,7 @@ export function AssistantScreen() {
       });
       await stopVoiceSession();
     }
-  }, [stopVoiceSession, appendMessage, updateMessage, startConversation, micLevel]);
+  }, [stopVoiceSession, appendMessage, updateMessage, startConversation, micLevel, handleApply, handleDismiss, showQuoteInChat]);
 
   const handleVoiceToggle = useCallback(async () => {
     if (voiceState !== 'idle') {
@@ -1096,7 +1253,6 @@ export function AssistantScreen() {
     [handleApply, handleDismiss, handleCtaPress, handleInlineQuoteEdit, handleInlineQuoteOpen],
   );
 
-  const isEmpty = !conversation || conversation.messages.length === 0;
   const voiceActive = voiceState !== 'idle';
   const voiceAccent = voiceState === 'thinking' ? colors.primary : colors.error;
   const voiceLabel =
@@ -1132,8 +1288,14 @@ export function AssistantScreen() {
           data={items}
           keyExtractor={(i) => i.key}
           renderItem={renderItem}
-          inverted
+          inverted={inverted}
           keyboardShouldPersistTaps="handled"
+          // Web (non-inverted): keep pinned to the newest message as content
+          // grows. While idle the content size is stable so this never fires,
+          // leaving the user free to scroll up to the start.
+          onContentSizeChange={
+            inverted ? undefined : () => listRef.current?.scrollToEnd({ animated: false })
+          }
         />
 
         {sending && (

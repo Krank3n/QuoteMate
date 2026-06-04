@@ -16,6 +16,8 @@
 // starts flowing.
 
 import { Platform } from 'react-native';
+import { Audio } from 'expo-av';
+import { bytesToBase64 } from './audioCodec';
 
 interface AudioRecordOptions {
   sampleRate: number;
@@ -103,33 +105,6 @@ class PCMDownsampler extends AudioWorkletProcessor {
 }
 registerProcessor('pcm-downsampler', PCMDownsampler);
 `;
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let s = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    const slice = bytes.subarray(i, i + chunk);
-    let part = '';
-    for (let j = 0; j < slice.length; j += 1) part += String.fromCharCode(slice[j]);
-    s += part;
-  }
-  const g: any = globalThis as any;
-  if (typeof g.btoa === 'function') return g.btoa(s);
-  // Hermes-style hosts without btoa shouldn't hit this path (web only),
-  // but fall back manually rather than crash if a polyfill is missing.
-  const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let out = '';
-  for (let i = 0; i < s.length; i += 3) {
-    const a = s.charCodeAt(i);
-    const b = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
-    const c = i + 2 < s.length ? s.charCodeAt(i + 2) : 0;
-    out += alpha[a >> 2];
-    out += alpha[((a & 3) << 4) | (b >> 4)];
-    out += i + 1 < s.length ? alpha[((b & 15) << 2) | (c >> 6)] : '=';
-    out += i + 2 < s.length ? alpha[c & 63] : '=';
-  }
-  return out;
-}
 
 interface WebCaptureState {
   stream: MediaStream;
@@ -265,17 +240,38 @@ async function stopWebCapture(state: WebCaptureState): Promise<void> {
 
 // --- Native path ------------------------------------------------------
 
-let nativeInitialised = false;
+// Android treats RECORD_AUDIO as a "dangerous" runtime permission, so the
+// manifest entry alone doesn't grant it — it has to be requested at
+// runtime *before* the recorder is constructed. Skip that and AudioRecord
+// is built in an uninitialised state; the later `startRecording()` throws
+// `startRecording() called on an uninitialized AudioRecord` on the native
+// modules thread, where a JS try/catch can't catch it — the app crashes
+// outright. Requesting here turns a denial into a friendly caught error.
+async function ensureMicPermission(): Promise<void> {
+  const { granted, canAskAgain } = await Audio.requestPermissionsAsync();
+  if (!granted) {
+    throw new MicUnavailableError(
+      canAskAgain
+        ? 'Mic access is needed for voice — tap the mic again and allow it.'
+        : 'Mic access is off. Switch it on for QuoteMate in your phone settings to talk to Mate.',
+    );
+  }
+}
 
-function startNativeCapture(onChunk: (b64: string) => void): { stop: () => Promise<void> } {
+async function startNativeCapture(
+  onChunk: (b64: string) => void,
+): Promise<{ stop: () => Promise<void> }> {
   const mod = loadNativeModule();
   if (!mod) {
     throw new MicUnavailableError('Mic capture is unavailable on this build.');
   }
-  if (!nativeInitialised) {
-    mod.init(RECORD_OPTS);
-    nativeInitialised = true;
-  }
+  await ensureMicPermission();
+  // Re-init on every capture rather than caching a "done" flag.
+  // react-native-audio-record releases the underlying AudioRecord on
+  // stop(), so reusing it on the next session would call startRecording()
+  // on a released recorder — the same uninitialised crash. A fresh init()
+  // each time keeps the recorder valid.
+  mod.init(RECORD_OPTS);
   // react-native-audio-record's listener is global; re-bind on every
   // capture so the previous closure is replaced rather than queued.
   mod.on('data', onChunk);
@@ -311,7 +307,7 @@ export async function startMicCapture(onChunk: (base64Pcm: string) => void): Pro
     };
   }
 
-  const handle = startNativeCapture(onChunk);
+  const handle = await startNativeCapture(onChunk);
   return {
     stop: async () => {
       if (stopped) return;

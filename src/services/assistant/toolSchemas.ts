@@ -1,6 +1,7 @@
 // Gemini Live function declarations for Mate's tool ecosystem.
 //
-// Translated from functions/src/assistant/toolSchemas.ts (Anthropic-shape).
+// These run entirely client-side — there is no server-side copy. Mate's
+// tool-calling loop lives inside the Live WS session (see readTools.ts).
 // Gemini's setup.tools format is `[{ functionDeclarations: FunctionDeclaration[] }]`
 // where each declaration has `{ name, description, parameters }` and
 // `parameters` is OpenAPI/JSON-Schema-ish — lowercase types, properties,
@@ -23,13 +24,23 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_add_line_item',
   'propose_delete_line_item',
   'propose_create_contact',
+  'propose_update_customer',
   'propose_send_quote',
   'propose_convert_to_invoice',
   'propose_reprice',
 ] as const;
 
+// Voice-only control tools. Unlike read/proposal tools these never reach
+// dispatchToolCall — the voice session intercepts them and hands the decision
+// to the chat screen, which runs the same Apply / dismiss the card buttons do.
+export const CONTROL_TOOL_NAMES = [
+  'apply_pending_proposal',
+  'cancel_pending_proposal',
+] as const;
+
 export type ReadToolName = (typeof READ_TOOL_NAMES)[number];
 export type ProposalToolName = (typeof PROPOSAL_TOOL_NAMES)[number];
+export type ControlToolName = (typeof CONTROL_TOOL_NAMES)[number];
 
 export function isReadTool(name: string): name is ReadToolName {
   return (READ_TOOL_NAMES as readonly string[]).includes(name);
@@ -37,6 +48,10 @@ export function isReadTool(name: string): name is ReadToolName {
 
 export function isProposalTool(name: string): name is ProposalToolName {
   return (PROPOSAL_TOOL_NAMES as readonly string[]).includes(name);
+}
+
+export function isControlTool(name: string): name is ControlToolName {
+  return (CONTROL_TOOL_NAMES as readonly string[]).includes(name);
 }
 
 interface GeminiSchema {
@@ -92,6 +107,18 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
       type: 'object',
       properties: {
         quoteId: { type: 'string', description: 'Document id from list_recent_quotes or find_customer.' },
+      },
+      required: ['quoteId'],
+    },
+  },
+  {
+    name: 'show_quote',
+    description:
+      "Put a quote or invoice ON THE TRADIE'S SCREEN — renders it inline in the chat (job header, scope, materials, totals) so they can actually see it. This is the ONLY way to show a quote; get_quote just hands YOU the data, it shows the tradie nothing. Use this whenever the tradie wants to see, view, open, pull up, or 'show me' a quote. Pass the document id from list_recent_quotes / find_customer / get_quote — NOT a QU- number. After calling it, say one short line ('here it is') — don't recite the whole quote.",
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of the quote/invoice to display (from list_recent_quotes, find_customer, or get_quote).' },
       },
       required: ['quoteId'],
     },
@@ -187,7 +214,8 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   },
   {
     name: 'propose_create_contact',
-    description: "Propose creating a new contact in the tradie's address book.",
+    description:
+      "Propose creating a new contact in the tradie's address book — standalone, NOT tied to a quote. Use this only when the tradie wants a contact saved on its own (\"add Bob to my contacts\"). To change WHO an existing quote is for, use propose_update_customer instead — this tool does not touch any quote.",
     parameters: {
       type: 'object',
       properties: {
@@ -200,14 +228,49 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
     },
   },
   {
+    name: 'propose_update_customer',
+    description:
+      "Change the customer on an EXISTING quote or invoice — re-point it at a different contact while staying in the chat. Use this whenever the tradie wants to swap, change, update, or fix who a quote is for (\"put this on Jane instead\", \"update the contact\", \"wrong customer, it's Bob\"). Resolve the customer first: call find_customer and pass customerId when there's a match; only pass customerDraft (with confirmation) when there's no match and they want a brand-new contact. Apply updates the quote's customer + the linked job and re-shows the quote in chat — it does NOT navigate away. Always pass customerName so the card can name who it's switching to.",
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of the quote/invoice to update (from list_recent_quotes, find_customer, get_quote, or the [context] line after a draft).' },
+        customerId: {
+          type: 'string',
+          description: 'Existing contact id from find_customer. Strongly preferred when a match exists.',
+        },
+        customerDraft: {
+          type: 'object',
+          description:
+            'New customer details. Only use when find_customer returned zero matches and the tradie confirmed they want a new contact.',
+          properties: {
+            name: { type: 'string' },
+            phone: { type: 'string' },
+            email: { type: 'string' },
+            address: { type: 'string' },
+          },
+          required: ['name'],
+        },
+        customerName: { type: 'string', description: 'The new customer name to show on the card (for display).' },
+      },
+      required: ['quoteId'],
+    },
+  },
+  {
     name: 'propose_send_quote',
     description:
-      'Propose sending an existing quote to the customer. Apply opens the existing send preview (the tradie still confirms recipient + email body). NEVER use this without first calling get_quote — you must show the recipient and total on the card.',
+      'Propose sending an existing quote or invoice to the customer. Apply opens the send preview — the tradie still confirms the recipient and taps Send; you never send it yourself. You CAN pre-write the email: pass draftEmailBody (and optionally draftEmailSubject) and it lands in the preview ready to edit. NEVER use this without first calling get_quote — you must show the recipient and total on the card.',
     parameters: {
       type: 'object',
       properties: {
         quoteId: { type: 'string' },
-        recipientEmail: { type: 'string', description: 'Pre-fill in the send modal.' },
+        recipientEmail: { type: 'string', description: "Pre-fill the recipient. Defaults to the customer's email; the field stays editable in the preview." },
+        draftEmailBody: {
+          type: 'string',
+          description:
+            "Optional. The email body to drop into the send preview. Customer-facing: a greeting, a line that the quote/invoice is attached, an invite to ask questions, signed off with the business name. No job specifics you weren't told, no mention of the app, gender-neutral, AU English.",
+        },
+        draftEmailSubject: { type: 'string', description: 'Optional subject line to pre-fill. Leave unset to use the default ("Quotation from <business> - <job>").' },
       },
       required: ['quoteId'],
     },
@@ -236,6 +299,42 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         displayTotal: { type: 'number', description: 'Current total in AUD to show on the card (for display only).' },
       },
       required: ['quoteId'],
+    },
+  },
+];
+
+// Voice-only: added to the Live session's tool list (NOT the text path, which
+// resolves a card with a tap). When a proposal card is waiting and the tradie
+// can't tap, Mate calls one of these to accept or back out of it. The voice
+// session intercepts the call and routes it to the same Apply / dismiss the
+// card buttons run — these never reach dispatchToolCall.
+export const CONTROL_TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
+  {
+    name: 'apply_pending_proposal',
+    description:
+      'Apply the proposal card the tradie is being shown — identical to them tapping Apply. Call this ONLY when a card is on screen waiting and the tradie clearly says yes to it ("yeah", "send it", "go on", "do it", "apply that", "yep do it"). If no card is waiting, or they\'re asking a question or changing the scope, do NOT call it — answer them instead.',
+    parameters: {
+      type: 'object',
+      properties: {
+        proposalId: {
+          type: 'string',
+          description: 'Optional. The specific card to apply if you know its id; omit to apply the one currently waiting.',
+        },
+      },
+    },
+  },
+  {
+    name: 'cancel_pending_proposal',
+    description:
+      'Dismiss the proposal card the tradie is being shown — identical to them tapping Cancel. Call this ONLY when a card is waiting and the tradie clearly backs out ("nah", "cancel", "scrap it", "leave it", "don\'t", "forget it"). If no card is waiting, do NOT call it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        proposalId: {
+          type: 'string',
+          description: 'Optional. The specific card to dismiss if you know its id; omit to dismiss the one currently waiting.',
+        },
+      },
     },
   },
 ];

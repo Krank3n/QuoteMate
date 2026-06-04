@@ -1,14 +1,14 @@
-// Mate read tools — client-side mirror of functions/src/assistant/readTools.ts.
+// Mate read tools — the client-side source of truth (no server-side copy).
 //
 // Why client-side: Gemini Live runs the tool-calling loop inside the WS
 // session. The model emits a toolCall, the client executes it locally, and
 // the response is sent back over the same socket. There is no opportunity
 // to bounce through a server. Firestore security rules already gate every
-// read by uid so this is no looser than the server path.
+// read by uid so this is no looser than a server path would be.
 //
-// Keep these behaviour-identical to the server file — the system prompt
-// describes specific result shapes (matches[], lastJob, phoneMasked, etc.).
-// Drift here changes how Mate reasons about results.
+// These result shapes are contractual: the system prompt describes specific
+// shapes (matches[], lastJob, phoneMasked, etc.), so changing them changes
+// how Mate reasons about results.
 
 import {
   collection,
@@ -25,6 +25,7 @@ import {
 import { auth, db } from '../../config/firebase';
 import { Material } from '../../types';
 import { reviewQuoteMaterials } from '../../utils/quoteReview';
+import { isProposalId, resolveQuoteId } from './quoteRefMap';
 
 function requireUid(): string {
   const uid = auth.currentUser?.uid;
@@ -225,8 +226,18 @@ export async function listRecentQuotes(input: {
 
 export async function getQuote(input: { quoteId: string }): Promise<unknown> {
   const uid = requireUid();
-  const docId = String(input.quoteId || '');
+  // The model often passes the proposal id (from propose_*'s response) instead
+  // of the minted quote id. Translate it back to the real id when we know it.
+  const docId = resolveQuoteId(input.quoteId);
   if (!docId) return { error: 'Missing quoteId.' };
+  // Still proposal-shaped after resolving → no quote was ever minted for it
+  // (or this session lost the mapping). Guide Mate to recover instead of a 404.
+  if (isProposalId(docId)) {
+    return {
+      error:
+        'That is a proposal id, not a quote id — a quote id only exists after the tradie taps Apply. Call list_recent_quotes to find the real quote id.',
+    };
+  }
 
   const snap = await getDoc(doc(db, 'users', uid, 'documents', docId));
   if (!snap.exists()) {
@@ -250,14 +261,15 @@ export async function reviewQuote(input: { quoteId: string }): Promise<unknown> 
   // Reuse getQuote's doc/legacy lookup, then read the pipeline's per-row flags
   // via the shared classifier. Returns a compact summary + the flagged rows
   // only — Mate doesn't need the full materials array to talk about problems.
-  const res = (await getQuote(input)) as { quote?: any; error?: string };
+  const quoteId = resolveQuoteId(input.quoteId);
+  const res = (await getQuote({ quoteId })) as { quote?: any; error?: string };
   if (!res || res.error || !res.quote) {
     return { error: res?.error || 'Quote not found.' };
   }
   const q = res.quote;
   const review = reviewQuoteMaterials((q.materials as Material[]) || []);
   return {
-    quoteId: input.quoteId,
+    quoteId,
     number: q.number,
     jobName: q.jobName || q.job?.name,
     customerName: q.customerName,

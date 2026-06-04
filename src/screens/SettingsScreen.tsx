@@ -41,8 +41,6 @@ interface SettingsSection {
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
-  const seenScreenTours = useStore((s) => s.seenScreenTours);
-  const setHasSeenTour = useStore((s) => s.setHasSeenTour);
 
   const sections: SettingsSection[] = [
     {
@@ -115,6 +113,15 @@ export function SettingsScreen() {
           badge: 'NEW',
           badgeColor: colors.primary,
         },
+        {
+          id: 'callKatie',
+          title: 'Never Miss a Call',
+          subtitle: 'Katie answers the calls you can’t get to',
+          icon: 'phone-in-talk',
+          screen: 'CallKatie',
+          badge: 'NEW',
+          badgeColor: colors.primary,
+        },
       ],
     },
     {
@@ -172,13 +179,6 @@ export function SettingsScreen() {
       title: 'App',
       items: [
         {
-          id: 'appTour',
-          title: 'App Tour',
-          subtitle: 'Replay the guided feature tour',
-          icon: 'map-marker-path',
-          screen: 'AppTour',
-        },
-        {
           id: 'referral',
           title: 'Refer a Friend',
           subtitle: 'Earn rewards for referrals',
@@ -224,15 +224,6 @@ export function SettingsScreen() {
   ];
 
   const handleMenuPress = async (screen: string, params?: Record<string, any>) => {
-    if (screen === 'AppTour') {
-      await setHasSeenTour(false);
-      // Also reset screen-specific tours
-      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-      await AsyncStorage.removeItem('@quotemate:seen_screen_tours');
-      useStore.setState({ seenScreenTours: [] });
-      navigation.navigate('Dashboard');
-      return;
-    }
     if (params) {
       (navigation as any).navigate(screen, params);
     } else {

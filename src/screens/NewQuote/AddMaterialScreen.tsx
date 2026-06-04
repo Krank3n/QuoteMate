@@ -67,10 +67,6 @@ import { SupplierGroup } from '../../types';
 import { loadGroups, deleteGroup } from '../../services/supplierGroupService';
 import { runMaterialSearch } from '../../services/materialSearch';
 import { ContactActionsBar } from '../../components/document/ContactActionsBar';
-import { useTourRefs } from '../../components/tour/useTourRefs';
-import { ScreenTour } from '../../components/tour/ScreenTour';
-import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
-import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
 type TabValue = 'search' | 'saved';
@@ -223,7 +219,7 @@ export function AddMaterialScreen() {
   const safeInsets = useSafeAreaInsets();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { businessSettings, subscriptionStatus, unifiedTourActive, unifiedTourPhase } = useStore();
+  const { businessSettings, subscriptionStatus } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -501,17 +497,6 @@ export function AddMaterialScreen() {
     },
   });
 
-  // Tour refs
-  const { registerRef } = useTourRefs();
-  const savedItemsTabRef = useRef<View>(null);
-  const searchSectionRef = useRef<View>(null);
-  const manualEntrySectionRef = useRef<View>(null);
-
-  useEffect(() => {
-    if (savedItemsTabRef.current) registerRef('savedItemsTab', savedItemsTabRef.current);
-    if (searchSectionRef.current) registerRef('searchSection', searchSectionRef.current);
-    if (manualEntrySectionRef.current) registerRef('manualEntrySection', manualEntrySectionRef.current);
-  });
 
   // Saved items state
   const [savedItems, setSavedItems] = useState<any[]>([]);
@@ -1299,7 +1284,7 @@ export function AddMaterialScreen() {
 
   // Search section component
   const renderSearchSection = () => (
-    <View ref={searchSectionRef} style={styles.section}>
+    <View style={styles.section}>
       <View style={styles.manualEntryHeader}>
         <View style={styles.manualEntryDividerLine} />
         <View style={styles.searchTitleRow}>
@@ -1427,7 +1412,6 @@ export function AddMaterialScreen() {
 
   const renderManualEntrySection = () => (
     <ManualEntrySection
-      sectionRef={manualEntrySectionRef}
       materialNameRef={materialNameRef}
       linkedToSupplierBook={linkedToSupplierBook}
       isEditMode={isEditMode}
@@ -1851,7 +1835,7 @@ export function AddMaterialScreen() {
     <View style={styles.container}>
       {/* Tab Selector - hidden in edit mode, saved-item modes, and supplier-book-only mode */}
       {!isEditMode && !isSavedItemMode && !supplierBookOnly && (
-        <View ref={savedItemsTabRef} style={styles.tabBar}>
+        <View style={styles.tabBar}>
           <WebContainer>
             <View style={styles.pillToggleRow}>
               <TouchableOpacity
@@ -2077,17 +2061,6 @@ export function AddMaterialScreen() {
         {snackbarMessage}
       </Snackbar>
 
-      {/* Screen Tour */}
-      {!isEditMode && unifiedTourActive && unifiedTourPhase === 'addMaterial' && (
-        <ScreenTour
-          tourId="addMaterial"
-          unifiedMode={true}
-          onScreenComplete={() => notifyScreenComplete('addMaterial')}
-          onSkipRequest={notifySkipRequest}
-          stepOffset={PHASE_STEP_OFFSETS.addMaterial}
-          globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
-        />
-      )}
     </View>
   );
 }

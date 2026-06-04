@@ -1,12 +1,14 @@
-// Shared types for the Mate assistant chat surface. Mirrors the function-side
-// Proposal union (see functions/src/assistant/proposalTools.ts) — changes to
-// either side must be reflected here.
+// Shared types for the Mate assistant chat surface. The Proposal union here is
+// the source of truth — the validators in services/assistant/proposalTools.ts
+// and the declarations in services/assistant/toolSchemas.ts must stay in step
+// with it.
 
 export type ProposalType =
   | 'propose_draft_quote'
   | 'propose_add_line_item'
   | 'propose_delete_line_item'
   | 'propose_create_contact'
+  | 'propose_update_customer'
   | 'propose_send_quote'
   | 'propose_convert_to_invoice'
   | 'propose_reprice';
@@ -54,10 +56,28 @@ export interface CreateContactProposal extends BaseProposal {
   address?: string;
 }
 
+export interface UpdateCustomerProposal extends BaseProposal {
+  type: 'propose_update_customer';
+  // The existing quote/invoice whose customer is being re-pointed.
+  quoteId: string;
+  // Either an existing contact (preferred when find_customer matched) or a
+  // fresh draft to create + link. Mirrors propose_draft_quote's customer shape.
+  customerId?: string;
+  customerDraft?: { name: string; phone?: string; email?: string; address?: string };
+  // Display-only — the new customer's name so the card names it without a
+  // round-trip (Mate already has it from find_customer / the draft).
+  customerName?: string;
+}
+
 export interface SendQuoteProposal extends BaseProposal {
   type: 'propose_send_quote';
   quoteId: string;
   recipientEmail?: string;
+  // Mate-written email copy. When set, Apply persists it onto the document so
+  // the send preview opens pre-filled with it (the modal reads draftEmailBody
+  // / draftEmailSubject) instead of auto-generating a body.
+  draftEmailBody?: string;
+  draftEmailSubject?: string;
 }
 
 export interface ConvertToInvoiceProposal extends BaseProposal {
@@ -79,6 +99,7 @@ export type Proposal =
   | AddLineItemProposal
   | DeleteLineItemProposal
   | CreateContactProposal
+  | UpdateCustomerProposal
   | SendQuoteProposal
   | ConvertToInvoiceProposal
   | RepriceQuoteProposal;
@@ -142,6 +163,9 @@ export interface AssistantChatResponse {
   messageId: string;
   text: string;
   proposals: Proposal[];
+  // Document ids the model asked to display inline (via show_quote). The chat
+  // screen renders each as an inline quote card once the turn resolves.
+  showQuoteIds?: string[];
   usage: {
     inputTokens: number;
     outputTokens: number;
