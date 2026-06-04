@@ -1616,9 +1616,6 @@ export function AssistantScreen() {
           // Hero empty state — big record button front and centre. Keeps the
           // composer mounted below so typing is still one tap away.
           <View style={[styles.heroWrap, { paddingTop: insets.top + 8 }]}>
-            <View style={styles.heroTop}>
-              <Text style={styles.heroBrand}>Mate</Text>
-            </View>
             <View style={styles.heroCenter}>
               <HeroRecordButton
                 active={voiceMode === 'sticky' && voiceState === 'listening'}

@@ -97,6 +97,26 @@ async function writeMirror(
     if (existingUpdated > incomingUpdated) {
       return { written: false, skipped: true, reason: 'newer-on-disk' };
     }
+    // Forward-only TYPE guard. Phase-5 `convertDocumentToInvoice` flips the
+    // unified Document to type='invoice' in-place (same doc id as the source
+    // quote). It does NOT stamp `invoiceId` on the legacy `quotes/{id}`
+    // record. So when the wizard later calls saveDraft / saveQuote on that
+    // same legacy quote (e.g. re-opening the doc to view it), this trigger
+    // would otherwise project type='quote' over the invoice mirror —
+    // visibly "switching it back to a quote". The canonical source of truth
+    // for type post-convert is the unified doc, not the legacy quote, so
+    // skip the projection entirely when we'd be downgrading invoice→quote.
+    const existingType = existingData.type as string | undefined;
+    const incomingType = projection.type as string | undefined;
+    if (existingType === 'invoice' && incomingType === 'quote') {
+      functions.logger.warn('[type] mirror_invoice_to_quote_blocked', {
+        userId,
+        docId: mirrorId,
+        existingUpdatedAt: existingUpdated,
+        incomingUpdatedAt: incomingUpdated,
+      });
+      return { written: false, skipped: true, reason: 'type-downgrade' };
+    }
     // Forward-only stage guard. The mirror derives `stage` from the legacy
     // `status` field, but `setDocumentStage` (cloud-function send / payment /
     // convert) is the canonical writer of advanced stages. If a legacy quote
@@ -164,6 +184,19 @@ export const onQuoteWritten = functions.firestore
 
     if (!after) return;
 
+    // If the unified mirror has already been promoted to type='invoice'
+    // (via Phase-5 convertDocumentToInvoice, which doesn't stamp
+    // invoiceId on the legacy quote), don't bother projecting — the
+    // `writeMirror` type guard would block it anyway, but short-circuiting
+    // here avoids a wasted read+write per legacy quote update.
+    try {
+      const mirrorSnap = await documentRef(userId, mirrorIdForQuote(quoteId)).get();
+      if (mirrorSnap.exists && (mirrorSnap.data() as AnyData)?.type === 'invoice') {
+        return;
+      }
+    } catch {
+      // Best-effort: fall through to the normal path if the read fails.
+    }
     // If a converted invoice already exists for this quote, that invoice's
     // projection wins — skip writing the quote-shaped projection so the
     // collapsed document keeps its invoice view.
