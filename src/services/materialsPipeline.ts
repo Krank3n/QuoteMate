@@ -340,6 +340,15 @@ export type PricingEvent =
   | { kind: 'reece-reauth' }
   | { kind: 'reconcile-start' }
   | {
+      // Emitted when a local supplier is ranked above Bunnings in
+      // BusinessSettings.supplierPriority but the local pass had no hit
+      // for one or more terms — Bunnings ended up filling them. Lets the
+      // UI / Mate tell the tradie their priority preference couldn't be
+      // honoured for those rows so they know to expand their saved list.
+      kind: 'supplier-priority-fallback';
+      missedTerms: string[];
+    }
+  | {
       kind: 'complete';
       fetched: number;
       failed: number;
@@ -445,8 +454,20 @@ export async function fetchPricesForQuote(
   // ── Local source preflight ──
   onEvent?.({ kind: 'phase-start', phase: 'local', status: 'Checking your saved supplier rates…' });
   const locallyPricedTerms = new Set<string>();
+  // Track terms that hit the local pass with a miss while the user has a
+  // local supplier ranked above Bunnings in BusinessSettings.supplierPriority
+  // — surfaces the "we wanted to use your supplier but had to fall back to
+  // Bunnings" gap to the caller so the UI / Mate can flag it instead of
+  // silently substituting Bunnings prices.
+  const localSupplierPreferredMisses = new Set<string>();
   try {
     const supplierList = await loadSupplierGroups();
+    const priorityOrder = businessSettings?.supplierPriority ?? [];
+    const bunningsIdx = priorityOrder.indexOf('bunnings');
+    const localSupplierIds = new Set(supplierList.map((g) => g.id).filter(Boolean));
+    const localRankedAboveBunnings = priorityOrder.some(
+      (id, idx) => localSupplierIds.has(id) && (bunningsIdx === -1 || idx < bunningsIdx),
+    );
     for (let i = 0; i < updatedMaterials.length; i++) {
       checkCancel();
       const m = updatedMaterials[i];
@@ -454,11 +475,14 @@ export async function fetchPricesForQuote(
       const term = m.searchTerm || m.name;
       let hits: { price: number; productName?: string; productUrl?: string; imageUrl?: string; unit?: string }[] = [];
       try {
-        hits = await searchLocalSources(term, supplierList);
+        hits = await searchLocalSources(term, supplierList, { priorityOrder });
       } catch {
         hits = [];
       }
-      if (hits.length === 0) continue;
+      if (hits.length === 0) {
+        if (localRankedAboveBunnings) localSupplierPreferredMisses.add(term);
+        continue;
+      }
       // Use the ranker to pick the best hit instead of just hits[0]. The
       // saved-supplier-rate path is usually 1–2 hits so the ranker mostly
       // no-ops here, but keeping the API consistent across paths means
@@ -490,6 +514,17 @@ export async function fetchPricesForQuote(
     }
   } catch {
     // Best-effort — fall through.
+  }
+
+  // If the user ranked a local supplier above Bunnings but the local pass
+  // didn't find prices for some terms, emit a single info event so the
+  // caller can surface it (e.g. Mate mentions 'Bunnings filled X items
+  // your supplier list didn't cover').
+  if (localSupplierPreferredMisses.size > 0) {
+    onEvent?.({
+      kind: 'supplier-priority-fallback',
+      missedTerms: Array.from(localSupplierPreferredMisses),
+    });
   }
 
   const reecePricedTerms = new Set<string>();

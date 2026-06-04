@@ -121,12 +121,27 @@ function searchTemplates(
 function searchFavorites(
   query: string,
   favorites: FavoriteProductMapping[],
-  suppliers: SupplierGroup[]
+  suppliers: SupplierGroup[],
+  priorityOrder?: string[]
 ): LocalSearchResult[] {
   if (suppliers.length === 0) return [];
   const supplierNamesLower = new Set(suppliers.map(s => s.name.trim().toLowerCase()));
+  // Prefer the user's BusinessSettings.supplierPriority order when supplied
+  // — a saved drag-and-drop ranking. Fall back to the supplier's own
+  // sortOrder when a supplier isn't in the priority list (newly-added).
+  // Without this the local pass ignored supplierPriority entirely, so a
+  // material that hit favorites under multiple suppliers would rank by
+  // each supplier's stale sortOrder rather than what the tradie set.
+  const priorityIndexById = new Map<string, number>();
+  (priorityOrder ?? []).forEach((id, idx) => {
+    if (id) priorityIndexById.set(id, idx);
+  });
   const sortOrderByName = new Map(
-    suppliers.map(s => [s.name.trim().toLowerCase(), s.sortOrder ?? 999])
+    suppliers.map(s => {
+      const priIdx = priorityIndexById.get(s.id);
+      const order = priIdx !== undefined ? priIdx : (s.sortOrder ?? 999);
+      return [s.name.trim().toLowerCase(), order];
+    })
   );
 
   const results: LocalSearchResult[] = [];
@@ -184,6 +199,13 @@ export interface LocalSearchOptions {
    * is asking for "prices from this supplier", not template bundles.
    */
   includeTemplates?: boolean;
+  /**
+   * `BusinessSettings.supplierPriority` — the drag-and-drop ranked list of
+   * supplier ids (built-in 'bunnings' / 'reece' or local SupplierGroup.id).
+   * When supplied, favorite hits sort by this order instead of the
+   * supplier's own sortOrder so the tradie's chosen priority is honoured.
+   */
+  priorityOrder?: string[];
 }
 
 /**
@@ -209,7 +231,7 @@ export async function searchLocalSources(
   const favorites = Object.values(favoritesMap);
 
   const templateHits = includeTemplates ? searchTemplates(query, templates) : [];
-  const favoriteHits = searchFavorites(query, favorites, suppliers);
+  const favoriteHits = searchFavorites(query, favorites, suppliers, options.priorityOrder);
 
   return [...templateHits, ...favoriteHits].sort((a, b) => a._sortHint - b._sortHint);
 }
