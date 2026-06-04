@@ -67,6 +67,7 @@ export async function runMaterialSearch(
     try {
       localResults = await searchLocalSources(query, supplierScope, {
         includeTemplates: !scopedToOne,
+        priorityOrder: opts.businessSettings?.supplierPriority,
       });
     } catch {
       localResults = [];
