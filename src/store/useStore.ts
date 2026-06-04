@@ -588,6 +588,35 @@ export const useStore = create<AppState>((set, get) => ({
   // Save draft to storage (lightweight, no quota check or number assignment)
   saveDraft: async (quote: Quote) => {
     try {
+      // Forward-only TYPE guard. If the unified Document with this id has
+      // already been promoted to type='invoice' (via Phase-5
+      // convertDocumentToInvoice), a legacy quote save here would round-trip
+      // through the mirror trigger and visibly flip it back to a quote.
+      // Re-route through saveInvoice so the user's edits land on the
+      // canonical invoice instead.
+      {
+        const unified = get().getDocumentById(quote.id);
+        if (unified && unified.type === 'invoice') {
+          const { invoices } = get();
+          const existingInvoice = invoices.find((i) => i.id === quote.id);
+          if (existingInvoice) {
+            await get().saveInvoice({
+              ...existingInvoice,
+              materials: quote.materials,
+              sections: quote.sections,
+              laborRate: quote.laborRate,
+              laborHours: quote.laborHours,
+              markup: quote.markup,
+              job: quote.job,
+              updatedAt: new Date(),
+            } as Invoice);
+            return;
+          }
+          // No legacy invoice yet — silently swallow so we don't downgrade
+          // the mirror. Local state already reflects what the user typed.
+          return;
+        }
+      }
       const { quotes } = get();
       // Phase-8: ensure a Job exists before the legacy quote hits Firestore —
       // the mirror carries jobId into the unified Document, and the trigger
@@ -724,6 +753,30 @@ export const useStore = create<AppState>((set, get) => ({
   // Save quote to storage
   saveQuote: async (quote: Quote) => {
     try {
+      // Forward-only TYPE guard — see saveDraft for the rationale. If the
+      // unified doc with this id is already an invoice, route through
+      // saveInvoice so the user's edits don't get reverted to a quote.
+      {
+        const unified = get().getDocumentById(quote.id);
+        if (unified && unified.type === 'invoice') {
+          const { invoices } = get();
+          const existingInvoice = invoices.find((i) => i.id === quote.id);
+          if (existingInvoice) {
+            await get().saveInvoice({
+              ...existingInvoice,
+              materials: quote.materials,
+              sections: quote.sections,
+              laborRate: quote.laborRate,
+              laborHours: quote.laborHours,
+              markup: quote.markup,
+              job: quote.job,
+              updatedAt: new Date(),
+            } as Invoice);
+            return;
+          }
+          return;
+        }
+      }
       const { quotes, getNextQuoteNumber, subscriptionStatus } = get();
 
       // Phase-8: auto-create a Job on first save if one isn't linked already.
