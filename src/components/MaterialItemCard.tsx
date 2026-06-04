@@ -4,8 +4,8 @@
  * Supports interactive mode (qty stepper, edit, delete) and read-only mode (templates).
  */
 
-import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, Pressable, Image, Platform, TextInput as RNTextInput, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, Pressable, Image, Platform, TextInput as RNTextInput, ActivityIndicator, Animated, Easing } from 'react-native';
 import { Text, Menu, Divider } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../theme';
@@ -220,6 +220,41 @@ function MaterialItemCardImpl({
     </View>
   );
 
+  // Pulsing glow for items needing price verification. We loop a 0→1
+  // Animated.Value and map it onto shadowOpacity (iOS/web) + border opacity
+  // (Android fallback) so the amber outline gently breathes. The effect is
+  // automatically removed once the user updates the price — that flips
+  // pricingSource away from 'ai' and priceConfidence away from 'low', which
+  // makes `isEstimate` false, so this glow stops mounting at all.
+  const glowAnim = useRef(new Animated.Value(0)).current;
+  const showVerifyGlow = isEstimate && !isFetching && !readOnly;
+  useEffect(() => {
+    if (!showVerifyGlow) {
+      glowAnim.stopAnimation();
+      glowAnim.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, {
+          toValue: 1,
+          duration: 1400,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(glowAnim, {
+          toValue: 0,
+          duration: 1400,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [showVerifyGlow, glowAnim]);
+  const glowOpacity = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.9] });
+
   // Saved Items variant — mirrors the interactive card layout but without
   // qty stepper or drag handle. Tapping the card body expands/collapses
   // details (image, description, brand, etc.). An add-arrow on the right
@@ -323,8 +358,15 @@ function MaterialItemCardImpl({
       style={[
         styles.listItem,
         isFetching && styles.listItemFetching,
+        showVerifyGlow && styles.listItemNeedsVerify,
       ]}
     >
+      {showVerifyGlow && (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.verifyGlowRing, { opacity: glowOpacity }]}
+        />
+      )}
       <TouchableOpacity
         onPress={() => hasDetails && onToggleExpand?.()}
         disabled={!hasDetails}
@@ -446,6 +488,37 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderLeftWidth: 3,
     borderLeftColor: colors.primary,
+  },
+  // Subtle amber tint + shadow on cards whose price still needs verifying.
+  // The actual pulse comes from the absolutely-positioned `verifyGlowRing`
+  // below — this just gives the card a faint resting warmth so it doesn't
+  // look totally inert between pulses.
+  listItemNeedsVerify: {
+    ...Platform.select({
+      ios: {
+        shadowColor: '#f59e0b',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
+      },
+      android: {
+        // Android can't tint elevation shadows, so we rely on the ring overlay.
+      },
+      web: {
+        boxShadow: '0 0 10px rgba(245, 158, 11, 0.35)',
+      } as any,
+    }),
+  },
+  verifyGlowRing: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#f59e0b',
+    zIndex: 1,
   },
   listItemReadOnly: {
     marginBottom: 8,

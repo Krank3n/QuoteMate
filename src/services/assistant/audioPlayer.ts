@@ -12,8 +12,15 @@
 //     would otherwise leave audible clicks/silences between chunks.
 //
 //   * Native (iOS/Android): `expo-av` Sound objects played in
-//     sequence. Has a small gap between chunks because each Sound has
-//     to load + play + unload, but is good enough for a first cut.
+//     sequence. expo-av has no streaming PCM API, so we do two things
+//     to avoid the choppy/"skippy" playback you'd otherwise get:
+//       1. Coalesce many small PCM chunks (the Live API ships ~20–100ms
+//          each, hundreds per reply) into ~500ms WAVs before queueing.
+//          ~10x fewer Sound load/unload cycles per reply.
+//       2. Preload the next Sound while the current one is still
+//          playing, so the `didJustFinish` -> next playback hop is just
+//          a `playAsync` call (fast) instead of `loadAsync` (~50–150ms
+//          on Android, which was the source of the audible gaps).
 //     The drain hook (`setOnIdle`) defers session teardown so Mate's
 //     reply never gets cut off mid-sentence.
 
@@ -190,9 +197,31 @@ function buildWavFromPcm(pcmBytes: Uint8Array): Uint8Array {
   return buf;
 }
 
+// Target batch size for coalesced WAVs. 24 kHz * 2 bytes * 0.5 s = 24000
+// bytes ≈ 500 ms of audio. Big enough to amortise the per-Sound load cost,
+// small enough that the first chunk still starts playing within ~half a
+// second of the reply beginning.
+const BATCH_BYTES = SAMPLE_RATE * 2 * 0.5;
+// If new PCM stops arriving for this long we flush whatever's pending so the
+// tail of a sentence isn't held back waiting to fill a batch.
+const FLUSH_IDLE_MS = 180;
+
 class NativeAudioQueue implements AudioQueue {
+  // Raw PCM chunks waiting to be merged into a WAV. We hold them as a list +
+  // running byte count so we can flush by size without re-measuring.
+  private pending: Uint8Array[] = [];
+  private pendingBytes = 0;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Built WAV data URIs awaiting playback.
   private queue: string[] = [];
-  private playing: Audio.Sound | null = null;
+  // Currently playing Sound (post `playAsync`).
+  private current: Audio.Sound | null = null;
+  // Next Sound, preloaded while `current` is still playing so the transition
+  // costs ~one playAsync rather than a full loadAsync.
+  private prepared: Audio.Sound | null = null;
+  private preparing = false;
+
   private stopped = false;
   private onIdleCb: (() => void) | null = null;
 
@@ -200,15 +229,42 @@ class NativeAudioQueue implements AudioQueue {
     if (this.stopped) return;
     const pcm = base64ToBytes(base64Pcm);
     if (pcm.length === 0) return;
-    const wav = buildWavFromPcm(pcm);
-    const wavB64 = bytesToBase64(wav);
-    this.queue.push(`data:audio/wav;base64,${wavB64}`);
-    void this.pump();
+    this.pending.push(pcm);
+    this.pendingBytes += pcm.length;
+    if (this.pendingBytes >= BATCH_BYTES) {
+      this.flushPending();
+    } else {
+      this.scheduleFlush();
+    }
   }
 
   setOnIdle(cb: (() => void) | null): void {
     this.onIdleCb = cb;
-    if (!this.playing && this.queue.length === 0) this.fireOnIdle();
+    if (!cb) return;
+    // End-of-turn: make sure the tail PCM doesn't sit in the batch buffer.
+    this.flushPending();
+    this.maybeFireOnIdle();
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this.flushPending();
+    }, FLUSH_IDLE_MS);
+  }
+
+  private flushPending(): void {
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
+    if (this.pendingBytes === 0) return;
+    const merged = new Uint8Array(this.pendingBytes);
+    let off = 0;
+    for (const c of this.pending) { merged.set(c, off); off += c.length; }
+    this.pending = [];
+    this.pendingBytes = 0;
+    const wav = buildWavFromPcm(merged);
+    this.queue.push(`data:audio/wav;base64,${bytesToBase64(wav)}`);
+    void this.pump();
   }
 
   private fireOnIdle(): void {
@@ -218,40 +274,74 @@ class NativeAudioQueue implements AudioQueue {
     try { cb(); } catch { /* noop */ }
   }
 
+  private maybeFireOnIdle(): void {
+    if (!this.onIdleCb) return;
+    if (this.current || this.prepared || this.preparing) return;
+    if (this.queue.length > 0 || this.pendingBytes > 0) return;
+    this.fireOnIdle();
+  }
+
   private async pump(): Promise<void> {
-    if (this.playing || this.stopped || this.queue.length === 0) {
-      if (!this.playing && this.queue.length === 0) this.fireOnIdle();
-      return;
-    }
-    const uri = this.queue.shift()!;
-    const sound = new Audio.Sound();
-    this.playing = sound;
-    try {
-      await sound.loadAsync({ uri }, { shouldPlay: true });
-      sound.setOnPlaybackStatusUpdate(async (status) => {
+    if (this.stopped) return;
+
+    // Promote the preloaded Sound to playing as soon as nothing's playing.
+    if (!this.current && this.prepared) {
+      const sound = this.prepared;
+      this.prepared = null;
+      this.current = sound;
+      sound.setOnPlaybackStatusUpdate((status) => {
         if (!status.isLoaded) return;
         if (status.didJustFinish) {
-          try { await sound.unloadAsync(); } catch { /* noop */ }
-          if (this.playing === sound) this.playing = null;
+          if (this.current === sound) this.current = null;
+          // Unload off the critical path so the next chunk can start
+          // immediately. Fire-and-forget is fine here.
+          void (async () => { try { await sound.unloadAsync(); } catch { /* noop */ } })();
           void this.pump();
         }
       });
-    } catch {
-      try { await sound.unloadAsync(); } catch { /* noop */ }
-      if (this.playing === sound) this.playing = null;
-      void this.pump();
+      try { await sound.playAsync(); } catch { /* noop */ }
     }
+
+    // Keep one Sound preloaded behind the playhead.
+    if (!this.prepared && !this.preparing && this.queue.length > 0) {
+      this.preparing = true;
+      const uri = this.queue.shift()!;
+      const s = new Audio.Sound();
+      void (async () => {
+        try {
+          await s.loadAsync({ uri }, { shouldPlay: false });
+          if (this.stopped) {
+            try { await s.unloadAsync(); } catch { /* noop */ }
+            return;
+          }
+          this.prepared = s;
+        } catch {
+          try { await s.unloadAsync(); } catch { /* noop */ }
+        } finally {
+          this.preparing = false;
+          void this.pump();
+        }
+      })();
+    }
+
+    this.maybeFireOnIdle();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.pending = [];
+    this.pendingBytes = 0;
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
     this.queue = [];
     this.onIdleCb = null;
-    const s = this.playing;
-    this.playing = null;
-    if (s) {
-      try { await s.stopAsync(); } catch { /* noop */ }
-      try { await s.unloadAsync(); } catch { /* noop */ }
+    const c = this.current; this.current = null;
+    const p = this.prepared; this.prepared = null;
+    if (c) {
+      try { await c.stopAsync(); } catch { /* noop */ }
+      try { await c.unloadAsync(); } catch { /* noop */ }
+    }
+    if (p) {
+      try { await p.unloadAsync(); } catch { /* noop */ }
     }
   }
 }

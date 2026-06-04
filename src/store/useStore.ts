@@ -363,13 +363,24 @@ function normalizeMaterialUnit(raw: string): Material['unit'] {
 // progress (kept separate so fast item events don't blow away the headline).
 function pricingEventToProgress(event: PricingEvent): Partial<WorkingStatus> | null {
   if (event.kind === 'phase-start') {
-    return { phase: 'pricing', status: event.status, detail: undefined };
+    // Clear the per-item list when we move off the batch phase so stale
+    // "Searching…" rows don't linger into reconcile/individual passes.
+    return {
+      phase: 'pricing',
+      status: event.status,
+      detail: undefined,
+      // Clear the per-item list on every phase boundary — the next
+      // batch-chunk event repopulates it, and non-batch phases shouldn't
+      // carry stale rows.
+      items: undefined,
+    };
   }
   if (event.kind === 'batch-chunk') {
     return {
       status:
         event.currentName || `Checking Bunnings (batch ${event.chunkIndex} of ${event.totalChunks})…`,
       detail: `${event.progress.current}/${event.progress.total} items priced`,
+      items: event.items,
     };
   }
   if (event.kind === 'item-priced') {
@@ -2831,6 +2842,23 @@ export const useStore = create<AppState>((set, get) => ({
             };
           }
 
+          // If the tradie asked for an invoice up front, auto-convert at the
+          // end of the pipeline so they don't have to do a second Apply.
+          if (proposal.documentType === 'invoice') {
+            try {
+              const converted = await get().convertDocumentToInvoice(quoteId);
+              return {
+                ok: true,
+                navigate: { kind: 'open_invoice', invoiceId: converted.id },
+                review,
+              };
+            } catch (err: any) {
+              // eslint-disable-next-line no-console
+              console.warn('[Mate] auto-convert to invoice failed', err);
+              // Fall through to opening the quote — the tradie can convert manually.
+            }
+          }
+
           // Land on JobPreview (the final review screen) instead of
           // MaterialsList — pricing is already done.
           return {
@@ -2838,6 +2866,41 @@ export const useStore = create<AppState>((set, get) => ({
             navigate: { kind: 'job_preview', quoteId },
             review,
           };
+        }
+
+        case 'propose_update_quote_rates': {
+          // Bump a numeric rate on the doc without re-running pricing. We
+          // convert to Quote-shape so the shared calculator can re-run totals,
+          // then write the updated values back onto the Document.
+          const target = await resolveDocument(proposal.quoteId);
+          if (!target) {
+            return { ok: false, error: 'Quote not found.' };
+          }
+          const { documentToQuote } = await import('../types/documentAdapter');
+          const sourceQuote = documentToQuote(target);
+          const nextQuote: Quote = {
+            ...sourceQuote,
+            markup: proposal.markup ?? sourceQuote.markup,
+            laborMarkup: proposal.laborMarkup ?? sourceQuote.laborMarkup,
+            laborRate: proposal.laborRate ?? sourceQuote.laborRate,
+            laborHours: proposal.laborHours ?? sourceQuote.laborHours,
+          };
+          const recalced = updateQuoteCalculations(nextQuote);
+          const nextDoc: Document = {
+            ...target,
+            laborRate: recalced.laborRate,
+            laborHours: recalced.laborHours,
+            laborTotal: recalced.laborTotal,
+            markup: recalced.markup,
+            laborMarkup: recalced.laborMarkup,
+            markupAmount: recalced.markupAmount,
+            materialsSubtotal: recalced.materialsSubtotal,
+            subtotal: recalced.subtotal,
+            gst: recalced.gst,
+            total: recalced.total,
+          };
+          await get().saveDocument(nextDoc);
+          return { ok: true, navigate: { kind: 'job_preview', quoteId: target.id } };
         }
 
         case 'propose_add_line_item': {
@@ -2870,6 +2933,58 @@ export const useStore = create<AppState>((set, get) => ({
           if (!quote) return { ok: false, error: 'Quote not found.' };
           await get().saveQuote({ ...quote, materials: [...quote.materials, stub], updatedAt: new Date() });
           return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
+        }
+
+        case 'propose_delete_quote': {
+          // Delete an entire quote/invoice document. Distinct from
+          // propose_delete_line_item: that strips one row, this removes the
+          // whole record. Block on paid / partially paid — those belong in
+          // the books, the tradie should archive them instead.
+          const target = await resolveDocument(proposal.quoteId);
+          const stage =
+            target?.stage ||
+            get().quotes.find((q) => q.id === proposal.quoteId)?.status ||
+            get().invoices.find((i) => i.id === proposal.quoteId)?.status;
+          if (stage === 'paid' || stage === 'partially_paid') {
+            return {
+              ok: false,
+              error:
+                "Can't delete a paid record — the books need to stay intact. Archive it instead.",
+            };
+          }
+          if (target) {
+            // Route via the appropriate store action so the matching local
+            // array (quotes vs invoices) and Firestore collection are both
+            // cleared. Then belt-and-braces wipe the unified mirror in case
+            // the trigger hasn't caught up.
+            if (target.type === 'invoice') {
+              await get().deleteInvoice(target.id);
+            } else {
+              await get().deleteQuote(target.id);
+            }
+            try {
+              await documentService.deleteDocument(target.id);
+            } catch {
+              // best-effort — the trigger will reconcile.
+            }
+            set((state) => ({
+              documents: state.documents.filter((d) => d.id !== target.id),
+            }));
+            return { ok: true };
+          }
+          // Legacy fallbacks — the doc lives only in the old quotes/invoices
+          // arrays (very fresh draft, not yet mirrored).
+          const legacyQuote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (legacyQuote) {
+            await get().deleteQuote(legacyQuote.id);
+            return { ok: true };
+          }
+          const legacyInvoice = get().invoices.find((i) => i.id === proposal.quoteId);
+          if (legacyInvoice) {
+            await get().deleteInvoice(legacyInvoice.id);
+            return { ok: true };
+          }
+          return { ok: false, error: 'Quote not found — it may have already been deleted.' };
         }
 
         case 'propose_delete_line_item': {
@@ -2915,12 +3030,29 @@ export const useStore = create<AppState>((set, get) => ({
           // If Mate pre-wrote the email, persist it onto the doc so the send
           // preview opens pre-filled (the modal reads draftEmailBody /
           // draftEmailSubject and skips auto-generation when they're set).
+          // Substitute any `<business>` / `[business name]` style placeholders
+          // with the actual business name from settings — the model often
+          // leaves a literal placeholder in the sign-off and we never want
+          // that going out to a customer.
+          const businessName =
+            get().businessSettings?.businessName?.trim() || '';
+          const substitute = (s: string): string => {
+            if (!businessName) return s;
+            return s.replace(
+              /[<\[{]\s*business(?:\s+name)?\s*[>\]}]/gi,
+              businessName,
+            );
+          };
           let target = doc;
           if (proposal.draftEmailBody || proposal.draftEmailSubject) {
             target = {
               ...doc,
-              ...(proposal.draftEmailBody ? { draftEmailBody: proposal.draftEmailBody } : {}),
-              ...(proposal.draftEmailSubject ? { draftEmailSubject: proposal.draftEmailSubject } : {}),
+              ...(proposal.draftEmailBody
+                ? { draftEmailBody: substitute(proposal.draftEmailBody) }
+                : {}),
+              ...(proposal.draftEmailSubject
+                ? { draftEmailSubject: substitute(proposal.draftEmailSubject) }
+                : {}),
             };
             await get().saveDocument(target);
           }

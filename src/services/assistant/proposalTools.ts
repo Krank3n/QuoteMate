@@ -8,11 +8,13 @@ import {
   ConvertToInvoiceProposal,
   CreateContactProposal,
   DeleteLineItemProposal,
+  DeleteQuoteProposal,
   DraftQuoteProposal,
   Proposal,
   RepriceQuoteProposal,
   SendQuoteProposal,
   UpdateCustomerProposal,
+  UpdateQuoteRatesProposal,
 } from '../../types/assistant';
 import { resolveQuoteId } from './quoteRefMap';
 
@@ -54,6 +56,38 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
           Number.isFinite(Number(input.estimatedDurationHours)) && Number(input.estimatedDurationHours) > 0
             ? Number(input.estimatedDurationHours)
             : undefined,
+        documentType: input.documentType === 'invoice' ? 'invoice' : 'quote',
+      };
+      return { proposal };
+    }
+
+    case 'propose_update_quote_rates': {
+      if (!input?.quoteId) return { error: 'propose_update_quote_rates requires quoteId.' };
+      const num = (v: unknown): number | undefined =>
+        Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : undefined;
+      const markup = num(input.markup);
+      const laborMarkup = num(input.laborMarkup);
+      const laborRate = num(input.laborRate);
+      const laborHours = num(input.laborHours);
+      if (
+        markup === undefined &&
+        laborMarkup === undefined &&
+        laborRate === undefined &&
+        laborHours === undefined
+      ) {
+        return { error: 'Provide at least one of markup, laborMarkup, laborRate, or laborHours.' };
+      }
+      const proposal: UpdateQuoteRatesProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_update_quote_rates',
+        quoteId: resolveQuoteId(input.quoteId),
+        markup,
+        laborMarkup,
+        laborRate,
+        laborHours,
+        displayName: input.displayName ? String(input.displayName) : undefined,
       };
       return { proposal };
     }
@@ -71,6 +105,23 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         qty: Number(input.qty) || 1,
         unit: String(input.unit || 'each'),
         section: input.section ? String(input.section) : undefined,
+      };
+      return { proposal };
+    }
+
+    case 'propose_delete_quote': {
+      if (!input?.quoteId) return { error: 'propose_delete_quote requires quoteId.' };
+      const docType = input.displayDocType === 'invoice' ? 'invoice' : input.displayDocType === 'quote' ? 'quote' : undefined;
+      const proposal: DeleteQuoteProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_delete_quote',
+        quoteId: resolveQuoteId(input.quoteId),
+        displayName: input.displayName ? String(input.displayName) : undefined,
+        displayCustomerName: input.displayCustomerName ? String(input.displayCustomerName) : undefined,
+        displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
+        displayDocType: docType,
       };
       return { proposal };
     }

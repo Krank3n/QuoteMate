@@ -23,11 +23,13 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_draft_quote',
   'propose_add_line_item',
   'propose_delete_line_item',
+  'propose_delete_quote',
   'propose_create_contact',
   'propose_update_customer',
   'propose_send_quote',
   'propose_convert_to_invoice',
   'propose_reprice',
+  'propose_update_quote_rates',
 ] as const;
 
 // Voice-only control tools. Unlike read/proposal tools these never reach
@@ -73,7 +75,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'find_customer',
     description:
-      "Search the tradie's saved contacts by name or phone. Returns up to 5 matches with id, name, phone (last 4 only), email presence flag, and last job summary if available. Phone search uses the last 8 digits.",
+      "Search the tradie's saved contacts by name or phone. Fuzzy + phonetic: handles typos (Smyth/Smith), spelling variants (Catherine/Kathryn), and partial names (\"sar\" → Sarah Wilson). Phone search uses the last 8 digits. Returns up to 5 matches, each with contactId, name, phoneMasked (last 4), hasEmail, lastJob, matchType ('phone' | 'exact' | 'close' | 'fuzzy' | 'sounds_like'), and confidence (0–1). Top-level: confidence (best hit), ambiguous (top 2 are too close to call), needsConfirmation (true unless it's a clean phone/exact hit). When needsConfirmation is true you MUST read the match back to the tradie (name + ...last4 + last job) and wait for a yes before using its contactId — a wrong contact on a quote is worse than asking.",
     parameters: {
       type: 'object',
       properties: {
@@ -85,10 +87,15 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'list_recent_quotes',
     description:
-      "List the tradie's recent quotes and invoices, newest first. Returns id, customerName, jobName, total, status, type (quote|invoice), createdAt. Use this to answer \"what's pending?\" or to find a quote by approximate name.",
+      "List the tradie's recent quotes and invoices, newest first. Returns id, customerName, jobName, total, status, type (quote|invoice), createdAt. Use this to answer \"what's pending?\" or to find a quote by approximate name. Pass `query` with whatever name the tradie used (job name, customer name, or both) — the tool fuzzy-matches against jobName + customerName (handles typos and STT slop like \"raise debt\" ↔ \"raised deck\"), so you rarely need to eyeball the full list yourself.",
     parameters: {
       type: 'object',
       properties: {
+        query: {
+          type: 'string',
+          description:
+            'Optional fuzzy search over jobName + customerName. Pass whatever the tradie said ("raised deck", "Gigar", "raise debt"). Tolerates typos / STT noise within ~2 chars per token. Omit to just list recent.',
+        },
         limit: { type: 'integer', description: 'Max rows to return (default 10, max 25).' },
         status: {
           type: 'string',
@@ -175,6 +182,12 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
           description:
             'Optional. If the tradie gave a duration ("2 days", "half a day"), convert to hours and pass it. The pipeline uses its own estimate otherwise.',
         },
+        documentType: {
+          type: 'string',
+          enum: ['quote', 'invoice'],
+          description:
+            "Optional. Pass 'invoice' when the tradie has clearly asked for an invoice up front (\"draft an invoice\", \"invoice Tom for the bathroom\"). Apply runs the same materials + pricing pipeline, then auto-converts the result to an invoice so the tradie never has to do a second tap. Defaults to 'quote'.",
+        },
       },
       required: ['jobName', 'jobDescription'],
     },
@@ -198,7 +211,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_delete_line_item',
     description:
-      'Propose deleting a single line item from an existing quote or invoice. Apply prompts the tradie to confirm. Use the material id from get_quote — never invent one. Always call get_quote first so the card can show the line name + total being removed.',
+      'Propose deleting a SINGLE LINE from an existing quote or invoice (one material row, not the whole document). Apply prompts the tradie to confirm. Use the material id from get_quote — never invent one. Always call get_quote first so the card can show the line name + total being removed. For deleting the entire quote/invoice itself, use propose_delete_quote instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -210,6 +223,26 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         displayTotal: { type: 'number', description: 'Total to show on the card in AUD (for display only).' },
       },
       required: ['quoteId', 'materialId'],
+    },
+  },
+  {
+    name: 'propose_delete_quote',
+    description:
+      'Propose deleting an ENTIRE quote or invoice (the whole document, all its lines). Use this whenever the tradie says "delete that quote", "scrap it", "bin it", "get rid of it", "chuck it out" referring to the document itself — NOT propose_delete_line_item, which only removes one row. Apply removes it from the tradie\'s quotes/invoices list. Paid or partially paid records are refused (the tradie should archive instead) so the books stay intact. Always call list_recent_quotes (or get_quote) first so you can populate the display fields — the destructive confirmation card MUST name the doc by customer + job name + total.',
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id from list_recent_quotes / find_customer / get_quote.' },
+        displayName: { type: 'string', description: 'Job name to show on the card (for display only).' },
+        displayCustomerName: { type: 'string', description: 'Customer name to show on the card (for display only).' },
+        displayTotal: { type: 'number', description: 'Total in AUD to show on the card (for display only).' },
+        displayDocType: {
+          type: 'string',
+          enum: ['quote', 'invoice'],
+          description: 'Whether the doc is a quote or invoice (for display only — controls card copy).',
+        },
+      },
+      required: ['quoteId'],
     },
   },
   {
@@ -297,6 +330,23 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         quoteId: { type: 'string', description: 'Document id of the quote to re-price.' },
         displayName: { type: 'string', description: 'Job name to show on the card (for display only).' },
         displayTotal: { type: 'number', description: 'Current total in AUD to show on the card (for display only).' },
+      },
+      required: ['quoteId'],
+    },
+  },
+  {
+    name: 'propose_update_quote_rates',
+    description:
+      "Change the labour or markup numbers on an existing quote or invoice without re-running the pricing pipeline. Use this whenever the tradie wants to bump the markup percentage, change the labour rate, adjust labour hours, or tweak the labour markup on a specific doc (\"bump markup to 30%\", \"change hours to 14\", \"labour rate to $130/h\"). Pass only the fields that are changing \u2014 omitted fields stay as-is. Markup values are percentages (30 means 30%). laborRate is $/hour, laborHours is hours. Always know the quote id first (from list_recent_quotes / get_quote / the [context] line after a draft).",
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of the quote/invoice to update.' },
+        markup: { type: 'number', description: 'New material markup percentage (e.g. 30 for 30%).' },
+        laborMarkup: { type: 'number', description: 'New labour markup percentage (e.g. 20 for 20%). Independent from material markup.' },
+        laborRate: { type: 'number', description: 'New labour rate in $/hour.' },
+        laborHours: { type: 'number', description: 'New labour hours total.' },
+        displayName: { type: 'string', description: 'Job name to show on the card (display only).' },
       },
       required: ['quoteId'],
     },

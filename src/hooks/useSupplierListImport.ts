@@ -32,6 +32,13 @@ import {
   type ExtractedSupplierContact,
 } from '../services/supplierListImporter';
 import {
+  parseSpreadsheet,
+  autoDetectMapping,
+  buildExtractFromMapping,
+  type ParsedSpreadsheet,
+  type ColumnMapping,
+} from '../services/spreadsheetParser';
+import {
   bulkSaveFavorites,
   loadFavoritesFromLocal,
   removeFavoriteProduct,
@@ -45,11 +52,12 @@ import {
 import type { FavoriteProductMapping, Material, SupplierGroup } from '../types';
 import type { ReviewItemState } from '../components/SupplierListReviewModal';
 
-export type ImportSource = 'camera' | 'gallery' | 'pdf';
+export type ImportSource = 'camera' | 'gallery' | 'pdf' | 'spreadsheet';
 export type ImportPhase =
   | 'idle'
   | 'capturing'
   | 'extracting'
+  | 'mappingColumns'
   | 'reviewing'
   | 'saving';
 
@@ -102,9 +110,19 @@ export interface UseSupplierListImportResult {
   existingSupplierNames: string[];
   saving: boolean;
   errorMessage?: string;
+  /**
+   * Spreadsheet column-mapping state (populated only when the parsed file
+   * couldn't be auto-mapped). The host renders a modal with these and calls
+   * applyColumnMapping() / cancelColumnMapping().
+   */
+  columnMappingVisible: boolean;
+  parsedSpreadsheet: ParsedSpreadsheet | null;
+  autoDetectedMapping: Partial<ColumnMapping> | null;
   startImport: (source: ImportSource) => Promise<void>;
   handleCaptureComplete: (uris: string[]) => Promise<void>;
   handleSaveImported: (supplierName: string, rows: ReviewItemState[]) => Promise<void>;
+  applyColumnMapping: (mapping: ColumnMapping) => Promise<void>;
+  cancelColumnMapping: () => void;
   cancelCapture: () => void;
   cancelReview: () => void;
   clearError: () => void;
@@ -114,6 +132,7 @@ const DEFAULT_LABELS: Record<ImportSource | 'default', string> = {
   camera: 'Reading your receipt…',
   gallery: 'Reading your price list…',
   pdf: 'Reading your price list…',
+  spreadsheet: 'Reading your spreadsheet…',
   default: 'Reading your price list…',
 };
 
@@ -137,6 +156,11 @@ export function useSupplierListImport(
   const [existingSupplierNames, setExistingSupplierNames] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
+  const [columnMappingVisible, setColumnMappingVisible] = useState(false);
+  const [parsedSpreadsheet, setParsedSpreadsheet] =
+    useState<ParsedSpreadsheet | null>(null);
+  const [autoDetectedMapping, setAutoDetectedMapping] =
+    useState<Partial<ColumnMapping> | null>(null);
 
   const labelFor = (source: ImportSource | null): string => {
     const labels = { ...DEFAULT_LABELS, ...(opts.loadingLabels ?? {}) };
@@ -307,6 +331,56 @@ export function useSupplierListImport(
           setPhase('extracting');
           const result = await extractFromPdf(asset.uri);
           await handleExtractionResult(result);
+        } else if (source === 'spreadsheet') {
+          const picked = await DocumentPicker.getDocumentAsync({
+            // RN DocumentPicker on Android is happiest with broad MIME hints;
+            // we re-check the extension in the parser.
+            type: [
+              'text/csv',
+              'text/comma-separated-values',
+              'application/csv',
+              'application/vnd.ms-excel',
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              '*/*',
+            ],
+            multiple: false,
+            copyToCacheDirectory: true,
+          });
+          if (picked.canceled || !picked.assets?.length) {
+            setPhase('idle');
+            return;
+          }
+          const asset = picked.assets[0];
+          setPhase('extracting');
+          const parsed = await parseSpreadsheet(asset.uri, asset.name, asset.mimeType);
+          if (!parsed.headers.length || !parsed.rows.length) {
+            reportError(
+              "Couldn't read any rows from that file. Make sure it has column headers on the first row and at least one product row.",
+            );
+            setPhase('idle');
+            return;
+          }
+          const detected = autoDetectMapping(parsed.headers);
+          if (detected) {
+            const result = buildExtractFromMapping(parsed, detected, {
+              supplierName: opts.prefilledSupplierName,
+            });
+            if (!result.items.length) {
+              // Detection picked columns but parsing yielded zero usable rows —
+              // fall through to the mapper so the user can correct it.
+              setParsedSpreadsheet(parsed);
+              setAutoDetectedMapping(detected);
+              setColumnMappingVisible(true);
+              setPhase('mappingColumns');
+              return;
+            }
+            await handleExtractionResult(result);
+          } else {
+            setParsedSpreadsheet(parsed);
+            setAutoDetectedMapping(null);
+            setColumnMappingVisible(true);
+            setPhase('mappingColumns');
+          }
         }
       } catch (err: any) {
         reportError(err?.message || 'Could not read the price list. Please try again.');
@@ -341,6 +415,39 @@ export function useSupplierListImport(
 
   const cancelCapture = useCallback(() => {
     setCaptureModalVisible(false);
+    setPhase('idle');
+  }, []);
+
+  const applyColumnMapping = useCallback(
+    async (mapping: ColumnMapping) => {
+      if (!parsedSpreadsheet) return;
+      setColumnMappingVisible(false);
+      setPhase('extracting');
+      try {
+        const result = buildExtractFromMapping(parsedSpreadsheet, mapping, {
+          supplierName: opts.prefilledSupplierName,
+        });
+        if (!result.items.length) {
+          reportError(
+            "Couldn't find any valid rows with that mapping. Double-check the price column — rows with no name or zero price are skipped.",
+          );
+          setPhase('idle');
+          return;
+        }
+        await handleExtractionResult(result);
+      } catch (err: any) {
+        reportError(err?.message || 'Could not import the spreadsheet.');
+        setPhase('idle');
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [parsedSpreadsheet, handleExtractionResult],
+  );
+
+  const cancelColumnMapping = useCallback(() => {
+    setColumnMappingVisible(false);
+    setParsedSpreadsheet(null);
+    setAutoDetectedMapping(null);
     setPhase('idle');
   }, []);
 
@@ -481,9 +588,14 @@ export function useSupplierListImport(
     existingSupplierNames,
     saving,
     errorMessage,
+    columnMappingVisible,
+    parsedSpreadsheet,
+    autoDetectedMapping,
     startImport,
     handleCaptureComplete,
     handleSaveImported,
+    applyColumnMapping,
+    cancelColumnMapping,
     cancelCapture,
     cancelReview,
     clearError,

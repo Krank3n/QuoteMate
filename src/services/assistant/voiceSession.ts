@@ -13,11 +13,90 @@
 // stays single-shot — burning a token mint per text turn is cheap and
 // the simpler lifecycle keeps that path easy to debug.
 
+import { httpsCallable } from 'firebase/functions';
 import { ChatMessage, Proposal } from '../../types/assistant';
+import { functions } from '../../config/firebase';
 import { MATE_SYSTEM_PROMPT } from './systemPrompt';
 import { TOOL_DECLARATIONS, CONTROL_TOOL_DECLARATIONS, isControlTool } from './toolSchemas';
 import { dispatchToolCall } from './toolDispatcher';
 import { LIVE_WS_BASE, MAX_HISTORY_TURNS, LiveOfflineError, mintLiveToken } from './liveSession';
+
+// Live API only sends usageMetadata to the client; the server-side proxy
+// never sees it (the WS runs device→Gemini on an ephemeral token). We
+// accumulate per-modality totals across the session and report once on
+// close so /admin/ai-costs can attribute real voice spend to the user.
+interface LiveUsageTotals {
+  inputTextTokens: number;
+  outputTextTokens: number;
+  inputAudioTokens: number;
+  outputAudioTokens: number;
+  cachedTokens: number;
+  thoughtsTokens: number;
+}
+
+function emptyUsageTotals(): LiveUsageTotals {
+  return {
+    inputTextTokens: 0,
+    outputTextTokens: 0,
+    inputAudioTokens: 0,
+    outputAudioTokens: 0,
+    cachedTokens: 0,
+    thoughtsTokens: 0,
+  };
+}
+
+// Live usageMetadata carries per-modality breakdowns in *TokensDetails arrays.
+// Older preview versions sometimes omit them and only ship the totals; fall
+// back to bucketing everything as text in that case so we still record cost.
+function accumulateLiveUsage(totals: LiveUsageTotals, u: any): void {
+  if (!u || typeof u !== 'object') return;
+  const promptTotal = Number(u.promptTokenCount) || 0;
+  const respTotal = Number(u.responseTokenCount) || 0;
+  const promptDetails = Array.isArray(u.promptTokensDetails) ? u.promptTokensDetails : [];
+  const respDetails = Array.isArray(u.responseTokensDetails) ? u.responseTokensDetails : [];
+
+  let promptAudio = 0;
+  let promptText = 0;
+  for (const d of promptDetails) {
+    const n = Number(d?.tokenCount) || 0;
+    if (String(d?.modality).toUpperCase() === 'AUDIO') promptAudio += n;
+    else promptText += n;
+  }
+  let respAudio = 0;
+  let respText = 0;
+  for (const d of respDetails) {
+    const n = Number(d?.tokenCount) || 0;
+    if (String(d?.modality).toUpperCase() === 'AUDIO') respAudio += n;
+    else respText += n;
+  }
+  // If details were missing, fall back to the bare totals as text.
+  if (!promptDetails.length && promptTotal) promptText = promptTotal;
+  if (!respDetails.length && respTotal) respText = respTotal;
+
+  totals.inputAudioTokens += promptAudio;
+  totals.inputTextTokens += promptText;
+  totals.outputAudioTokens += respAudio;
+  totals.outputTextTokens += respText;
+  totals.cachedTokens += Number(u.cachedContentTokenCount) || 0;
+  totals.thoughtsTokens += Number(u.thoughtsTokenCount) || 0;
+}
+
+async function reportLiveUsage(model: string, totals: LiveUsageTotals): Promise<void> {
+  // Nothing happened (mint failed before any turn, or the session was opened
+  // and closed instantly) — don't bother the server with a zero payload.
+  const anyTokens =
+    totals.inputTextTokens + totals.outputTextTokens +
+    totals.inputAudioTokens + totals.outputAudioTokens;
+  if (!anyTokens) return;
+  try {
+    const callable = httpsCallable(functions, 'reportAssistantLiveUsage');
+    await callable({ model, sessionEnded: true, ...totals });
+  } catch (err: any) {
+    // Cost reporting is best-effort — a failure must not impact the user.
+    // eslint-disable-next-line no-console
+    console.warn('[Mate voice] usage report failed', err?.message);
+  }
+}
 
 export interface VoiceSessionCallbacks {
   /** Server's transcription of what the user said. May fire multiple times per turn. */
@@ -96,6 +175,14 @@ export async function openVoiceSession(
     let setupAcked = false;
     const pendingChunks: string[] = [];
     let resolved = false;
+    const usageTotals = emptyUsageTotals();
+    let usageReported = false;
+    const flushUsage = () => {
+      if (usageReported) return;
+      usageReported = true;
+      // Fire-and-forget — the WS is already torn down by the time this runs.
+      void reportLiveUsage(model, usageTotals);
+    };
 
     const safeSend = (frame: any) => {
       if (!open) return;
@@ -110,6 +197,7 @@ export async function openVoiceSession(
       if (!open) return;
       open = false;
       try { ws.close(); } catch { /* noop */ }
+      flushUsage();
       cb.onClose?.(code);
     };
 
@@ -222,6 +310,12 @@ export async function openVoiceSession(
       let msg: any;
       try { msg = JSON.parse(raw); } catch { return; }
 
+      // usageMetadata can ride along with serverContent, toolCall, or arrive on
+      // its own — always sample it before branching on the message type.
+      if (msg?.usageMetadata) {
+        accumulateLiveUsage(usageTotals, msg.usageMetadata);
+      }
+
       if (msg?.setupComplete && !setupAcked) {
         setupAcked = true;
         // Flush any mic chunks captured before setupComplete arrived.
@@ -316,6 +410,7 @@ export async function openVoiceSession(
     ws.onclose = (event: any) => {
       const wasOpen = open;
       open = false;
+      flushUsage();
       cb.onClose?.(event?.code);
       if (!resolved && wasOpen) {
         resolved = true;

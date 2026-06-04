@@ -52,6 +52,7 @@ import { AlertModal } from '../../components/AlertModal';
 import * as ImagePicker from 'expo-image-picker';
 import { SupplierListReviewModal } from '../../components/SupplierListReviewModal';
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
+import { SpreadsheetColumnMapperModal } from '../../components/SpreadsheetColumnMapperModal';
 import { InvoiceReviewModal, type InvoiceReviewRow } from '../../components/InvoiceReviewModal';
 import { useSupplierListImport } from '../../hooks/useSupplierListImport';
 import { useInvoiceImport } from '../../hooks/useInvoiceImport';
@@ -686,7 +687,7 @@ export function AddMaterialScreen() {
     setImportSheetVisible(true);
   };
 
-  const launchImport = (source: 'camera' | 'gallery' | 'pdf') => {
+  const launchImport = (source: 'camera' | 'gallery' | 'pdf' | 'spreadsheet') => {
     setImportSheetVisible(false);
     importer.startImport(source);
   };
@@ -695,6 +696,11 @@ export function AddMaterialScreen() {
     { icon: 'camera', label: 'Take photo', onPress: () => launchImport('camera') },
     { icon: 'image-multiple', label: 'Pick from gallery', onPress: () => launchImport('gallery') },
     { icon: 'file-pdf-box', label: 'Pick PDF', onPress: () => launchImport('pdf') },
+    {
+      icon: 'file-table-outline',
+      label: 'Pick CSV / Excel',
+      onPress: () => launchImport('spreadsheet'),
+    },
   ];
 
   const cancelSearch = useCallback(() => {
@@ -1930,7 +1936,7 @@ export function AddMaterialScreen() {
         subtitle={
           importMode === 'refresh'
             ? "Prices crept up again? Snap the new sheet and we'll refresh your book without you bashing in a single line."
-            : "Snap your supplier's price sheet — every page, smudges and all. We'll sort it into your book so next time you're quoting, the prices are already in your pocket."
+            : "Snap your supplier's price sheet, drop in a PDF, or upload a CSV / Excel export — we'll sort it into your book so next time you're quoting, the prices are already in your pocket."
         }
         options={importSheetOptions}
       />
@@ -2039,6 +2045,15 @@ export function AddMaterialScreen() {
 
       {/* Unsaved-changes confirmation when navigating away */}
       <AlertModal {...unsavedModalProps} />
+
+      {/* Column mapper for CSV / XLSX imports when auto-detect fails */}
+      <SpreadsheetColumnMapperModal
+        visible={importer.columnMappingVisible}
+        parsed={importer.parsedSpreadsheet}
+        initialMapping={importer.autoDetectedMapping}
+        onCancel={importer.cancelColumnMapping}
+        onConfirm={importer.applyColumnMapping}
+      />
 
       {/* Review modal for extracted items */}
       <SupplierListReviewModal

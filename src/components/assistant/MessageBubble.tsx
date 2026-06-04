@@ -73,7 +73,7 @@ function InlineQuote({
   );
 }
 
-export function MessageBubble({
+function MessageBubbleImpl({
   message,
   onCtaPress,
   onInlineQuoteEdit,
@@ -119,6 +119,7 @@ export function MessageBubble({
             </Text>
           </View>
           {!!w.detail && <Text style={styles.workingDetail}>{w.detail}</Text>}
+          {!!w.items && w.items.length > 0 && <WorkingItems items={w.items} />}
           {!!w.summary && <Text style={styles.workingSummary}>{w.summary}</Text>}
         </View>
       </View>
@@ -213,6 +214,33 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontStyle: 'italic',
   },
+  workingItems: {
+    marginTop: 6,
+    gap: 2,
+  },
+  workingItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  workingItemText: {
+    color: colors.text,
+    fontSize: 12,
+    flexShrink: 1,
+  },
+  workingItemDone: {
+    color: colors.textMuted,
+  },
+  workingItemFailed: {
+    color: colors.textMuted,
+    textDecorationLine: 'line-through',
+  },
+  workingItemsMore: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
   workingSummary: {
     color: colors.text,
     fontSize: 13,
@@ -242,3 +270,81 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
 });
+
+// Compact rolling list of materials being searched in the current batch.
+// Renders at most ~6 rows: any items currently `searching`, plus the
+// most-recently completed ones for context, plus the next pending item so
+// the user can see what's queued. Keeps the chat card from ballooning on
+// large quotes (26 materials would be a wall of text otherwise).
+function WorkingItems({
+  items,
+}: {
+  items: Array<{ name: string; status: 'pending' | 'searching' | 'done' | 'failed' }>;
+}) {
+  // Bucket by status so we can show "searching" rows first, then a tail
+  // of just-completed rows, then a hint of what's still queued.
+  const searching = items.filter((i) => i.status === 'searching');
+  const completed = items.filter((i) => i.status === 'done' || i.status === 'failed');
+  const pending = items.filter((i) => i.status === 'pending');
+
+  const MAX_ROWS = 6;
+  // Always show all currently-searching items (usually ≤3 — the chunk size).
+  const rows: Array<{ name: string; status: 'pending' | 'searching' | 'done' | 'failed' }> = [
+    ...searching,
+  ];
+  // Fill remaining slots with the most-recently completed items so the user
+  // gets visible feedback as the list ticks over.
+  const recentDone = completed.slice(-Math.max(0, MAX_ROWS - rows.length - (pending.length > 0 ? 1 : 0)));
+  rows.unshift(...recentDone);
+  // Tail hint: show how many are still queued.
+  const remainingPending = pending.length;
+
+  return (
+    <View style={styles.workingItems}>
+      {rows.map((item, idx) => {
+        const icon =
+          item.status === 'done'
+            ? 'check'
+            : item.status === 'failed'
+            ? 'close'
+            : item.status === 'searching'
+            ? 'magnify'
+            : 'circle-small';
+        const tint =
+          item.status === 'done'
+            ? colors.success
+            : item.status === 'failed'
+            ? colors.error
+            : item.status === 'searching'
+            ? colors.primary
+            : colors.textMuted;
+        return (
+          <View key={`${item.name}-${idx}`} style={styles.workingItemRow}>
+            <MaterialCommunityIcons name={icon as any} size={14} color={tint} />
+            <Text
+              style={[
+                styles.workingItemText,
+                item.status === 'done' && styles.workingItemDone,
+                item.status === 'failed' && styles.workingItemFailed,
+              ]}
+              numberOfLines={1}
+            >
+              {item.name}
+            </Text>
+          </View>
+        );
+      })}
+      {remainingPending > 0 && (
+        <Text style={styles.workingItemsMore}>
+          +{remainingPending} more queued
+        </Text>
+      )}
+    </View>
+  );
+}
+
+// Memoised: the chat FlatList re-renders every time AssistantScreen
+// re-renders (composer keystrokes, voice ticks, store updates, etc).
+// Without this each bubble would re-run its Zustand selectors on every
+// character typed and cause visible scroll/typing jank on Android.
+export const MessageBubble = React.memo(MessageBubbleImpl);

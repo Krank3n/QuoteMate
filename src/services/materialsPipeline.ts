@@ -329,6 +329,10 @@ export type PricingEvent =
       chunkIndex: number;
       totalChunks: number;
       termStatuses: Map<string, 'pending' | 'searching' | 'done' | 'failed'>;
+      /** Per-item display names + statuses, in remainingTerms order. Lets
+       *  the chat working card show WHICH materials Mate is searching for
+       *  right now instead of a bare "batch X of Y" line. */
+      items: Array<{ name: string; status: 'pending' | 'searching' | 'done' | 'failed' }>;
       progress: { current: number; total: number };
       currentName?: string;
     }
@@ -591,6 +595,21 @@ export async function fetchPricesForQuote(
       try {
         const chunkSize = 3;
         const totalChunks = Math.ceil(remainingTerms.length / chunkSize);
+        // Display-name lookup so the working card can show "Searching:
+        // 75mm screws" instead of a bare search term. Falls back to the
+        // search term itself if a material can't be matched.
+        const termToDisplayName = new Map<string, string>();
+        for (const term of remainingTerms) {
+          const mat = updatedMaterials.find((m) => (m.searchTerm || m.name) === term);
+          termToDisplayName.set(term, mat?.name || term);
+        }
+        const buildItemList = (
+          statuses: Map<string, 'pending' | 'searching' | 'done' | 'failed'>,
+        ) =>
+          remainingTerms.map((term) => ({
+            name: termToDisplayName.get(term) || term,
+            status: statuses.get(term) || 'pending',
+          }));
         const initialStatuses = new Map<string, 'pending' | 'searching' | 'done' | 'failed'>();
         remainingTerms.forEach((term, idx) => {
           initialStatuses.set(term, idx < chunkSize ? 'searching' : 'pending');
@@ -600,6 +619,7 @@ export async function fetchPricesForQuote(
           chunkIndex: 0,
           totalChunks,
           termStatuses: new Map(initialStatuses),
+          items: buildItemList(initialStatuses),
           progress: { current: 0, total: materialsToFetch.length },
           currentName: `Searching batch 1 of ${totalChunks}…`,
         });
@@ -681,6 +701,7 @@ export async function fetchPricesForQuote(
               chunkIndex: chunkIndex + 1,
               totalChunks,
               termStatuses: statuses,
+              items: buildItemList(statuses),
               progress: { current: completedCount, total: materialsToFetch.length },
               currentName:
                 chunkIndex + 1 < totalChunks

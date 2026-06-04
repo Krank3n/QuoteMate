@@ -7,11 +7,13 @@ export type ProposalType =
   | 'propose_draft_quote'
   | 'propose_add_line_item'
   | 'propose_delete_line_item'
+  | 'propose_delete_quote'
   | 'propose_create_contact'
   | 'propose_update_customer'
   | 'propose_send_quote'
   | 'propose_convert_to_invoice'
-  | 'propose_reprice';
+  | 'propose_reprice'
+  | 'propose_update_quote_rates';
 
 export interface BaseProposal {
   id: string;
@@ -27,6 +29,9 @@ export interface DraftQuoteProposal extends BaseProposal {
   jobName: string;
   jobDescription: string;
   estimatedDurationHours?: number;
+  // When 'invoice', the draft is auto-converted into an invoice once the
+  // materials + pricing pipeline finishes. Defaults to 'quote'.
+  documentType?: 'quote' | 'invoice';
 }
 
 export interface AddLineItemProposal extends BaseProposal {
@@ -46,6 +51,19 @@ export interface DeleteLineItemProposal extends BaseProposal {
   displayQty?: number;
   displayUnit?: string;
   displayTotal?: number;
+}
+
+// Delete the whole quote/invoice (the document itself), as opposed to removing
+// a single line. Carries display fields so the confirmation card can name the
+// doc being removed ("Gigar — Raised deck with stairs · $14,360.77") without a
+// re-fetch.
+export interface DeleteQuoteProposal extends BaseProposal {
+  type: 'propose_delete_quote';
+  quoteId: string;
+  displayName?: string;
+  displayCustomerName?: string;
+  displayTotal?: number;
+  displayDocType?: 'quote' | 'invoice';
 }
 
 export interface CreateContactProposal extends BaseProposal {
@@ -94,15 +112,31 @@ export interface RepriceQuoteProposal extends BaseProposal {
   displayTotal?: number;
 }
 
+export interface UpdateQuoteRatesProposal extends BaseProposal {
+  type: 'propose_update_quote_rates';
+  quoteId: string;
+  // Any of these can be omitted — only provided fields are applied. Markup
+  // values are percentages (e.g. 30 = 30%). laborRate is $/hour. laborHours
+  // is hours.
+  markup?: number;
+  laborMarkup?: number;
+  laborRate?: number;
+  laborHours?: number;
+  // Display-only — name the doc on the card without a re-fetch.
+  displayName?: string;
+}
+
 export type Proposal =
   | DraftQuoteProposal
   | AddLineItemProposal
   | DeleteLineItemProposal
+  | DeleteQuoteProposal
   | CreateContactProposal
   | UpdateCustomerProposal
   | SendQuoteProposal
   | ConvertToInvoiceProposal
-  | RepriceQuoteProposal;
+  | RepriceQuoteProposal
+  | UpdateQuoteRatesProposal;
 
 export type ProposalStatus = 'pending' | 'applied' | 'dismissed' | 'failed';
 
@@ -113,6 +147,11 @@ export interface WorkingStatus {
   status: string;
   /** Optional secondary line — e.g. names of items being processed. */
   detail?: string;
+  /** Optional rolling list of items being searched — shown under the status
+   *  line so the user can see WHAT Mate is currently looking up, not just
+   *  a generic "batch X of Y" progress headline. Populated during the
+   *  Bunnings batch phase. */
+  items?: Array<{ name: string; status: 'pending' | 'searching' | 'done' | 'failed' }>;
   /** When true, the spinner stops and the card renders the final state. */
   done: boolean;
   /** Final summary text shown when done. */

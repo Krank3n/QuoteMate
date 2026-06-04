@@ -53,6 +53,7 @@ export {
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
 export { assistantToken } from './assistantToken';
 export { assistantChat } from './assistantChat';
+export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts';
 import {
   buildXeroAuthHeaders,
   buildXeroLineItems,

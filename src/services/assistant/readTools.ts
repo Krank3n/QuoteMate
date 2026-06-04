@@ -26,6 +26,7 @@ import { auth, db } from '../../config/firebase';
 import { Material } from '../../types';
 import { reviewQuoteMaterials } from '../../utils/quoteReview';
 import { isProposalId, resolveQuoteId } from './quoteRefMap';
+import { fuzzyScoreQuote } from './quoteFuzzy';
 
 function requireUid(): string {
   const uid = auth.currentUser?.uid;
@@ -35,6 +36,104 @@ function requireUid(): string {
 
 function normalizePhone(phone: string): string {
   return phone.replace(/[^\d]/g, '').slice(-8);
+}
+
+
+
+// --- Fuzzy / phonetic helpers -----------------------------------------------
+//
+// findCustomer used to be a strict substring match: "Kathryn" would not find
+// "Catherine", "McKay" would not find "MacKay", and a one-letter typo killed
+// the whole search. Tradies say names the way they hear them, so we now layer
+// three cheap matchers on top of substring:
+//   - Levenshtein-based similarity (typos, missing letters)
+//   - A small Soundex code (sounds-like: Kathryn/Catherine, Smith/Smyth)
+//   - Token-level scoring so "sarah" hits "Sarah Wilson" on either token
+// Each match is tagged with how it matched so Mate can decide whether to
+// trust it silently or read it back for confirmation.
+
+function stripDiacritics(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function tokenize(s: string): string[] {
+  return stripDiacritics(s.toLowerCase())
+    .replace(/[^a-z0-9\s'-]/g, ' ')
+    .split(/[\s'-]+/)
+    .filter(Boolean);
+}
+
+function soundex(input: string): string {
+  const s = stripDiacritics(input.toUpperCase()).replace(/[^A-Z]/g, '');
+  if (!s) return '';
+  const first = s[0];
+  const mapped = s
+    .slice(1)
+    .replace(/[HW]/g, '')
+    .replace(/[BFPV]/g, '1')
+    .replace(/[CGJKQSXZ]/g, '2')
+    .replace(/[DT]/g, '3')
+    .replace(/L/g, '4')
+    .replace(/[MN]/g, '5')
+    .replace(/R/g, '6')
+    .replace(/[AEIOUY]/g, '0');
+  let out = first;
+  let prev = '';
+  for (const ch of mapped) {
+    if (ch !== '0' && ch !== prev) out += ch;
+    prev = ch;
+  }
+  return (out.replace(/0/g, '') + '000').slice(0, 4);
+}
+
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp: number[] = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+function similarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const maxLen = Math.max(a.length, b.length);
+  return 1 - editDistance(a, b) / maxLen;
+}
+
+// Score one query token against the best name token. Returns { score, kind }.
+function scoreToken(qTok: string, nameToks: string[]): { score: number; kind: string } {
+  if (!qTok || !nameToks.length) return { score: 0, kind: 'none' };
+  const qSdx = soundex(qTok);
+  let best = { score: 0, kind: 'none' };
+  for (const nt of nameToks) {
+    if (nt === qTok) return { score: 1, kind: 'exact' };
+    if (qTok.length >= 2 && nt.startsWith(qTok)) {
+      if (best.score < 0.9) best = { score: 0.9, kind: 'prefix' };
+      continue;
+    }
+    if (qTok.length >= 3 && nt.includes(qTok)) {
+      if (best.score < 0.75) best = { score: 0.75, kind: 'substring' };
+    }
+    const sim = similarity(qTok, nt);
+    if (sim >= 0.72 && sim > best.score) best = { score: sim, kind: 'fuzzy' };
+    if (qSdx && qSdx === soundex(nt) && best.score < 0.7) {
+      best = { score: 0.7, kind: 'sounds_like' };
+    }
+  }
+  return best;
 }
 
 function maskPhone(phone: string | undefined): string | undefined {
@@ -74,23 +173,59 @@ export async function findCustomer(input: { query: string }): Promise<unknown> {
 
   const contactsRef = collection(db, 'users', uid, 'contacts');
   const snap = await getDocs(query(contactsRef, fsLimit(500)));
-  const qLower = q.toLowerCase();
+  const qLower = stripDiacritics(q.toLowerCase());
+  const qTokens = tokenize(q);
   const qPhone = normalizePhone(q);
   const isPhoneQuery = qPhone.length >= 4;
 
-  const scored: Array<{ score: number; id: string; data: any }> = [];
+  type Scored = { score: number; id: string; data: any; matchType: string; confidence: number };
+  const scored: Scored[] = [];
+
   for (const d of snap.docs) {
     const data = d.data();
-    const name = String(data.name || '').toLowerCase();
+    const rawName = String(data.name || '');
+    const nameLower = stripDiacritics(rawName.toLowerCase());
+    const nameTokens = tokenize(rawName);
     const phone = data.phone ? normalizePhone(String(data.phone)) : '';
-    let score = 0;
-    if (isPhoneQuery && phone && (phone === qPhone || phone.endsWith(qPhone))) score += 100;
-    if (name === qLower) score += 50;
-    if (name.startsWith(qLower)) score += 20;
-    if (name.includes(qLower)) score += 10;
-    const tokens = qLower.split(/\s+/).filter(Boolean);
-    if (tokens.length > 1 && tokens.every((t) => name.includes(t))) score += 15;
-    if (score > 0) scored.push({ score, id: d.id, data });
+
+    // Phone hits are unambiguous — short-circuit.
+    if (isPhoneQuery && phone && (phone === qPhone || phone.endsWith(qPhone))) {
+      scored.push({ score: 1000, id: d.id, data, matchType: 'phone', confidence: 1 });
+      continue;
+    }
+    if (!qTokens.length) continue;
+
+    // Whole-string fast paths first.
+    if (nameLower === qLower) {
+      scored.push({ score: 500, id: d.id, data, matchType: 'exact', confidence: 1 });
+      continue;
+    }
+
+    // Token-level: average each query token's best name-token score.
+    let total = 0;
+    let worstKind = 'exact';
+    const kindRank: Record<string, number> = {
+      exact: 0, prefix: 1, substring: 2, fuzzy: 3, sounds_like: 4, none: 5,
+    };
+    for (const t of qTokens) {
+      const r = scoreToken(t, nameTokens);
+      total += r.score;
+      if ((kindRank[r.kind] ?? 5) > (kindRank[worstKind] ?? 0)) worstKind = r.kind;
+    }
+    const avg = total / qTokens.length;
+    if (avg < 0.6) continue;
+
+    // Bonus when the query is a clean prefix of the full name ("sar" → "Sarah Wilson").
+    const prefixBonus = nameLower.startsWith(qLower) ? 0.05 : 0;
+    const confidence = Math.min(1, avg + prefixBonus);
+
+    let matchType: string;
+    if (confidence >= 0.97) matchType = 'exact';
+    else if (worstKind === 'prefix' || worstKind === 'substring' || confidence >= 0.88) matchType = 'close';
+    else if (worstKind === 'sounds_like') matchType = 'sounds_like';
+    else matchType = 'fuzzy';
+
+    scored.push({ score: confidence * 100, id: d.id, data, matchType, confidence });
   }
 
   scored.sort((a, b) => b.score - a.score);
@@ -127,16 +262,47 @@ export async function findCustomer(input: { query: string }): Promise<unknown> {
     }),
   );
 
-  return { matches, totalScanned: snap.size };
+  // Tell Mate how sure we are. ambiguous = top match isn't clearly ahead, so
+  // it needs to confirm with the tradie instead of silently picking #1.
+  const topHit = top[0];
+  const runnerUp = top[1];
+  const confidence = topHit ? topHit.confidence : 0;
+  const ambiguous =
+    !!topHit &&
+    topHit.matchType !== 'phone' &&
+    topHit.matchType !== 'exact' &&
+    (runnerUp ? topHit.confidence - runnerUp.confidence < 0.15 : topHit.confidence < 0.9);
+  const needsConfirmation =
+    ambiguous || (!!topHit && topHit.matchType !== 'phone' && topHit.matchType !== 'exact');
+
+  const matchesWithMeta = matches.map((m, i) => ({
+    ...m,
+    matchType: top[i].matchType,
+    confidence: Math.round(top[i].confidence * 100) / 100,
+  }));
+
+  return {
+    matches: matchesWithMeta,
+    confidence,
+    ambiguous,
+    needsConfirmation,
+    totalScanned: snap.size,
+  };
 }
 
 export async function listRecentQuotes(input: {
+  query?: string;
   limit?: number;
   status?: string;
   daysBack?: number;
 }): Promise<unknown> {
   const uid = requireUid();
   const rowLimit = Math.min(Math.max(input.limit ?? 10, 1), 25);
+  const rawQuery = typeof input.query === 'string' ? input.query.trim() : '';
+  const hasQuery = rawQuery.length > 0;
+  // When the model is searching for a specific quote, widen the underlying
+  // fetch so a small recency window doesn't hide the match.
+  const fetchLimit = hasQuery ? Math.max(rowLimit, 25) : rowLimit;
 
   // New drafts land in users/{uid}/quotes on the client and only get
   // mirrored into users/{uid}/documents seconds-to-minutes later by the
@@ -152,12 +318,12 @@ export async function listRecentQuotes(input: {
     const cutoff = new Date(Date.now() - input.daysBack * 24 * 60 * 60 * 1000);
     docConstraints.push(where('createdAt', '>=', cutoff));
   }
-  docConstraints.push(fsLimit(rowLimit));
+  docConstraints.push(fsLimit(fetchLimit));
 
   // The legacy quotes collection doesn't carry the `stage` field on every
   // row, and `daysBack` filtering is unreliable across schema drift, so
   // pull a fat slice and filter in memory.
-  const quoteConstraints: QueryConstraint[] = [orderBy('createdAt', 'desc'), fsLimit(rowLimit * 2)];
+  const quoteConstraints: QueryConstraint[] = [orderBy('createdAt', 'desc'), fsLimit(fetchLimit * 2)];
 
   const [docSnap, quoteSnap] = await Promise.all([
     getDocs(query(documentsRef, ...docConstraints)),
@@ -220,6 +386,28 @@ export async function listRecentQuotes(input: {
     const bT = b.createdAt ? Date.parse(b.createdAt) : 0;
     return bT - aT;
   });
+
+  if (hasQuery) {
+    const scored = merged
+      .map((row) => ({ row, score: fuzzyScoreQuote(rawQuery, row.jobName, row.customerName) }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const aT = a.row.createdAt ? Date.parse(a.row.createdAt) : 0;
+        const bT = b.row.createdAt ? Date.parse(b.row.createdAt) : 0;
+        return bT - aT;
+      })
+      .slice(0, rowLimit)
+      .map((x) => x.row);
+    return {
+      query: rawQuery,
+      documents: scored,
+      note:
+        scored.length === 0
+          ? 'No fuzzy matches for that query against recent docs — either it really isn\'t there, or call again without `query` to list recents and read them to the tradie.'
+          : undefined,
+    };
+  }
 
   return { documents: merged.slice(0, rowLimit) };
 }

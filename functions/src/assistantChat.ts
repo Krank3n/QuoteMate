@@ -29,6 +29,7 @@ import {
   checkAndReserveQuota,
   RateLimitConfig,
 } from './assistantToken';
+import { recordChatUsage } from './assistantCosts';
 
 const corsHandler = cors({ origin: true });
 
@@ -107,6 +108,22 @@ export const assistantChat = functions
       // echo verbatim on the next round-trip so the thinking model keeps its
       // reasoning context).
       const parts = parsed?.candidates?.[0]?.content?.parts || [];
-      res.status(200).json({ parts, model: CHAT_MODEL });
+
+      // Record real token usage from Gemini for cost tracking. Best-effort —
+      // a failed write must not break the user-facing reply.
+      const usageMetadata = parsed?.usageMetadata || {};
+      try {
+        await recordChatUsage({
+          uid: decoded.uid,
+          model: CHAT_MODEL,
+          usage: usageMetadata,
+          countedTurn: !!countTurn,
+        });
+      } catch (err: any) {
+        // eslint-disable-next-line no-console
+        console.warn('[assistantChat] usage record failed', err?.message);
+      }
+
+      res.status(200).json({ parts, model: CHAT_MODEL, usageMetadata });
     });
   });

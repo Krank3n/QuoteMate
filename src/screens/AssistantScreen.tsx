@@ -16,7 +16,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  ScrollView,
   Pressable,
   Animated,
   Easing,
@@ -42,9 +41,7 @@ import {
 } from '../types/assistant';
 import { MessageBubble } from '../components/assistant/MessageBubble';
 import { ProposalCard } from '../components/assistant/ProposalCard';
-import { SuggestedPromptChip } from '../components/assistant/SuggestedPromptChip';
 import { WebContainer } from '../components/WebContainer';
-import { useSuggestedPrompts } from '../hooks/useSuggestedPrompts';
 
 type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking';
 
@@ -52,6 +49,51 @@ interface ChatItem {
   key: string;
   message: ChatMessage;
 }
+
+// Single chat row, lifted out + memoised so FlatList can skip work when
+// AssistantScreen re-renders for unrelated reasons (composer keystrokes,
+// voice-state ticks, etc). The callbacks all take `message`/`proposal` as
+// arguments so the parent can hand in stable useCallback references.
+interface ChatRowProps {
+  item: ChatItem;
+  onCtaPress: (message: ChatMessage) => void;
+  onApply: (message: ChatMessage, proposal: Proposal) => void;
+  onDismiss: (message: ChatMessage, proposal: Proposal) => void;
+  onInlineQuoteEdit: (quoteId: string, step: any) => void;
+  onInlineQuoteOpen: (quoteId: string) => void;
+  onInlineJobEdit: (jobId: string) => void;
+}
+const ChatRowMemo = React.memo(function ChatRow({
+  item,
+  onCtaPress,
+  onApply,
+  onDismiss,
+  onInlineQuoteEdit,
+  onInlineQuoteOpen,
+  onInlineJobEdit,
+}: ChatRowProps) {
+  const proposals = item.message.proposals || [];
+  return (
+    <View>
+      <MessageBubble
+        message={item.message}
+        onCtaPress={() => onCtaPress(item.message)}
+        onInlineQuoteEdit={onInlineQuoteEdit}
+        onInlineQuoteOpen={onInlineQuoteOpen}
+        onInlineJobEdit={onInlineJobEdit}
+      />
+      {proposals.map((p) => (
+        <ProposalCard
+          key={p.id}
+          proposal={p}
+          status={(item.message.proposalStatus?.[p.id] as ProposalStatus) || 'pending'}
+          onApply={() => onApply(item.message, p)}
+          onDismiss={() => onDismiss(item.message, p)}
+        />
+      ))}
+    </View>
+  );
+});
 
 // Keep a faint baseline so the line gently undulates during silence instead of
 // going dead flat, while real speech still pushes the wave to full height.
@@ -251,6 +293,200 @@ function MicPulse({ active, color }: { active: boolean; color: string }) {
   );
 }
 
+// Big hero record button shown front-and-centre when the chat is empty.
+// Lifted from the JobDetailsScreen voice-record UI (ripple rings + glow +
+// pulse) so the two surfaces feel related. Self-contained animation loops
+// run only while `active`; `pending` (connecting/thinking) shows a spinner
+// over the icon without the rings, so the user gets feedback while the WS
+// is handshaking but we don't fake a "recording" state that isn't true yet.
+function HeroRecordButton({
+  active,
+  pending,
+  onPress,
+  accent,
+}: {
+  active: boolean;
+  pending: boolean;
+  onPress: () => void;
+  accent: string;
+}) {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const glowAnim = useRef(new Animated.Value(0)).current;
+  const rippleAnim = useRef(new Animated.Value(0)).current;
+  const ripple2Anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!active) {
+      Animated.parallel([
+        Animated.timing(pulseAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(rippleAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(ripple2Anim, { toValue: 0, duration: 300, useNativeDriver: true }),
+      ]).start();
+      return;
+    }
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.12, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
+      ]),
+    );
+    const glowLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, { toValue: 1, duration: 1400, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 0, duration: 1400, useNativeDriver: true }),
+      ]),
+    );
+    const rippleLoop = Animated.loop(
+      Animated.timing(rippleAnim, { toValue: 1, duration: 1800, useNativeDriver: true }),
+    );
+    const ripple2Loop = Animated.loop(
+      Animated.sequence([
+        Animated.delay(900),
+        Animated.timing(ripple2Anim, { toValue: 1, duration: 1800, useNativeDriver: true }),
+        Animated.timing(ripple2Anim, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ]),
+    );
+    pulseLoop.start();
+    glowLoop.start();
+    rippleLoop.start();
+    ripple2Loop.start();
+    return () => {
+      pulseLoop.stop();
+      glowLoop.stop();
+      rippleLoop.stop();
+      ripple2Loop.stop();
+    };
+  }, [active, pulseAnim, glowAnim, rippleAnim, ripple2Anim]);
+
+  const ringStyle = (anim: Animated.Value) => ({
+    position: 'absolute' as const,
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    borderWidth: 3,
+    borderColor: accent,
+    backgroundColor: 'transparent',
+    opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
+    transform: [
+      { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.9] }) },
+    ],
+  });
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      disabled={pending}
+      activeOpacity={0.85}
+      style={heroStyles.touchable}
+      accessibilityRole="button"
+      accessibilityLabel={active ? 'Stop voice mode' : 'Tap to talk to Mate'}
+    >
+      {active && (
+        <>
+          <Animated.View style={ringStyle(rippleAnim)} />
+          <Animated.View style={ringStyle(ripple2Anim)} />
+        </>
+      )}
+      <Animated.View
+        style={[
+          heroStyles.glow,
+          {
+            backgroundColor: accent,
+            shadowColor: accent,
+            opacity: active
+              ? glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0.55] })
+              : 0.18,
+          },
+        ]}
+      />
+      <Animated.View
+        style={[
+          heroStyles.button,
+          { backgroundColor: accent, shadowColor: accent, transform: [{ scale: pulseAnim }] },
+        ]}
+      >
+        {pending ? (
+          <ActivityIndicator size="large" color={colors.white} />
+        ) : (
+          <MaterialCommunityIcons
+            name={active ? 'stop' : 'microphone'}
+            size={56}
+            color={colors.white}
+          />
+        )}
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
+const heroStyles = StyleSheet.create({
+  touchable: {
+    width: 128,
+    height: 128,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  button: {
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 4,
+    borderColor: 'rgba(255,255,255,0.22)',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  glow: {
+    position: 'absolute',
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 28,
+    elevation: 18,
+  },
+});
+
+// Empty-state intro under the mic button. Two lines:
+//   primary — one short sentence, context-aware (unfinished draft > time of day).
+//   hint    — fixed, muted, smaller. The on-rails reminder.
+// Keep both short. This sits beneath a big mic button, not a marketing page.
+function getMateIntro(
+  quotes: { status: string; updatedAt: Date; job?: { name?: string }; customerName?: string }[],
+): { primary: string; hint: string } {
+  const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+  const hint = 'I draft. You tap to confirm. Nothing saves ’til you say.';
+
+  // Most recently touched draft — surface it so the tradie can pick it up.
+  const drafts = quotes
+    .filter((q) => q.status === 'draft')
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  const draft = drafts[0];
+  if (draft) {
+    const label =
+      draft.job?.name?.trim() ||
+      (draft.customerName ? `${draft.customerName}'s job` : 'that draft quote');
+    return {
+      primary: `“${label}” is still a draft — finish it, or start something new?`,
+      hint,
+    };
+  }
+
+  // No drafts — a short time-of-day nudge.
+  const h = new Date().getHours();
+  let openers: string[];
+  if (h < 11) openers = ['Mornin’. What are we quoting?', 'G’day. What’s the job?'];
+  else if (h < 14) openers = ['What are we quoting?', 'What’s the job?'];
+  else if (h < 17) openers = ['Arvo. What are we quoting?', 'What’s next on the list?'];
+  else openers = ['Evenin’. What are we quoting?', 'What’s the job?'];
+  return { primary: pick(openers), hint };
+}
+
 export function AssistantScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<any>>();
@@ -265,7 +501,6 @@ export function AssistantScreen() {
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const quotes = useStore((s) => s.quotes);
   const documents = useStore((s) => s.documents);
-  const suggestedPrompts = useSuggestedPrompts();
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -352,6 +587,12 @@ export function AssistantScreen() {
     [conversations, currentConversationId],
   );
   const isEmpty = !conversation || conversation.messages.length === 0;
+
+  // A bit of unique Aussie flavour for the empty-state intro — riffs on an
+  // unfinished draft if there is one, otherwise on the time of day. Picked
+  // once per mount so it doesn't reshuffle while the user is reading it.
+  const introBlurb = useMemo(() => getMateIntro(quotes), []); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // Native uses an inverted FlatList: newest-first data renders bottom-up and
   // sticks to the bottom for free. react-native-web's inverted list can't
@@ -472,9 +713,10 @@ export function AssistantScreen() {
             : `Apply just got tapped on "${narrationJobLabel}". The materials + pricing pipeline is running now`;
         liveSessionForNarration.sendUserText(
           `[narrate] ${intro} — usually 20 to 40 seconds. ` +
-          `Yarn casually for that whole window, two or three short paragraphs with pauses. ` +
+          `Yarn casually for that WHOLE window, two or three short paragraphs with pauses. ` +
           `Riff on the job or whatever's natural. Chill, dry, unhurried. ` +
-          `Stop when you see [narrate-done].`,
+          `Do NOT wrap up, sign off, or say anything like "all sorted" / "all good" / "that's the lot" / "done" / "beauty" until [narrate-done] actually arrives — the pipeline is still running and claiming it's finished early makes you a liar. ` +
+          `If you run out of thread, pause and start a fresh tangent. Only stop when you see [narrate-done].`,
         );
       }
 
@@ -543,6 +785,17 @@ export function AssistantScreen() {
       // the next utterance. turnComplete:false means the model logs it
       // as context without speaking a reply about it.
       const liveSession = voiceSessionRef.current;
+      // Most context notes need result.navigate (they reference the minted
+      // quote/invoice/contact id). propose_delete_quote is the exception —
+      // the doc is gone, so it never returns a navigate, but Mate still
+      // needs the heads-up that the id is dead.
+      if (liveSession?.isOpen() && proposal.type === 'propose_delete_quote') {
+        const label = proposal.displayName || proposal.displayCustomerName || proposal.quoteId;
+        liveSession.sendContextNote(
+          `[context] Deleted ${proposal.displayDocType || 'quote'} ${proposal.quoteId} ("${label}"). ` +
+            `It's gone — do NOT reference this id on follow-ups, and don't list it.`,
+        );
+      }
       if (liveSession?.isOpen() && result.navigate) {
         switch (proposal.type) {
           case 'propose_draft_quote':
@@ -565,6 +818,7 @@ export function AssistantScreen() {
               `[context] Removed material ${proposal.materialId} from quote ${proposal.quoteId}.`,
             );
             break;
+
           case 'propose_send_quote':
             liveSession.sendContextNote(
               `[context] Sent quote ${proposal.quoteId} to the customer.`,
@@ -596,6 +850,17 @@ export function AssistantScreen() {
               (result.review ? ` ${result.review.summary}` : ''),
             );
             break;
+          case 'propose_update_quote_rates': {
+            const parts: string[] = [];
+            if (typeof proposal.markup === 'number') parts.push(`markup ${proposal.markup}%`);
+            if (typeof proposal.laborMarkup === 'number') parts.push(`labour markup ${proposal.laborMarkup}%`);
+            if (typeof proposal.laborRate === 'number') parts.push(`labour rate $${proposal.laborRate}/h`);
+            if (typeof proposal.laborHours === 'number') parts.push(`labour hours ${proposal.laborHours}`);
+            liveSession.sendContextNote(
+              `[context] Updated rates on quote ${proposal.quoteId}: ${parts.join(', ')}.`,
+            );
+            break;
+          }
         }
       }
 
@@ -609,7 +874,8 @@ export function AssistantScreen() {
       if (
         proposal.type === 'propose_draft_quote' ||
         proposal.type === 'propose_reprice' ||
-        proposal.type === 'propose_update_customer'
+        proposal.type === 'propose_update_customer' ||
+        proposal.type === 'propose_update_quote_rates'
       ) {
         if (result.navigate && result.navigate.kind === 'job_preview') {
           const hasIssues = !!result.review && result.review.issues.length > 0;
@@ -620,9 +886,11 @@ export function AssistantScreen() {
                 : "Here's the draft — have a squiz. Tell me what to tweak, or tap to open it."
               : proposal.type === 'propose_update_customer'
                 ? `Done — this one's on ${proposal.customerName || 'the new contact'} now. Tap to open it.`
-                : hasIssues
-                  ? `Re-priced. ${result.review!.summary} Tap to open it, or say the word and I'll have another go.`
-                  : 'Re-priced — every line came back clean. Tap to open it.';
+                : proposal.type === 'propose_update_quote_rates'
+                  ? "Rates updated and totals re-run. Tap to open it."
+                  : hasIssues
+                    ? `Re-priced. ${result.review!.summary} Tap to open it, or say the word and I'll have another go.`
+                    : 'Re-priced — every line came back clean. Tap to open it.';
           appendMessage(conversation.id, {
             id: generateId(),
             role: 'assistant',
@@ -1080,6 +1348,38 @@ export function AssistantScreen() {
       voiceSessionRef.current = session;
       audioQueueRef.current = createAudioQueue();
 
+      // Fresh chat + sticky (big record button) mode: get Mate to kick things
+      // off with a short, slightly cheeky Aussie greeting so the tradie hears
+      // a voice the moment the session connects, instead of dead air. Skipped
+      // for PTT (the user's already talking) and for resumed conversations.
+      if (mode === 'sticky' && seedHistory.length === 0) {
+        const latestDraft = useStore
+          .getState()
+          .quotes.filter((q) => q.status === 'draft')
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
+        const draftLabel = latestDraft
+          ? latestDraft.job?.name?.trim() ||
+            (latestDraft.customerName ? `${latestDraft.customerName}'s job` : '')
+          : '';
+        const hour = new Date().getHours();
+        const tod =
+          hour < 6 ? 'sparrow\'s fart (pre-dawn)'
+          : hour < 11 ? 'morning'
+          : hour < 14 ? 'middle of the day / smoko'
+          : hour < 17 ? 'arvo'
+          : hour < 21 ? 'evening / knock-off'
+          : 'late night';
+        const draftHint = draftLabel
+          ? `There's an unfinished draft quote called "${draftLabel}" — you can rib them about it sitting half-done if it feels natural, or ignore it.`
+          : 'There are no unfinished drafts right now.';
+        session.sendUserText(
+          `[greet] Kick off the chat with ONE short Aussie greeting, 1–2 sentences max. ` +
+          `Dry, warm, slightly cheeky tradie humour. No emojis. Don't list options or features. ` +
+          `Time of day: ${tod}. ${draftHint} ` +
+          `End by inviting them to tell you what they need. Then stop and wait.`,
+        );
+      }
+
       // Open the mic only once the session handshake completed — earlier
       // chunks would queue inside voiceSession until setupComplete anyway,
       // but starting the mic now keeps the buffer small. On web the
@@ -1226,32 +1526,33 @@ export function AssistantScreen() {
     [navigation],
   );
 
-  const renderItem = useCallback(
-    ({ item }: { item: ChatItem }) => {
-      const proposals = item.message.proposals || [];
-      return (
-        <View>
-          <MessageBubble
-            message={item.message}
-            onCtaPress={() => handleCtaPress(item.message)}
-            onInlineQuoteEdit={handleInlineQuoteEdit}
-            onInlineQuoteOpen={handleInlineQuoteOpen}
-            onInlineJobEdit={handleInlineJobEdit}
-          />
-          {proposals.map((p) => (
-            <ProposalCard
-              key={p.id}
-              proposal={p}
-              status={(item.message.proposalStatus?.[p.id] as ProposalStatus) || 'pending'}
-              onApply={() => handleApply(item.message, p)}
-              onDismiss={() => handleDismiss(item.message, p)}
-            />
-          ))}
-        </View>
-      );
-    },
-    [handleApply, handleDismiss, handleCtaPress, handleInlineQuoteEdit, handleInlineQuoteOpen],
+  // Pull the per-row out so its callbacks can be stabilised against `message`
+  // identity rather than recreated on every parent render. MessageBubble and
+  // ProposalCard are React.memo'd, so stable props let them skip work on
+  // every composer keystroke / voice tick. This was the main cause of Android
+  // chat feeling skippy.
+  const ChatRow = useCallback(
+    ({ item }: { item: ChatItem }) => (
+      <ChatRowMemo
+        item={item}
+        onCtaPress={handleCtaPress}
+        onApply={handleApply}
+        onDismiss={handleDismiss}
+        onInlineQuoteEdit={handleInlineQuoteEdit}
+        onInlineQuoteOpen={handleInlineQuoteOpen}
+        onInlineJobEdit={handleInlineJobEdit}
+      />
+    ),
+    [
+      handleApply,
+      handleDismiss,
+      handleCtaPress,
+      handleInlineQuoteEdit,
+      handleInlineQuoteOpen,
+      handleInlineJobEdit,
+    ],
   );
+  const renderItem = ChatRow;
 
   const voiceActive = voiceState !== 'idle';
   const voiceAccent = voiceState === 'thinking' ? colors.primary : colors.error;
@@ -1271,55 +1572,77 @@ export function AssistantScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <WebContainer style={styles.webBody}>
-        {isEmpty && (
-          <View style={[styles.intro, { paddingTop: insets.top + 16 }]}>
-            <MaterialCommunityIcons name="chat-processing" size={36} color={colors.primary} />
-            <Text style={styles.introTitle}>Mate</Text>
-            <Text style={styles.introSubtitle}>
-              Ask me to draft a quote, find a customer, or chase a follow-up. I draft, you confirm — nothing saves without your tap.
-            </Text>
+        {isEmpty ? (
+          // Hero empty state — big record button front and centre. Keeps the
+          // composer mounted below so typing is still one tap away.
+          <View style={[styles.heroWrap, { paddingTop: insets.top + 8 }]}>
+            <View style={styles.heroTop}>
+              <Text style={styles.heroBrand}>Mate</Text>
+            </View>
+            <View style={styles.heroCenter}>
+              <HeroRecordButton
+                active={voiceMode === 'sticky' && voiceState === 'listening'}
+                pending={voiceState === 'connecting' || voiceState === 'thinking'}
+                onPress={handleVoiceToggle}
+                accent={
+                  voiceState === 'listening'
+                    ? colors.error
+                    : voiceState === 'thinking'
+                      ? colors.primary
+                      : colors.primary
+                }
+              />
+              <Text
+                style={[
+                  styles.heroStatus,
+                  voiceState === 'listening' && { color: colors.error },
+                  voiceState === 'thinking' && { color: colors.primary },
+                ]}
+              >
+                {voiceState === 'connecting'
+                  ? 'Connecting…'
+                  : voiceState === 'listening'
+                    ? "I'm listening — yarn away"
+                    : voiceState === 'thinking'
+                      ? "Mate's thinking…"
+                      : 'Tap to talk to Mate'}
+              </Text>
+              <Text style={styles.heroBlurb}>{introBlurb.primary}</Text>
+              <Text style={styles.heroHint}>{introBlurb.hint}</Text>
+            </View>
           </View>
+        ) : (
+          <FlatList
+            ref={listRef}
+            style={styles.list}
+            contentContainerStyle={styles.listContent}
+            data={items}
+            keyExtractor={(i) => i.key}
+            renderItem={renderItem}
+            inverted={inverted}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            // Perf tuning — chat scroll on mid-range Android was skippy
+            // because every parent re-render forced every bubble to re-render.
+            // Memoising the row + these list knobs together keeps frames stable.
+            initialNumToRender={12}
+            maxToRenderPerBatch={8}
+            windowSize={9}
+            removeClippedSubviews={Platform.OS === 'android'}
+            // Web (non-inverted): keep pinned to the newest message as content
+            // grows. While idle the content size is stable so this never fires,
+            // leaving the user free to scroll up to the start.
+            onContentSizeChange={
+              inverted ? undefined : () => listRef.current?.scrollToEnd({ animated: false })
+            }
+          />
         )}
-
-        <FlatList
-          ref={listRef}
-          style={styles.list}
-          contentContainerStyle={styles.listContent}
-          data={items}
-          keyExtractor={(i) => i.key}
-          renderItem={renderItem}
-          inverted={inverted}
-          keyboardShouldPersistTaps="handled"
-          // Web (non-inverted): keep pinned to the newest message as content
-          // grows. While idle the content size is stable so this never fires,
-          // leaving the user free to scroll up to the start.
-          onContentSizeChange={
-            inverted ? undefined : () => listRef.current?.scrollToEnd({ animated: false })
-          }
-        />
 
         {sending && (
           <View style={styles.typingRow}>
             <ActivityIndicator size="small" color={colors.textMuted} />
             <Text style={styles.typing}>Mate is thinking…</Text>
           </View>
-        )}
-
-        {suggestedPrompts.length > 0 && isEmpty && !voiceActive && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.chipsScroll}
-            contentContainerStyle={styles.chips}
-          >
-            {suggestedPrompts.map((p) => (
-              <SuggestedPromptChip
-                key={p.id}
-                label={p.label}
-                onPress={() => submit(p.text)}
-              />
-            ))}
-          </ScrollView>
         )}
 
         <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) + 70 }]}>
@@ -1458,6 +1781,58 @@ const styles = StyleSheet.create({
     maxWidth: 800,
     alignSelf: 'center',
   },
+  heroWrap: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 800,
+    alignSelf: 'center',
+    paddingHorizontal: 24,
+  },
+  heroTop: {
+    alignItems: 'center',
+    paddingTop: 4,
+  },
+  heroBrand: {
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+
+  heroCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 24,
+  },
+  heroStatus: {
+    marginTop: 28,
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text,
+    letterSpacing: 0.2,
+    textAlign: 'center',
+  },
+  heroBlurb: {
+    marginTop: 14,
+    color: colors.text,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '500',
+    textAlign: 'center',
+    paddingHorizontal: 12,
+    maxWidth: 420,
+  },
+  heroHint: {
+    marginTop: 8,
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
+    letterSpacing: 0.2,
+    paddingHorizontal: 12,
+    maxWidth: 360,
+  },
   introTitle: {
     color: colors.text,
     fontSize: 22,
@@ -1492,19 +1867,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   typing: { color: colors.textMuted, fontSize: 13 },
-  chipsScroll: {
-    // Without an explicit cap, the horizontal ScrollView stretches to fill
-    // the column's cross axis on react-native-web and the chips render as
-    // giant vertical blocks. flexGrow: 0 keeps the row hugging its content.
-    flexGrow: 0,
-    flexShrink: 0,
-    maxHeight: 48,
-  },
-  chips: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    alignItems: 'center',
-  },
   composerWrap: {
     paddingHorizontal: 8,
     width: '100%',

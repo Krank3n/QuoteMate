@@ -15,8 +15,11 @@ function formatCurrency(n: number): string {
   return `$${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export function ProposalCard({ proposal, status, onApply, onDismiss }: Props) {
-  const isDestructive = proposal.type === 'propose_send_quote' || proposal.type === 'propose_delete_line_item';
+function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
+  const isDestructive =
+    proposal.type === 'propose_send_quote' ||
+    proposal.type === 'propose_delete_line_item' ||
+    proposal.type === 'propose_delete_quote';
   const applyColor = isDestructive ? colors.error : colors.success;
   const applyLabel = labelFor(proposal);
   const applied = status === 'applied';
@@ -63,14 +66,18 @@ export function ProposalCard({ proposal, status, onApply, onDismiss }: Props) {
 
 function titleFor(p: Proposal): string {
   switch (p.type) {
-    case 'propose_draft_quote': return 'Draft quote';
+    case 'propose_draft_quote':
+      return p.documentType === 'invoice' ? 'Draft invoice' : 'Draft quote';
     case 'propose_add_line_item': return 'Add line item';
     case 'propose_delete_line_item': return 'Delete line item';
+    case 'propose_delete_quote':
+      return p.displayDocType === 'invoice' ? 'Delete invoice' : 'Delete quote';
     case 'propose_create_contact': return 'New contact';
     case 'propose_update_customer': return 'Change customer';
     case 'propose_send_quote': return 'Send quote';
     case 'propose_convert_to_invoice': return 'Convert to invoice';
     case 'propose_reprice': return 'Re-price quote';
+    case 'propose_update_quote_rates': return 'Update rates';
   }
 }
 
@@ -79,11 +86,13 @@ function iconFor(p: Proposal): React.ComponentProps<typeof MaterialCommunityIcon
     case 'propose_draft_quote': return 'file-document-edit-outline';
     case 'propose_add_line_item': return 'plus-circle-outline';
     case 'propose_delete_line_item': return 'trash-can-outline';
+    case 'propose_delete_quote': return 'file-remove-outline';
     case 'propose_create_contact': return 'account-plus-outline';
     case 'propose_update_customer': return 'account-switch-outline';
     case 'propose_send_quote': return 'send-outline';
     case 'propose_convert_to_invoice': return 'cash-multiple';
     case 'propose_reprice': return 'refresh';
+    case 'propose_update_quote_rates': return 'tune-variant';
   }
 }
 
@@ -91,8 +100,10 @@ function labelFor(p: Proposal): string {
   switch (p.type) {
     case 'propose_send_quote': return 'Send';
     case 'propose_delete_line_item': return 'Delete';
+    case 'propose_delete_quote': return 'Delete';
     case 'propose_convert_to_invoice': return 'Convert';
     case 'propose_reprice': return 'Re-price';
+    case 'propose_update_quote_rates': return 'Update';
     default: return 'Apply';
   }
 }
@@ -108,7 +119,8 @@ function Body({ proposal }: { proposal: Proposal }) {
           )}
           <Text style={styles.scope} numberOfLines={6}>{proposal.jobDescription}</Text>
           <Text style={styles.dim}>
-            Apply runs the materials + pricing pipeline.
+            Apply runs the materials + pricing pipeline
+            {proposal.documentType === 'invoice' ? ' and converts the result to an invoice' : ''}.
             {typeof proposal.estimatedDurationHours === 'number'
               ? ` Labour seeded at ${proposal.estimatedDurationHours} h.`
               : ''}
@@ -141,6 +153,27 @@ function Body({ proposal }: { proposal: Proposal }) {
           )}
         </View>
       );
+    case 'propose_delete_quote': {
+      const noun = proposal.displayDocType === 'invoice' ? 'invoice' : 'quote';
+      const title = [proposal.displayCustomerName, proposal.displayName]
+        .filter(Boolean)
+        .join(' — ');
+      return (
+        <View>
+          <Text style={styles.warningBanner}>
+            This will permanently delete the whole {noun} — every line on it.
+          </Text>
+          {title ? (
+            <Text style={styles.summary} numberOfLines={2}>{title}</Text>
+          ) : (
+            <Text style={styles.dim}>Doc id {proposal.quoteId.slice(0, 8)}…</Text>
+          )}
+          {typeof proposal.displayTotal === 'number' && (
+            <Text style={styles.dim}>Total {formatCurrency(proposal.displayTotal)}.</Text>
+          )}
+        </View>
+      );
+    }
     case 'propose_create_contact':
       return (
         <View>
@@ -169,13 +202,48 @@ function Body({ proposal }: { proposal: Proposal }) {
           {!!proposal.recipientEmail && (
             <Text style={styles.summary}>To: {proposal.recipientEmail}</Text>
           )}
-          {!!proposal.draftEmailBody && (
-            <Text style={styles.dim}>Email drafted — edit it in the preview before sending.</Text>
+          {(!!proposal.draftEmailSubject || !!proposal.draftEmailBody) && (
+            <View style={styles.emailPreview}>
+              {!!proposal.draftEmailSubject && (
+                <>
+                  <Text style={styles.emailLabel}>Subject</Text>
+                  <Text style={styles.emailSubject}>{proposal.draftEmailSubject}</Text>
+                </>
+              )}
+              {!!proposal.draftEmailBody && (
+                <>
+                  <Text style={[styles.emailLabel, { marginTop: 8 }]}>Message</Text>
+                  <Text style={styles.emailBody}>{proposal.draftEmailBody}</Text>
+                </>
+              )}
+              <Text style={styles.dim}>You can tweak it in the send preview before it goes.</Text>
+            </View>
           )}
         </View>
       );
     case 'propose_convert_to_invoice':
       return <Text style={styles.summary}>Convert the accepted quote into an invoice.</Text>;
+    case 'propose_update_quote_rates':
+      return (
+        <View>
+          {proposal.displayName ? (
+            <Text style={styles.summary} numberOfLines={2}>{proposal.displayName}</Text>
+          ) : null}
+          {typeof proposal.markup === 'number' && (
+            <Text style={styles.dim}>Material markup → {proposal.markup}%</Text>
+          )}
+          {typeof proposal.laborMarkup === 'number' && (
+            <Text style={styles.dim}>Labour markup → {proposal.laborMarkup}%</Text>
+          )}
+          {typeof proposal.laborRate === 'number' && (
+            <Text style={styles.dim}>Labour rate → {formatCurrency(proposal.laborRate)}/h</Text>
+          )}
+          {typeof proposal.laborHours === 'number' && (
+            <Text style={styles.dim}>Labour hours → {proposal.laborHours} h</Text>
+          )}
+          <Text style={styles.dim}>Apply updates the doc and re-totals.</Text>
+        </View>
+      );
     case 'propose_reprice':
       return (
         <View>
@@ -294,6 +362,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 6,
   },
+  emailPreview: {
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  emailLabel: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 2,
+  },
+  emailSubject: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  emailBody: {
+    color: colors.text,
+    fontSize: 13,
+    lineHeight: 19,
+  },
   actions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -322,3 +416,9 @@ const styles = StyleSheet.create({
   },
   statusText: { color: colors.textMuted, fontSize: 12 },
 });
+
+// Memoised: ProposalCard sits inside the chat FlatList renderItem, so without
+// this it would re-render for every keystroke / store update in
+// AssistantScreen. Props are flat primitives + stable callbacks (wrapped in
+// useCallback in AssistantScreen), so the default shallow compare is safe.
+export const ProposalCard = React.memo(ProposalCardImpl);

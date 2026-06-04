@@ -63,73 +63,99 @@ export function LaborMarkupScreen() {
 
   const HOURS_PER_DAY = 8;
 
+  // Tracks which quote ID has already been hydrated into local state. We
+  // intentionally do NOT re-hydrate on every currentQuote change — the
+  // LaborMarkupScreen stays mounted in the React Navigation stack while the
+  // user dives into MaterialsListScreen to edit prices. If this effect
+  // re-fired on each material price tweak it would re-run the auto-default
+  // "convert to days" branch (or simply stomp the user's in-progress edits),
+  // which is the source of the "hours and day rate both ×8 after editing
+  // materials" bug. Re-hydration is therefore keyed on the quote id only,
+  // so it runs exactly once per quote (and again only if the screen is
+  // shown a fresh quote, e.g. after creating a new draft).
+  const hydratedQuoteIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (currentQuote) {
-      const hasSections = !!(currentQuote.sections && currentQuote.sections.length > 0);
+    if (!currentQuote) return;
+    if (hydratedQuoteIdRef.current === currentQuote.id) return;
+    hydratedQuoteIdRef.current = currentQuote.id;
 
-      // Compute the section totals (in stored units — usually hours) and the
-      // overall labour total = sum + laborExtraHours. The extra preserves any
-      // buffer the user added on top of the per-section labour.
-      let sectionsSumStored = 0;
-      let totalHoursStored: number;
-      let rateForInput: number;
-      const sectionMap: Record<string, string> = {};
+    const hasSections = !!(currentQuote.sections && currentQuote.sections.length > 0);
 
-      if (hasSections && currentQuote.sections) {
-        for (const s of currentQuote.sections) {
-          const sectionTotal = (s.laborHours || 0) * (s.multiplier || 1);
-          sectionsSumStored += sectionTotal;
-          sectionMap[s.id] = sectionTotal.toString();
-        }
-        const firstNonZeroRate = currentQuote.sections.find((s) => (s.laborRate || 0) > 0)?.laborRate;
-        rateForInput = firstNonZeroRate || currentQuote.laborRate || 0;
-        totalHoursStored = sectionsSumStored + (currentQuote.laborExtraHours || 0);
-      } else {
-        totalHoursStored = currentQuote.laborHours;
-        rateForInput = currentQuote.laborRate;
+    // Compute the section totals (in stored units — usually hours) and the
+    // overall labour total = sum + laborExtraHours. The extra preserves any
+    // buffer the user added on top of the per-section labour.
+    let sectionsSumStored = 0;
+    let totalStored: number;
+    let rateForInput: number;
+    const sectionMap: Record<string, string> = {};
+
+    if (hasSections && currentQuote.sections) {
+      for (const s of currentQuote.sections) {
+        const sectionTotal = (s.laborHours || 0) * (s.multiplier || 1);
+        sectionsSumStored += sectionTotal;
+        sectionMap[s.id] = sectionTotal.toString();
       }
-
-      // Auto-default to days when the total is 6+ hours of work. Only
-      // applies when the stored unit is hours (or unset on legacy quotes) —
-      // otherwise this effect re-fires after every save (currentQuote dep)
-      // and re-multiplies an already-converted rate by 8, sending it to
-      // 51,200 / 409,600 / etc. The section map gets converted to days too
-      // so the per-section steppers are in the same unit as the input.
-      const alreadyInDays = currentQuote.laborUnit === 'days';
-      if (!alreadyInDays && totalHoursStored >= 6) {
-        setLaborUnit('days');
-        setLaborHours((Math.round((totalHoursStored / HOURS_PER_DAY) * 10) / 10).toString());
-        setLaborRate((rateForInput * HOURS_PER_DAY).toString());
-        if (hasSections) {
-          const daysMap: Record<string, string> = {};
-          for (const [id, val] of Object.entries(sectionMap)) {
-            const num = parseFloat(val) || 0;
-            daysMap[id] = (Math.round((num / HOURS_PER_DAY) * 10) / 10).toString();
-          }
-          setSectionTotalHoursMap(daysMap);
-        }
-      } else {
-        setLaborUnit(currentQuote.laborUnit || 'hours');
-        setLaborHours((Math.round(totalHoursStored * 10) / 10).toString());
-        setLaborRate(rateForInput.toString());
-        if (hasSections) {
-          const tidyMap: Record<string, string> = {};
-          for (const [id, val] of Object.entries(sectionMap)) {
-            const num = parseFloat(val) || 0;
-            tidyMap[id] = (Math.round(num * 10) / 10).toString();
-          }
-          setSectionTotalHoursMap(tidyMap);
-        }
-      }
-
-      setMarkup(currentQuote.markup.toString());
-      const lm = currentQuote.laborMarkup ?? currentQuote.markup ?? 0;
-      setLaborMarkup(lm.toString());
-      setShowLaborBreakdown(currentQuote.showLaborBreakdown !== false);
-      const ta = (currentQuote.travelAdjustment || 0).toString();
-      setTravelAdjustment(ta);
-      setLastTravelValue(ta);
+      const firstNonZeroRate = currentQuote.sections.find((s) => (s.laborRate || 0) > 0)?.laborRate;
+      rateForInput = firstNonZeroRate || currentQuote.laborRate || 0;
+      totalStored = sectionsSumStored + (currentQuote.laborExtraHours || 0);
+    } else {
+      totalStored = currentQuote.laborHours;
+      rateForInput = currentQuote.laborRate;
     }
+
+    // What unit is the stored data ACTUALLY in? Look at top-level laborUnit
+    // first; if it's missing (legacy quotes, or freshly-built quotes from
+    // materialsPipeline that only set per-section units), fall back to the
+    // first non-zero section's laborUnit. Without this, a quote whose
+    // sections were generated in days but whose top-level laborUnit was
+    // never written would be treated as "hours" and the auto-default would
+    // multiply the (already daily) rate by 8 again — sending it to
+    // 5,120 / 40,960 / etc.
+    const storedUnit: LaborUnit =
+      currentQuote.laborUnit
+      ?? (hasSections
+        ? (currentQuote.sections!.find((s) => (s.laborRate || 0) > 0)?.laborUnit
+          || currentQuote.sections!.find((s) => (s.laborHours || 0) > 0)?.laborUnit
+          || 'hours')
+        : 'hours');
+    const alreadyInDays = storedUnit === 'days';
+
+    // Auto-default to days only for legacy/hours-stored quotes whose total
+    // hits the 6h threshold. Stored-in-days quotes pass through untouched.
+    if (!alreadyInDays && totalStored >= 6) {
+      setLaborUnit('days');
+      setLaborHours((Math.round((totalStored / HOURS_PER_DAY) * 10) / 10).toString());
+      setLaborRate((rateForInput * HOURS_PER_DAY).toString());
+      if (hasSections) {
+        const daysMap: Record<string, string> = {};
+        for (const [id, val] of Object.entries(sectionMap)) {
+          const num = parseFloat(val) || 0;
+          daysMap[id] = (Math.round((num / HOURS_PER_DAY) * 10) / 10).toString();
+        }
+        setSectionTotalHoursMap(daysMap);
+      }
+    } else {
+      setLaborUnit(storedUnit);
+      setLaborHours((Math.round(totalStored * 10) / 10).toString());
+      setLaborRate(rateForInput.toString());
+      if (hasSections) {
+        const tidyMap: Record<string, string> = {};
+        for (const [id, val] of Object.entries(sectionMap)) {
+          const num = parseFloat(val) || 0;
+          tidyMap[id] = (Math.round(num * 10) / 10).toString();
+        }
+        setSectionTotalHoursMap(tidyMap);
+      }
+    }
+
+    setMarkup(currentQuote.markup.toString());
+    const lm = currentQuote.laborMarkup ?? currentQuote.markup ?? 0;
+    setLaborMarkup(lm.toString());
+    setShowLaborBreakdown(currentQuote.showLaborBreakdown !== false);
+    const ta = (currentQuote.travelAdjustment || 0).toString();
+    setTravelAdjustment(ta);
+    setLastTravelValue(ta);
   }, [currentQuote]);
 
   // Convert values when toggling between hours/days

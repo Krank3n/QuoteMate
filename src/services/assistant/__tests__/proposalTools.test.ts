@@ -3,6 +3,7 @@ import { rememberAppliedQuote } from '../quoteRefMap';
 import type {
   RepriceQuoteProposal,
   DeleteLineItemProposal,
+  DeleteQuoteProposal,
   SendQuoteProposal,
   UpdateCustomerProposal,
 } from '../../../types/assistant';
@@ -30,6 +31,41 @@ describe('buildProposal quoteId resolution', () => {
   it('passes a real quote id through untouched', () => {
     const { proposal } = buildProposal('propose_reprice', 'tool_3', { quoteId: 'doc_real' });
     expect((proposal as RepriceQuoteProposal).quoteId).toBe('doc_real');
+  });
+});
+
+describe('buildProposal propose_delete_quote', () => {
+  it('requires a quoteId', () => {
+    const { proposal, error } = buildProposal('propose_delete_quote', 'tool_dq_0', {});
+    expect(proposal).toBeUndefined();
+    expect(error).toMatch(/quoteId/);
+  });
+
+  it('resolves a proposal id to the minted quote id', () => {
+    rememberAppliedQuote('prop_dq-1', 'doc_minted_dq');
+    const { proposal, error } = buildProposal('propose_delete_quote', 'tool_dq_1', {
+      quoteId: 'prop_dq-1',
+      displayName: 'Raised deck with stairs',
+      displayCustomerName: 'Gigar',
+      displayTotal: 14360.77,
+      displayDocType: 'quote',
+    });
+    expect(error).toBeUndefined();
+    const dq = proposal as DeleteQuoteProposal;
+    expect(dq.quoteId).toBe('doc_minted_dq');
+    expect(dq.displayName).toBe('Raised deck with stairs');
+    expect(dq.displayCustomerName).toBe('Gigar');
+    expect(dq.displayTotal).toBeCloseTo(14360.77);
+    expect(dq.displayDocType).toBe('quote');
+  });
+
+  it('coerces an unknown displayDocType to undefined', () => {
+    const { proposal } = buildProposal('propose_delete_quote', 'tool_dq_2', {
+      quoteId: 'doc_real',
+      displayDocType: 'gibberish',
+    });
+    const dq = proposal as DeleteQuoteProposal;
+    expect(dq.displayDocType).toBeUndefined();
   });
 });
 
