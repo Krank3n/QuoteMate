@@ -254,14 +254,32 @@ function buildWavFromPcm(pcmBytes: Uint8Array): Uint8Array {
   return buf;
 }
 
-// Target batch size for coalesced WAVs. 24 kHz * 2 bytes * 0.5 s = 24000
-// bytes ≈ 500 ms of audio. Big enough to amortise the per-Sound load cost,
-// small enough that the first chunk still starts playing within ~half a
-// second of the reply beginning.
-const BATCH_BYTES = SAMPLE_RATE * 2 * 0.5;
+// Target batch size for coalesced WAVs. 24 kHz * 2 bytes * 0.75 s = 36000
+// bytes ≈ 750 ms of audio. Bumped up from 500 ms because longer batches
+// mean fewer Sound transitions per reply, which is what actually drives the
+// audible "skippy" gaps on Android — each transition costs a status-poll
+// roundtrip and a playAsync call on the UI thread. 750 ms still keeps the
+// first-syllable latency under a second.
+const BATCH_BYTES = SAMPLE_RATE * 2 * 0.75;
 // If new PCM stops arriving for this long we flush whatever's pending so the
 // tail of a sentence isn't held back waiting to fill a batch.
 const FLUSH_IDLE_MS = 180;
+// expo-av polls Sound status at progressUpdateIntervalMillis (default 500 ms),
+// and `didJustFinish` only fires on a poll. Pin it down to 30 ms so the
+// transition between batched WAVs is detected almost immediately — this was
+// the dominant cause of the audible inter-batch gap on Android.
+const STATUS_POLL_MS = 30;
+// PCM bytes per millisecond at our 24 kHz / 16-bit / mono format. Used to
+// derive a batch's exact playback duration so we can schedule the next
+// Sound's playAsync proactively instead of waiting for the late-firing
+// didJustFinish callback.
+const BYTES_PER_MS = (SAMPLE_RATE * (BITS_PER_SAMPLE / 8) * CHANNELS) / 1000;
+// We pre-fire the transition slightly before the current batch's nominal
+// end. The hand-off path is: stop current → playAsync prepared. Both calls
+// take a few ms on Android, and audio output has its own ~20–40 ms mixer
+// latency, so cutting it a hair early lands the next batch's first sample
+// right where the previous one ends instead of after a gap.
+const TRANSITION_LEAD_MS = 20;
 
 class NativeAudioQueue implements AudioQueue {
   // Raw PCM chunks waiting to be merged into a WAV. We hold them as a list +
@@ -270,8 +288,17 @@ class NativeAudioQueue implements AudioQueue {
   private pendingBytes = 0;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Built WAV data URIs awaiting playback.
-  private queue: string[] = [];
+  // Built WAV batches awaiting playback. We track the exact audio duration
+  // alongside the data URI so the transition timer can pre-empt didJustFinish.
+  private queue: Array<{ uri: string; durationMs: number }> = [];
+  // Duration of the currently-playing batch — needed when scheduling the
+  // transition timer after playAsync resolves.
+  private currentDurationMs = 0;
+  // Duration of the preloaded next batch — carried through the prepared slot.
+  private preparedDurationMs = 0;
+  // Fires shortly before the current batch is expected to finish to swap to
+  // the prepared one. Acts as the primary trigger; didJustFinish is a backup.
+  private transitionTimer: ReturnType<typeof setTimeout> | null = null;
   // Currently playing Sound (post `playAsync`).
   private current: Audio.Sound | null = null;
   // Next Sound, preloaded while `current` is still playing so the transition
@@ -352,8 +379,9 @@ class NativeAudioQueue implements AudioQueue {
     for (const c of this.pending) { merged.set(c, off); off += c.length; }
     this.pending = [];
     this.pendingBytes = 0;
+    const durationMs = merged.length / BYTES_PER_MS;
     const wav = buildWavFromPcm(merged);
-    this.queue.push(`data:audio/wav;base64,${bytesToBase64(wav)}`);
+    this.queue.push({ uri: `data:audio/wav;base64,${bytesToBase64(wav)}`, durationMs });
     void this.pump();
   }
 
@@ -374,40 +402,73 @@ class NativeAudioQueue implements AudioQueue {
     this.fireOnIdle();
   }
 
+  private finishCurrent(sound: Audio.Sound): void {
+    if (this.current !== sound) return;
+    this.current = null;
+    this.currentDurationMs = 0;
+    if (this.transitionTimer) { clearTimeout(this.transitionTimer); this.transitionTimer = null; }
+    // Unload off the critical path so the next batch's playAsync isn't
+    // blocked on the previous batch's MediaPlayer teardown.
+    void (async () => { try { await sound.unloadAsync(); } catch { /* noop */ } })();
+    void this.pump();
+  }
+
   private async pump(): Promise<void> {
     if (this.stopped) return;
 
     // Promote the preloaded Sound to playing as soon as nothing's playing.
     if (!this.current && this.prepared) {
       const sound = this.prepared;
+      const durationMs = this.preparedDurationMs;
       this.prepared = null;
+      this.preparedDurationMs = 0;
       this.current = sound;
+      this.currentDurationMs = durationMs;
       sound.setOnPlaybackStatusUpdate((status) => {
         if (!status.isLoaded) return;
-        if (status.didJustFinish) {
-          if (this.current === sound) this.current = null;
-          // Unload off the critical path so the next chunk can start
-          // immediately. Fire-and-forget is fine here.
-          void (async () => { try { await sound.unloadAsync(); } catch { /* noop */ } })();
-          void this.pump();
-        }
+        // Backup trigger — the proactive timer below normally beats this,
+        // but if the timer was thrown off (e.g. paused JS thread) we still
+        // want to react when the audio is genuinely done.
+        if (status.didJustFinish) this.finishCurrent(sound);
       });
-      try { await sound.playAsync(); } catch { /* noop */ }
+      try {
+        await sound.playAsync();
+      } catch {
+        // playAsync rejected — don't strand the queue.
+        this.finishCurrent(sound);
+        return;
+      }
+      // Primary trigger: schedule the transition based on the batch's known
+      // duration. JS setTimeout is usually within a few ms; the lead-in
+      // subtracted below absorbs the playAsync → audio-out latency on Android.
+      if (this.transitionTimer) { clearTimeout(this.transitionTimer); this.transitionTimer = null; }
+      const wait = Math.max(0, durationMs - TRANSITION_LEAD_MS);
+      this.transitionTimer = setTimeout(() => {
+        this.transitionTimer = null;
+        this.finishCurrent(sound);
+      }, wait);
     }
 
     // Keep one Sound preloaded behind the playhead.
     if (!this.prepared && !this.preparing && this.queue.length > 0) {
       this.preparing = true;
-      const uri = this.queue.shift()!;
+      const next = this.queue.shift()!;
       const s = new Audio.Sound();
       void (async () => {
         try {
-          await s.loadAsync({ uri }, { shouldPlay: false });
+          // progressUpdateIntervalMillis defaults to 500 ms — way too coarse
+          // for sub-second batches. Pin it tight so the backup didJustFinish
+          // trigger lands close to the actual end of audio.
+          await s.loadAsync(
+            { uri: next.uri },
+            { shouldPlay: false, progressUpdateIntervalMillis: STATUS_POLL_MS },
+          );
           if (this.stopped) {
             try { await s.unloadAsync(); } catch { /* noop */ }
             return;
           }
           this.prepared = s;
+          this.preparedDurationMs = next.durationMs;
         } catch {
           try { await s.unloadAsync(); } catch { /* noop */ }
         } finally {
@@ -426,7 +487,10 @@ class NativeAudioQueue implements AudioQueue {
     this.pendingBytes = 0;
     if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
     if (this.activeOffTimer) { clearTimeout(this.activeOffTimer); this.activeOffTimer = null; }
+    if (this.transitionTimer) { clearTimeout(this.transitionTimer); this.transitionTimer = null; }
     this.queue = [];
+    this.currentDurationMs = 0;
+    this.preparedDurationMs = 0;
     this.onIdleCb = null;
     if (this.active) {
       this.active = false;

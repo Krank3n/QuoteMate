@@ -33,6 +33,13 @@ import { LiveAuthError, LiveOfflineError, LiveQuotaError } from '../services/ass
 import { rememberAppliedQuote } from '../services/assistant/quoteRefMap';
 import { startMicCapture, MicCaptureHandle, MicUnavailableError } from '../services/assistant/mic';
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+
+// Tag for the screen-wake lock held during voice mode. Keeping it the same
+// across activate/deactivate calls means even if a second voice session
+// opens before the first one fully tears down, we don't end up stacking
+// untracked locks (expo-keep-awake refcounts per-tag).
+const VOICE_KEEP_AWAKE_TAG = 'mate-voice-session';
 import { generateId } from '../utils/generateId';
 import {
   ChatMessage,
@@ -1065,6 +1072,10 @@ export function AssistantScreen() {
     voiceModeRef.current = null;
     setVoiceMode(null);
     matePlayingRef.current = false;
+    // Release the wake lock now that the session is torn down. Fire-and-
+    // forget — if it fails (or the tag was never held, e.g. open errored
+    // before activate) the OS just keeps the default sleep behaviour.
+    try { void deactivateKeepAwake(VOICE_KEEP_AWAKE_TAG); } catch { /* noop */ }
     userBubbleIdRef.current = null;
     assistantBubbleIdRef.current = null;
     userBubbleTextRef.current = '';
@@ -1128,6 +1139,13 @@ export function AssistantScreen() {
       useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
 
     setVoiceState('connecting');
+    // Hold the screen awake for the duration of the voice session. Without
+    // this Android (and iOS) will dim and lock the phone after the user's
+    // configured timeout while Mate is mid-conversation — mic capture stops,
+    // playback chokes, the WS gets killed. Activated here (before any await)
+    // so even a slow Live token mint can't sneak the screen off; released in
+    // stopVoiceSession when the session is fully torn down.
+    try { await activateKeepAwakeAsync(VOICE_KEEP_AWAKE_TAG); } catch { /* non-fatal */ }
     try {
       await ensureAudioMode();
     } catch { /* non-fatal */ }
