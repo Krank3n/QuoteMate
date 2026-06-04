@@ -794,8 +794,16 @@ export function AssistantScreen() {
       // follow-ups; this lets the read/proposal tools translate it back to the
       // real quote even if the [context] note below never lands (text mode, or
       // a re-opened session that dropped the unpersisted note).
-      if (result.navigate && 'quoteId' in result.navigate && result.navigate.quoteId) {
-        rememberAppliedQuote(proposal.id, result.navigate.quoteId);
+      // Also remember invoice ids — propose_draft_quote with
+      // documentType:'invoice' resolves to { kind:'open_invoice', invoiceId }
+      // so the previous `quoteId in navigate` check missed every drafted
+      // invoice and show_quote follow-ups would fail to resolve.
+      if (result.navigate) {
+        const mintedId =
+          'quoteId' in result.navigate ? result.navigate.quoteId :
+          result.navigate.kind === 'open_invoice' ? result.navigate.invoiceId :
+          undefined;
+        if (mintedId) rememberAppliedQuote(proposal.id, mintedId);
       }
 
       // If a voice session is open, feed it the resolved quote id so
@@ -895,13 +903,25 @@ export function AssistantScreen() {
         proposal.type === 'propose_update_customer' ||
         proposal.type === 'propose_update_quote_rates'
       ) {
-        if (result.navigate && result.navigate.kind === 'job_preview') {
+        // Resolve the freshly-minted doc id regardless of whether the
+        // pipeline landed on a quote (job_preview) or an auto-converted
+        // invoice (open_invoice). Both render the same way via InlineQuote
+        // — the component reads doc.type from the unified store.
+        const renderableId =
+          result.navigate?.kind === 'job_preview'
+            ? result.navigate.quoteId
+            : result.navigate?.kind === 'open_invoice'
+              ? result.navigate.invoiceId
+              : undefined;
+        if (renderableId) {
+          const isInvoice = result.navigate!.kind === 'open_invoice';
+          const docNoun = isInvoice ? 'invoice' : 'draft';
           const hasIssues = !!result.review && result.review.issues.length > 0;
           const text =
             proposal.type === 'propose_draft_quote'
               ? hasIssues
-                ? `Here's the draft — ${result.review!.summary} Tell me what to tweak, or tap to open it.`
-                : "Here's the draft — have a squiz. Tell me what to tweak, or tap to open it."
+                ? `Here's the ${docNoun} — ${result.review!.summary} Tell me what to tweak, or tap to open it.`
+                : `Here's the ${docNoun} — have a squiz. Tell me what to tweak, or tap to open it.`
               : proposal.type === 'propose_update_customer'
                 ? `Done — this one's on ${proposal.customerName || 'the new contact'} now. Tap to open it.`
                 : proposal.type === 'propose_update_quote_rates'
@@ -920,7 +940,7 @@ export function AssistantScreen() {
             role: 'assistant',
             text: '',
             createdAt: new Date().toISOString(),
-            inlineQuoteId: result.navigate.quoteId,
+            inlineQuoteId: renderableId,
           });
         }
         return;
