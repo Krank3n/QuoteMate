@@ -3197,6 +3197,51 @@ export const useStore = create<AppState>((set, get) => ({
           return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, review };
         }
 
+        case 'propose_mark_paid': {
+          // Resolve the invoice. Unified doc first; fall back to the legacy
+          // invoices array for very old records that never made it through
+          // the mirror.
+          const doc = await resolveDocument(proposal.quoteId);
+          if (doc && doc.type !== 'invoice') {
+            return {
+              ok: false,
+              error: 'That\'s a quote, not an invoice. Convert it to an invoice first, then mark it paid.',
+            };
+          }
+          let invoiceId: string | undefined = doc?.id;
+          let total = Number(doc?.total ?? 0);
+          let alreadyPaid = Number(doc?.paidTotal ?? 0);
+          if (!invoiceId) {
+            const legacy = get().invoices.find((i) => i.id === proposal.quoteId);
+            if (!legacy) return { ok: false, error: 'Invoice not found.' };
+            invoiceId = legacy.id;
+            total = Number(legacy.total ?? 0);
+            alreadyPaid = Number(legacy.paidAmount ?? 0);
+          }
+          const balance = Math.max(0, total - alreadyPaid);
+          if (balance <= 0) {
+            // Idempotent — no money to record. Surface a friendly note
+            // instead of a hard error so Mate can reassure the tradie
+            // the invoice is already settled.
+            return {
+              ok: true,
+              navigate: { kind: 'open_invoice', invoiceId: invoiceId! },
+              note: 'That invoice was already paid in full — nothing to record.',
+            };
+          }
+          try {
+            await get().recordPayment(
+              invoiceId!,
+              balance,
+              proposal.method ?? 'other',
+              proposal.notes,
+            );
+          } catch (err: any) {
+            return { ok: false, error: err?.message || 'Failed to record payment.' };
+          }
+          return { ok: true, navigate: { kind: 'open_invoice', invoiceId: invoiceId! } };
+        }
+
         default:
           return { ok: false, error: 'Unknown proposal type.' };
       }

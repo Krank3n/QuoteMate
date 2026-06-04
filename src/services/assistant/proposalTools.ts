@@ -10,6 +10,7 @@ import {
   DeleteLineItemProposal,
   DeleteQuoteProposal,
   DraftQuoteProposal,
+  MarkPaidProposal,
   Proposal,
   RepriceQuoteProposal,
   SendQuoteProposal,
@@ -220,6 +221,26 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         quoteId: resolveQuoteId(input.quoteId),
         displayName: input.displayName ? String(input.displayName) : undefined,
         displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
+      };
+      return { proposal };
+    }
+
+    case 'propose_mark_paid': {
+      if (!input?.quoteId) return { error: 'propose_mark_paid requires quoteId.' };
+      const allowed = ['cash', 'bank_transfer', 'card', 'cheque', 'other'] as const;
+      const method = allowed.includes(input.method) ? input.method : undefined;
+      const proposal: MarkPaidProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_mark_paid',
+        quoteId: resolveQuoteId(input.quoteId),
+        method,
+        notes: input.notes ? String(input.notes) : undefined,
+        displayName: input.displayName ? String(input.displayName) : undefined,
+        displayCustomerName: input.displayCustomerName ? String(input.displayCustomerName) : undefined,
+        displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
+        displayBalance: Number.isFinite(Number(input.displayBalance)) ? Number(input.displayBalance) : undefined,
       };
       return { proposal };
     }

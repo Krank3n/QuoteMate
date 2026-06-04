@@ -78,6 +78,7 @@ function titleFor(p: Proposal): string {
     case 'propose_convert_to_invoice': return 'Convert to invoice';
     case 'propose_reprice': return 'Re-price quote';
     case 'propose_update_quote_rates': return 'Update rates';
+    case 'propose_mark_paid': return 'Mark invoice paid';
   }
 }
 
@@ -93,6 +94,7 @@ function iconFor(p: Proposal): React.ComponentProps<typeof MaterialCommunityIcon
     case 'propose_convert_to_invoice': return 'cash-multiple';
     case 'propose_reprice': return 'refresh';
     case 'propose_update_quote_rates': return 'tune-variant';
+    case 'propose_mark_paid': return 'check-decagram-outline';
   }
 }
 
@@ -104,6 +106,7 @@ function labelFor(p: Proposal): string {
     case 'propose_convert_to_invoice': return 'Convert';
     case 'propose_reprice': return 'Re-price';
     case 'propose_update_quote_rates': return 'Update';
+    case 'propose_mark_paid': return 'Mark paid';
     default: return 'Apply';
   }
 }
@@ -256,6 +259,41 @@ function Body({ proposal }: { proposal: Proposal }) {
           <Text style={styles.dim}>Apply re-fetches prices for the flagged rows and reconciles again.</Text>
         </View>
       );
+    case 'propose_mark_paid': {
+      const title = [proposal.displayCustomerName, proposal.displayName]
+        .filter(Boolean)
+        .join(' — ');
+      const methodLabel =
+        proposal.method === 'cash' ? 'cash'
+        : proposal.method === 'bank_transfer' ? 'bank transfer'
+        : proposal.method === 'card' ? 'card'
+        : proposal.method === 'cheque' ? 'cheque'
+        : 'other';
+      return (
+        <View>
+          {title ? (
+            <Text style={styles.summary} numberOfLines={2}>{title}</Text>
+          ) : null}
+          {typeof proposal.displayBalance === 'number' ? (
+            <Text style={styles.dim}>
+              Settling balance {formatCurrency(proposal.displayBalance)}
+              {typeof proposal.displayTotal === 'number' && proposal.displayTotal !== proposal.displayBalance
+                ? ` of ${formatCurrency(proposal.displayTotal)} total`
+                : ''}
+              {' · '}{methodLabel}.
+            </Text>
+          ) : typeof proposal.displayTotal === 'number' ? (
+            <Text style={styles.dim}>Total {formatCurrency(proposal.displayTotal)} · {methodLabel}.</Text>
+          ) : (
+            <Text style={styles.dim}>Payment method: {methodLabel}.</Text>
+          )}
+          {!!proposal.notes && (
+            <Text style={styles.dim}>Note: {proposal.notes}</Text>
+          )}
+          <Text style={styles.dim}>Apply records the payment and flips the invoice to paid.</Text>
+        </View>
+      );
+    }
   }
 }
 
