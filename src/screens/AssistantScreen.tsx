@@ -926,6 +926,22 @@ export function AssistantScreen() {
         return;
       }
 
+      // Mark paid stays in chat — the proposal card already flipped to
+      // "Applied". Don't navigate away mid-conversation; just let Mate
+      // confirm verbally / textually on the next turn. The [context] line
+      // below tells the model the payment landed.
+      if (proposal.type === 'propose_mark_paid') {
+        const liveSession = voiceSessionRef.current;
+        if (liveSession?.isOpen() && result.navigate?.kind === 'open_invoice') {
+          const label = proposal.displayName || proposal.displayCustomerName || 'that invoice';
+          liveSession.sendContextNote(
+            `[context] Marked invoice ${result.navigate.invoiceId} ("${label}") as paid in full. ` +
+              `The books are updated — confirm to the tradie in one short line, don't navigate or re-show it.`,
+          );
+        }
+        return;
+      }
+
       handleNavigate(result.navigate);
     },
     [conversation, applyProposal, appendMessage, updateMessage, updateProposalStatus, handleNavigate],

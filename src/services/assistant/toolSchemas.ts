@@ -30,6 +30,7 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_convert_to_invoice',
   'propose_reprice',
   'propose_update_quote_rates',
+  'propose_mark_paid',
 ] as const;
 
 // Voice-only control tools. Unlike read/proposal tools these never reach
@@ -347,6 +348,28 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         laborRate: { type: 'number', description: 'New labour rate in $/hour.' },
         laborHours: { type: 'number', description: 'New labour hours total.' },
         displayName: { type: 'string', description: 'Job name to show on the card (display only).' },
+      },
+      required: ['quoteId'],
+    },
+  },
+  {
+    name: 'propose_mark_paid',
+    description:
+      'Propose marking an invoice as paid in full — the voice/chat equivalent of opening the invoice and tapping Mark paid. Use this whenever the tradie says "mark it paid", "that\'s been paid", "close it off", "settle that invoice", etc. ONLY works on invoices, NOT quotes (a quote has to be converted to an invoice first — if they\'re trying to mark a quote paid, offer propose_convert_to_invoice first). Apply records a payment for the remaining balance using the chosen method so the books stay accurate. Always call get_quote first so the card can name the doc + balance being settled. Pass displayCustomerName + displayName + displayBalance from get_quote.',
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of the invoice to mark paid (must be an invoice, not a quote).' },
+        method: {
+          type: 'string',
+          enum: ['cash', 'bank_transfer', 'card', 'cheque', 'other'],
+          description: 'How the money landed. Defaults to "other" if the tradie didn\'t say. Map "bank" / "transfer" → bank_transfer, "eftpos" / "tap" → card.',
+        },
+        notes: { type: 'string', description: 'Optional payment note (e.g. "paid in cash on site").' },
+        displayName: { type: 'string', description: 'Job name to show on the card (display only).' },
+        displayCustomerName: { type: 'string', description: 'Customer name to show on the card (display only).' },
+        displayTotal: { type: 'number', description: 'Invoice total in AUD (display only).' },
+        displayBalance: { type: 'number', description: 'Remaining balance in AUD that\'s about to be settled (display only).' },
       },
       required: ['quoteId'],
     },

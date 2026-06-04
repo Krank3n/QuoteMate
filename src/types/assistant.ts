@@ -13,7 +13,8 @@ export type ProposalType =
   | 'propose_send_quote'
   | 'propose_convert_to_invoice'
   | 'propose_reprice'
-  | 'propose_update_quote_rates';
+  | 'propose_update_quote_rates'
+  | 'propose_mark_paid';
 
 export interface BaseProposal {
   id: string;
@@ -112,6 +113,26 @@ export interface RepriceQuoteProposal extends BaseProposal {
   displayTotal?: number;
 }
 
+// Mark an invoice paid in full — the voice / chat equivalent of opening
+// the doc and tapping "Mark paid". Apply records a payment for the
+// remaining balance with the chosen method so the books stay accurate
+// (status flips to 'paid' as a side effect of recordPayment when the
+// balance hits zero).
+export interface MarkPaidProposal extends BaseProposal {
+  type: 'propose_mark_paid';
+  // Document id of the invoice to mark paid.
+  quoteId: string;
+  // How the money landed. Defaults to 'other' if the tradie didn't say.
+  method?: 'cash' | 'bank_transfer' | 'card' | 'cheque' | 'other';
+  // Optional note recorded against the payment (e.g. "paid in cash on site").
+  notes?: string;
+  // Display-only — lets the card name the doc without a re-fetch.
+  displayName?: string;
+  displayCustomerName?: string;
+  displayTotal?: number;
+  displayBalance?: number;
+}
+
 export interface UpdateQuoteRatesProposal extends BaseProposal {
   type: 'propose_update_quote_rates';
   quoteId: string;
@@ -136,7 +157,8 @@ export type Proposal =
   | SendQuoteProposal
   | ConvertToInvoiceProposal
   | RepriceQuoteProposal
-  | UpdateQuoteRatesProposal;
+  | UpdateQuoteRatesProposal
+  | MarkPaidProposal;
 
 export type ProposalStatus = 'pending' | 'applied' | 'dismissed' | 'failed';
 
