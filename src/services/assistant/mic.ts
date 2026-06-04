@@ -49,9 +49,15 @@ const RECORD_OPTS: AudioRecordOptions = {
   sampleRate: 16000,
   channels: 1,
   bitsPerSample: 16,
-  // Android: VOICE_RECOGNITION (6) — tuned for speech and bypasses MIC's
-  // automatic gain weirdness. iOS ignores audioSource.
-  audioSource: 6,
+  // Android: VOICE_COMMUNICATION (7) — engages the platform's built-in
+  // acoustic echo canceller, noise suppression, and AGC pipeline so the
+  // loudspeaker playing back Mate's reply doesn't bleed into the mic and
+  // get re-transcribed as the tradie talking. Without this (the previous
+  // VOICE_RECOGNITION = 6) Gemini's server-side VAD would hear Mate's own
+  // voice, treat it as a new user turn, and Mate would talk to itself in
+  // an infinite loop. iOS ignores audioSource — the half-duplex mute in
+  // AssistantScreen (driven by AudioQueue.setOnActiveChange) covers it.
+  audioSource: 7,
   wavFile: 'mate.wav', // throwaway — we only consume the streamed chunks
 };
 

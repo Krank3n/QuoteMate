@@ -534,6 +534,14 @@ export function AssistantScreen() {
   // keep the tradie company. Audio still plays through the queue; text
   // bubbles are suppressed so the chat doesn't fill up with banter.
   const narrationModeRef = useRef(false);
+  // Half-duplex gate: true while Mate's reply audio is actively playing
+  // through the speaker. Mic chunks are dropped while this is set so the
+  // speaker output doesn't bleed back into the mic and get re-transcribed
+  // as the user talking — which would otherwise loop Mate replying to
+  // itself forever on Android (and sometimes iOS speakerphone). Hardware
+  // AEC via the VOICE_COMMUNICATION audio source handles most of it on
+  // Android, this is the defensive belt-and-braces layer.
+  const matePlayingRef = useRef(false);
   // Set when the tradie accepted/cancelled a card by voice this turn (Mate
   // called a control tool). We run the actual Apply / dismiss on turnComplete
   // so a draft's narration doesn't collide with Mate's spoken confirmation.
@@ -707,6 +715,9 @@ export function AssistantScreen() {
         // pre-Apply confirmation reply.
         try { audioQueueRef.current?.stop?.(); } catch { /* noop */ }
         audioQueueRef.current = createAudioQueue();
+        audioQueueRef.current.setOnActiveChange((active) => {
+          matePlayingRef.current = active;
+        });
         const intro =
           proposal.type === 'propose_reprice'
             ? `Re-pricing "${narrationJobLabel}" now — the pipeline's re-checking the flagged rows`
@@ -1053,6 +1064,7 @@ export function AssistantScreen() {
     voiceSessionRef.current = null;
     voiceModeRef.current = null;
     setVoiceMode(null);
+    matePlayingRef.current = false;
     userBubbleIdRef.current = null;
     assistantBubbleIdRef.current = null;
     userBubbleTextRef.current = '';
@@ -1347,6 +1359,9 @@ export function AssistantScreen() {
 
       voiceSessionRef.current = session;
       audioQueueRef.current = createAudioQueue();
+      audioQueueRef.current.setOnActiveChange((active) => {
+        matePlayingRef.current = active;
+      });
 
       // Fresh chat + sticky (big record button) mode: get Mate to kick things
       // off with a short, slightly cheeky Aussie greeting so the tradie hears
@@ -1387,7 +1402,14 @@ export function AssistantScreen() {
       // is awaited.
       try {
         micRef.current = await startMicCapture((chunk) => {
-          voiceSessionRef.current?.sendMicChunk(chunk);
+          // Half-duplex: while Mate's audio reply is playing, drop mic
+          // chunks so the speaker output doesn't get echoed back into
+          // Gemini's server-side VAD as a fresh user turn (which was the
+          // root cause of the infinite-loop bug on Android — and the
+          // occasional iOS one when on speakerphone).
+          if (!matePlayingRef.current) {
+            voiceSessionRef.current?.sendMicChunk(chunk);
+          }
           // Web only: feed the same PCM we're streaming into the inline
           // waveform so the line reacts to the tradie's actual voice. On native
           // the breathing loop (see the micLevel effect) owns this value, so

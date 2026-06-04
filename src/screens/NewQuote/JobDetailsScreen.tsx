@@ -903,6 +903,7 @@ export function JobDetailsScreen() {
           totalPrice: 0,
           manualPriceOverride: false,
           ...(m.section && { section: m.section }),
+          ...(m.qualityTier && { qualityTier: m.qualityTier }),
         }));
 
         // Update the job with analyzed data
@@ -921,6 +922,7 @@ export function JobDetailsScreen() {
             job: analyzedJob,
             materials,
             laborHours: analysis.estimatedHours,
+            ...(analysis.jobQualityTier && { qualityTier: analysis.jobQualityTier }),
           };
           if (mode === 'invoice') {
             state.updateInvoice(finalDocument as any);

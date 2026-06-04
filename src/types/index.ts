@@ -52,6 +52,12 @@ export interface Material {
   category?: string; // Trade category ID (e.g., 'carpentry', 'electrical', 'plumbing')
   section?: string; // Work section within a job (e.g., 'Concreting', 'Timber Framing')
   templateBaseQuantity?: number; // Per-unit qty from template/AI (e.g. 2 posts per bay). quantity = templateBaseQuantity * section.multiplier
+  // Detected quality tier from the job description (e.g. "high quality",
+  // "premium fittings", "budget reno"). Used by candidateRanker to pick
+  // the right price band out of the supplier search results instead of
+  // always taking the first/cheapest hit. Inherited from the job-level
+  // qualityTier on the Quote when not set per-material.
+  qualityTier?: 'budget' | 'standard' | 'premium';
 }
 
 // Snapshot of a Reece order placed from QuoteMate against the user's trade
@@ -226,6 +232,10 @@ export interface Quote {
   status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'completed' | 'cancelled';
   draftStep?: string; // Screen name where user left off during quote flow (e.g., 'CustomerDetails')
   notes?: string;
+  // Job-level quality tier inferred from the description ("premium",
+  // "high quality", "budget", etc.). Inherited by materials that don't
+  // carry their own qualityTier — see candidateRanker.pickBestCandidate.
+  qualityTier?: 'budget' | 'standard' | 'premium';
   aiSkipped?: boolean; // Flag to indicate AI analysis was intentionally skipped
   // AI template suggestions (generated during description cleanup or on materials screen load)
   templateSuggestions?: TemplateSuggestion[];

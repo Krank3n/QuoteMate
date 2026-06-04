@@ -35,8 +35,26 @@ const CHANNELS = 1;
 export interface AudioQueue {
   enqueuePcmChunk(base64Pcm: string): void;
   setOnIdle(cb: (() => void) | null): void;
+  /**
+   * Persistent listener that fires whenever the queue transitions between
+   * "actively playing audio" and "silent". Used by the voice screen to gate
+   * the mic (half-duplex) so the speaker output doesn't get re-heard as the
+   * user talking — without this Mate ends up in a feedback loop on devices
+   * where hardware AEC isn't reliable (notably iOS on speakerphone, and any
+   * Android that ignores the VOICE_COMMUNICATION audioSource hint).
+   *
+   * Fires `true` on the first chunk of a reply; fires `false` once playback
+   * has drained (plus a small tail to cover the device's mixer buffer).
+   */
+  setOnActiveChange(cb: ((active: boolean) => void) | null): void;
   stop(): Promise<void>;
 }
+
+// Extra delay tacked on after the queue thinks it's empty before we declare
+// playback finished and unmute the mic. Covers the OS audio mixer buffer and
+// any residual room reverb so the mic isn't reopened mid-tail and pick up
+// the very end of Mate's own voice.
+const ACTIVE_TAIL_MS = 350;
 
 function pcmBytesToFloat32(pcm: Uint8Array): Float32Array {
   // Interpret bytes as little-endian Int16 samples and normalise to [-1, 1].
@@ -66,6 +84,9 @@ class WebAudioQueue implements AudioQueue {
   private stopped = false;
   private onIdleCb: (() => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private onActiveChangeCb: ((active: boolean) => void) | null = null;
+  private active = false;
+  private activeOffTimer: ReturnType<typeof setTimeout> | null = null;
 
   private ensureCtx(): AudioContext | null {
     if (this.stopped) return null;
@@ -114,6 +135,36 @@ class WebAudioQueue implements AudioQueue {
     }
     this.nextStartTime = startAt + buffer.duration;
     this.scheduleIdleCheck();
+    this.markActive();
+  }
+
+  setOnActiveChange(cb: ((active: boolean) => void) | null): void {
+    this.onActiveChangeCb = cb;
+  }
+
+  private markActive(): void {
+    if (this.activeOffTimer) { clearTimeout(this.activeOffTimer); this.activeOffTimer = null; }
+    if (!this.active) {
+      this.active = true;
+      try { this.onActiveChangeCb?.(true); } catch { /* noop */ }
+    }
+    const ctx = this.audioCtx;
+    if (!ctx) return;
+    const remainingMs = Math.max(0, (this.nextStartTime - ctx.currentTime) * 1000);
+    this.activeOffTimer = setTimeout(() => {
+      this.activeOffTimer = null;
+      if (this.stopped) return;
+      // If new chunks landed, the next enqueue already re-armed; bail.
+      const c = this.audioCtx;
+      if (c && this.nextStartTime > c.currentTime + 0.01) {
+        this.markActive();
+        return;
+      }
+      if (this.active) {
+        this.active = false;
+        try { this.onActiveChangeCb?.(false); } catch { /* noop */ }
+      }
+    }, remainingMs + ACTIVE_TAIL_MS);
   }
 
   setOnIdle(cb: (() => void) | null): void {
@@ -158,7 +209,13 @@ class WebAudioQueue implements AudioQueue {
     if (this.stopped) return;
     this.stopped = true;
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+    if (this.activeOffTimer) { clearTimeout(this.activeOffTimer); this.activeOffTimer = null; }
     this.onIdleCb = null;
+    if (this.active) {
+      this.active = false;
+      try { this.onActiveChangeCb?.(false); } catch { /* noop */ }
+    }
+    this.onActiveChangeCb = null;
     const ctx = this.audioCtx;
     this.audioCtx = null;
     if (ctx) {
@@ -224,6 +281,9 @@ class NativeAudioQueue implements AudioQueue {
 
   private stopped = false;
   private onIdleCb: (() => void) | null = null;
+  private onActiveChangeCb: ((active: boolean) => void) | null = null;
+  private active = false;
+  private activeOffTimer: ReturnType<typeof setTimeout> | null = null;
 
   enqueuePcmChunk(base64Pcm: string): void {
     if (this.stopped) return;
@@ -231,11 +291,41 @@ class NativeAudioQueue implements AudioQueue {
     if (pcm.length === 0) return;
     this.pending.push(pcm);
     this.pendingBytes += pcm.length;
+    this.markActive();
     if (this.pendingBytes >= BATCH_BYTES) {
       this.flushPending();
     } else {
       this.scheduleFlush();
     }
+  }
+
+  setOnActiveChange(cb: ((active: boolean) => void) | null): void {
+    this.onActiveChangeCb = cb;
+  }
+
+  private markActive(): void {
+    if (this.activeOffTimer) { clearTimeout(this.activeOffTimer); this.activeOffTimer = null; }
+    if (!this.active) {
+      this.active = true;
+      try { this.onActiveChangeCb?.(true); } catch { /* noop */ }
+    }
+  }
+
+  private maybeFireActiveOff(): void {
+    if (!this.active) return;
+    if (this.current || this.prepared || this.preparing) return;
+    if (this.queue.length > 0 || this.pendingBytes > 0) return;
+    if (this.activeOffTimer) return;
+    this.activeOffTimer = setTimeout(() => {
+      this.activeOffTimer = null;
+      if (this.stopped) return;
+      if (this.current || this.prepared || this.preparing) return;
+      if (this.queue.length > 0 || this.pendingBytes > 0) return;
+      if (this.active) {
+        this.active = false;
+        try { this.onActiveChangeCb?.(false); } catch { /* noop */ }
+      }
+    }, ACTIVE_TAIL_MS);
   }
 
   setOnIdle(cb: (() => void) | null): void {
@@ -275,6 +365,9 @@ class NativeAudioQueue implements AudioQueue {
   }
 
   private maybeFireOnIdle(): void {
+    // Whenever the queue's potentially gone quiet, also re-evaluate the
+    // active flag so the mic gate releases promptly.
+    this.maybeFireActiveOff();
     if (!this.onIdleCb) return;
     if (this.current || this.prepared || this.preparing) return;
     if (this.queue.length > 0 || this.pendingBytes > 0) return;
@@ -332,8 +425,14 @@ class NativeAudioQueue implements AudioQueue {
     this.pending = [];
     this.pendingBytes = 0;
     if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
+    if (this.activeOffTimer) { clearTimeout(this.activeOffTimer); this.activeOffTimer = null; }
     this.queue = [];
     this.onIdleCb = null;
+    if (this.active) {
+      this.active = false;
+      try { this.onActiveChangeCb?.(false); } catch { /* noop */ }
+    }
+    this.onActiveChangeCb = null;
     const c = this.current; this.current = null;
     const p = this.prepared; this.prepared = null;
     if (c) {

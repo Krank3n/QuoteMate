@@ -1678,15 +1678,24 @@ Provide a JSON response with the following structure:
       "section": "Descriptive section name (e.g. Colorbond Fence Bay, Merbau Deck Section, Concrete Footings)",
       "sectionMultiplier": 1,
       "sectionLaborHours": 1.5,
+      "qualityTier": "(budget|standard|premium — see QUALITY TIER DETECTION below; inherits jobQualityTier when omitted)",
       "reasoning": "Why this material is needed AND the derivation math for any per-area, per-volume, or repeating-unit quantity (e.g. 'Pavers: 25m² ÷ 0.16m²-per-paver × 1.1 waste = 172'). For simple one-off items a short justification is fine.",
       "savedRateName": "(only set when matched to a saved rate)",
       "pricingSource": "(set to 'saved_rate' when matched)",
       "reeceProductId": "(only set when a Reece catalogue line clearly matches — copy the integer productId from the catalogue listing. Leave empty if unsure; the search layer will look it up.)"
     }
-  ]
+  ],
+  "jobQualityTier": "budget|standard|premium"
 }
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
+
+QUALITY TIER DETECTION — read the job description for tier qualifiers and set both "jobQualityTier" (top-level, one per job) and "qualityTier" (per-material, inherits jobQualityTier when omitted). The downstream pricing layer uses this to pick the RIGHT product out of the supplier search results instead of always grabbing the cheapest hit. This is high-leverage — a wrong tier turns a $400 "premium mixer tap" job into an $86 budget tap quote.
+- "premium", "high quality", "high-end", "luxury", "designer", "architectural", "top of the range", "custom", "bespoke", brand names like Phoenix / Miele / Fisher & Paykel / Caesarstone → jobQualityTier: "premium". Search terms for fittings/finishes in these jobs should include words like "premium" or "professional" (e.g. "premium stainless steel undermount sink", not just "sink").
+- "budget", "cheap", "basic", "entry level", "investment property", "rental fit-out", "flip" → jobQualityTier: "budget".
+- Anything else, or no signal at all → jobQualityTier: "standard".
+- Per-material override: when only SOME items are called out as premium (e.g. "high quality fittings and sink" in an otherwise standard reno), set qualityTier: "premium" on just those rows (taps, mixers, sinks, handles, hinges, lights) and leave the rest standard. Rule of thumb: which line items would a customer notice if they were cheap? Those carry the called-out tier.
+- Cabinetry/joinery substance descriptors map to tier too: "custom timber cabinetry", "solid timber doors", "marble benchtop", "stone benchtop", "engineered stone", "Caesarstone" all imply premium for those rows even if the job header doesn't say "premium".
 - EVERY section MUST have sectionLaborHours > 0. A section with zero labour hours is invalid output — if the work is materials-only with no labour (rare), put those materials under an existing labour-bearing section instead of creating a zero-hour section.
 - PER-AREA SURFACE-COVERING SECTIONS ONLY (paving installation, tiling, plastering, rendering, screeding): set sectionMultiplier = total surface area in m² and sectionLaborHours = hours PER m² (typical: paving install 0.4–0.6 h/m², tiling 0.5 h/m², plastering 0.3 h/m², screeding 0.2 h/m²). Per-m² IS a per-unit value: one m² is one unit. Material quantities inside these sections are PER m² (e.g. 6.25 pavers per m²) and get multiplied by sectionMultiplier at save time — do NOT pre-multiply.
 - DISCRETE-UNIT SECTIONS (fence bays, gates, post footings, framing, joists, footings, slabs poured per-pour, doors, windows, decks measured per board): sectionMultiplier = COUNT of those repeating units (e.g. 9 bays, 13 post holes, 1 deck), NOT an area. Material quantities are PER UNIT (e.g. 4 bags concrete per post hole × 13 holes). This applies to fencing, framing, and ALL concrete work that goes into individual holes/footings/footings-beams — those are per-hole not per-m².
@@ -1854,11 +1863,19 @@ Return ONLY valid JSON, no other text.`;
 
       const { materials: repairedMaterials, flags: aiFlags } = validateAndRepairAiOutput(validatedMaterials);
 
+      const jobQualityTier =
+        parsed.jobQualityTier === 'budget' ||
+        parsed.jobQualityTier === 'standard' ||
+        parsed.jobQualityTier === 'premium'
+          ? parsed.jobQualityTier
+          : undefined;
+
       res.status(200).json({
         materials: repairedMaterials,
         estimatedHours: parsed.estimatedHours || 8,
         jobSummary: parsed.jobSummary || '',
         flags: aiFlags,
+        ...(jobQualityTier && { jobQualityTier }),
       });
     } catch (error: any) {
       const userEmail = await getUserEmail(decodedToken.uid);

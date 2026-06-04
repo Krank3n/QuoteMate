@@ -43,6 +43,7 @@ import {
   type ScraperProduct,
 } from './bunningsScraperClient';
 import { searchMaterialPrice } from './webSearchPricing';
+import { pickBestCandidate, type RankableCandidate } from './candidateRanker';
 
 export interface PipelineEvent {
   phase: 'preflight' | 'analyzing' | 'building' | 'done';
@@ -386,6 +387,11 @@ export async function fetchPricesForQuote(
 
   const gstInclusive = quote.pricesIncludeGst === true;
   const updatedMaterials: Material[] = quote.materials.map((m) => ({ ...m }));
+  // Job-level quality tier inferred at analysis time. Inherited by any
+  // material that doesn't carry its own tier. See candidateRanker for the
+  // ranking math — the short version: "premium" pushes selection toward the
+  // high end of the supplier search results instead of just hits[0].
+  const jobQualityTier = quote.qualityTier;
 
   const checkCancel = () => {
     if (shouldCancel?.()) throw new FetchCancelled();
@@ -453,7 +459,17 @@ export async function fetchPricesForQuote(
         hits = [];
       }
       if (hits.length === 0) continue;
-      const top = hits[0];
+      // Use the ranker to pick the best hit instead of just hits[0]. The
+      // saved-supplier-rate path is usually 1–2 hits so the ranker mostly
+      // no-ops here, but keeping the API consistent across paths means
+      // future saved-rate libraries that return more candidates benefit
+      // automatically.
+      const ranked = pickBestCandidate(hits as RankableCandidate[], {
+        name: m.name,
+        searchTerm: m.searchTerm,
+        qualityTier: m.qualityTier,
+      }, { jobQualityTier }) as (typeof hits[number]) | null;
+      const top = ranked || hits[0];
       m.price = supplierPriceForGstMode(top.price, gstInclusive);
       m.manualPriceOverride = false;
       m.pricingSource = 'manual';
@@ -512,7 +528,20 @@ export async function fetchPricesForQuote(
         reauth = true;
         break;
       }
-      const result = candidates[0];
+      // Reece returns 1–5 candidates per term; pick the best fit for the
+      // material's quality tier instead of defaulting to candidates[0].
+      // Filter to fully-resolved candidates (price + itemNumber) first so
+      // the ranker doesn't waste a slot on a reauth/notConnected sentinel.
+      const validReeceCandidates = candidates.filter(
+        (c) => typeof c.price === 'number' && c.price > 0 && !!c.itemNumber,
+      );
+      const result =
+        pickBestCandidate(
+          validReeceCandidates as unknown as RankableCandidate[],
+          { name: m.name, searchTerm: m.searchTerm, qualityTier: m.qualityTier },
+          { jobQualityTier },
+        ) as unknown as (typeof candidates[number]) | null
+        || candidates[0];
       if (!result || !result.price || !result.itemNumber) {
         onEvent?.({
           kind: 'item-priced',
@@ -677,7 +706,15 @@ export async function fetchPricesForQuote(
               );
               if (matIndex === -1) continue;
               const material = updatedMaterials[matIndex];
-              const product = candidates[0] || null;
+              // Pick the best fit out of the (up to 5) scraper candidates
+              // for this material's quality tier, instead of trusting the
+              // scraper's default "most relevant" first hit — which on
+              // Bunnings tends to be the cheapest/most-popular SKU. See
+              // candidateRanker for the tier-bias math.
+              const product =
+                pickBestCandidate(candidates as RankableCandidate[], material, { jobQualityTier }) as ScraperProduct | null
+                || candidates[0]
+                || null;
               if (candidates.length > 0) candidatesByMaterialId.set(material.id, candidates);
               const ok = !!(product && product.price > 0);
               if (ok && product) {
@@ -758,7 +795,13 @@ export async function fetchPricesForQuote(
           candidates = await findCandidatesForMaterial(searchTerm);
         }
         if (candidates.length > 0) candidatesByMaterialId.set(material.id, candidates);
-        const product = candidates[0] || null;
+        // Tier-aware pick on the individual-fallback path too — same logic
+        // as the batch path above. The supplier ranker put a budget SKU
+        // first; we want the one that matches this material's quality tier.
+        const product =
+          pickBestCandidate(candidates as RankableCandidate[], material, { jobQualityTier }) as ScraperProduct | null
+          || candidates[0]
+          || null;
 
         if (product && product.price > 0) {
           material.price = supplierPriceForGstMode(product.price, gstInclusive);

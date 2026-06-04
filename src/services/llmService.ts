@@ -33,6 +33,11 @@ interface LLMMaterial {
   reasoning?: string;
   section?: string;
   sectionMultiplier?: number;
+  // Quality tier inferred from the job description. Drives candidate
+  // selection in materialsPipeline (see candidateRanker.pickBestCandidate)
+  // — e.g. "premium" pushes the picker toward the high end of the price
+  // band instead of always grabbing the cheapest scraper hit.
+  qualityTier?: 'budget' | 'standard' | 'premium';
   // Per-unit labour hours for this material's section. The LLM is asked to populate
   // this in the prompt; if it omits it (LLMs are unreliable), MaterialsListScreen
   // falls back to distributing analysis.estimatedHours across sections by multiplier.
@@ -54,6 +59,10 @@ interface LLMResponse {
   materials: LLMMaterial[];
   estimatedHours: number;
   jobSummary: string;
+  // Overall quality tier inferred from the job description. Falls back to
+  // 'standard' on the consumer side when undefined. Inherited by any
+  // material that didn't get an explicit qualityTier of its own.
+  jobQualityTier?: 'budget' | 'standard' | 'premium';
 }
 
 /**
@@ -161,10 +170,17 @@ async function analyzeViaFirebaseFunction(
   // The server doesn't dedupe or sanity-check sectionMultiplier values, so
   // without this pass a sentinel-equal-quantity multiplier (e.g. 100 for "100
   // bags concrete") would slip through and blow up section labour totals.
+  const jobQualityTier =
+    data.jobQualityTier === 'budget' ||
+    data.jobQualityTier === 'standard' ||
+    data.jobQualityTier === 'premium'
+      ? data.jobQualityTier
+      : undefined;
   return {
     materials: validateMaterials(data.materials || []),
     estimatedHours: Math.max(1, Math.min(data.estimatedHours || 8, 200)),
     jobSummary: data.jobSummary || '',
+    ...(jobQualityTier && { jobQualityTier }),
   };
 }
 
@@ -301,12 +317,21 @@ Provide a JSON response with the following structure:
       "section": "Descriptive section name (e.g. Colorbond Fence Bay, Merbau Deck Section, Concrete Footings)",
       "sectionMultiplier": 8,
       "sectionLaborHours": 1.5,
+      "qualityTier": "budget|standard|premium",
       "reasoning": "Why this material is needed"
     }
-  ]
+  ],
+  "jobQualityTier": "budget|standard|premium"
 }
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
+
+QUALITY TIER DETECTION — read the job description for tier qualifiers and set both "jobQualityTier" (top-level, one per job) and "qualityTier" (per-material, inherits jobQualityTier when omitted). This is what makes the pricing layer pick the RIGHT product out of the supplier search results instead of always grabbing the cheapest hit:
+- "premium", "high quality", "high-end", "luxury", "designer", "architectural", "top of the range", "custom", brand names like Phoenix/Miele/Fisher & Paykel → jobQualityTier: "premium". Search terms for fittings/finishes in these jobs should include words like "premium" or "professional" (e.g. "premium stainless steel undermount sink", not just "sink").
+- "budget", "cheap", "basic", "entry level", "investment property", "rental fit-out" → jobQualityTier: "budget".
+- Anything else, or no signal at all → jobQualityTier: "standard".
+- Per-material override: when only SOME items are called out as premium (e.g. "high quality fittings and sink" in an otherwise standard reno), set qualityTier: "premium" on just those rows (taps, mixers, sinks, handles, hinges) and leave the rest standard. The rule of thumb: which line items would a customer notice if they were cheap? Those carry the called-out tier.
+- Cabinetry/joinery descriptors map to tier too: "custom timber cabinetry", "solid timber doors", "marble benchtop", "stone benchtop", "engineered stone" all imply premium for those rows even if the job header doesn't say "premium".
 
 CRITICAL — emit quantities in the SMALLEST INDIVIDUAL UNIT, not in guessed packs:
 - Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
@@ -407,6 +432,10 @@ function validateMaterials(materials: LLMMaterial[]): LLMMaterial[] {
     // Clamp and normalise values
     .map(m => ({
       ...m,
+      qualityTier:
+        m.qualityTier === 'budget' || m.qualityTier === 'standard' || m.qualityTier === 'premium'
+          ? m.qualityTier
+          : undefined,
       quantity: Math.min(Math.max(Math.round(m.quantity), 1), 999),
       sectionMultiplier: m.sectionMultiplier
         ? Math.min(Math.max(Math.round(m.sectionMultiplier), 1), 200)
@@ -468,10 +497,17 @@ function parseResponse(content: string): LLMResponse {
 
     const parsed = JSON.parse(jsonStr);
 
+    const jobQualityTier =
+      parsed.jobQualityTier === 'budget' ||
+      parsed.jobQualityTier === 'standard' ||
+      parsed.jobQualityTier === 'premium'
+        ? parsed.jobQualityTier
+        : undefined;
     return {
       materials: validateMaterials(parsed.materials || []),
       estimatedHours: Math.max(1, Math.min(parsed.estimatedHours || 8, 200)),
       jobSummary: parsed.jobSummary || '',
+      ...(jobQualityTier && { jobQualityTier }),
     };
   } catch (error) {
     throw new Error('Invalid response from LLM');
@@ -791,7 +827,7 @@ function getFallbackResponse(jobDescription: string): LLMResponse {
 /**
  * Convert LLM materials to app Material format
  */
-export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Partial<Material> & { sectionMultiplier?: number; sectionLaborHours?: number; savedRateName?: string })[] {
+export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Partial<Material> & { sectionMultiplier?: number; sectionLaborHours?: number; savedRateName?: string; qualityTier?: 'budget' | 'standard' | 'premium' })[] {
   return llmMaterials.map((m) => {
     const multiplier = m.sectionMultiplier || 1;
     let finalQuantity = Math.round(m.quantity * multiplier * 1000) / 1000;
@@ -828,6 +864,7 @@ export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Pa
       }),
       sectionMultiplier: multiplier,
       ...(m.sectionLaborHours && m.sectionLaborHours > 0 && { sectionLaborHours: m.sectionLaborHours }),
+      ...(m.qualityTier && { qualityTier: m.qualityTier }),
     };
   });
 }
