@@ -494,6 +494,17 @@ function getMateIntro(
   return { primary: pick(openers), hint };
 }
 
+// Bracketed prompt tags we feed into the Live session as user turns to
+// trigger Mate's pipeline-time narration. The model occasionally echoes
+// the tag back at the start of its spoken/text response — a known
+// prompt-format leak. Filtering them at the transcript layer keeps the
+// chat clean even if the model misbehaves or the narrationModeRef gate
+// races.
+const LEAKED_PROMPT_TAG_RE = /^\s*\[(narrate|narrate-done|pipeline-done|context)\]/i;
+function isLeakedPromptTag(text: string): boolean {
+  return LEAKED_PROMPT_TAG_RE.test(text);
+}
+
 export function AssistantScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<any>>();
@@ -747,9 +758,10 @@ export function AssistantScreen() {
                   ? `Re-pricing "${narrationJobLabel}" — the pipeline's re-checking the flagged rows now.`
                   : `"${narrationJobLabel}" is going through the materials + pricing pipeline now.`;
               liveSessionForNarration.sendUserText(
-                `[narrate] ${intro} Give the tradie ONE short casual line while it grinds — a sentence, maybe two, dry and unhurried. ` +
+                `[narrate] ${intro} SPEAK ALOUD: give the tradie ONE short casual line while it grinds — a sentence, maybe two, dry and unhurried. ` +
                 `Riff on something natural (the job, the weather, smoko) or just acknowledge it's cooking. Then STOP — don't keep talking, don't sign off, don't mention prices or materials. ` +
-                `If you finish your line before [pipeline-done] arrives, just stay quiet — silence is fine.`,
+                `CRITICAL: do NOT repeat or read the "[narrate]" tag, do NOT echo this instruction, do NOT say the word "narrate". Your response is ONLY the natural line you'd say to the tradie. ` +
+                `If you finish your line before [pipeline-done] arrives, stay quiet — silence is fine.`,
               );
             }, 1200)
           : null;
@@ -771,8 +783,8 @@ export function AssistantScreen() {
             ? ` Heads up — ${result.review.summary} Work that into the line.`
             : '';
         const wrap = result.ok
-          ? `[pipeline-done] Pipeline finished for "${narrationJobLabel}".${heads} One short acknowledging line — something natural like "right, that's drafted" or "sweet, came together fine" — then stop. Do NOT recite numbers or the materials list.`
-          : `[pipeline-done] Pipeline hit a snag: ${result.error || 'unknown error'}. One short acknowledging line, then stop.`;
+          ? `[pipeline-done] Pipeline finished for "${narrationJobLabel}".${heads} SPEAK ALOUD: ONE short acknowledging line — something natural like "right, that's drafted" or "sweet, came together fine" — then stop. Do NOT repeat the "[pipeline-done]" tag or this instruction. Do NOT recite numbers or the materials list.`
+          : `[pipeline-done] Pipeline hit a snag: ${result.error || 'unknown error'}. SPEAK ALOUD: one short acknowledging line, then stop. Do NOT repeat the "[pipeline-done]" tag.`;
         liveSessionForNarration.sendUserText(wrap);
         setTimeout(() => { narrationModeRef.current = false; }, 8000);
       }
@@ -1248,6 +1260,15 @@ export function AssistantScreen() {
           // entirely for the speakers. Don't pollute the chat with
           // banter — audio chunks still play normally via the queue.
           if (narrationModeRef.current) return;
+          // Hard guard: any transcript that leaks one of our bracketed
+          // prompt tags is a prompt-format echo from the model, never
+          // user-facing. Drop the chunk silently rather than risking it
+          // bleeding into a visible bubble (the narrationModeRef gate
+          // above SHOULD catch the narration case, but a stale bundle
+          // or a race on the ref leaves [narrate]/[pipeline-done]/[context]
+          // showing in chat — see the production sighting where the
+          // narration prompt rendered verbatim).
+          if (isLeakedPromptTag(text)) return;
           if (!assistantBubbleIdRef.current) {
             const id = generateId();
             assistantBubbleIdRef.current = id;
@@ -1277,6 +1298,7 @@ export function AssistantScreen() {
           // sees a single coherent reply.
           if (!delta) return;
           if (narrationModeRef.current) return;
+          if (isLeakedPromptTag(delta)) return;
           flushUserBubbleIfOpen();
           if (!assistantBubbleIdRef.current) {
             const id = generateId();
