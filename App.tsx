@@ -11,7 +11,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 // Suppress known harmless warning from react-native-draggable-flatlist + reanimated v3
 LogBox.ignoreLogs(['ref.measureLayout must be called with a ref to a native component']);
-import { NavigationContainer, DarkTheme, LinkingOptions, createNavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme, LinkingOptions, createNavigationContainerRef, getStateFromPath as defaultGetStateFromPath, getPathFromState as defaultGetPathFromState } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -73,6 +73,14 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
   }
 }
 
+// The web build is served under /app (Expo baseUrl), but React Navigation's
+// linking writes paths from the site root — e.g. navigating to Dashboard sets
+// the URL to /Main/Dashboard, escaping /app. On a hard refresh the static host
+// has no file there and serves the marketing 404. Namespace every web URL
+// under /app so a refresh lands on a /app/* path, which the website's 404 page
+// catches and bounces back into the app (see the SPA route restore above).
+// Native is unaffected — these overrides only apply on web.
+const WEB_BASE = '/app';
 const linking: LinkingOptions<any> = {
   prefixes: [Linking.createURL('/'), 'https://quotemateapp.au', 'quotemate://'],
   config: {
@@ -80,6 +88,21 @@ const linking: LinkingOptions<any> = {
       DiscoverSuppliers: 'join',
     },
   },
+  ...(Platform.OS === 'web'
+    ? {
+        getPathFromState(state, config) {
+          const path = defaultGetPathFromState(state, config);
+          // path always starts with '/'; '/' + base avoids a double slash.
+          return WEB_BASE + (path === '/' ? '/' : path);
+        },
+        getStateFromPath(path, config) {
+          const stripped = path.startsWith(WEB_BASE)
+            ? path.slice(WEB_BASE.length) || '/'
+            : path;
+          return defaultGetStateFromPath(stripped, config);
+        },
+      }
+    : {}),
 };
 
 // React Native Web renders TextInput as <input>, which inherits Chrome's
