@@ -124,7 +124,6 @@ function searchFavorites(
   suppliers: SupplierGroup[],
   priorityOrder?: string[]
 ): LocalSearchResult[] {
-  if (suppliers.length === 0) return [];
   const supplierNamesLower = new Set(suppliers.map(s => s.name.trim().toLowerCase()));
   // Prefer the user's BusinessSettings.supplierPriority order when supplied
   // — a saved drag-and-drop ranking. Fall back to the supplier's own
@@ -146,7 +145,15 @@ function searchFavorites(
 
   const results: LocalSearchResult[] = [];
   for (const fav of favorites) {
-    if (!favoriteBelongsToSupplier(fav, supplierNamesLower)) continue;
+    // A favourite is eligible if either:
+    //  (a) its `store` matches a registered SupplierGroup (the normal path), OR
+    //  (b) it's flagged as a personal supplier rate (isPersonalRate === true).
+    // The (b) clause is a safety net for older imports that wrote favourites
+    // without ever registering a SupplierGroup record — the user clearly
+    // intends these to be used for pricing, so don't silently drop them just
+    // because the group bookkeeping is missing.
+    const belongsToSupplier = favoriteBelongsToSupplier(fav, supplierNamesLower);
+    if (!belongsToSupplier && fav.isPersonalRate !== true) continue;
     const haystack = [
       fav.productName,
       ...(fav.keywords ?? []),

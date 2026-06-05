@@ -245,21 +245,32 @@ export async function persistImportToSupplierBook(args: {
       ? await bulkSaveFavorites(toSave)
       : { created: 0, updated: 0, unchanged: 0 };
 
+  // Always ensure a SupplierGroup record exists for `supplierName` after a
+  // bulk import — even if no contact info was supplied. The pricing pipeline's
+  // local pass (searchLocalSources → searchFavorites) filters favourites by
+  // matching their `store` tag against the user's registered SupplierGroup
+  // names. If we skip group creation here, the imported rates get saved with
+  // store="<supplierName>" but are invisible to the pricing pipeline, so it
+  // silently falls through to Bunnings retail prices — which is exactly the
+  // "didn't use my supplier book" bug tradies hit after a price-list import.
+  //
+  // Contact-field merging is layered on top when a contact was provided.
   let contactFieldsApplied = 0;
-  if (contact && supplierName) {
+  if (supplierName && supplierName.trim()) {
     try {
       const existing = await getSupplierGroupByName(supplierName);
+
       const pickIfMissing = (current: string | undefined, incoming: string | undefined) => {
         if (current && current.trim()) return { value: current, applied: false };
         if (incoming && incoming.trim()) return { value: incoming.trim(), applied: true };
         return { value: current, applied: false };
       };
 
-      const contactPerson = pickIfMissing(existing?.contactPerson, contact.contactPerson);
-      const phone = pickIfMissing(existing?.phone, contact.phone);
-      const email = pickIfMissing(existing?.email, contact.email);
-      const address = pickIfMissing(existing?.address, contact.address);
-      const website = pickIfMissing(existing?.searchUrl, contact.website);
+      const contactPerson = pickIfMissing(existing?.contactPerson, contact?.contactPerson);
+      const phone = pickIfMissing(existing?.phone, contact?.phone);
+      const email = pickIfMissing(existing?.email, contact?.email);
+      const address = pickIfMissing(existing?.address, contact?.address);
+      const website = pickIfMissing(existing?.searchUrl, contact?.website);
 
       contactFieldsApplied =
         (contactPerson.applied ? 1 : 0) +
@@ -268,7 +279,12 @@ export async function persistImportToSupplierBook(args: {
         (address.applied ? 1 : 0) +
         (website.applied ? 1 : 0);
 
-      if (contactFieldsApplied > 0) {
+      // Write when:
+      //  - the group doesn't exist yet (we need to create it so the local
+      //    pricing pass can find the imported favourites), OR
+      //  - the group exists and we have new contact fields to merge in.
+      const shouldWrite = !existing || contactFieldsApplied > 0;
+      if (shouldWrite) {
         const now = new Date().toISOString();
         const record: SupplierGroup = existing
           ? {
