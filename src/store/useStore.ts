@@ -40,6 +40,10 @@ import { TRIAL_MS } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
 import { auth } from '../config/firebase';
+import { searchLocalSources } from '../services/localMaterialSearch';
+import { loadGroups as loadSupplierGroups } from '../services/supplierGroupService';
+import { applyPackAwarePricing } from '../utils/packAwarePricing';
+import { roundToTwoDecimals } from '../utils/documentCalculator';
 
 /**
  * A user-visible record of the last sync failure. Populated by the saveDraft /
@@ -2957,21 +2961,60 @@ export const useStore = create<AppState>((set, get) => ({
         }
 
         case 'propose_add_line_item': {
-          // We don't price line items here — stamp a placeholder material with
-          // the searchTerm + qty + unit and let MaterialsList's pricing pass
-          // resolve the price when the tradie next opens the quote. The
-          // tradie can also edit the placeholder before pricing runs.
+          // Try the user's supplier book FIRST — if the line item the
+          // assistant is adding matches a saved supplier rate, price it
+          // inline so the tradie doesn't have to wait for the pricing
+          // pipeline (which was the previous behaviour and the source of
+          // the "is it gone? … still cooking" UX). Pack-aware quantity is
+          // computed via applyPackAwarePricing so a 32 m² ceiling pulls
+          // ceil(32/8.08)=4 packs of Pink Batts at the saved rate, not 32
+          // packs at the saved per-pack price.
+          //
+          // Falls back to a $0 stub when nothing in the supplier book
+          // matches — the materials list pricing pass will resolve it on
+          // next open (the old behaviour, preserved as the safety net).
+          const baseUnit = normalizeMaterialUnit(proposal.unit);
           const stub: Material = {
             id: generateId(),
             name: proposal.searchTerm,
             searchTerm: proposal.searchTerm,
             quantity: proposal.qty,
-            unit: normalizeMaterialUnit(proposal.unit),
+            unit: baseUnit,
             price: 0,
             totalPrice: 0,
             manualPriceOverride: false,
             ...(proposal.section ? { section: proposal.section } : {}),
           };
+
+          // Local supplier-book lookup. Best-effort — any failure falls
+          // through to the $0 stub so we never block adding the row.
+          try {
+            const supplierList = await loadSupplierGroups();
+            const priorityOrder = get().businessSettings?.supplierPriority ?? [];
+            const hits = await searchLocalSources(
+              proposal.searchTerm,
+              supplierList,
+              { priorityOrder },
+            );
+            const top = hits[0];
+            if (top && typeof top.price === 'number' && top.price > 0) {
+              stub.name = top.productName || stub.name;
+              stub.price = top.price;
+              stub.unit = (top.unit as Material['unit']) || stub.unit;
+              stub.pricingSource = 'manual';
+              stub.priceConfidence = 'high';
+              stub.manualPriceOverride = false;
+              if (top.productUrl) stub.productUrl = top.productUrl;
+              if (top.imageUrl) stub.imageUrl = top.imageUrl;
+              // applyPackAwarePricing reads pack/coverage from the
+              // saved-rate product name and recomputes quantity in packs
+              // (e.g. 32 m² ÷ 8.08 m² per pack → 4 packs).
+              applyPackAwarePricing(stub, { productName: top.productName });
+              stub.totalPrice = roundToTwoDecimals(stub.price * stub.quantity);
+            }
+          } catch {
+            // best-effort — keep the $0 stub.
+          }
 
           const target = await resolveDocument(proposal.quoteId);
           if (target) {

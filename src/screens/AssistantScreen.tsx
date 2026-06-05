@@ -40,6 +40,17 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 // opens before the first one fully tears down, we don't end up stacking
 // untracked locks (expo-keep-awake refcounts per-tag).
 const VOICE_KEEP_AWAKE_TAG = 'mate-voice-session';
+// Auto-close a sticky voice session after this many ms of true silence —
+// no speech detected, Mate not speaking, no narration, no tool/turn in
+// flight. Saves a continuous drip of input-audio tokens (and the WS
+// itself) when the tradie taps the mic, walks off, and forgets it's on.
+// 90 s feels long enough that a thinking pause doesn't kill the session
+// mid-conversation, but short enough that a pocketed phone doesn't burn
+// dollars. The watchdog only fires while voiceState === 'listening' and
+// no pipeline activity is happening, so a long tool call / narration
+// won't trip it.
+const VOICE_IDLE_TIMEOUT_MS = 90_000;
+const VOICE_IDLE_CHECK_MS = 5_000;
 import { generateId } from '../utils/generateId';
 import {
   ChatMessage,
@@ -523,6 +534,11 @@ export function AssistantScreen() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  // Ref mirror of voiceState so long-lived closures (the sticky idle
+  // watchdog interval) read the current value instead of the one
+  // captured when the interval was installed.
+  const voiceStateRef = useRef<VoiceState>('idle');
+  useEffect(() => { voiceStateRef.current = voiceState; }, [voiceState]);
   // Mirror state of voiceModeRef — drives the send-button icon swap and
   // the status-row copy. Refs alone don't trigger re-renders.
   const [voiceMode, setVoiceMode] = useState<'sticky' | 'ptt' | null>(null);
@@ -542,6 +558,15 @@ export function AssistantScreen() {
   // 'ptt'    = press-and-hold the send button (auto-closes after one reply,
   //            once the audio queue has drained so Mate isn't cut off).
   const voiceModeRef = useRef<'sticky' | 'ptt' | null>(null);
+  // Wall-clock ms of the last sign that the tradie (or Mate) is still in
+  // the conversation: speech detected by server VAD, a model reply
+  // streaming, a turn completing, narration running, etc. The sticky
+  // idle watchdog (see openVoiceMode) compares against this to decide
+  // when it's safe to auto-close.
+  const lastVoiceActivityRef = useRef<number>(0);
+  // setInterval handle for the sticky idle watchdog. Only ever set while
+  // a sticky session is open; cleared in stopVoiceSession.
+  const idleWatchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Streaming-bubble targets — the user bubble being transcribed in real
   // time, and the assistant bubble currently being spoken/typed back.
   const userBubbleIdRef = useRef<string | null>(null);
@@ -1124,6 +1149,13 @@ export function AssistantScreen() {
     [appendMessage, updateMessage, conversation, currentConversationId, input, sending, startConversation, showQuoteInChat],
   );
 
+  // Bump the idle watchdog. Called from every signal that means the
+  // session is still in use — server-side VAD picked up speech, Mate is
+  // replying, a tool just ran, etc. Cheap, fires often.
+  const touchVoiceActivity = useCallback(() => {
+    lastVoiceActivityRef.current = Date.now();
+  }, []);
+
   const stopVoiceSession = useCallback(async () => {
     const mic = micRef.current;
     const queue = audioQueueRef.current;
@@ -1134,6 +1166,11 @@ export function AssistantScreen() {
     voiceModeRef.current = null;
     setVoiceMode(null);
     matePlayingRef.current = false;
+    // Kill the idle watchdog so it can't fire after teardown.
+    if (idleWatchdogRef.current) {
+      clearInterval(idleWatchdogRef.current);
+      idleWatchdogRef.current = null;
+    }
     // Release the wake lock now that the session is torn down. Fire-and-
     // forget — if it fails (or the tag was never held, e.g. open errored
     // before activate) the OS just keeps the default sleep behaviour.
@@ -1233,6 +1270,8 @@ export function AssistantScreen() {
       session = await openVoiceSession(seedHistory, {
         onInputTranscription: (text, finished) => {
           if (!text) return;
+          // Real speech detected by server VAD — keep the watchdog at bay.
+          touchVoiceActivity();
           if (!userBubbleIdRef.current) {
             const id = generateId();
             userBubbleIdRef.current = id;
@@ -1255,6 +1294,7 @@ export function AssistantScreen() {
         },
         onOutputTranscription: (text, finished) => {
           if (!text) return;
+          touchVoiceActivity();
           flushUserBubbleIfOpen();
           // During the post-Apply narration window, Mate is yarning
           // entirely for the speakers. Don't pollute the chat with
@@ -1297,6 +1337,7 @@ export function AssistantScreen() {
           // the same bubble used for the output transcription so the user
           // sees a single coherent reply.
           if (!delta) return;
+          touchVoiceActivity();
           if (narrationModeRef.current) return;
           if (isLeakedPromptTag(delta)) return;
           flushUserBubbleIfOpen();
@@ -1319,6 +1360,7 @@ export function AssistantScreen() {
           }
         },
         onAudioChunk: (b64) => {
+          touchVoiceActivity();
           flushUserBubbleIfOpen();
           audioQueueRef.current?.enqueuePcmChunk(b64);
         },
@@ -1387,6 +1429,10 @@ export function AssistantScreen() {
             : { ok: false, error: "Couldn't find that quote to put on screen." };
         },
         onTurnComplete: () => {
+          // Mate just finished replying. Reset the idle clock so the
+          // tradie gets a full timeout window to respond before we
+          // auto-close.
+          touchVoiceActivity();
           assistantBubbleIdRef.current = null;
           assistantBubbleTextRef.current = '';
           turnProposals = [];
@@ -1451,7 +1497,47 @@ export function AssistantScreen() {
       audioQueueRef.current = createAudioQueue();
       audioQueueRef.current.setOnActiveChange((active) => {
         matePlayingRef.current = active;
+        // Audio playback is itself activity — don't time out mid-reply.
+        if (active) touchVoiceActivity();
       });
+
+      // Sticky-only idle watchdog. PTT auto-closes on turnComplete already,
+      // so it doesn't need this. We only ever fire the auto-close when the
+      // session is parked at 'listening' with nothing in flight — every
+      // other state is the pipeline doing real work and must be left alone.
+      touchVoiceActivity();
+      if (mode === 'sticky') {
+        idleWatchdogRef.current = setInterval(() => {
+          // Guard: pipeline activity — any of these and we're still working.
+          if (voiceModeRef.current !== 'sticky') return;
+          if (!voiceSessionRef.current) return;
+          if (matePlayingRef.current) return;          // Mate is speaking
+          if (narrationModeRef.current) return;        // post-Apply narration
+          if (userBubbleIdRef.current) return;         // tradie mid-utterance
+          if (assistantBubbleIdRef.current) return;    // model still streaming
+          if (pendingVoiceActionRef.current) return;   // voice card action queued
+          // Only auto-close while we're actually parked waiting for the
+          // tradie. 'connecting' / 'thinking' mean a tool call or initial
+          // handshake is still in flight — don't yank the rug.
+          if (voiceStateRef.current !== 'listening') return;
+          const idleFor = Date.now() - lastVoiceActivityRef.current;
+          if (idleFor < VOICE_IDLE_TIMEOUT_MS) return;
+          // Quiet auto-close. Drop a short note in the chat so the tradie
+          // sees why the mic stopped pulsing next time they look.
+          // eslint-disable-next-line no-console
+          console.log('[Mate voice] idle auto-close after', Math.round(idleFor / 1000), 's');
+          const cid = convoId;
+          if (cid) {
+            appendMessage(cid, {
+              id: generateId(),
+              role: 'assistant',
+              text: "Quiet on the line — I've stepped off the mic. Tap it again when you want to keep yarning.",
+              createdAt: new Date().toISOString(),
+            });
+          }
+          void stopVoiceSession();
+        }, VOICE_IDLE_CHECK_MS);
+      }
 
       // Fresh chat + sticky (big record button) mode: get Mate to kick things
       // off with a short, slightly cheeky Aussie greeting so the tradie hears
