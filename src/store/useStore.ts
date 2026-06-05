@@ -3005,6 +3005,49 @@ export const useStore = create<AppState>((set, get) => ({
                 "Can't delete a paid record — the books need to stay intact. Archive it instead.",
             };
           }
+          // Capture the parent job BEFORE we delete the doc — once the
+          // document is gone we can't read its jobId back. We use this to
+          // cascade-delete the parent Job when it has no other documents
+          // attached. Without this, the assistant flow leaves an orphan
+          // "Draft" job in the jobs list even though the user asked to
+          // delete the quote (matching the manual ViewJobScreen flow,
+          // which already cascades via cascadeDeleteJob).
+          const parentJobId =
+            target?.jobId ||
+            get().quotes.find((q) => q.id === proposal.quoteId)?.jobId ||
+            get().invoices.find((i) => i.id === proposal.quoteId)?.jobId;
+
+          const cascadeParentJobIfOrphaned = async (deletedDocId: string) => {
+            if (!parentJobId) return;
+            try {
+              const job = useJobStore.getState().getJobById(parentJobId);
+              if (!job) return;
+              // Count remaining docs across all sources, excluding the one
+              // we just deleted. Includes the unified documents array, the
+              // legacy quotes/invoices arrays, and the job's own
+              // documentIds list — a doc may live in any subset depending
+              // on how fresh it is.
+              const remaining = new Set<string>();
+              get().documents.forEach((d) => {
+                if (d.id !== deletedDocId && d.jobId === parentJobId) remaining.add(d.id);
+              });
+              get().quotes.forEach((q) => {
+                if (q.id !== deletedDocId && q.jobId === parentJobId) remaining.add(q.id);
+              });
+              get().invoices.forEach((i) => {
+                if (i.id !== deletedDocId && i.jobId === parentJobId) remaining.add(i.id);
+              });
+              (job.documentIds || []).forEach((id) => {
+                if (id !== deletedDocId) remaining.add(id);
+              });
+              if (remaining.size === 0) {
+                await useJobStore.getState().deleteJob(parentJobId);
+              }
+            } catch {
+              // best-effort — the doc was deleted, that's the main ask.
+            }
+          };
+
           if (target) {
             // Route via the appropriate store action so the matching local
             // array (quotes vs invoices) and Firestore collection are both
@@ -3023,6 +3066,7 @@ export const useStore = create<AppState>((set, get) => ({
             set((state) => ({
               documents: state.documents.filter((d) => d.id !== target.id),
             }));
+            await cascadeParentJobIfOrphaned(target.id);
             return { ok: true };
           }
           // Legacy fallbacks — the doc lives only in the old quotes/invoices
@@ -3030,11 +3074,13 @@ export const useStore = create<AppState>((set, get) => ({
           const legacyQuote = get().quotes.find((q) => q.id === proposal.quoteId);
           if (legacyQuote) {
             await get().deleteQuote(legacyQuote.id);
+            await cascadeParentJobIfOrphaned(legacyQuote.id);
             return { ok: true };
           }
           const legacyInvoice = get().invoices.find((i) => i.id === proposal.quoteId);
           if (legacyInvoice) {
             await get().deleteInvoice(legacyInvoice.id);
+            await cascadeParentJobIfOrphaned(legacyInvoice.id);
             return { ok: true };
           }
           return { ok: false, error: 'Quote not found — it may have already been deleted.' };
