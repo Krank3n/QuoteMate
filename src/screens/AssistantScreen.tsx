@@ -698,19 +698,22 @@ export function AssistantScreen() {
         });
       }
 
-      // Silent pipeline. Earlier design had Mate yarn audibly during the
-      // 15–40s pipeline window to fill dead air — in practice the rambling
-      // landed worse than silence, especially when the tradie just wanted
-      // confirmation. So: we stay quiet during the pipeline (no [narrate]
-      // prompt), and only fire a single short confirmation after it
-      // finishes. narrationModeRef still gets flipped so visible text
-      // bubbles are suppressed during the silent window — stops Mate from
-      // reacting to ambient room noise mid-pipeline.
+      // Pipeline-first narration. The earlier flow fired the [narrate]
+      // prompt BEFORE awaiting the pipeline, which meant Mate's audio
+      // chunks started before the pipeline had even kicked off — the
+      // tradie heard yarn first, then the working card appeared. Worse,
+      // the prompt asked Mate to yarn for the WHOLE 20–40s window which
+      // was way too much. New contract:
+      //   1. Kick off the pipeline first.
+      //   2. After a short beat (so the working card is on screen and
+      //      the pipeline is actually grinding), send a SHORT narration
+      //      prompt — a sentence or two, not a monologue.
+      //   3. When the pipeline returns, fire [pipeline-done] for one
+      //      short confirmation line.
       const liveSessionForNarration = voiceSessionRef.current;
       const narrating =
         (proposal.type === 'propose_draft_quote' || proposal.type === 'propose_reprice') &&
         !!liveSessionForNarration?.isOpen();
-      // Job label for the post-pipeline confirmation line.
       const narrationJobLabel =
         proposal.type === 'propose_draft_quote'
           ? (proposal as Extract<Proposal, { type: 'propose_draft_quote' }>).jobName
@@ -719,9 +722,8 @@ export function AssistantScreen() {
             : '';
       if (narrating && liveSessionForNarration) {
         narrationModeRef.current = true;
-        // Cut anything currently playing/queued so leftover audio from the
-        // pre-Apply confirmation reply doesn't keep talking over the silent
-        // pipeline window.
+        // Cut leftover audio from the pre-Apply confirmation reply so the
+        // mid-pipeline narration doesn't start over the top of it.
         try { audioQueueRef.current?.stop?.(); } catch { /* noop */ }
         audioQueueRef.current = createAudioQueue();
         audioQueueRef.current.setOnActiveChange((active) => {
@@ -729,16 +731,41 @@ export function AssistantScreen() {
         });
       }
 
+      // Schedule the mid-pipeline narration. ~1.2s after Apply gives the
+      // pipeline time to render its first 'Getting ready…' progress event
+      // so the audio lands while the working card is visibly grinding,
+      // not before it appears. Cancellable so a fast pipeline (cached
+      // pricing) doesn't yarn AFTER the result has landed.
+      let narrationFired = false;
+      const narrationTimer =
+        narrating && liveSessionForNarration
+          ? setTimeout(() => {
+              if (!liveSessionForNarration.isOpen()) return;
+              narrationFired = true;
+              const intro =
+                proposal.type === 'propose_reprice'
+                  ? `Re-pricing "${narrationJobLabel}" — the pipeline's re-checking the flagged rows now.`
+                  : `"${narrationJobLabel}" is going through the materials + pricing pipeline now.`;
+              liveSessionForNarration.sendUserText(
+                `[narrate] ${intro} Give the tradie ONE short casual line while it grinds — a sentence, maybe two, dry and unhurried. ` +
+                `Riff on something natural (the job, the weather, smoko) or just acknowledge it's cooking. Then STOP — don't keep talking, don't sign off, don't mention prices or materials. ` +
+                `If you finish your line before [pipeline-done] arrives, just stay quiet — silence is fine.`,
+              );
+            }, 1200)
+          : null;
+
       const result = await applyProposal(proposal, (status) => {
         if (!workingMessageId) return;
         updateMessage(conversation.id, workingMessageId, { working: status });
       });
 
+      // If the pipeline beat the narration timer (cached / fast path),
+      // cancel it so we don't yarn AFTER the result.
+      if (narrationTimer && !narrationFired) {
+        clearTimeout(narrationTimer);
+      }
+
       if (narrating && liveSessionForNarration?.isOpen()) {
-        // Single short confirmation line after the pipeline finishes — the
-        // only time Mate speaks for this Apply. When the pricing pass
-        // flagged rows, hand Mate the summary so it can mention them in
-        // the same line instead of forcing a follow-up turn.
         const heads =
           result.ok && result.review && result.review.issues.length > 0
             ? ` Heads up — ${result.review.summary} Work that into the line.`
@@ -747,10 +774,6 @@ export function AssistantScreen() {
           ? `[pipeline-done] Pipeline finished for "${narrationJobLabel}".${heads} One short acknowledging line — something natural like "right, that's drafted" or "sweet, came together fine" — then stop. Do NOT recite numbers or the materials list.`
           : `[pipeline-done] Pipeline hit a snag: ${result.error || 'unknown error'}. One short acknowledging line, then stop.`;
         liveSessionForNarration.sendUserText(wrap);
-        // Give the confirmation audio room to play before re-enabling
-        // visible text bubbles. If Mate is still talking when this fires,
-        // the first visible bubble starts mid-sentence — annoying — so a
-        // generous tail is worth it.
         setTimeout(() => { narrationModeRef.current = false; }, 8000);
       }
 
