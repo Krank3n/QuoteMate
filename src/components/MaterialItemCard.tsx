@@ -97,11 +97,25 @@ function MaterialItemCardImpl({
   const isEstimate =
     material.pricingSource === 'ai' || material.priceConfidence === 'low';
 
+  // Saved supplier-book rates are priced from the user's own book (pricingSource
+  // 'manual') and carry the supplier name in favoriteProduct.store. Surface it
+  // like the Bunnings/Reece badges. 'manual' is the placeholder store used when
+  // no supplier was entered, so skip it. Long free-text names get ellipsised.
+  const savedStoreRaw =
+    material.pricingSource === 'manual' ? material.favoriteProduct?.store?.trim() : undefined;
+  const savedStore =
+    savedStoreRaw && savedStoreRaw.toLowerCase() !== 'manual' ? savedStoreRaw : undefined;
+
   const supplierLabel = material.reeceItemNumber
     ? { name: 'Reece', color: '#1f4e8e' }
     : material.bunningsItemNumber
       ? { name: 'Bunnings', color: '#0d7c3f' }
-      : null;
+      : savedStore
+        ? {
+            name: savedStore.length > 18 ? `${savedStore.slice(0, 17)}…` : savedStore,
+            color: colors.primary,
+          }
+        : null;
 
   const qty = localQuantity ?? material.quantity;
 

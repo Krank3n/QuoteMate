@@ -1,227 +1,51 @@
 /**
- * Local Material Search
+ * Local Material Search — loader orchestration.
  *
- * Searches the user's own data — saved section templates and supplier-tagged
- * favorites — BEFORE hitting any remote source (Bunnings scraper, web scraping,
- * AI estimation). The user's own prices are always more relevant than retail.
+ * The pure matcher (scoring, ranking, classification) lives in
+ * `localMaterialMatcher.ts` and is unit-tested in isolation. This file is
+ * the only side-effect-y piece: it reads the user's saved templates and
+ * supplier favourites from local storage, then delegates ranking to the
+ * matcher.
  *
- * Result rows are shaped to plug straight into AddMaterialScreen's existing
- * `searchResults` list, with two extra fields (`isLocalSource`, `localSource`,
- * `localSourceLabel`) so the UI can render a provenance badge and so
- * `handleSelectProduct` can route them to the right Material constructor.
+ * Designed to be called BEFORE any remote price source. Empty result is
+ * normal — caller should fall through to scraper/web-search.
  */
 
 import { loadTemplatesFromLocal } from './sectionTemplateService';
 import { loadFavoritesFromLocal } from './materialFavorites';
-import { FavoriteProductMapping, SectionTemplate, SupplierGroup } from '../types';
+import type { SupplierGroup } from '../types';
+import {
+  searchTemplates,
+  searchFavorites,
+  type LocalSearchResult,
+} from './localMaterialMatcher';
 
-export type LocalSourceKind = 'template' | 'favorite';
-
-export interface LocalSearchResult {
-  productName: string;
-  description: string;
-  itemNumber: string;
-  brand: string;
-  price: number;
-  productUrl?: string;
-  imageUrl?: string;
-  store: string;
-  unit?: string;
-  // Provenance — consumed by AddMaterialScreen badge rendering and
-  // handleSelectProduct's Material construction.
-  isLocalSource: true;
-  isScraperResult: false;
-  isAiEstimate: false;
-  localSource: LocalSourceKind;
-  localSourceLabel: string;   // "From template: Standard Bay" / "From Joe's Fencing"
-  // Sort hint — lower wins. Templates use 0; favorites inherit their supplier's
-  // sortOrder so the user's preferred supplier rises to the top.
-  _sortHint: number;
-}
-
-/** Lowercase + collapse whitespace for fuzzy comparison. */
-function norm(s: string): string {
-  return s.toLowerCase().trim().replace(/\s+/g, ' ');
-}
-
-/** True if `query` substring-matches `text` in either direction (handles plurals loosely). */
-function looseMatch(query: string, text: string): boolean {
-  const q = norm(query);
-  const t = norm(text);
-  if (!q || !t) return false;
-  if (t.includes(q) || q.includes(t)) return true;
-  // Try plural/singular swap on the query
-  if (q.endsWith('s') && t.includes(q.slice(0, -1))) return true;
-  if (!q.endsWith('s') && t.includes(q + 's')) return true;
-  // Token-level: every query word appears somewhere in text
-  const qWords = q.split(' ').filter(w => w.length > 1);
-  if (qWords.length > 1 && qWords.every(w => t.includes(w))) return true;
-  return false;
-}
-
-/**
- * Match the user's `store` favorite tag against their configured supplier
- * groups. Bunnings imports tag favorites with `'bunnings.com.au'`, so we
- * accept either an exact-name match or a substring on the supplier name.
- */
-function favoriteBelongsToSupplier(
-  fav: FavoriteProductMapping,
-  supplierNamesLower: Set<string>
-): boolean {
-  const store = fav.store?.trim().toLowerCase();
-  if (!store) return false;
-  if (supplierNamesLower.has(store)) return true;
-  // Loose contains: "bunnings.com.au" matches a "Bunnings" supplier
-  for (const name of supplierNamesLower) {
-    if (store.includes(name) || name.includes(store)) return true;
-  }
-  return false;
-}
-
-function searchTemplates(
-  query: string,
-  templates: SectionTemplate[]
-): LocalSearchResult[] {
-  const results: LocalSearchResult[] = [];
-  for (const tpl of templates) {
-    const templateMatches =
-      looseMatch(query, tpl.name) ||
-      (tpl.keywords?.some(kw => looseMatch(query, kw)) ?? false);
-
-    for (const mat of tpl.materials) {
-      const matMatches = looseMatch(query, mat.name);
-      // Surface a material if either:
-      //  - the template itself matched the query (e.g. "fence bay" → all bay parts), OR
-      //  - the individual material name matched (e.g. "post" → just the posts)
-      if (!templateMatches && !matMatches) continue;
-      if (typeof mat.price !== 'number' || mat.price <= 0) continue;
-
-      results.push({
-        productName: mat.name,
-        description: `From template: ${tpl.name}`,
-        itemNumber: '',
-        brand: '',
-        price: mat.price,
-        productUrl: undefined,
-        imageUrl: undefined,
-        store: tpl.name,
-        unit: mat.unit,
-        isLocalSource: true,
-        isScraperResult: false,
-        isAiEstimate: false,
-        localSource: 'template',
-        localSourceLabel: `From template: ${tpl.name}`,
-        _sortHint: 0,
-      });
-    }
-  }
-  return results;
-}
-
-function searchFavorites(
-  query: string,
-  favorites: FavoriteProductMapping[],
-  suppliers: SupplierGroup[],
-  priorityOrder?: string[]
-): LocalSearchResult[] {
-  const supplierNamesLower = new Set(suppliers.map(s => s.name.trim().toLowerCase()));
-  // Prefer the user's BusinessSettings.supplierPriority order when supplied
-  // — a saved drag-and-drop ranking. Fall back to the supplier's own
-  // sortOrder when a supplier isn't in the priority list (newly-added).
-  // Without this the local pass ignored supplierPriority entirely, so a
-  // material that hit favorites under multiple suppliers would rank by
-  // each supplier's stale sortOrder rather than what the tradie set.
-  const priorityIndexById = new Map<string, number>();
-  (priorityOrder ?? []).forEach((id, idx) => {
-    if (id) priorityIndexById.set(id, idx);
-  });
-  const sortOrderByName = new Map(
-    suppliers.map(s => {
-      const priIdx = priorityIndexById.get(s.id);
-      const order = priIdx !== undefined ? priIdx : (s.sortOrder ?? 999);
-      return [s.name.trim().toLowerCase(), order];
-    })
-  );
-
-  const results: LocalSearchResult[] = [];
-  for (const fav of favorites) {
-    // A favourite is eligible if either:
-    //  (a) its `store` matches a registered SupplierGroup (the normal path), OR
-    //  (b) it's flagged as a personal supplier rate (isPersonalRate === true).
-    // The (b) clause is a safety net for older imports that wrote favourites
-    // without ever registering a SupplierGroup record — the user clearly
-    // intends these to be used for pricing, so don't silently drop them just
-    // because the group bookkeeping is missing.
-    const belongsToSupplier = favoriteBelongsToSupplier(fav, supplierNamesLower);
-    if (!belongsToSupplier && fav.isPersonalRate !== true) continue;
-    const haystack = [
-      fav.productName,
-      ...(fav.keywords ?? []),
-      fav.notes ?? '',
-    ].join(' ');
-    if (!looseMatch(query, haystack)) continue;
-    if (typeof fav.price !== 'number' || fav.price <= 0) continue;
-
-    // Resolve sort hint from the matched supplier (favor exact, then loose)
-    const storeLower = fav.store?.trim().toLowerCase() ?? '';
-    let sortHint = sortOrderByName.get(storeLower);
-    if (sortHint === undefined) {
-      for (const [name, order] of sortOrderByName.entries()) {
-        if (storeLower.includes(name) || name.includes(storeLower)) {
-          sortHint = order;
-          break;
-        }
-      }
-    }
-    // Templates rank at 0; favorites start at 1 + supplier sortOrder so a
-    // matched template (almost always a closer fit) wins ties.
-    const rankedHint = 1 + (sortHint ?? 999);
-
-    results.push({
-      productName: fav.productName,
-      description: `From ${fav.store}`,
-      itemNumber: fav.itemNumber ?? '',
-      brand: '',
-      price: fav.price,
-      productUrl: fav.productUrl,
-      imageUrl: fav.imageUrl,
-      store: fav.store,
-      unit: fav.unit,
-      isLocalSource: true,
-      isScraperResult: false,
-      isAiEstimate: false,
-      localSource: 'favorite',
-      localSourceLabel: `From ${fav.store}`,
-      _sortHint: rankedHint,
-    });
-  }
-  return results;
-}
+// Re-export the matcher's surface so existing callers don't need to update
+// their imports.
+export {
+  scoreMatch,
+  looseMatch,
+  classifyTokens,
+  searchTemplates,
+  searchFavorites,
+  LOCAL_MATCH_THRESHOLD,
+} from './localMaterialMatcher';
+export type { LocalSearchResult, LocalSourceKind, ClassifiedToken } from './localMaterialMatcher';
 
 export interface LocalSearchOptions {
-  /**
-   * Include section-template matches alongside favorites. Defaults to true.
-   * Callers that have explicitly scoped to a single supplier (e.g. the
-   * supplier chip in AddMaterialScreen) usually want this off — the user
-   * is asking for "prices from this supplier", not template bundles.
-   */
+  /** Include section-template matches alongside favorites. Defaults to true. */
   includeTemplates?: boolean;
-  /**
-   * `BusinessSettings.supplierPriority` — the drag-and-drop ranked list of
-   * supplier ids (built-in 'bunnings' / 'reece' or local SupplierGroup.id).
-   * When supplied, favorite hits sort by this order instead of the
-   * supplier's own sortOrder so the tradie's chosen priority is honoured.
-   */
+  /** `BusinessSettings.supplierPriority` — the drag-and-drop ranked list. */
   priorityOrder?: string[];
 }
 
 /**
  * Search the user's local sources (templates + supplier-scoped favorites) for
- * materials matching `query`. Returns ranked results — templates first, then
- * favorites in supplier-`sortOrder` order.
- *
- * Designed to be called BEFORE any remote price source. Empty result is
- * normal — caller should fall through to scraper/web-search.
+ * materials matching `query`. Returns hits ranked by:
+ *   1. Templates above favourites by default (templates pack accurate
+ *      per-section materials so they're a tighter fit).
+ *   2. Within favourites, supplier priority order wins.
+ *   3. Match score breaks ties within the same supplier.
  */
 export async function searchLocalSources(
   query: string,
