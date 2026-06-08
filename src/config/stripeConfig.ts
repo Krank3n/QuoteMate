@@ -33,10 +33,10 @@ const LIVE_CONFIG = {
   prices: {
     monthly: process.env.STRIPE_LIVE_MONTHLY_PRICE ||
       Constants.expoConfig?.extra?.stripeLiveMonthlyPrice ||
-      'price_1SKDMw0jHreJeRX32LBk9h9D',
+      'price_1TgChZ0jHreJeRX3M5Q524ka',
     yearly: process.env.STRIPE_LIVE_YEARLY_PRICE ||
       Constants.expoConfig?.extra?.stripeLiveYearlyPrice ||
-      'price_1SKO6u0jHreJeRX3J0Czmd77',
+      'price_1TgCha0jHreJeRX3YCBAoXNK',
   },
 };
 
