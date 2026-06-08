@@ -8,7 +8,7 @@
  * Two paths:
  *   • Send instantly (free) — connect Square. 1.7% platform fee added on
  *     top of Square's standard card processing rate.
- *   • Upgrade to Pro — $29/mo. Send unlimited, any payment method.
+ *   • Upgrade to Pro — $49/mo. Send unlimited, any payment method.
  */
 
 import React from 'react';
@@ -73,7 +73,7 @@ export function SendGateModal({
               </View>
               <View style={styles.optionHeaderText}>
                 <Text style={styles.optionTitle}>Upgrade to Pro</Text>
-                <Text style={styles.optionBadge}>$29/mo</Text>
+                <Text style={styles.optionBadge}>$49/mo</Text>
               </View>
             </View>
             <Text style={styles.optionBody}>

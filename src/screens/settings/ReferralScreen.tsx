@@ -243,8 +243,8 @@ export function ReferralScreen() {
   );
 
   // ── Earnings projection data ──
-  // Shows what they COULD earn based on commission rate @ $29/mo avg
-  const avgCommissionPerUser = Math.round(2900 * 0.85 * (referralInfo?.commissionRate || 0.50)); // cents (net after ~15% avg platform fee)
+  // Shows what they COULD earn based on commission rate @ $49/mo avg
+  const avgCommissionPerUser = Math.round(4900 * 0.85 * (referralInfo?.commissionRate || 0.50)); // cents (net after ~15% avg platform fee)
   const projectionData = [
     { users: 5, label: '5' },
     { users: 10, label: '10' },

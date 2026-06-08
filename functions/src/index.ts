@@ -159,11 +159,11 @@ const PENDING_AFFILIATE_EMAILS = (process.env.PENDING_AFFILIATE_EMAILS || '').sp
 // Pricing in cents (AUD)
 const PRODUCT_PRICES: Record<string, number> = {
   // iOS product IDs
-  quotemate_pro_monthly: 2900,
-  quotemate_pro_yearly: 19900,
+  quotemate_pro_monthly: 4900,
+  quotemate_pro_yearly: 32800,
   // Android product IDs
-  quotemate_premium_monthly: 2900,
-  quotemate_premium_yearly: 19900,
+  quotemate_premium_monthly: 4900,
+  quotemate_premium_yearly: 32800,
 };
 
 /**
@@ -1259,7 +1259,7 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
 
       // Process referral commission
       try {
-        const grossCents = PRODUCT_PRICES[productId] || 2900;
+        const grossCents = PRODUCT_PRICES[productId] || 4900;
         await processReferralCommission(userId, 'ios', productId, grossCents);
       } catch (refError) {
         // silently ignore
@@ -1379,7 +1379,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
 
       // Process referral commission
       try {
-        const grossCents = PRODUCT_PRICES[productId] || 2900;
+        const grossCents = PRODUCT_PRICES[productId] || 4900;
         await processReferralCommission(userId, 'android', productId, grossCents);
       } catch (refError) {
         // silently ignore
@@ -8128,7 +8128,7 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
       statuses: invoiceStatuses,
       quoteToInvoiceRate: totalQuotes > 0 ? Math.round(totalInvoices / totalQuotes * 1000) / 10 : 0,
     },
-    mrr: proCount * 2900,
+    mrr: proCount * 4900,
     cohortedFunnel: Array.from(cohortMap.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, data]) => ({ month, ...data })),
