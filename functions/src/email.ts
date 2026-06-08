@@ -2144,7 +2144,7 @@ export function sendNewProSubscriptionEmail(
   const platformDisplay = platformLabels[platform] || platform || 'Unknown';
 
   const isYearly = productId.includes('yearly');
-  const planDisplay = isYearly ? 'Yearly ($199/yr)' : 'Monthly ($29/mo)';
+  const planDisplay = isYearly ? 'Yearly ($328/yr)' : 'Monthly ($49/mo)';
 
   const content = wrapEmailTemplate(`
     <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">New Pro Subscription 💰</p>
@@ -2375,7 +2375,7 @@ export function sendAffiliateInviteEmail(
     </p>
     ${infoCard(
       infoRow('Commission Rate', '50% of net revenue', false) +
-      infoRow('Subscription Price', '$29 AUD/month', false) +
+      infoRow('Subscription Price', '$49 AUD/month', false) +
       infoRow('How It Works', 'Share your referral link → they subscribe → you earn', true),
       '#10b981'
     )}

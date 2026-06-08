@@ -269,7 +269,7 @@ export function PaywallScreen() {
         const webProduct = products.length > 0 ? products[0] : {
           productId: 'price_default',
           title: 'Pro Monthly',
-          localizedPrice: '$29',
+          localizedPrice: '$49',
         };
         setSelectedProduct(webProduct);
         setShowCheckoutModal(true);
@@ -285,8 +285,8 @@ export function PaywallScreen() {
 
   const getProductPrice = (productId: string): string => {
     const product = products.find(p => p.productId === productId);
-    if (product) return (product as any)?.localizedPrice || (productId === SUBSCRIPTION_SKUS.YEARLY ? '$199' : '$29');
-    return productId === SUBSCRIPTION_SKUS.YEARLY ? '$199' : '$29';
+    if (product) return (product as any)?.localizedPrice || (productId === SUBSCRIPTION_SKUS.YEARLY ? '$328' : '$49');
+    return productId === SUBSCRIPTION_SKUS.YEARLY ? '$328' : '$49';
   };
 
   const selectedSku = selectedPlan === 'yearly' ? SUBSCRIPTION_SKUS.YEARLY : SUBSCRIPTION_SKUS.MONTHLY;
@@ -681,7 +681,7 @@ export function PaywallScreen() {
             onPress={() => setSelectedPlan('yearly')}
           >
             <View style={styles.saveBadge}>
-              <Text style={styles.saveBadgeText}>Save 43%</Text>
+              <Text style={styles.saveBadgeText}>Save 44%</Text>
             </View>
             <Text style={[styles.planOptionLabel, selectedPlan === 'yearly' && styles.planOptionLabelSelected]}>Yearly</Text>
             <Text style={[styles.planOptionPrice, selectedPlan === 'yearly' && styles.planOptionPriceSelected]}>{getProductPrice(SUBSCRIPTION_SKUS.YEARLY)}</Text>
