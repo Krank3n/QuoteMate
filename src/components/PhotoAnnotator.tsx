@@ -22,7 +22,6 @@ import Svg, { Path, Line, Ellipse, G, Polygon, Text as SvgText, Rect } from 'rea
 import { captureRef } from 'react-native-view-shot';
 import { colors } from '../theme';
 import { selectionTap, lightTap } from '../utils/haptics';
-import { useTourRefs } from './tour/useTourRefs';
 
 // --- Types ---
 
@@ -101,8 +100,6 @@ interface PhotoAnnotatorProps {
   imageUri: string;
   onSave: (annotatedUri: string) => void;
   onCancel: () => void;
-  /** When true, renders as absolute View (not Modal) so tour overlay can appear on top */
-  tourMode?: boolean;
 }
 
 // --- Helpers ---
@@ -123,7 +120,7 @@ function getArrowHeadPoints(endX: number, endY: number, startX: number, startY: 
 
 // --- Component ---
 
-export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode = false }: PhotoAnnotatorProps) {
+export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnnotatorProps) {
   // Tool & style state
   const [activeTool, setActiveTool] = useState<AnnotationTool>('draw');
   const [selectedColor, setSelectedColor] = useState(COLORS[0].value);
@@ -151,31 +148,6 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
   // Overlay ref for coordinate calculation
   const overlayRef = useRef<View>(null);
-
-  // Tour mode refs — registered so the tour spotlight can target annotator elements
-  const { registerRef } = useTourRefs();
-  const tourCanvasRef = useRef<View>(null);
-  const tourToolbarRef = useRef<View>(null);
-  const tourDoneRef = useRef<View>(null);
-
-  // Only register tour refs once the canvas has sized (image loaded).
-  // This prevents the tour from measuring before the layout is ready.
-  useEffect(() => {
-    if (tourMode && visible && canvasSize) {
-      // Small delay to let layout settle after canvasSize is set
-      const timer = setTimeout(() => {
-        if (tourCanvasRef.current) registerRef('annotatorCanvas', tourCanvasRef.current);
-        if (tourToolbarRef.current) registerRef('annotatorTools', tourToolbarRef.current);
-        if (tourDoneRef.current) registerRef('annotatorDone', tourDoneRef.current);
-      }, 100);
-      return () => {
-        clearTimeout(timer);
-        registerRef('annotatorCanvas', null);
-        registerRef('annotatorTools', null);
-        registerRef('annotatorDone', null);
-      };
-    }
-  }, [tourMode, visible, canvasSize]);
 
   const getCanvasCoords = useCallback((e: any): { x: number; y: number } => {
     if (Platform.OS === 'web') {
@@ -220,27 +192,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
   // Reset state when modal opens
   useEffect(() => {
     if (visible) {
-      // In tour mode, pre-populate demo annotations
-      if (tourMode) {
-        setAnnotations([
-          {
-            id: 'demo-circle',
-            tool: 'circle',
-            color: '#ef4444',
-            strokeWidth: 4,
-            cx: 160, cy: 110, rx: 50, ry: 40,
-          },
-          {
-            id: 'demo-arrow',
-            tool: 'arrow',
-            color: '#ef4444',
-            strokeWidth: 4,
-            startX: 100, startY: 260, endX: 160, endY: 320,
-          },
-        ]);
-      } else {
-        setAnnotations([]);
-      }
+      setAnnotations([]);
       setCurrentDraw('');
       setDragStart(null);
       setDragCurrent(null);
@@ -249,7 +201,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
       setActiveTool('draw');
       setCanvasSize(null);
     }
-  }, [visible, tourMode]);
+  }, [visible]);
 
   // Track whether mouse is pressed (for web)
   const isDrawing = useRef(false);
@@ -359,7 +311,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
 
   // Attach native DOM mouse listeners for web (responder system is unreliable for drag on web)
   useEffect(() => {
-    if (Platform.OS !== 'web' || !canvasSize || tourMode) return;
+    if (Platform.OS !== 'web' || !canvasSize) return;
 
     const node = overlayRef.current as unknown as HTMLElement | null;
     if (!node) return;
@@ -669,21 +621,16 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
 
   const hasAnnotations = annotations.length > 0;
 
-  const Wrapper = tourMode ? View : Modal;
-  const wrapperProps = tourMode
-    ? { style: [StyleSheet.absoluteFill, { zIndex: 999 }] }
-    : { visible, animationType: 'slide' as const, presentationStyle: 'fullScreen' as const };
-
   return (
-    <Wrapper {...wrapperProps as any}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={tourMode ? undefined : onCancel} style={styles.headerButton} disabled={tourMode}>
-            <Text style={[styles.headerButtonText, tourMode && { opacity: 0.3 }]}>Cancel</Text>
+          <TouchableOpacity onPress={onCancel} style={styles.headerButton}>
+            <Text style={styles.headerButtonText}>Cancel</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Annotate Photo</Text>
-          <TouchableOpacity ref={tourDoneRef} onPress={tourMode ? undefined : handleSave} style={styles.headerButton} disabled={tourMode}>
+          <TouchableOpacity onPress={handleSave} style={styles.headerButton}>
             <Text style={[styles.headerButtonText, { color: colors.primary }]}>Done</Text>
           </TouchableOpacity>
         </View>
@@ -692,7 +639,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
         <View style={styles.canvasContainer}>
           {canvasSize ? (
             <View
-              ref={(node) => { (canvasRef as any).current = node; (tourCanvasRef as any).current = node; }}
+              ref={canvasRef}
               style={[styles.canvas, { width: canvasSize.width, height: canvasSize.height }]}
               collapsable={false}
             >
@@ -704,7 +651,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
               <View
                 style={styles.touchOverlay}
                 ref={overlayRef}
-                {...(Platform.OS !== 'web' && !tourMode ? {
+                {...(Platform.OS !== 'web' ? {
                   onStartShouldSetResponder: () => true,
                   onMoveShouldSetResponder: () => true,
                   onResponderStart: handleTouchStart,
@@ -800,7 +747,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
         )}
 
         {/* Bottom toolbar */}
-        <View ref={tourToolbarRef} style={styles.toolbar}>
+        <View style={styles.toolbar}>
           {/* Tool buttons */}
           <View style={styles.toolButtons}>
             {TOOLS.map(({ tool, icon }) => (
@@ -848,7 +795,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel, tourMode =
           </View>
         </View>
       </View>
-    </Wrapper>
+    </Modal>
   );
 }
 

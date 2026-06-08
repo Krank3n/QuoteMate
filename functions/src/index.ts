@@ -17,6 +17,7 @@ import {
   handleUnsubscribe,
   sendNewUserNotificationEmail,
   sendFeedbackEmail,
+  sendLeadInterestEmail,
   sendQuoteFollowUpEmail,
   sendCustomerQuoteReminderEmail,
   sendAffiliateInviteEmail,
@@ -50,6 +51,9 @@ export {
   leadUnsubscribe,
 } from './leadOutreach';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
+export { assistantToken } from './assistantToken';
+export { assistantChat } from './assistantChat';
+export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts';
 import {
   buildXeroAuthHeaders,
   buildXeroLineItems,
@@ -1674,24 +1678,41 @@ Provide a JSON response with the following structure:
       "section": "Descriptive section name (e.g. Colorbond Fence Bay, Merbau Deck Section, Concrete Footings)",
       "sectionMultiplier": 1,
       "sectionLaborHours": 1.5,
+      "qualityTier": "(budget|standard|premium — see QUALITY TIER DETECTION below; inherits jobQualityTier when omitted)",
       "reasoning": "Why this material is needed AND the derivation math for any per-area, per-volume, or repeating-unit quantity (e.g. 'Pavers: 25m² ÷ 0.16m²-per-paver × 1.1 waste = 172'). For simple one-off items a short justification is fine.",
       "savedRateName": "(only set when matched to a saved rate)",
       "pricingSource": "(set to 'saved_rate' when matched)",
       "reeceProductId": "(only set when a Reece catalogue line clearly matches — copy the integer productId from the catalogue listing. Leave empty if unsure; the search layer will look it up.)"
     }
-  ]
+  ],
+  "jobQualityTier": "budget|standard|premium"
 }
 
+RESPECT THE JOB DESCRIPTION — NAMED MATERIALS AND QUANTITIES ARE MANDATORY:
+- If the job description explicitly names a material (a product type, spec, R-value, grade, brand, colour, or dimension — e.g. "R2.5 HD thermal insulation batts", "90x45 H3 treated pine", "Colorbond Surfmist sheets"), that material MUST appear as a line item with the exact spec the tradie wrote, unless it is already in the existing materials listed above. NEVER drop a named primary material and return only consumables, fasteners, or PPE — that is the most damaging failure, because the tradie can't quote a job that's missing the thing they're installing.
+- If the job description states a quantity for a material (e.g. "12 batts", "6 sheets", "20 litres"), use EXACTLY that quantity and unit — do not recompute, round, or override it.
+- If a material is named but no quantity is given, derive the quantity from the area, length, or count in the description using its coverage (e.g. "10 m² of R2.5 batts" → batt pack coverage → packs needed) and show the derivation in "reasoning".
+- The named primary material is the core of the job — supporting items (fasteners, tape, PPE, blades) are ADDITIONAL to it, never a substitute for it.
+
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
+
+QUALITY TIER DETECTION — read the job description for tier qualifiers and set both "jobQualityTier" (top-level, one per job) and "qualityTier" (per-material, inherits jobQualityTier when omitted). The downstream pricing layer uses this to pick the RIGHT product out of the supplier search results instead of always grabbing the cheapest hit. This is high-leverage — a wrong tier turns a $400 "premium mixer tap" job into an $86 budget tap quote.
+- "premium", "high quality", "high-end", "luxury", "designer", "architectural", "top of the range", "custom", "bespoke", brand names like Phoenix / Miele / Fisher & Paykel / Caesarstone → jobQualityTier: "premium". Search terms for fittings/finishes in these jobs should include words like "premium" or "professional" (e.g. "premium stainless steel undermount sink", not just "sink").
+- "budget", "cheap", "basic", "entry level", "investment property", "rental fit-out", "flip" → jobQualityTier: "budget".
+- Anything else, or no signal at all → jobQualityTier: "standard".
+- Per-material override: when only SOME items are called out as premium (e.g. "high quality fittings and sink" in an otherwise standard reno), set qualityTier: "premium" on just those rows (taps, mixers, sinks, handles, hinges, lights) and leave the rest standard. Rule of thumb: which line items would a customer notice if they were cheap? Those carry the called-out tier.
+- Cabinetry/joinery substance descriptors map to tier too: "custom timber cabinetry", "solid timber doors", "marble benchtop", "stone benchtop", "engineered stone", "Caesarstone" all imply premium for those rows even if the job header doesn't say "premium".
 - EVERY section MUST have sectionLaborHours > 0. A section with zero labour hours is invalid output — if the work is materials-only with no labour (rare), put those materials under an existing labour-bearing section instead of creating a zero-hour section.
-- PER-AREA WORK AS A SECTION (paving installation, tiling, plastering, screeding, concreting): set sectionMultiplier = total area in m² and sectionLaborHours = hours PER m² (typical: paving install 0.4–0.6 h/m², tiling 0.5 h/m², plastering 0.3 h/m², screeding 0.2 h/m²). Never set sectionLaborHours: 0 on the assumption that "the section is per m² so there is no per-unit hour value" — that is the most common mistake. Per-m² IS a per-unit value: one m² is one unit.
+- PER-AREA SURFACE-COVERING SECTIONS ONLY (paving installation, tiling, plastering, rendering, screeding): set sectionMultiplier = total surface area in m² and sectionLaborHours = hours PER m² (typical: paving install 0.4–0.6 h/m², tiling 0.5 h/m², plastering 0.3 h/m², screeding 0.2 h/m²). Per-m² IS a per-unit value: one m² is one unit. Material quantities inside these sections are PER m² (e.g. 6.25 pavers per m²) and get multiplied by sectionMultiplier at save time — do NOT pre-multiply.
+- DISCRETE-UNIT SECTIONS (fence bays, gates, post footings, framing, joists, footings, slabs poured per-pour, doors, windows, decks measured per board): sectionMultiplier = COUNT of those repeating units (e.g. 9 bays, 13 post holes, 1 deck), NOT an area. Material quantities are PER UNIT (e.g. 4 bags concrete per post hole × 13 holes). This applies to fencing, framing, and ALL concrete work that goes into individual holes/footings/footings-beams — those are per-hole not per-m².
+- DO NOT include concreting/footings under the per-m² surface-covering rule above. A 13-post fence is 13 discrete footings, not a "concreting per m²" job. If you find yourself emitting >50 bags of concrete per post, your multiplier or per-unit quantity is wrong — recalculate.
 
 CRITICAL — emit quantities in the SMALLEST PHYSICAL UNIT, not in guessed packs/bags:
 - Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
 - BULK AGGREGATES (sand, crusher dust, road base, gravel, cement, mortar mix) → emit TOTAL MASS in kg with unit "kg" (e.g. "1275 kg of bedding sand" for 25m² × 30mm @ 1700kg/m³). DO NOT guess bag counts. You don't know whether the SKU is a 20kg, 25kg, or 30kg bag — the pricing layer reads bag size from the product page and divides. If you emit "60 each" thinking it means bags but the scraper returns a 20kg-bag SKU, the system multiplies bag_price × 60 = wrong by ~20×.
 - READY-MIX / POURED CONCRETE sold loose by volume → emit m³ with unit "m³" (e.g. "0.054 m³" for one footing).
 - SHEET / ROLL MATERIALS sold by area (geotextile, weed mat, sarking-by-area, sisalation) → emit total area in m² with unit "m²" (e.g. "30 m²" for 25m² + 20% overlap). The pricing layer converts to roll count using the SKU's coverage.
-- Timber / decking / fascia → emit linear metres and unit "m" (e.g. 75 m).
+- Structural timber sold by length (joists, bearers, fascia, handrail, trim) → emit linear metres and unit "m" (e.g. 75 m). EXCEPTION: decking BOARDS are piece-goods — emit a board COUNT with unit "each" (see the piece-goods rule and the deck worked example below), never linear metres.
 - Tape / membrane sold by linear metre → emit linear metres and unit "m" (e.g. 150 m).
 - Paint / oil / sealer → emit total litres and unit "L" (e.g. 8 L).
 The pricing layer reads pack/length/area/mass size from the product page (e.g. "Box of 500", "5.4m length", "20m² roll", "20kg bag") and computes how many packs to buy. If you guess pack counts yourself you will get them wrong — you have no way to know how many clips are in a pack or how heavy a bag is.
@@ -1721,6 +1742,13 @@ WORKED EXAMPLE — 25m² (5m × 5m) paver patio, a previously-broken case the sy
 - Geotextile / weed mat: 25 × 1.2 = 30. quantity 30, unit "m²". reasoning: "25m² + 20% overlap = 30m²".
 - Plate compactor hire (half day): quantity 1, unit "each".
 WRONG outputs to avoid: "1575 each" of crusher dust, "1050 each" of bedding sand, "100 each" of jointing sand, "430 each" of pavers — these label bulk quantities as "each" and inflate cost ~20×.
+
+WORKED EXAMPLE — 30 m² (15m × 2m) merbau deck, no handrails — a previously-broken case that inflated to ~$75k off a single decking line. Correct outputs:
+- Merbau decking board 90x19mm: lineal metres = 30 ÷ 0.094 (90mm board + 4mm gap) = 319 lm; boards = 319 ÷ 5.4m board length × 1.1 waste ≈ 65. quantity 65, unit "each". reasoning: "30m² ÷ 0.094m coverage = 319 lm ÷ 5.4m × 1.1 = 65". WRONG: 891 (that labels lineal-metre or per-m² maths as a board count).
+- Treated pine joists 90x45 @ 450 centres: (2 ÷ 0.45) + 1 = 6 joists × 15m = 90. quantity 90, unit "m".
+- H4 posts 90x90 @ 1.8m: ((15 ÷ 1.8) + 1) ≈ 10 per row × 2 rows ≈ 20. quantity 20, unit "each". WRONG: 70.
+- Decking oil: 30m² × 2 coats ÷ ~8 m²/L = ~8. quantity 8, unit "L". WRONG: "12 tins".
+This deck is ONE discrete unit (sectionMultiplier = 1), NOT a per-m² surface-covering section — do not multiply these per-deck counts by the area.
 
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
@@ -1841,11 +1869,19 @@ Return ONLY valid JSON, no other text.`;
 
       const { materials: repairedMaterials, flags: aiFlags } = validateAndRepairAiOutput(validatedMaterials);
 
+      const jobQualityTier =
+        parsed.jobQualityTier === 'budget' ||
+        parsed.jobQualityTier === 'standard' ||
+        parsed.jobQualityTier === 'premium'
+          ? parsed.jobQualityTier
+          : undefined;
+
       res.status(200).json({
         materials: repairedMaterials,
         estimatedHours: parsed.estimatedHours || 8,
         jobSummary: parsed.jobSummary || '',
         flags: aiFlags,
+        ...(jobQualityTier && { jobQualityTier }),
       });
     } catch (error: any) {
       const userEmail = await getUserEmail(decodedToken.uid);
@@ -1877,7 +1913,7 @@ Return ONLY valid JSON, no other text.`;
  * A small Gemini Flash Lite call given the requirement + product can use
  * general knowledge to handle all of these uniformly across trades.
  */
-const GEMINI_RECONCILE_MODEL = 'gemini-3.1-flash-lite-preview';
+const GEMINI_RECONCILE_MODEL = 'gemini-3.1-flash-lite';
 
 /**
  * Quantity sanity-check pass — review the materials list emitted by the
@@ -1981,6 +2017,43 @@ async function callGeminiLiteJson(apiKey: string, prompt: string): Promise<any> 
   return parseLLMJson(content);
 }
 
+/**
+ * Claude Haiku fallback for the lite-JSON tier. Mirrors callGeminiLiteJson —
+ * same prompt-in, parsed-JSON-out contract. Used by reconcilePricedMaterials
+ * (and any other structured-reasoning lite call) when Gemini is unavailable
+ * (key revoked, model retired, quota hit). The reconcile pass is what
+ * converts AI mass quantities (e.g. "400 kg of concrete") into pack counts
+ * (e.g. "20 bags of 20kg"); without it, the pricing pipeline silently leaves
+ * inflated quantities like the QU-177971 "400 packs of concrete" bug.
+ */
+async function callClaudeLiteJson(apiKey: string, prompt: string): Promise<any> {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      // Haiku tier — reconcile work is structured reasoning over a small
+      // JSON payload, doesn't need Opus/Sonnet capability and Haiku is
+      // ~10× cheaper + ~3× faster, matching Gemini Flash Lite's profile.
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 8000,
+      temperature: 0.1,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Claude Lite returned ${response.status}: ${errorText}`);
+  }
+  const data = await response.json();
+  const content = data.content?.[0]?.text;
+  if (!content) throw new Error('No content in Claude Lite response');
+  return parseLLMJson(content);
+}
+
 export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
@@ -2021,8 +2094,9 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
       }
 
       const geminiApiKey = process.env.GEMINI_API_KEY;
-      if (!geminiApiKey) {
-        res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
+      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+      if (!geminiApiKey && !anthropicApiKey) {
+        res.status(500).json({ error: 'No LLM API keys configured (GEMINI_API_KEY / ANTHROPIC_API_KEY)' });
         return;
       }
 
@@ -2105,7 +2179,47 @@ ${JSON.stringify(items, null, 2)}
 
 Return ONLY the JSON object, no other text.`;
 
-      const parsed = await callGeminiLiteJson(geminiApiKey, prompt);
+      // Gemini Flash Lite primary, Claude Haiku fallback — same dual-provider
+      // pattern as analyzeJobDescription. When the QU-177971 incident hit
+      // (Gemini key revoked + model retired), this function returned 500 and
+      // the client fell back to leaving raw mass quantities in place,
+      // producing the "400 packs of concrete" bug. Having a second provider
+      // keeps the pricing pipeline working through single-vendor outages.
+      let parsed: any | null = null;
+      let primaryError: Error | null = null;
+      if (geminiApiKey) {
+        try {
+          parsed = await callGeminiLiteJson(geminiApiKey, prompt);
+        } catch (err: any) {
+          primaryError = err;
+          console.warn('Gemini Lite failed for reconcile, falling back to Claude Haiku:', err?.message);
+        }
+      }
+      if (!parsed) {
+        if (!anthropicApiKey) {
+          throw primaryError || new Error('Gemini failed and no Anthropic fallback key configured');
+        }
+        try {
+          parsed = await callClaudeLiteJson(anthropicApiKey, prompt);
+        } catch (fallbackErr: any) {
+          console.error('Gemini primary error:', primaryError?.message);
+          console.error('Claude fallback error:', fallbackErr?.message);
+          const summarize = (msg: string): string => {
+            if (!msg) return 'unknown';
+            const m = msg.match(/returned (\d{3})/);
+            const status = m ? m[1] : '';
+            if (status === '429' || /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(msg)) return `${status || '429'} quota exceeded`;
+            if (status === '400' && /credit balance/i.test(msg)) return '400 out of credit';
+            if (status === '401' || status === '403') return `${status} auth denied`;
+            if (status === '500' || status === '503') return `${status} unavailable`;
+            return status ? `${status} error` : msg.slice(0, 60);
+          };
+          const geminiShort = primaryError ? `Gemini ${summarize(primaryError.message)}` : 'Gemini not attempted';
+          const claudeShort = `Claude ${summarize(fallbackErr.message)}`;
+          throw new Error(`Both LLM providers failed — ${geminiShort}; ${claudeShort}`);
+        }
+      }
+
       const results = Array.isArray(parsed.results) ? parsed.results : [];
       res.status(200).json({ results });
     } catch (error: any) {
@@ -8862,6 +8976,68 @@ export const submitFeedback = functions.https.onCall(async (data, context) => {
     userEmail,
     category,
     feedback,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { success: true };
+});
+
+/**
+ * Register interest in the call-answering service (Katie).
+ *
+ * The first integrations are done by hand (white-glove setup call), so this
+ * just captures the lead: it emails the founder and stores the submission in
+ * a `leadInterests` collection to follow up. No phone routing happens here.
+ */
+export const submitLeadInterest = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+
+  const userId = context.auth.uid;
+  const businessName = (data?.businessName || '').trim().slice(0, 200);
+  const contactPhone = (data?.contactPhone || '').trim().slice(0, 50);
+  const missedCalls = (data?.missedCalls || '').trim().slice(0, 100);
+  const notes = (data?.notes || '').trim().slice(0, 2000);
+
+  // "Missed money" calculator inputs/output (optional, clamped to sane ranges).
+  const clampNum = (v: unknown, max: number) =>
+    Number.isFinite(Number(v)) ? Math.min(Math.max(Math.round(Number(v)), 0), max) : null;
+  const typicalJobValue = clampNum(data?.typicalJobValue, 1_000_000);
+  const estLostPerYear = clampNum(data?.estLostPerYear, 100_000_000);
+
+  if (!contactPhone) {
+    throw new functions.https.HttpsError('invalid-argument', 'A contact number is required');
+  }
+
+  const userEmail = await getUserEmail(userId) || 'Unknown';
+
+  const success = await sendLeadInterestEmail(userEmail, userId, {
+    businessName,
+    contactPhone,
+    missedCalls,
+    typicalJobValue,
+    estLostPerYear,
+    notes,
+  });
+
+  if (!success) {
+    throw new functions.https.HttpsError('internal', 'Failed to register interest');
+  }
+
+  // Store for follow-up. Kept distinct from the website's marketing `leads`
+  // collection — these are in-app, product-specific (Katie) sign-ups.
+  await admin.firestore().collection('leadInterests').add({
+    userId,
+    userEmail,
+    product: 'callkatie',
+    status: 'new',
+    businessName,
+    contactPhone,
+    missedCalls,
+    typicalJobValue,
+    estLostPerYear,
+    notes,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 

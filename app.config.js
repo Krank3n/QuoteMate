@@ -9,7 +9,7 @@ export default {
   expo: {
     name: "QuoteMate",
     slug: "quotemate",
-    version: "1.42",
+    version: "1.43",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -70,6 +70,7 @@ export default {
       ],
       "expo-iap",
       ["./plugins/withKotlinVersion", "2.2.0"],
+      "./plugins/withFmtConstevalFix",
       // Skip the Square plugin entirely if SQUARE_APP_ID_PRODUCTION is missing
       // — keeps `npx expo config` (used by EAS env commands) working before
       // the secret is registered. Builds without it will get a runtime error

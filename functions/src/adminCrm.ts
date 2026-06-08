@@ -1148,6 +1148,113 @@ export const adminListFeedback = functions
     return { items: rows, totals, categoryCounts };
   });
 
+interface LeadInterestRow {
+  id: string;
+  userId: string | null;
+  email: string | null;
+  businessName: string | null;
+  contactPhone: string | null;
+  missedCalls: string | null;
+  typicalJobValue: number | null;
+  estLostPerYear: number | null;
+  notes: string | null;
+  product: string | null;
+  status: string | null;
+  handledAt: number | null;
+  handledBy: string | null;
+  createdAt: number | null;
+}
+
+/**
+ * List in-app "Katie" call-answering interest sign-ups (the `leadInterests`
+ * collection written by submitLeadInterest). Distinct from the outreach
+ * `leads` collection. Mirrors adminListFeedback.
+ */
+export const adminListLeadInterests = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const limit = Math.min(Math.max(Number(data?.limit) || 200, 1), 500);
+    const status = (data?.status || '').toString().trim();
+
+    let q: admin.firestore.Query = db()
+      .collection('leadInterests')
+      .orderBy('createdAt', 'desc');
+    if (status && status !== 'all') q = q.where('status', '==', status);
+
+    const snap = await q.limit(limit).get();
+    const docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as any }));
+
+    // Resolve missing emails from userId in one de-duped pass
+    const uidsToLookup = Array.from(
+      new Set(
+        docs
+          .filter((d) => !d.data.userEmail && d.data.userId)
+          .map((d) => d.data.userId as string),
+      ),
+    );
+    const emailByUid = new Map<string, string | null>();
+    await Promise.all(
+      uidsToLookup.map(async (uid) => {
+        try {
+          emailByUid.set(uid, await getUserEmail(uid));
+        } catch {
+          emailByUid.set(uid, null);
+        }
+      }),
+    );
+
+    const rows: LeadInterestRow[] = docs.map(({ id, data: v }) => {
+      const uid = v.userId || null;
+      const email = v.userEmail || (uid ? emailByUid.get(uid) || null : null);
+      return {
+        id,
+        userId: uid,
+        email,
+        businessName: v.businessName || null,
+        contactPhone: v.contactPhone || null,
+        missedCalls: v.missedCalls || null,
+        typicalJobValue: typeof v.typicalJobValue === 'number' ? v.typicalJobValue : null,
+        estLostPerYear: typeof v.estLostPerYear === 'number' ? v.estLostPerYear : null,
+        notes: v.notes || null,
+        product: v.product || null,
+        status: v.status || 'new',
+        handledAt: ts(v.handledAt),
+        handledBy: v.handledBy || null,
+        createdAt: ts(v.createdAt),
+      };
+    });
+
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const totals = {
+      all: rows.length,
+      new: rows.filter((r) => r.status !== 'handled').length,
+      handled: rows.filter((r) => r.status === 'handled').length,
+      last7d: rows.filter((r) => (r.createdAt || 0) >= sevenDaysAgo).length,
+    };
+
+    return { items: rows, totals };
+  });
+
+/** Toggle a lead interest between 'new' and 'handled'. */
+export const adminMarkLeadInterestHandled = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const id = (data?.id || '').toString();
+  const handled = data?.handled !== false; // default true
+  if (!id) throw new functions.https.HttpsError('invalid-argument', 'id required');
+
+  await db().doc(`leadInterests/${id}`).set(
+    {
+      status: handled ? 'handled' : 'new',
+      handledAt: handled ? admin.firestore.FieldValue.serverTimestamp() : null,
+      handledBy: handled ? adminUid : null,
+    },
+    { merge: true },
+  );
+
+  return { ok: true };
+});
+
 export const adminReplyToFeedback = functions.https.onCall(async (data, context) => {
   const adminUid = requireAdmin(context);
   const feedbackId = (data?.feedbackId || '').toString();
@@ -1668,6 +1775,200 @@ export const adminGetDocument = functions.https.onCall(async (data, context) => 
     userEmail: authRec?.email || null,
     userBusinessName: biz.data()?.businessName || null,
     document: cleaned,
+  };
+});
+
+// ============================================================
+// MATE ASSISTANT CONVERSATIONS — transcripts for QA / accuracy tuning
+// ============================================================
+//
+// The app mirrors every Mate chat to users/{uid}/assistantConversations/{id}
+// (see the app's firestoreService.saveConversation). These two callables let
+// the admin panel sweep them across every tradie (list) and read one in full
+// (get) so we can review what Mate proposed, what got applied, and where it
+// errored — the signal for improving accuracy over time.
+
+interface ConversationSummary {
+  userMessages: number;
+  assistantMessages: number;
+  proposalCount: number;
+  appliedCount: number;
+  dismissedCount: number;
+  failedCount: number;
+  errorCount: number;
+  proposalTypes: string[];
+  firstUserText: string | null;
+  lastText: string | null;
+}
+
+// Roll a conversation's message array up into scan-friendly counts + previews.
+// Tolerant of partial/legacy shapes — every field defaults rather than throws.
+function summariseConversation(messages: any[]): ConversationSummary {
+  const out: ConversationSummary = {
+    userMessages: 0,
+    assistantMessages: 0,
+    proposalCount: 0,
+    appliedCount: 0,
+    dismissedCount: 0,
+    failedCount: 0,
+    errorCount: 0,
+    proposalTypes: [],
+    firstUserText: null,
+    lastText: null,
+  };
+  const types = new Set<string>();
+  const arr = Array.isArray(messages) ? messages : [];
+  for (const m of arr) {
+    const text = typeof m?.text === 'string' ? m.text.trim() : '';
+    if (m?.role === 'user') {
+      out.userMessages++;
+      if (!out.firstUserText && text) out.firstUserText = text.slice(0, 160);
+    } else if (m?.role === 'assistant') {
+      out.assistantMessages++;
+    }
+    if (text) out.lastText = text.slice(0, 160);
+    if (m?.errorMessage) out.errorCount++;
+    const proposals = Array.isArray(m?.proposals) ? m.proposals : [];
+    out.proposalCount += proposals.length;
+    for (const p of proposals) if (p?.type) types.add(String(p.type));
+    const status = m?.proposalStatus && typeof m.proposalStatus === 'object' ? m.proposalStatus : {};
+    for (const s of Object.values(status)) {
+      if (s === 'applied') out.appliedCount++;
+      else if (s === 'dismissed') out.dismissedCount++;
+      else if (s === 'failed') out.failedCount++;
+    }
+  }
+  out.proposalTypes = Array.from(types);
+  return out;
+}
+
+export const adminListAssistantConversations = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .https.onCall(async (data, context) => {
+    requireAdmin(context);
+    const limit = Math.min(Math.max(Number(data?.limit) || 500, 1), 2000);
+    const userIdFilter = (data?.userId || '').toString();
+
+    const firestore = db();
+    const snap = await firestore.collectionGroup('assistantConversations').get();
+
+    // Resolve auth + business per uid in batch so each row can name the tradie.
+    const uidSet = new Set<string>();
+    for (const d of snap.docs) {
+      const uid = d.ref.parent.parent?.id;
+      if (uid && (!userIdFilter || uid === userIdFilter)) uidSet.add(uid);
+    }
+    const uidList = Array.from(uidSet);
+    const authMap = new Map<string, admin.auth.UserRecord>();
+    for (let i = 0; i < uidList.length; i += 100) {
+      const chunk = uidList.slice(i, i + 100);
+      if (!chunk.length) continue;
+      const res = await admin.auth().getUsers(chunk.map((uid) => ({ uid })));
+      for (const u of res.users) authMap.set(u.uid, u);
+    }
+    const businessMap = new Map<string, any>();
+    await Promise.all(
+      uidList.map(async (uid) => {
+        const b = await firestore.doc(`users/${uid}/settings/business`).get().catch(() => null);
+        businessMap.set(uid, b?.data() || {});
+      })
+    );
+
+    const rows = snap.docs
+      .map((d) => {
+        const uid = d.ref.parent.parent?.id || '';
+        if (userIdFilter && uid !== userIdFilter) return null;
+        const c = d.data() as any;
+        const summary = summariseConversation(c.messages);
+        const authRec = authMap.get(uid);
+        const biz = businessMap.get(uid) || {};
+        return {
+          id: d.id,
+          uid,
+          userEmail: authRec?.email || biz.email || null,
+          userBusinessName: biz.businessName || authRec?.displayName || null,
+          platform: c.platform || null,
+          createdAt: tsMs(c.createdAt),
+          updatedAt: tsMs(c.updatedAt),
+          syncedAt: tsMs(c.syncedAt),
+          messageCount: typeof c.messageCount === 'number'
+            ? c.messageCount
+            : (Array.isArray(c.messages) ? c.messages.length : 0),
+          userMessages: summary.userMessages,
+          assistantMessages: summary.assistantMessages,
+          proposalCount: summary.proposalCount,
+          appliedCount: summary.appliedCount,
+          dismissedCount: summary.dismissedCount,
+          failedCount: summary.failedCount,
+          errorCount: summary.errorCount,
+          proposalTypes: summary.proposalTypes,
+          preview: summary.firstUserText,
+          lastText: summary.lastText,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+      .slice(0, limit);
+
+    const totals = {
+      all: rows.length,
+      messages: rows.reduce((a, r) => a + r.messageCount, 0),
+      proposals: rows.reduce((a, r) => a + r.proposalCount, 0),
+      applied: rows.reduce((a, r) => a + r.appliedCount, 0),
+      failed: rows.reduce((a, r) => a + r.failedCount, 0),
+      withProposals: rows.filter((r) => r.proposalCount > 0).length,
+      withErrors: rows.filter((r) => r.errorCount > 0 || r.failedCount > 0).length,
+    };
+
+    return { conversations: rows, totals };
+  });
+
+export const adminGetAssistantConversation = functions.https.onCall(async (data, context) => {
+  requireAdmin(context);
+  const uid = (data?.uid || '').toString();
+  const id = (data?.id || '').toString();
+  if (!uid || !id) throw new functions.https.HttpsError('invalid-argument', 'uid and id required');
+
+  const firestore = db();
+  const [snap, biz, authRec] = await Promise.all([
+    firestore.doc(`users/${uid}/assistantConversations/${id}`).get(),
+    firestore.doc(`users/${uid}/settings/business`).get(),
+    admin.auth().getUser(uid).catch(() => null),
+  ]);
+  if (!snap.exists) {
+    throw new functions.https.HttpsError('not-found', 'conversation not found');
+  }
+
+  const c = snap.data() as any;
+  // Pass messages through verbatim (proposals/status/working/error all intact)
+  // so the panel can render the exact transcript — only normalise timestamps.
+  const messages = (Array.isArray(c.messages) ? c.messages : []).map((m: any) => ({
+    id: m?.id || null,
+    role: m?.role || 'assistant',
+    text: typeof m?.text === 'string' ? m.text : '',
+    createdAt: tsMs(m?.createdAt),
+    proposals: Array.isArray(m?.proposals) ? m.proposals : undefined,
+    proposalStatus: m?.proposalStatus && typeof m.proposalStatus === 'object' ? m.proposalStatus : undefined,
+    errorMessage: m?.errorMessage || undefined,
+    working: m?.working || undefined,
+    inlineQuoteId: m?.inlineQuoteId || undefined,
+  }));
+
+  return {
+    id,
+    uid,
+    userEmail: authRec?.email || null,
+    userBusinessName: biz.data()?.businessName || null,
+    conversation: {
+      id,
+      platform: c.platform || null,
+      createdAt: tsMs(c.createdAt),
+      updatedAt: tsMs(c.updatedAt),
+      syncedAt: tsMs(c.syncedAt),
+      messageCount: typeof c.messageCount === 'number' ? c.messageCount : messages.length,
+      messages,
+      summary: summariseConversation(c.messages),
+    },
   };
 });
 

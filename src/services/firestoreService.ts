@@ -21,7 +21,17 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { Quote, BusinessSettings, SubscriptionStatus, Invoice, ReferralInfo, Contact } from '../types';
+import { Conversation } from '../types/assistant';
 import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
+
+/**
+ * Master switch for Mate conversation logging. While this is on, every chat is
+ * mirrored to Firestore (under the owning user) so we can review transcripts
+ * and proposal outcomes to tune accuracy and chase down issues. Flip to false
+ * to stop collecting once we've gathered enough — the only effect is that
+ * `saveConversation` becomes a no-op; nothing else depends on it.
+ */
+export const ASSISTANT_LOGGING_ENABLED = true;
 
 /**
  * Map any legacy invoice-style status that lived on a quote (back when Quote
@@ -352,80 +362,6 @@ class FirestoreService {
       return false;
     } catch (error) {
       return false;
-    }
-  }
-
-  /**
-   * Save tour status to Firestore
-   */
-  async saveTourStatus(hasSeenTour: boolean): Promise<void> {
-    const userId = this.getUserId();
-    if (!userId) return;
-
-    try {
-      const tourRef = doc(db, 'users', userId, 'profile', 'tour');
-      await setDoc(tourRef, {
-        hasSeenTour,
-        syncedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-    }
-  }
-
-  /**
-   * Load tour status from Firestore
-   */
-  async loadTourStatus(): Promise<boolean | null> {
-    const userId = this.getUserId();
-    if (!userId) return null;
-
-    try {
-      const tourRef = doc(db, 'users', userId, 'profile', 'tour');
-      const snapshot = await getDoc(tourRef);
-
-      if (snapshot.exists()) {
-        return snapshot.data().hasSeenTour || false;
-      }
-      return null;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  /**
-   * Save seen screen tours to Firestore
-   */
-  async saveSeenScreenTours(seenScreenTours: string[]): Promise<void> {
-    const userId = this.getUserId();
-    if (!userId) return;
-
-    try {
-      const tourRef = doc(db, 'users', userId, 'profile', 'tour');
-      await setDoc(tourRef, {
-        seenScreenTours,
-        syncedAt: new Date().toISOString(),
-      }, { merge: true });
-    } catch (error) {
-    }
-  }
-
-  /**
-   * Load seen screen tours from Firestore
-   */
-  async loadSeenScreenTours(): Promise<string[] | null> {
-    const userId = this.getUserId();
-    if (!userId) return null;
-
-    try {
-      const tourRef = doc(db, 'users', userId, 'profile', 'tour');
-      const snapshot = await getDoc(tourRef);
-
-      if (snapshot.exists() && snapshot.data().seenScreenTours) {
-        return snapshot.data().seenScreenTours;
-      }
-      return null;
-    } catch (error) {
-      return null;
     }
   }
 
@@ -863,14 +799,40 @@ class FirestoreService {
       const q = query(contactsRef, orderBy('name'));
       const snapshot = await getDocs(q);
 
-      const contacts: Contact[] = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return data as Contact;
-      });
+      // Always use the Firestore document id as the contact id. The doc
+      // data may carry its own `id` field (saveContact spreads ...contact)
+      // but if those two ever drift — legacy migration, partial write,
+      // server-side seed — every other read in the app (and Mate's
+      // find_customer tool, which returns doc.id) breaks because the local
+      // contact.id doesn't match anything on the server. doc.id is the
+      // source of truth.
+      const contacts: Contact[] = snapshot.docs.map((doc) => ({
+        ...(doc.data() as Contact),
+        id: doc.id,
+      }));
 
       return contacts;
     } catch (error) {
       return [];
+    }
+  }
+
+  /**
+   * Fetch a single contact by doc id. Used by Mate's applyProposal as a
+   * fallback when find_customer returned a contactId that isn't yet in the
+   * local cache — without this, the chat would dead-end with a stale-contact
+   * error even though the contact exists server-side.
+   */
+  async getContactById(contactId: string): Promise<Contact | null> {
+    const userId = this.getUserId();
+    if (!userId || !contactId) return null;
+    try {
+      const ref = doc(db, 'users', userId, 'contacts', contactId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return null;
+      return { ...(snap.data() as Contact), id: snap.id };
+    } catch {
+      return null;
     }
   }
 
@@ -910,6 +872,46 @@ class FirestoreService {
       }
     } catch (error) {
       throw error;
+    }
+  }
+
+  /**
+   * Mirror a Mate conversation to Firestore for review/telemetry.
+   *
+   * Stored under the owning user (users/{uid}/assistantConversations/{id}) so
+   * the existing owner rule already permits the write — no firestore.rules
+   * change — while an admin `collectionGroup('assistantConversations')` query
+   * can sweep every user's chats at once for tuning. merge:true overwrites the
+   * latest full snapshot each flush (Firestore replaces the messages array
+   * wholesale, which is what we want). Best-effort: a logging failure must
+   * never surface to the user, so errors are swallowed.
+   *
+   * No-op when logging is disabled, when signed out, or before the first
+   * message lands (an empty conversation isn't worth a doc).
+   */
+  async saveConversation(conversation: Conversation): Promise<void> {
+    if (!ASSISTANT_LOGGING_ENABLED) return;
+    const userId = this.getUserId();
+    if (!userId) return;
+    if (!conversation?.id || !conversation.messages?.length) return;
+
+    try {
+      const ref = doc(db, 'users', userId, 'assistantConversations', conversation.id);
+      await setDoc(
+        ref,
+        stripUndefined({
+          id: conversation.id,
+          createdAt: conversation.createdAt,
+          updatedAt: conversation.updatedAt,
+          messages: conversation.messages,
+          messageCount: conversation.messages.length,
+          platform: require('react-native').Platform.OS,
+          syncedAt: new Date().toISOString(),
+        }),
+        { merge: true },
+      );
+    } catch {
+      // Telemetry is best-effort — swallow so logging never breaks the chat.
     }
   }
 

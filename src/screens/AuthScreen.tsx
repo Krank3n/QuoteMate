@@ -51,6 +51,10 @@ export function AuthScreen() {
   const [isProcessingOAuth, setIsProcessingOAuth] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  // Web only: set once Chrome autofills a field, so we can hide the floating
+  // label while the autofill preview is showing (the value isn't readable yet).
+  const [emailAutofilled, setEmailAutofilled] = useState(false);
+  const [passwordAutofilled, setPasswordAutofilled] = useState(false);
 
   // Animation values
   const fadeAnim = useState(new Animated.Value(0))[0];
@@ -105,6 +109,49 @@ export function AuthScreen() {
         useNativeDriver: true,
       }),
     ]).start();
+  }, []);
+
+  // Web: Chrome autofills the underlying <input> on page load without firing
+  // React's onChange, so `email`/`password` stay empty. Two problems follow:
+  // the floating label sits on top of the autofilled text, and handleSignIn's
+  // empty-field guard would reject a submit that *looks* filled.
+  //
+  // Chrome withholds the autofilled value from JS until the first user gesture,
+  // so we can't just read it back on load. Instead we detect autofill via the
+  // `animationstart` event our CSS keyframe fires the instant a field fills
+  // (works pre-gesture) and hide the label then. Separately we sync the actual
+  // values into state whenever Chrome will hand them over (gesture / a few
+  // timers) so the submit guard and floated label end up correct.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const EMAIL_SEL = 'input[autocomplete="email"]';
+    const PASS_SEL = 'input[autocomplete="current-password"], input[autocomplete="new-password"]';
+
+    const syncValues = () => {
+      const emailEl = document.querySelector(EMAIL_SEL) as HTMLInputElement | null;
+      const passEl = document.querySelector(PASS_SEL) as HTMLInputElement | null;
+      if (emailEl?.value) setEmail((prev) => prev || emailEl.value);
+      if (passEl?.value) setPassword((prev) => prev || passEl.value);
+    };
+
+    const onAnimStart = (e: AnimationEvent) => {
+      if (e.animationName !== 'qm-autofill') return;
+      const target = e.target as HTMLInputElement;
+      if (target.matches?.(EMAIL_SEL)) setEmailAutofilled(true);
+      else if (target.matches?.(PASS_SEL)) setPasswordAutofilled(true);
+      syncValues();
+    };
+
+    document.addEventListener('animationstart', onAnimStart, true);
+    const timers = [setTimeout(syncValues, 100), setTimeout(syncValues, 400), setTimeout(syncValues, 900)];
+    window.addEventListener('pointerdown', syncValues, { once: true });
+    window.addEventListener('keydown', syncValues, { once: true });
+    return () => {
+      document.removeEventListener('animationstart', onAnimStart, true);
+      timers.forEach(clearTimeout);
+      window.removeEventListener('pointerdown', syncValues);
+      window.removeEventListener('keydown', syncValues);
+    };
   }, []);
 
   // Check if Apple Authentication is available (iOS only)
@@ -421,7 +468,7 @@ export function AuthScreen() {
               {/* Email / Password form */}
               <View style={styles.formSection}>
                 <TextInput
-                  label="Email address"
+                  label={emailAutofilled && !email ? undefined : 'Email address'}
                   value={email}
                   onChangeText={setEmail}
                   mode="outlined"
@@ -441,7 +488,7 @@ export function AuthScreen() {
 
                 <TextInput
                   ref={passwordRef}
-                  label="Password"
+                  label={passwordAutofilled && !password ? undefined : 'Password'}
                   value={password}
                   onChangeText={setPassword}
                   mode="outlined"

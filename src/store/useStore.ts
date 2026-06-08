@@ -8,11 +8,25 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
 import { Document } from '../types/document';
-import { TourPhase } from '../components/tour/tourFlow';
+import {
+  ChatMessage,
+  Conversation,
+  Proposal,
+  ProposalStatus,
+  WorkingStatus,
+} from '../types/assistant';
+import {
+  generateMaterialsForQuote,
+  fetchPricesForQuote,
+  PipelineCancelled,
+  PricingEvent,
+} from '../services/materialsPipeline';
+import { reviewQuoteMaterials, isFlaggedRow, QuoteReview } from '../utils/quoteReview';
+import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { reconcileNextNumber } from '../utils/nextNumber';
-import { firestoreService } from '../services/firestoreService';
+import { firestoreService, ASSISTANT_LOGGING_ENABLED } from '../services/firestoreService';
 import { documentService } from '../services/documentService';
 // Static import — see note on the call sites below. Dynamic `import()` here
 // (the previous shape) created a Metro lazy chunk that, in Android dev with
@@ -24,8 +38,12 @@ import { documentService } from '../services/documentService';
 import * as xeroService from '../services/xeroService';
 import { TRIAL_MS } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
-import { ensureJobForDocument, ensureJobForQuote } from './useJobStore';
+import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
 import { auth } from '../config/firebase';
+import { searchLocalSources } from '../services/localMaterialSearch';
+import { loadGroups as loadSupplierGroups } from '../services/supplierGroupService';
+import { applyPackAwarePricing } from '../utils/packAwarePricing';
+import { roundToTwoDecimals } from '../utils/documentCalculator';
 
 /**
  * A user-visible record of the last sync failure. Populated by the saveDraft /
@@ -111,14 +129,6 @@ interface AppState {
   setOnboarded: (value: boolean) => Promise<void>;
   checkOnboarding: () => Promise<void>;
 
-  // Tour
-  hasSeenTour: boolean;
-  setHasSeenTour: (value: boolean) => Promise<void>;
-  checkTourStatus: () => Promise<void>;
-  seenScreenTours: string[];
-  markScreenTourSeen: (tourId: string) => Promise<void>;
-  hasSeenScreenTour: (tourId: string) => boolean;
-
   // Quote numbering
   nextQuoteNumber: number;
   loadNextQuoteNumber: () => Promise<void>;
@@ -155,15 +165,6 @@ interface AppState {
   // Referral
   referralInfo: ReferralInfo | null;
   loadReferralInfo: () => Promise<void>;
-
-  // Unified guided tour
-  unifiedTourActive: boolean;
-  unifiedTourPhase: TourPhase | null;
-  unifiedTourQuoteId: string | null;
-  startUnifiedTour: () => void;
-  setUnifiedTourPhase: (phase: TourPhase) => void;
-  endUnifiedTour: () => Promise<void>;
-  skipUnifiedTour: () => Promise<void>;
 
   // Template material staging (for adding materials to templates from AddMaterialScreen)
   pendingTemplateMaterial: Material | null;
@@ -212,9 +213,62 @@ interface AppState {
     newJobId: string,
   ) => Promise<Document>;
 
+  // Mate assistant — chat history lives client-only in v1. The model never
+  // writes here directly; it returns Proposal payloads that applyProposal
+  // routes through the existing store actions.
+  conversations: Conversation[];
+  currentConversationId: string | null;
+  startConversation: () => string;
+  endConversation: () => void;
+  /**
+   * Discard the current chat and start a blank one. We don't keep chat
+   * history — the durable output is the quote/job/invoice, and transcripts
+   * still sync to Firestore for admin review. Returns the new id.
+   */
+  newChat: () => string;
+  appendMessage: (conversationId: string, message: ChatMessage) => void;
+  /**
+   * Patch a single message in place — used to update a "working" card as
+   * pipeline events arrive (analyse → building → done) without spawning a
+   * new bubble per phase.
+   */
+  updateMessage: (
+    conversationId: string,
+    messageId: string,
+    patch: Partial<ChatMessage>,
+  ) => void;
+  updateProposalStatus: (
+    conversationId: string,
+    messageId: string,
+    proposalId: string,
+    status: ProposalStatus,
+  ) => void;
+  // (chat history is in-memory only — no load-from-disk; see newChat)
+  // Apply a proposal through the existing store actions. Returns a follow-up
+  // hint the caller can use to drive navigation — keeps the store free of
+  // navigation imports. The optional onProgress callback receives pipeline
+  // events for proposals that run the materials pipeline (draft quote);
+  // the AssistantScreen wires it into a working-card message so the user
+  // sees what's happening without leaving the chat.
+  applyProposal: (
+    proposal: Proposal,
+    onProgress?: (status: WorkingStatus) => void,
+  ) => Promise<ApplyProposalResult>;
+
   // Cleanup
   clearAllData: () => Promise<void>;
 }
+
+export type ApplyProposalResult =
+  | { ok: true; navigate?: NavigateHint; note?: string; review?: QuoteReview }
+  | { ok: false; error: string };
+
+export type NavigateHint =
+  | { kind: 'job_preview'; quoteId: string }
+  | { kind: 'quote_materials_list'; quoteId: string }
+  | { kind: 'open_send_modal'; documentId: string; recipientEmail?: string }
+  | { kind: 'open_contact'; contactId: string }
+  | { kind: 'open_invoice'; invoiceId: string };
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -225,10 +279,10 @@ const STORAGE_KEYS = {
   NEXT_QUOTE_NUMBER: '@quotemate:next_quote_number',
   INVOICES: '@quotemate:invoices',
   NEXT_INVOICE_NUMBER: '@quotemate:next_invoice_number',
-  TOUR_SEEN: '@quotemate:tour_seen',
   XERO_CONNECTION: '@quotemate:xero_connection',
   CONTACTS: '@quotemate:contacts',
   CONTACTS_MIGRATED: '@quotemate:contacts_migrated',
+  CONVERSATIONS: '@quotemate:mate_conversations',
 };
 
 /**
@@ -248,6 +302,38 @@ export function logSyncError(kind: SyncError['kind'], id: string, error: unknown
   });
 }
 
+/**
+ * Recursively replace NaN/Infinity numeric fields with 0 so Firestore's JS
+ * SDK doesn't reject the write. Mutates in place. Logs the path of every
+ * scrubbed field so we can find the upstream calc that produced the bad
+ * number. Skips Date and Array-of-non-object values to keep traversal cheap.
+ *
+ * Why this lives here: previously a single NaN anywhere in a Quote would
+ * trip `setDoc(...)` silently — Firestore rejects, the .catch logs a sync
+ * error, the user sees no UI feedback, and ensureJobForQuote has already
+ * created a Job. The result: orphan jobs in production with no linked
+ * quote/invoice. This scrub keeps the save path resilient.
+ */
+function sanitizeNonFiniteNumbers(target: any, label: string, path: string = ''): void {
+  if (target === null || target === undefined) return;
+  if (target instanceof Date) return;
+  if (Array.isArray(target)) {
+    target.forEach((v, i) => sanitizeNonFiniteNumbers(v, label, `${path}[${i}]`));
+    return;
+  }
+  if (typeof target !== 'object') return;
+  for (const key of Object.keys(target)) {
+    const value = target[key];
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+      // eslint-disable-next-line no-console
+      console.warn(`[sanitize] ${label}: ${path}${path ? '.' : ''}${key} was ${value} → 0`);
+      target[key] = 0;
+    } else if (value && typeof value === 'object') {
+      sanitizeNonFiniteNumbers(value, label, `${path}${path ? '.' : ''}${key}`);
+    }
+  }
+}
+
 // Helper to check if we need to reset monthly count
 const getMonthStart = () => {
   const now = new Date();
@@ -258,6 +344,80 @@ const getMonthEnd = () => {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 };
+
+// Map free-form units from Mate proposals to the strict Material unit union.
+// The model is allowed to emit "m2"/"sqm"/"hr"/"L" — we coerce to the closest
+// known unit so the wizard's calculator doesn't choke on an unknown literal.
+function normalizeMaterialUnit(raw: string): Material['unit'] {
+  const s = (raw || '').trim().toLowerCase();
+  if (!s) return 'each';
+  if (s === 'm2' || s === 'sqm' || s === 'sq m' || s === 'm²') return 'm²';
+  if (s === 'm3' || s === 'm³' || s === 'cubic m') return 'm³';
+  if (s === 'm' || s === 'metre' || s === 'meter' || s === 'metres' || s === 'lm' || s === 'lin m') return 'm';
+  if (s === 'kg' || s === 'kilogram' || s === 'kilograms') return 'kg';
+  if (s === 'l' || s === 'litre' || s === 'liter' || s === 'litres') return 'L';
+  if (s === 'box' || s === 'boxes') return 'box';
+  if (s === 'pack' || s === 'packs') return 'pack';
+  return 'each';
+}
+
+// Map a pricing-pipeline event onto a partial WorkingStatus update. Shared by
+// the draft and reprice apply paths so their chat progress cards read the same;
+// `status` carries the slow-changing phase headline, `detail` the rapid per-item
+// progress (kept separate so fast item events don't blow away the headline).
+function pricingEventToProgress(event: PricingEvent): Partial<WorkingStatus> | null {
+  if (event.kind === 'phase-start') {
+    // Clear the per-item list when we move off the batch phase so stale
+    // "Searching…" rows don't linger into reconcile/individual passes.
+    return {
+      phase: 'pricing',
+      status: event.status,
+      detail: undefined,
+      // Clear the per-item list on every phase boundary — the next
+      // batch-chunk event repopulates it, and non-batch phases shouldn't
+      // carry stale rows.
+      items: undefined,
+    };
+  }
+  if (event.kind === 'batch-chunk') {
+    return {
+      status:
+        event.currentName || `Checking Bunnings (batch ${event.chunkIndex} of ${event.totalChunks})…`,
+      detail: `${event.progress.current}/${event.progress.total} items priced`,
+      items: event.items,
+    };
+  }
+  if (event.kind === 'item-priced') {
+    const progressLine = event.progress
+      ? `${event.progress.current}/${event.progress.total} priced`
+      : undefined;
+    const itemLine = event.success
+      ? `${progressLine ? progressLine + ' · ' : ''}Just priced ${event.name}`
+      : `${progressLine ? progressLine + ' · ' : ''}Couldn't find ${event.name}`;
+    return { detail: itemLine };
+  }
+  if (event.kind === 'reconcile-start') {
+    return { status: 'Sorting pack sizes and quantities…', detail: 'Mate is double-checking every line.' };
+  }
+  if (event.kind === 'reece-reauth') {
+    return { status: 'Reece sign-in expired — sort it in Settings to use Reece prices.', detail: undefined };
+  }
+  return null;
+}
+
+// Wipe the price off every row the review flags (no price, AI estimate,
+// low-confidence) so fetchPrices re-fetches them — it skips any row already at
+// price > 0. Manual overrides and confident rows are never flagged, so they're
+// left exactly as they were. requiredQty is preserved so pack rounding still works.
+function resetFlaggedRowsForReprice(materials: Material[]): { materials: Material[]; resetCount: number } {
+  let resetCount = 0;
+  const next = materials.map((m) => {
+    if (!isFlaggedRow(m)) return m;
+    resetCount++;
+    return { ...m, price: 0, totalPrice: 0, priceConfidence: undefined, pricingSource: undefined };
+  });
+  return { materials: next, resetCount };
+}
 
 // Cached map keyed on the documents array identity. Rebuilt whenever the
 // store swaps in a new array (every set({ documents })), so lookups stay
@@ -279,6 +439,29 @@ function buildLegacyDocIndex(docs: Document[]): Map<string, Document> {
 }
 
 // Create the store
+// --- Mate conversation telemetry -----------------------------------------
+// Mirror Mate conversations to Firestore so transcripts + proposal outcomes
+// can be reviewed to tune accuracy. Streaming text deltas (voice especially)
+// call appendMessage/updateMessage many times per turn, so coalesce the burst
+// into a single write that fires once activity settles and reads the latest
+// conversation state at flush time — never the intermediate half-streamed
+// bubbles. Timers live outside the store so the non-serializable handles never
+// land in state.
+const ASSISTANT_SYNC_DEBOUNCE_MS = 4000;
+const assistantSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleConversationSync(conversationId: string, get: () => AppState): void {
+  if (!ASSISTANT_LOGGING_ENABLED) return;
+  const pending = assistantSyncTimers.get(conversationId);
+  if (pending) clearTimeout(pending);
+  const timer = setTimeout(() => {
+    assistantSyncTimers.delete(conversationId);
+    const convo = get().conversations.find((c) => c.id === conversationId);
+    if (convo) void firestoreService.saveConversation(convo);
+  }, ASSISTANT_SYNC_DEBOUNCE_MS);
+  assistantSyncTimers.set(conversationId, timer);
+}
+
 export const useStore = create<AppState>((set, get) => ({
   // Initial state
   businessSettings: null,
@@ -289,8 +472,6 @@ export const useStore = create<AppState>((set, get) => ({
   setSyncError: (err) => set({ lastSyncError: err }),
   clearSyncError: () => set({ lastSyncError: null }),
   isOnboarded: false,
-  hasSeenTour: false,
-  seenScreenTours: [],
   subscriptionStatus: null,
   nextQuoteNumber: 1,
   invoices: [],
@@ -305,11 +486,10 @@ export const useStore = create<AppState>((set, get) => ({
   contacts: [],
   contactsLoaded: false,
   xeroContacts: [],
-  unifiedTourActive: false,
-  unifiedTourPhase: null,
-  unifiedTourQuoteId: null,
   documents: [],
   documentsLoaded: false,
+  conversations: [],
+  currentConversationId: null,
 
   // Business settings
   setBusinessSettings: async (settings: BusinessSettings) => {
@@ -412,6 +592,35 @@ export const useStore = create<AppState>((set, get) => ({
   // Save draft to storage (lightweight, no quota check or number assignment)
   saveDraft: async (quote: Quote) => {
     try {
+      // Forward-only TYPE guard. If the unified Document with this id has
+      // already been promoted to type='invoice' (via Phase-5
+      // convertDocumentToInvoice), a legacy quote save here would round-trip
+      // through the mirror trigger and visibly flip it back to a quote.
+      // Re-route through saveInvoice so the user's edits land on the
+      // canonical invoice instead.
+      {
+        const unified = get().getDocumentById(quote.id);
+        if (unified && unified.type === 'invoice') {
+          const { invoices } = get();
+          const existingInvoice = invoices.find((i) => i.id === quote.id);
+          if (existingInvoice) {
+            await get().saveInvoice({
+              ...existingInvoice,
+              materials: quote.materials,
+              sections: quote.sections,
+              laborRate: quote.laborRate,
+              laborHours: quote.laborHours,
+              markup: quote.markup,
+              job: quote.job,
+              updatedAt: new Date(),
+            } as Invoice);
+            return;
+          }
+          // No legacy invoice yet — silently swallow so we don't downgrade
+          // the mirror. Local state already reflects what the user typed.
+          return;
+        }
+      }
       const { quotes } = get();
       // Phase-8: ensure a Job exists before the legacy quote hits Firestore —
       // the mirror carries jobId into the unified Document, and the trigger
@@ -421,6 +630,15 @@ export const useStore = create<AppState>((set, get) => ({
         ...withJob,
         updatedAt: new Date(),
       });
+
+      // Defensive scrub: Firestore's JS SDK silently fails on NaN/Infinity
+      // (the saveQuote.catch surfaces it via logSyncError but the user only
+      // sees an orphan Job and no quote in the docs collection). If any
+      // numeric field on the calculated quote ended up non-finite, fix it
+      // before we try to persist. Most common sources: a legacy section
+      // with a missing laborHours/multiplier feeding into syncJobEstimatedHours,
+      // or a divide-by-zero in markup math when materialsSubtotal is 0.
+      sanitizeNonFiniteNumbers(calculatedQuote, `quote ${calculatedQuote.id}`);
 
       const existingIndex = quotes.findIndex((q) => q.id === quote.id);
       let updatedQuotes: Quote[];
@@ -539,6 +757,30 @@ export const useStore = create<AppState>((set, get) => ({
   // Save quote to storage
   saveQuote: async (quote: Quote) => {
     try {
+      // Forward-only TYPE guard — see saveDraft for the rationale. If the
+      // unified doc with this id is already an invoice, route through
+      // saveInvoice so the user's edits don't get reverted to a quote.
+      {
+        const unified = get().getDocumentById(quote.id);
+        if (unified && unified.type === 'invoice') {
+          const { invoices } = get();
+          const existingInvoice = invoices.find((i) => i.id === quote.id);
+          if (existingInvoice) {
+            await get().saveInvoice({
+              ...existingInvoice,
+              materials: quote.materials,
+              sections: quote.sections,
+              laborRate: quote.laborRate,
+              laborHours: quote.laborHours,
+              markup: quote.markup,
+              job: quote.job,
+              updatedAt: new Date(),
+            } as Invoice);
+            return;
+          }
+          return;
+        }
+      }
       const { quotes, getNextQuoteNumber, subscriptionStatus } = get();
 
       // Phase-8: auto-create a Job on first save if one isn't linked already.
@@ -1079,85 +1321,6 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (error) {
       // silently ignore
     }
-  },
-
-  // Tour
-  setHasSeenTour: async (value: boolean) => {
-    try {
-      await AsyncStorage.setItem(STORAGE_KEYS.TOUR_SEEN, JSON.stringify(value));
-      set({ hasSeenTour: value });
-
-      // Sync to Firestore if user is signed in
-      if (auth.currentUser) {
-        await firestoreService.saveTourStatus(value);
-      }
-    } catch (error) {
-      // silently ignore
-    }
-  },
-
-  checkTourStatus: async () => {
-    try {
-      // Hydrate from AsyncStorage first so hasSeenTour is correct on the very
-      // first render after app launch. Without this, the dashboard's 800ms
-      // auto-start timer can race the Firestore round-trip and re-trigger the
-      // tour on every app restart/update for users who've already seen it.
-      const localStored = await AsyncStorage.getItem(STORAGE_KEYS.TOUR_SEEN);
-      const localScreenStored = await AsyncStorage.getItem('@quotemate:seen_screen_tours');
-      if (localStored) set({ hasSeenTour: JSON.parse(localStored) });
-      if (localScreenStored) set({ seenScreenTours: JSON.parse(localScreenStored) });
-
-      // If user is signed in, reconcile with Firestore
-      if (auth.currentUser) {
-        const cloudTourStatus = await firestoreService.loadTourStatus();
-        if (cloudTourStatus !== null) {
-          await AsyncStorage.setItem(STORAGE_KEYS.TOUR_SEEN, JSON.stringify(cloudTourStatus));
-          set({ hasSeenTour: cloudTourStatus });
-        } else if (localStored) {
-          // Cloud has no record but local says seen — sync up
-          const hasSeenTour = JSON.parse(localStored);
-          if (hasSeenTour) {
-            await firestoreService.saveTourStatus(hasSeenTour);
-          }
-        }
-
-        const cloudScreenTours = await firestoreService.loadSeenScreenTours();
-        const localTours: string[] = localScreenStored ? JSON.parse(localScreenStored) : [];
-        if (cloudScreenTours) {
-          const merged = [...new Set([...localTours, ...cloudScreenTours])];
-          await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(merged));
-          set({ seenScreenTours: merged });
-          if (merged.length > cloudScreenTours.length) {
-            await firestoreService.saveSeenScreenTours(merged);
-          }
-        } else if (localTours.length > 0) {
-          await firestoreService.saveSeenScreenTours(localTours);
-        }
-      }
-    } catch (error) {
-      // silently ignore
-    }
-  },
-
-  markScreenTourSeen: async (tourId: string) => {
-    try {
-      const { seenScreenTours } = get();
-      if (seenScreenTours.includes(tourId)) return;
-      const updated = [...seenScreenTours, tourId];
-      await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(updated));
-      set({ seenScreenTours: updated });
-
-      // Sync to Firestore if user is signed in
-      if (auth.currentUser) {
-        await firestoreService.saveSeenScreenTours(updated);
-      }
-    } catch (error) {
-      // silently ignore
-    }
-  },
-
-  hasSeenScreenTour: (tourId: string) => {
-    return get().seenScreenTours.includes(tourId);
   },
 
   // Quote numbering
@@ -1775,73 +1938,6 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  // Unified guided tour
-  startUnifiedTour: () => {
-    const { createNewQuote, currentQuote } = get();
-    createNewQuote();
-    const newQuote = get().currentQuote;
-    set({
-      unifiedTourActive: true,
-      unifiedTourPhase: 'dashboard',
-      unifiedTourQuoteId: newQuote?.id || null,
-    });
-  },
-
-  setUnifiedTourPhase: (phase: TourPhase) => {
-    set({ unifiedTourPhase: phase });
-  },
-
-  endUnifiedTour: async () => {
-    const { unifiedTourQuoteId, deleteQuote, setHasSeenTour } = get();
-    // Delete the tour dummy quote — user was told to delete it themselves,
-    // but we clean it up to avoid leftovers
-    if (unifiedTourQuoteId) {
-      try {
-        await deleteQuote(unifiedTourQuoteId);
-      } catch (e) {
-        // silently ignore
-      }
-    }
-    // Mark all tours as seen
-    await setHasSeenTour(true);
-    const allScreenTours = ['jobDetails', 'customerDetails', 'materialsList', 'materialsListItems', 'addMaterial', 'materialsListAdded', 'laborMarkup', 'quotePreview', 'dashboardComplete'];
-    const { seenScreenTours } = get();
-    const updated = [...new Set([...seenScreenTours, ...allScreenTours])];
-    await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(updated));
-    set({
-      unifiedTourActive: false,
-      unifiedTourPhase: null,
-      unifiedTourQuoteId: null,
-      currentQuote: null,
-      seenScreenTours: updated,
-    });
-  },
-
-  skipUnifiedTour: async () => {
-    const { unifiedTourQuoteId, deleteQuote, setHasSeenTour } = get();
-    // Delete the dummy quote on skip
-    if (unifiedTourQuoteId) {
-      try {
-        await deleteQuote(unifiedTourQuoteId);
-      } catch (e) {
-        // silently ignore
-      }
-    }
-    // Mark all tours as seen
-    await setHasSeenTour(true);
-    const allScreenTours = ['jobDetails', 'customerDetails', 'materialsList', 'materialsListItems', 'addMaterial', 'materialsListAdded', 'laborMarkup', 'quotePreview', 'dashboardComplete'];
-    const { seenScreenTours } = get();
-    const updated = [...new Set([...seenScreenTours, ...allScreenTours])];
-    await AsyncStorage.setItem('@quotemate:seen_screen_tours', JSON.stringify(updated));
-    set({
-      unifiedTourActive: false,
-      unifiedTourPhase: null,
-      unifiedTourQuoteId: null,
-      currentQuote: null,
-      seenScreenTours: updated,
-    });
-  },
-
   // Contacts
   loadContacts: async () => {
     try {
@@ -2390,6 +2486,859 @@ export const useStore = create<AppState>((set, get) => ({
     return finalDoc;
   },
 
+  // Mate assistant ---------------------------------------------------------
+  newChat: () => {
+    const id = generateId();
+    const now = new Date().toISOString();
+    const convo: Conversation = { id, createdAt: now, updatedAt: now, messages: [] };
+    // We don't keep chat history: replace everything with one fresh, empty
+    // conversation. The prior turns were already synced to Firestore for
+    // admin review (scheduleConversationSync), so nothing's lost there.
+    set({ conversations: [convo], currentConversationId: id });
+    return id;
+  },
+
+  startConversation: () => {
+    const id = generateId();
+    const now = new Date().toISOString();
+    const convo: Conversation = { id, createdAt: now, updatedAt: now, messages: [] };
+    // Chat history is in-memory only (not persisted): a tab switch keeps the
+    // current chat alive, but a cold launch starts fresh. Cap at 20 so a long
+    // session can't grow the array without bound.
+    const trimmed = [convo, ...get().conversations].slice(0, 20);
+    set({ conversations: trimmed, currentConversationId: id });
+    return id;
+  },
+
+  endConversation: () => {
+    set({ currentConversationId: null });
+  },
+
+  appendMessage: (conversationId: string, message: ChatMessage) => {
+    const existing = get().conversations.find((c) => c.id === conversationId);
+    let next: Conversation[];
+    if (existing) {
+      next = get().conversations.map((c) =>
+        c.id === conversationId
+          ? { ...c, messages: [...c.messages, message], updatedAt: new Date().toISOString() }
+          : c,
+      );
+    } else {
+      // Defensive: a stale currentConversationId can point at a conversation
+      // that's no longer in the array (e.g. just after newChat). Self-heal by
+      // minting a conversation with this id so the message isn't lost.
+      const now = new Date().toISOString();
+      const fresh: Conversation = { id: conversationId, createdAt: now, updatedAt: now, messages: [message] };
+      next = [fresh, ...get().conversations].slice(0, 20);
+      set({ currentConversationId: conversationId });
+    }
+    set({ conversations: next });
+    scheduleConversationSync(conversationId, get);
+  },
+
+  updateMessage: (conversationId, messageId, patch) => {
+    const next = get().conversations.map((c) => {
+      if (c.id !== conversationId) return c;
+      return {
+        ...c,
+        updatedAt: new Date().toISOString(),
+        messages: c.messages.map((m) => (m.id === messageId ? { ...m, ...patch } : m)),
+      };
+    });
+    set({ conversations: next });
+    scheduleConversationSync(conversationId, get);
+  },
+
+  updateProposalStatus: (conversationId, messageId, proposalId, status) => {
+    const next = get().conversations.map((c) => {
+      if (c.id !== conversationId) return c;
+      return {
+        ...c,
+        updatedAt: new Date().toISOString(),
+        messages: c.messages.map((m) => {
+          if (m.id !== messageId) return m;
+          return {
+            ...m,
+            proposalStatus: { ...(m.proposalStatus || {}), [proposalId]: status },
+          };
+        }),
+      };
+    });
+    set({ conversations: next });
+    scheduleConversationSync(conversationId, get);
+  },
+
+  applyProposal: async (
+    proposal: Proposal,
+    onProgress?: (status: WorkingStatus) => void,
+  ): Promise<ApplyProposalResult> => {
+    // Resolve a unified Document by id — local cache first, then a Firestore
+    // round-trip if missing. Mate's server-side tools always return doc ids
+    // from users/{uid}/documents/{docId}, so a local-cache miss (listener
+    // hasn't synced, doc was just minted, another device added it) should
+    // not kill the apply path. If we fetch from Firestore we also seed the
+    // local cache so subsequent reads are fast.
+    const resolveDocument = async (docId: string): Promise<Document | undefined> => {
+      const cached = get().getDocumentById(docId) || get().getDocumentByLegacyId(docId);
+      if (cached) return cached;
+      // eslint-disable-next-line no-console
+      console.log('[Mate] doc not in local cache, fetching from Firestore', docId);
+      const fetched = await documentService.getDocumentById(docId);
+      if (fetched) {
+        set((state) => {
+          const existing = state.documents.find((d) => d.id === fetched.id);
+          const documents = existing
+            ? state.documents.map((d) => (d.id === fetched.id ? fetched : d))
+            : [...state.documents, fetched];
+          return { documents };
+        });
+      }
+      return fetched || undefined;
+    };
+
+    try {
+      switch (proposal.type) {
+        case 'propose_create_contact': {
+          const newContact: Contact = {
+            id: generateId(),
+            name: proposal.name,
+            email: proposal.email,
+            phone: proposal.phone,
+            address: proposal.address,
+            source: 'manual',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          await get().saveContact(newContact);
+          return { ok: true, navigate: { kind: 'open_contact', contactId: newContact.id } };
+        }
+
+        case 'propose_update_customer': {
+          // Re-point an EXISTING quote/invoice at a different contact. Resolve
+          // the customer the same way propose_draft_quote does: prefer an
+          // existing contact (customerId), fall back to a fresh draft we
+          // create + link. Then stamp the customer onto the document and let
+          // saveDocument → ensureJobForDocument sync the linked job's
+          // customerName/email/phone/address (the in-chat header reads the job).
+          let contact: Contact | undefined;
+          if (proposal.customerId) {
+            contact = get().contacts.find((c) => c.id === proposal.customerId);
+            if (!contact) {
+              // eslint-disable-next-line no-console
+              console.log('[Mate] contact not in local cache, fetching from Firestore', proposal.customerId);
+              const fetched = await firestoreService.getContactById(proposal.customerId);
+              if (fetched) {
+                contact = fetched;
+                const next = [...get().contacts.filter((c) => c.id !== fetched.id), fetched];
+                set({ contacts: next });
+                AsyncStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(next)).catch(() => {});
+              }
+            }
+            if (!contact) {
+              return {
+                ok: false,
+                error: 'Couldn\'t find that contact in Firestore. Ask again so Mate can re-search.',
+              };
+            }
+          } else if (proposal.customerDraft?.name) {
+            contact = {
+              id: generateId(),
+              name: proposal.customerDraft.name,
+              email: proposal.customerDraft.email,
+              phone: proposal.customerDraft.phone,
+              address: proposal.customerDraft.address,
+              source: 'manual',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            await get().saveContact(contact);
+          } else {
+            return { ok: false, error: 'No customer provided.' };
+          }
+
+          // syncJobFromSource only patches non-empty differing fields and never
+          // the contact link, so after the save we also point the linked job's
+          // customerId at the new contact.
+          const syncJobContactId = async (jobId: string | undefined) => {
+            if (!jobId) return;
+            const job = useJobStore.getState().getJobById(jobId);
+            if (job && job.customerId !== contact!.id) {
+              await useJobStore.getState().saveJob({ ...job, customerId: contact!.id });
+            }
+          };
+
+          // Preferred path: unified Document (covers quotes and invoices).
+          const target = await resolveDocument(proposal.quoteId);
+          if (target) {
+            const nextDoc: Document = {
+              ...target,
+              contactId: contact.id,
+              customerName: contact.name,
+              customerEmail: contact.email,
+              customerPhone: contact.phone,
+              jobAddress: contact.address ?? target.jobAddress,
+            };
+            await get().saveDocument(nextDoc);
+            await syncJobContactId(nextDoc.jobId);
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: nextDoc.id } };
+          }
+
+          // Legacy fallback: a draft still only in the quotes array.
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (quote) {
+            const nextQuote: Quote = {
+              ...quote,
+              contactId: contact.id,
+              customerName: contact.name,
+              customerEmail: contact.email,
+              customerPhone: contact.phone,
+              jobAddress: contact.address ?? quote.jobAddress,
+              updatedAt: new Date(),
+            };
+            await get().saveQuote(nextQuote);
+            await syncJobContactId(get().quotes.find((q) => q.id === quote.id)?.jobId);
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
+          }
+
+          const invoice = get().invoices.find((i) => i.id === proposal.quoteId);
+          if (invoice) {
+            const nextInvoice: Invoice = {
+              ...invoice,
+              contactId: contact.id,
+              customerName: contact.name,
+              customerEmail: contact.email,
+              customerPhone: contact.phone,
+              jobAddress: contact.address ?? invoice.jobAddress,
+              updatedAt: new Date(),
+            };
+            await get().saveInvoice(nextInvoice);
+            await syncJobContactId(get().invoices.find((i) => i.id === invoice.id)?.jobId);
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: invoice.id } };
+          }
+
+          return { ok: false, error: 'Quote not found.' };
+        }
+
+        case 'propose_draft_quote': {
+          // Resolve customer. If customerId was provided, prefer the local
+          // contacts cache, then fall back to a direct Firestore fetch —
+          // find_customer reads from server-side users/{uid}/contacts, so a
+          // miss in the local cache (stale loadContacts, phone-book contact
+          // not yet synced, contact added on another device) shouldn't kill
+          // the apply path.
+          let contact: Contact | undefined;
+          if (proposal.customerId) {
+            contact = get().contacts.find((c) => c.id === proposal.customerId);
+            if (!contact) {
+              // eslint-disable-next-line no-console
+              console.log('[Mate] contact not in local cache, fetching from Firestore', proposal.customerId);
+              const fetched = await firestoreService.getContactById(proposal.customerId);
+              if (fetched) {
+                contact = fetched;
+                // Add to the local cache so subsequent reads + future tabs see it.
+                const next = [...get().contacts.filter((c) => c.id !== fetched.id), fetched];
+                set({ contacts: next });
+                AsyncStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(next)).catch(() => {});
+              }
+            }
+            if (!contact) {
+              return {
+                ok: false,
+                error: 'Couldn\'t find that contact in Firestore. Ask again so Mate can re-search.',
+              };
+            }
+          } else if (proposal.customerDraft?.name) {
+            contact = {
+              id: generateId(),
+              name: proposal.customerDraft.name,
+              email: proposal.customerDraft.email,
+              phone: proposal.customerDraft.phone,
+              address: proposal.customerDraft.address,
+              source: 'manual',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            await get().saveContact(contact);
+          }
+
+          // Mint a new quote so business defaults (labour rate, markup, GST)
+          // are stamped from settings.
+          get().createNewQuote();
+          const fresh = get().currentQuote;
+          if (!fresh) return { ok: false, error: 'Failed to create draft quote.' };
+
+          // Stamp customer + scope. Materials come from the pipeline.
+          const seeded: Quote = {
+            ...fresh,
+            customerName: contact?.name || proposal.customerDraft?.name || '',
+            customerEmail: contact?.email,
+            customerPhone: contact?.phone,
+            jobAddress: contact?.address,
+            contactId: contact?.id,
+            job: {
+              ...fresh.job,
+              name: proposal.jobName,
+              description: proposal.jobDescription,
+            },
+            laborHours: proposal.estimatedDurationHours ?? fresh.laborHours,
+          };
+          get().updateQuote(seeded);
+          await get().saveDraft(get().currentQuote!);
+          const quoteId = get().currentQuote!.id;
+
+          // Run the FULL pipeline (analyse + pricing) IN CHAT via the shared
+          // materialsPipeline service. The onProgress callback streams events
+          // into the working card the chat already mounted. After both phases
+          // complete, navigate to JobPreview so the tradie sees the priced
+          // draft instead of an empty materials screen.
+          let materialCount = 0;
+          let pricingSummary: string | undefined;
+          let review: QuoteReview | undefined;
+          try {
+            // Track the current working status so partial updates (e.g. an
+            // item-priced event that only changes the detail line) don't blow
+            // away the phase headline. Without merging, fast per-item events
+            // overwrite the user-visible phase and the card looks like it's
+            // flashing between item names with no context for what's happening.
+            let currentWorking: WorkingStatus = {
+              phase: 'preflight',
+              status: 'Getting ready…',
+              done: false,
+            };
+            const reportProgress = (next: Partial<WorkingStatus>) => {
+              currentWorking = { ...currentWorking, ...next };
+              onProgress?.(currentWorking);
+            };
+            reportProgress({});
+            const templates = await loadTemplates().catch(() => []);
+            const isPro = get().getEffectivePlan() === 'pro';
+
+            // ── Phase 1: analyse ──
+            const analyseResult = await generateMaterialsForQuote(
+              {
+                quote: get().currentQuote!,
+                businessSettings: get().businessSettings,
+                isPro,
+                templates,
+              },
+              {
+                onEvent: (event) => {
+                  reportProgress({
+                    phase: event.phase,
+                    status: event.status,
+                    detail: event.detail,
+                  });
+                },
+              },
+            ).catch((err) => {
+              if (err instanceof PipelineCancelled) return null;
+              throw err;
+            });
+
+            if (!analyseResult) {
+              return { ok: false, error: 'Pipeline was cancelled.' };
+            }
+
+            get().updateQuote(analyseResult.updatedQuote);
+            await get().saveDraft(get().currentQuote!);
+            materialCount = analyseResult.generatedMaterialCount;
+
+            // ── Phase 2: pricing ──
+            // Reuse the same working card. Map PricingEvents → WorkingStatus.
+            // status holds the phase headline (slow-changing) while detail
+            // carries the rapid per-item progress.
+            reportProgress({
+              phase: 'pricing',
+              status: `Pricing ${materialCount} item${materialCount === 1 ? '' : 's'}…`,
+              detail: undefined,
+            });
+
+            const pricedResult = await fetchPricesForQuote(
+              {
+                quote: get().currentQuote!,
+                businessSettings: get().businessSettings,
+                reeceConnected: null, // pipeline resolves on demand
+              },
+              {
+                onEvent: (event) => {
+                  const next = pricingEventToProgress(event);
+                  if (next) reportProgress(next);
+                },
+              },
+            );
+
+            get().updateQuote(pricedResult.updatedQuote);
+            await get().saveDraft(get().currentQuote!);
+            review = reviewQuoteMaterials(pricedResult.updatedQuote.materials);
+
+            const parts: string[] = [];
+            if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
+            if (pricedResult.failedCount > 0) parts.push(`${pricedResult.failedCount} need pricing`);
+            if (pricedResult.skippedCount > 0) parts.push(`${pricedResult.skippedCount} already priced`);
+            pricingSummary = parts.join(' · ') || 'Nothing to price.';
+
+            onProgress?.({
+              phase: 'done',
+              status: `Drafted ${materialCount} item${materialCount === 1 ? '' : 's'}.`,
+              done: true,
+              summary: pricingSummary,
+            });
+          } catch (err: any) {
+            // eslint-disable-next-line no-console
+            console.warn('[Mate] pipeline failed', err);
+            onProgress?.({
+              phase: 'failed',
+              status: 'Pipeline hit a snag.',
+              detail: err?.message,
+              done: true,
+            });
+            return {
+              ok: true,
+              navigate: { kind: 'job_preview', quoteId },
+              note: `Pipeline snag — opened the draft, tap Fetch Prices in the wizard. (${err?.message || 'unknown'})`,
+            };
+          }
+
+          // If the tradie asked for an invoice up front, auto-convert at the
+          // end of the pipeline so they don't have to do a second Apply.
+          if (proposal.documentType === 'invoice') {
+            try {
+              const converted = await get().convertDocumentToInvoice(quoteId);
+              return {
+                ok: true,
+                navigate: { kind: 'open_invoice', invoiceId: converted.id },
+                review,
+              };
+            } catch (err: any) {
+              // eslint-disable-next-line no-console
+              console.warn('[Mate] auto-convert to invoice failed', err);
+              // Fall through to opening the quote — the tradie can convert manually.
+            }
+          }
+
+          // Land on JobPreview (the final review screen) instead of
+          // MaterialsList — pricing is already done.
+          return {
+            ok: true,
+            navigate: { kind: 'job_preview', quoteId },
+            review,
+          };
+        }
+
+        case 'propose_update_quote_rates': {
+          // Bump a numeric rate on the doc without re-running pricing. We
+          // convert to Quote-shape so the shared calculator can re-run totals,
+          // then write the updated values back onto the Document.
+          const target = await resolveDocument(proposal.quoteId);
+          if (!target) {
+            return { ok: false, error: 'Quote not found.' };
+          }
+          const { documentToQuote } = await import('../types/documentAdapter');
+          const sourceQuote = documentToQuote(target);
+          const nextQuote: Quote = {
+            ...sourceQuote,
+            markup: proposal.markup ?? sourceQuote.markup,
+            laborMarkup: proposal.laborMarkup ?? sourceQuote.laborMarkup,
+            laborRate: proposal.laborRate ?? sourceQuote.laborRate,
+            laborHours: proposal.laborHours ?? sourceQuote.laborHours,
+          };
+          const recalced = updateQuoteCalculations(nextQuote);
+          const nextDoc: Document = {
+            ...target,
+            laborRate: recalced.laborRate,
+            laborHours: recalced.laborHours,
+            laborTotal: recalced.laborTotal,
+            markup: recalced.markup,
+            laborMarkup: recalced.laborMarkup,
+            markupAmount: recalced.markupAmount,
+            materialsSubtotal: recalced.materialsSubtotal,
+            subtotal: recalced.subtotal,
+            gst: recalced.gst,
+            total: recalced.total,
+          };
+          await get().saveDocument(nextDoc);
+          return { ok: true, navigate: { kind: 'job_preview', quoteId: target.id } };
+        }
+
+        case 'propose_add_line_item': {
+          // Try the user's supplier book FIRST — if the line item the
+          // assistant is adding matches a saved supplier rate, price it
+          // inline so the tradie doesn't have to wait for the pricing
+          // pipeline (which was the previous behaviour and the source of
+          // the "is it gone? … still cooking" UX). Pack-aware quantity is
+          // computed via applyPackAwarePricing so a 32 m² ceiling pulls
+          // ceil(32/8.08)=4 packs of Pink Batts at the saved rate, not 32
+          // packs at the saved per-pack price.
+          //
+          // Falls back to a $0 stub when nothing in the supplier book
+          // matches — the materials list pricing pass will resolve it on
+          // next open (the old behaviour, preserved as the safety net).
+          const baseUnit = normalizeMaterialUnit(proposal.unit);
+          const stub: Material = {
+            id: generateId(),
+            name: proposal.searchTerm,
+            searchTerm: proposal.searchTerm,
+            quantity: proposal.qty,
+            unit: baseUnit,
+            price: 0,
+            totalPrice: 0,
+            manualPriceOverride: false,
+            ...(proposal.section ? { section: proposal.section } : {}),
+          };
+
+          // Local supplier-book lookup. Best-effort — any failure falls
+          // through to the $0 stub so we never block adding the row.
+          try {
+            const supplierList = await loadSupplierGroups();
+            const priorityOrder = get().businessSettings?.supplierPriority ?? [];
+            const hits = await searchLocalSources(
+              proposal.searchTerm,
+              supplierList,
+              { priorityOrder },
+            );
+            const top = hits[0];
+            if (top && typeof top.price === 'number' && top.price > 0) {
+              stub.name = top.productName || stub.name;
+              stub.price = top.price;
+              stub.unit = (top.unit as Material['unit']) || stub.unit;
+              stub.pricingSource = 'manual';
+              stub.priceConfidence = 'high';
+              stub.manualPriceOverride = false;
+              if (top.productUrl) stub.productUrl = top.productUrl;
+              if (top.imageUrl) stub.imageUrl = top.imageUrl;
+              // applyPackAwarePricing reads pack/coverage from the
+              // saved-rate product name and recomputes quantity in packs
+              // (e.g. 32 m² ÷ 8.08 m² per pack → 4 packs).
+              applyPackAwarePricing(stub, { productName: top.productName });
+              stub.totalPrice = roundToTwoDecimals(stub.price * stub.quantity);
+            }
+          } catch {
+            // best-effort — keep the $0 stub.
+          }
+
+          const target = await resolveDocument(proposal.quoteId);
+          if (target) {
+            const nextDoc: Document = {
+              ...target,
+              materials: [...(target.materials ?? []), stub],
+            };
+            await get().saveDocument(nextDoc);
+            return { ok: true };
+          }
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (!quote) return { ok: false, error: 'Quote not found.' };
+          await get().saveQuote({ ...quote, materials: [...quote.materials, stub], updatedAt: new Date() });
+          return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
+        }
+
+        case 'propose_delete_quote': {
+          // Delete an entire quote/invoice document. Distinct from
+          // propose_delete_line_item: that strips one row, this removes the
+          // whole record. Block on paid / partially paid — those belong in
+          // the books, the tradie should archive them instead.
+          const target = await resolveDocument(proposal.quoteId);
+          const stage =
+            target?.stage ||
+            get().quotes.find((q) => q.id === proposal.quoteId)?.status ||
+            get().invoices.find((i) => i.id === proposal.quoteId)?.status;
+          if (stage === 'paid' || stage === 'partially_paid') {
+            return {
+              ok: false,
+              error:
+                "Can't delete a paid record — the books need to stay intact. Archive it instead.",
+            };
+          }
+          // Capture the parent job BEFORE we delete the doc — once the
+          // document is gone we can't read its jobId back. We use this to
+          // cascade-delete the parent Job when it has no other documents
+          // attached. Without this, the assistant flow leaves an orphan
+          // "Draft" job in the jobs list even though the user asked to
+          // delete the quote (matching the manual ViewJobScreen flow,
+          // which already cascades via cascadeDeleteJob).
+          const parentJobId =
+            target?.jobId ||
+            get().quotes.find((q) => q.id === proposal.quoteId)?.jobId ||
+            get().invoices.find((i) => i.id === proposal.quoteId)?.jobId;
+
+          const cascadeParentJobIfOrphaned = async (deletedDocId: string) => {
+            if (!parentJobId) return;
+            try {
+              const job = useJobStore.getState().getJobById(parentJobId);
+              if (!job) return;
+              // Count remaining docs across all sources, excluding the one
+              // we just deleted. Includes the unified documents array, the
+              // legacy quotes/invoices arrays, and the job's own
+              // documentIds list — a doc may live in any subset depending
+              // on how fresh it is.
+              const remaining = new Set<string>();
+              get().documents.forEach((d) => {
+                if (d.id !== deletedDocId && d.jobId === parentJobId) remaining.add(d.id);
+              });
+              get().quotes.forEach((q) => {
+                if (q.id !== deletedDocId && q.jobId === parentJobId) remaining.add(q.id);
+              });
+              get().invoices.forEach((i) => {
+                if (i.id !== deletedDocId && i.jobId === parentJobId) remaining.add(i.id);
+              });
+              (job.documentIds || []).forEach((id) => {
+                if (id !== deletedDocId) remaining.add(id);
+              });
+              if (remaining.size === 0) {
+                await useJobStore.getState().deleteJob(parentJobId);
+              }
+            } catch {
+              // best-effort — the doc was deleted, that's the main ask.
+            }
+          };
+
+          if (target) {
+            // Route via the appropriate store action so the matching local
+            // array (quotes vs invoices) and Firestore collection are both
+            // cleared. Then belt-and-braces wipe the unified mirror in case
+            // the trigger hasn't caught up.
+            if (target.type === 'invoice') {
+              await get().deleteInvoice(target.id);
+            } else {
+              await get().deleteQuote(target.id);
+            }
+            try {
+              await documentService.deleteDocument(target.id);
+            } catch {
+              // best-effort — the trigger will reconcile.
+            }
+            set((state) => ({
+              documents: state.documents.filter((d) => d.id !== target.id),
+            }));
+            await cascadeParentJobIfOrphaned(target.id);
+            return { ok: true };
+          }
+          // Legacy fallbacks — the doc lives only in the old quotes/invoices
+          // arrays (very fresh draft, not yet mirrored).
+          const legacyQuote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (legacyQuote) {
+            await get().deleteQuote(legacyQuote.id);
+            await cascadeParentJobIfOrphaned(legacyQuote.id);
+            return { ok: true };
+          }
+          const legacyInvoice = get().invoices.find((i) => i.id === proposal.quoteId);
+          if (legacyInvoice) {
+            await get().deleteInvoice(legacyInvoice.id);
+            await cascadeParentJobIfOrphaned(legacyInvoice.id);
+            return { ok: true };
+          }
+          return { ok: false, error: 'Quote not found — it may have already been deleted.' };
+        }
+
+        case 'propose_delete_line_item': {
+          // Prefer the unified Document path so the legacy mirror tracks the
+          // change; fall back to legacy quote/invoice arrays.
+          const target = await resolveDocument(proposal.quoteId);
+          if (target) {
+            const before = (target.materials ?? []).length;
+            const nextMaterials = (target.materials ?? []).filter((m) => m.id !== proposal.materialId);
+            if (nextMaterials.length === before) {
+              return { ok: false, error: 'Line not found — it may have already been removed.' };
+            }
+            const nextDoc: Document = { ...target, materials: nextMaterials };
+            await get().saveDocument(nextDoc);
+            return { ok: true };
+          }
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (quote) {
+            const before = quote.materials.length;
+            const nextMaterials = quote.materials.filter((m) => m.id !== proposal.materialId);
+            if (nextMaterials.length === before) {
+              return { ok: false, error: 'Line not found — it may have already been removed.' };
+            }
+            await get().saveQuote({ ...quote, materials: nextMaterials, updatedAt: new Date() });
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
+          }
+          const invoice = get().invoices.find((i) => i.id === proposal.quoteId);
+          if (invoice) {
+            const before = invoice.materials.length;
+            const nextMaterials = invoice.materials.filter((m) => m.id !== proposal.materialId);
+            if (nextMaterials.length === before) {
+              return { ok: false, error: 'Line not found — it may have already been removed.' };
+            }
+            await get().saveInvoice({ ...invoice, materials: nextMaterials, updatedAt: new Date() });
+            return { ok: true };
+          }
+          return { ok: false, error: 'Quote not found.' };
+        }
+
+        case 'propose_send_quote': {
+          const doc = await resolveDocument(proposal.quoteId);
+          if (!doc) return { ok: false, error: 'Quote not found.' };
+          // If Mate pre-wrote the email, persist it onto the doc so the send
+          // preview opens pre-filled (the modal reads draftEmailBody /
+          // draftEmailSubject and skips auto-generation when they're set).
+          // Substitute any `<business>` / `[business name]` style placeholders
+          // with the actual business name from settings — the model often
+          // leaves a literal placeholder in the sign-off and we never want
+          // that going out to a customer.
+          const businessName =
+            get().businessSettings?.businessName?.trim() || '';
+          const substitute = (s: string): string => {
+            if (!businessName) return s;
+            return s.replace(
+              /[<\[{]\s*business(?:\s+name)?\s*[>\]}]/gi,
+              businessName,
+            );
+          };
+          let target = doc;
+          if (proposal.draftEmailBody || proposal.draftEmailSubject) {
+            target = {
+              ...doc,
+              ...(proposal.draftEmailBody
+                ? { draftEmailBody: substitute(proposal.draftEmailBody) }
+                : {}),
+              ...(proposal.draftEmailSubject
+                ? { draftEmailSubject: substitute(proposal.draftEmailSubject) }
+                : {}),
+            };
+            await get().saveDocument(target);
+          }
+          return {
+            ok: true,
+            navigate: {
+              kind: 'open_send_modal',
+              documentId: target.id,
+              recipientEmail: proposal.recipientEmail || target.customerEmail,
+            },
+          };
+        }
+
+        case 'propose_convert_to_invoice': {
+          const doc = await resolveDocument(proposal.quoteId);
+          if (doc) {
+            const converted = await get().convertDocumentToInvoice(doc.id);
+            return { ok: true, navigate: { kind: 'open_invoice', invoiceId: converted.id } };
+          }
+          // Fall back to legacy quotes array (very old drafts not yet mirrored
+          // to the unified collection).
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (!quote) return { ok: false, error: 'Quote not found.' };
+          const invoice = await get().createInvoiceFromQuote(quote);
+          return { ok: true, navigate: { kind: 'open_invoice', invoiceId: invoice.id } };
+        }
+
+        case 'propose_reprice': {
+          // Re-run the pricing pipeline (price fetch + reconcile) on an EXISTING
+          // quote/invoice to fix the rows review_quote flagged. We wipe the price
+          // off the flagged rows first (fetchPrices skips anything already
+          // priced); manual overrides and confident rows are never flagged so
+          // they're untouched. Materials only — scope/labour aren't re-analysed.
+          let currentWorking: WorkingStatus = { phase: 'pricing', status: 'Re-checking prices…', done: false };
+          const reportProgress = (next: Partial<WorkingStatus>) => {
+            currentWorking = { ...currentWorking, ...next };
+            onProgress?.(currentWorking);
+          };
+
+          const runReprice = async (source: Quote): Promise<{ priced: Quote; resetCount: number }> => {
+            const { materials, resetCount } = resetFlaggedRowsForReprice(source.materials);
+            reportProgress({
+              status: resetCount > 0 ? `Re-pricing ${resetCount} row${resetCount === 1 ? '' : 's'}…` : 'Re-checking prices…',
+            });
+            const priced = await fetchPricesForQuote(
+              {
+                quote: { ...source, materials },
+                businessSettings: get().businessSettings,
+                reeceConnected: null,
+              },
+              {
+                onEvent: (event) => {
+                  const next = pricingEventToProgress(event);
+                  if (next) reportProgress(next);
+                },
+              },
+            );
+            return { priced: updateQuoteCalculations(priced.updatedQuote), resetCount };
+          };
+
+          // Preferred path: unified Document (covers both quotes and invoices).
+          const doc = await resolveDocument(proposal.quoteId);
+          if (doc) {
+            const { documentToQuote } = await import('../types/documentAdapter');
+            const { priced } = await runReprice(documentToQuote(doc));
+            const repricedDoc: Document = {
+              ...doc,
+              materials: priced.materials,
+              materialsSubtotal: priced.materialsSubtotal,
+              laborTotal: priced.laborTotal,
+              subtotal: priced.subtotal,
+              markupAmount: priced.markupAmount,
+              gst: priced.gst,
+              total: priced.total,
+            };
+            await get().saveDocument(repricedDoc);
+            const review = reviewQuoteMaterials(priced.materials);
+            onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: doc.id }, review };
+          }
+
+          // Legacy fallback: a draft still only in the quotes array.
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (!quote) return { ok: false, error: 'Quote not found.' };
+          const { priced } = await runReprice(quote);
+          await get().saveQuote(priced);
+          const review = reviewQuoteMaterials(priced.materials);
+          onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
+          return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, review };
+        }
+
+        case 'propose_mark_paid': {
+          // Resolve the invoice. Unified doc first; fall back to the legacy
+          // invoices array for very old records that never made it through
+          // the mirror.
+          const doc = await resolveDocument(proposal.quoteId);
+          if (doc && doc.type !== 'invoice') {
+            return {
+              ok: false,
+              error: 'That\'s a quote, not an invoice. Convert it to an invoice first, then mark it paid.',
+            };
+          }
+          let invoiceId: string | undefined = doc?.id;
+          let total = Number(doc?.total ?? 0);
+          let alreadyPaid = Number(doc?.paidTotal ?? 0);
+          if (!invoiceId) {
+            const legacy = get().invoices.find((i) => i.id === proposal.quoteId);
+            if (!legacy) return { ok: false, error: 'Invoice not found.' };
+            invoiceId = legacy.id;
+            total = Number(legacy.total ?? 0);
+            alreadyPaid = Number(legacy.paidAmount ?? 0);
+          }
+          const balance = Math.max(0, total - alreadyPaid);
+          if (balance <= 0) {
+            // Idempotent — no money to record. Surface a friendly note
+            // instead of a hard error so Mate can reassure the tradie
+            // the invoice is already settled.
+            return {
+              ok: true,
+              navigate: { kind: 'open_invoice', invoiceId: invoiceId! },
+              note: 'That invoice was already paid in full — nothing to record.',
+            };
+          }
+          try {
+            await get().recordPayment(
+              invoiceId!,
+              balance,
+              proposal.method ?? 'other',
+              proposal.notes,
+            );
+          } catch (err: any) {
+            return { ok: false, error: err?.message || 'Failed to record payment.' };
+          }
+          return { ok: true, navigate: { kind: 'open_invoice', invoiceId: invoiceId! } };
+        }
+
+        default:
+          return { ok: false, error: 'Unknown proposal type.' };
+      }
+    } catch (err: any) {
+      return { ok: false, error: err?.message || 'Failed to apply proposal.' };
+    }
+  },
+
   // Clear all data (for logout)
   clearAllData: async () => {
     try {
@@ -2402,11 +3351,10 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.INVOICES,
         STORAGE_KEYS.NEXT_QUOTE_NUMBER,
         STORAGE_KEYS.NEXT_INVOICE_NUMBER,
-        STORAGE_KEYS.TOUR_SEEN,
         STORAGE_KEYS.XERO_CONNECTION,
         STORAGE_KEYS.CONTACTS,
         STORAGE_KEYS.CONTACTS_MIGRATED,
-        '@quotemate:seen_screen_tours',
+        STORAGE_KEYS.CONVERSATIONS,
       ]);
       // Reset store state to initial values
       set({
@@ -2414,8 +3362,6 @@ export const useStore = create<AppState>((set, get) => ({
         quotes: [],
         currentQuote: null,
         isOnboarded: false,
-        hasSeenTour: false,
-        seenScreenTours: [],
         subscriptionStatus: null,
         invoices: [],
         currentInvoice: null,
@@ -2429,6 +3375,8 @@ export const useStore = create<AppState>((set, get) => ({
         xeroContacts: [],
         documents: [],
         documentsLoaded: false,
+        conversations: [],
+        currentConversationId: null,
       });
     } catch (error) {
       throw error;

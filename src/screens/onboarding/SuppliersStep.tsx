@@ -29,6 +29,7 @@ import { successTap, lightTap, errorTap } from '../../utils/haptics';
 import { useSupplierListImport } from '../../hooks/useSupplierListImport';
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
 import { SupplierListReviewModal } from '../../components/SupplierListReviewModal';
+import { SpreadsheetColumnMapperModal } from '../../components/SpreadsheetColumnMapperModal';
 import { ActionSheet, type ActionSheetOption } from '../../components/ActionSheet';
 
 export interface AddedSupplier {
@@ -79,7 +80,7 @@ export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
     setUploadSheetVisible(true);
   };
 
-  const launchFromSheet = (source: 'gallery' | 'pdf') => {
+  const launchFromSheet = (source: 'gallery' | 'pdf' | 'spreadsheet') => {
     setUploadSheetVisible(false);
     importer.startImport(source);
   };
@@ -87,6 +88,11 @@ export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
   const uploadSheetOptions: ActionSheetOption[] = [
     { icon: 'file-pdf-box', label: 'Pick a PDF', onPress: () => launchFromSheet('pdf') },
     { icon: 'image-multiple', label: 'Pick photos from gallery', onPress: () => launchFromSheet('gallery') },
+    {
+      icon: 'file-table-outline',
+      label: 'Pick CSV / Excel',
+      onPress: () => launchFromSheet('spreadsheet'),
+    },
   ];
 
   const renderExtractingOverlay = () => (
@@ -226,6 +232,14 @@ export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
           'Make sure prices and product names are sharp',
           'Multiple pages? Snap them all before hitting Done',
         ]}
+      />
+
+      <SpreadsheetColumnMapperModal
+        visible={importer.columnMappingVisible}
+        parsed={importer.parsedSpreadsheet}
+        initialMapping={importer.autoDetectedMapping}
+        onCancel={importer.cancelColumnMapping}
+        onConfirm={importer.applyColumnMapping}
       />
 
       <SupplierListReviewModal

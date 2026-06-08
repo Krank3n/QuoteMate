@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Animated, StyleSheet, View, TouchableOpacity, LayoutChangeEvent, Platform } from 'react-native';
+import { Animated, StyleSheet, View, Text, TouchableOpacity, LayoutChangeEvent, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { JobsListScreen } from '../screens/JobsListScreen';
+import { AssistantScreen } from '../screens/AssistantScreen';
 import { ViewJobScreen } from '../screens/ViewJobScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
@@ -36,6 +37,7 @@ import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen
 import { SquareIntegrationScreen } from '../screens/settings/SquareIntegrationScreen';
 import { ReeceIntegrationScreen } from '../screens/settings/ReeceIntegrationScreen';
 import { GoogleCalendarIntegrationScreen } from '../screens/settings/GoogleCalendarIntegrationScreen';
+import { CallKatieScreen } from '../screens/settings/CallKatieScreen';
 import { SectionTemplatesScreen } from '../screens/settings/SectionTemplatesScreen';
 import { JobTemplateEditorScreen } from '../screens/settings/JobTemplateEditorScreen';
 import { EditSupplierScreen } from '../screens/settings/EditSupplierScreen';
@@ -51,21 +53,19 @@ import { JobPreviewScreen } from '../screens/NewQuote/JobPreviewScreen';
 import { ReeceOrderScreen } from '../screens/ReeceOrderScreen';
 
 import { colors } from '../theme';
-import { TourRefsProvider } from '../components/tour/useTourRefs';
-import { UnifiedTourController } from '../components/tour/UnifiedTourController';
-import { useStore } from '../store/useStore';
 
 // Type definitions for navigation
 export type RootTabParamList = {
   Dashboard: undefined;
   Jobs: undefined;
+  Mate: undefined;
   Settings: undefined;
 };
 
 export type NewQuoteStackParamList = {
   Details: { mode?: 'quote' | 'invoice' } | undefined;
   CustomerDetails: { mode?: 'quote' | 'invoice' } | undefined;
-  MaterialsList: { mode?: 'quote' | 'invoice' } | undefined;
+  MaterialsList: { mode?: 'quote' | 'invoice'; autoGenerate?: boolean; autoFetchPrices?: boolean } | undefined;
   AddMaterial: { materialId?: string; mode?: 'quote' | 'invoice' } | undefined;
   LaborMarkup: { mode?: 'quote' | 'invoice' } | undefined;
   JobPreview: { mode?: 'quote' | 'invoice'; viewing?: boolean; editing?: boolean } | undefined;
@@ -218,6 +218,7 @@ function NewInvoiceNavigator() {
 const TAB_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
   Dashboard: 'home',
   Jobs: 'briefcase',
+  Mate: 'chat-processing',
   Settings: 'cog',
 };
 
@@ -373,6 +374,11 @@ function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             >
               <Animated.View style={{ transform: [{ scale: iconScales[index] }] }}>
                 <MaterialCommunityIcons name={iconName} size={26} color={tintColor} />
+                {route.name === 'Mate' && (
+                  <View style={styles.betaBadge}>
+                    <Text style={styles.betaBadgeText}>BETA</Text>
+                  </View>
+                )}
               </Animated.View>
               <Animated.Text
                 style={[
@@ -423,6 +429,11 @@ function MainTabs() {
         options={{ title: 'QuoteMate' }}
       />
       <Tab.Screen
+        name="Mate"
+        component={AssistantScreen}
+        options={{ title: 'Mate' }}
+      />
+      <Tab.Screen
         name="Jobs"
         component={JobsListScreen}
         options={{ title: 'Jobs' }}
@@ -439,28 +450,8 @@ function MainTabs() {
 /**
  * Root Navigator - Includes tabs and modal screens
  */
-function TourTouchBlocker() {
-  const { unifiedTourActive } = useStore();
-  if (!unifiedTourActive) return null;
-  // Global touch blocker that sits above the entire navigator stack.
-  // Prevents tapping through to screens underneath during tour step transitions.
-  // The tour tooltip and modals render via Portal/native Modal which sit above this.
-  return (
-    <View
-      style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', zIndex: 9990 }]}
-      pointerEvents="auto"
-      onStartShouldSetResponder={() => true}
-      onStartShouldSetResponderCapture={() => true}
-      onMoveShouldSetResponder={() => true}
-      onMoveShouldSetResponderCapture={() => true}
-      onResponderRelease={() => {}}
-    />
-  );
-}
-
 export function RootNavigator() {
   return (
-    <TourRefsProvider>
     <RootStack.Navigator
       screenOptions={{
         headerShown: false,
@@ -811,6 +802,20 @@ export function RootNavigator() {
         }}
       />
       <RootStack.Screen
+        name="CallKatie"
+        component={CallKatieScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
+          headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Never Miss a Call',
+        }}
+      />
+      <RootStack.Screen
         name="Feedback"
         component={FeedbackScreen}
         options={{
@@ -867,9 +872,6 @@ export function RootNavigator() {
         }}
       />
     </RootStack.Navigator>
-    <TourTouchBlocker />
-    <UnifiedTourController />
-    </TourRefsProvider>
   );
 }
 
@@ -896,6 +898,21 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontSize: 11,
     marginTop: 3,
+  },
+  betaBadge: {
+    position: 'absolute',
+    top: -7,
+    right: -20,
+    backgroundColor: colors.primary,
+    borderRadius: 6,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  betaBadgeText: {
+    fontSize: 7,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    color: colors.white,
   },
   liquidPill: {
     position: 'absolute',

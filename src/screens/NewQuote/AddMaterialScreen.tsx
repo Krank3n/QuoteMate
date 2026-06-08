@@ -52,6 +52,7 @@ import { AlertModal } from '../../components/AlertModal';
 import * as ImagePicker from 'expo-image-picker';
 import { SupplierListReviewModal } from '../../components/SupplierListReviewModal';
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
+import { SpreadsheetColumnMapperModal } from '../../components/SpreadsheetColumnMapperModal';
 import { InvoiceReviewModal, type InvoiceReviewRow } from '../../components/InvoiceReviewModal';
 import { useSupplierListImport } from '../../hooks/useSupplierListImport';
 import { useInvoiceImport } from '../../hooks/useInvoiceImport';
@@ -67,10 +68,6 @@ import { SupplierGroup } from '../../types';
 import { loadGroups, deleteGroup } from '../../services/supplierGroupService';
 import { runMaterialSearch } from '../../services/materialSearch';
 import { ContactActionsBar } from '../../components/document/ContactActionsBar';
-import { useTourRefs } from '../../components/tour/useTourRefs';
-import { ScreenTour } from '../../components/tour/ScreenTour';
-import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
-import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
 type TabValue = 'search' | 'saved';
@@ -223,7 +220,7 @@ export function AddMaterialScreen() {
   const safeInsets = useSafeAreaInsets();
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
-  const { businessSettings, subscriptionStatus, unifiedTourActive, unifiedTourPhase } = useStore();
+  const { businessSettings, subscriptionStatus } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -501,17 +498,6 @@ export function AddMaterialScreen() {
     },
   });
 
-  // Tour refs
-  const { registerRef } = useTourRefs();
-  const savedItemsTabRef = useRef<View>(null);
-  const searchSectionRef = useRef<View>(null);
-  const manualEntrySectionRef = useRef<View>(null);
-
-  useEffect(() => {
-    if (savedItemsTabRef.current) registerRef('savedItemsTab', savedItemsTabRef.current);
-    if (searchSectionRef.current) registerRef('searchSection', searchSectionRef.current);
-    if (manualEntrySectionRef.current) registerRef('manualEntrySection', manualEntrySectionRef.current);
-  });
 
   // Saved items state
   const [savedItems, setSavedItems] = useState<any[]>([]);
@@ -701,7 +687,7 @@ export function AddMaterialScreen() {
     setImportSheetVisible(true);
   };
 
-  const launchImport = (source: 'camera' | 'gallery' | 'pdf') => {
+  const launchImport = (source: 'camera' | 'gallery' | 'pdf' | 'spreadsheet') => {
     setImportSheetVisible(false);
     importer.startImport(source);
   };
@@ -710,6 +696,11 @@ export function AddMaterialScreen() {
     { icon: 'camera', label: 'Take photo', onPress: () => launchImport('camera') },
     { icon: 'image-multiple', label: 'Pick from gallery', onPress: () => launchImport('gallery') },
     { icon: 'file-pdf-box', label: 'Pick PDF', onPress: () => launchImport('pdf') },
+    {
+      icon: 'file-table-outline',
+      label: 'Pick CSV / Excel',
+      onPress: () => launchImport('spreadsheet'),
+    },
   ];
 
   const cancelSearch = useCallback(() => {
@@ -1299,7 +1290,7 @@ export function AddMaterialScreen() {
 
   // Search section component
   const renderSearchSection = () => (
-    <View ref={searchSectionRef} style={styles.section}>
+    <View style={styles.section}>
       <View style={styles.manualEntryHeader}>
         <View style={styles.manualEntryDividerLine} />
         <View style={styles.searchTitleRow}>
@@ -1427,7 +1418,6 @@ export function AddMaterialScreen() {
 
   const renderManualEntrySection = () => (
     <ManualEntrySection
-      sectionRef={manualEntrySectionRef}
       materialNameRef={materialNameRef}
       linkedToSupplierBook={linkedToSupplierBook}
       isEditMode={isEditMode}
@@ -1851,7 +1841,7 @@ export function AddMaterialScreen() {
     <View style={styles.container}>
       {/* Tab Selector - hidden in edit mode, saved-item modes, and supplier-book-only mode */}
       {!isEditMode && !isSavedItemMode && !supplierBookOnly && (
-        <View ref={savedItemsTabRef} style={styles.tabBar}>
+        <View style={styles.tabBar}>
           <WebContainer>
             <View style={styles.pillToggleRow}>
               <TouchableOpacity
@@ -1946,7 +1936,7 @@ export function AddMaterialScreen() {
         subtitle={
           importMode === 'refresh'
             ? "Prices crept up again? Snap the new sheet and we'll refresh your book without you bashing in a single line."
-            : "Snap your supplier's price sheet — every page, smudges and all. We'll sort it into your book so next time you're quoting, the prices are already in your pocket."
+            : "Snap your supplier's price sheet, drop in a PDF, or upload a CSV / Excel export — we'll sort it into your book so next time you're quoting, the prices are already in your pocket."
         }
         options={importSheetOptions}
       />
@@ -2056,6 +2046,15 @@ export function AddMaterialScreen() {
       {/* Unsaved-changes confirmation when navigating away */}
       <AlertModal {...unsavedModalProps} />
 
+      {/* Column mapper for CSV / XLSX imports when auto-detect fails */}
+      <SpreadsheetColumnMapperModal
+        visible={importer.columnMappingVisible}
+        parsed={importer.parsedSpreadsheet}
+        initialMapping={importer.autoDetectedMapping}
+        onCancel={importer.cancelColumnMapping}
+        onConfirm={importer.applyColumnMapping}
+      />
+
       {/* Review modal for extracted items */}
       <SupplierListReviewModal
         visible={importer.reviewModalVisible}
@@ -2077,17 +2076,6 @@ export function AddMaterialScreen() {
         {snackbarMessage}
       </Snackbar>
 
-      {/* Screen Tour */}
-      {!isEditMode && unifiedTourActive && unifiedTourPhase === 'addMaterial' && (
-        <ScreenTour
-          tourId="addMaterial"
-          unifiedMode={true}
-          onScreenComplete={() => notifyScreenComplete('addMaterial')}
-          onSkipRequest={notifySkipRequest}
-          stepOffset={PHASE_STEP_OFFSETS.addMaterial}
-          globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
-        />
-      )}
     </View>
   );
 }

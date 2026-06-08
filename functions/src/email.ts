@@ -42,6 +42,36 @@ function sanitizeDisplayName(name: string): string {
   return name.replace(/[\r\n,"<>]/g, '').trim().slice(0, 78);
 }
 
+// Domains that are guaranteed to bounce or are forbidden by RFC 2606.
+// privaterelay.appleid.com is Apple's Hide-My-Email — when the user revokes
+// the relay (or the account was a Sign-in-with-Apple throwaway) every send
+// hard-bounces and chews through sender reputation.
+const UNSENDABLE_DOMAINS = new Set([
+  'privaterelay.appleid.com',
+  'example.com',
+  'example.org',
+  'example.net',
+  'test.com',
+  'sentry-next.wixpress.com',
+]);
+
+// Recipients scraped from image filenames (e.g. "flags@2x.webp",
+// "group-193@2x-3.png") parse as valid-looking addresses but the "domain"
+// is just a file extension. Reject anything whose domain ends in an asset
+// extension to catch the whole family without enumerating filenames.
+const ASSET_DOMAIN_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.ico', '.bmp'];
+
+export function classifyUnsendable(to: string): string | null {
+  const clean = (to || '').trim().toLowerCase();
+  if (!clean || !clean.includes('@')) return 'invalid-format';
+  const at = clean.lastIndexOf('@');
+  const domain = clean.slice(at + 1);
+  if (!domain) return 'invalid-format';
+  if (UNSENDABLE_DOMAINS.has(domain)) return `unsendable-domain:${domain}`;
+  if (ASSET_DOMAIN_EXTS.some(ext => domain.endsWith(ext))) return 'asset-filename';
+  return null;
+}
+
 // Shared email wrapper (base layout for all emails)
 function wrapEmailTemplate(content: string, options?: { unsubscribeUrl?: string; preheader?: string }): string {
   const { unsubscribeUrl, preheader } = options || {};
@@ -241,6 +271,31 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
 
   if (!to) {
     console.warn('sendEmail: no recipient address provided');
+    return false;
+  }
+
+  // Short-circuit known-unsendable addresses before we burn a Brevo call or
+  // sender reputation. We still log a row so the admin email log shows what
+  // was skipped and why.
+  const unsendableReason = classifyUnsendable(to);
+  if (unsendableReason) {
+    console.info(`sendEmail: blocking unsendable recipient ${to} (${unsendableReason})`);
+    try {
+      await admin.firestore().collection('emailLog').add({
+        userId: userId || null,
+        to,
+        subject,
+        category,
+        tags: [...(tags || []), `blocked:${unsendableReason}`],
+        status: 'blocked',
+        blockedReason: unsendableReason,
+        queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+        openCount: 0,
+        clickCount: 0,
+      });
+    } catch (logErr: any) {
+      console.warn('sendEmail: failed to log blocked send', logErr?.message);
+    }
     return false;
   }
 
@@ -776,11 +831,17 @@ export function sendReEngagementEmail(
   userId: string
 ): Promise<boolean> {
   const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
-  const greeting = businessName || 'mate';
+  const trimmedName = (businessName || '').trim();
+  const heading = trimmedName
+    ? `Hey ${trimmedName}, your next quote is waiting`
+    : `Your next quote is waiting`;
+  const subjectLine = trimmedName
+    ? `${trimmedName}, your next quote is waiting`
+    : `Your next quote is waiting`;
 
   const content = wrapEmailTemplate(`
     <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
-      Hey ${greeting}, your next quote is waiting
+      ${heading}
     </h1>
     <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;">
       It's been <strong style="color:#f8fafc;">${daysSinceLastActive} days</strong> since your last visit. Jobs don't quote themselves &mdash; let's get back to it.
@@ -835,7 +896,7 @@ export function sendReEngagementEmail(
 
   return sendEmail({
     to,
-    subject: `${greeting}, your next quote is waiting`,
+    subject: subjectLine,
     htmlContent: content,
     category: 'marketing',
     userId,
@@ -2193,6 +2254,105 @@ export function sendFeedbackEmail(
     htmlContent: content,
     category: 'transactional',
     tags: ['feedback', category.toLowerCase().replace(/\s+/g, '-')],
+  });
+}
+
+/**
+ * Notify the founder when a tradie registers interest in the call-answering
+ * service (Katie). These leads are handled with a manual/white-glove setup
+ * call for now, so this email is the trigger to reach out.
+ */
+export function sendLeadInterestEmail(
+  userEmail: string,
+  userId: string,
+  details: {
+    businessName: string;
+    contactPhone: string;
+    missedCalls?: string;
+    typicalJobValue?: number | null;
+    estLostPerYear?: number | null;
+    notes?: string;
+  },
+): Promise<boolean> {
+  const businessName = escapeHtmlEmail(details.businessName || 'Unknown business');
+  const contactPhone = escapeHtmlEmail(details.contactPhone || 'Not provided');
+  const missedCalls = escapeHtmlEmail(details.missedCalls || 'Not specified');
+  const fmtMoney = (n?: number | null) =>
+    typeof n === 'number' && Number.isFinite(n)
+      ? '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+      : null;
+  const typicalJobValue = fmtMoney(details.typicalJobValue);
+  const estLostPerYear = fmtMoney(details.estLostPerYear);
+  const notes = details.notes
+    ? escapeHtmlEmail(details.notes).replace(/\n/g, '<br/>')
+    : '—';
+
+  const content = wrapEmailTemplate(`
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">New Lead — Call Answering (Katie)</p>
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      ${businessName} wants Katie set up
+    </h1>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+      <tr>
+        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Business</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${businessName}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Best number to call</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${contactPhone}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Calls missed per week</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${missedCalls}</span>
+              </td>
+            </tr>
+            ${typicalJobValue ? `<tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Typical job value</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${typicalJobValue}</span>
+              </td>
+            </tr>` : ''}
+            ${estLostPerYear ? `<tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Est. lost revenue / year</span><br/>
+                <span style="color:#cfa153;font-size:15px;font-weight:700;">${estLostPerYear}</span>
+              </td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding:8px 0;border-bottom:1px solid #334155;">
+                <span style="color:#94a3b8;font-size:13px;">Account email</span><br/>
+                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${escapeHtmlEmail(userEmail)}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;">
+                <span style="color:#94a3b8;font-size:13px;">Notes</span><br/>
+                <span style="color:#f8fafc;font-size:15px;line-height:1.6;">${notes}</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="color:#64748b;font-size:12px;margin:0;">User ID: ${escapeHtmlEmail(userId)}</p>
+  `);
+
+  return sendEmail({
+    to: ADMIN_EMAIL,
+    subject: `New Katie lead: ${details.businessName || 'Unknown business'}`,
+    htmlContent: content,
+    category: 'transactional',
+    tags: ['lead-interest', 'callkatie'],
   });
 }
 

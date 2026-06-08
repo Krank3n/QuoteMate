@@ -59,13 +59,6 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { ProBadge } from '../../components/ProBadge';
 import { AlertModal } from '../../components/AlertModal';
 import { JobPhotos } from '../../components/JobPhotos';
-import { PhotoAnnotator } from '../../components/PhotoAnnotator';
-import { useTourRefs } from '../../components/tour/useTourRefs';
-import { ScreenTour } from '../../components/tour/ScreenTour';
-import { TOUR_STEPS, INTRO_TOUR_TOTAL_STEPS } from '../../components/tour/tourSteps';
-import { notifyScreenComplete, notifySkipRequest } from '../../components/tour/UnifiedTourController';
-import { getTourPhoto, getTourPhotoAnnotated } from '../../components/tour/tourDummyData';
-import { PHASE_STEP_OFFSETS, UNIFIED_TOUR_TOTAL_STEPS } from '../../components/tour/tourFlow';
 
 // Sentinel id for the Custom chip so it participates in MRU sorting alongside
 // niche template ids. Recorded via recordJobTypeUsed(CUSTOM_CHIP_ID) on tap.
@@ -74,7 +67,6 @@ const CUSTOM_CHIP_ID = 'custom';
 export function JobDetailsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const fromTour = route.params?.fromTour;
   const isEditFromPreview = route.params?.editing === true;
   const mode = useDocumentMode();
   const { document: currentDocument, update: updateDocument } = useCurrentDocument();
@@ -83,8 +75,6 @@ export function JobDetailsScreen() {
   const businessSettings = useStore((s) => s.businessSettings);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
   const saveDraft = usePersistDocument();
-  const unifiedTourActive = useStore((s) => s.unifiedTourActive);
-  const unifiedTourPhase = useStore((s) => s.unifiedTourPhase);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
@@ -119,15 +109,7 @@ export function JobDetailsScreen() {
     });
   }, []);
 
-  // Tour refs
-  const { registerRef } = useTourRefs();
-  const descriptionRef = useRef<View>(null);
-  const descriptionCleanedRef = useRef<View>(null);
   const descriptionInputRef = useRef<any>(null);
-  const micButtonRef = useRef<View>(null);
-  const jobPhotosRef = useRef<View>(null);
-  const jobPhotoThumbnailRef = useRef<View>(null);
-  const analyzeRef = useRef<View>(null);
   const descriptionCardRef = useRef<View>(null);
   // Y position of the description card inside the ScrollView's content,
   // captured via onLayout. measureLayout against the inner scroll node was
@@ -139,27 +121,6 @@ export function JobDetailsScreen() {
   // node handle from findNodeHandle), so we side-step it with onLayout.
   const descriptionYInCardRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
-  const [tourActive, setTourActive] = useState(false);
-  const [tourAnnotatorOpen, setTourAnnotatorOpen] = useState(false);
-  const typewriterRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (descriptionRef.current) registerRef('jobDescription', descriptionRef.current);
-    if (descriptionCleanedRef.current) registerRef('jobDescriptionCleaned', descriptionCleanedRef.current);
-    if (micButtonRef.current) registerRef('micButton', micButtonRef.current);
-    if (jobPhotosRef.current) registerRef('jobPhotos', jobPhotosRef.current);
-    if (jobPhotoThumbnailRef.current) registerRef('jobPhotoThumbnail', jobPhotoThumbnailRef.current);
-    // jobPhotoAnnotated uses the same ref as jobPhotoThumbnail (same element, different content)
-    if (jobPhotoThumbnailRef.current) registerRef('jobPhotoAnnotated', jobPhotoThumbnailRef.current);
-    if (analyzeRef.current) registerRef('analyzeButton', analyzeRef.current);
-  });
-
-  // Clean up typewriter on unmount
-  useEffect(() => {
-    return () => {
-      if (typewriterRef.current) clearInterval(typewriterRef.current);
-    };
-  }, []);
 
   // Listening pills — passive checklist that ticks itself off as the user
   // dictates. Pills come from the selected template's niche; serverState is
@@ -942,6 +903,7 @@ export function JobDetailsScreen() {
           totalPrice: 0,
           manualPriceOverride: false,
           ...(m.section && { section: m.section }),
+          ...(m.qualityTier && { qualityTier: m.qualityTier }),
         }));
 
         // Update the job with analyzed data
@@ -960,6 +922,7 @@ export function JobDetailsScreen() {
             job: analyzedJob,
             materials,
             laborHours: analysis.estimatedHours,
+            ...(analysis.jobQualityTier && { qualityTier: analysis.jobQualityTier }),
           };
           if (mode === 'invoice') {
             state.updateInvoice(finalDocument as any);
@@ -1192,7 +1155,7 @@ export function JobDetailsScreen() {
 
         {/* Beautiful Record Button */}
         {(
-          <View ref={micButtonRef} style={styles.recordButtonContainer}>
+          <View style={styles.recordButtonContainer}>
             <View style={styles.recordButtonRow}>
               <TouchableOpacity
                 onPress={() => {
@@ -1329,10 +1292,9 @@ export function JobDetailsScreen() {
         )}
 
 
-        {/* Job Description + Clean-up Button + Title (wrapped for tour highlights) */}
-        <View ref={descriptionCleanedRef}>
+        {/* Job Description + Clean-up Button + Title */}
+        <View>
         <View
-          ref={descriptionRef}
           onLayout={(e) => {
             descriptionYInCardRef.current = e.nativeEvent.layout.y;
           }}
@@ -1421,12 +1383,10 @@ export function JobDetailsScreen() {
         {/* Job Photos */}
         {useCustomMode && (
           <>
-            <View ref={jobPhotosRef}>
+            <View>
             <JobPhotos
               photos={jobPhotos}
               onPhotosChange={setJobPhotos}
-              firstPhotoRef={jobPhotoThumbnailRef}
-              interactionDisabled={tourActive}
             />
             </View>
             {jobPhotos.length > 0 && (
@@ -1453,7 +1413,7 @@ export function JobDetailsScreen() {
           </WebContainer>
         </ScrollView>
 
-        <View ref={analyzeRef}>
+        <View>
         <FixedBottomButton
           label={isEditFromPreview ? 'Save' : 'Next: Customer Details'}
           onPress={isEditFromPreview ? handleSaveAndReturn : handleNext}
@@ -1465,81 +1425,6 @@ export function JobDetailsScreen() {
         />
         </View>
       </KeyboardAvoidingView>
-
-      {/* Screen Tour */}
-      {unifiedTourActive && unifiedTourPhase === 'jobDetails' && <ScreenTour
-        tourId="jobDetails"
-        delay={fromTour ? 200 : 600}
-        stepOffset={PHASE_STEP_OFFSETS.jobDetails}
-        globalTotalSteps={UNIFIED_TOUR_TOTAL_STEPS}
-        scrollRef={scrollRef}
-        scrollPositions={{ micButton: 0, jobDescription: 0, jobDescriptionCleaned: 200, jobPhotoThumbnail: 600, annotatorCanvas: 0, annotatorTools: 0, annotatorDone: 0, jobPhotoAnnotated: 600 }}
-        onActiveChange={setTourActive}
-        unifiedMode={true}
-        onScreenComplete={() => notifyScreenComplete('jobDetails')}
-        onSkipRequest={notifySkipRequest}
-        onStepChange={(stepId) => {
-          if (stepId === 'jobDescription' && !jobDescription.trim()) {
-            const demoText =
-              "yeah so the dunny door fell off again and the missus is losing it, " +
-              "hinges are cooked reckon the frames a bit dodgy too from when bazza " +
-              "reversed the mower into it last arvo. needs new hinges and maybe " +
-              "replace the bottom bit of the frame cos its gone all soggy from the rain";
-            // Typewriter effect — write word by word
-            const words = demoText.split(' ');
-            let i = 0;
-            if (typewriterRef.current) clearInterval(typewriterRef.current);
-            typewriterRef.current = setInterval(() => {
-              i++;
-              if (i >= words.length) {
-                clearInterval(typewriterRef.current!);
-                typewriterRef.current = null;
-                setJobDescription(demoText);
-              } else {
-                setJobDescription(words.slice(0, i + 1).join(' '));
-              }
-            }, 80);
-          } else if (stepId === 'jobDescriptionCleaned') {
-            // Auto-trigger cleanup when arriving at this step
-            if (typewriterRef.current) {
-              clearInterval(typewriterRef.current);
-              typewriterRef.current = null;
-            }
-            handleCleanupDescription();
-          } else if (stepId === 'jobPhotoThumbnail' && jobPhotos.length === 0) {
-            // Inject dummy photo when arriving at combined photo/annotate step
-            if (typewriterRef.current) {
-              clearInterval(typewriterRef.current);
-              typewriterRef.current = null;
-            }
-            setJobPhotos([getTourPhoto()]);
-          } else if (stepId === 'annotatorCanvas') {
-            // Open the real annotator in tour mode
-            setTourAnnotatorOpen(true);
-          } else if (stepId === 'jobPhotoAnnotated') {
-            // Close annotator and swap to pre-annotated version
-            setTourAnnotatorOpen(false);
-            setJobPhotos([getTourPhotoAnnotated()]);
-          } else {
-            // Clear typewriter if moving away from step
-            if (typewriterRef.current) {
-              clearInterval(typewriterRef.current);
-              typewriterRef.current = null;
-            }
-          }
-        }}
-      />}
-
-      {/* Tour-mode annotator — rendered as absolute overlay (not Modal) so tour spotlight works on top */}
-      {tourAnnotatorOpen && jobPhotos.length > 0 && (
-        <PhotoAnnotator
-          visible={true}
-          tourMode={true}
-          imageUri={jobPhotos[0].storageUrl}
-          onSave={() => {}}
-          onCancel={() => {}}
-        />
-      )}
     </>
   );
 }

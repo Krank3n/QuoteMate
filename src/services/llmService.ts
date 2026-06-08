@@ -33,6 +33,11 @@ interface LLMMaterial {
   reasoning?: string;
   section?: string;
   sectionMultiplier?: number;
+  // Quality tier inferred from the job description. Drives candidate
+  // selection in materialsPipeline (see candidateRanker.pickBestCandidate)
+  // — e.g. "premium" pushes the picker toward the high end of the price
+  // band instead of always grabbing the cheapest scraper hit.
+  qualityTier?: 'budget' | 'standard' | 'premium';
   // Per-unit labour hours for this material's section. The LLM is asked to populate
   // this in the prompt; if it omits it (LLMs are unreliable), MaterialsListScreen
   // falls back to distributing analysis.estimatedHours across sections by multiplier.
@@ -54,6 +59,10 @@ interface LLMResponse {
   materials: LLMMaterial[];
   estimatedHours: number;
   jobSummary: string;
+  // Overall quality tier inferred from the job description. Falls back to
+  // 'standard' on the consumer side when undefined. Inherited by any
+  // material that didn't get an explicit qualityTier of its own.
+  jobQualityTier?: 'budget' | 'standard' | 'premium';
 }
 
 /**
@@ -161,10 +170,17 @@ async function analyzeViaFirebaseFunction(
   // The server doesn't dedupe or sanity-check sectionMultiplier values, so
   // without this pass a sentinel-equal-quantity multiplier (e.g. 100 for "100
   // bags concrete") would slip through and blow up section labour totals.
+  const jobQualityTier =
+    data.jobQualityTier === 'budget' ||
+    data.jobQualityTier === 'standard' ||
+    data.jobQualityTier === 'premium'
+      ? data.jobQualityTier
+      : undefined;
   return {
     materials: validateMaterials(data.materials || []),
     estimatedHours: Math.max(1, Math.min(data.estimatedHours || 8, 200)),
     jobSummary: data.jobSummary || '',
+    ...(jobQualityTier && { jobQualityTier }),
   };
 }
 
@@ -301,12 +317,27 @@ Provide a JSON response with the following structure:
       "section": "Descriptive section name (e.g. Colorbond Fence Bay, Merbau Deck Section, Concrete Footings)",
       "sectionMultiplier": 8,
       "sectionLaborHours": 1.5,
+      "qualityTier": "budget|standard|premium",
       "reasoning": "Why this material is needed"
     }
-  ]
+  ],
+  "jobQualityTier": "budget|standard|premium"
 }
 
+RESPECT THE JOB DESCRIPTION — NAMED MATERIALS AND QUANTITIES ARE MANDATORY:
+- If the job description explicitly names a material (a product type, spec, R-value, grade, brand, colour, or dimension — e.g. "R2.5 HD thermal insulation batts", "90x45 H3 treated pine", "Colorbond Surfmist sheets"), that material MUST appear as a line item with the exact spec the tradie wrote, unless it is already in the existing materials listed above. NEVER drop a named primary material and return only consumables, fasteners, or PPE.
+- If the job description states a quantity for a material (e.g. "12 batts", "6 sheets", "20 litres"), use EXACTLY that quantity and unit — do not recompute, round, or override it.
+- If a material is named but no quantity is given, derive the quantity from the area, length, or count in the description using its coverage (e.g. "10 m² of R2.5 batts" → batt pack coverage → packs needed) and show the derivation in "reasoning".
+- The named primary material is the core of the job — supporting items (fasteners, tape, PPE, blades) are ADDITIONAL to it, never a substitute for it.
+
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
+
+QUALITY TIER DETECTION — read the job description for tier qualifiers and set both "jobQualityTier" (top-level, one per job) and "qualityTier" (per-material, inherits jobQualityTier when omitted). This is what makes the pricing layer pick the RIGHT product out of the supplier search results instead of always grabbing the cheapest hit:
+- "premium", "high quality", "high-end", "luxury", "designer", "architectural", "top of the range", "custom", brand names like Phoenix/Miele/Fisher & Paykel → jobQualityTier: "premium". Search terms for fittings/finishes in these jobs should include words like "premium" or "professional" (e.g. "premium stainless steel undermount sink", not just "sink").
+- "budget", "cheap", "basic", "entry level", "investment property", "rental fit-out" → jobQualityTier: "budget".
+- Anything else, or no signal at all → jobQualityTier: "standard".
+- Per-material override: when only SOME items are called out as premium (e.g. "high quality fittings and sink" in an otherwise standard reno), set qualityTier: "premium" on just those rows (taps, mixers, sinks, handles, hinges) and leave the rest standard. The rule of thumb: which line items would a customer notice if they were cheap? Those carry the called-out tier.
+- Cabinetry/joinery descriptors map to tier too: "custom timber cabinetry", "solid timber doors", "marble benchtop", "stone benchtop", "engineered stone" all imply premium for those rows even if the job header doesn't say "premium".
 
 CRITICAL — emit quantities in the SMALLEST INDIVIDUAL UNIT, not in guessed packs:
 - Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
@@ -402,11 +433,23 @@ function mode(arr: number[]): number {
  */
 function validateMaterials(materials: LLMMaterial[]): LLMMaterial[] {
   const filtered = materials
-    // Remove items missing required fields or with bad quantities
-    .filter(m => m.name && m.searchTerm && m.quantity > 0)
+    // Remove items missing required fields or with bad quantities.
+    // Retail items need a searchTerm to price; saved-rate and Reece-matched
+    // rows are priced off savedRateName / reeceProductId and are told by the
+    // prompt to leave searchTerm empty, so don't drop those for a blank term.
+    .filter(
+      m =>
+        m.name &&
+        m.quantity > 0 &&
+        (m.searchTerm || m.savedRateName || m.pricingSource === 'saved_rate' || m.reeceProductId)
+    )
     // Clamp and normalise values
     .map(m => ({
       ...m,
+      qualityTier:
+        m.qualityTier === 'budget' || m.qualityTier === 'standard' || m.qualityTier === 'premium'
+          ? m.qualityTier
+          : undefined,
       quantity: Math.min(Math.max(Math.round(m.quantity), 1), 999),
       sectionMultiplier: m.sectionMultiplier
         ? Math.min(Math.max(Math.round(m.sectionMultiplier), 1), 200)
@@ -468,10 +511,17 @@ function parseResponse(content: string): LLMResponse {
 
     const parsed = JSON.parse(jsonStr);
 
+    const jobQualityTier =
+      parsed.jobQualityTier === 'budget' ||
+      parsed.jobQualityTier === 'standard' ||
+      parsed.jobQualityTier === 'premium'
+        ? parsed.jobQualityTier
+        : undefined;
     return {
       materials: validateMaterials(parsed.materials || []),
       estimatedHours: Math.max(1, Math.min(parsed.estimatedHours || 8, 200)),
       jobSummary: parsed.jobSummary || '',
+      ...(jobQualityTier && { jobQualityTier }),
     };
   } catch (error) {
     throw new Error('Invalid response from LLM');
@@ -791,10 +841,20 @@ function getFallbackResponse(jobDescription: string): LLMResponse {
 /**
  * Convert LLM materials to app Material format
  */
-export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Partial<Material> & { sectionMultiplier?: number; sectionLaborHours?: number; savedRateName?: string })[] {
+export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Partial<Material> & { sectionMultiplier?: number; sectionLaborHours?: number; savedRateName?: string; qualityTier?: 'budget' | 'standard' | 'premium' })[] {
   return llmMaterials.map((m) => {
     const multiplier = m.sectionMultiplier || 1;
-    const finalQuantity = Math.round(m.quantity * multiplier * 1000) / 1000;
+    let finalQuantity = Math.round(m.quantity * multiplier * 1000) / 1000;
+    // Backstop against the per-unit × multiplier explosion. validateMaterials
+    // caps per-unit qty at 999 and the multiplier at 200 independently, so their
+    // PRODUCT can still reach ~200k (real stored cases: 500 × 25 = 12,500 and
+    // 42,957 "each" decking screws). Bulk units (kg/L/m/m²/m³) can legitimately
+    // be large, so only cap discrete COUNT units; the downstream pack-aware +
+    // coverage passes then collapse this to the real number of packs to buy.
+    const COUNT_UNITS = ['each', 'pack', 'box'];
+    if (COUNT_UNITS.includes(m.unit) && finalQuantity > 5000) {
+      finalQuantity = 5000;
+    }
     // When the backend has already resolved a Reece catalogue match, trust
     // the pre-stamped price/itemNumber/pricingSource — the reece pricing
     // pass in MaterialsListScreen skips materials that already carry these.
@@ -818,6 +878,7 @@ export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Pa
       }),
       sectionMultiplier: multiplier,
       ...(m.sectionLaborHours && m.sectionLaborHours > 0 && { sectionLaborHours: m.sectionLaborHours }),
+      ...(m.qualityTier && { qualityTier: m.qualityTier }),
     };
   });
 }
@@ -1202,6 +1263,10 @@ export interface ReconcileCandidate {
   price: number;
   url?: string;
   description?: string;
+  /** Pack/volume size the price covers (e.g. 500 each, 10 L), when known.
+   *  Lets the reconcile pass compute packs-needed instead of guessing. */
+  packSize?: number;
+  packUnit?: string;
 }
 
 export interface ReconcileItem {

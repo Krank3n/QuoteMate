@@ -122,13 +122,25 @@ export function calculateDocumentTotals(
 }
 
 /**
+ * Coerce any field to a finite number. NaN and Infinity become 0 so they
+ * never propagate into Firestore writes — the SDK rejects non-finite values
+ * silently, which used to surface as orphan Jobs created without their
+ * matching Quote when this function returned NaN for `estimatedHours`.
+ */
+function finiteNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
  * Convert a labour value to hours given its unit. Days are billed as
  * STANDARD_DAY_HOURS (8h) for the purpose of the JobSpec.estimatedHours
  * field, which is the unit the rest of the app (scheduling, GCal export)
  * already assumes.
  */
-function laborValueToHours(value: number, unit: LaborUnit | undefined): number {
-  return unit === 'days' ? value * STANDARD_DAY_HOURS : value;
+function laborValueToHours(value: unknown, unit: LaborUnit | undefined): number {
+  const n = finiteNumber(value);
+  return unit === 'days' ? n * STANDARD_DAY_HOURS : n;
 }
 
 /**
@@ -136,6 +148,11 @@ function laborValueToHours(value: number, unit: LaborUnit | undefined): number {
  * sections + laborExtraHours when sections exist, otherwise the top-level
  * laborHours field. Used to keep JobSpec.estimatedHours in sync so the
  * "est. Xh" header doesn't drift from the actual labour billed.
+ *
+ * NaN-safe — any non-finite field is treated as 0. A single corrupt section
+ * value used to poison the whole computation and bubble NaN up to
+ * JobSpec.estimatedHours, causing every saveQuote() Firestore write to
+ * silently fail until the user manually edited the field.
  */
 export function deriveTotalLabourHours<
   T extends {
@@ -148,15 +165,15 @@ export function deriveTotalLabourHours<
   const hasSections = Array.isArray(doc.sections) && doc.sections.length > 0;
   if (hasSections) {
     const sectionHours = doc.sections!.reduce((sum, s) => {
-      const total = typeof s.laborHoursTotal === 'number'
+      const candidate = typeof s.laborHoursTotal === 'number' && Number.isFinite(s.laborHoursTotal)
         ? s.laborHoursTotal
-        : (s.laborHours || 0) * (s.multiplier || 1);
-      return sum + laborValueToHours(total, s.laborUnit);
+        : finiteNumber(s.laborHours) * (finiteNumber(s.multiplier) || 1);
+      return sum + laborValueToHours(candidate, s.laborUnit);
     }, 0);
-    const extra = laborValueToHours(doc.laborExtraHours ?? 0, doc.laborUnit);
+    const extra = laborValueToHours(doc.laborExtraHours, doc.laborUnit);
     return sectionHours + extra;
   }
-  return laborValueToHours(doc.laborHours || 0, doc.laborUnit);
+  return laborValueToHours(doc.laborHours, doc.laborUnit);
 }
 
 /**
@@ -164,6 +181,11 @@ export function deriveTotalLabourHours<
  * (when present) are the source of truth; the field on JobSpec is just a
  * cached headline number. Returns a new JobSpec object only when the value
  * changed, so callers can preserve referential equality otherwise.
+ *
+ * If the derivation yields a non-finite result for any reason, the existing
+ * JobSpec is returned unchanged. Better to leave the stored value alone than
+ * to write NaN/Infinity into Firestore (the SDK rejects, breaking the whole
+ * quote save).
  */
 export function syncJobEstimatedHours<
   T extends {
@@ -175,6 +197,7 @@ export function syncJobEstimatedHours<
   },
 >(doc: T): JobSpec {
   const totalHours = deriveTotalLabourHours(doc);
+  if (!Number.isFinite(totalHours)) return doc.job;
   const rounded = Math.round(totalHours);
   if (doc.job.estimatedHours === rounded) return doc.job;
   return { ...doc.job, estimatedHours: rounded };

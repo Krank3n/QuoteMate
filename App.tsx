@@ -11,7 +11,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 // Suppress known harmless warning from react-native-draggable-flatlist + reanimated v3
 LogBox.ignoreLogs(['ref.measureLayout must be called with a ref to a native component']);
-import { NavigationContainer, DarkTheme, LinkingOptions, createNavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme, LinkingOptions, createNavigationContainerRef, getStateFromPath as defaultGetStateFromPath, getPathFromState as defaultGetPathFromState } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -54,6 +54,33 @@ import { AppUpdateSheet } from './src/components/AppUpdateSheet';
 
 const navigationRef = createNavigationContainerRef<any>();
 
+// SPA route restore (web only). The app is served from /app on a static host
+// with no per-route files, so a hard refresh of /app/<route> 404s and the
+// website's 404 page bounces back here with the intended route stashed in
+// sessionStorage. Put that route back in the URL before NavigationContainer
+// reads it below, so refresh lands on the right screen instead of the 404.
+// Runs at module eval (before render); no-op on native and on a clean load.
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  try {
+    const k = 'qm_spa_redirect';
+    const v = window.sessionStorage.getItem(k);
+    if (v) {
+      window.sessionStorage.removeItem(k);
+      if (v !== '/') window.history.replaceState(null, '', '/app' + v);
+    }
+  } catch (e) {
+    // sessionStorage/history unavailable — ignore, app loads at default route.
+  }
+}
+
+// The web build is served under /app (Expo baseUrl), but React Navigation's
+// linking writes paths from the site root — e.g. navigating to Dashboard sets
+// the URL to /Main/Dashboard, escaping /app. On a hard refresh the static host
+// has no file there and serves the marketing 404. Namespace every web URL
+// under /app so a refresh lands on a /app/* path, which the website's 404 page
+// catches and bounces back into the app (see the SPA route restore above).
+// Native is unaffected — these overrides only apply on web.
+const WEB_BASE = '/app';
 const linking: LinkingOptions<any> = {
   prefixes: [Linking.createURL('/'), 'https://quotemateapp.au', 'quotemate://'],
   config: {
@@ -61,6 +88,21 @@ const linking: LinkingOptions<any> = {
       DiscoverSuppliers: 'join',
     },
   },
+  ...(Platform.OS === 'web'
+    ? {
+        getPathFromState(state, config) {
+          const path = defaultGetPathFromState(state, config);
+          // path always starts with '/'; '/' + base avoids a double slash.
+          return WEB_BASE + (path === '/' ? '/' : path);
+        },
+        getStateFromPath(path, config) {
+          const stripped = path.startsWith(WEB_BASE)
+            ? path.slice(WEB_BASE.length) || '/'
+            : path;
+          return defaultGetStateFromPath(stripped, config);
+        },
+      }
+    : {}),
 };
 
 // React Native Web renders TextInput as <input>, which inherits Chrome's
@@ -84,6 +126,28 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
         outline: none !important;
         box-shadow: none !important;
       }
+      /* Chrome paints autofilled fields with its own pale background and
+         near-black text, which looks broken on our dark surface. There's no
+         way to set the autofill background directly, so mask it with a
+         surface-coloured inset box-shadow and force the text fill light.
+         The long transition stops Chrome flashing its colour back on focus. */
+      input:-webkit-autofill,
+      input:-webkit-autofill:hover,
+      input:-webkit-autofill:focus,
+      input:-webkit-autofill:active {
+        -webkit-box-shadow: 0 0 0 1000px #1E293B inset !important;
+        box-shadow: 0 0 0 1000px #1E293B inset !important;
+        -webkit-text-fill-color: #E2E8F0 !important;
+        caret-color: #E2E8F0;
+        transition: background-color 9999s ease-in-out 0s;
+        /* Fires an animationstart event the instant Chrome autofills, even
+           before any gesture (when the value still isn't readable). AuthScreen
+           listens for it to drop the floating label that would otherwise sit
+           on top of the autofilled text. */
+        animation-name: qm-autofill;
+        animation-duration: 1ms;
+      }
+      @keyframes qm-autofill { from {} to {} }
       button { outline: none; }
       button:focus-visible {
         outline: 2px solid rgba(0, 152, 104, 0.55);
@@ -110,7 +174,7 @@ export default function App() {
   // few seconds after the dashboard mounts, and the data-load Promise.all
   // runs twice — which feels (and looks) like the app reloading itself.
   const initialisedForUidRef = useRef<string | null>(null);
-  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, checkTourStatus, loadXeroConnection, loadContacts, loadDocuments, listenToDocuments } = useStore();
+  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, loadXeroConnection, loadContacts, loadDocuments, listenToDocuments } = useStore();
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [showUpdateSheet, setShowUpdateSheet] = useState(false);
 
@@ -173,16 +237,15 @@ export default function App() {
         setUserDataLoaded(false); // Reset when new user signs in
 
         // Critical-for-first-paint: dashboard needs quotes, business settings,
-        // subscription (trial banner), onboarding flag (router gate), tour
-        // status, and the quote-number counter. Everything else gets deferred
-        // until after first paint so the splash dismisses sooner.
+        // subscription (trial banner), onboarding flag (router gate), and the
+        // quote-number counter. Everything else gets deferred until after first
+        // paint so the splash dismisses sooner.
         await Promise.all([
           loadQuotes(),
           loadBusinessSettings(),
           checkOnboarding(),
           loadSubscription(),
           loadNextQuoteNumber(),
-          checkTourStatus(),
         ]);
 
         setUserDataLoaded(true); // Mark user data as loaded — dashboard can render

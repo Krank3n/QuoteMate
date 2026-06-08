@@ -3,6 +3,14 @@ const path = require('path');
 
 const config = getDefaultConfig(__dirname);
 
+// Watchman is broken on this machine — its daemon hangs on spawn (the OS killed
+// the old daemon with SIGTERM and the 2025.10.06 build won't come back cleanly
+// on Darwin 25.x), which left Metro stuck at "Waiting for Watchman
+// `watch-project`" forever. Metro falls back to its built-in Node file watcher
+// when this is off, so dev/HMR still work. Remove this line once `watchman
+// version` responds again (e.g. after `brew reinstall watchman`).
+config.resolver.useWatchman = false;
+
 // Zustand's .mjs files use `import.meta.env` which Metro doesn't transform
 // for web, causing "Cannot use 'import.meta' outside a module" at runtime.
 // Force zustand to resolve to its .js files (which use process.env instead).
