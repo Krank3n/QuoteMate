@@ -50,6 +50,13 @@ interface MaterialItemCardProps {
   onEdit?: () => void;
   onDelete?: () => void;
   /**
+   * Optional: open the "Calculate from area" sheet for this material.
+   * Surfaced as a small calculator icon next to the qty controls when the
+   * linked favorite has a coveragePerUnit + coverageUnit set (e.g.
+   * "1 bag covers 13.5 m²"). Parent owns the modal so the card stays dumb.
+   */
+  onCalculateFromArea?: () => void;
+  /**
    * Render a compact variant of the card — no qty stepper or drag handle,
    * but still supports expand/collapse for details. Used by the Saved Items
    * tab to display saved favorites/personal-rate items consistently with the
@@ -76,6 +83,7 @@ function MaterialItemCardImpl({
   onDelete,
   readOnly = false,
   onPress,
+  onCalculateFromArea,
 }: MaterialItemCardProps) {
   // Anchored dropdown for the box icon — lets the user move this material
   // to another section without leaving the card. Closed by default; opens on
@@ -417,6 +425,11 @@ function MaterialItemCardImpl({
             <Text style={styles.qtyUnit}>{material.unit}</Text>
           </View>
           <View style={styles.itemActions}>
+            {onCalculateFromArea && (
+              <TouchableOpacity style={styles.actionBtn} onPress={onCalculateFromArea}>
+                <MaterialCommunityIcons name="calculator-variant" size={18} color={colors.primary} />
+              </TouchableOpacity>
+            )}
             {showLink && (
               <TouchableOpacity style={styles.actionBtn} onPress={onOpenInStore}>
                 <MaterialCommunityIcons name="open-in-new" size={18} color={colors.primary} />

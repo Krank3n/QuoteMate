@@ -91,6 +91,10 @@ export interface FavoriteProductMapping {
   isPersonalRate?: boolean;       // true → prefer over retail in auto-generate
   coveragePerUnit?: number;       // 1 unit covers N of coverageUnit (e.g. 13 m² per sheet)
   coverageUnit?: 'm²' | 'm³' | 'm';
+  // Some suppliers deliver in pack multiples — bags of insulation by the
+  // 5/10/20, full pallets, etc. Used by the area→quantity calculator on
+  // the materials screen to round up to the next ordable pack. Default 1.
+  roundingIncrement?: number;
   keywords?: string[];            // ["concrete","slab","footing"] for LLM matching
   notes?: string;
   // Provenance — PR1: 'manual', PR2: 'imported', PR3: 'subscribed'

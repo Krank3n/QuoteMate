@@ -54,6 +54,9 @@ export interface ManualEntrySectionProps {
   setCoveragePerUnit: (v: string) => void;
   coverageUnit: CoverageUnit;
   setCoverageUnit: (v: CoverageUnit) => void;
+  // Optional pack rounding for area-based reorder (e.g. bags delivered in 10s).
+  roundingIncrement?: string;
+  setRoundingIncrement?: (v: string) => void;
 }
 
 export function ManualEntrySection({
@@ -90,6 +93,8 @@ export function ManualEntrySection({
   setCoveragePerUnit,
   coverageUnit,
   setCoverageUnit,
+  roundingIncrement,
+  setRoundingIncrement,
 }: ManualEntrySectionProps) {
   return (
     <View style={styles.section}>
@@ -384,6 +389,17 @@ export function ManualEntrySection({
                 ]}
                 style={styles.unitRow}
               />
+              {setRoundingIncrement && (
+                <TextInput
+                  label="Order in packs of (optional)"
+                  value={roundingIncrement || ''}
+                  onChangeText={setRoundingIncrement}
+                  mode="outlined"
+                  keyboardType="number-pad"
+                  placeholder="e.g. 10 for bags delivered in 10s"
+                  style={styles.input}
+                />
+              )}
             </View>
           )}
         </View>

@@ -56,6 +56,7 @@ import { shouldRunReeceFirst } from '../../services/supplierPriority';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
 import { InlineAddMaterialRow } from '../../components/InlineAddMaterialRow';
+import { CoverageQuantityModal } from '../../components/CoverageQuantityModal';
 import { ActionSheet, type ActionSheetOption } from '../../components/ActionSheet';
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
 import { InvoiceReviewModal } from '../../components/InvoiceReviewModal';
@@ -584,6 +585,9 @@ export function MaterialsListScreen() {
   // Delete confirmation dialog state
   const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
   const [materialToDelete, setMaterialToDelete] = useState<string | null>(null);
+  // Tracks which material's "Calculate from area" sheet is open. The sheet
+  // shows when the linked favorite has a coveragePerUnit + coverageUnit.
+  const [coverageCalcMaterialId, setCoverageCalcMaterialId] = useState<string | null>(null);
 
   // Unpriced materials warning dialog state
   const [unpricedDialogVisible, setUnpricedDialogVisible] = useState(false);
@@ -1915,6 +1919,12 @@ export function MaterialsListScreen() {
           onOpenInStore={() => handleOpenInStore(item.material)}
           onEdit={() => handleEditMaterial(item.material)}
           onDelete={() => handleDeleteMaterial(item.material.id)}
+          onCalculateFromArea={
+            item.material.favoriteProduct?.coveragePerUnit &&
+            item.material.favoriteProduct?.coverageUnit
+              ? () => setCoverageCalcMaterialId(item.material.id)
+              : undefined
+          }
         />
       </View>
     );
@@ -2248,6 +2258,38 @@ export function MaterialsListScreen() {
         secondaryButtonAction={() => setUnpricedDialogVisible(false)}
         showConfetti={false}
       />
+
+      {/* Coverage → quantity sheet. Opens when the user taps the calculator
+          icon on a material card whose linked favorite has a coverage spec
+          (e.g. "1 bag covers 13.5 m²"). Applies a rounded unit count back
+          to the material's quantity. */}
+      {(() => {
+        if (!coverageCalcMaterialId) return null;
+        const m = materials.find((x) => x.id === coverageCalcMaterialId);
+        const fav = m?.favoriteProduct;
+        if (!m || !fav?.coveragePerUnit || !fav?.coverageUnit) return null;
+        const packLabel =
+          m.unit === 'box' ? 'box' :
+          m.unit === 'pack' ? 'pack' :
+          m.unit === 'each' ? 'bag' :
+          m.unit === 'm' ? 'length' :
+          'unit';
+        return (
+          <CoverageQuantityModal
+            visible
+            materialName={m.name}
+            coveragePerUnit={fav.coveragePerUnit}
+            coverageUnit={fav.coverageUnit}
+            packLabel={packLabel}
+            roundingIncrement={fav.roundingIncrement}
+            onCancel={() => setCoverageCalcMaterialId(null)}
+            onApply={(units) => {
+              handleQuantityBlur(coverageCalcMaterialId, String(units));
+              setCoverageCalcMaterialId(null);
+            }}
+          />
+        );
+      })()}
 
       {/* Material Match Selector Modal */}
       <MaterialMatchSelector

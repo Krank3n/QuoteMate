@@ -298,6 +298,9 @@ export function AddMaterialScreen() {
   const [isPersonalRate, setIsPersonalRate] = useState(false);
   const [coveragePerUnit, setCoveragePerUnit] = useState('');
   const [coverageUnit, setCoverageUnit] = useState<'m²' | 'm³' | 'm' | 'none'>('none');
+  // Pack rounding for area→quantity calc on consumer side (e.g. "bags
+  // delivered in 10s"). Stored as a string while editing; parsed on save.
+  const [roundingIncrement, setRoundingIncrement] = useState('');
   const [rateKeywords, setRateKeywords] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
@@ -373,6 +376,8 @@ export function AddMaterialScreen() {
         const cov = (linkedFav as any).coveragePerUnit;
         setCoveragePerUnit(cov !== undefined ? String(cov) : '');
         setCoverageUnit(((linkedFav as any).coverageUnit as 'm²' | 'm³' | 'm') || 'none');
+        const ri = (linkedFav as any).roundingIncrement;
+        setRoundingIncrement(ri !== undefined && ri !== null ? String(ri) : '');
         setShowCoverageOptions(cov !== undefined && cov !== null);
       }
     }
@@ -417,6 +422,11 @@ export function AddMaterialScreen() {
       const cov = fav.coveragePerUnit !== undefined ? fav.coveragePerUnit.toString() : '';
       setCoveragePerUnit(cov);
       setCoverageUnit((fav.coverageUnit as 'm²' | 'm³' | 'm') || 'none');
+      setRoundingIncrement(
+        fav.roundingIncrement !== undefined && fav.roundingIncrement !== null
+          ? String(fav.roundingIncrement)
+          : ''
+      );
       setShowCoverageOptions(cov !== '' || (fav.coverageUnit !== undefined && fav.coverageUnit !== null));
       setRateKeywords(fav.keywords?.join(', ') || '');
       setSupplierName(fav.store && fav.store !== 'manual' ? fav.store : '');
@@ -927,6 +937,10 @@ export function AddMaterialScreen() {
         ...(isPersonalRate && coverageUnit !== 'none' && {
           coverageUnit: coverageUnit as 'm²' | 'm³' | 'm',
         }),
+        ...(isPersonalRate && (() => {
+          const ri = parseInt(roundingIncrement, 10);
+          return Number.isFinite(ri) && ri > 1 ? { roundingIncrement: ri } : null;
+        })()),
         ...(isPersonalRate && parsedKeywords.length > 0 && {
           keywords: parsedKeywords,
         }),
@@ -990,6 +1004,12 @@ export function AddMaterialScreen() {
           ...(coverageUnit !== 'none'
             ? { coverageUnit: coverageUnit as 'm²' | 'm³' | 'm' }
             : { coverageUnit: undefined as any }),
+          ...((() => {
+            const ri = parseInt(roundingIncrement, 10);
+            return Number.isFinite(ri) && ri > 1
+              ? { roundingIncrement: ri }
+              : { roundingIncrement: undefined as any };
+          })()),
           ...(parsedKeywords.length > 0
             ? { keywords: parsedKeywords }
             : { keywords: undefined as any }),
@@ -1037,6 +1057,10 @@ export function AddMaterialScreen() {
           ...(coverageUnit !== 'none' && {
             coverageUnit: coverageUnit as 'm²' | 'm³' | 'm',
           }),
+          ...((() => {
+            const ri = parseInt(roundingIncrement, 10);
+            return Number.isFinite(ri) && ri > 1 ? { roundingIncrement: ri } : null;
+          })()),
           ...(parsedKeywords.length > 0 && {
             keywords: parsedKeywords,
           }),
@@ -1446,6 +1470,8 @@ export function AddMaterialScreen() {
       rateKeywords={rateKeywords}
       setRateKeywords={setRateKeywords}
       showCoverageOptions={showCoverageOptions}
+      roundingIncrement={roundingIncrement}
+      setRoundingIncrement={setRoundingIncrement}
       setShowCoverageOptions={setShowCoverageOptions}
       coveragePerUnit={coveragePerUnit}
       setCoveragePerUnit={setCoveragePerUnit}
