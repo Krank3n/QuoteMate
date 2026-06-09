@@ -149,6 +149,15 @@ export function SettingsScreen() {
           screen: 'AddMaterialStandalone',
           screenParams: { supplierBookOnly: true },
         },
+        {
+          id: 'bulkPriceAdjust',
+          title: 'Bulk Price Adjust',
+          subtitle: 'Apply a supplier price rise or flip GST across saved items',
+          icon: 'trending-up',
+          screen: 'BulkPriceAdjust',
+          badge: 'NEW',
+          badgeColor: colors.primary,
+        },
       ],
     },
     {

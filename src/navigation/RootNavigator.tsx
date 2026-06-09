@@ -31,6 +31,7 @@ import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen
 import { AboutScreen } from '../screens/settings/AboutScreen';
 import { FeedbackScreen } from '../screens/settings/FeedbackScreen';
 import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
+import { BulkPriceAdjustScreen } from '../screens/settings/BulkPriceAdjustScreen';
 import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen';
@@ -645,6 +646,18 @@ export function RootNavigator() {
           headerTintColor: colors.white,
           headerTitleStyle: { fontWeight: '700' },
           title: 'Account',
+        }}
+      />
+      <RootStack.Screen
+        name="BulkPriceAdjust"
+        component={BulkPriceAdjustScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Bulk Price Adjust',
         }}
       />
       <RootStack.Screen

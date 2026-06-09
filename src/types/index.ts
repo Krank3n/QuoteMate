@@ -167,6 +167,21 @@ export interface SupplierGroup {
   email?: string;
   address?: string;
   notes?: string;
+  // GST mode the saved prices are stored in. Lets the supplier book reflect
+  // what the rep quoted ("all my prices are ex GST") so the bulk-adjust
+  // flow knows whether to add 10% on top. Default: undefined = ex-GST
+  // (matches AU wholesale convention).
+  pricesIncludeGst?: boolean;
+  // Audit trail of the last bulk uplift applied to every favorite under
+  // this supplier. Used by BulkPriceAdjustScreen to show "Last adjusted:
+  // +5.8% on 2025-06-09" and to warn before re-applying the same percent
+  // twice (which would compound, not idempotent).
+  lastPriceAdjustment?: {
+    percent: number;          // e.g. 5.8
+    appliedAt: string;        // ISO timestamp
+    gstAction?: 'addGst' | 'removeGst' | 'none';
+    itemsUpdated: number;
+  };
 }
 
 export interface SupplierPartner {

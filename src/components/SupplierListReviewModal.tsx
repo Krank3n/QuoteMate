@@ -36,6 +36,7 @@ import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import type { ExtractedItem } from '../services/supplierListImporter';
 import type { FavoriteProductMapping } from '../types';
+import { adjustPrice, GstAction } from '../utils/priceAdjust';
 
 export interface ReviewItemState extends ExtractedItem {
   // Tracks whether this row should be saved.
@@ -103,6 +104,12 @@ export function SupplierListReviewModal({
   const [supplierName, setSupplierName] = useState(initialSupplierName);
   const [rows, setRows] = useState<ReviewItemState[]>([]);
   const [keywordDraft, setKeywordDraft] = useState<Record<string, string>>({});
+  // Inline bulk-adjust controls applied to every row's price on Save. Useful
+  // when the supplier's PDF is a year out of date ("add 5.8%") or the prices
+  // are quoted ex-GST and need flipping to inc-GST before they land in the
+  // supplier book.
+  const [bulkPercentText, setBulkPercentText] = useState('');
+  const [bulkGstAction, setBulkGstAction] = useState<GstAction>('none');
 
   // Build initial rows whenever the modal opens with new data.
   useEffect(() => {
@@ -261,6 +268,46 @@ export function SupplierListReviewModal({
             </Button>
           </View>
 
+          {/* Bulk price uplift + GST flip controls. Applied to every selected
+              row's price when the user hits Save. */}
+          <View style={styles.bulkAdjustWrap}>
+            <Text style={styles.bulkAdjustLabel}>Adjust all prices on save (optional)</Text>
+            <View style={styles.bulkAdjustRow}>
+              <TextInput
+                label="Price increase %"
+                value={bulkPercentText}
+                onChangeText={setBulkPercentText}
+                mode="outlined"
+                dense
+                keyboardType="decimal-pad"
+                placeholder="e.g. 5.8"
+                style={styles.bulkAdjustPercent}
+                right={<TextInput.Affix text="%" />}
+              />
+              <View style={styles.bulkAdjustGstGroup}>
+                {([
+                  { value: 'none', label: 'No GST change' },
+                  { value: 'addGst', label: '+10% GST' },
+                  { value: 'removeGst', label: '−10% GST' },
+                ] as { value: GstAction; label: string }[]).map(opt => {
+                  const active = bulkGstAction === opt.value;
+                  return (
+                    <TouchableOpacity
+                      key={opt.value}
+                      onPress={() => setBulkGstAction(opt.value)}
+                      style={[styles.bulkAdjustGstBtn, active && styles.bulkAdjustGstBtnActive]}
+                      disabled={saving}
+                    >
+                      <Text style={[styles.bulkAdjustGstText, active && styles.bulkAdjustGstTextActive]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+
           {rows.map(row => (
             <View key={row.uiKey} style={styles.row}>
               <View style={styles.rowHeader}>
@@ -410,7 +457,20 @@ export function SupplierListReviewModal({
           </Button>
           <Button
             mode="contained"
-            onPress={() => onSave(supplierName, rows)}
+            onPress={() => {
+              const percent = parseFloat(bulkPercentText);
+              const pct = Number.isFinite(percent) ? percent : 0;
+              if (pct === 0 && bulkGstAction === 'none') {
+                onSave(supplierName, rows);
+                return;
+              }
+              const adjusted = rows.map(r =>
+                r.diffStatus === 'removed'
+                  ? r
+                  : { ...r, price: adjustPrice(r.price || 0, { percent: pct, gstAction: bulkGstAction }) }
+              );
+              onSave(supplierName, adjusted);
+            }}
             disabled={saving || selectedCount === 0}
             loading={saving}
           >
@@ -463,6 +523,49 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     marginBottom: 8,
   },
+  bulkAdjustWrap: {
+    backgroundColor: colors.surfaceDark,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  bulkAdjustLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.onSurface,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  bulkAdjustRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  bulkAdjustPercent: {
+    width: 140,
+    backgroundColor: colors.surface,
+  },
+  bulkAdjustGstGroup: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+    flex: 1,
+  },
+  bulkAdjustGstBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.outline + '40',
+  },
+  bulkAdjustGstBtnActive: {
+    backgroundColor: colors.primary + '12',
+    borderColor: colors.primary,
+  },
+  bulkAdjustGstText: { color: colors.onSurface, fontSize: 12, fontWeight: '600' },
+  bulkAdjustGstTextActive: { color: colors.primary },
   row: {
     marginBottom: 4,
     backgroundColor: colors.surfaceDark,
