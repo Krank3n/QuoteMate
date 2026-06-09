@@ -333,6 +333,14 @@ export function JobScopeCard({
             }
             requireDeposit={doc.requireDeposit === true}
             depositPercentage={Number(doc.depositPercentage ?? 0)}
+            presentationMode={
+              (doc as any).presentationMode ||
+              businessSettings?.defaultPresentationMode ||
+              'itemised'
+            }
+            flatRateInclusions={(doc as any).flatRateInclusions}
+            flatRateLineLabel={(doc as any).flatRateLineLabel}
+            defaultFlatRateLabel={doc.job?.name}
             onChange={handleDisplaySettingsChange}
             variant="collapsible"
             expanded={displayExpanded}

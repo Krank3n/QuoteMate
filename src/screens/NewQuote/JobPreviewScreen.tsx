@@ -719,6 +719,14 @@ export function JobPreviewScreen() {
             }
             requireDeposit={(workingDoc as any).requireDeposit === true}
             depositPercentage={Number((workingDoc as any).depositPercentage ?? 0)}
+            presentationMode={
+              (workingDoc as any).presentationMode ||
+              businessSettings?.defaultPresentationMode ||
+              'itemised'
+            }
+            flatRateInclusions={(workingDoc as any).flatRateInclusions}
+            flatRateLineLabel={(workingDoc as any).flatRateLineLabel}
+            defaultFlatRateLabel={workingDoc.job?.name}
             onChange={handleDisplaySettingsChange}
             variant="embedded"
           />

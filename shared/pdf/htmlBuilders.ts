@@ -412,6 +412,36 @@ function buildLaborHTML(data: QuotePdfData): string {
 /**
  * Build summary/totals HTML, with optional paid amount/balance for invoices
  */
+/**
+ * Render the flat-rate customer block: a single labelled line at the
+ * document total, with an optional bulleted scope list under it.
+ *
+ * Used when data.presentationMode === 'flatRate'. The internal/itemised
+ * materials & labour tables are suppressed entirely upstream — the
+ * customer never sees per-line qty or pricing, only this row.
+ */
+export function buildFlatRateLineHTML(data: QuotePdfData): string {
+  const label = (data.flatRateLineLabel && data.flatRateLineLabel.trim())
+    ? data.flatRateLineLabel
+    : data.job?.name || 'Job total';
+  const inclusions = (data.flatRateInclusions || [])
+    .map((s) => (s || '').trim())
+    .filter((s) => s.length > 0);
+  const inclusionsHtml = inclusions.length > 0
+    ? `<ul style="margin: 8px 0 0 20px; padding: 0; color: #444;">${inclusions.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}</ul>`
+    : '';
+  return `
+      <div class="section-wrapper">
+        <table style="width:100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 14px 0; font-size: 16px; font-weight: 600;">${escapeHtml(label)}</td>
+            <td style="padding: 14px 0; text-align: right; font-size: 16px; font-weight: 600;">${formatCurrency(data.total)}</td>
+          </tr>
+        </table>
+        ${inclusionsHtml}
+      </div>`;
+}
+
 function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: number, depositCredit?: number): string {
   // By default markup is rolled into the displayed line totals (combined).
   // When showMarkup is explicitly true, the markup is broken out as its own
@@ -435,8 +465,11 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   // hidden, the Subtotal row is also dropped so the customer sees only the
   // grand TOTAL (with GST disclosure). Subtotal/GST/Total still reconcile
   // because displaySubtotal is computed regardless.
-  const showMaterials = data.showMaterialCosts !== false;
-  const showLabor = data.showLaborCosts !== false;
+  // Flat-rate presentation collapses both rows unconditionally — the
+  // customer already sees the total in the flat-rate line above the summary.
+  const flatRate = data.presentationMode === 'flatRate';
+  const showMaterials = !flatRate && data.showMaterialCosts !== false;
+  const showLabor = !flatRate && data.showLaborCosts !== false;
   const showSubtotalLine = showMaterials || showLabor;
 
   return `
@@ -509,8 +542,10 @@ export function buildQuotePdfHtml(
 ): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
   const rollMarkup = quote.showMarkup !== true && quote.markup > 0;
-  const showMaterials = quote.showMaterialCosts !== false;
-  const showLabor = quote.showLaborCosts !== false;
+  const flatRate = quote.presentationMode === 'flatRate';
+  // Flat-rate suppresses both itemised blocks for the customer.
+  const showMaterials = !flatRate && quote.showMaterialCosts !== false;
+  const showLabor = !flatRate && quote.showLaborCosts !== false;
   const watermark = options?.watermark;
 
   return `
@@ -561,6 +596,8 @@ export function buildQuotePdfHtml(
         <p>${formatMultiline(quote.job.description)}</p>
       </div>
 
+      ${flatRate ? buildFlatRateLineHTML(quote) : ''}
+
       ${showMaterials ? `
       <div class="section-wrapper">
         <h3>Materials</h3>
@@ -601,8 +638,9 @@ export function buildInvoicePdfHtml(
 ): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
   const rollMarkup = invoice.showMarkup !== true && invoice.markup > 0;
-  const showMaterials = invoice.showMaterialCosts !== false;
-  const showLabor = invoice.showLaborCosts !== false;
+  const flatRate = invoice.presentationMode === 'flatRate';
+  const showMaterials = !flatRate && invoice.showMaterialCosts !== false;
+  const showLabor = !flatRate && invoice.showLaborCosts !== false;
   const watermark = options?.watermark;
 
   const paidAmount = invoice.paidAmount || 0;
@@ -657,6 +695,8 @@ export function buildInvoicePdfHtml(
         <p><strong>${escapeHtml(invoice.job.name)}</strong></p>
         <p>${formatMultiline(invoice.job.description)}</p>
       </div>
+
+      ${flatRate ? buildFlatRateLineHTML(invoice) : ''}
 
       ${showMaterials ? `
       <div class="section-wrapper">

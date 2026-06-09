@@ -27,6 +27,9 @@ export interface InvoiceDisplaySettingsChange {
   requireDeposit?: boolean;
   depositPercentage?: number;
   depositAmount?: number;
+  presentationMode?: 'itemised' | 'flatRate';
+  flatRateInclusions?: string[];
+  flatRateLineLabel?: string;
 }
 
 interface InvoiceDisplaySettingsProps {
@@ -37,6 +40,14 @@ interface InvoiceDisplaySettingsProps {
   showLaborCosts: boolean;
   requireDeposit: boolean;
   depositPercentage: number;
+  /** Customer-facing presentation — 'itemised' or 'flatRate'. */
+  presentationMode?: 'itemised' | 'flatRate';
+  /** Optional bullet list shown under the flat-rate line. */
+  flatRateInclusions?: string[];
+  /** Label shown as the single flat-rate line. Falls back to job title. */
+  flatRateLineLabel?: string;
+  /** Suggested default for the flat-rate label (job title). */
+  defaultFlatRateLabel?: string;
   onChange: (partial: InvoiceDisplaySettingsChange) => void;
   /**
    * Layout variant.
@@ -109,12 +120,39 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
     showLaborCosts,
     requireDeposit,
     depositPercentage,
+    presentationMode = 'itemised',
+    flatRateInclusions,
+    flatRateLineLabel,
+    defaultFlatRateLabel,
     onChange,
     variant = 'card',
     surfaceStyle,
     expanded,
     onToggleExpand,
   } = props;
+  const isFlatRate = presentationMode === 'flatRate';
+  // Local editing state for inclusions — we render them as a single
+  // multi-line textarea (one bullet per line) for now. Cheaper to ship
+  // than a row-by-row editor and matches how tradies copy/paste scope.
+  const [inclusionsText, setInclusionsText] = useState((flatRateInclusions || []).join('\n'));
+  const [lineLabelText, setLineLabelText] = useState(flatRateLineLabel || '');
+  useEffect(() => {
+    setInclusionsText((flatRateInclusions || []).join('\n'));
+  }, [flatRateInclusions]);
+  useEffect(() => {
+    setLineLabelText(flatRateLineLabel || '');
+  }, [flatRateLineLabel]);
+  const commitInclusions = () => {
+    const parsed = inclusionsText
+      .split(/\r?\n/)
+      .map((s) => s.replace(/^[-•]\s*/, '').trim())
+      .filter((s) => s.length > 0);
+    onChange({ flatRateInclusions: parsed.length > 0 ? parsed : undefined });
+  };
+  const commitLineLabel = () => {
+    const trimmed = lineLabelText.trim();
+    onChange({ flatRateLineLabel: trimmed.length > 0 ? trimmed : undefined });
+  };
   const navigation = useNavigation<any>();
   const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
   const [depositInput, setDepositInput] = useState(
@@ -186,6 +224,64 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
 
   const body = (
     <View style={styles.body}>
+      {/* Customer-facing presentation. Flat rate hides everything below
+          (materials/labour breakdown toggles dim) and replaces the line
+          items with a single labelled line + optional inclusions list. */}
+      <View style={styles.presentationBlock}>
+        <Text style={styles.depositHeaderLabel}>Customer sees</Text>
+        <View style={styles.segmented}>
+          {([
+            { value: 'itemised', label: 'Itemised' },
+            { value: 'flatRate', label: 'Flat rate' },
+          ] as { value: 'itemised' | 'flatRate'; label: string }[]).map((opt) => {
+            const active = presentationMode === opt.value;
+            return (
+              <TouchableOpacity
+                key={opt.value}
+                onPress={() => onChange({ presentationMode: opt.value })}
+                style={[styles.segment, active && styles.segmentActive]}
+              >
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={styles.toggleSubtitle}>
+          {isFlatRate
+            ? 'One labelled line + total. No materials, no labour, no quantities. Your internal copy keeps every line for supplier ordering.'
+            : 'Materials and labour shown as line items. Use the toggles below to hide individual sections.'}
+        </Text>
+
+        {isFlatRate && (
+          <View style={styles.flatRateEditor}>
+            <TextInput
+              label="Line label"
+              value={lineLabelText}
+              onChangeText={setLineLabelText}
+              onBlur={commitLineLabel}
+              mode="outlined"
+              placeholder={defaultFlatRateLabel || 'e.g. R4.1 Ceiling Insulation — supply & fit'}
+              dense
+              style={styles.flatRateInput}
+            />
+            <TextInput
+              label={`What's included (one per line, optional)`}
+              value={inclusionsText}
+              onChangeText={setInclusionsText}
+              onBlur={commitInclusions}
+              mode="outlined"
+              multiline
+              numberOfLines={4}
+              placeholder={'Supply and fit R4.1 ceiling insulation\nSite clean & rubbish removal\nFully accredited installer'}
+              style={styles.flatRateInput}
+            />
+          </View>
+        )}
+      </View>
+      <Divider style={styles.rowDivider} />
+
       <ToggleRow
         title={`Show markup breakdown on ${docLabel}`}
         subtitle="When off, markup is included in the total but not shown as a separate line to the customer."
@@ -195,16 +291,26 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
       <Divider style={styles.rowDivider} />
       <ToggleRow
         title={`Show material breakdown on ${docLabel}`}
-        subtitle="When off, the materials breakdown and subtotal are hidden. Turn both this and labour off to show only the grand total."
-        value={showMaterialCosts}
+        subtitle={
+          isFlatRate
+            ? 'Flat rate hides this automatically.'
+            : 'When off, the materials breakdown and subtotal are hidden. Turn both this and labour off to show only the grand total.'
+        }
+        value={!isFlatRate && showMaterialCosts}
         onValueChange={(v) => onChange({ showMaterialCosts: v })}
+        disabled={isFlatRate}
       />
       <Divider style={styles.rowDivider} />
       <ToggleRow
         title={`Show labour breakdown on ${docLabel}`}
-        subtitle="When off, the labour breakdown and subtotal are hidden. Turn both this and materials off to show only the grand total."
-        value={showLaborCosts}
+        subtitle={
+          isFlatRate
+            ? 'Flat rate hides this automatically.'
+            : 'When off, the labour breakdown and subtotal are hidden. Turn both this and materials off to show only the grand total.'
+        }
+        value={!isFlatRate && showLaborCosts}
         onValueChange={(v) => onChange({ showLaborCosts: v })}
+        disabled={isFlatRate}
       />
 
       <View style={styles.depositSection}>
@@ -502,6 +608,36 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: colors.primary,
+  },
+  presentationBlock: {
+    paddingVertical: 8,
+    gap: 8,
+  },
+  segmented: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  segment: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+  },
+  segmentActive: {
+    backgroundColor: colors.primary + '12',
+    borderColor: colors.primary,
+  },
+  segmentText: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
+  segmentTextActive: { color: colors.primary },
+  flatRateEditor: {
+    gap: 8,
+    marginTop: 4,
+  },
+  flatRateInput: {
+    backgroundColor: colors.surface,
   },
   // Collapsible variant — matches ScopeRow exactly so it slots into the
   // JobScopeCard list without breaking the visual rhythm.

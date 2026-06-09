@@ -271,6 +271,20 @@ export interface Quote {
   // Labour breakdown visibility on PDFs. When false, the per-section labour
   // rows are hidden and only the Labour Total is shown. Default: true.
   showLaborBreakdown?: boolean;
+  // Presentation mode for the customer-facing PDF / email / acceptance page.
+  // 'itemised' — current behaviour, respects showMaterialCosts / showLaborCosts.
+  // 'flatRate' — collapses everything into a single line: job description + total.
+  //              Materials and labour are NOT shown to the customer at all.
+  //              The internal record (used for supplier ordering, profit, CRM)
+  //              keeps every line.
+  // Falls back to BusinessSettings.defaultPresentationMode when undefined.
+  presentationMode?: 'itemised' | 'flatRate';
+  // Customer-facing scope summary used when presentationMode = 'flatRate'.
+  // Bullet points the customer sees instead of line items. Optional.
+  flatRateInclusions?: string[];
+  // Single label that appears as the only line on the customer PDF in flat-
+  // rate mode. Defaults to the job title when blank.
+  flatRateLineLabel?: string;
   // Travel adjustment
   travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
   estimatedDistance?: number;   // km (straight-line)
@@ -516,6 +530,11 @@ export interface BusinessSettings {
   showMaterialCostsByDefault?: boolean;
   // Default for new quotes' showLaborCosts. Same shape as above for labour.
   showLaborCostsByDefault?: boolean;
+  // Default presentation mode for new quotes. 'flatRate' is the Tradify-
+  // pain-point wedge — hides every material qty and labour line, leaving
+  // a single labelled line + total on the customer-facing PDF. Per-quote
+  // toggle on Quote.presentationMode overrides. Default: 'itemised'.
+  defaultPresentationMode?: 'itemised' | 'flatRate';
   // Payment method settings
   paymentMethods?: PaymentMethodSettings;
   // Branding

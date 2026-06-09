@@ -44,6 +44,7 @@ export function BusinessDefaultsScreen() {
   const [showMarkup, setShowMarkup] = useState(false);
   const [showMaterialCostsByDefault, setShowMaterialCostsByDefault] = useState(true);
   const [showLaborCostsByDefault, setShowLaborCostsByDefault] = useState(true);
+  const [defaultPresentationMode, setDefaultPresentationMode] = useState<'itemised' | 'flatRate'>('itemised');
   const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(false);
   const [termsAndConditions, setTermsAndConditions] = useState('');
 
@@ -66,6 +67,7 @@ export function BusinessDefaultsScreen() {
     const sm = businessSettings.showMarkup === true;
     const smc = businessSettings.showMaterialCostsByDefault !== false;
     const slc = businessSettings.showLaborCostsByDefault !== false;
+    const pm = businessSettings.defaultPresentationMode === 'flatRate' ? 'flatRate' : 'itemised';
     const acf = businessSettings.autoCustomerFollowUpEnabled === true;
     const tc = businessSettings.termsAndConditions ?? '';
 
@@ -80,10 +82,11 @@ export function BusinessDefaultsScreen() {
     setShowMarkup(sm);
     setShowMaterialCostsByDefault(smc);
     setShowLaborCostsByDefault(slc);
+    setDefaultPresentationMode(pm);
     setAutoCustomerFollowUp(acf);
     setTermsAndConditions(tc);
 
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, acf, tc }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, pm, acf, tc }));
   }, [businessSettings]);
 
   // Re-check on focus so the deposit + surcharge toggles unlock the moment
@@ -112,6 +115,7 @@ export function BusinessDefaultsScreen() {
       sm: showMarkup,
       smc: showMaterialCostsByDefault,
       slc: showLaborCostsByDefault,
+      pm: defaultPresentationMode,
       acf: autoCustomerFollowUp,
       tc: termsAndConditions,
     });
@@ -119,7 +123,7 @@ export function BusinessDefaultsScreen() {
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
     transportMarkupEnabled, surchargePaymentFees, pricesIncludeGst,
-    showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, autoCustomerFollowUp, termsAndConditions,
+    showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, defaultPresentationMode, autoCustomerFollowUp, termsAndConditions,
     initialSnapshot,
   ]);
 
@@ -147,6 +151,7 @@ export function BusinessDefaultsScreen() {
         showMarkup,
         showMaterialCostsByDefault,
         showLaborCostsByDefault,
+        defaultPresentationMode,
         autoCustomerFollowUpEnabled: autoCustomerFollowUp,
         termsAndConditions: termsAndConditions.trim() || undefined,
         termsUpdatedAt:
@@ -258,6 +263,35 @@ export function BusinessDefaultsScreen() {
             <Text style={styles.helperText}>
               Defaults for what appears on customer-facing quotes and invoices. Each document can override these.
             </Text>
+
+            {/* Presentation mode — the big customer-facing wedge. */}
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Default presentation</Text>
+                <Text style={styles.toggleDescription}>
+                  Flat rate hides every material, quantity and labour row from the customer — they see one labelled line and the total. Your internal copy keeps every line for ordering.
+                </Text>
+                <View style={styles.presentationSegmented}>
+                  {([
+                    { value: 'itemised', label: 'Itemised' },
+                    { value: 'flatRate', label: 'Flat rate' },
+                  ] as { value: 'itemised' | 'flatRate'; label: string }[]).map((opt) => {
+                    const active = defaultPresentationMode === opt.value;
+                    return (
+                      <TouchableOpacity
+                        key={opt.value}
+                        onPress={() => setDefaultPresentationMode(opt.value)}
+                        style={[styles.presentationSegment, active && styles.presentationSegmentActive]}
+                      >
+                        <Text style={[styles.presentationSegmentText, active && styles.presentationSegmentTextActive]}>
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            </View>
 
             <View style={styles.toggleRow}>
               <View style={styles.toggleLabel}>
@@ -509,6 +543,26 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 4,
   },
+  presentationSegmented: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  presentationSegment: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.outline + '40',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+  },
+  presentationSegmentActive: {
+    backgroundColor: colors.primary + '12',
+    borderColor: colors.primary,
+  },
+  presentationSegmentText: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
+  presentationSegmentTextActive: { color: colors.primary },
   helperText: {
     fontSize: 13,
     color: colors.textMuted,

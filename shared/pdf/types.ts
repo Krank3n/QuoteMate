@@ -69,6 +69,14 @@ export interface QuotePdfData {
   // AND the Labour row in the summary. Subtotal/GST/Total are still computed
   // and shown.
   showLaborCosts?: boolean;
+  // Customer-facing presentation mode. When 'flatRate', the renderer
+  // collapses every material + labour line into a single 'flatRateLineLabel'
+  // row at the document total, with an optional bullet list of inclusions.
+  // Materials, labour rows, and the Materials Subtotal / Labour summary
+  // rows are all suppressed. Subtotal/GST/Total still render.
+  presentationMode?: 'itemised' | 'flatRate';
+  flatRateInclusions?: string[];
+  flatRateLineLabel?: string;
   travelAdjustment?: number;
   gst: number;
   total: number;

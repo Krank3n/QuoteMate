@@ -229,6 +229,10 @@ export async function generateDocumentPDF(
       showLaborCosts: doc.showLaborCosts !== undefined
         ? doc.showLaborCosts
         : businessSettings?.showLaborCostsByDefault !== false,
+      presentationMode:
+        doc.presentationMode || businessSettings?.defaultPresentationMode || 'itemised',
+      flatRateInclusions: doc.flatRateInclusions,
+      flatRateLineLabel: doc.flatRateLineLabel,
       travelAdjustment: doc.travelAdjustment,
       gst: doc.gst,
       total: doc.total,
@@ -290,6 +294,10 @@ export async function generateDocumentPDF(
     showLaborCosts: doc.showLaborCosts !== undefined
       ? doc.showLaborCosts
       : businessSettings?.showLaborCostsByDefault !== false,
+    presentationMode:
+      doc.presentationMode || businessSettings?.defaultPresentationMode || 'itemised',
+    flatRateInclusions: doc.flatRateInclusions,
+    flatRateLineLabel: doc.flatRateLineLabel,
     travelAdjustment: doc.travelAdjustment,
     gst: doc.gst,
     total: doc.total,

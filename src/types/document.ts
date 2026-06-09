@@ -77,6 +77,10 @@ export interface Document {
   showMaterialCosts?: boolean;
   showLaborCosts?: boolean;
   showLaborBreakdown?: boolean;
+  // Customer-facing presentation. See Quote.presentationMode for details.
+  presentationMode?: 'itemised' | 'flatRate';
+  flatRateInclusions?: string[];
+  flatRateLineLabel?: string;
 
   // ===== Travel adjustment =====
   travelAdjustment?: number;
