@@ -142,6 +142,15 @@ export function SettingsScreen() {
           screen: 'SectionTemplates',
         },
         {
+          id: 'salesPitches',
+          title: 'Sales Pitches',
+          subtitle: 'Branded intro + R-value upgrade calc on every quote',
+          icon: 'bullhorn-outline',
+          screen: 'QuotePitch',
+          badge: 'NEW',
+          badgeColor: colors.primary,
+        },
+        {
           id: 'supplierBook',
           title: 'Supplier Book',
           subtitle: 'Saved supplier prices grouped by store',

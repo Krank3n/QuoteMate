@@ -157,6 +157,32 @@ export interface TemplateSuggestion {
 }
 
 // User-defined supplier group for materials search
+/**
+ * A reusable sales-pitch block (e.g. "owner-operator" intro, "R-value
+ * upgrade" calc) that lives on BusinessSettings.salesPitches. Renders
+ * above line items on the customer PDF + email body + acceptance page.
+ *
+ * Body supports {{key}} template variables. See SalesPitchVariable for
+ * the supported variable types and the small derived-value language.
+ */
+export interface SalesPitch {
+  id: string;
+  name: string;                       // user-visible label
+  body: string;                       // raw text; {{key}} substitution
+  variables?: SalesPitchVariable[];
+  isDefault?: boolean;                // pre-selected on new quotes
+}
+
+export interface SalesPitchVariable {
+  key: string;                        // matches {{key}} in body
+  label: string;
+  type: 'text' | 'number';
+  defaultValue?: string;
+  // Whitelisted arithmetic over other variable keys. Currently 'add' only;
+  // extend the union as more derive ops are needed.
+  derive?: { op: 'add'; from: string[] };
+}
+
 export interface SupplierGroup {
   id: string;
   name: string;              // e.g. "Local Timber Yard", "Fencing Supplies Co"
@@ -285,6 +311,15 @@ export interface Quote {
   // Single label that appears as the only line on the customer PDF in flat-
   // rate mode. Defaults to the job title when blank.
   flatRateLineLabel?: string;
+  // Sales pitch to render on the customer-facing PDF + email + acceptance
+  // page. Optional. References a SalesPitch on BusinessSettings.salesPitches.
+  // `pitchVariableValues` snapshots the user's variable overrides at the
+  // time of send so later template edits don't rewrite history. The fully
+  // resolved body is also snapshotted to `pitchRenderedBody` so the PDF
+  // doesn't have to re-run the template engine.
+  pitchId?: string;
+  pitchVariableValues?: Record<string, string>;
+  pitchRenderedBody?: string;
   // Travel adjustment
   travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
   estimatedDistance?: number;   // km (straight-line)
@@ -535,6 +570,9 @@ export interface BusinessSettings {
   // a single labelled line + total on the customer-facing PDF. Per-quote
   // toggle on Quote.presentationMode overrides. Default: 'itemised'.
   defaultPresentationMode?: 'itemised' | 'flatRate';
+  // User's library of reusable sales pitches. See SalesPitch above. The
+  // pitch with isDefault === true is auto-selected on new quotes.
+  salesPitches?: SalesPitch[];
   // Payment method settings
   paymentMethods?: PaymentMethodSettings;
   // Branding

@@ -30,6 +30,10 @@ export interface InvoiceDisplaySettingsChange {
   presentationMode?: 'itemised' | 'flatRate';
   flatRateInclusions?: string[];
   flatRateLineLabel?: string;
+  // Sales pitch — fed through the same change channel from QuotePitchPicker
+  // so JobPreviewScreen only has to wire one persistence path.
+  pitchId?: string;
+  pitchVariableValues?: Record<string, string>;
 }
 
 interface InvoiceDisplaySettingsProps {
