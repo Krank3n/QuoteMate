@@ -85,6 +85,17 @@ export interface Document {
   pitchId?: string;
   pitchVariableValues?: Record<string, string>;
   pitchRenderedBody?: string;
+  // Snapshot of the labour-rate preset applied to this quote. See
+  // Quote.labourPresetSnapshot for details.
+  labourPresetSnapshot?: {
+    presetId: string;
+    presetName: string;
+    amount: number;
+    denominator: number;
+    unit: string;
+    measuredArea: number;
+    computedLabourTotal: number;
+  };
 
   // ===== Travel adjustment =====
   travelAdjustment?: number;

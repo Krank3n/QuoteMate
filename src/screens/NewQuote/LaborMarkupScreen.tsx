@@ -26,6 +26,8 @@ import { QuoteSentBanner } from '../../components/QuoteSentBanner';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
+import { LabourPresetChipRow } from '../../components/LabourPresetChipRow';
+import type { LabourRatePreset } from '../../types';
 
 export function LaborMarkupScreen() {
   const navigation = useNavigation<any>();
@@ -456,6 +458,42 @@ export function LaborMarkupScreen() {
         >
         <WebContainer>
         <QuoteSentBanner quote={currentQuote} />
+
+        {/* Labour rate presets — one-tap apply of saved $/m² rates.
+            Updates laborHours = 1 and laborRate = computedTotal, stamps a
+            snapshot so the original $/m² intent survives later edits. */}
+        {businessSettings && (
+          <LabourPresetChipRow
+            presets={businessSettings.labourRatePresets || []}
+            defaultMeasuredArea={(currentQuote as any)?.labourPresetSnapshot?.measuredArea}
+            currentSnapshotName={(currentQuote as any)?.labourPresetSnapshot?.presetName}
+            onApplyPreset={({ preset, measuredArea, computedLabourTotal }) => {
+              if (!currentQuote) return;
+              // Persist 1 × computed-total so existing labour total maths
+              // (laborHours × laborRate) keeps reconciling without us
+              // touching the calculator. Stamp the snapshot for audit /
+              // ViewJob badge / future Xero sync.
+              setLaborHours('1');
+              setLaborRate(String(computedLabourTotal));
+              updateQuote({
+                ...currentQuote,
+                laborHours: 1,
+                laborRate: computedLabourTotal,
+                laborTotal: computedLabourTotal,
+                labourPresetSnapshot: {
+                  presetId: preset.id,
+                  presetName: preset.name,
+                  amount: preset.amount,
+                  denominator: preset.denominator,
+                  unit: preset.unit,
+                  measuredArea,
+                  computedLabourTotal,
+                },
+              } as any);
+            }}
+          />
+        )}
+
         {/* Labor Section */}
         <View style={styles.sectionHeader}>
           <View style={styles.sectionLine} />

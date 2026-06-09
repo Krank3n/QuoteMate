@@ -33,6 +33,7 @@ import { FeedbackScreen } from '../screens/settings/FeedbackScreen';
 import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
 import { BulkPriceAdjustScreen } from '../screens/settings/BulkPriceAdjustScreen';
 import { QuotePitchScreen } from '../screens/settings/QuotePitchScreen';
+import { LabourRatePresetsScreen } from '../screens/settings/LabourRatePresetsScreen';
 import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen';
@@ -647,6 +648,18 @@ export function RootNavigator() {
           headerTintColor: colors.white,
           headerTitleStyle: { fontWeight: '700' },
           title: 'Account',
+        }}
+      />
+      <RootStack.Screen
+        name="LabourRatePresets"
+        component={LabourRatePresetsScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.primary },
+          headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Labour Rate Presets',
         }}
       />
       <RootStack.Screen

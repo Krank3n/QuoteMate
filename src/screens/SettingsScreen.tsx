@@ -60,6 +60,15 @@ export function SettingsScreen() {
           icon: 'tune',
           screen: 'BusinessDefaults',
         },
+        {
+          id: 'labourRatePresets',
+          title: 'Labour Rate Presets',
+          subtitle: 'Reusable $/m² rates for quick quoting',
+          icon: 'tools',
+          screen: 'LabourRatePresets',
+          badge: 'NEW',
+          badgeColor: colors.primary,
+        },
 {
           id: 'payment',
           title: 'Payment Methods',

@@ -173,6 +173,22 @@ export interface SalesPitch {
   isDefault?: boolean;                // pre-selected on new quotes
 }
 
+/**
+ * A reusable labour-rate preset attached to a BusinessSettings record.
+ * Pricing model: `amount` dollars per `denominator` of `unit`.
+ *
+ * Example: ceiling preset = { amount: 1500, denominator: 100, unit: 'm²' }
+ *   → $1500 per 100 m². 240 m² job → labour total $3,600.
+ */
+export interface LabourRatePreset {
+  id: string;
+  name: string;             // e.g. "Ceiling insulation"
+  amount: number;           // dollars (ex GST)
+  denominator: number;      // typically 100
+  unit: 'm²' | 'm' | 'each' | 'm³';
+  notes?: string;
+}
+
 export interface SalesPitchVariable {
   key: string;                        // matches {{key}} in body
   label: string;
@@ -320,6 +336,19 @@ export interface Quote {
   pitchId?: string;
   pitchVariableValues?: Record<string, string>;
   pitchRenderedBody?: string;
+  // Snapshot of the labour-rate preset that was applied to this quote, if
+  // any. Persisted so the original $/m² intent survives even if the user
+  // later nudges Quote.laborTotal manually — and so deleting the preset
+  // from BusinessSettings.labourRatePresets doesn't break old quotes.
+  labourPresetSnapshot?: {
+    presetId: string;
+    presetName: string;
+    amount: number;
+    denominator: number;
+    unit: string;
+    measuredArea: number;
+    computedLabourTotal: number;
+  };
   // Travel adjustment
   travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
   estimatedDistance?: number;   // km (straight-line)
@@ -573,6 +602,8 @@ export interface BusinessSettings {
   // User's library of reusable sales pitches. See SalesPitch above. The
   // pitch with isDefault === true is auto-selected on new quotes.
   salesPitches?: SalesPitch[];
+  // Reusable labour-rate presets ($/100 m² style). See LabourRatePreset.
+  labourRatePresets?: LabourRatePreset[];
   // Payment method settings
   paymentMethods?: PaymentMethodSettings;
   // Branding
