@@ -160,6 +160,15 @@ export function SettingsScreen() {
           badgeColor: colors.primary,
         },
         {
+          id: 'starterKits',
+          title: 'Trade Starter Kits',
+          subtitle: 'Pre-built line-item libraries (insulation, more soon)',
+          icon: 'briefcase-plus-outline',
+          screen: 'StarterKits',
+          badge: 'NEW',
+          badgeColor: colors.primary,
+        },
+        {
           id: 'supplierBook',
           title: 'Supplier Book',
           subtitle: 'Saved supplier prices grouped by store',
