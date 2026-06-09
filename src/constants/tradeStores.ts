@@ -96,6 +96,37 @@ export const CARPENTER_STORES: HardwareStore[] = [
   },
 ];
 
+// Cabinet maker-specific stores (joinery / cabinetry suppliers + general hardware)
+export const CABINET_MAKER_STORES: HardwareStore[] = [
+  {
+    name: 'Hettich',
+    url: 'hettich.com.au',
+    description: 'Cabinet hardware, hinges, drawer runners, sliding systems',
+  },
+  {
+    name: 'Blum',
+    url: 'blum.com',
+    description: 'Premium cabinet hinges, drawer systems, lift systems',
+  },
+  {
+    name: 'Galvins Hardware',
+    url: 'galvinhardware.com.au',
+    description: 'Specialist cabinet, joinery and architectural hardware',
+  },
+  {
+    name: 'Polytec',
+    url: 'polytec.com.au',
+    description: 'Decorative panels, doors and benchtops for cabinetry',
+  },
+  {
+    name: 'Laminex',
+    url: 'laminex.com.au',
+    description: 'Laminate, melamine, benchtops and decorative surfaces',
+  },
+  // Include general hardware stores too
+  ...GENERAL_HARDWARE_STORES.slice(0, 3),
+];
+
 // Cleaner-specific stores
 export const CLEANER_STORES: HardwareStore[] = [
   {
@@ -126,6 +157,8 @@ export function getStoresForTrade(tradeType: TradeType): HardwareStore[] {
       return ELECTRICAL_STORES;
     case 'carpenter':
       return CARPENTER_STORES;
+    case 'cabinet_maker':
+      return CABINET_MAKER_STORES;
     case 'cleaner':
       return CLEANER_STORES;
     case 'all':
@@ -146,6 +179,9 @@ export function getDefaultStoresForTrade(tradeType: TradeType): string[] {
     case 'all':
       // Default to Bunnings and Flexihire for carpenters and all trades
       return ['bunnings.com.au', 'flexihire.com.au'];
+    case 'cabinet_maker':
+      // Default to Hettich and Polytec for cabinet makers
+      return ['hettich.com.au', 'polytec.com.au'];
     default:
       // For other trades, use first 2 stores
       const stores = getStoresForTrade(tradeType);
@@ -159,6 +195,7 @@ export function getDefaultStoresForTrade(tradeType: TradeType): string[] {
 export const TRADE_TYPE_LABELS: Record<TradeType, string> = {
   all: 'All Trades',
   carpenter: 'Carpenter',
+  cabinet_maker: 'Cabinet Maker',
   plumber: 'Plumber',
   electrician: 'Electrician',
   cleaner: 'Cleaner',

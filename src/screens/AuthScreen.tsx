@@ -83,11 +83,17 @@ export function AuthScreen() {
       getRedirectResult(auth)
         .then((result) => {
           if (result) {
-            saveRegistrationPlatform(result.user.uid, 'google');
+            const providerId = result.providerId || '';
+            const method: 'google' | 'apple' | 'email' = providerId.includes('apple')
+              ? 'apple'
+              : providerId.includes('google')
+              ? 'google'
+              : 'email';
+            saveRegistrationPlatform(result.user.uid, method);
           }
         })
         .catch((error) => {
-          setError('Failed to sign in with Google. Please try again.');
+          setError('Failed to sign in. Please try again.');
         });
     }
   }, []);
@@ -154,9 +160,14 @@ export function AuthScreen() {
     };
   }, []);
 
-  // Check if Apple Authentication is available (iOS only)
+  // Check if Apple Authentication is available (iOS native, or web via Firebase OAuth)
   useEffect(() => {
     const checkAppleAuth = async () => {
+      if (Platform.OS === 'web') {
+        // Apple Sign-In is always available on web via Firebase OAuth provider
+        setAppleAuthAvailable(true);
+        return;
+      }
       const isAvailable = await AppleAuthentication.isAvailableAsync();
       setAppleAuthAvailable(isAvailable);
     };
@@ -288,6 +299,22 @@ export function AuthScreen() {
     setError('');
 
     try {
+      // Web: use Firebase OAuth popup/redirect flow (same pattern as Google)
+      if (Platform.OS === 'web') {
+        const provider = new OAuthProvider('apple.com');
+        provider.addScope('email');
+        provider.addScope('name');
+        if (isInAppBrowser()) {
+          await signInWithRedirect(auth, provider);
+          return;
+        }
+        setIsProcessingOAuth(true);
+        const result = await signInWithPopup(auth, provider);
+        await saveRegistrationPlatform(result.user.uid, 'apple');
+        // Keep loading state - App.tsx will handle navigation
+        return;
+      }
+
       // Generate a secure random nonce for Apple Sign In
       const nonce = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
       const hashedNonce = await Crypto.digestStringAsync(

@@ -403,7 +403,7 @@ export interface TemplateParam {
   defaultValue?: number;
 }
 
-export type TradeType = 'all' | 'carpenter' | 'plumber' | 'electrician' | 'cleaner';
+export type TradeType = 'all' | 'carpenter' | 'cabinet_maker' | 'plumber' | 'electrician' | 'cleaner';
 
 export interface HardwareStore {
   name: string;

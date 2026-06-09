@@ -253,6 +253,61 @@ export const NICHE_PILLS: Record<string, PillSpec[]> = {
   ],
 
   // ============================================
+  // CABINET MAKING
+  // ============================================
+  [KEY('cabinet_making', 'kitchens')]: [
+    { id: 'layout',     label: 'Layout',       keywords: ['galley', 'l-shape', 'l shape', 'u-shape', 'u shape', 'island', 'peninsula', 'straight run', 'butler'], jsonField: 'layout' },
+    { id: 'linear_m',   label: 'Linear m',     keywords: [/\b\d+(\.\d+)?\s*(lm|linear|metre|meter|m)\b/i, ...M_WORDS, 'linear metre', 'cabinet run', 'run of cabinets'], jsonField: 'linearMetres' },
+    { id: 'benchtop',   label: 'Benchtop',     keywords: ['benchtop', 'stone', 'caesarstone', 'smartstone', 'laminate top', 'timber top', 'butcher block', 'porcelain', '20mm', '40mm'], jsonField: 'benchtop' },
+    { id: 'doors',      label: 'Door finish',  keywords: ['polytec', 'laminex', 'two-pack', '2 pac', '2-pac', 'vinyl wrap', 'thermoformed', 'shaker', 'flat panel', 'gloss', 'matte', 'woodgrain'], jsonField: 'doorFinish' },
+    { id: 'appliances', label: 'Appliances',   keywords: ['oven', 'cooktop', 'rangehood', 'range hood', 'dishwasher', 'fridge', 'microwave', 'integrated', 'pyrolytic'], jsonField: 'appliances' },
+    { id: 'splashback', label: 'Splashback',   keywords: ['splashback', 'tile splashback', 'glass splashback', 'stone splashback', 'window splashback'], jsonField: 'splashback' },
+    { id: 'hardware',   label: 'Hardware',     keywords: ['blum', 'hettich', 'soft close', 'push to open', 'tip on', 'drawer runner', 'hinge', 'handle', 'finger pull'], jsonField: 'hardware' },
+    { id: 'demo',       label: 'Demo',         keywords: ['strip out', 'rip out', 'remove existing', 'demo old kitchen', 'tear out'], jsonField: 'demo' },
+  ],
+  [KEY('cabinet_making', 'wardrobes')]: [
+    { id: 'count',      label: 'How many',     keywords: [/\b\d+\s*(wardrobe|robe|walk[- ]?in)/i, 'wardrobe', 'robe', 'walk-in', 'walk in'], jsonField: 'count' },
+    { id: 'dimensions', label: 'Dimensions',   keywords: [/\b\d+(\.\d+)?\s*(x|by)\s*\d+/i, 'wide', 'high', 'deep', 'metre wide', 'mm wide'], jsonField: 'dimensions' },
+    { id: 'doors',      label: 'Doors',        keywords: ['sliding door', 'hinged door', 'bifold', 'mirror door', 'mirrored', 'cavity slider', 'no doors', 'open robe'], jsonField: 'doors' },
+    { id: 'internals',  label: 'Internals',    keywords: ['hanging', 'double hang', 'single hang', 'shelf', 'shelving', 'drawer', 'shoe rack', 'tie rack', 'belt rack', 'soft close'], jsonField: 'internals' },
+    { id: 'material',   label: 'Material',     keywords: ['melamine', 'mdf', 'laminate', 'two-pack', '2 pac', 'veneer', 'polytec', 'laminex'], jsonField: 'material' },
+    { id: 'hardware',   label: 'Hardware',     keywords: ['blum', 'hettich', 'runner', 'hinge', 'handle', 'soft close', 'push to open'], jsonField: 'hardware' },
+  ],
+  [KEY('cabinet_making', 'vanities_laundry')]: [
+    { id: 'item',       label: 'Item',         keywords: ['vanity', 'laundry', 'mirror cabinet', 'shaving cabinet', 'tub cabinet', 'broom cupboard'], jsonField: 'item' },
+    { id: 'width',      label: 'Width',        keywords: [/\b\d+\s*mm/i, /\b\d+(\.\d+)?\s*(m|metre|meter)/i, '600mm', '750mm', '900mm', '1200mm', '1500mm', '1800mm', 'wide'], jsonField: 'width' },
+    { id: 'mount',      label: 'Mounting',     keywords: ['wall hung', 'wall mounted', 'floor standing', 'freestanding', 'kick board', 'kickboard'], jsonField: 'mount' },
+    { id: 'basin',      label: 'Basin / sink', keywords: ['basin', 'undermount', 'above counter', 'inset', 'semi inset', 'sink', 'tub', 'laundry tub'], jsonField: 'basin' },
+    { id: 'top',        label: 'Top',          keywords: ['stone top', 'caesarstone', 'laminate top', 'engineered stone', 'porcelain', 'timber top', '20mm', '40mm'], jsonField: 'top' },
+    { id: 'doors',      label: 'Door finish',  keywords: ['polytec', 'laminex', 'two-pack', '2 pac', 'shaker', 'flat panel', 'gloss', 'matte', 'woodgrain'], jsonField: 'doorFinish' },
+    { id: 'hardware',   label: 'Hardware',     keywords: ['blum', 'hettich', 'soft close', 'push to open', 'handle', 'finger pull', 'drawer runner', 'hinge'], jsonField: 'hardware' },
+  ],
+  [KEY('cabinet_making', 'entertainment_office')]: [
+    { id: 'item',       label: 'Item',         keywords: ['tv unit', 'entertainment', 'media unit', 'home office', 'desk', 'bookshelf', 'bookcase', 'display cabinet', 'study nook'], jsonField: 'item' },
+    { id: 'dimensions', label: 'Dimensions',   keywords: [/\b\d+(\.\d+)?\s*(x|by)\s*\d+/i, 'wide', 'high', 'deep', 'metre wide', 'mm wide', 'floor to ceiling'], jsonField: 'dimensions' },
+    { id: 'material',   label: 'Material',     keywords: ['melamine', 'mdf', 'laminate', 'two-pack', '2 pac', 'veneer', 'polytec', 'laminex', 'plywood', 'oak'], jsonField: 'material' },
+    { id: 'doors',      label: 'Doors/drawers', keywords: ['door', 'drawer', 'open shelf', 'glass door', 'push to open', 'soft close'], jsonField: 'doorsDrawers' },
+    { id: 'cabling',    label: 'Cable mgmt',   keywords: ['cable', 'power', 'gpo', 'data', 'usb', 'cable management', 'cord'], jsonField: 'cabling' },
+    { id: 'hardware',   label: 'Hardware',     keywords: ['blum', 'hettich', 'runner', 'hinge', 'handle', 'soft close', 'push to open'], jsonField: 'hardware' },
+  ],
+  [KEY('cabinet_making', 'commercial_joinery')]: [
+    { id: 'project',    label: 'Project',      keywords: ['shopfit', 'shop fit', 'fitout', 'fit-out', 'reception', 'retail display', 'cafe', 'office', 'medical', 'hospitality'], jsonField: 'project' },
+    { id: 'linear_m',   label: 'Linear m',     keywords: [/\b\d+(\.\d+)?\s*(lm|linear|metre|meter|m)\b/i, ...M_WORDS, 'linear metre', 'cabinet run'], jsonField: 'linearMetres' },
+    { id: 'material',   label: 'Material',     keywords: ['laminate', 'two-pack', '2 pac', 'veneer', 'compact laminate', 'polytec', 'laminex', 'corian', 'solid surface'], jsonField: 'material' },
+    { id: 'compliance', label: 'Compliance',   keywords: ['fire rated', 'commercial grade', 'wet area', 'food grade', 'bca', 'standard', 'spec', 'specification'], jsonField: 'compliance' },
+    { id: 'install',    label: 'Install',      keywords: ['after hours', 'overnight', 'weekend', 'staged', 'site access', 'loading dock', 'lift access'], jsonField: 'install' },
+    { id: 'hardware',   label: 'Hardware',     keywords: ['blum', 'hettich', 'lock', 'security', 'commercial hinge', 'heavy duty'], jsonField: 'hardware' },
+  ],
+  [KEY('cabinet_making', 'repairs_refacing')]: [
+    { id: 'scope',      label: 'Scope',        keywords: ['reface', 'refacing', 'door replace', 'replace doors', 'paint cabinets', 'restore', 'repair', 'broken'], jsonField: 'scope' },
+    { id: 'count',      label: 'How many',     keywords: [/\b\d+\s*(door|drawer|hinge|cabinet)/i, 'door', 'drawer', 'hinge', 'cabinet', 'panel'], jsonField: 'count' },
+    { id: 'item',       label: 'Item',         keywords: ['kitchen', 'wardrobe', 'vanity', 'laundry', 'tv unit', 'cabinet'], jsonField: 'item' },
+    { id: 'finish',     label: 'New finish',   keywords: ['polytec', 'laminex', 'two-pack', '2 pac', 'vinyl wrap', 'paint', 'shaker', 'flat panel'], jsonField: 'finish' },
+    { id: 'hardware',   label: 'Hardware',     keywords: ['hinge', 'blum', 'hettich', 'drawer runner', 'handle', 'soft close'], jsonField: 'hardware' },
+    { id: 'condition',  label: 'Condition',    keywords: ['water damage', 'swollen', 'broken', 'sagging', 'misaligned', 'worn', 'chipped'], jsonField: 'condition' },
+  ],
+
+  // ============================================
   // PAINTING
   // ============================================
   [KEY('painting', 'interior')]: [

@@ -76,6 +76,7 @@ export const TRADES = [
   'electrician',
   'hvac',
   'carpenter',
+  'cabinet-maker',
   'painter',
   'roofer',
   'flooring',
@@ -111,6 +112,7 @@ const TRADE_QUERY: Record<Trade, string[]> = {
   'electrician': ['electrician', 'electrical contractor'],
   'hvac': ['air conditioning installation', 'air conditioning contractor'],
   'carpenter': ['carpenter', 'carpentry contractor'],
+  'cabinet-maker': ['cabinet maker', 'kitchen joinery', 'custom cabinetry'],
   'painter': ['painter', 'painting contractor'],
   'roofer': ['roofer', 'roofing contractor'],
   'flooring': ['flooring installer', 'flooring contractor'],
@@ -139,6 +141,8 @@ const TRADE_PITCH: Record<Trade, string> = {
     'Splits, ducting, brackets, refrigerant lines — live pricing from your local suppliers, plus accurate qty for the rooms and capacity you describe. Describe the job, get the quote.',
   'carpenter':
     'Framing timber, sheet goods, fixings — live pricing from your local suppliers, plus accurate qty for the framing, lining or trim work you describe.',
+  'cabinet-maker':
+    'Board, edging, hinges, runners, handles — live pricing from Hettich, Polytec, Laminex and your local suppliers, plus accurate linear-metre + hardware qty from the kitchen, wardrobe or vanity you describe.',
   'painter':
     'Paint, primer, prep gear, drop sheets — live pricing from your local suppliers, plus accurate paint qty (litres + coats) from the wall and ceiling areas you describe.',
   'roofer':
