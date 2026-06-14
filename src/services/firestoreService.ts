@@ -161,11 +161,9 @@ function safeIsoString(value: any): string | null {
 }
 
 class FirestoreService {
-  private quotesUnsubscribe: Unsubscribe | null = null;
   private settingsUnsubscribe: Unsubscribe | null = null;
   private onboardingUnsubscribe: Unsubscribe | null = null;
   private subscriptionUnsubscribe: Unsubscribe | null = null;
-  private invoicesUnsubscribe: Unsubscribe | null = null;
 
   /**
    * Get the current user ID
@@ -213,41 +211,6 @@ class FirestoreService {
       await setDoc(quoteRef, stripUndefined(payload), { merge: true });
     } catch (error) {
       throw error;
-    }
-  }
-
-  /**
-   * Load all quotes from Firestore
-   */
-  async loadQuotes(): Promise<Quote[]> {
-    const userId = this.getUserId();
-    if (!userId) {
-      return [];
-    }
-
-    try {
-      const quotesRef = collection(db, 'users', userId, 'quotes');
-      const q = query(quotesRef, orderBy('createdAt', 'desc'));
-      const snapshot = await getDocs(q);
-
-      const quotes: Quote[] = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        const createdAt = toDate(data.createdAt) || new Date();
-        return {
-          ...data,
-          createdAt,
-          updatedAt: toDate(data.updatedAt) || createdAt,
-          status: normalizeQuoteStatus(data.status),
-          invoicedAt: toDate(data.invoicedAt),
-          // Handle new quote acceptance fields
-          acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
-          respondedAt: toDate(data.respondedAt),
-        } as Quote;
-      });
-
-      return quotes;
-    } catch (error) {
-      return [];
     }
   }
 
@@ -418,53 +381,6 @@ class FirestoreService {
   }
 
   /**
-   * Listen to quotes changes in real-time
-   */
-  listenToQuotes(callback: (quotes: Quote[]) => void): Unsubscribe | null {
-    const userId = this.getUserId();
-    if (!userId) {
-      return null;
-    }
-
-    try {
-      // Release the prior listener before creating a new one. Firebase auth
-      // token-refresh fires onAuthStateChanged every hour, which re-invokes
-      // this method — without this release, listeners stack and every Firestore
-      // write triggers N parallel snapshot replays after N hours of use.
-      this.quotesUnsubscribe?.();
-      const quotesRef = collection(db, 'users', userId, 'quotes');
-      // Cap the live listener at 100 most-recent quotes so power users with
-      // years of history don't pay a full-tree re-render on every write.
-      // Older docs are still fetchable via getQuotes() / archive views.
-      const q = query(quotesRef, orderBy('createdAt', 'desc'), limit(100));
-
-      this.quotesUnsubscribe = onSnapshot(q, (snapshot) => {
-        const quotes: Quote[] = snapshot.docs.map((doc) => {
-          const data = doc.data();
-          const createdAt = toDate(data.createdAt) || new Date();
-          return {
-            ...data,
-            createdAt,
-            updatedAt: toDate(data.updatedAt) || createdAt,
-            status: normalizeQuoteStatus(data.status),
-            invoicedAt: toDate(data.invoicedAt),
-            // Handle new quote acceptance fields
-            acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
-            respondedAt: toDate(data.respondedAt),
-          } as Quote;
-        });
-
-        callback(quotes);
-      }, (error) => {
-      });
-
-      return this.quotesUnsubscribe;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  /**
    * Listen to business settings changes in real-time
    */
   listenToBusinessSettings(callback: (settings: BusinessSettings | null) => void): Unsubscribe | null {
@@ -600,40 +516,6 @@ class FirestoreService {
   }
 
   /**
-   * Load all invoices from Firestore
-   */
-  async loadInvoices(): Promise<Invoice[]> {
-    const userId = this.getUserId();
-    if (!userId) {
-      return [];
-    }
-
-    try {
-      const invoicesRef = collection(db, 'users', userId, 'invoices');
-      const q = query(invoicesRef, orderBy('createdAt', 'desc'));
-      const snapshot = await getDocs(q);
-
-      const invoices: Invoice[] = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        const createdAt = toDate(data.createdAt) || new Date();
-        return {
-          ...data,
-          createdAt,
-          updatedAt: toDate(data.updatedAt) || createdAt,
-          issueDate: toDate(data.issueDate) || createdAt,
-          dueDate: toDate(data.dueDate) || createdAt,
-          paidDate: toDate(data.paidDate),
-          xeroSyncedAt: toDate(data.xeroSyncedAt),
-        } as Invoice;
-      });
-
-      return invoices;
-    } catch (error) {
-      return [];
-    }
-  }
-
-  /**
    * Delete an invoice from Firestore
    */
   async deleteInvoice(invoiceId: string): Promise<void> {
@@ -647,45 +529,6 @@ class FirestoreService {
       await deleteDoc(invoiceRef);
     } catch (error) {
       throw error;
-    }
-  }
-
-  /**
-   * Listen to invoices changes in real-time
-   */
-  listenToInvoices(callback: (invoices: Invoice[]) => void): Unsubscribe | null {
-    const userId = this.getUserId();
-    if (!userId) {
-      return null;
-    }
-
-    try {
-      this.invoicesUnsubscribe?.();
-      const invoicesRef = collection(db, 'users', userId, 'invoices');
-      const q = query(invoicesRef, orderBy('createdAt', 'desc'), limit(100));
-
-      this.invoicesUnsubscribe = onSnapshot(q, (snapshot) => {
-        const invoices: Invoice[] = snapshot.docs.map((doc) => {
-          const data = doc.data();
-          const createdAt = toDate(data.createdAt) || new Date();
-          return {
-            ...data,
-            createdAt,
-            updatedAt: toDate(data.updatedAt) || createdAt,
-            issueDate: toDate(data.issueDate) || createdAt,
-            dueDate: toDate(data.dueDate) || createdAt,
-            paidDate: toDate(data.paidDate),
-            xeroSyncedAt: toDate(data.xeroSyncedAt),
-          } as Invoice;
-        });
-
-        callback(invoices);
-      }, (error) => {
-      });
-
-      return this.invoicesUnsubscribe;
-    } catch (error) {
-      return null;
     }
   }
 
@@ -1007,10 +850,6 @@ class FirestoreService {
    * Clean up all listeners
    */
   cleanup(): void {
-    if (this.quotesUnsubscribe) {
-      this.quotesUnsubscribe();
-      this.quotesUnsubscribe = null;
-    }
     if (this.settingsUnsubscribe) {
       this.settingsUnsubscribe();
       this.settingsUnsubscribe = null;
@@ -1022,10 +861,6 @@ class FirestoreService {
     if (this.subscriptionUnsubscribe) {
       this.subscriptionUnsubscribe();
       this.subscriptionUnsubscribe = null;
-    }
-    if (this.invoicesUnsubscribe) {
-      this.invoicesUnsubscribe();
-      this.invoicesUnsubscribe = null;
     }
   }
 }

@@ -50,7 +50,7 @@ export {
   onUserCreatedLinkLead,
   leadUnsubscribe,
 } from './leadOutreach';
-export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
+export { mirrorAllDocuments } from './documentMirror';
 export { assistantToken } from './assistantToken';
 export { assistantChat } from './assistantChat';
 export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts';

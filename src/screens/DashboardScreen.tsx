@@ -28,7 +28,7 @@ import { JobCard } from '../components/JobCard';
 import { JobStageSheet } from '../components/JobStageSheet';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import type { Job, JobStage } from '../../shared/job/types';
-import { quoteToDocument } from '../types/documentAdapter';
+import { quoteToDocument, documentToQuote } from '../types/documentAdapter';
 import { AlertModal } from '../components/AlertModal';
 import { updateActivityTimestamp } from '../services/emailService';
 import { AnimatedNumber } from '../components/AnimatedNumber';
@@ -266,6 +266,8 @@ export function DashboardScreen() {
   // mutation. Replaces a single useStore() destructure that re-rendered on
   // every store write (the prime "janky return to home" suspect).
   const quotes = useStore((s) => s.quotes);
+  const documents = useStore((s) => s.documents);
+  const documentsLoaded = useStore((s) => s.documentsLoaded);
   const businessSettings = useStore((s) => s.businessSettings);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
   // Action handles are stable Zustand fn refs — subscribing is a no-op
@@ -278,19 +280,19 @@ export function DashboardScreen() {
   const canCreateQuote = useStore((s) => s.canCreateQuote);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
-  const loadQuotes = useStore((s) => s.loadQuotes);
+  const loadDocuments = useStore((s) => s.loadDocuments);
   const saveDraft = useStore((s) => s.saveDraft);
 
   const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [initialLoaded, setInitialLoaded] = useState(quotes.length > 0);
+  const [initialLoaded, setInitialLoaded] = useState(documentsLoaded);
   useEffect(() => {
-    if (!initialLoaded && quotes.length > 0) setInitialLoaded(true);
-  }, [quotes.length, initialLoaded]);
+    if (!initialLoaded && documentsLoaded) setInitialLoaded(true);
+  }, [documentsLoaded, initialLoaded]);
   useEffect(() => {
     if (!initialLoaded) {
-      loadQuotes().then(() => setInitialLoaded(true));
+      loadDocuments().then(() => setInitialLoaded(true));
     }
   }, []);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -301,7 +303,8 @@ export function DashboardScreen() {
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
-  // Calculate quick stats (memoized to avoid recalculation on every render)
+  // Calculate quick stats from the unified documents collection (quotes only).
+  const quoteDocs = useMemo(() => documents.filter((d) => d.type === 'quote'), [documents]);
   const { sentQuotes, acceptedQuotes, thisMonthRevenue, pipelineValue } = useMemo(() => {
     const now = new Date();
     let sent = 0;
@@ -309,29 +312,29 @@ export function DashboardScreen() {
     let monthRevenue = 0;
     let pipeline = 0;
 
-    for (const q of quotes) {
-      if (q.status === 'sent') {
+    for (const doc of quoteDocs) {
+      if (doc.stage === 'quote_sent') {
         sent++;
-        pipeline += q.total;
+        pipeline += doc.total;
       }
-      if (q.status === 'accepted' || q.status === 'completed') {
+      if (doc.stage === 'quote_accepted' || doc.stage === 'paid') {
         accepted++;
-        const d = new Date(q.updatedAt);
-        if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
-          monthRevenue += q.total;
+        const updatedDate = new Date(doc.updatedAt);
+        if (updatedDate.getMonth() === now.getMonth() && updatedDate.getFullYear() === now.getFullYear()) {
+          monthRevenue += doc.total;
         }
       }
     }
 
     return { sentQuotes: sent, acceptedQuotes: accepted, thisMonthRevenue: monthRevenue, pipelineValue: pipeline };
-  }, [quotes]);
+  }, [quoteDocs]);
 
-  // Find in-progress draft (has draftStep set)
+  // Find in-progress draft (has draftStep set) from unified documents.
   const inProgressDraft = useMemo(() => {
-    return quotes
-      .filter((q) => q.status === 'draft' && q.draftStep)
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] || null;
-  }, [quotes]);
+    return quoteDocs
+      .filter((d) => d.stage === 'draft' && d.draftStep)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0] || null;
+  }, [quoteDocs]);
 
   // Translate the wizard step they left off on into a "what's needed
   // next" hint shown on the draft banner. Mirrors the screens in the
@@ -396,15 +399,15 @@ export function DashboardScreen() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await loadQuotes();
+      await loadDocuments();
     } finally {
       setRefreshing(false);
     }
   };
 
-  const handleContinueDraft = (draft: Quote) => {
+  const handleContinueDraft = (draft: Document) => {
     lightTap();
-    setCurrentQuote(draft);
+    setCurrentQuote(documentToQuote(draft));
     navigation.navigate('NewJob' as never, { screen: draft.draftStep || 'Details' } as never);
   };
 
@@ -441,19 +444,19 @@ export function DashboardScreen() {
   const handleViewQuote = (quoteId: string) => {
     // Post-UX-collapse: ViewQuote/ViewInvoice are gone. Look up the
     // job that this quote is attached to and navigate to ViewJob. The
-    // quote↔job link lives on quote.jobId (Phase-8+), with a fallback
+    // quote↔job link lives on document.jobId (Phase-8+), with a fallback
     // via jobs.find for legacy docs.
-    const q = quotes.find((x) => x.id === quoteId);
-    const jobId = (q as any)?.jobId;
+    const doc = documents.find((x) => x.id === quoteId);
+    const jobId = doc?.jobId;
     if (jobId) {
       navigation.navigate('ViewJob' as never, { jobId } as never);
       return;
     }
     // No linked job — open the scope editor instead so the user can
-    // work with the quote directly. ensureJobForQuote will fire on
+    // work with the quote directly. ensureJobForDocument will fire on
     // next save and stitch things together.
-    if (q) {
-      setCurrentQuote(q);
+    if (doc) {
+      setCurrentQuote(documentToQuote(doc));
       navigation.navigate('NewJob' as never, {
         screen: 'MaterialsList',
         params: { editing: true },
@@ -633,7 +636,7 @@ export function DashboardScreen() {
         return (
           <TrialBanner
             trialStartedAt={subscriptionStatus.trialStartedAt}
-            quoteCount={quotes.length}
+            quoteCount={quoteDocs.length}
           />
         );
       })()}

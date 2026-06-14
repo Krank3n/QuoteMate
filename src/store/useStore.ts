@@ -92,7 +92,6 @@ interface AppState {
   deleteQuote: (quoteId: string) => Promise<void>;
   duplicateQuote: (quote: Quote) => Promise<void>;
   updateQuote: (quote: Quote) => void;
-  loadQuotes: () => Promise<void>;
   /**
    * Merge a snapshot of quotes from the realtime Firestore listener into local state.
    * Per-id rules:
@@ -148,7 +147,6 @@ interface AppState {
   updateInvoice: (invoice: Invoice) => void;
   saveInvoice: (invoice: Invoice) => Promise<void>;
   deleteInvoice: (invoiceId: string) => Promise<void>;
-  loadInvoices: () => Promise<void>;
   /** Mirror of mergeRemoteQuotes for invoices. */
   mergeRemoteInvoices: (remote: Invoice[]) => void;
   loadNextInvoiceNumber: () => Promise<void>;
@@ -998,67 +996,6 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  // Load quotes from storage
-  loadQuotes: async () => {
-    try {
-      // If user is signed in, try loading from Firestore first
-      if (auth.currentUser) {
-        const cloudQuotes = await firestoreService.loadQuotes();
-        if (cloudQuotes.length > 0) {
-          // Backfill laborMarkup from material markup for legacy quotes
-          const backfilled = cloudQuotes.map((q) =>
-            q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q
-          );
-          // Save to local storage for offline access
-          await AsyncStorage.setItem(
-            STORAGE_KEYS.QUOTES,
-            JSON.stringify(backfilled)
-          );
-          const reconciledNextNumber = reconcileNextNumber({
-            items: backfilled,
-            field: (q) => q.quoteNumber,
-            prefix: 'Q',
-            cached: get().nextQuoteNumber,
-          });
-          set({ quotes: backfilled, nextQuoteNumber: reconciledNextNumber });
-          return;
-        }
-      }
-
-      // Fallback to local storage
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.QUOTES);
-      if (stored) {
-        const parsed: Quote[] = JSON.parse(stored, (key, value) => {
-          // Parse date strings back to Date objects
-          if (key === 'createdAt' || key === 'updatedAt') {
-            return new Date(value);
-          }
-          return value;
-        });
-        // Backfill laborMarkup from material markup for legacy quotes
-        const quotes = parsed.map((q) =>
-          q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q
-        );
-        const reconciledNextNumber = reconcileNextNumber({
-          items: quotes,
-          field: (q) => q.quoteNumber,
-          prefix: 'Q',
-          cached: get().nextQuoteNumber,
-        });
-        set({ quotes, nextQuoteNumber: reconciledNextNumber });
-
-        // Sync to cloud if user is signed in but no cloud data exists
-        if (auth.currentUser && quotes.length > 0) {
-          for (const quote of quotes) {
-            await firestoreService.saveQuote(quote);
-          }
-        }
-      }
-    } catch (error) {
-      // silently ignore
-    }
-  },
-
   // Subscription
   loadSubscription: async () => {
     try {
@@ -1704,72 +1641,6 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  loadInvoices: async () => {
-    try {
-      // If user is signed in, try loading from Firestore first
-      if (auth.currentUser) {
-        const cloudInvoices = await firestoreService.loadInvoices();
-        if (cloudInvoices.length > 0) {
-          // Backfill laborMarkup from material markup for legacy invoices
-          const backfilled = cloudInvoices.map((i) =>
-            i.laborMarkup === undefined ? { ...i, laborMarkup: i.markup } : i
-          );
-          // Save to local storage for offline access
-          await AsyncStorage.setItem(
-            STORAGE_KEYS.INVOICES,
-            JSON.stringify(backfilled)
-          );
-          const reconciledNextNumber = reconcileNextNumber({
-            items: backfilled,
-            field: (i) => i.invoiceNumber,
-            prefix: 'INV',
-            cached: get().nextInvoiceNumber,
-          });
-          set({ invoices: backfilled, nextInvoiceNumber: reconciledNextNumber });
-          return;
-        }
-      }
-
-      // Fallback to local storage
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.INVOICES);
-      if (stored) {
-        const parsed: Invoice[] = JSON.parse(stored, (key, value) => {
-          // Parse date strings back to Date objects
-          if (
-            key === 'createdAt' ||
-            key === 'updatedAt' ||
-            key === 'issueDate' ||
-            key === 'dueDate' ||
-            key === 'paidDate'
-          ) {
-            return value ? new Date(value) : undefined;
-          }
-          return value;
-        });
-        // Backfill laborMarkup from material markup for legacy invoices
-        const invoices = parsed.map((i) =>
-          i.laborMarkup === undefined ? { ...i, laborMarkup: i.markup } : i
-        );
-        const reconciledNextNumber = reconcileNextNumber({
-          items: invoices,
-          field: (i) => i.invoiceNumber,
-          prefix: 'INV',
-          cached: get().nextInvoiceNumber,
-        });
-        set({ invoices, nextInvoiceNumber: reconciledNextNumber });
-
-        // Sync to cloud if user is signed in but no cloud data exists
-        if (auth.currentUser && invoices.length > 0) {
-          for (const invoice of invoices) {
-            await firestoreService.saveInvoice(invoice);
-          }
-        }
-      }
-    } catch (error) {
-      // silently ignore
-    }
-  },
-
   loadNextInvoiceNumber: async () => {
     try {
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.NEXT_INVOICE_NUMBER);
@@ -2293,9 +2164,8 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const result = await xeroService.xeroBulkSync(invoiceIds);
 
-      // Reload invoices to get updated Xero fields from Firestore
-      const { loadInvoices } = get();
-      await loadInvoices();
+      // Reload documents to get updated Xero fields from Firestore
+      await get().loadDocuments();
 
       return { successCount: result.successCount, totalCount: result.totalCount };
     } finally {
