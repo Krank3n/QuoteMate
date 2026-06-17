@@ -77,11 +77,6 @@ export interface QuotePdfData {
   presentationMode?: 'itemised' | 'flatRate';
   flatRateInclusions?: string[];
   flatRateLineLabel?: string;
-  // Sales pitch HTML, pre-resolved + escaped + paragraph-wrapped. Rendered
-  // above the line items / flat-rate row. When undefined or empty, no
-  // pitch block is shown. The pdfGenerator layer is responsible for
-  // running the template engine (src/utils/salesPitch.ts) and escaping.
-  pitchHtml?: string;
   travelAdjustment?: number;
   gst: number;
   total: number;

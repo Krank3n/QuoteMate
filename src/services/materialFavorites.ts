@@ -9,10 +9,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getFirestore, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
-import { FavoriteProductMapping, SupplierGroup } from '../types';
+import { FavoriteProductMapping } from '../types';
 import { logSyncError } from '../store/useStore';
-import { adjustPrice, GstAction } from '../utils/priceAdjust';
-import { loadGroups, saveGroup } from './supplierGroupService';
 
 const FAVORITES_STORAGE_KEY = 'material_favorites';
 
@@ -308,121 +306,6 @@ export async function bulkSaveFavorites(
   await saveFavoritesToLocal(localFavorites);
 
   return { created, updated, unchanged };
-}
-
-/**
- * Bulk-adjust prices on saved favorites.
- *
- * Used by:
- *   - The supplier price-list review modal, to apply a one-off +%/GST flip
- *     to every imported row before persisting.
- *   - The standalone BulkPriceAdjustScreen, to apply an annual supplier
- *     price rise (e.g. Jesse's +5.8%) across every product under a
- *     given supplier without re-importing the PDF.
- *
- * Order of operations matches `adjustPrice`: uplift first, then GST.
- * Each adjusted favorite gets a refreshed `lastUpdatedAt`. If the filter
- * matches a SupplierGroup by name, that group's `lastPriceAdjustment`
- * audit field is updated so the UI can show "Last adjusted: +5.8% on…".
- *
- * Returns counts suitable for snackbar feedback.
- */
-export async function bulkAdjustFavoritePrices(opts: {
-  filter: { supplier?: string; ids?: string[] };
-  percentChange?: number;
-  gstAction?: GstAction;
-  gstRate?: number;
-}): Promise<{ updated: number; skipped: number }> {
-  const { filter, percentChange = 0, gstAction = 'none', gstRate } = opts;
-  if (percentChange === 0 && gstAction === 'none') {
-    return { updated: 0, skipped: 0 };
-  }
-
-  const localFavorites = await loadFavoritesFromLocal();
-  const auth = getAuth();
-  const uid = auth.currentUser?.uid;
-  const db = uid ? getFirestore() : null;
-
-  let updated = 0;
-  let skipped = 0;
-
-  const supplierMatch = filter.supplier?.trim();
-  const idSet = filter.ids && filter.ids.length > 0 ? new Set(filter.ids) : null;
-
-  for (const [key, fav] of Object.entries(localFavorites)) {
-    const matchesSupplier = supplierMatch ? fav.store === supplierMatch : true;
-    // FavoriteProductMapping has no explicit id field — we use the storage
-    // key (slug) as the stable identifier when the caller passes ids.
-    const matchesId = idSet ? idSet.has(key) : true;
-    if (!matchesSupplier || !matchesId) {
-      continue;
-    }
-    if (typeof fav.price !== 'number' || !Number.isFinite(fav.price)) {
-      skipped += 1;
-      continue;
-    }
-
-    const nextPrice = adjustPrice(fav.price, { percent: percentChange, gstAction, gstRate });
-    if (nextPrice === fav.price) {
-      skipped += 1;
-      continue;
-    }
-
-    const merged: FavoriteProductMapping = {
-      ...fav,
-      price: nextPrice,
-      lastUpdatedAt: new Date().toISOString(),
-    };
-    localFavorites[key] = merged;
-    updated += 1;
-
-    if (db && uid) {
-      try {
-        await setDoc(
-          doc(db, `users/${uid}/materialFavorites/${key}`),
-          stripUndefined({ ...merged, savedAt: new Date().toISOString() }),
-          { merge: true }
-        );
-      } catch (error) {
-        logSyncError('favorite', key, error);
-      }
-    }
-  }
-
-  if (updated > 0) {
-    await saveFavoritesToLocal(localFavorites);
-
-    // Best-effort: stamp the audit field on the SupplierGroup so the UI can
-    // surface "Last adjusted: +5.8% on …". Quietly skip when the supplier
-    // string doesn't match a saved group (e.g. user imported under a free-
-    // form store name that was never promoted to a group).
-    if (supplierMatch) {
-      try {
-        const groups = await loadGroups();
-        const target: SupplierGroup | undefined = groups.find(
-          (g) => g.name.trim().toLowerCase() === supplierMatch.toLowerCase()
-        );
-        if (target) {
-          await saveGroup({
-            ...target,
-            updatedAt: new Date().toISOString(),
-            lastPriceAdjustment: {
-              percent: percentChange,
-              appliedAt: new Date().toISOString(),
-              gstAction,
-              itemsUpdated: updated,
-            },
-          });
-        }
-      } catch (error) {
-        // Audit stamp failure shouldn't fail the whole operation.
-        // eslint-disable-next-line no-console
-        console.warn('[favorites] failed to stamp SupplierGroup audit', error);
-      }
-    }
-  }
-
-  return { updated, skipped };
 }
 
 /**

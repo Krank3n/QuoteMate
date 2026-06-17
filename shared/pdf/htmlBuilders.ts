@@ -590,7 +590,6 @@ export function buildQuotePdfHtml(
         </div>
       </div>
 
-      ${quote.pitchHtml ? `<div class="sales-pitch info-section">${quote.pitchHtml}</div>` : ''}
 
       <div class="info-section">
         <h3>Job Details</h3>
@@ -692,7 +691,6 @@ export function buildInvoicePdfHtml(
         </div>
       </div>
 
-      ${invoice.pitchHtml ? `<div class="sales-pitch info-section">${invoice.pitchHtml}</div>` : ''}
 
       <div class="info-section">
         <h3>Job Details</h3>

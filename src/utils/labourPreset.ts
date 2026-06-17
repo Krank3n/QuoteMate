@@ -38,6 +38,37 @@ export function computeLabourFromPreset(
 }
 
 /**
+ * Decision helper for LaborMarkupScreen's "auto-default to days" branch.
+ *
+ * The screen used to flip into days mode whenever the total labour hit 6h
+ * or more, multiplying the displayed rate by 8 on the way in. That breaks
+ * spectacularly when the stored `laborRate` isn't actually a per-hour rate
+ * — the labour-rate preset apply path used to stash the entire computed
+ * job total in `laborRate` with `laborHours: 1`, so the ×8 conversion
+ * inflated the quote 8× (“QU-177892” / Lisa @ Mackay = $396,000 instead of
+ * $49,500).
+ *
+ * We now skip the auto-convert when:
+ *  - the quote already has a `labourPresetSnapshot` (the rate field is a
+ *    lump-sum disguised as a rate; multiplying it makes no sense), OR
+ *  - the rate looks implausibly high for a per-hour figure (> $500/hr).
+ *    No Australian trade hourly rate is that high in 2026; if it is, the
+ *    field has been repurposed and we shouldn't touch it.
+ */
+export function shouldAutoConvertHoursToDays(opts: {
+  alreadyInDays: boolean;
+  totalStored: number;
+  rateForInput: number;
+  hasLabourPresetSnapshot: boolean;
+}): boolean {
+  const { alreadyInDays, totalStored, rateForInput, hasLabourPresetSnapshot } = opts;
+  if (alreadyInDays) return false;
+  if (hasLabourPresetSnapshot) return false;
+  if (rateForInput > 500) return false;
+  return totalStored >= 6;
+}
+
+/**
  * Format a preset for chip/badge display.
  *   "$1,500 per 100 m\u00b2" \u2014 used on the LaborMarkupScreen chip row.
  */

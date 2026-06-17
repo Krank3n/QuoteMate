@@ -52,7 +52,6 @@ import {
   InvoiceDisplaySettings,
   type InvoiceDisplaySettingsChange,
 } from '../../components/InvoiceDisplaySettings';
-import { QuotePitchPicker } from '../../components/QuotePitchPicker';
 
 // Confetti piece definition (reused from AlertModal pattern)
 interface ConfettiPiece {
@@ -747,21 +746,6 @@ export function JobPreviewScreen() {
           job={workingDoc.job}
           onEdit={() => navigation.navigate('Details')}
         />
-
-        {/* Sales pitch — renders above the line items on the customer PDF.
-            Source of truth = BusinessSettings.salesPitches, with per-quote
-            overrides on Quote.pitchId / pitchVariableValues. */}
-        {(businessSettings?.salesPitches && businessSettings.salesPitches.length > 0) && (
-          <QuotePitchPicker
-            pitches={businessSettings.salesPitches}
-            pitchId={
-              (workingDoc as any).pitchId
-              ?? businessSettings.salesPitches.find((p) => p.isDefault)?.id
-            }
-            pitchVariableValues={(workingDoc as any).pitchVariableValues}
-            onChange={handleDisplaySettingsChange}
-          />
-        )}
 
         <MaterialsSection
           materials={workingDoc.materials}

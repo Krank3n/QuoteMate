@@ -398,3 +398,38 @@ describe('calculateQuote (legacy wrapper)', () => {
     expect(out.total).toBeCloseTo(495, 2); // (100 + 340 + 10) × 1.1
   });
 });
+
+describe('labour-preset apply regression (QU-177892 / Lisa @ Mackay)', () => {
+  // The original bug: applying a $/m² preset stored the entire computed
+  // labour total in laborRate with laborHours: 1. On the next hydration of
+  // LaborMarkupScreen, the section sum (8h from the AI-generated paint
+  // job) triggered the hours→days auto-convert, which multiplied that
+  // lump-sum "rate" by 8 — turning $37,500 of labour into $300,000 and
+  // the final quote into $396,000 (20% markup + 10% GST).
+  //
+  // The fixed apply path derives a real per-hour rate from the existing
+  // hours basis, so rate × hours = computedLabourTotal regardless of
+  // which calculator path the document later takes.
+  it('a $37,500 preset on an 8h job stays at $37,500 of labour', () => {
+    const computedLabourTotal = 37500;
+    const sectionsSumHours = 8; // multiplier-weighted section hours from AI
+    const perHourRate = computedLabourTotal / sectionsSumHours;
+
+    const out = calculateQuote(
+      [],
+      perHourRate,
+      sectionsSumHours,
+      20, // material markup %
+      0,
+      undefined, // no sections — top-level laborRate×laborHours path
+      20, // labour markup %
+      0,
+      false,
+    );
+
+    expect(out.laborTotal).toBe(37500);
+    // Subtotal $37,500 + 20% labour markup $7,500 = $45,000, + 10% GST = $49,500.
+    // The buggy version produced $396,000 here.
+    expect(out.total).toBeCloseTo(49500, 2);
+  });
+});

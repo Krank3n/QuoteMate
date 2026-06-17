@@ -156,23 +156,6 @@ export interface TemplateSuggestion {
   reasoning: string;
 }
 
-// User-defined supplier group for materials search
-/**
- * A reusable sales-pitch block (e.g. "owner-operator" intro, "R-value
- * upgrade" calc) that lives on BusinessSettings.salesPitches. Renders
- * above line items on the customer PDF + email body + acceptance page.
- *
- * Body supports {{key}} template variables. See SalesPitchVariable for
- * the supported variable types and the small derived-value language.
- */
-export interface SalesPitch {
-  id: string;
-  name: string;                       // user-visible label
-  body: string;                       // raw text; {{key}} substitution
-  variables?: SalesPitchVariable[];
-  isDefault?: boolean;                // pre-selected on new quotes
-}
-
 /**
  * A reusable labour-rate preset attached to a BusinessSettings record.
  * Pricing model: `amount` dollars per `denominator` of `unit`.
@@ -189,16 +172,7 @@ export interface LabourRatePreset {
   notes?: string;
 }
 
-export interface SalesPitchVariable {
-  key: string;                        // matches {{key}} in body
-  label: string;
-  type: 'text' | 'number';
-  defaultValue?: string;
-  // Whitelisted arithmetic over other variable keys. Currently 'add' only;
-  // extend the union as more derive ops are needed.
-  derive?: { op: 'add'; from: string[] };
-}
-
+// User-defined supplier group for materials search
 export interface SupplierGroup {
   id: string;
   name: string;              // e.g. "Local Timber Yard", "Fencing Supplies Co"
@@ -214,20 +188,10 @@ export interface SupplierGroup {
   address?: string;
   notes?: string;
   // GST mode the saved prices are stored in. Lets the supplier book reflect
-  // what the rep quoted ("all my prices are ex GST") so the bulk-adjust
-  // flow knows whether to add 10% on top. Default: undefined = ex-GST
+  // what the rep quoted ("all my prices are ex GST") so the import-time
+  // bulk adjust knows whether to add 10% on top. Default: undefined = ex-GST
   // (matches AU wholesale convention).
   pricesIncludeGst?: boolean;
-  // Audit trail of the last bulk uplift applied to every favorite under
-  // this supplier. Used by BulkPriceAdjustScreen to show "Last adjusted:
-  // +5.8% on 2025-06-09" and to warn before re-applying the same percent
-  // twice (which would compound, not idempotent).
-  lastPriceAdjustment?: {
-    percent: number;          // e.g. 5.8
-    appliedAt: string;        // ISO timestamp
-    gstAction?: 'addGst' | 'removeGst' | 'none';
-    itemsUpdated: number;
-  };
 }
 
 export interface SupplierPartner {
@@ -327,15 +291,6 @@ export interface Quote {
   // Single label that appears as the only line on the customer PDF in flat-
   // rate mode. Defaults to the job title when blank.
   flatRateLineLabel?: string;
-  // Sales pitch to render on the customer-facing PDF + email + acceptance
-  // page. Optional. References a SalesPitch on BusinessSettings.salesPitches.
-  // `pitchVariableValues` snapshots the user's variable overrides at the
-  // time of send so later template edits don't rewrite history. The fully
-  // resolved body is also snapshotted to `pitchRenderedBody` so the PDF
-  // doesn't have to re-run the template engine.
-  pitchId?: string;
-  pitchVariableValues?: Record<string, string>;
-  pitchRenderedBody?: string;
   // Snapshot of the labour-rate preset that was applied to this quote, if
   // any. Persisted so the original $/m² intent survives even if the user
   // later nudges Quote.laborTotal manually — and so deleting the preset
@@ -599,9 +554,6 @@ export interface BusinessSettings {
   // a single labelled line + total on the customer-facing PDF. Per-quote
   // toggle on Quote.presentationMode overrides. Default: 'itemised'.
   defaultPresentationMode?: 'itemised' | 'flatRate';
-  // User's library of reusable sales pitches. See SalesPitch above. The
-  // pitch with isDefault === true is auto-selected on new quotes.
-  salesPitches?: SalesPitch[];
   // Reusable labour-rate presets ($/100 m² style). See LabourRatePreset.
   labourRatePresets?: LabourRatePreset[];
   // Payment method settings

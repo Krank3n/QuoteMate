@@ -31,10 +31,7 @@ import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen
 import { AboutScreen } from '../screens/settings/AboutScreen';
 import { FeedbackScreen } from '../screens/settings/FeedbackScreen';
 import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
-import { BulkPriceAdjustScreen } from '../screens/settings/BulkPriceAdjustScreen';
-import { QuotePitchScreen } from '../screens/settings/QuotePitchScreen';
 import { LabourRatePresetsScreen } from '../screens/settings/LabourRatePresetsScreen';
-import { StarterKitsScreen } from '../screens/settings/StarterKitsScreen';
 import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen';
@@ -652,18 +649,6 @@ export function RootNavigator() {
         }}
       />
       <RootStack.Screen
-        name="StarterKits"
-        component={StarterKitsScreen}
-        options={{
-          presentation: 'card',
-          headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
-          title: 'Trade Starter Kits',
-        }}
-      />
-      <RootStack.Screen
         name="LabourRatePresets"
         component={LabourRatePresetsScreen}
         options={{
@@ -673,30 +658,6 @@ export function RootNavigator() {
           headerTintColor: colors.white,
           headerTitleStyle: { fontWeight: '700' },
           title: 'Labour Rate Presets',
-        }}
-      />
-      <RootStack.Screen
-        name="QuotePitch"
-        component={QuotePitchScreen}
-        options={{
-          presentation: 'card',
-          headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
-          title: 'Sales Pitches',
-        }}
-      />
-      <RootStack.Screen
-        name="BulkPriceAdjust"
-        component={BulkPriceAdjustScreen}
-        options={{
-          presentation: 'card',
-          headerShown: true,
-          headerStyle: { backgroundColor: colors.primary },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
-          title: 'Bulk Price Adjust',
         }}
       />
       <RootStack.Screen

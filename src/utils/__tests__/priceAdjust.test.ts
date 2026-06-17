@@ -73,7 +73,7 @@ describe('convertIncToEx', () => {
 });
 
 describe('adjustPrice', () => {
-  it('applies uplift then adds GST (Jesse 5.8% + 10% scenario)', () => {
+  it('applies uplift then adds GST (5.8% + 10% scenario)', () => {
     // 100 → 105.80 → 116.38
     expect(adjustPrice(100, { percent: 5.8, gstAction: 'addGst' })).toBe(116.38);
   });

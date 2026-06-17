@@ -1,9 +1,8 @@
 /**
  * Price adjustment helpers — pure, side-effect-free.
  *
- * Used by the supplier price-list import flow and the standalone
- * BulkPriceAdjustScreen to apply:
- *   - An annual percentage uplift across every saved price (e.g. supplier
+ * Used by the supplier price-list import flow to apply:
+ *   - A percentage uplift across every imported price (e.g. supplier
  *     announces +5.8%).
  *   - A GST mode flip when a price book was stored ex-GST but the business
  *     wants inc-GST (or vice versa).
@@ -63,7 +62,7 @@ export type GstAction = 'addGst' | 'removeGst' | 'none';
  * Apply a percentage uplift followed by an optional GST action.
  * Convenience wrapper so callers don't reimplement the order of operations.
  *
- * Order: uplift first, then GST — matches Jesse's mental model
+ * Order: uplift first, then GST — matches how a supplier rise is quoted
  * ("supplier price rises by 5.8%, then add GST on top").
  */
 export function adjustPrice(

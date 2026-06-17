@@ -27,6 +27,7 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { LabourPresetChipRow } from '../../components/LabourPresetChipRow';
+import { shouldAutoConvertHoursToDays } from '../../utils/labourPreset';
 import type { LabourRatePreset } from '../../types';
 
 export function LaborMarkupScreen() {
@@ -125,7 +126,17 @@ export function LaborMarkupScreen() {
 
     // Auto-default to days only for legacy/hours-stored quotes whose total
     // hits the 6h threshold. Stored-in-days quotes pass through untouched.
-    if (!alreadyInDays && totalStored >= 6) {
+    // Also skipped when the quote has a labour-preset snapshot (the rate
+    // field there is a lump-sum, not per-hour) or when the rate looks
+    // implausibly high — see shouldAutoConvertHoursToDays for the full
+    // story (Lisa / QU-177892 regression).
+    const autoConvert = shouldAutoConvertHoursToDays({
+      alreadyInDays,
+      totalStored,
+      rateForInput,
+      hasLabourPresetSnapshot: !!(currentQuote as any).labourPresetSnapshot,
+    });
+    if (autoConvert) {
       setLaborUnit('days');
       setLaborHours((Math.round((totalStored / HOURS_PER_DAY) * 10) / 10).toString());
       setLaborRate((rateForInput * HOURS_PER_DAY).toString());
@@ -469,16 +480,31 @@ export function LaborMarkupScreen() {
             currentSnapshotName={(currentQuote as any)?.labourPresetSnapshot?.presetName}
             onApplyPreset={({ preset, measuredArea, computedLabourTotal }) => {
               if (!currentQuote) return;
-              // Persist 1 × computed-total so existing labour total maths
-              // (laborHours × laborRate) keeps reconciling without us
-              // touching the calculator. Stamp the snapshot for audit /
-              // ViewJob badge / future Xero sync.
-              setLaborHours('1');
-              setLaborRate(String(computedLabourTotal));
+              // Derive a real per-hour rate so the rate field stays
+              // semantically per-hour. The previous version stashed the
+              // whole computed-total in laborRate with laborHours=1, which
+              // tripped the hours→days auto-convert (×8) on the next
+              // hydration and inflated the quote 8× (QU-177892 regression).
+              // We use whatever hours basis already exists (section sum,
+              // top-level laborHours, or 1) so labour total = rate × hours
+              // still equals computedLabourTotal regardless of which path
+              // the calculator takes downstream.
+              const sectionsSumHours = (currentQuote.sections || []).reduce(
+                (sum, s) => sum + (s.laborHours || 0) * (s.multiplier || 1),
+                0,
+              );
+              const hoursBasis = sectionsSumHours > 0
+                ? sectionsSumHours
+                : ((currentQuote.laborHours || 0) > 0 ? currentQuote.laborHours : 1);
+              const perHourRate = computedLabourTotal / hoursBasis;
+              setLaborHours(String(hoursBasis));
+              setLaborRate(String(perHourRate));
+              setLaborUnit('hours');
               updateQuote({
                 ...currentQuote,
-                laborHours: 1,
-                laborRate: computedLabourTotal,
+                laborHours: hoursBasis,
+                laborRate: perHourRate,
+                laborUnit: 'hours',
                 laborTotal: computedLabourTotal,
                 labourPresetSnapshot: {
                   presetId: preset.id,

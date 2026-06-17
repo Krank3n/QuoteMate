@@ -3,8 +3,8 @@ import { buildQuotePdfHtml, buildFlatRateLineHTML } from './htmlBuilders';
 import type { QuotePdfData, BusinessPdfData } from './types';
 
 const business: BusinessPdfData = {
-  businessName: 'J. Gorman Insulation',
-  email: 'jesse@example.com',
+  businessName: 'Acme Insulation',
+  email: 'quotes@example.com',
   phone: '0400 000 000',
 };
 

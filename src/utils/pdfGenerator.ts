@@ -14,8 +14,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as MailComposer from 'expo-mail-composer';
 import { format } from 'date-fns';
-import { Quote, BusinessSettings, Invoice, SalesPitch } from '../types';
-import { resolveAndRenderPitch } from './salesPitch';
+import { Quote, BusinessSettings, Invoice } from '../types';
 import { Document } from '../types/document';
 import { quoteToDocument, invoiceToDocument } from '../types/documentAdapter';
 import { formatPaymentTerms, getAmountDue } from './invoiceCalculator';
@@ -30,44 +29,6 @@ import {
 } from '../../shared/pdf';
 import { useStore } from '../store/useStore';
 import { checkSquareConnection } from '../services/squareService';
-
-/**
- * Resolve the customer-facing sales-pitch HTML for a doc:
- *   1. Prefer doc.pitchRenderedBody (snapshot at send time).
- *   2. Else look up doc.pitchId on businessSettings.salesPitches and
- *      render against doc.pitchVariableValues + variable defaults.
- *   3. HTML-escape + paragraph-wrap so the renderer can drop it into the
- *      PDF as-is. Newlines map to <br/>; blank lines split paragraphs.
- */
-export function resolvePitchHtml(
-  doc: { pitchId?: string; pitchVariableValues?: Record<string, string>; pitchRenderedBody?: string },
-  businessSettings: BusinessSettings | null,
-): string | undefined {
-  let raw: string | undefined;
-  if (doc.pitchRenderedBody && doc.pitchRenderedBody.trim().length > 0) {
-    raw = doc.pitchRenderedBody;
-  } else if (doc.pitchId && businessSettings?.salesPitches) {
-    const pitch = businessSettings.salesPitches.find((p: SalesPitch) => p.id === doc.pitchId);
-    if (pitch) {
-      raw = resolveAndRenderPitch(pitch, doc.pitchVariableValues || {});
-    }
-  }
-  if (!raw || raw.trim().length === 0) return undefined;
-  return rawTextToHtml(raw);
-}
-
-function rawTextToHtml(s: string): string {
-  const esc = s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-  // Split on blank lines, paragraph-wrap, single newlines→<br/>.
-  return esc
-    .split(/\n{2,}/)
-    .map((p) => `<p>${p.replace(/\n/g, '<br/>')}</p>`)
-    .join('');
-}
 
 // Module-level cache for the base64-encoded logo HTML keyed by source URI.
 // Logos rarely change but reading + base64-encoding the file on every PDF
@@ -272,7 +233,6 @@ export async function generateDocumentPDF(
         doc.presentationMode || businessSettings?.defaultPresentationMode || 'itemised',
       flatRateInclusions: doc.flatRateInclusions,
       flatRateLineLabel: doc.flatRateLineLabel,
-      pitchHtml: resolvePitchHtml(doc, businessSettings),
       travelAdjustment: doc.travelAdjustment,
       gst: doc.gst,
       total: doc.total,
@@ -338,7 +298,6 @@ export async function generateDocumentPDF(
       doc.presentationMode || businessSettings?.defaultPresentationMode || 'itemised',
     flatRateInclusions: doc.flatRateInclusions,
     flatRateLineLabel: doc.flatRateLineLabel,
-    pitchHtml: resolvePitchHtml(doc, businessSettings),
     travelAdjustment: doc.travelAdjustment,
     gst: doc.gst,
     total: doc.total,

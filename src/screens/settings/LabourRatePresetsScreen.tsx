@@ -3,7 +3,7 @@
  *
  * Manage reusable $/N-unit labour presets. Pick one on the quote labour
  * screen to convert a measured area to a labour dollar figure with one
- * tap. First visit seeds Jesse's two presets if the array is undefined.
+ * tap. Ships empty — the tradie adds their own rates from a blank slate.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -30,7 +30,6 @@ import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { generateId } from '../../utils/generateId';
 import { formatPresetRate } from '../../utils/labourPreset';
-import { buildStarterLabourPresets } from '../../services/starterLabourPresets';
 import type { LabourRatePreset } from '../../types';
 
 const UNITS: LabourRatePreset['unit'][] = ['m\u00b2', 'm', 'each', 'm\u00b3'];
@@ -46,13 +45,8 @@ export function LabourRatePresetsScreen() {
 
   useEffect(() => {
     if (!businessSettings) return;
-    if (businessSettings.labourRatePresets === undefined) {
-      // First visit \u2014 seed Jesse's two presets.
-      setPresets(buildStarterLabourPresets());
-      setDirty(true);
-    } else {
-      setPresets(businessSettings.labourRatePresets);
-    }
+    // Library starts empty \u2014 no auto-seeded rates. The tradie adds their own.
+    setPresets(businessSettings.labourRatePresets ?? []);
   }, [businessSettings]);
 
   const updatePreset = (id: string, patch: Partial<LabourRatePreset>) => {

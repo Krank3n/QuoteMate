@@ -3,7 +3,7 @@
  *
  * Bottom sheet that lets the tradie enter an area in m² (or m / m³) and
  * have the app calculate the units required from the linked favorite's
- * coverage spec. Built for Jesse's insulation flow but generalises to
+ * coverage spec. Built for an insulation flow but generalises to
  * tilers, painters, decking, etc.
  *
  * Pure presentational — calc lives in src/utils/coverageCalc.ts.
