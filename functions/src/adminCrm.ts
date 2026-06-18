@@ -184,6 +184,32 @@ async function fetchAllSquareConnections(): Promise<Map<string, any>> {
   return map;
 }
 
+// Single collection-group pass over `settings` that buckets the relevant
+// per-user settings docs (emailState / business / emailPreferences /
+// squareConnection) into per-type maps keyed by uid. Replaces the N+1 of
+// reading each user's settings docs individually inside adminListUsers.
+async function fetchAllUserSettings(): Promise<{
+  emailState: Map<string, any>;
+  business: Map<string, any>;
+  emailPreferences: Map<string, any>;
+  squareConnection: Map<string, any>;
+}> {
+  const snap = await db().collectionGroup('settings').get();
+  const emailState = new Map<string, any>();
+  const business = new Map<string, any>();
+  const emailPreferences = new Map<string, any>();
+  const squareConnection = new Map<string, any>();
+  for (const d of snap.docs) {
+    const uid = d.ref.parent.parent?.id;
+    if (!uid) continue;
+    if (d.id === 'emailState') emailState.set(uid, d.data());
+    else if (d.id === 'business') business.set(uid, d.data());
+    else if (d.id === 'emailPreferences') emailPreferences.set(uid, d.data());
+    else if (d.id === 'squareConnection') squareConnection.set(uid, d.data());
+  }
+  return { emailState, business, emailPreferences, squareConnection };
+}
+
 // Per-user admin-note summary used by the user list to power "Contacted /
 // Not contacted / Recently contacted" filters. One collection-group pass
 // instead of N per-user reads.
@@ -287,8 +313,13 @@ export const adminWhoami = functions.https.onCall(async (_data, context) => {
 // DASHBOARD STATS
 // ============================================================
 
-export const adminDashboardStats = functions.runWith({ minInstances: 1 }).https.onCall(async (_data, context) => {
-  requireAdmin(context);
+// Cache the expensive dashboard computation in adminStats/current and lazily
+// refresh it at most once every 15 minutes (see adminDashboardStats below).
+const DASHBOARD_CACHE_TTL_MS = 15 * 60 * 1000;
+
+// The full, uncached dashboard computation. Extracted verbatim from the
+// original adminDashboardStats body so the returned shape is unchanged.
+async function computeDashboardStats() {
   const firestore = db();
 
   const now = Date.now();
@@ -387,6 +418,39 @@ export const adminDashboardStats = functions.runWith({ minInstances: 1 }).https.
       oneDayAgo: oneDayAgo.toMillis(),
     },
   };
+}
+
+// Lazy-refresh cache wrapper: serve adminStats/current if it was generated
+// within the last 15 minutes (one doc read), otherwise recompute and refresh
+// the cache. Caching problems never break the endpoint — any read/write error
+// falls back to (or returns) the live computation.
+export const adminDashboardStats = functions.runWith({ minInstances: 1 }).https.onCall(async (_data, context) => {
+  requireAdmin(context);
+  const cacheRef = db().collection('adminStats').doc('current');
+
+  // Fast path — return cached payload if fresh. Never fail on a read error.
+  try {
+    const cached = await cacheRef.get();
+    if (cached.exists) {
+      const data = cached.data() as any;
+      const generatedAt = typeof data?.generatedAt === 'number' ? data.generatedAt : 0;
+      if (data?.payload && Date.now() - generatedAt < DASHBOARD_CACHE_TTL_MS) {
+        return data.payload;
+      }
+    }
+  } catch (err) {
+    console.error('adminDashboardStats cache read failed, computing live', err);
+  }
+
+  // Stale or missing cache — recompute and refresh. A cache write failure must
+  // still return the freshly computed result.
+  const result = await computeDashboardStats();
+  try {
+    await cacheRef.set({ payload: result, generatedAt: Date.now() });
+  } catch (err) {
+    console.error('adminDashboardStats cache write failed', err);
+  }
+  return result;
 });
 
 // ============================================================
@@ -440,32 +504,29 @@ export const adminListUsers = functions
     const userDocMap = new Map<string, any>();
     for (const d of userDocsSnap.docs) userDocMap.set(d.id, d.data());
 
-    // Prefetch subscriptions + Square connections + admin-note summaries in
-    // single collection-group passes
-    const [subsMap, squareMap, notesSummaryMap] = await Promise.all([
+    // Prefetch subscriptions + admin-note summaries + all per-user settings in
+    // single collection-group passes. fetchAllUserSettings() replaces both the
+    // per-user emailState/business/emailPreferences reads (the N+1) and the
+    // separate fetchAllSquareConnections() pass — all four come from one
+    // collectionGroup('settings') scan.
+    const [subsMap, notesSummaryMap, userSettings] = await Promise.all([
       fetchAllSubscriptions(),
-      fetchAllSquareConnections(),
       fetchAllAdminNoteSummaries(),
+      fetchAllUserSettings(),
     ]);
 
-    const rows: UserListRow[] = await Promise.all(
-      authUsers.map(async (auth) => {
-        const uid = auth.uid;
-        const userData = userDocMap.get(uid) || {};
-        const [emailStateSnap, businessSnap, emailPrefsSnap] = await Promise.all([
-          firestore.doc(`users/${uid}/settings/emailState`).get(),
-          firestore.doc(`users/${uid}/settings/business`).get(),
-          firestore.doc(`users/${uid}/settings/emailPreferences`).get(),
-        ]);
-        const emailState = emailStateSnap.data() || {};
-        const business = businessSnap.data() || {};
-        const subFields = deriveSubFields(subsMap.get(uid));
-        const emailPrefs = emailPrefsSnap.data() || {};
-        const squareSummary = summariseSquare(squareMap.get(uid));
+    const rows: UserListRow[] = authUsers.map((auth) => {
+      const uid = auth.uid;
+      const userData = userDocMap.get(uid) || {};
+      const emailState = userSettings.emailState.get(uid) || {};
+      const business = userSettings.business.get(uid) || {};
+      const subFields = deriveSubFields(subsMap.get(uid));
+      const emailPrefs = userSettings.emailPreferences.get(uid) || {};
+      const squareSummary = summariseSquare(userSettings.squareConnection.get(uid));
 
-        const planTier = subFields.tier;
+      const planTier = subFields.tier;
 
-        return {
+      return {
           uid,
           email: auth?.email || business.email || null,
           displayName: auth?.displayName || business.businessName || null,
@@ -499,8 +560,7 @@ export const adminListUsers = functions
           noteCount: notesSummaryMap.get(uid)?.count || 0,
           lastNoteAt: notesSummaryMap.get(uid)?.lastAt || null,
         };
-      })
-    );
+    });
 
     const filtered = search
       ? rows.filter((r) => {
