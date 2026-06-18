@@ -42,6 +42,39 @@ function requireAdmin(context: functions.https.CallableContext): string {
 const TRIAL_DAYS = 7;
 const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
 
+// Monthly-equivalent AUD we actually bill per subscription. Source of truth:
+// the live Stripe "Starter" prices ($49/mo, $328/yr); the iOS/Android yearly
+// SKUs are priced to match. Update here if prices change.
+const SUB_PRICE_AUD = { monthly: 49, yearly: 328 };
+
+// A subscription only contributes MRR if it's backed by a real billing record:
+// an app-store purchase (productId) or a Stripe subscription (subscriptionId /
+// priceId). Admin comps (platform 'admin_grant') and bare manual isPro flags
+// (owner / test / orphan accounts) have neither and bill $0 — counting them is
+// what inflated the old "9 × $29" estimate.
+function isBilledSub(sub: any): boolean {
+  if (!sub?.isPro) return false;
+  if (sub.platform === 'admin_grant') return false;
+  return !!(sub.productId || sub.subscriptionId || sub.priceId);
+}
+
+function subInterval(sub: any): 'yearly' | 'monthly' {
+  const i = String(sub?.interval || sub?.planInterval || '').toLowerCase();
+  if (i.startsWith('year') || i.startsWith('annual')) return 'yearly';
+  if (i.startsWith('month')) return 'monthly';
+  const sku = String(sub?.productId || sub?.priceId || '').toLowerCase();
+  if (sku.includes('year') || sku.includes('annual')) return 'yearly';
+  return 'monthly';
+}
+
+// Monthly recurring revenue this subscription represents (AUD), 0 if not billed.
+function monthlyRevenueAud(sub: any): number {
+  if (!isBilledSub(sub)) return 0;
+  return subInterval(sub) === 'yearly'
+    ? Math.round((SUB_PRICE_AUD.yearly / 12) * 100) / 100
+    : SUB_PRICE_AUD.monthly;
+}
+
 interface SubFields {
   isPro: boolean;
   canceling: boolean;
@@ -55,6 +88,9 @@ interface SubFields {
   cancelAt: number | null;
   trialStartedAt: number | null;
   trialDaysRemaining: number | null;
+  billed: boolean;
+  interval: 'yearly' | 'monthly' | null;
+  monthlyAud: number;
 }
 
 function ts(v: any): number | null {
@@ -113,6 +149,9 @@ function deriveSubFields(sub: any | undefined | null): SubFields {
     cancelAt: canceling ? ts(sub?.currentPeriodEnd) : null,
     trialStartedAt,
     trialDaysRemaining,
+    billed: isBilledSub(sub),
+    interval: isBilledSub(sub) ? subInterval(sub) : null,
+    monthlyAud: monthlyRevenueAud(sub),
   };
 }
 
@@ -2920,6 +2959,9 @@ export const adminListSubscriptions = functions
           cancelAt: f.cancelAt,
           validatedAt: f.validatedAt,
           quotesThisMonth: sub.quotesThisMonth || 0,
+          billed: f.billed,
+          interval: f.interval,
+          monthlyAud: f.monthlyAud,
         };
       })
     );
@@ -2931,9 +2973,15 @@ export const adminListSubscriptions = functions
     const trial_expired = rows.filter((r) => r.status === 'trial_expired').length;
     const free = rows.filter((r) => r.status === 'free').length;
 
+    // MRR = sum of monthly-equivalent revenue across billed subs (comps + bare
+    // isPro flags contribute $0). "paying" is the count of real revenue subs.
+    const mrr = Math.round(rows.reduce((a, r) => a + (r.monthlyAud || 0), 0));
+    const paying = rows.filter((r) => r.billed && (r.status === 'active' || r.status === 'canceling')).length;
+    const comped = rows.filter((r) => r.isPro && !r.billed).length;
+
     return {
       subscriptions: rows,
-      totals: { active, canceling, canceled, trialing, trial_expired, free, all: rows.length },
+      totals: { active, canceling, canceled, trialing, trial_expired, free, all: rows.length, mrr, paying, comped },
     };
   });
 

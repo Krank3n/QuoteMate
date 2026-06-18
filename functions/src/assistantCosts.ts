@@ -248,10 +248,15 @@ export const adminAssistantCosts = functions
 
     const firestore = db();
     // Per-user rows.
-    const userSnap = await firestore
-      .collectionGroup('assistantUsage')
-      .where(admin.firestore.FieldPath.documentId(), '>=', startKey)
-      .get();
+    // NOTE: a collectionGroup query can't range-filter on documentId() with a
+    // bare date key — Firestore requires the value to resolve to a full
+    // (even-segment) document path for collection-group __name__ queries, so
+    // `.where(documentId(), '>=', '20260520')` throws "…odd number of segments"
+    // and the whole call 500s (which is why /admin/ai-costs showed nothing).
+    // Each assistantUsage doc id IS the yyyymmdd key, so we fetch the group and
+    // apply the date window in memory below (one doc per active user per day —
+    // a small read at this app's scale).
+    const userSnap = await firestore.collectionGroup('assistantUsage').get();
 
     interface PerUser {
       uid: string;
@@ -270,10 +275,11 @@ export const adminAssistantCosts = functions
     const perDay = new Map<string, { date: string; turns: number; costMicros: number; activeUsers: Set<string> }>();
 
     for (const doc of userSnap.docs) {
+      const dateKey: string = doc.id;
+      if (dateKey < startKey) continue; // in-memory date-window filter
       const uid = doc.ref.parent.parent?.id;
       if (!uid) continue;
       const d = doc.data() as any;
-      const dateKey: string = doc.id;
       const cost = Number(d.costMicros) || 0;
       const turns = Number(d.turns) || 0;
 
