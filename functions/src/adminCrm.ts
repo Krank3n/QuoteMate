@@ -287,7 +287,7 @@ export const adminWhoami = functions.https.onCall(async (_data, context) => {
 // DASHBOARD STATS
 // ============================================================
 
-export const adminDashboardStats = functions.https.onCall(async (_data, context) => {
+export const adminDashboardStats = functions.runWith({ minInstances: 1 }).https.onCall(async (_data, context) => {
   requireAdmin(context);
   const firestore = db();
 
@@ -422,7 +422,7 @@ interface UserListRow {
 }
 
 export const adminListUsers = functions
-  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .runWith({ memory: '512MB', timeoutSeconds: 60, minInstances: 1 })
   .https.onCall(async (data, context) => {
     requireAdmin(context);
     const firestore = db();
@@ -1518,7 +1518,7 @@ export const writeDailyMetricsSnapshotNow = functions.https.onRequest(async (req
   res.json({ ok: true, date: dateOverride, snapshot });
 });
 
-export const adminMetricsSeries = functions.https.onCall(async (data, context) => {
+export const adminMetricsSeries = functions.runWith({ minInstances: 1 }).https.onCall(async (data, context) => {
   requireAdmin(context);
   const days = Math.min(Math.max(Number(data?.days) || 30, 7), 180);
   // Doc ids are YYYY-MM-DD so they sort lexicographically by date. Default
