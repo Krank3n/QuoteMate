@@ -290,21 +290,8 @@ export default function App() {
           );
         }
 
-        // Set up real-time listeners for cross-device sync.
-        // Use mergeRemoteQuotes/Invoices (not setState) so an in-flight local edit
-        // isn't wiped by a stale snapshot — see the merge actions for the rules.
-        firestoreService.listenToQuotes((quotes) => {
-          useStore.getState().mergeRemoteQuotes(quotes);
-        });
-
-        firestoreService.listenToInvoices((invoices) => {
-          useStore.getState().mergeRemoteInvoices(invoices);
-        });
-
-        // Phase-5: real-time listener for the unified Document collection.
-        // Coexists with the legacy listeners during the cutover — server-side
-        // mirror keeps both projections in sync, the legacy slices are still
-        // referenced by older edit/save flows.
+        // Real-time listener for the unified Document collection.
+        // Legacy quotes/invoices listeners removed after 2026-04-27 rollout.
         listenToDocuments();
 
         // Phase-8: real-time listener for the Jobs collection. Aggregates on
