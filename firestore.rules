@@ -108,6 +108,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Personal AI ticket board — Cloud Functions only (admin-gated callables +
+    // the key-gated agent bridge). No client reads/writes Firestore directly.
+    match /tickets/{ticketId} {
+      allow read, write: if false;
+    }
+
     // Lead outreach pipeline — Cloud Functions only (admin-gated callables).
     // No client should ever read or write these directly.
     match /leads/{leadId} {

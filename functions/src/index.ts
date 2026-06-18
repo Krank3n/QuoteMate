@@ -27,6 +27,7 @@ import {
   classifyUnsendable,
 } from './email';
 export * from './adminCrm';
+export * from './tickets';
 export {
   adminLeadDiscovery,
   adminEnrichLeads,
