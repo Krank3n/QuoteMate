@@ -4,7 +4,7 @@
  */
 
 import { ANTHROPIC_API_KEY, GEMINI_API_KEY } from '@env';
-import { Material } from '../types';
+import { Material, FloorplanAnalysis } from '../types';
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase';
 // Lazy-import FileSystem (only available on native)
@@ -63,6 +63,9 @@ interface LLMResponse {
   // 'standard' on the consumer side when undefined. Inherited by any
   // material that didn't get an explicit qualityTier of its own.
   jobQualityTier?: 'budget' | 'standard' | 'premium';
+  // Geometry read off an attached architectural plan, when one is detected
+  // among the photos. Undefined for ordinary site photos / no photos.
+  floorplanAnalysis?: FloorplanAnalysis;
 }
 
 /**
@@ -98,6 +101,41 @@ export async function analyzeJobDescription(
   return analyzeViaFirebaseFunction(jobDescription, tradeContext, photoUrls, existingMaterials, availableTemplates, userSavedRates);
 }
 
+/** Read a Blob's bytes as a bare base64 string (no data: prefix). */
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Convert a photo URL to base64, cross-platform:
+ *  - native + local file:// → read directly off disk (fast, no network)
+ *  - remote https (Firebase Storage) or web blob/data URL → fetch the bytes
+ * Returns null on failure so one bad photo doesn't sink the whole request.
+ */
+async function photoUrlToBase64(url: string): Promise<string | null> {
+  try {
+    if (Platform.OS !== 'web' && FileSystem && url.startsWith('file://')) {
+      return await FileSystem.readAsStringAsync(url, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    }
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return await blobToBase64(blob);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Analyze job description via Firebase Cloud Function
  * All platforms use this path so API keys stay server-side.
@@ -125,19 +163,23 @@ async function analyzeViaFirebaseFunction(
     notes?: string;
   }>
 ): Promise<LLMResponse> {
-  // Convert local photo URIs to base64 for sending to the server
+  // Photos reach the server two ways, both handled here AND on web:
+  //  - remote https (Firebase Storage) URLs → send as `photoUrls`; the function
+  //    fetches the bytes server-side. Avoids browser CORS on the web app and
+  //    means no large base64 payloads from the client.
+  //  - local file:// URIs (rare — pre-upload) → convert to base64 here (native).
+  // The old path was native-only + FileSystem-only, so it never ran on web and
+  // silently dropped the remote Storage URLs quote photos actually use.
   let photoBase64: string[] | undefined;
-  if (photoUrls?.length && Platform.OS !== 'web' && FileSystem) {
-    photoBase64 = [];
-    for (const uri of photoUrls) {
-      try {
-        const base64Data = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        photoBase64.push(base64Data);
-      } catch (err) {
-        // silently ignore failed photo read
-      }
+  let remotePhotoUrls: string[] | undefined;
+  if (photoUrls?.length) {
+    const remote = photoUrls.filter(u => /^https?:\/\//i.test(u));
+    const local = photoUrls.filter(u => !/^https?:\/\//i.test(u));
+    if (remote.length) remotePhotoUrls = remote;
+    if (local.length) {
+      const converted = await Promise.all(local.map(photoUrlToBase64));
+      const usable = converted.filter((b): b is string => !!b);
+      if (usable.length) photoBase64 = usable;
     }
   }
 
@@ -154,6 +196,7 @@ async function analyzeViaFirebaseFunction(
       jobDescription,
       tradeContext,
       photoBase64,
+      photoUrls: remotePhotoUrls,
       existingMaterials,
       availableTemplates,
       userSavedRates,
@@ -176,11 +219,65 @@ async function analyzeViaFirebaseFunction(
     data.jobQualityTier === 'premium'
       ? data.jobQualityTier
       : undefined;
+  const floorplanAnalysis = normaliseFloorplanAnalysis(data.floorplanAnalysis);
   return {
     materials: validateMaterials(data.materials || []),
     estimatedHours: Math.max(1, Math.min(data.estimatedHours || 8, 200)),
     jobSummary: data.jobSummary || '',
     ...(jobQualityTier && { jobQualityTier }),
+    ...(floorplanAnalysis && { floorplanAnalysis }),
+  };
+}
+
+/**
+ * Coerce a raw floorplanAnalysis blob from the LLM into our typed shape, or
+ * undefined when no plan was detected. Keeps only sane numeric values so a
+ * hallucinated area never silently inflates quantities downstream.
+ */
+function normaliseFloorplanAnalysis(raw: any): FloorplanAnalysis | undefined {
+  if (!raw || typeof raw !== 'object' || raw.detected !== true) return undefined;
+  const num = (v: any): number | undefined => {
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const confidence: FloorplanAnalysis['confidence'] =
+    raw.confidence === 'high' || raw.confidence === 'low' ? raw.confidence : 'medium';
+  const zones = Array.isArray(raw.zones)
+    ? raw.zones
+        .map((z: any) => ({
+          label: (z?.label || z?.code || 'Zone').toString(),
+          code: z?.code ? z.code.toString() : undefined,
+          areaM2: num(z?.areaM2),
+          dims:
+            num(z?.dims?.lengthM) && num(z?.dims?.widthM)
+              ? { lengthM: num(z.dims.lengthM)!, widthM: num(z.dims.widthM)! }
+              : undefined,
+        }))
+        .slice(0, 100)
+    : undefined;
+  return {
+    detected: true,
+    scale: raw.scale ? raw.scale.toString() : undefined,
+    calibration:
+      raw.calibration && typeof raw.calibration === 'object'
+        ? {
+            source:
+              raw.calibration.source === 'scale_bar' ||
+              raw.calibration.source === 'known_dimension' ||
+              raw.calibration.source === 'stated_total'
+                ? raw.calibration.source
+                : 'stated_total',
+            basisMm: num(raw.calibration.basisMm),
+            note: (raw.calibration.note || '').toString(),
+          }
+        : undefined,
+    totalAreaM2: num(raw.totalAreaM2),
+    perimeterM: num(raw.perimeterM),
+    zones: zones && zones.length ? zones : undefined,
+    removalAreaM2: num(raw.removalAreaM2),
+    removalBinM3: num(raw.removalBinM3),
+    assumptions: (raw.assumptions || '').toString(),
+    confidence,
   };
 }
 
@@ -1397,6 +1494,85 @@ export async function extractSupplierPriceList(
   }
 
   throw new Error(lastError?.message || 'Failed to extract price list after multiple attempts');
+}
+
+/**
+ * Model-assisted spreadsheet column mapping.
+ *
+ * For supplier price lists whose headers our deterministic auto-detect can't
+ * confidently map (arbitrary 30-column exports, multi-column names, per-unit
+ * prices), send ONLY the headers + a few sample rows to the backend, which
+ * asks the model which columns hold what. Never uploads the whole file.
+ *
+ * Returns a best-guess mapping in the same shape as ColumnMapping (name may be
+ * a single header or an ordered list of columns to compose). The caller still
+ * shows the column mapper for confirmation — this only pre-fills it.
+ */
+export interface SuggestedColumnMapping {
+  name?: string | string[];
+  price?: string;
+  unit?: string;
+  qty?: string;
+  coveragePerUnit?: string;
+  coverageUnit?: string;
+  keywords?: string;
+  dimensions?: string | string[];
+  itemNumber?: string;
+  notes?: string | string[];
+}
+
+export async function suggestSupplierColumnMapping(payload: {
+  headers: string[];
+  sampleRows: Record<string, string>[];
+}): Promise<SuggestedColumnMapping | null> {
+  if (!payload.headers?.length) return null;
+  try {
+    const idToken = await auth.currentUser?.getIdToken();
+    const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/mapSupplierColumns`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        headers: payload.headers,
+        // Cap the sample so we never ship a 12,800-row file to the model.
+        sampleRows: payload.sampleRows.slice(0, 20),
+      }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const m = data?.mapping;
+    if (!m || typeof m !== 'object') return null;
+    // Only keep keys that name real headers (the model occasionally invents one).
+    const valid = new Set(payload.headers);
+    const keep = (v: unknown): string | string[] | undefined => {
+      if (typeof v === 'string') return valid.has(v) ? v : undefined;
+      if (Array.isArray(v)) {
+        const cols = v.filter((h): h is string => typeof h === 'string' && valid.has(h));
+        return cols.length ? cols : undefined;
+      }
+      return undefined;
+    };
+    const single = (v: unknown): string | undefined => {
+      const k = keep(v);
+      return typeof k === 'string' ? k : Array.isArray(k) ? k[0] : undefined;
+    };
+    return {
+      name: keep(m.name),
+      price: single(m.price),
+      unit: single(m.unit),
+      qty: single(m.qty),
+      coveragePerUnit: single(m.coveragePerUnit),
+      coverageUnit: single(m.coverageUnit),
+      keywords: single(m.keywords),
+      dimensions: keep(m.dimensions),
+      itemNumber: single(m.itemNumber),
+      notes: keep(m.notes),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   sendNewProSubscriptionEmail,
   sendMaterialListErrorEmail,
   sendDraftNudgeEmail,
+  classifyUnsendable,
 } from './email';
 export * from './adminCrm';
 export {
@@ -1455,6 +1456,51 @@ function parseLLMJson(content: string): any {
 // Better image understanding than Claude for site photos.
 const GEMINI_MATERIALS_MODEL = 'gemini-3.1-pro-preview';
 
+// Hosts we'll fetch images from server-side. Quote photos live in Firebase
+// Storage; anything else is rejected (SSRF guard).
+const ALLOWED_IMAGE_HOSTS = new Set([
+  'firebasestorage.googleapis.com',
+  'storage.googleapis.com',
+]);
+const MAX_FETCH_IMAGES = 10;
+const MAX_IMAGE_BYTES = 8_000_000; // ~8 MB per image
+
+/**
+ * Fetch image URLs (Firebase Storage download URLs) and return their base64.
+ * Done server-side so the web app never has to deal with Storage CORS, and so
+ * the client doesn't ship large base64 payloads. Bad/oversized/odd-host URLs
+ * are skipped, never fatal.
+ */
+async function fetchStorageImagesAsBase64(urls: any[]): Promise<string[]> {
+  const out: string[] = [];
+  const list = (Array.isArray(urls) ? urls : [])
+    .filter(u => typeof u === 'string')
+    .slice(0, MAX_FETCH_IMAGES);
+  for (const url of list) {
+    try {
+      const host = new URL(url).hostname;
+      if (!ALLOWED_IMAGE_HOSTS.has(host)) {
+        console.warn('Skipping image URL with disallowed host:', host);
+        continue;
+      }
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.warn('Image fetch failed:', res.status);
+        continue;
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > MAX_IMAGE_BYTES) {
+        console.warn('Image too large, skipping:', buf.length);
+        continue;
+      }
+      out.push(buf.toString('base64'));
+    } catch (err: any) {
+      console.warn('Image fetch error:', err?.message);
+    }
+  }
+  return out;
+}
+
 async function callGeminiForMaterials(
   apiKey: string,
   prompt: string,
@@ -1473,6 +1519,10 @@ async function callGeminiForMaterials(
   }
   parts.push({ text: prompt });
 
+  // When images are attached the model may also return a floorplanAnalysis
+  // (scale, per-zone area breakdown) alongside the materials, so give it more
+  // headroom; the Claude fallback already runs at 32k.
+  const hasImages = Array.isArray(photoBase64) && photoBase64.length > 0;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MATERIALS_MODEL}:generateContent?key=${apiKey}`;
   const response = await fetch(url, {
     method: 'POST',
@@ -1481,7 +1531,7 @@ async function callGeminiForMaterials(
       contents: [{ parts }],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: 8000,
+        maxOutputTokens: hasImages ? 16000 : 8000,
         responseMimeType: 'application/json',
       },
     }),
@@ -1563,7 +1613,7 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 300 }).
     if (!decodedToken) return;
 
     try {
-      const { jobDescription, tradeContext, photoBase64, existingMaterials, availableTemplates, userSavedRates } = req.body;
+      const { jobDescription, tradeContext, photoBase64: photoBase64Input, photoUrls, existingMaterials, availableTemplates, userSavedRates } = req.body;
 
       if (!isNonEmptyString(jobDescription)) {
         res.status(400).json({ error: 'Missing or invalid jobDescription' });
@@ -1572,6 +1622,17 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 300 }).
       if (jobDescription.length > 50000) {
         res.status(400).json({ error: 'jobDescription exceeds maximum length' });
         return;
+      }
+
+      // Effective image set: any client-provided base64 (native local files)
+      // plus Storage URLs fetched server-side (the usual case, and what makes
+      // photo/floorplan analysis work on the web app without CORS).
+      const photoBase64: string[] = Array.isArray(photoBase64Input)
+        ? photoBase64Input.filter((b: any) => typeof b === 'string')
+        : [];
+      if (Array.isArray(photoUrls) && photoUrls.length > 0) {
+        const fetched = await fetchStorageImagesAsBase64(photoUrls);
+        photoBase64.push(...fetched);
       }
 
       // Get API keys from Firebase config.
@@ -1685,7 +1746,8 @@ Provide a JSON response with the following structure:
       "reeceProductId": "(only set when a Reece catalogue line clearly matches — copy the integer productId from the catalogue listing. Leave empty if unsure; the search layer will look it up.)"
     }
   ],
-  "jobQualityTier": "budget|standard|premium"
+  "jobQualityTier": "budget|standard|premium",
+  "floorplanAnalysis": "(OMIT unless an attached image is an architectural plan/drawing — see FLOORPLAN ANALYSIS below)"
 }
 
 RESPECT THE JOB DESCRIPTION — NAMED MATERIALS AND QUANTITIES ARE MANDATORY:
@@ -1768,10 +1830,25 @@ Guidelines:
 - Consider the suggested materials but don't limit yourself to only those
 - Think about what a professional ${tradeContext?.nicheName || 'tradie'} would need for this job
 
+FLOORPLAN ANALYSIS (only when one of the attached images is an architectural plan, floorplan, or scaled drawing — NOT an ordinary site photo):
+- First classify each attached image as a PLAN or a SITE PHOTO. Treat ordinary photos exactly as before; only fill "floorplanAnalysis" when at least one image is a plan/drawing. If no plan is attached, OMIT "floorplanAnalysis" entirely.
+- This is trade-agnostic: read the geometry, don't assume a trade. The same output serves flooring, tiling, painting, concreting, landscaping, fencing, roofing, etc.
+- CALIBRATE FIRST, then measure everything FROM that scale — do not eyeball areas. Establish one real-world scale from the strongest reference available, in this order, and you MUST record it in "calibration" (source + a short note stating the scale you derived):
+  1. a printed scale bar or ratio ("1:100");
+  2. a clearly labelled dimension on the drawing (treat a known structural grid spacing as a labelled dimension — if the grid is evenly spaced and any one bay is dimensioned, apply that spacing across the whole drawing; use source "known_dimension");
+  3. a total dimension the tradie stated in the job description (source "stated_total").
+  When references disagree, prefer a real-world measurement the tradie supplied over a hard-to-read drawing, and note the discrepancy.
+- Derive every "areaM2", "dims" and "perimeterM" by measuring against that single scale — never by guessing. Compute "totalAreaM2" two independent ways and reconcile them: (a) the overall footprint from its outer dimensions, and (b) the sum of the zone areas. If they differ by more than ~15%, re-measure, report the reconciled figure, and lower "confidence".
+- "perimeterM" is the outer boundary length (drives skirting/edging/cornice/kerb/fence runs). "zones" are the distinct regions you can identify, each { "label", "code" (a printed room number or area/finish code if shown, else omit), "areaM2", "dims": { "lengthM", "widthM" } }.
+- If the scope involves removing/stripping existing surfaces, estimate "removalAreaM2" and a rough waste skip volume "removalBinM3".
+- ALWAYS include "assumptions" (what you inferred or could not read clearly) and "confidence": "high" ONLY when scale came from a scale bar or labelled dimension AND the two area methods agreed; "medium" when scale came from a stated total or grid spacing; "low" when scale was guessed or the drawing was hard to read. NEVER silently invent dimensions — if you can't establish scale at all, set detected:true, confidence:"low", omit the numbers, and say so in "assumptions".
+- Use the calibrated areas/perimeter to GROUND the material quantities above (e.g. m² of surface, lineal m of edge) instead of guessing — and show that derivation in each material's "reasoning".
+- Shape: "floorplanAnalysis": { "detected": true, "scale": "1:100", "calibration": { "source": "scale_bar|known_dimension|stated_total", "basisMm": 2520, "note": "..." }, "totalAreaM2": 0, "perimeterM": 0, "zones": [ { "label": "...", "code": "...", "areaM2": 0, "dims": { "lengthM": 0, "widthM": 0 } } ], "removalAreaM2": 0, "removalBinM3": 0, "assumptions": "...", "confidence": "medium" }
+
 Return ONLY valid JSON, no other text.`;
 
       const finalPrompt = Array.isArray(photoBase64) && photoBase64.length > 0
-        ? `${prompt}\n\nI've also attached ${photoBase64.length} site photo(s). Please examine them carefully to better understand the scope of work, identify specific materials visible, and refine your material estimates based on what you see.`
+        ? `${prompt}\n\nI've attached ${photoBase64.length} image(s). Examine each carefully. If an image is an ordinary site photo, use it to understand the scope and identify visible materials. If an image is an architectural plan, floorplan, or scaled drawing, ALSO follow the FLOORPLAN ANALYSIS instructions above — read the scale and extract areas/perimeter, and use them to ground your material quantities.`
         : prompt;
 
       // Try Gemini 3 Pro Preview first (primary — better image understanding)
@@ -1876,12 +1953,20 @@ Return ONLY valid JSON, no other text.`;
           ? parsed.jobQualityTier
           : undefined;
 
+      const floorplanAnalysis =
+        parsed.floorplanAnalysis &&
+        typeof parsed.floorplanAnalysis === 'object' &&
+        parsed.floorplanAnalysis.detected === true
+          ? parsed.floorplanAnalysis
+          : undefined;
+
       res.status(200).json({
         materials: repairedMaterials,
         estimatedHours: parsed.estimatedHours || 8,
         jobSummary: parsed.jobSummary || '',
         flags: aiFlags,
         ...(jobQualityTier && { jobQualityTier }),
+        ...(floorplanAnalysis && { floorplanAnalysis }),
       });
     } catch (error: any) {
       const userEmail = await getUserEmail(decodedToken.uid);
@@ -2492,6 +2577,112 @@ export const extractSupplierPriceList = functions
             : null,
           items: Array.isArray(parsed.items) ? parsed.items : [],
         });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+  });
+
+/**
+ * Map Supplier Columns — text-only column mapping for arbitrary supplier
+ * spreadsheets. The client's deterministic auto-detect handles common layouts;
+ * when it can't confidently map a sheet (multi-column names, per-unit prices,
+ * 30-column flooring/joinery/electrical exports), we send ONLY the headers and
+ * a few sample rows here. The model returns which header(s) hold what — never
+ * the whole file. Gemini Flash Lite primary, Claude Haiku fallback (small,
+ * structured reasoning over text, like reconcilePricedMaterials).
+ */
+function buildColumnMappingPrompt(headers: string[], sampleRows: any[]): string {
+  const safeHeaders = headers.slice(0, 60);
+  const safeRows = (Array.isArray(sampleRows) ? sampleRows : []).slice(0, 20);
+  return `You are mapping the columns of a tradesperson's supplier price-list spreadsheet onto a fixed schema. Decide which header (verbatim, exactly as given) holds each field. Use the sample rows to disambiguate — e.g. a column whose values look like "$28.50/m²" is the price, not the unit.
+
+HEADERS (use these strings verbatim, including any line breaks):
+${JSON.stringify(safeHeaders)}
+
+SAMPLE ROWS (header → value):
+${JSON.stringify(safeRows)}
+
+Target fields:
+- name: the product's identity. If no single name/description column exists, return an ORDERED ARRAY of the columns that together name the product (e.g. ["Style/Range","Colour"]). Do NOT use a bare "Type"/"Category" column as the name on its own.
+- price: the per-unit cost column (values may carry a currency symbol and a unit suffix like "/m²").
+- unit: the unit of sale column, if one exists separately (each|m|m²|m³|L|kg|box|pack). Omit if the unit only appears inside the price (e.g. "$28.50/m²").
+- qty: the quantity-per-pack column (e.g. "Qty per pack"), NOT a coverage/area column.
+- coveragePerUnit: how much area/length one purchased unit covers (e.g. "m² per pack").
+- coverageUnit: the coverage unit column, if separate (m²|m³|m).
+- keywords: a tags/keywords column, or a product type/category column useful for search.
+- dimensions: one or more size columns (Length/Width/Thickness) — return an array if several.
+- itemNumber: a supplier/product code column.
+- notes: descriptive attribute columns worth keeping (warranty, country of origin, ratings) — return an array if several.
+
+Only reference headers that actually appear above. Omit any field you can't confidently map. Return ONLY valid JSON in this exact shape:
+{
+  "mapping": {
+    "name": "..." or ["...","..."],
+    "price": "...",
+    "unit": "...",
+    "qty": "...",
+    "coveragePerUnit": "...",
+    "coverageUnit": "...",
+    "keywords": "...",
+    "dimensions": "..." or ["...","..."],
+    "itemNumber": "...",
+    "notes": "..." or ["...","..."]
+  }
+}`;
+}
+
+export const mapSupplierColumns = functions
+  .runWith({ timeoutSeconds: 60 })
+  .https.onRequest((req, res) => {
+    corsHandler(req, res, async () => {
+      if (req.method !== 'POST') {
+        res.status(405).send('Method Not Allowed');
+        return;
+      }
+
+      const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
+      if (!decodedToken) return;
+
+      try {
+        const { headers, sampleRows } = req.body;
+        if (!Array.isArray(headers) || headers.length === 0) {
+          res.status(400).json({ error: 'Provide headers[]' });
+          return;
+        }
+        if (headers.length > 200) {
+          res.status(400).json({ error: 'Too many columns (max 200)' });
+          return;
+        }
+
+        const geminiApiKey = process.env.GEMINI_API_KEY;
+        const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+        if (!geminiApiKey && !anthropicApiKey) {
+          res.status(500).json({ error: 'No LLM API keys configured' });
+          return;
+        }
+
+        const prompt = buildColumnMappingPrompt(headers, sampleRows);
+
+        let parsed: any | null = null;
+        let primaryError: Error | null = null;
+        if (geminiApiKey) {
+          try {
+            parsed = await callGeminiLiteJson(geminiApiKey, prompt);
+          } catch (err: any) {
+            primaryError = err;
+            console.warn('Gemini column mapping failed, falling back to Claude:', err.message);
+          }
+        }
+        if (!parsed) {
+          if (!anthropicApiKey) {
+            throw primaryError || new Error('Gemini failed and no Anthropic fallback key configured');
+          }
+          parsed = await callClaudeLiteJson(anthropicApiKey, prompt);
+        }
+
+        const mapping = parsed && typeof parsed.mapping === 'object' ? parsed.mapping : parsed;
+        res.status(200).json({ mapping: mapping && typeof mapping === 'object' ? mapping : {} });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -9714,17 +9905,29 @@ export const quoteFollowUp = functions.pubsub
         businessName = settingsDoc.data()?.businessName || '';
       } catch {}
 
-      const sent = await sendQuoteFollowUpEmail(
-        email,
-        businessName,
-        quote.job?.name || 'the job',
-        quote.total || 0,
-        userDoc.id
-      );
+      // Skip recipients we already know will hard-bounce (Apple private relay,
+      // example.com test accounts, etc). Otherwise sendEmail logs a 'blocked'
+      // row and the scheduler retries forever because the success flag below
+      // is gated on `sent`.
+      const unsendable = classifyUnsendable(email);
 
-      if (sent) {
+      const sent = unsendable
+        ? false
+        : await sendQuoteFollowUpEmail(
+            email,
+            businessName,
+            quote.job?.name || 'the job',
+            quote.total || 0,
+            userDoc.id
+          );
+
+      // Persist the flag whether we sent OR deliberately skipped, so we don't
+      // re-attempt on every 30-min tick. Only leave it unset on a transient
+      // failure (e.g. Brevo 5xx) so it can retry next run.
+      if (sent || unsendable) {
         await userDoc.ref.collection('settings').doc('emailState').set({
           quoteFollowUpSentAt: admin.firestore.FieldValue.serverTimestamp(),
+          ...(unsendable ? { quoteFollowUpSkippedReason: unsendable } : {}),
         }, { merge: true });
       }
     }

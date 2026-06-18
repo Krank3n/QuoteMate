@@ -34,10 +34,12 @@ import {
 import {
   parseSpreadsheet,
   autoDetectMapping,
+  assessMapping,
   buildExtractFromMapping,
   type ParsedSpreadsheet,
   type ColumnMapping,
 } from '../services/spreadsheetParser';
+import { suggestSupplierColumnMapping } from '../services/llmService';
 import {
   bulkSaveFavorites,
   loadFavoritesFromLocal,
@@ -360,27 +362,37 @@ export function useSupplierListImport(
             setPhase('idle');
             return;
           }
-          const detected = autoDetectMapping(parsed.headers);
+          // Value-aware detection (sees sample rows, not just headers).
+          const detected = autoDetectMapping(parsed.headers, parsed.rows);
           if (detected) {
-            const result = buildExtractFromMapping(parsed, detected, {
-              supplierName: opts.prefilledSupplierName,
-            });
-            if (!result.items.length) {
-              // Detection picked columns but parsing yielded zero usable rows —
-              // fall through to the mapper so the user can correct it.
-              setParsedSpreadsheet(parsed);
-              setAutoDetectedMapping(detected);
-              setColumnMappingVisible(true);
-              setPhase('mappingColumns');
-              return;
+            const { confidence } = assessMapping(detected, parsed.rows);
+            if (confidence !== 'low') {
+              const result = buildExtractFromMapping(parsed, detected, {
+                supplierName: opts.prefilledSupplierName,
+              });
+              // High/medium confidence with usable rows → import straight through.
+              if (result.items.length) {
+                await handleExtractionResult(result);
+                return;
+              }
             }
-            await handleExtractionResult(result);
-          } else {
-            setParsedSpreadsheet(parsed);
-            setAutoDetectedMapping(null);
-            setColumnMappingVisible(true);
-            setPhase('mappingColumns');
           }
+          // Low confidence, zero usable rows, or undetectable → never silently
+          // import a wrong mapping. Pre-fill the column mapper with our best
+          // guess (deterministic, then model-assisted) and let the user confirm.
+          let suggestion: Partial<ColumnMapping> | null = detected;
+          const needsModel = !detected || assessMapping(detected, parsed.rows).confidence === 'low';
+          if (needsModel) {
+            const modelMapping = await suggestSupplierColumnMapping({
+              headers: parsed.headers,
+              sampleRows: parsed.rows,
+            });
+            if (modelMapping) suggestion = { ...(suggestion || {}), ...modelMapping };
+          }
+          setParsedSpreadsheet(parsed);
+          setAutoDetectedMapping(suggestion ?? null);
+          setColumnMappingVisible(true);
+          setPhase('mappingColumns');
         }
       } catch (err: any) {
         reportError(err?.message || 'Could not read the price list. Please try again.');
@@ -477,6 +489,9 @@ export function useSupplierListImport(
           coveragePerUnit: item.coveragePerUnit,
           coverageUnit: item.coverageUnit,
           keywords: item.keywords,
+          dimensions: item.dimensions,
+          itemNumber: item.itemNumber,
+          notes: item.notes,
           source: 'imported' as const,
           sourceRef: importBatchId,
           isPersonalRate: true,

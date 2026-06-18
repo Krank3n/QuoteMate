@@ -14,21 +14,39 @@ import { storage } from '../config/firebase';
 const MAX_WIDTH = 1200;
 const JPEG_QUALITY = 0.7;
 
+// Plans / scaled drawings carry fine dimension text and finish codes that are
+// unreadable once downscaled to 1200px. Send them larger and at higher quality
+// so the vision model can actually read the scale and numbers. Larger upload +
+// slightly higher vision cost, but materially better extraction accuracy.
+export const PLAN_MAX_WIDTH = 2400;
+export const PLAN_JPEG_QUALITY = 0.85;
+
 // Logo-specific compression — logos appear small on PDFs/emails so 512px is
 // plenty. Keeps uploaded file size in the low-10s of KB range instead of
 // multi-MB photos straight from the camera roll.
 const LOGO_MAX_WIDTH = 512;
 const LOGO_JPEG_QUALITY = 0.8;
 
+export interface CompressOptions {
+  /** Compress a plan/drawing at higher resolution so fine text stays legible. */
+  isPlan?: boolean;
+}
+
 /**
- * Compress and resize an image before saving
+ * Compress and resize an image before saving. Pass `{ isPlan: true }` for
+ * architectural plans/drawings to keep more detail (PLAN_MAX_WIDTH / quality).
  */
-export async function compressImage(uri: string): Promise<string> {
+export async function compressImage(
+  uri: string,
+  opts: CompressOptions = {}
+): Promise<string> {
+  const width = opts.isPlan ? PLAN_MAX_WIDTH : MAX_WIDTH;
+  const quality = opts.isPlan ? PLAN_JPEG_QUALITY : JPEG_QUALITY;
   try {
     const result = await manipulateAsync(
       uri,
-      [{ resize: { width: MAX_WIDTH } }],
-      { compress: JPEG_QUALITY, format: SaveFormat.JPEG }
+      [{ resize: { width } }],
+      { compress: quality, format: SaveFormat.JPEG }
     );
     return result.uri;
   } catch (error) {
@@ -133,10 +151,11 @@ export async function uploadBusinessLogo(
  */
 export async function uploadQuotePhoto(
   userId: string,
-  photoUri: string
+  photoUri: string,
+  opts: CompressOptions = {}
 ): Promise<string> {
-  // Compress first (works on all platforms)
-  const compressedUri = await compressImage(photoUri);
+  // Compress first (works on all platforms). Plans go through at higher res.
+  const compressedUri = await compressImage(photoUri, opts);
 
   const blob = await uriToBlob(compressedUri);
   const photoId = generateId();

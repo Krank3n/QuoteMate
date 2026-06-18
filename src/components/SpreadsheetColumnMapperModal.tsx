@@ -94,16 +94,17 @@ export function SpreadsheetColumnMapperModal({
 
   const handleConfirm = () => {
     if (!canConfirm) return;
+    // Spread first so detected-but-not-editable fields (dimensions, itemNumber,
+    // notes, and a composed multi-column name) survive confirmation.
     onConfirm({
+      ...mapping,
       name: mapping.name!,
       price: mapping.price!,
-      unit: mapping.unit,
-      qty: mapping.qty,
-      coveragePerUnit: mapping.coveragePerUnit,
-      coverageUnit: mapping.coverageUnit,
-      keywords: mapping.keywords,
-    });
+    } as ColumnMapping);
   };
+
+  // A composed name (Style/Range + Colour) can't be shown as a single chip.
+  const composedName = Array.isArray(mapping.name) ? mapping.name : null;
 
   return (
     <RNModal
@@ -159,7 +160,14 @@ export function SpreadsheetColumnMapperModal({
                           {field.label}
                           {field.required ? <Text style={styles.required}> *</Text> : null}
                         </Text>
-                        {field.hint ? <Text style={styles.fieldHint}>{field.hint}</Text> : null}
+                        {field.key === 'name' && composedName ? (
+                          <Text style={styles.fieldHint}>
+                            Combined from: {composedName.join(' + ')}. Pick a single
+                            column to override.
+                          </Text>
+                        ) : field.hint ? (
+                          <Text style={styles.fieldHint}>{field.hint}</Text>
+                        ) : null}
                       </View>
                       <ScrollView
                         horizontal

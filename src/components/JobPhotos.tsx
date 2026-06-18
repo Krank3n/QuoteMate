@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { colors } from '../theme';
 import { QuotePhoto } from '../types';
 import { uploadQuotePhoto, deleteQuotePhoto } from '../services/photoService';
+import { detectIsPlan } from '../services/planDetection';
 import { generateId } from '../utils/generateId';
 import { auth } from '../config/firebase';
 import { PhotoAnnotator } from './PhotoAnnotator';
@@ -74,7 +75,7 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
    * `committed` snapshot rather than the (stale) `photos` closure, so all
    * uploads from the same batch survive instead of clobbering each other.
    */
-  const uploadUris = async (uris: string[]) => {
+  const uploadUris = async (uris: string[], opts: { isPlan?: boolean } = {}) => {
     if (!uris.length) return;
 
     const userId = auth.currentUser?.uid;
@@ -87,12 +88,21 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
       return;
     }
 
-    const pendingPhotos: LocalPhoto[] = uris.map(uri => ({
+    // Resolve a plan/photo flag per image: an explicit override wins (the
+    // native "Plan or drawing" option), otherwise auto-detect so we never have
+    // to ask the user. Detection is web-only and best-effort; a miss just
+    // changes upload resolution, not correctness.
+    const planFlags = await Promise.all(
+      uris.map(uri => (opts.isPlan ? Promise.resolve(true) : detectIsPlan(uri))),
+    );
+
+    const pendingPhotos: LocalPhoto[] = uris.map((uri, i) => ({
       id: generateId(),
       storageUrl: '',
       localUri: uri,
       uploading: true,
       annotated: false,
+      isPlan: planFlags[i],
     }));
 
     setLocalPhotos(prev => [...prev, ...pendingPhotos]);
@@ -107,9 +117,9 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
 
     for (const pending of pendingPhotos) {
       try {
-        const storageUrl = await uploadQuotePhoto(userId, pending.localUri!);
+        const storageUrl = await uploadQuotePhoto(userId, pending.localUri!, { isPlan: pending.isPlan });
         setLocalPhotos(prev => prev.filter(p => p.id !== pending.id));
-        committed = [...committed, { id: pending.id, storageUrl, annotated: false }];
+        committed = [...committed, { id: pending.id, storageUrl, annotated: false, ...(pending.isPlan ? { isPlan: true } : {}) }];
         onPhotosChange(committed);
       } catch (err) {
         setLocalPhotos(prev => prev.filter(p => p.id !== pending.id));
@@ -127,7 +137,7 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
     }
   };
 
-  const pickFromGallery = async () => {
+  const pickFromGallery = async (opts: { isPlan?: boolean } = {}) => {
     if (allPhotos.length >= MAX_PHOTOS) {
       showAlert({
         type: 'warning',
@@ -182,7 +192,7 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
       });
     }
 
-    await uploadUris(assets.map(a => a.uri));
+    await uploadUris(assets.map(a => a.uri), { isPlan: opts.isPlan });
   };
 
   const openCameraCapture = async () => {
@@ -274,9 +284,9 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
     setAnnotatingPhoto(null);
 
     try {
-      const storageUrl = await uploadQuotePhoto(userId, annotatedUri);
+      const storageUrl = await uploadQuotePhoto(userId, annotatedUri, { isPlan: annotatingPhoto.isPlan });
       setLocalPhotos(prev => prev.filter(p => p.id !== photoId));
-      onPhotosChange([...photos.filter(p => p.id !== photoId), { id: photoId, storageUrl, annotated: true }]);
+      onPhotosChange([...photos.filter(p => p.id !== photoId), { id: photoId, storageUrl, annotated: true, ...(annotatingPhoto.isPlan ? { isPlan: true } : {}) }]);
 
       // Delete old version in background
       if (annotatingPhoto.storageUrl) {
@@ -298,6 +308,7 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
 
   const showAddOptions = () => {
     if (Platform.OS === 'web') {
+      // No ask — plans are auto-detected on upload (web) so we just pick.
       pickFromGallery();
       return;
     }
@@ -305,9 +316,12 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
     setPhotoSheetVisible(true);
   };
 
+  // Native can't read pixels to auto-detect, so it keeps an explicit
+  // "Plan or drawing" option for the rare hi-res case. Web auto-detects.
   const photoSheetOptions: ActionSheetOption[] = [
     { icon: 'camera', label: 'Take Photo', onPress: openCameraCapture },
-    { icon: 'image-multiple', label: 'Photo Library', onPress: pickFromGallery },
+    { icon: 'image-multiple', label: 'Photo Library', onPress: () => pickFromGallery() },
+    { icon: 'floor-plan', label: 'Plan or drawing (hi-res)', onPress: () => pickFromGallery({ isPlan: true }) },
   ];
 
   const hasAnyUploading = localPhotos.some(p => p.uploading);
@@ -319,7 +333,7 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
         <Text style={styles.optional}>optional</Text>
       </View>
       <Text style={styles.hint}>
-        Add site photos to help with AI analysis and show clients the scope
+        Add site photos or plans to help with AI analysis and show clients the scope
       </Text>
 
       <View style={styles.grid}>
@@ -398,6 +412,7 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
           'Capture each angle of the job site',
           'Get close to anything that needs work',
           'Snap measurements, fences, walls, gates',
+          'Got a plan? Snap the whole thing and keep the scale bar or a known measurement in shot',
           'Include any obstacles or access issues',
           'Multiple shots? Take them all before hitting Done',
         ]}

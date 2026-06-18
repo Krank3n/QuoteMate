@@ -6,11 +6,14 @@
  * by feeding `buildExtractFromMapping` a hand-built ParsedSpreadsheet.
  */
 
+import path from 'path';
 import { describe, it, expect } from 'vitest';
 import {
   autoDetectMapping,
+  assessMapping,
   buildExtractFromMapping,
   normaliseUnit,
+  parseSpreadsheet,
   type ParsedSpreadsheet,
 } from '../spreadsheetParser';
 
@@ -25,6 +28,10 @@ describe('autoDetectMapping', () => {
       coveragePerUnit: undefined,
       coverageUnit: undefined,
       keywords: undefined,
+      // SKU is now recognised as a product/item code.
+      itemNumber: 'SKU',
+      dimensions: undefined,
+      notes: undefined,
     });
   });
 
@@ -130,5 +137,73 @@ describe('buildExtractFromMapping', () => {
       price: 'Unit Price',
     });
     expect(result.items).toHaveLength(2);
+  });
+});
+
+// End-to-end over a REAL supplier price list (Craig's Flooring Supplies export):
+// 30 columns, no single name column, prices like "$28.50/m²", no unit column,
+// and lots of attribute columns. This is the exact file as if uploaded through
+// the supplier book, run through parse → detect → build.
+describe('real flooring supplier spreadsheet', () => {
+  const fixture = path.join(__dirname, '__fixtures__', 'sample-flooring-database.xlsx');
+
+  it('parses, auto-detects and builds correct line items', async () => {
+    const parsed = await parseSpreadsheet(fixture, 'sample-flooring-database.xlsx');
+
+    // Real header row picked up despite line-wrapped headers.
+    expect(parsed.rows.length).toBe(4);
+
+    const mapping = autoDetectMapping(parsed.headers, parsed.rows);
+    expect(mapping).not.toBeNull();
+
+    // Name is composed from Style/Range + Colour — NOT the generic "Product Type".
+    expect(Array.isArray(mapping!.name)).toBe(true);
+    // No dedicated unit column — unit must come from the price suffix.
+    expect(mapping!.unit).toBeUndefined();
+    // qty maps to "Qty per pack", not the greedy "m² per pack".
+    expect(mapping!.qty?.toLowerCase()).toContain('qty');
+    // coverage maps to "m² per pack", not the empty "Raw area".
+    expect(mapping!.coveragePerUnit?.toLowerCase()).toContain('per pack');
+
+    const { items } = buildExtractFromMapping(parsed, mapping!, {
+      supplierName: 'Craig\'s Flooring Supplies',
+    });
+    expect(items).toHaveLength(4);
+
+    // FC01 — Airlay Oakwood LVT.
+    const lvt = items[0];
+    expect(lvt.name).toBe('Oakwood LVP Collection — Blonde Oak');
+    expect(lvt.price).toBe(28.5);
+    expect(lvt.unit).toBe('m²'); // inferred from "$28.50/m²", NOT "each"
+    expect(lvt.coveragePerUnit).toBe(2.8);
+    expect(lvt.coverageUnit).toBe('m²');
+    expect(lvt.qty).toBe(8); // Qty per pack, NOT 3 (m² per pack rounded)
+    expect(lvt.dimensions).toBe('1524 × 230 × 5');
+    expect(lvt.keywords).toContain('vinyl 5.0 plank');
+    expect(lvt.notes ?? '').toMatch(/warranty/i);
+    expect(lvt.notes ?? '').toMatch(/china/i);
+
+    // FC03 — Supersafe safety sheet vinyl (40 m² roll).
+    const vinyl = items[2];
+    expect(vinyl.name).toBe('Supersafe Safety Sheet Vinyl — Stone Taupe Plain R11');
+    expect(vinyl.price).toBe(29.5);
+    expect(vinyl.unit).toBe('m²');
+    expect(vinyl.coveragePerUnit).toBe(40);
+
+    // FC05 — Spectrum entry mat, priced per linear metre with a supplier code.
+    const mat = items[3];
+    expect(mat.name).toBe('Excellence Entrance Matting — Anthracite');
+    expect(mat.price).toBe(448.13);
+    expect(mat.unit).toBe('m'); // "$448.13/m"
+    expect(mat.itemNumber).toBe('PE607');
+  });
+
+  it('flags the import as needing confirmation rather than silently importing', async () => {
+    const parsed = await parseSpreadsheet(fixture, 'sample-flooring-database.xlsx');
+    const mapping = autoDetectMapping(parsed.headers, parsed.rows)!;
+    const { confidence, warnings } = assessMapping(mapping, parsed.rows);
+    // Composed name + price-inferred unit → not "high"; surfaced to the user.
+    expect(confidence).not.toBe('high');
+    expect(warnings.length).toBeGreaterThan(0);
   });
 });

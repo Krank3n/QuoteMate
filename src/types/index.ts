@@ -104,6 +104,40 @@ export interface QuotePhoto {
   storageUrl: string;    // Firebase Storage download URL
   thumbnailUrl?: string;  // Optional smaller version
   annotated?: boolean;    // Whether photo has been annotated
+  // Marked by the user as a plan/drawing → uploaded at higher resolution so the
+  // gear generator can read its scale and dimensions.
+  isPlan?: boolean;
+}
+
+// A single measurable region read off a plan. Deliberately trade-agnostic —
+// "zone" (not "finish code") so the same shape serves flooring, tiling,
+// painting, concreting, landscaping, etc. `code` carries a plan label when one
+// is printed (FC01, R1, Room 3…) but is never required.
+export interface FloorplanZone {
+  label: string;          // human label, e.g. "Master bedroom" or "FC01 area"
+  code?: string;          // plan-printed code if any (FC01, R1, …)
+  areaM2?: number;
+  dims?: { lengthM: number; widthM: number };
+}
+
+// Structured geometry extracted from an architectural plan/drawing in the photo
+// pipeline. Always carries `assumptions` + `confidence` so a misread surfaces to
+// the user instead of being silently baked into quantities.
+export interface FloorplanAnalysis {
+  detected: boolean;
+  scale?: string;                 // "1:100"
+  calibration?: {
+    source: 'scale_bar' | 'known_dimension' | 'stated_total';
+    basisMm?: number;             // the reference length used to set scale
+    note: string;
+  };
+  totalAreaM2?: number;
+  perimeterM?: number;            // drives skirting / edging / cornice / kerb
+  zones?: FloorplanZone[];
+  removalAreaM2?: number;         // strip-out / demolition scope
+  removalBinM3?: number;          // estimated waste skip volume
+  assumptions: string;            // what was inferred or could not be read
+  confidence: 'low' | 'medium' | 'high';
 }
 
 // Labor unit type for hours/days billing
@@ -194,6 +228,9 @@ export interface JobSpec {
   template?: 'stairs' | 'deck' | 'fence' | 'pergola' | 'custom';
   estimatedHours?: number;
   customParams?: Record<string, number>; // e.g., { steps: 15, length: 10 }
+  // Geometry read off an attached plan during gear generation (area, perimeter,
+  // per-zone breakdown). Present only when a floorplan/drawing was detected.
+  floorplanAnalysis?: FloorplanAnalysis;
 }
 
 // Top-level Job entity. Re-exported from the shared module so the app and

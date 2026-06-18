@@ -269,7 +269,11 @@ export async function generateMaterialsForQuote(
   const hasExistingMaterials = quote.materials.length > 0;
   const updatedQuote: Quote = {
     ...quote,
-    job: { ...quote.job, estimatedHours: analysis.estimatedHours } as Quote['job'],
+    job: {
+      ...quote.job,
+      estimatedHours: analysis.estimatedHours,
+      ...(analysis.floorplanAnalysis ? { floorplanAnalysis: analysis.floorplanAnalysis } : {}),
+    } as Quote['job'],
     sections: [...existingSections, ...newSections],
     materials: hasExistingMaterials ? [...quote.materials, ...generatedMaterials] : generatedMaterials,
     laborHours: hasExistingMaterials

@@ -33,6 +33,12 @@ export interface ExtractedItem {
   coveragePerUnit?: number;
   coverageUnit?: 'm²' | 'm³' | 'm';
   keywords: string[];
+  /** Composed product dimensions, e.g. "1524 × 230 × 5". */
+  dimensions?: string;
+  /** Supplier/product code. */
+  itemNumber?: string;
+  /** Free-text attributes preserved from a spreadsheet (warranty, country…). */
+  notes?: string;
   confidence: 'high' | 'medium' | 'low';
   rawLine?: string;
 }
@@ -201,6 +207,9 @@ export interface ImportFavoriteRow {
   coveragePerUnit?: number;
   coverageUnit?: 'm²' | 'm³' | 'm';
   keywords?: string[];
+  dimensions?: string;
+  itemNumber?: string;
+  notes?: string;
 }
 
 /**
@@ -234,6 +243,9 @@ export async function persistImportToSupplierBook(args: {
     coveragePerUnit: item.coveragePerUnit,
     coverageUnit: item.coverageUnit,
     keywords: item.keywords,
+    dimensions: item.dimensions,
+    itemNumber: item.itemNumber,
+    notes: item.notes,
     source: 'imported' as const,
     sourceRef: importBatchId,
     isPersonalRate: true,
