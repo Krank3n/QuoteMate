@@ -465,9 +465,17 @@ export const adminRunTicket = functions
 
     if (ticket.type === 'code') {
       const now = Date.now();
-      await ref.update({ status: 'todo', agentStatus: 'queued', updatedAt: now });
-      await logTicketAction(adminUid, 'queue_code_ticket', id);
-      return { ok: true, queued: true };
+      // Queue = open a GitHub issue the cloud agent finds via `gh issue list`
+      // (the cloud env can reach GitHub, unlike the bridge Cloud Function).
+      const issueNumber = await ensureTicketIssue(ref, id, ticket);
+      await ref.update({
+        status: 'todo',
+        agentStatus: 'queued',
+        shipStatus: issueNumber ? 'queued' : 'queued (set GITHUB_TOKEN to create the agent issue)',
+        updatedAt: now,
+      });
+      await logTicketAction(adminUid, 'queue_code_ticket', id, { issueNumber });
+      return { ok: true, queued: true, issueNumber };
     }
 
     await logTicketAction(adminUid, 'run_ops_ticket', id);
@@ -702,6 +710,49 @@ function parsePrUrl(prUrl: string | undefined | null): { owner: string; repo: st
   return m ? { owner: m[1], repo: m[2], number: Number(m[3]) } : null;
 }
 
+// ---- GitHub Issues queue: the cloud agent finds work via `gh issue list`
+// (GitHub is reachable from the cloud env; the bridge Cloud Function is not). A
+// hidden marker in the issue/PR body maps the work back to this ticket. ----
+const AGENT_QUEUE_LABEL = 'agent-queue';
+
+function ticketMarker(id: string): string {
+  return `<!-- qm-ticket:${id} -->`;
+}
+
+// Open (idempotently) a queue issue for a code ticket. Returns the issue number,
+// or null if it couldn't be created (e.g. GITHUB_TOKEN unset).
+async function ensureTicketIssue(
+  ref: FirebaseFirestore.DocumentReference,
+  id: string,
+  ticket: any,
+): Promise<number | null> {
+  if (ticket.issueNumber) return ticket.issueNumber;
+  if (!process.env.GITHUB_TOKEN) return null;
+  try {
+    // Ensure the label exists (ignore "already exists").
+    await githubFetch(`/repos/${REPO_OWNER}/${REPO_NAME}/labels`, {
+      method: 'POST',
+      body: { name: AGENT_QUEUE_LABEL, color: 'f97316', description: 'Queued for the QuoteMate code agent' },
+    }).catch(() => undefined);
+
+    const body =
+      `${ticket.spec || ''}\n\n---\n` +
+      `Priority: ${ticket.priority || 'medium'}\n` +
+      `${ticketMarker(id)}\n` +
+      `_Queued from the QuoteMate Tasks board. The code agent implements this on a branch and opens a PR that closes this issue. Keep the marker above intact._`;
+    const r = await githubFetch(`/repos/${REPO_OWNER}/${REPO_NAME}/issues`, {
+      method: 'POST',
+      body: { title: ticket.title, body, labels: [AGENT_QUEUE_LABEL] },
+    });
+    if (r.status >= 300) return null;
+    const number = (r.body?.number as number) || null;
+    await ref.update({ issueNumber: number, issueUrl: r.body?.html_url || null, updatedAt: Date.now() });
+    return number;
+  } catch {
+    return null;
+  }
+}
+
 // Merge the ticket's PR (squash by default) via the GitHub API.
 export const adminMergeTicketPR = functions.https.onCall(async (data, context) => {
   const adminUid = requireAdmin(context);
@@ -790,4 +841,45 @@ export const adminGenerateReleaseNotes = functions
     await ref.update({ releaseNotes: res.text, updatedAt: Date.now() });
     await logTicketAction(adminUid, 'generate_release_notes', id);
     return { releaseNotes: res.text };
+  });
+
+// Reconciler: pull agent-opened PRs back onto the board. Lists open PRs and,
+// for any whose body carries a qm-ticket marker, flips that ticket into the
+// 'pr' (review/ship) lane with its PR url. This is the return path the cloud
+// agent can't make itself (it can't reach the bridge), so we poll GitHub from
+// the backend (which can). No-op until GITHUB_TOKEN is set.
+export const ticketPrSync = functions
+  .runWith({ timeoutSeconds: 120, memory: '256MB' })
+  .pubsub.schedule('every 10 minutes')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    if (!process.env.GITHUB_TOKEN) {
+      console.log('ticketPrSync: GITHUB_TOKEN not set, skipping');
+      return null;
+    }
+    const r = await githubFetch(`/repos/${REPO_OWNER}/${REPO_NAME}/pulls?state=open&per_page=100`, { method: 'GET' });
+    if (r.status >= 300 || !Array.isArray(r.body)) {
+      console.error('ticketPrSync: list PRs failed', r.status);
+      return null;
+    }
+    let synced = 0;
+    for (const pr of r.body) {
+      const m = String(pr.body || '').match(/<!--\s*qm-ticket:([A-Za-z0-9_-]+)\s*-->/);
+      if (!m) continue;
+      const ref = db().collection('tickets').doc(m[1]);
+      const snap = await ref.get();
+      if (!snap.exists) continue;
+      const t = snap.data() as any;
+      if (t.prUrl === pr.html_url && t.status === 'pr') continue; // already synced
+      await ref.update({
+        prUrl: pr.html_url,
+        status: 'pr',
+        agentStatus: 'succeeded',
+        shipStatus: t.shipStatus === 'merged' ? 'merged' : 'pr_open',
+        updatedAt: Date.now(),
+      });
+      synced++;
+    }
+    console.log(`ticketPrSync: synced ${synced} PR(s)`);
+    return null;
   });
