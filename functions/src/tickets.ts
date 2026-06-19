@@ -714,6 +714,7 @@ function parsePrUrl(prUrl: string | undefined | null): { owner: string; repo: st
 // (GitHub is reachable from the cloud env; the bridge Cloud Function is not). A
 // hidden marker in the issue/PR body maps the work back to this ticket. ----
 const AGENT_QUEUE_LABEL = 'agent-queue';
+const AGENT_WORKING_LABEL = 'agent-working';
 
 function ticketMarker(id: string): string {
   return `<!-- qm-ticket:${id} -->`;
@@ -857,6 +858,24 @@ export const ticketPrSync = functions
       console.log('ticketPrSync: GITHUB_TOKEN not set, skipping');
       return null;
     }
+
+    // Reflect claimed issues (label agent-working) as In Progress on the board,
+    // so a ticket visibly moves To Do -> In Progress while the agent is on it.
+    const ir = await githubFetch(`/repos/${REPO_OWNER}/${REPO_NAME}/issues?state=open&labels=${AGENT_WORKING_LABEL}&per_page=100`, { method: 'GET' });
+    if (ir.status < 300 && Array.isArray(ir.body)) {
+      for (const issue of ir.body) {
+        if (issue.pull_request) continue; // the issues endpoint also returns PRs
+        const im = String(issue.body || '').match(/<!--\s*qm-ticket:([A-Za-z0-9_-]+)\s*-->/);
+        if (!im) continue;
+        const iref = db().collection('tickets').doc(im[1]);
+        const isnap = await iref.get();
+        if (!isnap.exists) continue;
+        const it = isnap.data() as any;
+        if (['pr', 'done'].includes(it.status) || (it.status === 'in_progress' && it.agentStatus === 'running')) continue;
+        await iref.update({ status: 'in_progress', agentStatus: 'running', shipStatus: 'agent working', updatedAt: Date.now() });
+      }
+    }
+
     const r = await githubFetch(`/repos/${REPO_OWNER}/${REPO_NAME}/pulls?state=open&per_page=100`, { method: 'GET' });
     if (r.status >= 300 || !Array.isArray(r.body)) {
       console.error('ticketPrSync: list PRs failed', r.status);
