@@ -14,6 +14,15 @@ export default {
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
     newArchEnabled: true,
+    // EAS Update (OTA): JS-only changes push over-the-air. runtimeVersion =
+    // appVersion means an OTA only lands on a build of the SAME app version,
+    // so native changes still require a fresh build + store submit.
+    updates: {
+      url: "https://u.expo.dev/b164d7f8-b04e-4960-a962-ebc74fe65bce"
+    },
+    runtimeVersion: {
+      policy: "appVersion"
+    },
     plugins: [
       [
         "expo-build-properties",

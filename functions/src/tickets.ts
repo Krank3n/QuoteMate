@@ -25,16 +25,24 @@ const db = () => admin.firestore();
 // 'claude-opus-4-6' here if ops tasks need deeper reasoning.
 const TICKET_MODEL = 'claude-sonnet-4-6';
 
+// Repo the code-ticket pipeline + ship buttons act on, and the GitHub Actions
+// workflow the Rebuild/Redeploy/OTA buttons dispatch. The backend needs a
+// GITHUB_TOKEN (fine-grained PAT — Contents + Pull requests + Actions on this
+// repo) in functions/.env; the workflow itself needs an EXPO_TOKEN repo secret.
+const REPO_OWNER = 'Krank3n';
+const REPO_NAME = 'QuoteMate';
+const EAS_WORKFLOW_FILE = 'eas.yml';
+
 // ============================================================
 // TYPES + VALIDATION
 // ============================================================
 
 type TicketType = 'ops' | 'code';
-type TicketStatus = 'backlog' | 'todo' | 'in_progress' | 'done';
+type TicketStatus = 'backlog' | 'todo' | 'in_progress' | 'pr' | 'done';
 type TicketPriority = 'low' | 'medium' | 'high';
 
 const VALID_TYPE: TicketType[] = ['ops', 'code'];
-const VALID_STATUS: TicketStatus[] = ['backlog', 'todo', 'in_progress', 'done'];
+const VALID_STATUS: TicketStatus[] = ['backlog', 'todo', 'in_progress', 'pr', 'done'];
 const VALID_PRIORITY: TicketPriority[] = ['low', 'medium', 'high'];
 
 function coerceType(v: any, fallback: TicketType = 'ops'): TicketType {
@@ -615,7 +623,9 @@ export const ticketAgentBridge = functions.https.onRequest(async (req, res) => {
         .collection('tickets')
         .doc(ticketId)
         .update({
-          status: success ? 'done' : 'todo',
+          // A completed code ticket with a PR lands in the 'pr' (review/ship)
+          // lane, not 'done' — 'done' means merged + shipped.
+          status: success ? (prUrl ? 'pr' : 'done') : 'todo',
           agentStatus: success ? 'succeeded' : 'failed',
           output,
           prUrl,
@@ -651,3 +661,133 @@ export const ticketAgentBridge = functions.https.onRequest(async (req, res) => {
     res.status(500).json({ error: err?.message || 'failed' });
   }
 });
+
+// ============================================================
+// SHIP CONTROLS — merge PRs + drive EAS builds / submits / OTA via the GitHub
+// Actions workflow (.github/workflows/eas.yml). All GitHub calls use
+// GITHUB_TOKEN (functions/.env). Outward-facing + costs build credits / hits
+// the stores — only ever fired on an explicit admin button click.
+// ============================================================
+
+async function githubFetch(
+  path: string,
+  init: { method: string; body?: any },
+): Promise<{ status: number; body: any }> {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) throw new functions.https.HttpsError('failed-precondition', 'GITHUB_TOKEN not configured');
+  const res = await fetch(`https://api.github.com${path}`, {
+    method: init.method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+      'content-type': 'application/json',
+      'user-agent': 'quotemate-admin',
+    },
+    body: init.body ? JSON.stringify(init.body) : undefined,
+  });
+  const text = await res.text();
+  let body: any = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = text;
+  }
+  return { status: res.status, body };
+}
+
+function parsePrUrl(prUrl: string | undefined | null): { owner: string; repo: string; number: number } | null {
+  if (!prUrl) return null;
+  const m = String(prUrl).match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  return m ? { owner: m[1], repo: m[2], number: Number(m[3]) } : null;
+}
+
+// Merge the ticket's PR (squash by default) via the GitHub API.
+export const adminMergeTicketPR = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const id = (data?.id || '').toString();
+  if (!id) throw new functions.https.HttpsError('invalid-argument', 'id required');
+  const ref = db().collection('tickets').doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'ticket not found');
+  const ticket = snap.data() as any;
+  const pr = parsePrUrl(ticket.prUrl);
+  if (!pr) throw new functions.https.HttpsError('failed-precondition', 'ticket has no GitHub PR url');
+
+  const method = ['squash', 'merge', 'rebase'].includes((data?.method || '').toString()) ? data.method : 'squash';
+  const r = await githubFetch(`/repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/merge`, {
+    method: 'PUT',
+    body: { merge_method: method },
+  });
+  if (r.status >= 300) {
+    const msg = (r.body?.message || JSON.stringify(r.body) || '').toString().slice(0, 200);
+    throw new functions.https.HttpsError('internal', `GitHub merge failed (${r.status}): ${msg}`);
+  }
+  await ref.update({ prMerged: true, shipStatus: 'merged', updatedAt: Date.now() });
+  await logTicketAction(adminUid, 'merge_pr', id, { pr: pr.number, sha: r.body?.sha || null });
+  return { ok: true, merged: true, sha: r.body?.sha || null };
+});
+
+// Dispatch the EAS workflow for this ticket. action: 'build' (full native),
+// 'submit' (to the stores), or 'update' (instant OTA, JS-only).
+export const adminDispatchEas = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const id = (data?.id || '').toString();
+  const eas = (data?.action || '').toString();
+  if (!id) throw new functions.https.HttpsError('invalid-argument', 'id required');
+  if (!['build', 'submit', 'update'].includes(eas)) {
+    throw new functions.https.HttpsError('invalid-argument', 'action must be build | submit | update');
+  }
+  const platform = ['all', 'android', 'ios'].includes((data?.platform || '').toString()) ? data.platform : 'all';
+  const profile = (data?.profile || 'production').toString();
+
+  const ref = db().collection('tickets').doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'ticket not found');
+  const ticket = snap.data() as any;
+  const message = (data?.message || ticket.releaseNotes || ticket.title || '').toString().slice(0, 800);
+
+  const r = await githubFetch(`/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${EAS_WORKFLOW_FILE}/dispatches`, {
+    method: 'POST',
+    body: { ref: 'main', inputs: { action: eas, platform, profile, message } },
+  });
+  if (r.status >= 300) {
+    const msg = (r.body?.message || JSON.stringify(r.body) || '').toString().slice(0, 200);
+    throw new functions.https.HttpsError('internal', `Workflow dispatch failed (${r.status}): ${msg}`);
+  }
+  const runsUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${EAS_WORKFLOW_FILE}`;
+  const shipStatus = eas === 'build' ? 'building' : eas === 'submit' ? 'submitting' : 'updating';
+  await ref.update({
+    shipStatus,
+    buildRunUrl: runsUrl,
+    lastDispatch: { action: eas, platform, at: Date.now() },
+    updatedAt: Date.now(),
+  });
+  await logTicketAction(adminUid, `eas_${eas}`, id, { platform, profile });
+  return { ok: true, runsUrl };
+});
+
+// AI: write user-facing "What's New" notes from the ticket (store notes / OTA message).
+export const adminGenerateReleaseNotes = functions
+  .runWith({ timeoutSeconds: 120, memory: '256MB' })
+  .https.onCall(async (data, context) => {
+    const adminUid = requireAdmin(context);
+    const id = (data?.id || '').toString();
+    if (!id) throw new functions.https.HttpsError('invalid-argument', 'id required');
+    const ref = db().collection('tickets').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'ticket not found');
+    const ticket = snap.data() as any;
+
+    const res = await callClaude({
+      system:
+        "You write short App Store / Play Store \"What's New\" release notes for QuoteMate, an app for Australian tradies. 1-3 plain, benefit-led sentences or short bullets. No jargon, no version numbers, no implementation detail, Australian tone. Describe what the user gets.",
+      user: `Ticket: ${ticket.title}\n\nDetails:\n${ticket.spec || ''}\n\nWhat was built:\n${ticket.output || ''}`,
+      maxTokens: 400,
+      temperature: 0.5,
+    });
+    if (!res.ok) throw new functions.https.HttpsError('internal', res.error);
+    await ref.update({ releaseNotes: res.text, updatedAt: Date.now() });
+    await logTicketAction(adminUid, 'generate_release_notes', id);
+    return { releaseNotes: res.text };
+  });

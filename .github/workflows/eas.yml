@@ -1,0 +1,66 @@
+name: EAS Pipeline
+
+# Triggered from the QuoteMate admin Tasks board (Rebuild / Redeploy / Push OTA
+# buttons) via the GitHub API (workflow_dispatch). Requires an EXPO_TOKEN
+# secret on the repo (Settings → Secrets and variables → Actions).
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to run"
+        required: true
+        type: choice
+        options: [build, submit, update]
+      platform:
+        description: "Target platform"
+        required: true
+        default: "all"
+        type: choice
+        options: [all, android, ios]
+      profile:
+        description: "EAS build/submit profile (also the OTA branch)"
+        required: false
+        default: "production"
+      message:
+        description: "Release notes / OTA update message"
+        required: false
+        default: ""
+
+jobs:
+  eas:
+    name: ${{ inputs.action }} (${{ inputs.platform }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # Full native build (Android app-bundle + iOS). Non-blocking: EAS runs it
+      # in the cloud and the run page links to the build.
+      - name: Build
+        if: ${{ inputs.action == 'build' }}
+        run: eas build --platform ${{ inputs.platform }} --profile ${{ inputs.profile }} --non-interactive --no-wait
+
+      # Submit the latest finished build to the stores (iOS → App Store review).
+      - name: Submit
+        if: ${{ inputs.action == 'submit' }}
+        run: eas submit --platform ${{ inputs.platform }} --profile ${{ inputs.profile }} --latest --non-interactive
+
+      # OTA: ship a JS-only change instantly to installed builds on this channel.
+      - name: OTA Update
+        if: ${{ inputs.action == 'update' }}
+        run: eas update --branch ${{ inputs.profile }} --message "${{ inputs.message }}" --non-interactive
