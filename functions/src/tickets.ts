@@ -32,6 +32,7 @@ const TICKET_MODEL = 'claude-sonnet-4-6';
 const REPO_OWNER = 'Krank3n';
 const REPO_NAME = 'QuoteMate';
 const EAS_WORKFLOW_FILE = 'eas.yml';
+const AGENT_WORKFLOW_FILE = 'agent.yml';
 
 // ============================================================
 // TYPES + VALIDATION
@@ -465,17 +466,22 @@ export const adminRunTicket = functions
 
     if (ticket.type === 'code') {
       const now = Date.now();
-      // Queue = open a GitHub issue the cloud agent finds via `gh issue list`
-      // (the cloud env can reach GitHub, unlike the bridge Cloud Function).
+      // Run now = open a GitHub issue for the ticket, then immediately dispatch
+      // the on-demand agent workflow on it — no waiting for the hourly sweep.
       const issueNumber = await ensureTicketIssue(ref, id, ticket);
+      const started = issueNumber ? await startAgentOnIssue(issueNumber) : false;
       await ref.update({
-        status: 'todo',
-        agentStatus: 'queued',
-        shipStatus: issueNumber ? 'queued' : 'queued (set GITHUB_TOKEN to create the agent issue)',
+        status: started ? 'in_progress' : 'todo',
+        agentStatus: started ? 'running' : 'queued',
+        shipStatus: !issueNumber
+          ? 'queued (set GITHUB_TOKEN to create the agent issue)'
+          : started
+            ? 'agent started'
+            : 'queued (agent workflow dispatch failed)',
         updatedAt: now,
       });
-      await logTicketAction(adminUid, 'queue_code_ticket', id, { issueNumber });
-      return { ok: true, queued: true, issueNumber };
+      await logTicketAction(adminUid, 'run_code_ticket', id, { issueNumber, started });
+      return { ok: true, queued: true, started, issueNumber };
     }
 
     await logTicketAction(adminUid, 'run_ops_ticket', id);
@@ -751,6 +757,25 @@ async function ensureTicketIssue(
     return number;
   } catch {
     return null;
+  }
+}
+
+// Start the on-demand agent on an issue NOW: claim it (so the hourly sweep skips
+// it), then dispatch the agent.yml GitHub Actions workflow to run the pipeline.
+async function startAgentOnIssue(issueNumber: number): Promise<boolean> {
+  if (!process.env.GITHUB_TOKEN) return false;
+  try {
+    await githubFetch(`/repos/${REPO_OWNER}/${REPO_NAME}/issues/${issueNumber}/labels`, {
+      method: 'PUT',
+      body: { labels: [AGENT_WORKING_LABEL] },
+    }).catch(() => undefined);
+    const r = await githubFetch(`/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${AGENT_WORKFLOW_FILE}/dispatches`, {
+      method: 'POST',
+      body: { ref: 'main', inputs: { issue: String(issueNumber) } },
+    });
+    return r.status < 300;
+  } catch {
+    return false;
   }
 }
 

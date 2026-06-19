@@ -1,0 +1,49 @@
+name: Code agent (on-demand)
+
+# Runs the full Claude Code quality pipeline on ONE queued issue, immediately,
+# when dispatched from the QuoteMate Tasks board (Run now). Needs an
+# ANTHROPIC_API_KEY repo secret. The board sets the issue's label to
+# agent-working before dispatching, so the hourly cloud routine won't also grab it.
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Issue number to implement"
+        required: true
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Git identity
+        run: |
+          git config user.name "QuoteMate Agent"
+          git config user.email "noreply@anthropic.com"
+
+      - name: Run the pipeline on the issue
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue }}
+        run: |
+          claude --dangerously-skip-permissions --model sonnet -p "$(cat .github/agent-task.md)
+
+          Target issue to implement: #${ISSUE}"
