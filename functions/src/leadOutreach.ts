@@ -97,7 +97,8 @@ type LeadStatus =
   | 'converted'
   | 'rejected'
   | 'dnc'
-  | 'bounced';
+  | 'bounced'
+  | 'no_email';
 
 interface PersonalizationHook {
   text: string;
@@ -944,6 +945,14 @@ export const adminEnrichLeads = functions
       if (!lead.facebookUrl && scraped?.socials?.facebook) updates.facebookUrl = scraped.socials.facebook;
       if (!lead.instagramUrl && scraped?.socials?.instagram) updates.instagramUrl = scraped.socials.instagram;
 
+      // Cold outreach is email-only. If enrichment couldn't find a sendable
+      // address (no website, contact-form-only site, obfuscated email), park
+      // the lead in 'no_email' rather than letting it flow to 'researched' →
+      // 'queued', where it would clog the queue and get skipped forever.
+      if (!normaliseEmail(updates.email || lead.email)) {
+        updates.status = 'no_email' as LeadStatus;
+      }
+
       await ref.set(updates, { merge: true });
 
       // Save research raw
@@ -994,6 +1003,15 @@ export const adminGenerateLeadMessages = functions
       if (!snap.exists) { skipped++; continue; }
       const lead: any = snap.data();
       if (!['researched', 'queued'].includes(lead.status)) { skipped++; continue; }
+
+      // No email = nothing to send. Don't spend a Claude call generating copy
+      // for a lead we can never email; park it in 'no_email' so it leaves the
+      // pipeline instead of silently sitting in the send queue.
+      if (!normaliseEmail(lead.email)) {
+        await ref.set({ status: 'no_email' as LeadStatus }, { merge: true });
+        skipped++;
+        continue;
+      }
 
       const msg = await claudeGenerateMessage({
         businessName: lead.businessName,
@@ -1310,11 +1328,16 @@ async function sendOneLead(params: {
   if (!snap.exists) return { sent: false, reason: 'not_found' };
   const lead: any = snap.data();
   if (lead.status !== 'queued') return { sent: false, reason: `not_queued:${lead.status}` };
-  if (!lead.email) return { sent: false, reason: 'no_email' };
+
+  // No sendable address: reclassify out of the queue so we stop re-scanning it
+  // every run. (Self-heals leads that were queued before the email gate landed.)
+  const email = normaliseEmail(lead.email);
+  if (!email) {
+    await ref.set({ status: 'no_email' as LeadStatus }, { merge: true });
+    return { sent: false, reason: 'no_email' };
+  }
   if (!lead.generatedSubject || !lead.generatedBody) return { sent: false, reason: 'no_message' };
 
-  const email = normaliseEmail(lead.email);
-  if (!email) return { sent: false, reason: 'invalid_email' };
   const dom = domainOf(email);
 
   const supp = await isSuppressed({ email, domain: dom || undefined, placeId: lead.googlePlaceId });
