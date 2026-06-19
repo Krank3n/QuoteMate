@@ -100,7 +100,7 @@ export function ViewJobScreen() {
   } | null>(null);
   const [pendingAction, setPendingAction] = useState<JobActionId | null>(null);
   const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
-  const { showAlert, alertNode } = useAlertModal();
+  const { showAlert, dismissAlert, alertNode } = useAlertModal();
   const [convertSnackbar, setConvertSnackbar] = useState(false);
   const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
 
@@ -285,16 +285,18 @@ export function ViewJobScreen() {
       type: 'warning',
       title: 'Convert to invoice?',
       message: "This quote will become an invoice and can't be sent as a quote again.",
-      primaryButtonText: 'Convert',
+      primaryButtonText: 'Convert to invoice',
+      primaryKeepsOpen: true,
       primaryButtonAction: async () => {
         try {
           await convertDocumentToInvoice(doc.id);
+          dismissAlert();
           setConvertSnackbar(true);
         } catch (err) {
           showAlert({
             type: 'error',
             title: 'Conversion failed',
-            message: 'Save the document first, then try again.',
+            message: 'Something went wrong. Pull to refresh and try again.',
           });
         }
       },

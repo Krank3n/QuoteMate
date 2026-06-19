@@ -84,6 +84,7 @@ export function useAlertModal() {
       primaryButtonAction={wrappedPrimary}
       secondaryButtonText={opts.secondaryButtonText}
       secondaryButtonAction={wrappedSecondary}
+      primaryButtonLoading={busy && !!wrappedPrimary}
       secondaryButtonLoading={busy && !!wrappedSecondary}
     />
   ) : null;

@@ -217,7 +217,7 @@ export function DocumentRow({
               ]}
             >
               <MaterialCommunityIcons
-                name={'dots-vertical' as any}
+                name={'file-replace' as any}
                 size={18}
                 color={colors.primary}
               />

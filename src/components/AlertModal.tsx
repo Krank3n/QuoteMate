@@ -30,6 +30,7 @@ interface AlertModalProps {
   primaryButtonAction?: () => void;
   secondaryButtonText?: string;
   secondaryButtonAction?: () => void;
+  primaryButtonLoading?: boolean;
   secondaryButtonLoading?: boolean;
   secondaryActionComponent?: React.ReactNode;
 }
@@ -100,6 +101,7 @@ export function AlertModal({
   primaryButtonAction,
   secondaryButtonText,
   secondaryButtonAction,
+  primaryButtonLoading = false,
   secondaryButtonLoading = false,
   secondaryActionComponent,
 }: AlertModalProps) {
@@ -393,6 +395,8 @@ export function AlertModal({
               style={styles.button}
               buttonColor={themeColors.buttonColor}
               textColor={colors.white}
+              loading={primaryButtonLoading}
+              disabled={primaryButtonLoading}
             >
               {primaryButtonText}
             </Button>
