@@ -10,7 +10,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, StyleSheet, Pressable, Linking, Platform, TouchableOpacity } from 'react-native';
 import { NestableScrollContainer } from 'react-native-draggable-flatlist';
-import { Text, Card, Button, TextInput } from 'react-native-paper';
+import { Text, Card, Button, TextInput, Snackbar } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { formatDistanceToNow } from 'date-fns';
@@ -72,6 +72,7 @@ export function ViewJobScreen() {
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
+  const convertDocumentToInvoice = useStore((s) => s.convertDocumentToInvoice);
   const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
@@ -100,6 +101,7 @@ export function ViewJobScreen() {
   const [pendingAction, setPendingAction] = useState<JobActionId | null>(null);
   const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
   const { showAlert, alertNode } = useAlertModal();
+  const [convertSnackbar, setConvertSnackbar] = useState(false);
   const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
 
   useEffect(() => {
@@ -276,6 +278,29 @@ export function ViewJobScreen() {
       return;
     }
     setPaymentSheetDoc(doc);
+  };
+
+  const handleConvertToInvoice = (doc: Document) => {
+    showAlert({
+      type: 'warning',
+      title: 'Convert to invoice?',
+      message: "This quote will become an invoice and can't be sent as a quote again.",
+      primaryButtonText: 'Convert',
+      primaryButtonAction: async () => {
+        try {
+          await convertDocumentToInvoice(doc.id);
+          setConvertSnackbar(true);
+        } catch (err) {
+          showAlert({
+            type: 'error',
+            title: 'Conversion failed',
+            message: 'Save the document first, then try again.',
+          });
+        }
+      },
+      secondaryButtonText: 'Cancel',
+      secondaryButtonAction: () => {},
+    });
   };
 
   const openTakePaymentForDoc = (doc: Document) => {
@@ -741,6 +766,7 @@ export function ViewJobScreen() {
             onEdit={openEditorForDoc}
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={handlePaymentChipPress}
+            onConvertToInvoice={handleConvertToInvoice}
             extra={reeceOrderEntry}
           />
         ) : null}
@@ -761,6 +787,7 @@ export function ViewJobScreen() {
             onEdit={openEditorForDoc}
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={handlePaymentChipPress}
+            onConvertToInvoice={handleConvertToInvoice}
             extra={reeceOrderEntry}
           />
         ) : null}
@@ -865,6 +892,14 @@ export function ViewJobScreen() {
 
       {alertNode}
 
+      <Snackbar
+        visible={convertSnackbar}
+        onDismiss={() => setConvertSnackbar(false)}
+        duration={3000}
+      >
+        Converted to invoice
+      </Snackbar>
+
     </View>
   );
 }
@@ -882,6 +917,7 @@ interface ScopeBlockProps {
   onEdit: (doc: Document, step: ScopeStep) => void;
   onStagePress: (doc: Document) => void;
   onPaymentPress: (doc: Document) => void;
+  onConvertToInvoice: (doc: Document) => void;
   /** Optional slot rendered between the primary doc card and the
    *  "Also on this job" section. Used for the Order-from-Reece entry. */
   extra?: React.ReactNode;
@@ -893,6 +929,7 @@ function ScopeBlock({
   onEdit,
   onStagePress,
   onPaymentPress,
+  onConvertToInvoice,
   extra,
 }: ScopeBlockProps) {
   if (!primaryDoc) {
@@ -934,6 +971,9 @@ function ScopeBlock({
               onView={(d) => onEdit(d, 'materials')}
               onStagePress={onStagePress}
               onPaymentPress={onPaymentPress}
+              onConvertToInvoice={
+                doc.type === 'quote' ? onConvertToInvoice : undefined
+              }
             />
           ))}
         </View>
