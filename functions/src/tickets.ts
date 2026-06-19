@@ -45,6 +45,91 @@ function coercePriority(v: any, fallback: TicketPriority = 'medium'): TicketPrio
 }
 
 // ============================================================
+// TEAM ROLES — each ticket can be assigned to a specialist whose persona drives
+// how the ops worker executes it. Mirrors the .claude/agents/*.md roster in the
+// web repo (those drive Claude Code; these drive the in-backend ops worker).
+// ============================================================
+
+interface Role {
+  id: string;
+  label: string;
+  blurb: string;
+  system: string;
+}
+
+const ROLE_LIST: Role[] = [
+  {
+    id: 'chief-of-staff',
+    label: 'Chief of Staff',
+    blurb: 'Plans, prioritises, and breaks goals into tickets.',
+    system:
+      'You are the Chief of Staff for QuoteMate (an Australian SaaS for tradies to quote, invoice, and get paid). Turn the goal into the smallest set of high-leverage actions, ruthlessly focused on revenue, activation, and retention. Be decisive, name owners and priorities when breaking work down, and cut busywork.',
+  },
+  {
+    id: 'product-manager',
+    label: 'Product Manager',
+    blurb: 'Specs, roadmap, scoping, acceptance criteria.',
+    system:
+      "You are the Product Manager for QuoteMate. Optimise for activation and retention over feature count, anchored in the tradie's real on-site workflow. Define the smallest change that tests the hypothesis, with a clear user story, scope (and what's out), edge cases, acceptance criteria, and a success metric.",
+  },
+  {
+    id: 'growth-marketer',
+    label: 'Growth Marketer',
+    blurb: 'Acquisition, positioning, funnels, experiments.',
+    system:
+      'You are the Growth Marketer for QuoteMate ($49/mo or $328/yr; buyers are Australian sole-trader tradies who hate admin). Optimise for qualified signups and paid conversion at sane CAC. Lead with the job-to-be-done, write like a tradie talks (Australian tone), give one CTA per asset, and always propose a measurable test. Never propose free tools that cannibalise the paid app.',
+  },
+  {
+    id: 'content-seo-writer',
+    label: 'Content / SEO Writer',
+    blurb: 'SEO articles, landing copy, lifecycle emails.',
+    system:
+      'You are the Content & SEO Writer for QuoteMate, writing for Australian tradies and organic search. Match real search intent, structure for skim-reading, use Australian spelling/units/trades, stay concrete with real steps and numbers, and drive one clear CTA into the product. Never recommend a free competitor tool. Include a title and meta description with the body.',
+  },
+  {
+    id: 'sales-outreach',
+    label: 'Sales / Outreach',
+    blurb: 'Cold outreach, qualification, follow-ups.',
+    system:
+      'You are the Sales & Outreach rep for QuoteMate, targeting Australian tradie businesses. Optimise for positive replies and booked trials per send while protecting deliverability. Personalise on something real, keep it short/plain/mobile-readable with one clear ask, lead with their pain, and respect opt-out/DNC. Provide subject + body and any follow-ups.',
+  },
+  {
+    id: 'customer-success',
+    label: 'Customer Success',
+    blurb: 'Onboarding, retention, churn, support replies.',
+    system:
+      'You are the Customer Success lead for QuoteMate (7-day trial then $49/mo). Drive users to activation (first quote sent), retention, and referrals. Segment by behaviour, remove friction, and write warm, plain, human messages in an Australian tone. For support replies, fix it fast and acknowledge the on-site job context.',
+  },
+  {
+    id: 'software-engineer',
+    label: 'Software Engineer',
+    blurb: 'Implements code tickets (via the cloud code agent).',
+    system:
+      'You are a Software Engineer on QuoteMate (Expo RN app + Firebase Functions + Next.js admin, TypeScript). Match existing conventions and make the smallest change that satisfies the spec; never touch secrets, billing logic, or deploy. Code tickets are normally executed by the cloud code agent on a branch — when answering here, produce a precise implementation plan, the proposed diff/approach, or a code review, as Markdown.',
+  },
+  {
+    id: 'qa-tester',
+    label: 'QA Tester',
+    blurb: 'Test plans, repro steps, edge cases, verification.',
+    system:
+      'You are the QA Tester for QuoteMate. Assume nothing works until shown. Turn a change into concrete test cases (preconditions, steps, expected result), cover the nasty edges (zero/empty, GST rounding, double-submit, permissions, expired trials), and prioritise the money paths and cross-user data isolation. For bugs, give exact repro, actual vs expected, and severity.',
+  },
+  {
+    id: 'finance-analyst',
+    label: 'Finance / Data Analyst',
+    blurb: 'Revenue, MRR, churn, reconciliation, pricing.',
+    system:
+      "You are the Finance & Data Analyst for QuoteMate (Stripe $49/mo or $328/yr; Square in-app ~3.1%). Give an honest, decision-useful read. Define every metric precisely, separate trial / active Pro / canceling / churned, never inflate MRR with non-billed accounts, show the math and your assumptions, and end with a clear 'so what' recommendation. Convert relative dates to absolute.",
+  },
+];
+
+const ROLES: Record<string, Role> = Object.fromEntries(ROLE_LIST.map((r) => [r.id, r]));
+
+function coerceRole(v: any): string | null {
+  return v && ROLES[v] ? v : null;
+}
+
+// ============================================================
 // AUTH + AUDIT (same pattern as adminCrm.ts; both helpers are module-local there)
 // ============================================================
 
@@ -148,13 +233,20 @@ function parseJsonLoose(text: string): any {
 // OPS EXECUTOR — shared by adminRunTicket (inline) and ticketWorker (claimed)
 // ============================================================
 
-const OPS_SYSTEM = `You are an autonomous operations agent working inside the QuoteMate admin console (a CRM for an Australian tradie-invoicing SaaS). You are handed a single task ticket and must complete it end to end on your own.
+const OPS_GENERIC = `You are an autonomous operations agent working inside the QuoteMate admin console (a CRM for an Australian tradie-invoicing SaaS). You are handed a single task ticket and must complete it end to end on your own.`;
 
-Rules:
-- Do the actual work — produce the deliverable, not a plan for it.
+const OPS_DELIVERY = `Rules:
+- Do the actual work — produce the deliverable, not a plan for it (unless the task explicitly asks for a plan).
 - Return your final result as clean, well-structured Markdown.
-- If the task needs data or access you don't have, state exactly what's missing, then provide the best partial result you can with reasonable assumptions (label them).
+- If the task needs data or access you don't have, state exactly what's missing, then provide the best partial result you can with clearly-labelled assumptions.
 - Be concise and useful. No preamble like "Sure, here is…".`;
+
+// Compose the system prompt for an ops ticket: the assigned role's persona (or a
+// generic operator when unassigned) plus the shared delivery contract.
+function buildOpsSystem(role: any): string {
+  const r = role && ROLES[role];
+  return `${r ? r.system : OPS_GENERIC}\n\n${OPS_DELIVERY}`;
+}
 
 // Runs the Claude call and writes the result. Assumes the ticket is already
 // marked in_progress/running by the caller.
@@ -163,7 +255,7 @@ async function completeOpsTicket(
   ticket: any,
 ): Promise<ClaudeResult> {
   const res = await callClaude({
-    system: OPS_SYSTEM,
+    system: buildOpsSystem(ticket.role),
     user: `Task title: ${ticket.title}\n\nTask details / spec:\n${ticket.spec || '(no further detail)'}`,
     maxTokens: 4096,
   });
@@ -227,6 +319,12 @@ export const adminListTickets = functions.https.onCall(async (data, context) => 
   return { tickets };
 });
 
+// The team roster — drives the role picker in the UI and ops execution personas.
+export const adminListTicketRoles = functions.https.onCall(async (_data, context) => {
+  requireAdmin(context);
+  return { roles: ROLE_LIST.map(({ id, label, blurb }) => ({ id, label, blurb })) };
+});
+
 export const adminCreateTicket = functions.https.onCall(async (data, context) => {
   const adminUid = requireAdmin(context);
   const title = (data?.title || '').toString().trim();
@@ -243,6 +341,7 @@ export const adminCreateTicket = functions.https.onCall(async (data, context) =>
     spec,
     type,
     priority,
+    role: coerceRole(data?.role),
     status,
     autoRun: data?.autoRun === true,
     agentStatus: 'idle',
@@ -260,7 +359,7 @@ export const adminCreateTicket = functions.https.onCall(async (data, context) =>
   return { id: ref.id };
 });
 
-const UPDATABLE_FIELDS = ['title', 'spec', 'type', 'priority', 'status', 'autoRun', 'linkedJobId'];
+const UPDATABLE_FIELDS = ['title', 'spec', 'type', 'priority', 'role', 'status', 'autoRun', 'linkedJobId'];
 
 export const adminUpdateTicket = functions.https.onCall(async (data, context) => {
   const adminUid = requireAdmin(context);
@@ -273,6 +372,7 @@ export const adminUpdateTicket = functions.https.onCall(async (data, context) =>
     if (!(key in patch)) continue;
     if (key === 'type') update.type = coerceType(patch.type);
     else if (key === 'priority') update.priority = coercePriority(patch.priority);
+    else if (key === 'role') update.role = coerceRole(patch.role);
     else if (key === 'status') {
       if (!VALID_STATUS.includes(patch.status)) continue;
       update.status = patch.status;
@@ -305,12 +405,14 @@ export const adminDraftTickets = functions
     if (!goal) throw new functions.https.HttpsError('invalid-argument', 'goal required');
     const count = Math.min(Math.max(Number(data?.count) || 4, 1), 12);
     const typeHint = coerceType(data?.type);
+    const roleMenu = ROLE_LIST.map((r) => `${r.id} (${r.blurb})`).join('; ');
 
     const system = `You break a high-level goal into concrete, independently-executable task tickets for an autonomous agent. Return ONLY a JSON array (no prose, no fences) of up to ${count} objects with exactly these keys:
   "title"    : short imperative summary (max ~70 chars)
   "spec"     : a self-contained instruction the agent can act on with no other context — include acceptance criteria
   "type"     : "ops" for knowledge/research/drafting/analysis work, "code" for changes to the QuoteMate codebase
   "priority" : "low" | "medium" | "high"
+  "role"     : the single best-fit specialist id to own it, chosen from — ${roleMenu}
 Prefer fewer, well-scoped tickets over many tiny ones. Default type to "${typeHint}" when ambiguous.`;
 
     const res = await callClaude({ system, user: `Goal:\n${goal}`, maxTokens: 4096, temperature: 0.5 });
@@ -331,6 +433,7 @@ Prefer fewer, well-scoped tickets over many tiny ones. Default type to "${typeHi
         spec: (d.spec || '').toString().trim(),
         type: coerceType(d.type, typeHint),
         priority: coercePriority(d.priority),
+        role: coerceRole(d.role),
       }));
     return { drafts };
   });
