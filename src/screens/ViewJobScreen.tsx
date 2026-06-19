@@ -49,6 +49,7 @@ import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { applyStageChange } from '../utils/applyStageChange';
+import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureSquareConnectedForPayment } from '../utils/quoteDeliveryGuard';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
@@ -339,6 +340,9 @@ export function ViewJobScreen() {
             });
           }
           await saveJob({ ...job, stage: 'accepted' });
+          // Quote accepted (not via the tap-to-pay flow, which leads straight
+          // into payment) — opportunistic store-review ask, rate-limited.
+          maybeRequestReview('quote_accepted').catch(() => {});
           break;
         case 'takeDeposit':
           if (actionableDoc && actionableDoc.type === 'quote') {

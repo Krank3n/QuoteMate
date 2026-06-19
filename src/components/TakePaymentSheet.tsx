@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { Text, Button } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { maybeRequestReview } from '../services/storeReviewService';
 
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
@@ -223,6 +224,10 @@ export function TakePaymentSheet({
           ? { message, url: result.paymentLinkUrl }
           : { message }
       );
+      // Tradie just sent a pay link — phone is in THEIR hand (unlike the
+      // in-person tap-to-pay flow, where the customer may hold the device), so
+      // this is a safe moment to ask for a store review. Rate-limited + F&F.
+      maybeRequestReview('payment_success').catch(() => {});
       onDismiss();
     } catch (error: any) {
       onError(
