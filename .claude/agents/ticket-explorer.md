@@ -11,7 +11,7 @@ Given a ticket spec, you produce the plan a strong engineer needs to implement i
 
 Do this:
 1. Locate the exact files and symbols the change touches (grep/glob aggressively). Cite real paths.
-2. Identify existing patterns, helpers, and components to REUSE so the change fits the codebase (don't reinvent — find what's already there).
+2. Identify existing patterns, helpers, and components to REUSE so the change fits the codebase (don't reinvent — find what's already there). Explicitly check whether the ticket overlaps something the app ALREADY does, and recommend the leanest approach (extend/reuse over add-new). Flag any part of the spec that's unnecessary, redundant, or would bloat the app — the implementer should build the minimum that satisfies the acceptance criteria, nothing more.
 3. Map the user-facing surface: which screen(s)/component(s), the current user flow, and where the new behaviour slots in.
 4. Note data-model + backend touchpoints (Firestore shape, callables, triggers) and any security/permission implications.
 5. Call out risks, edge cases, and the trickiest part — especially money paths (GST, totals, payments), cross-user data isolation, and offline/sync.
