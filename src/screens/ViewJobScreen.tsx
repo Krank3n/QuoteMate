@@ -289,9 +289,10 @@ export function ViewJobScreen() {
       primaryKeepsOpen: true,
       primaryButtonAction: async () => {
         try {
-          await convertDocumentToInvoice(doc.id);
+          const converted = await convertDocumentToInvoice(doc.id);
           dismissAlert();
           setConvertSnackbar(true);
+          if (converted) openEditorForDoc(converted, 'materials');
         } catch (err) {
           showAlert({
             type: 'error',
