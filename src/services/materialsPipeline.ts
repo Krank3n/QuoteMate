@@ -250,7 +250,10 @@ export async function generateMaterialsForQuote(
   sectionMultipliers.forEach((multiplier, sectionName) => {
     if (existingSectionNames.has(sectionName)) return;
     const perUnitHours = sectionLaborHours.get(sectionName) || fallbackPerUnitHours;
-    const useDays = perUnitHours >= 5;
+    // Only draft a section in days when a single unit is at least a full day
+    // of work. The old >= 5 threshold turned 5–7h units into fractional days
+    // ("0.625 days"), which reads worse than plain hours.
+    const useDays = perUnitHours >= 8;
     const laborRate = useDays ? defaultRate * 8 : defaultRate;
     const laborHoursValue = useDays ? perUnitHours / 8 : perUnitHours;
     newSections.push({

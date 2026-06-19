@@ -121,9 +121,13 @@ export function LaborMarkupScreen() {
         : 'hours');
     const alreadyInDays = storedUnit === 'days';
 
-    // Auto-default to days only for legacy/hours-stored quotes whose total
-    // hits the 6h threshold. Stored-in-days quotes pass through untouched.
-    if (!alreadyInDays && totalStored >= 6) {
+    // Auto-default to days only for legacy/hours-stored quotes that are
+    // genuinely multi-day (>= 2 full days). Below that, hours read far better
+    // than awkward fractions: a 7h job rendered as "0.9 days" — and its
+    // sections as "0.4 days" / "0.52 days" — was the source of the confusing
+    // day values reported on the admin docs view and customer PDFs.
+    // Stored-in-days quotes pass through untouched.
+    if (!alreadyInDays && totalStored >= HOURS_PER_DAY * 2) {
       setLaborUnit('days');
       setLaborHours((Math.round((totalStored / HOURS_PER_DAY) * 10) / 10).toString());
       setLaborRate((rateForInput * HOURS_PER_DAY).toString());
