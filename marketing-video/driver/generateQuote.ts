@@ -343,7 +343,9 @@ function buildDemoPayload(scenario: Scenario, quote: Quote): DemoPayload {
   const c = scenario.conversation;
   const events: DemoEvent[] = [
     { kind: 'user', text: c.request },
-    { kind: 'assistant', text: `${c.mateAck}\n\n${c.clarifyingQuestion}` },
+    // `vo:'reply'` → the Aussie Mate voiceover for this bubble. holdMs is filled
+    // in at capture time from the generated clip's real duration.
+    { kind: 'assistant', text: `${c.mateAck}\n\n${c.clarifyingQuestion}`, vo: 'reply' },
     { kind: 'user', text: c.clarifyingAnswer, delayMs: 900 },
     {
       kind: 'working',
@@ -354,7 +356,7 @@ function buildDemoPayload(scenario: Scenario, quote: Quote): DemoPayload {
         { phase: 'done', status: 'Quote ready', ms: 500 },
       ],
     },
-    { kind: 'reveal', quoteId: quote.id, text: c.reveal },
+    { kind: 'reveal', quoteId: quote.id, text: c.reveal, vo: 'reveal' },
   ];
   return { quote, events, options: { typingMsPerChar: 22, betweenMs: 650, startDelayMs: 700 } };
 }

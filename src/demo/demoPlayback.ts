@@ -96,6 +96,15 @@ async function runDemo(payload: DemoPayload, isCancelled: () => boolean): Promis
   useStore.setState({ quotes: [reviveQuote(payload.quote)] });
 
   const w = globalThis as any;
+  // Timeline of spoken events for the capture script. Wall-clock (Date.now) so
+  // the Node-side recorder can convert to video-relative offsets — same machine,
+  // same epoch clock, so the values are directly comparable.
+  const timeline: Array<{ vo: string; t: number }> = [];
+  w.__QM_TIMELINE__ = timeline;
+  const markVo = (vo?: string) => {
+    if (vo) timeline.push({ vo, t: Date.now() });
+  };
+
   w.__QM_DEMO_READY__ = true;
   await sleep(opts.startDelayMs ?? 600);
 
@@ -116,8 +125,11 @@ async function runDemo(payload: DemoPayload, isCancelled: () => boolean): Promis
       appendMessage(convoId, userMessage(ev.text));
     } else if (ev.kind === 'assistant') {
       const id = nextId();
+      markVo(ev.vo); // mark when the bubble appears = when the voiceover starts
       appendMessage(convoId, { id, role: 'assistant', text: '', createdAt: nowIso() });
       await typeOut(convoId, id, ev.text, ev.typeMs ?? typingMsPerChar, isCancelled);
+      // Linger so the spoken line can finish before the chat moves on.
+      if (ev.holdMs) await sleep(ev.holdMs);
     } else if (ev.kind === 'working') {
       const id = nextId();
       appendMessage(convoId, {
@@ -133,6 +145,7 @@ async function runDemo(payload: DemoPayload, isCancelled: () => boolean): Promis
         await sleep(phase.ms);
       }
     } else if (ev.kind === 'reveal') {
+      markVo(ev.vo); // mark when the quote card appears = when its voiceover starts
       appendMessage(convoId, {
         id: nextId(),
         role: 'assistant',
@@ -140,6 +153,7 @@ async function runDemo(payload: DemoPayload, isCancelled: () => boolean): Promis
         createdAt: nowIso(),
         inlineQuoteId: ev.quoteId,
       });
+      if (ev.holdMs) await sleep(ev.holdMs);
     }
   }
 
