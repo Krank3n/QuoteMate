@@ -50,17 +50,18 @@ just adds the human presenter and ships it to the site.
 
 ## Track B — Add the human presenter (Veo 3)
 
-### B1 — Confirm Veo 3 access on the Gemini key  🌐
-1. Go to **https://aistudio.google.com/** and sign in with the Google account that owns
-   the `hansendev` Gemini API key.
-2. Open **Get API key** → confirm the key is on a **paid tier** (Veo is **not** in the
-   free tier — image/video generation needs billing enabled).
-3. Open the **Veo** docs/playground and generate one test clip to confirm the account
-   is entitled to model **`veo-3.0-generate-001`**. If it's gated/region-blocked, that's
-   the blocker to resolve before B-anything.
+### B1 — Veo 3 access  ✅ ALREADY CONFIRMED
+The existing `GEMINI_API_KEY` (`functions/.env`) is Veo-enabled — verified by generating a
+real clip: the key lists `veo-3.0`, `veo-3.0-fast`, `veo-3.1*`, and a live
+`veo-3.0-fast-generate-001` generation succeeded (8s, 720×1280, native speech audio,
+~47s to render). **No new key or billing change needed.**
 
-> If Veo isn't available on this key, the pipeline still runs via Track A (screen-demo).
-> The presenter is the only piece that needs Veo.
+Notes baked in from that test:
+- Text-to-video needs `personGeneration: 'allow_all'` (not `'allow_adult'`, which is
+  image-to-video only and 400s). The function already sends the right value.
+- The pipeline defaults to **`veo-3.0-fast-generate-001`** (≈½ the cost, indistinguishable
+  for talking-head). Set `VEO_MODEL=veo-3.0-generate-001` for the higher-fidelity model.
+- Rough cost: ~$1–2 per 8s fast clip; a 3-clip scenario (intro/answer/reaction) ≈ $3–6.
 
 ### B2 — Deploy the new Veo function  🖥️
 ```bash

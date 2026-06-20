@@ -56,7 +56,10 @@ export const generatePresenterClip = functions
 
       const parameters: Record<string, unknown> = {
         aspectRatio: aspectRatio || '9:16',
-        personGeneration: 'allow_adult',
+        // Text-to-video supports 'allow_all' | 'dont_allow' — 'allow_adult' is
+        // image-to-video only and 400s here. We generate a talking person, so
+        // 'allow_all'. (Verified against veo-3.0 on the live API.)
+        personGeneration: 'allow_all',
       };
       if (negativePrompt) parameters.negativePrompt = negativePrompt;
       if (typeof seed === 'number') parameters.seed = seed;
