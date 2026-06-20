@@ -40,6 +40,7 @@ const navigationTheme = {
   },
 };
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { isDemoCaptureActive } from './src/demo/demoPlayback';
 import { NewOnboardingScreen } from './src/screens/NewOnboardingScreen';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { subscriptionSyncService } from './src/services/subscriptionSyncService';
@@ -179,6 +180,11 @@ export default function App() {
   const [showUpdateSheet, setShowUpdateSheet] = useState(false);
 
   const requiresAuth = true;
+  // Capture-only — true exclusively when a marketing demo build has an injected
+  // payload (window.__QM_DEMO__). Renders the real navigator (Mate tab) without
+  // a live login so the demo harness can record. The injected payload is the
+  // real gate, so this can never trip for production users — see isDemoCaptureActive.
+  const DEMO_CAPTURE = isDemoCaptureActive();
 
   useEffect(() => {
     // Listen to authentication state changes
@@ -441,8 +447,9 @@ export default function App() {
   // so signing in doesn't tear down and rebuild the entire React tree, which
   // is what caused the "app reloads on sign-in" symptom.
   const splashVisible =
-    isLoading || !fontsLoaded || (!!user && !userDataLoaded);
-  const showAuthScreen = requiresAuth && !user;
+    !DEMO_CAPTURE && (isLoading || !fontsLoaded || (!!user && !userDataLoaded));
+  const showAuthScreen = !DEMO_CAPTURE && requiresAuth && !user;
+  const showMainApp = DEMO_CAPTURE || isOnboarded;
 
   return (
     <GestureHandlerRootView style={appStyles.flex}>
@@ -458,7 +465,7 @@ export default function App() {
               <StatusBar style="light" />
               {showAuthScreen ? (
                 <AuthScreen />
-              ) : isOnboarded ? (
+              ) : showMainApp ? (
                 <RootNavigator />
               ) : (
                 <NewOnboardingScreen />

@@ -1,0 +1,9 @@
+{
+  "_comment": "The single recurring 'common human' presenter. Reused across EVERY scenario so the face/voice stay recognizable. Veo 3 drifts between clips, so keep this description verbatim and pin the same seed + reference image each run. If consistency isn't good enough at scale, this is the block to swap to a Higgsfield Soul ID.",
+  "id": "qm-presenter-v1",
+  "seed": 73411,
+  "referenceImage": "presenter/reference/qm-presenter-v1.png",
+  "description": "A friendly, down-to-earth Australian customer in their early 30s, gender-neutral presentation, short dark wavy hair, light stubble, wearing a plain charcoal t-shirt. Natural daylight, standing in a suburban backyard near a fence line. Relaxed, genuine smile. Speaks to camera like chatting to a tradie they trust.",
+  "voice": "Warm, casual Australian accent, unhurried, conversational — not an announcer.",
+  "negative": "no on-screen text, no logos, no studio lighting, no exaggerated gestures, not a presenter podium, not corporate."
+}

@@ -1,0 +1,4 @@
+node_modules/
+out/
+presenter/reference/*.png
+!presenter/reference/.gitkeep

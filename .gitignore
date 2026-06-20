@@ -11,6 +11,7 @@ package-lock.json
 .expo/
 dist/
 dist-web/
+dist-web-demo/
 web-build/
 
 # Environment variables

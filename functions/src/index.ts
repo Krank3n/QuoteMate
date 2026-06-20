@@ -55,6 +55,7 @@ export {
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
 export { assistantToken } from './assistantToken';
 export { assistantChat } from './assistantChat';
+export { generatePresenterClip } from './generatePresenterClip';
 export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts';
 import {
   buildXeroAuthHeaders,

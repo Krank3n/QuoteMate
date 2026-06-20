@@ -27,6 +27,7 @@ import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { useStore, NavigateHint } from '../store/useStore';
+import { useDemoPlayback } from '../demo/demoPlayback';
 import { sendAssistantTurn } from '../services/assistantService';
 import { openVoiceSession, VoiceSession } from '../services/assistant/voiceSession';
 import { LiveAuthError, LiveOfflineError, LiveQuotaError } from '../services/assistant/liveSession';
@@ -530,6 +531,10 @@ export function AssistantScreen() {
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const quotes = useStore((s) => s.quotes);
   const documents = useStore((s) => s.documents);
+
+  // Marketing demo playback — no-op unless this is a capture build with an
+  // injected payload (see src/demo/demoPlayback.ts). Never runs for real users.
+  useDemoPlayback();
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);

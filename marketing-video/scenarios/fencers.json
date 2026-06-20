@@ -1,0 +1,37 @@
+{
+  "slug": "fencers",
+  "title": "Colorbond fence quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "other",
+    "nicheId": "fencing",
+    "categoryName": "Fencing",
+    "nicheName": "Colorbond fencing"
+  },
+  "templateId": "fence_install_colorbond",
+  "params": { "length": 22, "height": 1.8, "gates": 1 },
+  "jobDescription": "Supply and install 22 linear metres of 1.8m Colorbond fencing along the rear boundary, including one 900mm single pedestrian gate. Customer to remove the old timber fence themselves.",
+  "labour": {
+    "rate": 85,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 15,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Dakota Reyes",
+    "address": "14 Boundary Rd, Brunswick VIC 3056"
+  },
+  "conversation": {
+    "request": "Yeah g'day — after a quote to put a Colorbond fence in out the back. About 22 metres, standard height, and the one gate.",
+    "mateAck": "Good one. I'll sort a Colorbond fence quote for you now.",
+    "clarifyingQuestion": "Quick one — single pedestrian gate, and 1.8 metres high the whole run?",
+    "clarifyingAnswer": "Yep, just the one 900 gate, 1.8 the whole way.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — 22m of Colorbond, one gate, materials and labour all in."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted."
+  }
+}
