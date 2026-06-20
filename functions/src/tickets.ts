@@ -908,12 +908,25 @@ export const ticketPrSync = functions
     }
     let synced = 0;
     for (const pr of r.body) {
-      const m = String(pr.body || '').match(/<!--\s*qm-ticket:([A-Za-z0-9_-]+)\s*-->/);
-      if (!m) continue;
-      const ref = db().collection('tickets').doc(m[1]);
-      const snap = await ref.get();
-      if (!snap.exists) continue;
-      const t = snap.data() as any;
+      const body = String(pr.body || '');
+      // Map the PR to a ticket: prefer the qm-ticket marker (the ticket doc id),
+      // but fall back to the issue the PR closes — robust even if the agent
+      // fumbles the marker, since it reliably writes "Closes #<n>".
+      let ref: FirebaseFirestore.DocumentReference | null = null;
+      const m = body.match(/<!--\s*qm-ticket:([A-Za-z0-9_-]+)\s*-->/);
+      if (m) {
+        const cand = db().collection('tickets').doc(m[1]);
+        if ((await cand.get()).exists) ref = cand;
+      }
+      if (!ref) {
+        const cm = body.match(/(?:closes|fixes|resolves)\s+#(\d+)/i);
+        if (cm) {
+          const q = await db().collection('tickets').where('issueNumber', '==', Number(cm[1])).limit(1).get();
+          if (!q.empty) ref = q.docs[0].ref;
+        }
+      }
+      if (!ref) continue;
+      const t = (await ref.get()).data() as any;
       if (t.prUrl === pr.html_url && t.status === 'pr') continue; // already synced
       await ref.update({
         prUrl: pr.html_url,
