@@ -44,6 +44,11 @@ function hasAudio(file: string): boolean {
   return r.status === 0 && r.stdout.toString().trim().length > 0;
 }
 
+function probeDur(file: string): number {
+  const r = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]);
+  return Number(r.stdout.toString().trim()) || 0;
+}
+
 const esc = (t: string) => t.replace(/:/g, '\\:').replace(/'/g, "’").replace(/,/g, '\\,');
 
 /** Word-wrap to ~maxChars per line, honouring explicit newlines. */
@@ -123,45 +128,91 @@ function main(): void {
   rmSync(TMP, { recursive: true, force: true });
   mkdirSync(TMP, { recursive: true });
 
+  // Build the ordered segment list, tracking where the app segment starts in
+  // the final timeline so the Mate voiceover can be placed against it.
   const segments: string[] = [];
-  const push = (file: string, label: string) => {
+  let cursor = 0; // running start time of the next segment
+  let appStart = 0;
+  const add = (file: string) => {
+    segments.push(file);
+    cursor += probeDur(file);
+  };
+  const push = (file: string, label: string): string => {
     const norm = join(TMP, `${label}.mp4`);
     normalize(file, norm);
-    segments.push(norm);
+    return norm;
   };
 
   // brand intro
   const intro = join(TMP, 'intro.mp4');
   makeCard(intro, scenario.title ?? 'QuoteMate', 1.6);
-  segments.push(intro);
+  add(intro);
 
   // talking-head + app cut-ins (presenter clips optional)
   const presenterIntro = join(OUT, `${slug}.intro.mp4`);
-  if (existsSync(presenterIntro)) push(presenterIntro, 'p-intro');
-  push(app, 'app');
+  if (existsSync(presenterIntro)) add(push(presenterIntro, 'p-intro'));
+  appStart = cursor; // the app segment begins here
+  add(push(app, 'app'));
   const presenterReaction = join(OUT, `${slug}.reaction.mp4`);
-  if (existsSync(presenterReaction)) push(presenterReaction, 'p-reaction');
+  if (existsSync(presenterReaction)) add(push(presenterReaction, 'p-reaction'));
 
   // brand outro
   const outro = join(TMP, 'outro.mp4');
   makeCard(outro, 'Real quotes. Real prices.\nQuoteMate', 2.2);
-  segments.push(outro);
+  add(outro);
 
-  // concat
+  // concat (re-encode for uniformity) → single track we then dub onto
   const listFile = join(TMP, 'list.txt');
   writeFileSync(listFile, segments.map((s) => `file '${s}'`).join('\n'));
-  const finalMp4 = join(OUT, `${slug}.mp4`);
+  const concatV = join(TMP, 'concat.mp4');
+  ff(['-f', 'concat', '-safe', '0', '-i', listFile, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', concatV]);
 
-  if (MUSIC_FILE && existsSync(MUSIC_FILE)) {
-    const concatV = join(TMP, 'concat.mp4');
-    ff(['-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', concatV]);
-    ff([
-      '-i', concatV, '-stream_loop', '-1', '-i', MUSIC_FILE,
-      '-filter_complex', '[1:a]volume=0.12[m];[0:a][m]amix=inputs=2:duration=first[a]',
-      '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-shortest', finalMp4,
-    ]);
+  // Gather the Mate voiceover clips + their placement (appStart + recorded offset).
+  const voClips: Array<{ file: string; atSec: number }> = [];
+  const voPath = join(OUT, `${slug}.voiceover.json`);
+  const timingPath = join(OUT, `${slug}.timing.json`);
+  if (existsSync(voPath) && existsSync(timingPath)) {
+    const voice = JSON.parse(readFileSync(voPath, 'utf8'));
+    const timing = JSON.parse(readFileSync(timingPath, 'utf8')) as Array<{ vo: string; videoTime: number }>;
+    for (const mark of timing) {
+      const clip = voice.clips?.[mark.vo];
+      if (clip && existsSync(clip.file)) voClips.push({ file: clip.file, atSec: appStart + mark.videoTime });
+    }
+    console.log(`  voiceover: ${voClips.map((v, i) => `${timing[i].vo}@${v.atSec.toFixed(1)}s`).join('  ')}`);
+  }
+
+  const finalMp4 = join(OUT, `${slug}.mp4`);
+  const haveMusic = !!(MUSIC_FILE && existsSync(MUSIC_FILE));
+
+  if (voClips.length === 0 && !haveMusic) {
+    // Nothing to dub — concat is the final.
+    ff(['-i', concatV, '-c', 'copy', finalMp4]);
   } else {
-    ff(['-f', 'concat', '-safe', '0', '-i', listFile, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', finalMp4]);
+    // Mix: base audio + each delayed Mate VO clip + optional looped music bed.
+    const inputs = ['-i', concatV];
+    voClips.forEach((v) => inputs.push('-i', v.file));
+    if (haveMusic) inputs.push('-stream_loop', '-1', '-i', MUSIC_FILE);
+
+    const parts: string[] = [];
+    const mixIns: string[] = ['[0:a]'];
+    voClips.forEach((v, i) => {
+      const idx = i + 1; // input index of this VO
+      const delayMs = Math.round(v.atSec * 1000);
+      parts.push(`[${idx}:a]aresample=48000,adelay=${delayMs}:all=1[vo${i}]`);
+      mixIns.push(`[vo${i}]`);
+    });
+    if (haveMusic) {
+      const mIdx = voClips.length + 1;
+      parts.push(`[${mIdx}:a]volume=0.10[mus]`);
+      mixIns.push('[mus]');
+    }
+    parts.push(`${mixIns.join('')}amix=inputs=${mixIns.length}:duration=first:normalize=0[a]`);
+    ff([
+      ...inputs,
+      '-filter_complex', parts.join(';'),
+      '-map', '0:v', '-map', '[a]',
+      '-c:v', 'copy', '-c:a', 'aac', '-movflags', '+faststart', '-shortest', finalMp4,
+    ]);
   }
 
   // web variants

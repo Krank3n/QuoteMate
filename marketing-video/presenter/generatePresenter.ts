@@ -27,6 +27,9 @@ interface Character {
   description: string;
   voice: string;
   negative: string;
+  /** What the person is physically doing while they speak (e.g. holding their
+   *  phone up and talking to it). Drives the action clause of the prompt. */
+  action?: string;
 }
 
 /** Resolve a presenter line: either a key into conversation, or a literal. */
@@ -35,9 +38,10 @@ function resolveLine(value: string, conversation: Record<string, string>): strin
 }
 
 function clipPrompt(character: Character, line: string): string {
+  const action = character.action ?? 'looking at the camera';
   return (
     `${character.description} ${character.voice} ` +
-    `The person looks straight at the camera and says, naturally and warmly: "${line}"`
+    `While ${action}, they say it out loud, naturally and warmly: "${line}"`
   );
 }
 

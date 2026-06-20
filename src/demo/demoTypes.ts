@@ -12,14 +12,23 @@ export interface DemoWorkingPhase {
 }
 
 export type DemoEvent =
-  // Customer message bubble.
+  // Customer/tradie message bubble.
   | { kind: 'user'; text: string; delayMs?: number }
   // Mate reply — typed out character-by-character like a real streamed turn.
-  | { kind: 'assistant'; text: string; typeMs?: number; delayMs?: number }
+  // `vo` names a voiceover clip; `holdMs` keeps the bubble on screen that long
+  // after typing so the spoken line can finish before the chat moves on.
+  | { kind: 'assistant'; text: string; typeMs?: number; delayMs?: number; vo?: string; holdMs?: number }
   // The live "working" pipeline card, advanced through its phases.
   | { kind: 'working'; phases: DemoWorkingPhase[]; delayMs?: number }
   // Final reveal — an assistant bubble that renders the priced quote inline.
-  | { kind: 'reveal'; quoteId: string; text?: string; delayMs?: number };
+  | { kind: 'reveal'; quoteId: string; text?: string; delayMs?: number; vo?: string; holdMs?: number };
+
+// One spoken event, captured at record time. `t` is wall-clock ms (Date.now);
+// the capture script converts it to a video-relative offset for the compositor.
+export interface DemoTimelineMark {
+  vo: string;
+  t: number;
+}
 
 export interface DemoOptions {
   /** Typewriter speed for assistant text, ms per character. */

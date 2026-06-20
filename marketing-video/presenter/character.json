@@ -3,7 +3,8 @@
   "id": "qm-presenter-v1",
   "seed": 73411,
   "referenceImage": "presenter/reference/qm-presenter-v1.png",
-  "description": "A friendly, down-to-earth Australian customer in their early 30s, gender-neutral presentation, short dark wavy hair, light stubble, wearing a plain charcoal t-shirt. Natural daylight, standing in a suburban backyard near a fence line. Relaxed, genuine smile. Speaks to camera like chatting to a tradie they trust.",
+  "description": "A friendly, down-to-earth Australian tradie in their early 30s, short dark wavy hair, light stubble, wearing a navy work polo shirt. Standing on a residential job site near a fence line in natural daylight. They hold a smartphone up in one hand and talk to it casually — dictating a job to an app — glancing at the phone then back up as they speak. The phone is angled so its screen is turned AWAY from camera and never visible. Relaxed, conversational, like leaving a quick voice note.",
   "voice": "Warm, casual Australian accent, unhurried, conversational — not an announcer.",
-  "negative": "no on-screen text, no logos, no studio lighting, no exaggerated gestures, not a presenter podium, not corporate."
+  "action": "holding their phone up and speaking to it",
+  "negative": "phone screen visible, any app or UI on the phone, screen glare, no on-screen text, no logos, no studio lighting, no exaggerated gestures, not a presenter podium, not corporate, not looking only at the camera."
 }

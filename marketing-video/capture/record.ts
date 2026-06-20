@@ -20,7 +20,7 @@
  *   PHONE_W / PHONE_H  viewport (default 414 x 896), DSF default 2
  */
 import { spawn } from 'node:child_process';
-import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,6 +90,20 @@ async function main() {
   }
   const payload = JSON.parse(readFileSync(join(OUT, `${slug}.demo.json`), 'utf8'));
 
+  // Merge voiceover durations into the payload so each spoken bubble lingers for
+  // the length of its clip (the chat won't move on before Mate finishes talking).
+  let voiceover: any = null;
+  const voPath = join(OUT, `${slug}.voiceover.json`);
+  if (existsSync(voPath)) {
+    voiceover = JSON.parse(readFileSync(voPath, 'utf8'));
+    const pad = 350; // small tail so the next bubble doesn't clip the audio
+    for (const ev of payload.events as any[]) {
+      const clip = ev.vo && voiceover.clips?.[ev.vo];
+      if (clip) ev.holdMs = Math.round(clip.durSec * 1000) + pad;
+    }
+    console.log(`[${slug}] voiceover: ${Object.keys(voiceover.clips).join(', ')} (bubbles will hold for audio)`);
+  }
+
   const stop = await serve(dir, port);
   const browser = await chromium.launch({ args: ['--no-sandbox'] });
   const context = await browser.newContext({
@@ -97,6 +111,11 @@ async function main() {
     deviceScaleFactor: Number(process.env.PHONE_DSF ?? 2),
     recordVideo: { dir: OUT, size: { width: W, height: H } },
   });
+  // Recording starts ~here; mark the wall-clock so harness timeline marks (also
+  // Date.now, same machine) convert to video-relative offsets. Small constant
+  // accounts for the gap to the first rendered frame; the bubble lingers well
+  // past the audio so sub-second slop is invisible.
+  const tRecordStart = Date.now();
   // Inject the payload BEFORE any app code runs.
   await context.addInitScript((p: unknown) => {
     (window as any).__QM_DEMO__ = p;
@@ -127,6 +146,15 @@ async function main() {
   // Let the quote card settle, grab a poster, then close so Playwright flushes the video.
   await page.waitForTimeout(1500);
   await page.screenshot({ path: join(OUT, `${slug}-poster.png`) });
+
+  // Persist the spoken-event timeline as video-relative offsets for the compositor.
+  if (voiceover) {
+    const marks = (await page.evaluate(() => (window as any).__QM_TIMELINE__ || [])) as Array<{ vo: string; t: number }>;
+    const fudge = Number(process.env.VIDEO_START_FUDGE ?? 0);
+    const timing = marks.map((m) => ({ vo: m.vo, videoTime: Math.max(0, (m.t - tRecordStart) / 1000 + fudge) }));
+    writeFileSync(join(OUT, `${slug}.timing.json`), JSON.stringify(timing, null, 2));
+    console.log(`[${slug}] timing: ${timing.map((t) => `${t.vo}@${t.videoTime.toFixed(1)}s`).join('  ')}`);
+  }
 
   const videoObj = page.video();
   await context.close();

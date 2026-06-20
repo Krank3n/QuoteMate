@@ -22,7 +22,7 @@
     "address": "14 Boundary Rd, Brunswick VIC 3056"
   },
   "conversation": {
-    "request": "Yeah g'day — after a quote to put a Colorbond fence in out the back. About 22 metres, standard height, and the one gate.",
+    "request": "Yeah g'day, need a quote — Colorbond fence out the back, about 22 metres, standard height, and a gate.",
     "mateAck": "Good one. I'll sort a Colorbond fence quote for you now.",
     "clarifyingQuestion": "Quick one — single pedestrian gate, and 1.8 metres high the whole run?",
     "clarifyingAnswer": "Yep, just the one 900 gate, 1.8 the whole way.",
@@ -33,5 +33,12 @@
     "intro": "request",
     "answer": "clarifyingAnswer",
     "reaction": "That's the lot — real prices and everything. Sorted."
+  },
+  "voiceover": {
+    "voice": "Puck",
+    "lines": {
+      "reply": "Good one, I'll sort a Colorbond fence quote for you now. Quick one — single pedestrian gate, and one point eight metres high the whole run?",
+      "reveal": "Here's your quote — 22 metres of Colorbond, one gate, materials and labour all in."
+    }
   }
 }

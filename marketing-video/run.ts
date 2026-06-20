@@ -61,9 +61,18 @@ function main(): void {
   }
   if (slugs.length === 0) throw new Error('usage: run.ts <slug> [...] | --all');
 
+  const skipVoiceover = argv.includes('--skip-voiceover');
+
   for (const slug of slugs) {
     console.log(`\n=== ${slug} ===`);
     step('driver/generateQuote.ts', [slug, '--mode', mode]);
+    if (!skipVoiceover) {
+      try {
+        step('voiceover/generateVoiceover.ts', [slug]); // Aussie Mate voice — before capture
+      } catch (e) {
+        console.warn(`  ⚠ voiceover step failed (${(e as Error).message}); chat will be silent.`);
+      }
+    }
     step('capture/record.ts', [slug]);
     if (!skipPresenter) {
       try {
