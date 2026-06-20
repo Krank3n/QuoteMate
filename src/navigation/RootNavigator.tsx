@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { JobsListScreen } from '../screens/JobsListScreen';
 import { AssistantScreen } from '../screens/AssistantScreen';
+import { isDemoCaptureActive } from '../demo/demoPlayback';
 import { ViewJobScreen } from '../screens/ViewJobScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
@@ -402,9 +403,15 @@ function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
  */
 function MainTabs() {
   const insets = useSafeAreaInsets();
+  // Capture-only — gated on the injected demo payload (never trips in
+  // production). See src/demo/demoPlayback.ts → isDemoCaptureActive.
+  const demoCapture = isDemoCaptureActive();
 
   return (
     <Tab.Navigator
+      // Capture builds land straight on the Mate tab so the demo harness can
+      // record the chat without other tabs (and their user-data deps) mounting.
+      initialRouteName={demoCapture ? 'Mate' : undefined}
       tabBar={(props) => <LiquidTabBar {...props} />}
       screenOptions={{
         headerBackground: () => (
