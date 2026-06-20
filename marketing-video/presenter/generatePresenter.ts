@@ -52,6 +52,10 @@ async function generate(prompt: string, character: Character): Promise<Buffer> {
       negativePrompt: character.negative,
       aspectRatio: '9:16',
       seed: character.seed,
+      // Fast proved indistinguishable for talking-head and is ~½ the cost; the
+      // function still defaults to standard, so override here. Set VEO_MODEL to
+      // 'veo-3.0-generate-001' for the higher-fidelity model.
+      model: process.env.VEO_MODEL || 'veo-3.0-fast-generate-001',
     }),
   });
   if (!res.ok) throw new Error(`generatePresenterClip -> ${res.status}: ${await res.text()}`);
