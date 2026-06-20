@@ -29,6 +29,11 @@ interface DocumentRowProps {
   onSend?: (doc: Document) => void;
   /** When supplied, a card quick-action renders on the right. */
   onTakePayment?: (doc: Document) => void;
+  /**
+   * When supplied and the doc is a convertible quote, a 3-dots overflow
+   * action renders that lets the tradie convert the quote to an invoice.
+   */
+  onConvertToInvoice?: (doc: Document) => void;
 }
 
 function stageShortLabel(stage: Document['stage']): string {
@@ -74,10 +79,18 @@ export function DocumentRow({
   onPaymentPress,
   onSend,
   onTakePayment,
+  onConvertToInvoice,
 }: DocumentRowProps) {
   const meta = STAGE_META[doc.stage];
   const label = stageShortLabel(doc.stage);
-  const hasQuickActions = !!(onSend || onTakePayment);
+  // Convert-to-invoice is only legal on a quote that hasn't already been
+  // invoiced and is sitting in a stage where conversion makes sense.
+  const canConvert =
+    !!onConvertToInvoice &&
+    doc.type === 'quote' &&
+    !doc.invoicedAt &&
+    (doc.stage === 'draft' || doc.stage === 'quote_accepted');
+  const hasQuickActions = !!(onSend || onTakePayment || canConvert);
   // Doc stage chip is mostly redundant noise on the row — payment state
   // already lives in PaymentChip, and the job-level timeline above tells
   // the "where is it" story. Keep the chip only for the terminal-paid
@@ -185,6 +198,26 @@ export function DocumentRow({
             >
               <MaterialCommunityIcons
                 name={'credit-card-outline' as any}
+                size={18}
+                color={colors.primary}
+              />
+            </Pressable>
+          ) : null}
+          {canConvert ? (
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation();
+                selectionTap();
+                onConvertToInvoice!(doc);
+              }}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.actionButton,
+                pressed && styles.actionButtonPressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={'file-replace' as any}
                 size={18}
                 color={colors.primary}
               />
