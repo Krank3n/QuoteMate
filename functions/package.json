@@ -5,6 +5,7 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
+    "test": "vitest run",
     "serve": "npm run build && firebase emulators:start --only functions",
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
@@ -27,7 +28,8 @@
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/node-fetch": "^2.6.13",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.7"
   },
   "private": true
 }

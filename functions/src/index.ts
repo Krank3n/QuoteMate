@@ -82,6 +82,7 @@ import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
+import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
 import {
   QM_APP_FEE_PCT_ONLINE,
   QM_APP_FEE_PCT_ONLINE_FREE,
@@ -7463,30 +7464,20 @@ export const updateActivityTimestamp = functions.https.onRequest((req, res) => {
  * Quick feedback from follow-up email — one-tap rating
  */
 export const quickFeedback = functions.https.onRequest(async (req, res) => {
-  // HEAD requests are read-only health checks — never mutate or notify
-  if (req.method === 'HEAD') {
+  // HEAD probes and email-client / link-previewer prefetches must be
+  // side-effect-free (no Firestore write, no founder email). This is the
+  // scanner-prefetch guard — see quickFeedback.helpers.isSideEffectFreeRequest.
+  if (isSideEffectFreeRequest(req.method, req.headers)) {
     res.status(200).end();
     return;
   }
-
-  // Prefetch/preview requests (email clients, link previewers) must be side-effect-free
-  const purpose = req.headers['purpose'] || req.headers['x-purpose'] || req.headers['x-moz'] || req.headers['sec-purpose'] || '';
-  if (typeof purpose === 'string' && (purpose.toLowerCase().includes('prefetch') || purpose.toLowerCase().includes('preview'))) {
-    res.status(200).end();
-    return;
-  }
-
-  const getFeedbackDocId = (uid: string, cat: string | undefined) =>
-    `${uid}__${cat === 're-engagement' ? 're-engagement' : 'first-quote'}`;
-  const getCategoryLabel = (cat: string | undefined) =>
-    cat === 're-engagement' ? 'Re-engagement' : 'First Quote Follow-Up';
 
   // POST = record rating (auto-fired on page load) OR detailed feedback submission
   if (req.method === 'POST') {
     const { userId, rating, category, feedbackId, details, record } = req.body;
 
     // Rating record path: deterministic upsert, founder email only on first create
-    const isRatingRecord = record === true || (!details && !!rating);
+    const isRatingRecord = isRatingRecordRequest({ record, rating, details });
     if (isRatingRecord) {
       const validRatings = ['great', 'okay', 'bad'];
       if (!userId || !rating || !validRatings.includes(rating)) {
