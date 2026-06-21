@@ -82,6 +82,7 @@ import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
+import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
 import {
   QM_APP_FEE_PCT_ONLINE,
   QM_APP_FEE_PCT_ONLINE_FREE,
@@ -7463,20 +7464,86 @@ export const updateActivityTimestamp = functions.https.onRequest((req, res) => {
  * Quick feedback from follow-up email — one-tap rating
  */
 export const quickFeedback = functions.https.onRequest(async (req, res) => {
-  // POST = detailed feedback submission after initial rating
+  // HEAD probes and email-client / link-previewer prefetches must be
+  // side-effect-free (no Firestore write, no founder email). This is the
+  // scanner-prefetch guard — see quickFeedback.helpers.isSideEffectFreeRequest.
+  if (isSideEffectFreeRequest(req.method, req.headers)) {
+    res.status(200).end();
+    return;
+  }
+
+  // POST = record rating (auto-fired on page load) OR detailed feedback submission
   if (req.method === 'POST') {
-    const { userId, rating, feedbackId, details } = req.body;
+    const { userId, rating, category, feedbackId, details, record } = req.body;
+
+    // Rating record path: deterministic upsert, founder email only on first create
+    const isRatingRecord = isRatingRecordRequest({ record, rating, details });
+    if (isRatingRecord) {
+      const validRatings = ['great', 'okay', 'bad'];
+      if (!userId || !rating || !validRatings.includes(rating)) {
+        res.status(400).send('Invalid request');
+        return;
+      }
+
+      const categoryLabel = getCategoryLabel(category);
+      const docId = feedbackId || getFeedbackDocId(userId, category);
+
+      try {
+        const ref = admin.firestore().collection('feedback').doc(docId);
+        let firstCreate = false;
+        await admin.firestore().runTransaction(async (tx) => {
+          firstCreate = false;  // reset on each attempt
+          const snap = await tx.get(ref);
+          if (!snap.exists) {
+            tx.set(ref, {
+              userId,
+              category: categoryLabel,
+              feedback: `Quick rating: ${rating}`,
+              rating,
+              source: 'email-quick-feedback',
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              notifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            firstCreate = true;
+          } else {
+            tx.set(ref, {
+              rating,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+        });
+
+        // Notify admin only on the first rating — never on re-taps
+        if (firstCreate) {
+          const userEmail = await getUserEmail(userId) || 'Unknown';
+          await sendEmail({
+            to: 'thomas.andrew.hansen@gmail.com',
+            subject: `Quick feedback: "${rating}" from ${userEmail} (${categoryLabel})`,
+            htmlContent: `<p>User <strong>${userEmail}</strong> (${userId}) rated their ${categoryLabel} experience: <strong>${rating}</strong></p>`,
+            category: 'transactional',
+            tags: ['quick-feedback-admin'],
+          });
+        }
+
+        res.status(200).json({ success: true });
+      } catch (error: any) {
+        res.status(500).send('Something went wrong');
+      }
+      return;
+    }
+
+    // Detailed feedback submission after initial rating
     if (!userId || !feedbackId) {
       res.status(400).send('Invalid request');
       return;
     }
 
     try {
-      // Update the existing feedback doc with detailed comments
-      await admin.firestore().collection('feedback').doc(feedbackId).update({
+      // Merge detailed comments into the existing deterministic feedback doc
+      await admin.firestore().collection('feedback').doc(feedbackId).set({
         details: (details || '').slice(0, 5000),
         detailsAddedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      }, { merge: true });
 
       // Notify admin about the detailed feedback
       const userEmail = await getUserEmail(userId) || 'Unknown';
@@ -7527,29 +7594,10 @@ export const quickFeedback = functions.https.onRequest(async (req, res) => {
     return;
   }
 
-  const categoryLabel = feedbackCategory === 're-engagement' ? 'Re-engagement' : 'First Quote Follow-Up';
+  // Deterministic doc id — the actual record/email happens via the auto-POST below
+  const docId = getFeedbackDocId(userId, feedbackCategory);
 
   try {
-    // Store the feedback and get the doc ID for the follow-up form
-    const feedbackRef = await admin.firestore().collection('feedback').add({
-      userId,
-      category: categoryLabel,
-      feedback: `Quick rating: ${rating}`,
-      rating,
-      source: 'email-quick-feedback',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    // Notify admin
-    const userEmail = await getUserEmail(userId) || 'Unknown';
-    await sendEmail({
-      to: 'thomas.andrew.hansen@gmail.com',
-      subject: `Quick feedback: "${rating}" from ${userEmail}`,
-      htmlContent: `<p>User <strong>${userEmail}</strong> (${userId}) rated their first quote experience: <strong>${rating}</strong></p>`,
-      category: 'transactional',
-      tags: ['quick-feedback-admin'],
-    });
-
     const emoji = rating === 'great' ? '&#129321;' : rating === 'okay' ? '&#128528;' : '&#128169;';
     const message = rating === 'great'
       ? "Stoked to hear it! That's made our day."
@@ -7603,6 +7651,15 @@ export const quickFeedback = functions.https.onRequest(async (req, res) => {
         </div>
 
         <script>
+          // Record the rating on real page load (skipped by prefetch/HEAD requests)
+          document.addEventListener('DOMContentLoaded', function() {
+            fetch(window.location.origin + '/quickFeedback', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: '${userId}', rating: '${rating}', category: '${feedbackCategory || ''}', record: true })
+            }).catch(function(){});
+          });
+
           document.getElementById('detailsForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             var details = document.getElementById('details').value.trim();
@@ -7617,7 +7674,7 @@ export const quickFeedback = functions.https.onRequest(async (req, res) => {
                 body: JSON.stringify({
                   userId: '${userId}',
                   rating: '${rating}',
-                  feedbackId: '${feedbackRef.id}',
+                  feedbackId: '${docId}',
                   details: details
                 })
               });
