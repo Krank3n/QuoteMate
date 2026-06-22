@@ -54,6 +54,21 @@ jobs:
       - name: Build web export
         run: npx expo export --platform web --output-dir dist-staging
 
+      - name: Write staging hosting config
+        # Generated here so the deploy works even on PR branches that predate
+        # firebase.staging.json in the repo.
+        run: |
+          cat > firebase.preview.json <<'JSON'
+          {
+            "hosting": {
+              "site": "quotemate-staging",
+              "public": "dist-staging",
+              "ignore": ["firebase.json", "**/.*"],
+              "rewrites": [{ "source": "**", "destination": "/index.html" }]
+            }
+          }
+          JSON
+
       - name: Resolve channel id
         id: chan
         run: |
@@ -75,7 +90,7 @@ jobs:
           printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
           set +e
           OUT=$(npx firebase-tools hosting:channel:deploy "${{ steps.chan.outputs.channel }}" \
-            --config firebase.staging.json --project hansendev --expires 30d --json 2>&1)
+            --config firebase.preview.json --project hansendev --expires 30d --json 2>&1)
           CODE=$?
           echo "$OUT"
           if [ $CODE -ne 0 ]; then
