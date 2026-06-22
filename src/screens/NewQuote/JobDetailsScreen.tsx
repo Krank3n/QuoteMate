@@ -12,6 +12,7 @@ import {
   Alert,
   Platform,
   Animated,
+  Easing,
 } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -375,8 +376,20 @@ export function JobDetailsScreen() {
     );
     const rotateLoop = Animated.loop(
       Animated.sequence([
-        Animated.timing(rotateAnim, { toValue: 1, duration: 2000, useNativeDriver: true }),
-        Animated.timing(rotateAnim, { toValue: 0, duration: 2000, useNativeDriver: true }),
+        // Smooth sinusoidal S-bend so the logo eases in/out at each end of the
+        // wobble (no abrupt reversal like a linear curve would give).
+        Animated.timing(rotateAnim, {
+          toValue: 1,
+          duration: 2000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(rotateAnim, {
+          toValue: 0,
+          duration: 2000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
       ])
     );
 
