@@ -33,6 +33,7 @@ const REPO_OWNER = 'Krank3n';
 const REPO_NAME = 'QuoteMate';
 const EAS_WORKFLOW_FILE = 'eas.yml';
 const AGENT_WORKFLOW_FILE = 'agent.yml';
+const WEB_PREVIEW_WORKFLOW_FILE = 'web-preview.yml';
 
 // ============================================================
 // TYPES + VALIDATION
@@ -842,6 +843,58 @@ export const adminDispatchEas = functions.https.onCall(async (data, context) => 
   });
   await logTicketAction(adminUid, `eas_${eas}`, id, { platform, profile });
   return { ok: true, runsUrl };
+});
+
+// Deploy a per-PR web preview so changes can be reviewed in a browser BEFORE
+// merging to main. Resolves the ticket's PR head branch, then dispatches the
+// web-preview.yml workflow which builds the Expo web export and ships it to a
+// Firebase Hosting preview channel (quotemate-staging--pr-<n>-*.web.app). The
+// workflow comments the live URL back on the PR when it finishes.
+export const adminDeployWebPreview = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const id = (data?.id || '').toString();
+  if (!id) throw new functions.https.HttpsError('invalid-argument', 'id required');
+
+  const ref = db().collection('tickets').doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'ticket not found');
+  const ticket = snap.data() as any;
+
+  const pr = parsePrUrl(ticket.prUrl);
+  if (!pr) throw new functions.https.HttpsError('failed-precondition', 'ticket has no GitHub PR url');
+
+  // The PR head branch is what we want to build (not main).
+  const prInfo = await githubFetch(`/repos/${pr.owner}/${pr.repo}/pulls/${pr.number}`, { method: 'GET' });
+  if (prInfo.status >= 300) {
+    const msg = (prInfo.body?.message || JSON.stringify(prInfo.body) || '').toString().slice(0, 200);
+    throw new functions.https.HttpsError('internal', `Could not read PR #${pr.number} (${prInfo.status}): ${msg}`);
+  }
+  const headRef = (prInfo.body?.head?.ref || '').toString();
+  if (!headRef) throw new functions.https.HttpsError('internal', 'could not resolve PR head branch');
+
+  const r = await githubFetch(
+    `/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WEB_PREVIEW_WORKFLOW_FILE}/dispatches`,
+    {
+      method: 'POST',
+      body: { ref: 'main', inputs: { ref: headRef, pr: String(pr.number), channel: `pr-${pr.number}` } },
+    },
+  );
+  if (r.status >= 300) {
+    const msg = (r.body?.message || JSON.stringify(r.body) || '').toString().slice(0, 200);
+    throw new functions.https.HttpsError('internal', `Workflow dispatch failed (${r.status}): ${msg}`);
+  }
+
+  // Predict the preview URL (the workflow also comments the canonical one on the PR).
+  const previewUrl = `https://quotemate-staging--pr-${pr.number}-*.web.app`;
+  const runsUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WEB_PREVIEW_WORKFLOW_FILE}`;
+  await ref.update({
+    webPreviewStatus: 'building',
+    webPreviewRunUrl: runsUrl,
+    lastWebPreview: { branch: headRef, pr: pr.number, at: Date.now() },
+    updatedAt: Date.now(),
+  });
+  await logTicketAction(adminUid, 'web_preview', id, { pr: pr.number, branch: headRef });
+  return { ok: true, runsUrl, branch: headRef, previewUrl };
 });
 
 // AI: write user-facing "What's New" notes from the ticket (store notes / OTA message).
