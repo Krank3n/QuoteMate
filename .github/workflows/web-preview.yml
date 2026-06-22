@@ -44,7 +44,12 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        # Skip postinstall (patch-package) during install: without a committed
+        # lockfile npm may resolve a newer native module than a patch targets,
+        # which is irrelevant to the web bundle. Apply patches best-effort after.
+        run: |
+          npm install --no-audit --no-fund --ignore-scripts
+          npx patch-package || echo "patch-package warnings ignored (native patches not needed for web export)"
 
       - name: Build web export
         run: npx expo export --platform web --output-dir dist-staging
