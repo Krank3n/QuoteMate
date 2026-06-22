@@ -1,0 +1,57 @@
+{
+  "slug": "turf",
+  "title": "Instant turf quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "landscape_gardening",
+    "nicheId": "garden_install",
+    "categoryName": "Landscaping",
+    "nicheName": "Turf Supply & Lay"
+  },
+  "templateId": "turf_laying",
+  "params": { "area": 45 },
+  "jobDescription": "Supply and lay 45 square metres of Sir Walter buffalo instant turf out the front. Existing lawn to be sprayed off and removed first, 50mm of premium topsoil added and levelled before laying, with a starter fertiliser.",
+  "labour": {
+    "rate": 85,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 15,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Marco Bianchi",
+    "address": "5 Rennie St, Thornbury VIC 3071"
+  },
+  "business": {
+    "businessName": "Thornbury Lawn & Garden",
+    "phone": "0415 770 904",
+    "email": "jobs@thornburylawn.com.au",
+    "abn": "45 678 901 234",
+    "address": "Thornbury VIC 3071",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Turf rolls, top soil, fertiliser, sand",
+  "conversation": {
+    "request": "G'day, after a quote — instant turf out the front, about 45 square metres, and the old lawn needs to come out first.",
+    "mateAck": "Good one. I'll sort a turf supply and lay quote for you now.",
+    "clarifyingQuestion": "Quick one — Sir Walter buffalo, old lawn sprayed and removed, and fresh soil before we lay?",
+    "clarifyingAnswer": "Yeah, Sir Walter, old lawn out, fresh soil and levelled before lay.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — 45 square metres of Sir Walter, the soil, the prep, materials and labour all in."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted."
+  },
+  "voiceover": {
+    "voices": { "tradie": "Charon", "mate": "Puck" },
+    "lines": {
+      "ask": { "voice": "tradie", "text": "G'day, after a quote — instant turf out the front, about 45 square metres, and the old lawn needs to come out first." },
+      "reply": { "voice": "mate", "text": "Good one, I'll sort a turf supply and lay quote for you now. Quick one — Sir Walter buffalo, old lawn sprayed and removed, and fresh soil before we lay?" },
+      "answer": { "voice": "tradie", "text": "Yeah, Sir Walter, old lawn out, fresh soil and levelled before lay." },
+      "reveal": { "voice": "mate", "text": "Here's your quote — 45 square metres of Sir Walter, the soil, the prep, materials and labour all in." },
+      "pdf": { "voice": "tradie", "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy." }
+    }
+  }
+}

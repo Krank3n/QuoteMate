@@ -34,8 +34,8 @@ function geminiKey(): string {
 /** Generate one spoken line → raw PCM (s16le 24kHz mono). */
 async function tts(text: string, voice: string, key: string): Promise<Buffer> {
   const styled =
-    `Say this in a warm, natural Australian accent, like a helpful Aussie tradie mate — ` +
-    `relaxed and friendly, not an announcer: ${text}`;
+    `Say this naturally in a warm, relaxed Australian accent — conversational, ` +
+    `like a couple of Aussie tradies chatting, not an announcer: ${text}`;
   const res = await fetch(`${API}/models/${MODEL}:generateContent?key=${key}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -75,22 +75,31 @@ async function main() {
     console.log(`[${slug}] no voiceover.lines in scenario — skipping (silent chat).`);
     return;
   }
-  const voice = vo.voice || 'Puck';
+  // `voices` maps a role (e.g. tradie/mate) → a prebuilt Gemini voice so the
+  // human side and Mate's replies are spoken by distinct voices. Each line is
+  // either a plain string (legacy, uses the default voice) or { voice, text }
+  // where `voice` is a role key (or a raw voice name as a fallback).
+  const voices: Record<string, string> = vo.voices ?? {};
+  const defaultVoice: string = vo.voice || voices.mate || 'Puck';
+  const resolveVoice = (role?: string): string => (role && (voices[role] ?? role)) || defaultVoice;
+
   const key = geminiKey();
   mkdirSync(OUT, { recursive: true });
 
-  const clips: Record<string, { file: string; durSec: number }> = {};
-  for (const [voKey, text] of Object.entries(vo.lines) as Array<[string, string]>) {
+  const clips: Record<string, { file: string; durSec: number; voice: string }> = {};
+  for (const [voKey, raw] of Object.entries(vo.lines) as Array<[string, string | { voice?: string; text: string }]>) {
+    const text = typeof raw === 'string' ? raw : raw.text;
+    const voice = typeof raw === 'string' ? defaultVoice : resolveVoice(raw.voice);
     console.log(`[${slug}] vo '${voKey}' (${voice}): "${text.slice(0, 60)}…"`);
     const pcm = await tts(text, voice, key);
     const durSec = pcm.length / (2 * SAMPLE_RATE); // exact for s16le mono
     const file = join(OUT, `${slug}.vo.${voKey}.wav`);
     pcmToWav(pcm, file);
-    clips[voKey] = { file, durSec: Math.round(durSec * 1000) / 1000 };
-    console.log(`  → ${file} (${durSec.toFixed(2)}s)`);
+    clips[voKey] = { file, durSec: Math.round(durSec * 1000) / 1000, voice };
+    console.log(`  → ${file} (${durSec.toFixed(2)}s, ${voice})`);
   }
 
-  writeFileSync(join(OUT, `${slug}.voiceover.json`), JSON.stringify({ voice, clips }, null, 2));
+  writeFileSync(join(OUT, `${slug}.voiceover.json`), JSON.stringify({ voices, clips }, null, 2));
   console.log(`  → out/${slug}.voiceover.json`);
 }
 

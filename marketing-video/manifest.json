@@ -1,4 +1,8 @@
 {
   "_comment": "Pilot scenarios. Each slug must have scenarios/<slug>.json and match a website trade slug. Add more (electricians, painters, carpenters, plumbers) once a scenario file exists.",
-  "slugs": ["fencers"]
+  "slugs": [
+    "fencers",
+    "door",
+    "downlights"
+  ]
 }
