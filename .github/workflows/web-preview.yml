@@ -89,15 +89,16 @@ jobs:
         run: |
           printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
           set +e
+          # stdout = clean --json result; stderr (npm warns/progress) flows to the log.
           OUT=$(npx firebase-tools hosting:channel:deploy "${{ steps.chan.outputs.channel }}" \
-            --config firebase.preview.json --project hansendev --expires 30d --json 2>&1)
+            --config firebase.preview.json --project hansendev --expires 30d --json)
           CODE=$?
           echo "$OUT"
           if [ $CODE -ne 0 ]; then
             echo "::error::firebase hosting:channel:deploy failed (exit $CODE)"
             exit $CODE
           fi
-          URL=$(echo "$OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);const r=j.result||{};const k=Object.keys(r)[0];console.log((r[k]&&r[k].url)||'')}catch(e){console.log('')}})")
+          URL=$(echo "$OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const i=s.indexOf('{');const j=JSON.parse(s.slice(i));const r=j.result||{};const k=Object.keys(r)[0];console.log((r[k]&&r[k].url)||'')}catch(e){console.log('')}})")
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "### 🌐 Web preview: $URL" >> "$GITHUB_STEP_SUMMARY"
 
