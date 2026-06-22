@@ -73,9 +73,15 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
         run: |
           printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
+          set +e
           OUT=$(npx firebase-tools hosting:channel:deploy "${{ steps.chan.outputs.channel }}" \
-            --config firebase.staging.json --project hansendev --expires 30d --json)
+            --config firebase.staging.json --project hansendev --expires 30d --json 2>&1)
+          CODE=$?
           echo "$OUT"
+          if [ $CODE -ne 0 ]; then
+            echo "::error::firebase hosting:channel:deploy failed (exit $CODE)"
+            exit $CODE
+          fi
           URL=$(echo "$OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);const r=j.result||{};const k=Object.keys(r)[0];console.log((r[k]&&r[k].url)||'')}catch(e){console.log('')}})")
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "### 🌐 Web preview: $URL" >> "$GITHUB_STEP_SUMMARY"
