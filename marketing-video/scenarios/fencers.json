@@ -14,17 +14,27 @@
     "rate": 85,
     "unit": "hours",
     "hoursOverride": null,
-    "materialMarkupPercent": 15,
+    "materialMarkupPercent": 30,
     "laborMarkupPercent": 0
   },
   "customer": {
     "name": "Dakota Reyes",
     "address": "14 Boundary Rd, Brunswick VIC 3056"
   },
+  "business": {
+    "businessName": "Brunswick Fencing Co.",
+    "phone": "0412 345 678",
+    "email": "jobs@brunswickfencing.com.au",
+    "abn": "12 345 678 901",
+    "address": "Brunswick VIC 3056",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Posts, rails, infill, gate kit",
   "conversation": {
     "request": "Yeah g'day, need a quote — Colorbond fence out the back, about 22 metres, standard height, and a gate.",
     "mateAck": "Good one. I'll sort a Colorbond fence quote for you now.",
-    "clarifyingQuestion": "Quick one — single pedestrian gate, and 1.8 metres high the whole run?",
+    "clarifyingQuestion": "Righto — single pedestrian gate, and 1.8 metres high the whole run?",
     "clarifyingAnswer": "Yep, just the one 900 gate, 1.8 the whole way.",
     "matePricing": "Sweet — pricing it up now with live supplier rates…",
     "reveal": "Here's the quote — 22m of Colorbond, one gate, materials and labour all in."
@@ -32,13 +42,17 @@
   "presenter": {
     "intro": "request",
     "answer": "clarifyingAnswer",
-    "reaction": "That's the lot — real prices and everything. Sorted."
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "standing on a paved path beside a freshly-installed Colorbond fence"
   },
   "voiceover": {
-    "voice": "Puck",
+    "voices": { "tradie": "Charon", "mate": "Puck" },
     "lines": {
-      "reply": "Good one, I'll sort a Colorbond fence quote for you now. Quick one — single pedestrian gate, and one point eight metres high the whole run?",
-      "reveal": "Here's your quote — 22 metres of Colorbond, one gate, materials and labour all in."
+      "ask": { "voice": "tradie", "text": "Yeah g'day, need a quote — Colorbond fence out the back, about 22 metres, standard height, and a gate." },
+      "reply": { "voice": "mate", "text": "Good one, I'll sort a Colorbond fence quote for you now. Righto — single pedestrian gate, and one point eight metres high the whole run?" },
+      "answer": { "voice": "tradie", "text": "Yep, just the one 900 gate, one point eight the whole way." },
+      "reveal": { "voice": "mate", "text": "Here's your quote — 22 metres of Colorbond, one gate, materials and labour all in." },
+      "pdf": { "voice": "tradie", "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy." }
     }
   }
 }

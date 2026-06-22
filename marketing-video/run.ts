@@ -65,7 +65,9 @@ function main(): void {
 
   for (const slug of slugs) {
     console.log(`\n=== ${slug} ===`);
-    step('driver/generateQuote.ts', [slug, '--mode', mode]);
+    // When the presenter speaks the opening line, the chat shows it silently
+    // (no second voiceover) — tell the driver so it skips the human 'ask' VO.
+    step('driver/generateQuote.ts', [slug, '--mode', mode, ...(skipPresenter ? [] : ['--with-presenter'])]);
     if (!skipVoiceover) {
       try {
         step('voiceover/generateVoiceover.ts', [slug]); // Aussie Mate voice — before capture

@@ -64,6 +64,11 @@ interface Scenario {
     laborMarkupPercent: number;
   };
   customer: { name: string; address?: string };
+  /** Optional demo business — seeded into the capture so the previewed PDF has
+   *  a real header. Fictional/sample only; never shipped to real users. */
+  business?: Record<string, string | number>;
+  /** Trade-appropriate detail line shown on the "building the materials list" card. */
+  workingDetail?: string;
   conversation: {
     request: string;
     mateAck: string;
@@ -339,26 +344,48 @@ function assembleQuote(scenario: Scenario, template: NicheJobTemplate, materials
   };
 }
 
-function buildDemoPayload(scenario: Scenario, quote: Quote): DemoPayload {
+function buildDemoPayload(scenario: Scenario, quote: Quote, withPresenter: boolean): DemoPayload {
   const c = scenario.conversation;
+  // The `vo` tag names a voiceover clip (scenarios/<slug>.json voiceover.lines).
+  // The human/tradie bubbles ('ask','answer') are spoken in a different voice
+  // from Mate's replies ('reply','reveal'). holdMs is filled in at capture time
+  // from each generated clip's real duration so the bubble lingers.
+  //
+  // With a presenter, the talking-head already SPEAKS the opening line, so the
+  // chat shows that first bubble silently (no 'ask' VO) — just a short hold so
+  // it's readable before Mate replies. Without a presenter (screen demo) the
+  // chat voices it so the request isn't silent.
+  const askEvent: DemoEvent = withPresenter
+    ? { kind: 'user', text: c.request, holdMs: 1600 }
+    : { kind: 'user', text: c.request, vo: 'ask' };
   const events: DemoEvent[] = [
-    { kind: 'user', text: c.request },
-    // `vo:'reply'` → the Aussie Mate voiceover for this bubble. holdMs is filled
-    // in at capture time from the generated clip's real duration.
+    askEvent,
     { kind: 'assistant', text: `${c.mateAck}\n\n${c.clarifyingQuestion}`, vo: 'reply' },
-    { kind: 'user', text: c.clarifyingAnswer, delayMs: 900 },
+    { kind: 'user', text: c.clarifyingAnswer, delayMs: 900, vo: 'answer' },
     {
       kind: 'working',
       phases: [
         { phase: 'analyzing', status: 'Reading the job…', ms: 1100 },
-        { phase: 'building', status: 'Building the materials list…', detail: 'Posts, rails, infill, gate kit', ms: 1300 },
+        { phase: 'building', status: 'Building the materials list…', detail: scenario.workingDetail ?? 'Materials, fixings and hardware', ms: 1300 },
         { phase: 'pricing', status: 'Pricing with live supplier rates…', detail: `${quote.materials.length} items`, ms: 1700 },
         { phase: 'done', status: 'Quote ready', ms: 500 },
       ],
     },
     { kind: 'reveal', quoteId: quote.id, text: c.reveal, vo: 'reveal' },
+    // Tap "Preview PDF" and slowly scroll the finished quote document so the
+    // viewer sees the polished, ready-to-send output, with the tradie's closing
+    // line (vo:'pdf') spoken over it. pageW reflows the fluid PDF to a tall
+    // phone column; the harness scrolls it and holds for the voiceover.
+    { kind: 'previewPdf', quoteId: quote.id, pageW: 380, vo: 'pdf', holdMs: 2500 },
   ];
-  return { quote, events, options: { typingMsPerChar: 22, betweenMs: 650, startDelayMs: 700 } };
+  return {
+    quote,
+    events,
+    business: scenario.business,
+    // Tight start so the chat text appears soon after the presenter clip, and a
+    // snappier gap between turns.
+    options: { typingMsPerChar: 20, betweenMs: 400, startDelayMs: 250 },
+  };
 }
 
 // ---- main ------------------------------------------------------------------
@@ -367,7 +394,8 @@ async function main() {
   const args = process.argv.slice(2);
   const slug = args.find((a) => !a.startsWith('--'));
   const mode = (args.includes('--mode') ? args[args.indexOf('--mode') + 1] : 'local') as 'local' | 'backend';
-  if (!slug) throw new Error('usage: generateQuote.ts <slug> [--mode local|backend]');
+  const withPresenter = args.includes('--with-presenter');
+  if (!slug) throw new Error('usage: generateQuote.ts <slug> [--mode local|backend] [--with-presenter]');
 
   await loadAppModules();
   const scenario: Scenario = JSON.parse(readFileSync(join(ROOT, 'scenarios', `${slug}.json`), 'utf8'));
@@ -391,7 +419,7 @@ async function main() {
   const outDir = join(ROOT, 'out');
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, `${slug}.quote.json`), JSON.stringify(quote, null, 2));
-  writeFileSync(join(outDir, `${slug}.demo.json`), JSON.stringify(buildDemoPayload(scenario, quote), null, 2));
+  writeFileSync(join(outDir, `${slug}.demo.json`), JSON.stringify(buildDemoPayload(scenario, quote, withPresenter), null, 2));
   console.log(`  → out/${slug}.quote.json`);
   console.log(`  → out/${slug}.demo.json\n`);
 }

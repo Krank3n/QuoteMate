@@ -1,0 +1,58 @@
+{
+  "slug": "door",
+  "title": "Door hanging quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "carpentry",
+    "nicheId": "doors_windows",
+    "categoryName": "Carpentry",
+    "nicheName": "Door Hanging"
+  },
+  "templateId": "door_hanging",
+  "params": { "doors": 4 },
+  "jobDescription": "Supply and hang four internal hollow-core doors throughout the house, supply chrome lever-on-rose hardware, hinges and striker plates, and fit new primed pine architraves to each opening.",
+  "labour": {
+    "rate": 85,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Hayley Dorn",
+    "address": "18 Vale St, Northcote VIC 3070"
+  },
+  "business": {
+    "businessName": "Northcote Carpentry Co.",
+    "phone": "0416 308 552",
+    "email": "jobs@northcotecarpentry.com.au",
+    "abn": "56 789 012 345",
+    "address": "Northcote VIC 3070",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Doors, hinges, handles, architraves",
+  "conversation": {
+    "request": "G'day mate, after a quote — hanging four internal doors, supplying the doors and the hardware.",
+    "mateAck": "Good one. I'll sort a door hanging quote for you now.",
+    "clarifyingQuestion": "Just to confirm — four hollow-core doors, chrome lever handles, and new architraves all round?",
+    "clarifyingAnswer": "Yeah, four hollow-core, chrome levers, and fresh architraves.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — four doors, the hinges, handles, architraves, materials and labour all in."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "standing in the doorway of a bright, freshly-painted home interior"
+  },
+  "voiceover": {
+    "voices": { "tradie": "Charon", "mate": "Puck" },
+    "lines": {
+      "ask": { "voice": "tradie", "text": "G'day mate, after a quote — hanging four internal doors, supplying the doors and the hardware." },
+      "reply": { "voice": "mate", "text": "Good one, I'll sort a door hanging quote for you now. Just to confirm — four hollow-core doors, chrome lever handles, and new architraves all round?" },
+      "answer": { "voice": "tradie", "text": "Yeah, four hollow-core, chrome levers, and fresh architraves." },
+      "reveal": { "voice": "mate", "text": "Here's your quote — four doors, the hinges, the handles, the architraves, materials and labour all in." },
+      "pdf": { "voice": "tradie", "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy." }
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "slug": "hotwater",
+  "title": "Hot water system quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "plumbing",
+    "nicheId": "hot_water",
+    "categoryName": "Plumbing",
+    "nicheName": "Hot Water"
+  },
+  "templateId": "hot_water_install",
+  "params": { "capacity": 250 },
+  "jobDescription": "Supply and install a 250 litre electric storage hot water system, like-for-like swap in the existing external alcove. New tempering valve, PTR valve and isolation valves, with the old unit removed and taken to scrap.",
+  "labour": {
+    "rate": 95,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 15,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Daniel Okafor",
+    "address": "12 Plenty Rd, Preston VIC 3072"
+  },
+  "business": {
+    "businessName": "Preston Plumbing & Gas",
+    "phone": "0417 640 233",
+    "email": "jobs@prestonplumbing.com.au",
+    "abn": "67 890 123 456",
+    "address": "Preston VIC 3072",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Storage tank, copper, valves, tray",
+  "conversation": {
+    "request": "G'day mate, after a quote — electric hot water system, 250 litre, like-for-like swap, the old one's carked it.",
+    "mateAck": "Good one. I'll sort an electric hot water quote for you now.",
+    "clarifyingQuestion": "Quick one — 250 litre storage, swapping in the same spot, new tempering and relief valves?",
+    "clarifyingAnswer": "Yeah, 250, same spot outside, new valves, and take the old one away.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — 250 litre electric storage system, the valves, the fittings, materials and labour all in."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted."
+  },
+  "voiceover": {
+    "voices": { "tradie": "Charon", "mate": "Puck" },
+    "lines": {
+      "ask": { "voice": "tradie", "text": "G'day mate, after a quote — electric hot water system, 250 litre, like-for-like swap, the old one's carked it." },
+      "reply": { "voice": "mate", "text": "Good one, I'll sort an electric hot water quote for you now. Quick one — 250 litre storage, swapping in the same spot, new tempering and relief valves?" },
+      "answer": { "voice": "tradie", "text": "Yeah, 250, same spot outside, new valves, and take the old one away." },
+      "reveal": { "voice": "mate", "text": "Here's your quote — a 250 litre electric storage system, the valves, the fittings, materials and labour all in." },
+      "pdf": { "voice": "tradie", "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy." }
+    }
+  }
+}

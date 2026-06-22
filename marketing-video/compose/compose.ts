@@ -24,12 +24,22 @@ const TMP = join(OUT, '_tmp');
 const W = 1080;
 const H = 1920;
 const FPS = 30;
-const BG = '0x0F172A'; // brand dark
-const ACCENT = 'F97316'; // brand orange (drawtext fontcolor, no 0x)
+// Trim the empty "booting" lead-in (blank chat) off the front of the app
+// capture so the chat content starts promptly after the presenter clip.
+const APP_HEAD_TRIM = Number(process.env.APP_HEAD_TRIM ?? 1.2);
+// The logo PNG is exported on its own #1E293C backing square; matching the
+// canvas to it lets the badge sit flush with no visible box around it.
+const BG = '0x1E293C'; // brand surface (= logo backing)
+const ACCENT = '0xF97316'; // brand orange — accent rule under the logo
 
 const FONT_FILE =
   process.env.FONT_FILE ??
-  ['/System/Library/Fonts/Supplemental/Arial.ttf', '/Library/Fonts/Arial.ttf'].find(existsSync) ??
+  [
+    '/System/Library/Fonts/Supplemental/DIN Alternate Bold.ttf', // strong, industrial — pairs with the gear/wrench mark
+    '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+    '/System/Library/Fonts/Supplemental/Arial.ttf',
+    '/Library/Fonts/Arial.ttf',
+  ].find(existsSync) ??
   '';
 const LOGO_FILE = process.env.LOGO_FILE ?? resolve(ROOT, '..', '..', 'QuoteMateAppWebsite', 'public', 'assets', 'logo.png');
 const MUSIC_FILE = process.env.MUSIC_FILE ?? '';
@@ -69,20 +79,41 @@ function wrapLines(text: string, maxChars: number): string[] {
   return out;
 }
 
-/** A solid brand card with optional centered title + logo, `secs` long. */
-function makeCard(out: string, title: string, secs: number): void {
+/**
+ * A solid brand card: centered logo, a short orange accent rule, and a centered
+ * title below it, `secs` long. The canvas matches the logo's backing colour so
+ * the badge sits flush (no visible square).
+ */
+function makeCard(out: string, title: string, secs: number, spin: 'in' | 'out' = 'in'): void {
+  const haveLogo = existsSync(LOGO_FILE);
   const filters = [`[0:v]format=yuv420p[bg]`];
   let last = 'bg';
-  if (existsSync(LOGO_FILE)) {
-    filters.push(`[1:v]scale=320:-1[logo]`);
-    filters.push(`[${last}][logo]overlay=(W-w)/2:H/2-280[bgl]`);
+  if (haveLogo) {
+    // The logo spins + fades in (intro) or out (outro). Its baked #1E293C square
+    // matches the card bg, so only the badge appears to turn. It's a still image,
+    // so the input is looped into a timed stream (see inputs) for the time fx.
+    // Ease-in-out (smoothstep) spin so the logo glides to a stop instead of
+    // halting abruptly — one full turn over D, fading in (intro) / out (outro).
+    const D = 0.8;
+    const a = spin === 'out' ? secs - D : 0;
+    const p = `clip((t-${a})/${D},0,1)`; // progress 0→1, clamped
+    const eased = `(${p})*(${p})*(3-2*(${p}))`; // smoothstep S-curve
+    const angle = spin === 'out' ? `(${eased})*2*PI` : `(1-(${eased}))*2*PI`;
+    const fade = spin === 'out' ? `fade=t=out:st=${secs - D}:d=${D}:alpha=1` : `fade=t=in:st=0:d=${D}:alpha=1`;
+    filters.push(
+      `[1:v]scale=380:-1,format=rgba,rotate=a='${angle}':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=none,${fade}[logo]`,
+    );
+    filters.push(`[${last}][logo]overlay=(W-w)/2:(H-h)/2-110[bgl]`);
     last = 'bgl';
+    // short orange rule between the mark and the words
+    filters.push(`[${last}]drawbox=x=(iw-120)/2:y=ih/2+90:w=120:h=6:color=${ACCENT}:t=fill[rule]`);
+    last = 'rule';
   }
   const lines = FONT_FILE && title ? wrapLines(title, 22) : [];
   const fontsize = 58;
-  const lineHeight = 76;
+  const lineHeight = 78;
   lines.forEach((ln, i) => {
-    const y = `H/2+10+${i * lineHeight}`;
+    const y = `H/2+150+${i * lineHeight}`;
     filters.push(
       `[${last}]drawtext=fontfile='${FONT_FILE}':text='${esc(ln)}':fontcolor=white:fontsize=${fontsize}:` +
         `x=(w-text_w)/2:y=${y}[t${i}]`,
@@ -91,25 +122,27 @@ function makeCard(out: string, title: string, secs: number): void {
   });
   filters.push(`[${last}]null[outv]`);
   const inputs = ['-f', 'lavfi', '-t', String(secs), '-i', `color=c=${BG}:s=${W}x${H}:r=${FPS}`];
-  if (existsSync(LOGO_FILE)) inputs.push('-i', LOGO_FILE);
+  // Loop the still logo into a timed stream so the rotate/fade have a timeline.
+  if (haveLogo) inputs.push('-loop', '1', '-framerate', String(FPS), '-t', String(secs), '-i', LOGO_FILE);
   ff([
     ...inputs,
     '-f', 'lavfi', '-t', String(secs), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000',
     '-filter_complex', filters.join(';'),
-    '-map', '[outv]', '-map', `${existsSync(LOGO_FILE) ? 2 : 1}:a`,
+    '-map', '[outv]', '-map', `${haveLogo ? 2 : 1}:a`,
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', String(FPS), '-c:a', 'aac', '-shortest', out,
   ]);
 }
 
 /** Normalize any clip to the canvas: fit on the brand bg, 30fps, with audio. */
-function normalize(input: string, out: string): void {
+function normalize(input: string, out: string, headTrimSec = 0): void {
   const audio = hasAudio(input);
+  const ss = headTrimSec > 0 ? ['-ss', String(headTrimSec)] : [];
   const vf = `scale=${W - 80}:${H - 160}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${BG},setsar=1,fps=${FPS},format=yuv420p`;
   if (audio) {
-    ff(['-i', input, '-vf', vf, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '48000', '-ac', '2', out]);
+    ff([...ss, '-i', input, '-vf', vf, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '48000', '-ac', '2', out]);
   } else {
     ff([
-      '-i', input,
+      ...ss, '-i', input,
       '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000',
       '-vf', vf, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest',
       '-map', '0:v', '-map', '1:a', out,
@@ -125,6 +158,16 @@ function main(): void {
   const app = join(OUT, `${slug}.app.mp4`);
   if (!existsSync(app)) throw new Error(`missing ${app} — run capture first`);
 
+  // Read the voiceover timeline up front: trim the app's empty boot lead-in to
+  // just before the first chat bubble actually appears (its time varies per run,
+  // so a fixed trim leaves a gap). The harness emits a '__start__' mark for it.
+  const timingPath = join(OUT, `${slug}.timing.json`);
+  const timing: Array<{ vo: string; videoTime: number }> = existsSync(timingPath)
+    ? JSON.parse(readFileSync(timingPath, 'utf8'))
+    : [];
+  const startMark = timing.find((m) => m.vo === '__start__');
+  const appHeadTrim = startMark ? Math.max(0, startMark.videoTime - 0.4) : APP_HEAD_TRIM;
+
   rmSync(TMP, { recursive: true, force: true });
   mkdirSync(TMP, { recursive: true });
 
@@ -137,9 +180,9 @@ function main(): void {
     segments.push(file);
     cursor += probeDur(file);
   };
-  const push = (file: string, label: string): string => {
+  const push = (file: string, label: string, headTrim = 0): string => {
     const norm = join(TMP, `${label}.mp4`);
-    normalize(file, norm);
+    normalize(file, norm, headTrim);
     return norm;
   };
 
@@ -151,42 +194,57 @@ function main(): void {
   // talking-head + app cut-ins (presenter clips optional)
   const presenterIntro = join(OUT, `${slug}.intro.mp4`);
   if (existsSync(presenterIntro)) add(push(presenterIntro, 'p-intro'));
-  appStart = cursor; // the app segment begins here
-  add(push(app, 'app'));
+  appStart = cursor; // the app segment begins here (after head-trim)
+  add(push(app, 'app', appHeadTrim));
   const presenterReaction = join(OUT, `${slug}.reaction.mp4`);
   if (existsSync(presenterReaction)) add(push(presenterReaction, 'p-reaction'));
 
   // brand outro
   const outro = join(TMP, 'outro.mp4');
-  makeCard(outro, 'Real quotes. Real prices.\nQuoteMate', 2.2);
+  // Two balanced stacked lines under the logo (the badge already carries the wordmark).
+  makeCard(outro, 'Real quotes.\nReal prices.', 2.2, 'out');
   add(outro);
 
   // concat (re-encode for uniformity) → single track we then dub onto
   const listFile = join(TMP, 'list.txt');
   writeFileSync(listFile, segments.map((s) => `file '${s}'`).join('\n'));
   const concatV = join(TMP, 'concat.mp4');
-  ff(['-f', 'concat', '-safe', '0', '-i', listFile, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', concatV]);
+  // Tag bt709 explicitly — without a colr atom some players (QuickTime) render
+  // the H.264 as a black screen. `-c:v copy` below preserves these tags.
+  ff(['-f', 'concat', '-safe', '0', '-i', listFile, '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+    '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709',
+    '-c:a', 'aac', '-movflags', '+faststart', concatV]);
 
-  // Gather the Mate voiceover clips + their placement (appStart + recorded offset).
-  const voClips: Array<{ file: string; atSec: number }> = [];
+  // Gather the voiceover clips + their placement (appStart + recorded offset,
+  // shifted by the head-trim). The '__start__' mark has no clip and is skipped.
+  const voClips: Array<{ vo: string; file: string; atSec: number }> = [];
   const voPath = join(OUT, `${slug}.voiceover.json`);
-  const timingPath = join(OUT, `${slug}.timing.json`);
-  if (existsSync(voPath) && existsSync(timingPath)) {
+  if (existsSync(voPath) && timing.length) {
     const voice = JSON.parse(readFileSync(voPath, 'utf8'));
-    const timing = JSON.parse(readFileSync(timingPath, 'utf8')) as Array<{ vo: string; videoTime: number }>;
     for (const mark of timing) {
       const clip = voice.clips?.[mark.vo];
-      if (clip && existsSync(clip.file)) voClips.push({ file: clip.file, atSec: appStart + mark.videoTime });
+      if (clip && existsSync(clip.file)) {
+        voClips.push({ vo: mark.vo, file: clip.file, atSec: appStart + Math.max(0, mark.videoTime - appHeadTrim) });
+      }
     }
-    console.log(`  voiceover: ${voClips.map((v, i) => `${timing[i].vo}@${v.atSec.toFixed(1)}s`).join('  ')}`);
+    console.log(`  voiceover: ${voClips.map((v) => `${v.vo}@${v.atSec.toFixed(1)}s`).join('  ')}`);
   }
 
   const finalMp4 = join(OUT, `${slug}.mp4`);
   const haveMusic = !!(MUSIC_FILE && existsSync(MUSIC_FILE));
 
+  // Re-encode the final with the PTS reset (setpts/asetpts) and `-bf 0`: B-frames
+  // make libx264 emit an edit list with an empty edit at the start, which some
+  // players (QuickTime) render as a fully black screen. Dropping B-frames +
+  // zeroing the start removes it, so the deliverable plays everywhere.
+  const VENC = [
+    '-c:v', 'libx264', '-bf', '0', '-pix_fmt', 'yuv420p', '-crf', '20',
+    '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709',
+  ];
   if (voClips.length === 0 && !haveMusic) {
-    // Nothing to dub — concat is the final.
-    ff(['-i', concatV, '-c', 'copy', finalMp4]);
+    // Nothing to dub — clean the concat into the final.
+    ff(['-i', concatV, '-vf', 'setpts=PTS-STARTPTS', '-af', 'aresample=async=1,asetpts=PTS-STARTPTS',
+      ...VENC, '-c:a', 'aac', '-movflags', '+faststart', finalMp4]);
   } else {
     // Mix: base audio + each delayed Mate VO clip + optional looped music bed.
     const inputs = ['-i', concatV];
@@ -207,11 +265,12 @@ function main(): void {
       mixIns.push('[mus]');
     }
     parts.push(`${mixIns.join('')}amix=inputs=${mixIns.length}:duration=first:normalize=0[a]`);
+    parts.push(`[0:v]setpts=PTS-STARTPTS[v]`);
     ff([
       ...inputs,
       '-filter_complex', parts.join(';'),
-      '-map', '0:v', '-map', '[a]',
-      '-c:v', 'copy', '-c:a', 'aac', '-movflags', '+faststart', '-shortest', finalMp4,
+      '-map', '[v]', '-map', '[a]',
+      ...VENC, '-c:a', 'aac', '-movflags', '+faststart', '-shortest', finalMp4,
     ]);
   }
 
