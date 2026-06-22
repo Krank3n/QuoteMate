@@ -10,6 +10,7 @@ import { Proposal } from '../../types/assistant';
 import {
   findCustomer,
   getBusinessDefaults,
+  getJobRequirements,
   getQuote,
   listRecentQuotes,
   reviewQuote,
@@ -67,6 +68,9 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
           break;
         case 'review_quote':
           result = await reviewQuote(input);
+          break;
+        case 'get_job_requirements':
+          result = await getJobRequirements(input as { category?: string; niche?: string; freeText?: string });
           break;
       }
       return { name, id, response: result as any };

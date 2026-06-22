@@ -17,6 +17,7 @@ export const READ_TOOL_NAMES = [
   'get_quote',
   'get_business_defaults',
   'review_quote',
+  'get_job_requirements',
 ] as const;
 
 export const PROPOSAL_TOOL_NAMES = [
@@ -147,6 +148,20 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         quoteId: { type: 'string', description: 'Document id from list_recent_quotes or find_customer.' },
       },
       required: ['quoteId'],
+    },
+  },
+  {
+    name: 'get_job_requirements',
+    description:
+      'Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions.',
+    parameters: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', description: 'Trade category ID (optional; loaded from business settings if omitted)' },
+        niche: { type: 'string', description: 'Niche ID (optional; inferred from freeText if omitted)' },
+        freeText: { type: 'string', description: 'The job description or blurb to match a niche from (e.g. "colorbond fence", "lawn mow and edge")' },
+      },
+      required: [],
     },
   },
   {
