@@ -461,7 +461,10 @@ export const adminRunTicket = functions
     if (!snap.exists) throw new functions.https.HttpsError('not-found', 'ticket not found');
     const ticket = snap.data() as any;
 
-    if (ticket.agentStatus === 'running') {
+    // Re-running a code ticket re-dispatches the agent on its existing issue, so
+    // you can retry a stuck/failed run from the board. Only the inline ops
+    // executor blocks concurrent runs.
+    if (ticket.type !== 'code' && ticket.agentStatus === 'running') {
       throw new functions.https.HttpsError('failed-precondition', 'ticket is already running');
     }
 
@@ -780,6 +783,24 @@ async function startAgentOnIssue(issueNumber: number): Promise<boolean> {
   }
 }
 
+// Open a PR for an agent-pushed branch using the backend token (the Actions
+// runner can't create PRs in this repo, but this token can). Returns the PR url,
+// or null (no branch, no diff, or a PR already exists).
+async function openPrForBranch(branch: string, issueNumber: number, ticketId: string, title: string): Promise<string | null> {
+  try {
+    const body =
+      `${ticketMarker(ticketId)}\nCloses #${issueNumber}\n\n` +
+      `_PR opened automatically by the board — the agent pushed this branch but Actions PR-creation is disabled._`;
+    const r = await githubFetch(`/repos/${REPO_OWNER}/${REPO_NAME}/pulls`, {
+      method: 'POST',
+      body: { title, head: branch, base: 'main', body },
+    });
+    return r.status < 300 ? r.body?.html_url || null : null;
+  } catch {
+    return null;
+  }
+}
+
 // Merge the ticket's PR (squash by default) via the GitHub API.
 export const adminMergeTicketPR = functions.https.onCall(async (data, context) => {
   const adminUid = requireAdmin(context);
@@ -990,6 +1011,28 @@ export const ticketPrSync = functions
       });
       synced++;
     }
+
+    // Option B: auto-open PRs for agent-pushed branches that don't have one yet.
+    // The Actions runner can't create PRs in this repo, but the backend can —
+    // so a code ticket never gets stuck "in progress" with an orphan branch.
+    const inProgress = await db().collection('tickets').where('status', '==', 'in_progress').get();
+    for (const d of inProgress.docs) {
+      const t = d.data() as any;
+      if (t.prUrl || t.type !== 'code' || !t.issueNumber) continue;
+      const refs = await githubFetch(
+        `/repos/${REPO_OWNER}/${REPO_NAME}/git/matching-refs/heads/ticket/${t.issueNumber}-`,
+        { method: 'GET' },
+      );
+      if (refs.status >= 300 || !Array.isArray(refs.body) || !refs.body.length) continue;
+      const branch = String(refs.body[0].ref || '').replace('refs/heads/', '');
+      if (!branch) continue;
+      const prUrl = await openPrForBranch(branch, t.issueNumber, d.id, t.title || `Ticket ${t.issueNumber}`);
+      if (prUrl) {
+        await d.ref.update({ prUrl, status: 'pr', agentStatus: 'succeeded', shipStatus: 'pr_open', updatedAt: Date.now() });
+        synced++;
+      }
+    }
+
     console.log(`ticketPrSync: synced ${synced} PR(s)`);
     return null;
   });
