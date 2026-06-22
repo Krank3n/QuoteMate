@@ -67,3 +67,4 @@ android/app/build/outputs/
 
 # Claude Code
 .claude/scheduled_tasks.lock
+dist-staging

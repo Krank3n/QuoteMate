@@ -10,6 +10,8 @@
     "ios": "npm run ios:clean && expo run:ios",
     "ios:clean": "xcrun simctl uninstall booted com.hansendev.quotemate 2>/dev/null || true",
     "web": "expo start --web",
+    "export:staging": "expo export --platform web --output-dir dist-staging",
+    "deploy:staging": "npm run export:staging && firebase deploy --only hosting --config firebase.staging.json --project hansendev",
     "test": "vitest run",
     "test:watch": "vitest",
     "postinstall": "patch-package"
