@@ -1,0 +1,78 @@
+{
+  "slug": "bathroom_renovation",
+  "title": "Bathroom Renovation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "plumbing",
+    "nicheId": "bathroom_reno",
+    "categoryName": "Plumbing",
+    "nicheName": "Bathroom Renovation"
+  },
+  "templateId": "bathroom_renovation",
+  "params": {
+    "fixtures": 5
+  },
+  "jobDescription": "Full main bathroom strip-out and reno, layout staying the same. New shower, vanity, toilet, mixer taps. Tiles supplied by customer. Waterproofing certified to AS3740.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Sam Whitlock",
+    "address": "Brunswick VIC 3056"
+  },
+  "business": {
+    "businessName": "Brunswick Plumbing",
+    "phone": "0425 205 295",
+    "email": "jobs@bathroomrebrunswick.com.au",
+    "abn": "25 145 235 265",
+    "address": "Brunswick VIC 3056",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Shower mixer, Basin mixer, Toilet suite, Vanity",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a full bathroom reno? It's a strip-out, layout staying the same, new shower, vanity, toilet, mixer taps, tiles supplied by the customer, and waterproofing certified to AS3740.",
+    "mateAck": "Good one. I'll sort a Bathroom Renovation quote for you now.",
+    "clarifyingQuestion": "Just to confirm — are the new shower, vanity, toilet, and mixer taps being supplied by you, or by the customer?",
+    "clarifyingAnswer": "Nah Mate, I'll be supplying those; the customer's only sorting the tiles.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers the full strip-out and renovation, all new fixtures supplied and installed, plus certified waterproofing, with the customer supplying the tiles."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie stands in a customer's living room, phone to ear, looking towards a bathroom door."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a full bathroom reno? It's a strip-out, layout staying the same, new shower, vanity, toilet, mixer taps, tiles supplied by the customer, and waterproofing certified to AS3740."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Bathroom Renovation quote for you now. Just to confirm — are the new shower, vanity, toilet, and mixer taps being supplied by you, or by the customer?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah Mate, I'll be supplying those; the customer's only sorting the tiles."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it covers the full strip-out and renovation, all new fixtures supplied and installed, plus certified waterproofing, with the customer supplying the tiles."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

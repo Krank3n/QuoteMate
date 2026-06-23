@@ -1,0 +1,76 @@
+{
+  "slug": "stump-grinding-quote-template",
+  "title": "Stump Grinding quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "arborists",
+    "nicheId": "stump-grinding-quote-template",
+    "categoryName": "Arborists",
+    "nicheName": "Stump Grinding"
+  },
+  "templateId": "pressure_clean",
+  "params": {},
+  "jobDescription": "Residential stump grinding at the Smith's residence, 14 Acacia Street, Sunnybank. Includes grinding of three stumps: one large Gum tree stump (ninety-centimetre diameter, thirty-centimetre below ground level), with extensive surface roots requiring grinding across a two-metre radius; one medium Melaleuca stump (sixty-centimetre diameter, twenty-five-centimetre below ground level), located zero point five metres from a retaining wall; and one small Bottlebrush stump (forty-centimetre diameter, twenty-centimetre below ground level). All ground material to be removed. Backfill all three areas with premium garden soil, then cover with native hardwood mulch. Comprehensive site clean-up and green waste removal included.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 6,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Sam Whitlock",
+    "address": "Brunswick VIC 3056"
+  },
+  "business": {
+    "businessName": "Brunswick Arborist",
+    "phone": "0440 310 490",
+    "email": "jobs@stumpgrindinbrunswick.com.au",
+    "abn": "40 190 370 430",
+    "address": "Brunswick VIC 3056",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Stump grinding (below ground level), Root grinding (surface roots), Backfill soil or mulch, Turf patch (optional)",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that stump grinding job at the Smith's place?",
+    "mateAck": "Good one. I'll sort a Stump Grinding quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, for the large gum tree stump, are we grinding all surface roots within that two-metre radius, and do they need to be ground to the same thirty-centimetre depth below ground level?",
+    "clarifyingAnswer": "Yeah, that's right Mate. Grind all those surface roots down nice and deep, thirty centimetres for the gum, and we'll backfill and mulch everything, no turf patch.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for the three stumps, including deep grinding for the gum's surface roots, backfill, mulch, and full site clean-up."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in high-vis workwear, standing next to a large, recently cut gum tree stump in a suburban backyard with a wooden fence and garden beds in the background."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that stump grinding job at the Smith's place?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Stump Grinding quote for you now. Righto — just to confirm, for the large gum tree stump, are we grinding all surface roots within that two-metre radius, and do they need to be ground to the same thirty-centimetre depth below ground level?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's right Mate. Grind all those surface roots down nice and deep, thirty centimetres for the gum, and we'll backfill and mulch everything, no turf patch."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for the three stumps, including deep grinding for the gum's surface roots across a two-metre radius, backfill, mulch, and full site clean-up."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

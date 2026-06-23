@@ -1,0 +1,79 @@
+{
+  "slug": "garden_bed_install",
+  "title": "Garden Bed Installation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "landscape_gardening",
+    "nicheId": "garden_install",
+    "categoryName": "Landscaping",
+    "nicheName": "Garden Bed Installation"
+  },
+  "templateId": "garden_bed_install",
+  "params": {
+    "area": 10,
+    "plants": 20
+  },
+  "jobDescription": "About 8m² new garden bed along the front fence, 15 native shrubs in 200mm pots, mulch top-up, flexible plastic edging. Soil supplied bulk by m³.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Liam Brooks",
+    "address": "Footscray VIC 3011"
+  },
+  "business": {
+    "businessName": "Footscray Landscaping",
+    "phone": "0416 142 178",
+    "email": "jobs@gardenbedifootscray.com.au",
+    "abn": "16 118 154 166",
+    "address": "Footscray VIC 3011",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Garden soil, Mulch, Plants, Fertilizer",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for a new garden bed installation?",
+    "mateAck": "Good one. I'll sort a Garden Bed Installation quote for you now.",
+    "clarifyingQuestion": "Righto — is the bed area exactly 8m², are the 15 native shrubs in 200mm pots, and is that flexible plastic edging or something more substantial for the border?",
+    "clarifyingAnswer": "Yeah, spot on for the 8m² and the 15 native shrubs in 200mm pots; the flexible plastic edging is exactly what they want.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes an 8m² garden bed with 15 native shrubs in 200mm pots, mulch, flexible plastic edging, and bulk soil supply."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands next to a marked-out garden bed area along a suburban front fence, with a wheelbarrow and some hand tools nearby."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for a new garden bed installation?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Garden Bed Installation quote for you now. Righto — is the bed area exactly eight square metres, are the fifteen native shrubs in two hundred millimetre pots, and is that flexible plastic edging or something more substantial for the border?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, spot on for the eight square metres and the fifteen native shrubs in two hundred millimetre pots; the flexible plastic edging is exactly what they want."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it includes an eight square metre garden bed with fifteen native shrubs in two hundred millimetre pots, mulch, flexible plastic edging, and bulk soil supply."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

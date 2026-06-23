@@ -1,0 +1,78 @@
+{
+  "slug": "render_acrylic",
+  "title": "Acrylic Render quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "other",
+    "nicheId": "rendering",
+    "categoryName": "Trades",
+    "nicheName": "Acrylic Render"
+  },
+  "templateId": "render_acrylic",
+  "params": {
+    "area": 80
+  },
+  "jobDescription": "Approx 80m² of brick veneer house, single storey. Primer + acrylic render with sponge finish. Two coats top, rolled finish. Customer to choose colour from Dulux range.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Liam Brooks",
+    "address": "Footscray VIC 3011"
+  },
+  "business": {
+    "businessName": "Footscray Trades",
+    "phone": "0446 352 568",
+    "email": "jobs@acrylicrenfootscray.com.au",
+    "abn": "46 208 424 496",
+    "address": "Footscray VIC 3011",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Acrylic render, Primer, Texture coat, Mesh",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for an acrylic render job on a single-storey brick veneer house, about eighty square metres?",
+    "mateAck": "Good one. I'll sort a Acrylic Render quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is that eighty square metres of wall area, on brick veneer, with a sponge finish?",
+    "clarifyingAnswer": "Spot on, Mate, eighty square metres of wall, brick veneer, and a sponge texture.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — primer, two coats of acrylic render with a sponge finish on eighty square metres of brick veneer."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in work gear stands next to a single-storey brick veneer house, a pile of sand and bags of render mix visible nearby."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for an acrylic render job on a single-storey brick veneer house, about eighty square metres?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort an Acrylic Render quote for you now. Just to confirm — is that eighty square metres of wall area, on brick veneer, with a sponge finish?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate, eighty square metres of wall, brick veneer, and a sponge texture."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — primer, two coats of acrylic render with a sponge finish on eighty square metres of brick veneer."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

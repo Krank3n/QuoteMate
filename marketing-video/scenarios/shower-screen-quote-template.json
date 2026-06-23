@@ -1,0 +1,76 @@
+{
+  "slug": "shower-screen-quote-template",
+  "title": "Shower Screen Installation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "glaziers",
+    "nicheId": "shower-screen-quote-template",
+    "categoryName": "Glaziers",
+    "nicheName": "Shower Screen Installation"
+  },
+  "templateId": "garden_bed_install",
+  "params": {},
+  "jobDescription": "Supply and install a frameless shower screen in an ensuite bathroom in Manly, NSW. This includes one fixed panel (800mm wide x 1950mm high, 10mm clear toughened safety glass) and one pivot door panel (900mm wide x 1950mm high, 10mm clear toughened safety glass). Hardware supplied and installed: two polished chrome wall-to-glass hinges, one polished chrome D-handle (150mm centre-to-centre), and 1.95 linear metres of polished chrome U-channel for the fixed panel. Clear silicone sealant, all necessary fixings, and waterproofing membrane applied to floor-level joints around the screen base.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 5,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Priya Nand",
+    "address": "Coburg VIC 3058"
+  },
+  "business": {
+    "businessName": "Coburg Glazier",
+    "phone": "0426 212 308",
+    "email": "jobs@showerscreencoburg.com.au",
+    "abn": "26 148 244 276",
+    "address": "Coburg VIC 3058",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Toughened safety glass panel(s), Hinges (wall-to-glass or glass-to-glass), Wall channels and U-channels, Handle and towel rail",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that shower screen job for the Davo's?",
+    "mateAck": "Good one. I'll sort a Shower Screen Installation quote for you now.",
+    "clarifyingQuestion": "Righto — is this a frameless, semi-frameless, or framed shower screen job?",
+    "clarifyingAnswer": "Yeah, mate, it's a frameless one.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a frameless shower screen for the Davo's, all up for two thousand four hundred and fifty-five dollars."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie in a modern ensuite bathroom, measuring a shower recess with a laser measurer."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that shower screen job for the Davo's?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Shower Screen Installation quote for you now. Righto — is this a frameless, semi-frameless, or framed shower screen job?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, mate, it's a frameless one."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a frameless shower screen for the Davo's, all up for two thousand, four hundred and fifty-five dollars."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

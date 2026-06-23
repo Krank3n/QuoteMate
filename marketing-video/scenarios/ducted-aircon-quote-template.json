@@ -1,0 +1,76 @@
+{
+  "slug": "ducted-aircon-quote-template",
+  "title": "Ducted Air Conditioning quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "hvac-technicians",
+    "nicheId": "ducted-aircon-quote-template",
+    "categoryName": "HVAC Technicians",
+    "nicheName": "Ducted Air Conditioning"
+  },
+  "templateId": "ducted_ac_install",
+  "params": {},
+  "jobDescription": "Installation of a Daikin FDYQ140LAY 14.0kW Inverter Ducted System (indoor and outdoor units) for the Smith Residence, a single-storey, three-bedroom brick veneer home at 12 Acacia Avenue, Burleigh Heads, QLD. This includes twenty metres of R1.5 insulated 350mm flexible supply duct, sixty metres of R1.0 insulated 250mm flexible branch duct, and eight metres of R1.5 insulated 400mm flexible return air duct. Custom supply and return air box plenums will be fabricated and installed. Six 250x250mm square ceiling diffusers and one 600x400mm return air grille with filter box are included. The system will be controlled by a MyAir 5-zone system, including a MyAir tablet controller and three remote wall sensors. Twenty-five metres of insulated copper refrigerant piping (liquid and suction lines) will be run. Electrical works include a dedicated 32A circuit from the existing switchboard, using thirty metres of 6mm TPS cable, an outdoor isolator, and indoor unit connection. Ten metres of 20mm PVC drain pipe will be run to existing storm water. All necessary mounting brackets, anti-vibration pads, full system commissioning, and homeowner handover are included.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 40,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Daniel Okafor",
+    "address": "Thornbury VIC 3071"
+  },
+  "business": {
+    "businessName": "Thornbury HVAC Technician",
+    "phone": "0442 324 516",
+    "email": "jobs@ductedairconthornbury.com.au",
+    "abn": "42 196 388 452",
+    "address": "Thornbury VIC 3071",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Ducted AC unit (indoor and outdoor), Flexible ductwork and plenums, Diffusers and return air grilles, Zone controller and motorised dampers",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that ducted AC job at the Smith's place?",
+    "mateAck": "Good one. I'll sort a Ducted Air Conditioning quote for you now.",
+    "clarifyingQuestion": "Cool — just to confirm, how many zones are we talking for the Smith's ducted system?",
+    "clarifyingAnswer": "Yeah, five zones, mate. Three bedrooms, living, and kitchen/dining.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers the 14kW Daikin system, five zones, and all the installation bits and bobs, coming in at fifteen thousand, eight hundred and seventy-five dollars."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie stands next to a recently installed outdoor ducted AC unit at the side of a single-storey brick home in Burleigh Heads."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that ducted AC job at the Smith's place?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Ducted Air Conditioning quote for you now. Cool — just to confirm, how many zones are we talking for the Smith's ducted system?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, five zones, mate. Three bedrooms, living, and kitchen/dining."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it covers the fourteen-kilowatt Daikin system, five zones, and all the installation bits and bobs, coming in at fifteen thousand, eight hundred and seventy-five dollars."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

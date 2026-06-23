@@ -1,0 +1,76 @@
+{
+  "slug": "bathroom-tiling-quote-template",
+  "title": "Bathroom Tiling quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "tilers",
+    "nicheId": "bathroom-tiling-quote-template",
+    "categoryName": "Tilers",
+    "nicheName": "Bathroom Tiling"
+  },
+  "templateId": "bathroom_renovation",
+  "params": {},
+  "jobDescription": "Bathroom Tiling Renovation, small ensuite.\nScope:\n- Floor Tiling: 4.5 square metres.\n- Wall Tiling: 8.3 square metres.\n  - Comprising: Shower recess (three walls) tiled to ceiling height (2.4 metres); Vanity splashback wall tiled to 1.2 metres height.\n- Tile Supply:\n  - Floor Tiles: 300x300mm porcelain, standard grade.\n  - Wall Tiles: 300x600mm ceramic, standard grade.\n- Waterproofing: Full bathroom floor and shower recess walls (up to 1.8 metres high).\n- Materials: Flexible tile adhesive, matching coloured grout, standard aluminium tile trim, mould-resistant silicone.\n- Waste calculations included.\n- Exclusions: Demolition of existing tiles, screeding (assumed level substrate).",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 20,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Liam Brooks",
+    "address": "Footscray VIC 3011"
+  },
+  "business": {
+    "businessName": "Footscray Tiler",
+    "phone": "0431 247 373",
+    "email": "jobs@bathroomtilifootscray.com.au",
+    "abn": "31 163 289 331",
+    "address": "Footscray VIC 3011",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Floor tiles, Wall tiles, Tile adhesive (flexible), Grout (matching colour)",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for this bathroom tiling job?",
+    "mateAck": "Good one. I'll sort a Bathroom Tiling quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, for the waterproofing, are we doing the whole bathroom floor and shower recess, or just the shower itself?",
+    "clarifyingAnswer": "Nah mate, full waterproofing for the whole floor and up the shower walls to eighteen hundred millimetres.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a complete estimate for the floor and wall tiling, including waterproofing and all materials, with waste calculations."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie (gender-neutral, e.g., 'Sam') stands in a newly renovated bathroom shell, holding a tape measure, looking at a bare wall."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for this bathroom tiling job?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Bathroom Tiling quote for you now. Righto — just to confirm, for the waterproofing, are we doing the whole bathroom floor and shower recess, or just the shower itself?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah mate, full waterproofing for the whole floor and up the shower walls to eighteen hundred millimetres."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's the quote — a complete estimate for the floor and wall tiling, including waterproofing and all materials, with waste calculations."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

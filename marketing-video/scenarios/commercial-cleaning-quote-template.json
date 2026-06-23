@@ -1,0 +1,76 @@
+{
+  "slug": "commercial-cleaning-quote-template",
+  "title": "Commercial Office Cleaning quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "cleaners",
+    "nicheId": "commercial-cleaning-quote-template",
+    "categoryName": "Cleaners",
+    "nicheName": "Commercial Office Cleaning"
+  },
+  "templateId": "pressure_clean",
+  "params": {},
+  "jobDescription": "Commercial office clean in Richmond. Weekly service, every Friday afternoon. Total approximate floor area two hundred square metres.\n\nScope of works:\n- Open Plan Office (one hundred and fifty square metres): General surface wipe-down of all desks (ten desks), filing cabinets (five units), and common area surfaces. Vacuum all carpeted floors and mop hard floors (ten square metres). Empty and reline ten small desk bins.\n- Private Offices (two rooms, fifteen square metres each): General surface wipe-down of desks (one per room) and vacuum carpet.\n- Kitchen/Breakroom (twenty square metres): Clean and sanitise benchtops, sink, microwave interior and exterior, and exterior of fridge. Mop hard floors. Empty and reline two kitchen bins.\n- Bathrooms (two rooms): Sanitisation of two toilets, two sinks, and two mirrors. Mop hard floors. Empty and reline two small bins.\n- Consumables Supply: Weekly check and refill of two soap dispensers, two paper towel dispensers, and two toilet roll dispensers (two rolls per dispenser). Supply of all cleaning materials.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 3,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Ruby Saleh",
+    "address": "Bentleigh VIC 3204"
+  },
+  "business": {
+    "businessName": "Bentleigh Cleaner",
+    "phone": "0438 296 464",
+    "email": "jobs@commercialclbentleigh.com.au",
+    "abn": "38 184 352 408",
+    "address": "Bentleigh VIC 3204",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "General surface cleaning, Vacuum and mop all floors, Kitchen and breakroom cleaning, Bathroom sanitisation",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for the weekly clean at that new office in Richmond?",
+    "mateAck": "Good one. I'll sort a Commercial Office Cleaning quote for you now.",
+    "clarifyingQuestion": "Cool — just checking, is this a one-off deep clean or a regular weekly job?",
+    "clarifyingAnswer": "Nah mate, it's a regular weekly clean. They want it done every Friday arvo.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a weekly commercial office clean for the Richmond property, including all materials and consumables, for three hundred and fifty dollars a week."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie sitting at a kitchen island bench, laptop open, looking relaxed."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for the weekly clean at that new office in Richmond?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Commercial Office Cleaning quote for you now. Cool — just checking, is this a one-off deep clean or a regular weekly job?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah mate, it's a regular weekly clean. They want it done every Friday arvo."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's the quote — a weekly commercial office clean for the Richmond property, including all materials and consumables, for three hundred and fifty dollars a week."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

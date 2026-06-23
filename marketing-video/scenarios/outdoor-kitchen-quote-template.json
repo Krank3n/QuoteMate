@@ -1,0 +1,76 @@
+{
+  "slug": "outdoor-kitchen-quote-template",
+  "title": "Outdoor Kitchen quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "builders",
+    "nicheId": "outdoor-kitchen-quote-template",
+    "categoryName": "Builders",
+    "nicheName": "Outdoor Kitchen"
+  },
+  "templateId": "kitchen_cabinetry",
+  "params": {},
+  "jobDescription": "Supply and install a custom outdoor kitchen at the Johnsons' residence. Includes a Beefeater Signature ProLine five-burner built-in BBQ. Four point two linear metres of Caesarstone 'Raw Concrete' benchtop, 600mm deep, with waterfall end panel. Three linear metres of marine-grade aluminium cabinetry in 'Charcoal', comprising a double-door under-BBQ unit, a single-door sink unit, and a two-drawer unit. Franke Sinos SNX210-40 stainless steel undermount sink with a Clark Round Gooseneck mixer tap. Installation of ten linear metres of new gas line from the existing meter to the BBQ. Electrical rough-in and fit-off for two double weather-resistant GPOs and wiring for three LED strip lights under the benchtop. Includes removal of existing small BBQ cart and site tidy-up.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 45,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Hayley Dorn",
+    "address": "Reservoir VIC 3073"
+  },
+  "business": {
+    "businessName": "Reservoir Builder",
+    "phone": "0445 345 555",
+    "email": "jobs@outdoorkitchreservoir.com.au",
+    "abn": "45 205 415 485",
+    "address": "Reservoir VIC 3073",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Built-in BBQ or cooktop, Stone or granite benchtop, Outdoor cabinetry (marine grade), Sink and tapware",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that outdoor kitchen at the Johnsons' place?",
+    "mateAck": "Good one. I'll sort a Outdoor Kitchen quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, are we including the gas line connection and the electrical points in this quote?",
+    "clarifyingAnswer": "Yeah, nah, definitely need to factor in the gas connection from the main and wiring for a couple of double GPOs and some under-bench lighting. The client wants the whole shebang.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full breakdown for the Johnsons' custom outdoor kitchen, including all materials, labour, and subbie costs for gas and electrical connections."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie, Mark, stands on a paved patio of a modern suburban home. Behind him is a newly built timber pergola structure, ready for the outdoor kitchen installation."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that outdoor kitchen at the Johnsons' place?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Outdoor Kitchen quote for you now. Righto — just to confirm, are we including the gas line connection and the electrical points in this quote?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, nah, definitely need to factor in the gas connection from the main and wiring for a couple of double GPOs and some under-bench lighting. The client wants the whole shebang."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full breakdown for the Johnsons' custom outdoor kitchen, including all materials, labour, and subbie costs for gas and electrical connections. That's for forty-five hours of labour, plus all materials."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

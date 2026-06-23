@@ -1,0 +1,76 @@
+{
+  "slug": "epoxy-floor-coating-quote-template",
+  "title": "Epoxy Floor Coating quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "flooring-installers",
+    "nicheId": "epoxy-floor-coating-quote-template",
+    "categoryName": "Flooring Installers",
+    "nicheName": "Epoxy Floor Coating"
+  },
+  "templateId": "epoxy_garage_floor",
+  "params": {},
+  "jobDescription": "Epoxy floor coating for a double garage, approximately 6.5m x 6m (39 sqm), located in Brighton East, Melbourne, for a client named Riley.\nSurface preparation: Diamond grinding of the entire approximately 39 square metres of concrete floor.\nCrack repair: One linear metre of minor crack repair near the rear wall using epoxy filler.\nPrimer: Application of one coat of high-solids epoxy primer across the entire 39 square metres.\nBase Coat: Application of two coats of medium grey (e.g., Dulux 'Grey Pail') epoxy base coat across the 39 square metres, allowing for appropriate cure time between coats.\nDecorative Flake Broadcast: Full broadcast of black vinyl flakes (e.g., 'Midnight') into the wet second base coat.\nTopcoat: Application of one clear, UV-stable polyurethane topcoat with a fine anti-slip aggregate (e.g., 50-micron silica) across the 39 square metres.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 24,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Sam Whitlock",
+    "address": "Brunswick VIC 3056"
+  },
+  "business": {
+    "businessName": "Brunswick Flooring Installer",
+    "phone": "0425 205 295",
+    "email": "jobs@epoxyfloorcobrunswick.com.au",
+    "abn": "25 145 235 265",
+    "address": "Brunswick VIC 3056",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Diamond grinding / surface preparation, Epoxy primer, Epoxy base coat (colour), Anti-slip aggregate (optional)",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for that double garage epoxy floor in Brighton East for the Rileys?",
+    "mateAck": "Good one. I'll sort a Epoxy Floor Coating quote for you now.",
+    "clarifyingQuestion": "Cool — just to be crystal clear, are we including the decorative flake broadcast and a non-slip additive in the topcoat for the Rileys' garage?",
+    "clarifyingAnswer": "Yeah, Mate, definitely. Black flakes and a fine non-slip for safety.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full breakdown for the Rileys' double garage epoxy floor, including prep, a two-tone finish with flakes, and a non-slip topcoat."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie is in a neat, modern garage, perhaps with some tools visible, but the floor is clean and ready for work."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for that double garage epoxy floor in Brighton East for the Rileys?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Epoxy Floor Coating quote for you now. Cool — just to be crystal clear, are we including the decorative flake broadcast and a non-slip additive in the topcoat for the Rileys' garage?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, Mate, definitely. Black flakes and a fine non-slip for safety."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full breakdown for the Rileys' double garage epoxy floor, including prep, a two-tone finish with flakes, and a non-slip topcoat."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

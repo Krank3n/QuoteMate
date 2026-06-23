@@ -1,0 +1,78 @@
+{
+  "slug": "hot_water_install",
+  "title": "Hot Water (Electric Storage) quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "plumbing",
+    "nicheId": "hot_water",
+    "categoryName": "Plumbing",
+    "nicheName": "Hot Water (Electric Storage)"
+  },
+  "templateId": "hot_water_install",
+  "params": {
+    "capacity": 250
+  },
+  "jobDescription": "250L electric storage HWS, like-for-like swap in external alcove. New tempering valve, PTR and isolation valves. Old unit removed and taken to scrap.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Cooper Vance",
+    "address": "Carnegie VIC 3163"
+  },
+  "business": {
+    "businessName": "Carnegie Plumbing",
+    "phone": "0422 184 256",
+    "email": "jobs@hotwaterelcarnegie.com.au",
+    "abn": "22 136 208 232",
+    "address": "Carnegie VIC 3163",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Storage tank, Copper pipe, Fittings, PTR valve",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a 250-litre hot water system swap out?",
+    "mateAck": "Good one. I'll sort a Hot Water (Electric Storage) quote for you now.",
+    "clarifyingQuestion": "Righto — just checking, is it a like-for-like swap in the same spot, and are we taking the old unit away?",
+    "clarifyingAnswer": "Yeah, spot on, like-for-like in the same external alcove, and definitely take the old one for scrap.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers a 250-litre electric storage HWS like-for-like swap, all new valves, and old unit disposal."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a modern kitchen, looking at their phone, a half-eaten biscuit on the bench beside them."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a two hundred and fifty litre hot water system swap out?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Hot Water (Electric Storage) quote for you now. Righto — just checking, is it a like-for-like swap in the same spot, and are we taking the old unit away?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, spot on, like-for-like in the same external alcove, and definitely take the old one for scrap."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it covers a two hundred and fifty litre electric storage HWS like-for-like swap, all new valves, and old unit disposal."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

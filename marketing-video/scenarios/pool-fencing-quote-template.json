@@ -1,0 +1,76 @@
+{
+  "slug": "pool-fencing-quote-template",
+  "title": "Pool Fencing quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "fencers",
+    "nicheId": "pool-fencing-quote-template",
+    "categoryName": "Fencers",
+    "nicheName": "Pool Fencing"
+  },
+  "templateId": "fencers",
+  "params": {},
+  "jobDescription": "Install a new pool fence for a residential property in Bondi, NSW. The scope includes: 18 lineal metres of 1200mm high, 12mm thick clear toughened glass pool fencing, comprising twelve 1200mm x 1500mm glass panels. One 900mm wide x 1200mm high self-closing, self-latching tubular steel gate (black powder-coat). Twenty-four stainless steel spigots (square, core drill type). Two 65x65x1800mm powder-coated aluminium gate posts. Two heavy-duty self-closing hinges. One MagnaLatch Top Pull Series 3 gate latch. Twenty-four core holes drilled into existing concrete paving for spigots, two core holes for gate posts. All core holes to be filled with non-shrink grout. Site clearance and waste removal. Provide a compliance certificate for AS1926.1.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 24,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Ruby Saleh",
+    "address": "Bentleigh VIC 3204"
+  },
+  "business": {
+    "businessName": "Bentleigh Fencer",
+    "phone": "0423 191 269",
+    "email": "jobs@poolfencingbentleigh.com.au",
+    "abn": "23 139 217 243",
+    "address": "Bentleigh VIC 3204",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Glass panels or aluminium/tubular steel panels, Spigots or posts, Self-closing, self-latching gate, Gate hinges and latch hardware",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that pool fence job in Bondi?",
+    "mateAck": "Good one. I'll sort a Pool Fencing quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is this for core drilling into existing concrete, or do we need footings?",
+    "clarifyingAnswer": "Yeah, it's all existing concrete around the pool, mate. Standard core drilling will be fine.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full breakdown for eighteen lineal metres of glass pool fencing with a tubular steel gate, all compliant and ready to go."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie standing in a sunny backyard next to a partially completed pool fence, with a concrete slab around the pool."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that pool fence job in Bondi?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Pool Fencing quote for you now. Righto — just to confirm, is this for core drilling into existing concrete, or do we need footings?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, it's all existing concrete around the pool, mate. Standard core drilling will be fine."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full breakdown for eighteen lineal metres of glass pool fencing with a tubular steel gate, all compliant and ready to go."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

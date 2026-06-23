@@ -1,0 +1,78 @@
+{
+  "slug": "pressure_clean",
+  "title": "Pressure Clean quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "cleaning",
+    "nicheId": "specialty",
+    "categoryName": "Cleaning",
+    "nicheName": "Pressure Clean"
+  },
+  "templateId": "pressure_clean",
+  "params": {
+    "area": 100
+  },
+  "jobDescription": "Driveway and front path approx 90m² concrete, plus side path pavers 20m². Heavy mould and lichen on shaded sections — chemical pre-treat then surface clean.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Marco Bianchi",
+    "address": "Northcote VIC 3070"
+  },
+  "business": {
+    "businessName": "Northcote Cleaning",
+    "phone": "0444 338 542",
+    "email": "jobs@pressureclnorthcote.com.au",
+    "abn": "44 202 406 474",
+    "address": "Northcote VIC 3070",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Pressure washer detergent, Surface cleaner attachment, Fuel",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a pressure clean? It's a driveway and front path, about ninety square metres of concrete, plus a twenty square metre side path with pavers, and it's got heavy mould and lichen on the shaded sections needing pre-treat.",
+    "mateAck": "Good one. I'll sort a Pressure Clean quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is that ninety square metres of concrete and twenty square metres of pavers, with heavy mould and lichen on the shaded sections?",
+    "clarifyingAnswer": "Yeah, Mate, that's exactly right: ninety square metres of concrete and twenty of pavers, and it's definitely heavy mould and lichen on the shaded parts, so it needs that chemical pre-treat.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — pressure clean for one hundred and ten square metres of concrete and pavers, including chemical pre-treatment for heavy mould and lichen."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in their home office, reviewing plans on a tablet."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a pressure clean? It's a driveway and front path, about ninety square metres of concrete, plus a twenty square metre side path with pavers, and it's got heavy mould and lichen on the shaded sections needing pre-treat."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Pressure Clean quote for you now. Righto — just to confirm, is that ninety square metres of concrete and twenty square metres of pavers, with heavy mould and lichen on the shaded sections?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, Mate, that's exactly right: ninety square metres of concrete and twenty of pavers, and it's definitely heavy mould and lichen on the shaded parts, so it needs that chemical pre-treat."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — pressure cleaning for one hundred and ten square metres of concrete and pavers, including chemical pre-treatment for heavy mould and lichen."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "slug": "laundry-renovation-quote-template",
+  "title": "Laundry Renovation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "builders",
+    "nicheId": "laundry-renovation-quote-template",
+    "categoryName": "Builders",
+    "nicheName": "Laundry Renovation"
+  },
+  "templateId": "bathroom_renovation",
+  "params": {},
+  "jobDescription": "Demolish and remove existing laundry setup including two base cabinets, one wall-mounted trough, and all wall and floor tiles. Supply and install two point four linear metres of custom white melamine cabinetry comprising two 900mm base cabinets and one 600mm base cabinet with standard handles, and two 900mm overhead cabinets. Install a two point four metre by 600mm by thirty-eight millimetre laminate benchtop in 'Arctic White' finish. Supply and install a Clark Roundline 45L stainless steel laundry trough with a Phoenix Vivid Slimline pull-out mixer tap. Tile wall splashback area two point four metres wide by 600mm high (approximately two point five square metres) with 300x600mm white ceramic tiles. Tile floor area two point five metres by one point eight metres (approximately five point five square metres) with 300x300mm grey non-slip ceramic tiles. Rough-in new hot/cold water and waste points for trough and washing machine, connect all new fixtures. Install two new double GPOs and replace existing light fitting with a new LED oyster light. Minor plaster repair and paint touch-ups.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 30,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Elise Carter",
+    "address": "Preston VIC 3072"
+  },
+  "business": {
+    "businessName": "Preston Builder",
+    "phone": "0443 331 529",
+    "email": "jobs@laundryrenovpreston.com.au",
+    "abn": "43 199 397 463",
+    "address": "Preston VIC 3072",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Laundry cabinetry (base and overhead), Benchtop (laminate or stone), Laundry trough and tapware, Wall and floor tiles",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that laundry reno at the Wilsons' place?",
+    "mateAck": "Good one. I'll sort a Laundry Renovation quote for you now.",
+    "clarifyingQuestion": "Cool — just to confirm, are we going with a laminate benchtop or a stone one for this job?",
+    "clarifyingAnswer": "Yeah, laminate's fine for this one, Mate. The Wilsons are on a bit of a budget.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full laundry renovation, including all demo, new cabinetry, benchtop, trough, tiling, plumbing, and electrical work."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie on a residential job site, standing in front of a partially renovated house exterior (e.g., new cladding or fresh paint), not just a plain lawn."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that laundry reno at the Wilsons' place?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Laundry Renovation quote for you now. Cool — just to confirm, are we going with a laminate benchtop or a stone one for this job?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, laminate's fine for this one, Mate. The Wilsons are on a bit of a budget."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full laundry renovation, including all demolition, new cabinetry, benchtop, trough, tiling, plumbing, and electrical work. The total comes to around eleven thousand, four hundred and fifty dollars, including GST."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

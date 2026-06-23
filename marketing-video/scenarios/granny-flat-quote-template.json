@@ -1,0 +1,76 @@
+{
+  "slug": "granny-flat-quote-template",
+  "title": "Granny Flat Construction quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "builders",
+    "nicheId": "granny-flat-quote-template",
+    "categoryName": "Builders",
+    "nicheName": "Granny Flat Construction"
+  },
+  "templateId": "deck_construction",
+  "params": {},
+  "jobDescription": "Construction of a 60m² detached granny flat on a residential property in Merrylands, NSW. Includes: 60m² concrete slab and footings (100mm slab, 400x400mm footings); MGP10 timber frame for a one-bedroom, one-bathroom layout; Colorbond skillion roof in 'Surfmist'; Scyon Linea external cladding, painted; Internal plasterboard walls and ceilings; R2.5 wall insulation and R4.0 ceiling insulation; L-shaped laminate kitchen with basic appliances (oven, cooktop, rangehood, sink); Full bathroom fit-out (shower, toilet, 900mm vanity); Standard plumbing and electrical connections including a 250L electric hot water system; Four aluminium windows (1200x900mm), one 2400x2100mm sliding glass door, one external entry door, and one internal door; Internal painting and vinyl plank flooring for living areas, carpet for bedroom.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 480,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Cooper Vance",
+    "address": "Carnegie VIC 3163"
+  },
+  "business": {
+    "businessName": "Carnegie Builder",
+    "phone": "0422 184 256",
+    "email": "jobs@grannyflatcarnegie.com.au",
+    "abn": "22 136 208 232",
+    "address": "Carnegie VIC 3163",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Concrete slab and footings, Timber or steel frame, Roofing (Colorbond), External cladding",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that granny flat in Merrylands?",
+    "mateAck": "Good one. I'll sort a Granny Flat Construction quote for you now.",
+    "clarifyingQuestion": "Righto — just to make sure I've got the right fit-out, are we doing a standard kitchen and bathroom, or something a bit more premium?",
+    "clarifyingAnswer": "Yeah, standard fit-out for this one, mate. Nothing fancy, just good quality basics.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full build for the 60 square metre granny flat, including all materials and labour, ready to go."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie standing on a newly poured concrete slab at a residential backyard, with house framing materials stacked nearby."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that granny flat in Merrylands?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Granny Flat Construction quote for you now. Righto — just to make sure I've got the right fit-out, are we doing a standard kitchen and bathroom, or something a bit more premium?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, standard fit-out for this one, mate. Nothing fancy, just good quality basics."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full build for the sixty square metre granny flat, including all materials and labour, ready to go."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

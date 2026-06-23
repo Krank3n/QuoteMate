@@ -1,0 +1,78 @@
+{
+  "slug": "epoxy_garage_floor",
+  "title": "Epoxy Floor quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "painting",
+    "nicheId": "specialty",
+    "categoryName": "Painting",
+    "nicheName": "Epoxy Floor"
+  },
+  "templateId": "epoxy_garage_floor",
+  "params": {
+    "area": 40
+  },
+  "jobDescription": "Double garage approx 38m². Existing floor bare concrete with oil stains. Diamond grind prep, single colour epoxy in mid-grey with light flake broadcast.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Ben Trent",
+    "address": "Hampton VIC 3188"
+  },
+  "business": {
+    "businessName": "Hampton Painting",
+    "phone": "0439 303 477",
+    "email": "jobs@epoxyfloorhampton.com.au",
+    "abn": "39 187 361 419",
+    "address": "Hampton VIC 3188",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Epoxy coating kit, Primer, Concrete grinder discs, Roller",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a double garage epoxy floor? It's got oil stains, needs grinding, and they want mid-grey with a light flake.",
+    "mateAck": "Good one. I'll sort a Epoxy Floor quote for you now.",
+    "clarifyingQuestion": "Righto — what's the exact floor area, is there any existing coating to remove, and what's the precise colour and flake combination?",
+    "clarifyingAnswer": "It's around thirty-eight square metres, currently bare concrete with some oil stains needing diamond grinding, and they're set on mid-grey with a light flake broadcast.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — covering diamond grinding, oil stain treatment, a mid-grey epoxy finish, and a light flake broadcast for a thirty-eight square metre double garage."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in a clean, modern kitchen, holding a tablet and sipping a cuppa."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a double garage epoxy floor? It's got oil stains, needs grinding, and they want mid-grey with a light flake."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Epoxy Floor quote for you now. Righto — what's the exact floor area, is there any existing coating to remove, and what's the precise colour and flake combination?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "It's around thirty-eight square metres, currently bare concrete with some oil stains needing diamond grinding, and they're set on mid-grey with a light flake broadcast."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's the quote — covering diamond grinding, oil stain treatment, a mid-grey epoxy finish, and a light flake broadcast for a thirty-eight square metre double garage."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

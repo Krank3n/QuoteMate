@@ -1,0 +1,76 @@
+{
+  "slug": "switchboard_upgrade",
+  "title": "Switchboard Upgrade quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "electrical",
+    "nicheId": "switchboards",
+    "categoryName": "Electrical",
+    "nicheName": "Switchboard Upgrade"
+  },
+  "templateId": "switchboard_upgrade",
+  "params": {},
+  "jobDescription": "Old ceramic-fuse board to be replaced with 18-pole metal enclosure. RCD-protect every circuit, add surge protector and main switch. Asbestos removal not required (existing board confirmed bakelite).",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Daniel Okafor",
+    "address": "Thornbury VIC 3071"
+  },
+  "business": {
+    "businessName": "Thornbury Electrical",
+    "phone": "0427 219 321",
+    "email": "jobs@switchboarthornbury.com.au",
+    "abn": "27 151 253 287",
+    "address": "Thornbury VIC 3071",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Switchboard enclosure, Circuit breakers, RCDs, Surge protector",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for a switchboard upgrade? It's an old ceramic-fuse board getting replaced with an eighteen-pole metal enclosure, every circuit RCD-protected, plus a surge protector and main switch. Confirmed bakelite, no asbestos worries.",
+    "mateAck": "Good one. I'll sort a Switchboard Upgrade quote for you now.",
+    "clarifyingQuestion": "Righto — what's the existing pole count, and are the new RCDs to AS3000 standards?",
+    "clarifyingAnswer": "It's a twelve-pole board currently, and yep, AS3000 compliant RCDs for sure.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full switchboard upgrade including an eighteen-pole metal enclosure, RCDs for all circuits, surge protection, and main switch installation."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a laundry room, looking at an old fuse board mounted on the wall."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for a switchboard upgrade? It's an old ceramic-fuse board getting replaced with an eighteen-pole metal enclosure, every circuit RCD-protected, plus a surge protector and main switch. Confirmed bakelite, no asbestos worries."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Switchboard Upgrade quote for you now. Righto — what's the existing pole count, and are the new RCDs to AS three thousand standards?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "It's a twelve-pole board currently, and yep, AS three thousand compliant RCDs for sure."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for a full switchboard upgrade including an eighteen-pole metal enclosure, RCDs for all circuits, surge protection, and main switch installation."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

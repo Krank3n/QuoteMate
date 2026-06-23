@@ -1,0 +1,79 @@
+{
+  "slug": "gutter_clean",
+  "title": "Gutter Clean quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "roofing",
+    "nicheId": "gutters",
+    "categoryName": "Roofing",
+    "nicheName": "Gutter Clean"
+  },
+  "templateId": "gutter_clean",
+  "params": {
+    "length": 40,
+    "storeys": 1
+  },
+  "jobDescription": "Single-storey 3-bedroom home, approx 45m of gutter all round. Heavy leaf load from neighbour's gum. Blow out, hand scoop, downpipe flush with hose, debris bagged and removed.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Sam Whitlock",
+    "address": "Brunswick VIC 3056"
+  },
+  "business": {
+    "businessName": "Brunswick Roofing",
+    "phone": "0455 415 685",
+    "email": "jobs@guttercleabrunswick.com.au",
+    "abn": "55 235 505 595",
+    "address": "Brunswick VIC 3056",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Bin bags, Downpipe brush, Tarps",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a gutter clean on a single-storey, three-bedroom house, about forty-five metres of gutter, with a heavy leaf load from a neighbour's gum, including blow out, hand scoop, downpipe flush, and debris removal?",
+    "mateAck": "Good one. I'll sort a Gutter Clean quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, that's a single-storey with about forty-five metres of gutter, a heavy leaf load, and including the downpipe flush?",
+    "clarifyingAnswer": "Yep, that's spot on: single-storey, forty-five metres, heavy gum leaves, and definitely include the downpipe flush.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for a single-storey gutter clean, forty-five metres with heavy leaf removal, downpipe flush, and debris disposal."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in the driveway of a single-storey brick home, looking up at the roofline and gutters, with a gum tree visible nearby."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a gutter clean on a single-storey, three-bedroom house, about forty-five metres of gutter, with a heavy leaf load from a neighbour's gum, including blow out, hand scoop, downpipe flush, and debris removal?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Gutter Clean quote for you now. Righto — just to confirm, that's a single-storey with about forty-five metres of gutter, a heavy leaf load, and including the downpipe flush?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yep, that's spot on: single-storey, forty-five metres, heavy gum leaves, and definitely include the downpipe flush."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for a single-storey gutter clean, forty-five metres with heavy leaf removal, downpipe flush, and debris disposal."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

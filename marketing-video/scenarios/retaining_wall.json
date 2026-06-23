@@ -1,0 +1,79 @@
+{
+  "slug": "retaining_wall",
+  "title": "Retaining Wall quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "landscape_gardening",
+    "nicheId": "landscaping",
+    "categoryName": "Landscaping",
+    "nicheName": "Retaining Wall"
+  },
+  "templateId": "retaining_wall",
+  "params": {
+    "length": 8,
+    "height": 0.6
+  },
+  "jobDescription": "8m of concrete sleeper retaining wall at 600mm high, galv H-posts in concrete footings, ag drain behind with 50mm drainage gravel and geotextile. Backfill with site soil.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Mia Donnelly",
+    "address": "Essendon VIC 3040"
+  },
+  "business": {
+    "businessName": "Essendon Landscaping",
+    "phone": "0419 163 217",
+    "email": "jobs@retainingwessendon.com.au",
+    "abn": "19 127 181 199",
+    "address": "Essendon VIC 3040",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Sleepers / blocks, Galvanised posts, Concrete, Drainage gravel",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for an 8m concrete sleeper retaining wall, 600mm high, with galv H-posts in concrete footings, ag drain behind with 50mm drainage gravel and geotextile, then backfill with site soil?",
+    "mateAck": "Good one. I'll sort a Retaining Wall quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is it 8m long, 600mm high, concrete sleepers, and drainage behind?",
+    "clarifyingAnswer": "Yeah, that's right, 8m, 600 high, concrete sleepers, and drainage.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — 8m concrete sleeper retaining wall, 600mm high, with galvanised H-posts, drainage, and backfill."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a suburban backyard, a partially demolished old retaining wall behind him, looking at his phone."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for an eight-metre concrete sleeper retaining wall, six hundred millimetres high, with galvanised H-posts in concrete footings, ag drain behind with fifty-millimetre drainage gravel and geotextile, then backfill with site soil?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Retaining Wall quote for you now. Righto — just to confirm, is it eight metres long, six hundred millimetres high, concrete sleepers, and drainage behind?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's right, eight metres, six hundred high, concrete sleepers, and drainage."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — an eight-metre concrete sleeper retaining wall, six hundred millimetres high, with galvanised H-posts, drainage, and backfill."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

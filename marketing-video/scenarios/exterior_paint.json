@@ -1,0 +1,78 @@
+{
+  "slug": "exterior_paint",
+  "title": "Exterior Painting quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "painting",
+    "nicheId": "exterior",
+    "categoryName": "Painting",
+    "nicheName": "Exterior Painting"
+  },
+  "templateId": "exterior_paint",
+  "params": {
+    "area": 150
+  },
+  "jobDescription": "Single-storey weatherboard cottage, approx 160m² walls plus eaves and fascias. Pressure wash, scrape and spot prime, two top coats Weathershield. Trims gloss black.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Ruby Saleh",
+    "address": "Bentleigh VIC 3204"
+  },
+  "business": {
+    "businessName": "Bentleigh Painting",
+    "phone": "0438 296 464",
+    "email": "jobs@exteriorpabentleigh.com.au",
+    "abn": "38 184 352 408",
+    "address": "Bentleigh VIC 3204",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Exterior paint, Primer, Drop sheets, Masking tape",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for an exterior paint job?",
+    "mateAck": "Good one. I'll sort a Exterior Painting quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is it a single or two-storey weatherboard, what's the approximate wall area, and does it include pressure cleaning and prep?",
+    "clarifyingAnswer": "Yeah, it's a single-storey weatherboard cottage, about one hundred and sixty square metres of walls, and includes pressure washing, scraping, and spot priming.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers a single-storey weatherboard, one hundred and sixty square metres, full prep, two top coats of Weathershield, and gloss black trims."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie sits at their kitchen bench, phone in hand, sipping a cuppa."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for an exterior paint job?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Exterior Painting quote for you now. Righto — just to confirm, is it a single or two-storey weatherboard, what's the approximate wall area, and does it include pressure cleaning and prep?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, it's a single-storey weatherboard cottage, about one hundred and sixty square metres of walls, and includes pressure washing, scraping, and spot priming."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — covering a single-storey weatherboard of about one hundred and sixty square metres, complete with full prep, two top coats, and gloss black trims."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

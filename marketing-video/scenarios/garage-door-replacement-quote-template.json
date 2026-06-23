@@ -1,0 +1,76 @@
+{
+  "slug": "garage-door-replacement-quote-template",
+  "title": "Garage Door Replacement quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "garage-door-installers",
+    "nicheId": "garage-door-replacement-quote-template",
+    "categoryName": "Garage Door Installers",
+    "nicheName": "Garage Door Replacement"
+  },
+  "templateId": "cabinet_door_replacement",
+  "params": {},
+  "jobDescription": "Supply and install a new B&D Panelift Icon Sectional Garage Door for Mrs. Henderson at 14 Gumleaf Crescent, Balmain, NSW. The new door will be a double width (approx. 5.2m wide x 2.2m high) in Colorbond Monument colour with a Woodgrain finish. This includes removal and disposal of the existing old double roller door, supply and installation of a B&D Controll-A-Door Power Drive motor, two (2) Tri-Tran+ Premium remote controls, one (1) wireless wall-mount button, full perimeter weather seals, and safety beam sensors.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 5,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Marco Bianchi",
+    "address": "Northcote VIC 3070"
+  },
+  "business": {
+    "businessName": "Northcote Garage Door Installer",
+    "phone": "0444 338 542",
+    "email": "jobs@garagedoorrenorthcote.com.au",
+    "abn": "44 202 406 474",
+    "address": "Northcote VIC 3070",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Garage door (roller or sectional), Door motor / opener unit, Remote controls (x2), Wall-mount button",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for Mrs. Henderson's garage door replacement?",
+    "mateAck": "Good one. I'll sort a Garage Door Replacement quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is this for a standard double sectional door, about five point two metres wide, with a Colorbond Monument finish?",
+    "clarifyingAnswer": "Spot on, Mate. B&D Panelift Icon, Monument, woodgrain finish, and the B&D Power Drive motor.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a complete replacement for Mrs. Henderson's double sectional garage door, including supply, installation, motor, and remotes, coming in at four thousand nine hundred and fifty dollars."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie standing in front of a modern suburban house with an existing double garage door (showing signs of age), a Ute is parked on the driveway."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for Mrs. Henderson's garage door replacement?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Garage Door Replacement quote for you now. Righto — just to confirm, is this for a standard double sectional door, about five point two metres wide, with a Colorbond Monument finish?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate. B&D Panelift Icon, Monument, woodgrain finish, and the B&D Power Drive motor."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a complete replacement for Mrs. Henderson's double sectional garage door, including supply, installation, motor, and remotes, coming in at four thousand nine hundred and fifty dollars."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

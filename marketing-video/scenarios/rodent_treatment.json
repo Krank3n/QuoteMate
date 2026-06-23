@@ -1,0 +1,78 @@
+{
+  "slug": "rodent_treatment",
+  "title": "Rodent Treatment quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "pest_control",
+    "nicheId": "rodents",
+    "categoryName": "Pest Control",
+    "nicheName": "Rodent Treatment"
+  },
+  "templateId": "rodent_treatment",
+  "params": {
+    "stations": 6
+  },
+  "jobDescription": "Active rats in roof void and along side fence. 6 lockable external bait stations, 4 snap traps in roof void, exclusion of two visible entry points around eaves. Two follow-up visits at 2 and 6 weeks included.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Liam Brooks",
+    "address": "Footscray VIC 3011"
+  },
+  "business": {
+    "businessName": "Footscray Pest Control",
+    "phone": "0461 457 763",
+    "email": "jobs@rodenttreafootscray.com.au",
+    "abn": "61 253 559 661",
+    "address": "Footscray VIC 3011",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Lockable bait stations, Rodenticide blocks, Snap traps, Exclusion mesh",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a rodent treatment? Got active rats in the roof void and along the side fence. Need six lockable external bait stations, four snap traps in the roof void, and exclusion of two entry points around the eaves. Plus two follow-up visits at two and six weeks.",
+    "mateAck": "Good one. I'll sort a Rodent Treatment quote for you now.",
+    "clarifyingQuestion": "Righto — just checking, is the activity mostly inside or out, any pets or kids on site, and is the roof void easily accessible?",
+    "clarifyingAnswer": "Yeah, bit of both, mostly outside but some scuttling inside. No pets or kids, and the roof void access is easy, just a standard manhole.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — includes six lockable external bait stations, four snap traps in the roof, two entry point exclusions, and two follow-up visits."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in a clean, modern kitchen, holding a phone, looking up at the ceiling as if assessing the roof void."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a rodent treatment? Got active rats in the roof void and along the side fence. Need six lockable external bait stations, four snap traps in the roof void, and exclusion of two entry points around the eaves. Plus two follow-up visits at two and six weeks."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Rodent Treatment quote for you now. Righto — just checking, is the activity mostly inside or out, any pets or kids on site, and is the roof void easily accessible?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, bit of both, mostly outside but some scuttling inside. No pets or kids, and the roof void access is easy, just a standard manhole."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's the quote — includes six lockable external bait stations, four snap traps in the roof, two entry point exclusions, and two follow-up visits."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

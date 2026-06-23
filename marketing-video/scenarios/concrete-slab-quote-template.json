@@ -1,0 +1,76 @@
+{
+  "slug": "concrete-slab-quote-template",
+  "title": "Concrete Slab quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "concreters",
+    "nicheId": "concrete-slab-quote-template",
+    "categoryName": "Concreters",
+    "nicheName": "Concrete Slab"
+  },
+  "templateId": "concrete_driveway",
+  "params": {},
+  "jobDescription": "Supply and lay a new concrete shed slab, 6m x 4m (24sqm), 100mm thick, for a backyard shed in Penrith. Scope includes: excavation of 150mm of topsoil, supply and compaction of 100mm DGB20 crushed rock base, a 200 micron poly vapour barrier, SL72 reinforcement mesh, N25 concrete mix (approx. 2.4 cubic metres), edge formwork (20 lineal metres), and one saw-cut control joint across the 4m width (4 lineal metres).",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 24,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Aisha Khan",
+    "address": "Yarraville VIC 3013"
+  },
+  "business": {
+    "businessName": "Yarraville Concreter",
+    "phone": "0432 254 386",
+    "email": "jobs@concreteslabyarraville.com.au",
+    "abn": "32 166 298 342",
+    "address": "Yarraville VIC 3013",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Excavation and levelling, Compacted crushed rock base, Poly vapour barrier, Reinforcement mesh (SL72, SL82, or trench mesh)",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that shed slab in Penrith?",
+    "mateAck": "Good one. I'll sort a Concrete Slab quote for you now.",
+    "clarifyingQuestion": "Righto — what kind of finish are they after?",
+    "clarifyingAnswer": "Just a standard broom finish for grip, mate.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a twenty-four square metre N-twenty-five concrete shed slab with a broom finish, ready to go."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Suburban backyard, a cleared, level dirt patch next to a fence, ready for a shed slab."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that shed slab in Penrith?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Concrete Slab quote for you now. Righto — what kind of finish are they after?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Just a standard broom finish for grip, mate."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a twenty-four square metre N-twenty-five concrete shed slab with a broom finish, ready to go."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "slug": "end_of_lease_clean",
+  "title": "End-of-Lease Clean quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "cleaning",
+    "nicheId": "residential",
+    "categoryName": "Cleaning",
+    "nicheName": "End-of-Lease Clean"
+  },
+  "templateId": "end_of_lease_clean",
+  "params": {
+    "bedrooms": 3,
+    "bathrooms": 2
+  },
+  "jobDescription": "3 bed, 2 bath unfurnished townhouse. Full end-of-lease including oven, range hood, inside windows, blinds, walls spot-clean. Carpets steam-cleaned by separate sub-contractor.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Elise Carter",
+    "address": "Preston VIC 3072"
+  },
+  "business": {
+    "businessName": "Preston Cleaning",
+    "phone": "0443 331 529",
+    "email": "jobs@endofleasepreston.com.au",
+    "abn": "43 199 397 463",
+    "address": "Preston VIC 3072",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "All-purpose cleaner, Glass cleaner, Bathroom cleaner, Oven cleaner",
+  "conversation": {
+    "request": "Mate, can you sort a quote for an end-of-lease clean on a three-bed, two-bath unfurnished townhouse, including oven, range hood, windows, blinds, and wall spot-cleans, but the carpets are separate?",
+    "mateAck": "Good one. I'll sort a End-of-Lease Clean quote for you now.",
+    "clarifyingQuestion": "Just to confirm — are we talking three bedrooms, two bathrooms, unfurnished, with oven, windows, and walls included, and no carpet steam-cleaning from us?",
+    "clarifyingAnswer": "Spot on, Mate: three bed, two bath, unfurnished, oven, windows, and walls are in, but the carpet steam is separate.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a complete end-of-lease clean for a three-bedroom, two-bathroom unfurnished townhouse, with specific itemised tasks and excluding carpet steam-cleaning."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Interior shot of a clean, empty townhouse living room, sun streaming through a window."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you sort a quote for an end-of-lease clean on a three-bed, two-bath unfurnished townhouse, including oven, range hood, windows, blinds, and wall spot-cleans, but the carpets are separate?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a End-of-Lease Clean quote for you now. Just to confirm — are we talking three bedrooms, two bathrooms, unfurnished, with oven, windows, and walls included, and no carpet steam-cleaning from us?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate: three-bedroom, two-bathroom, unfurnished, oven, windows, and walls are in, but the carpet steam is separate."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a complete end-of-lease clean for a three-bedroom, two-bathroom unfurnished townhouse, with specific itemised tasks and excluding carpet steam-cleaning."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

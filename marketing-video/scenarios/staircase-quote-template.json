@@ -1,0 +1,76 @@
+{
+  "slug": "staircase-quote-template",
+  "title": "Staircase Construction quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "carpenters",
+    "nicheId": "staircase-quote-template",
+    "categoryName": "Carpenters",
+    "nicheName": "Staircase Construction"
+  },
+  "templateId": "deck_construction",
+  "params": {},
+  "jobDescription": "Construct an external timber staircase from an existing concrete patio up to a new elevated timber deck. The staircase has a total rise of 2.5 metres and a total run of 4.2 metres, with a finished width of 1.2 metres. It features two H4 treated pine stringers (250x50mm, 4.5m long each). There are 19 Merbau decking treads (1200x240x32mm) in an open riser design. A balustrade is required on one side, comprising three H4 treated pine posts (90x90mm) painted to match house trim, a Merbau timber handrail (65x42mm, 4.2 linear metres), and ten runs of 3.2mm stainless steel wire infill (42 linear metres total). All fixings are galvanised or stainless steel and BCA compliant. Treads and handrail require oiling; stringers and posts require painting.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 20,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Ben Trent",
+    "address": "Hampton VIC 3188"
+  },
+  "business": {
+    "businessName": "Hampton Carpenter",
+    "phone": "0424 198 282",
+    "email": "jobs@staircasehampton.com.au",
+    "abn": "24 142 226 254",
+    "address": "Hampton VIC 3188",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Stair stringers (timber or steel), Treads and risers, Balustrade posts and handrail, Balustrade infill (glass, wire, timber)",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that external timber staircase for the Smith job?",
+    "mateAck": "Good one, I'll sort a Staircase Construction quote for you now.",
+    "clarifyingQuestion": "Righto — just to make sure I get the balustrade right, is it glass, timber, or wire infill for this one?",
+    "clarifyingAnswer": "Yeah, mate, it's the stainless steel wire, ten runs, with the Merbau handrail.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full breakdown for the Smith family's external timber staircase with wire balustrade, including materials, labour, and painting."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie on an outdoor residential job site, standing near a partially constructed timber deck, with views of a garden and existing concrete patio."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that external timber staircase for the Smith job?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one, I'll sort a Staircase Construction quote for you now. Righto — just to make sure I get the balustrade right, is it glass, timber, or wire infill for this one?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, mate, it's the stainless steel wire, ten runs, with the Merbau handrail."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full breakdown for the Smith family's external timber staircase with wire balustrade, including materials, labour, and painting."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

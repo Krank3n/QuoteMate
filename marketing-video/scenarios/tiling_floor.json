@@ -1,0 +1,78 @@
+{
+  "slug": "tiling_floor",
+  "title": "Floor Tiling quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "flooring",
+    "nicheId": "tiles",
+    "categoryName": "Flooring",
+    "nicheName": "Floor Tiling"
+  },
+  "templateId": "tiling_floor",
+  "params": {
+    "area": 18
+  },
+  "jobDescription": "18m² 600x600 porcelain tiles in living and hallway, supplied by customer. Substrate is existing concrete slab — clean, prime, level any low spots. Straight lay pattern, 3mm grout joints.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Aisha Khan",
+    "address": "Yarraville VIC 3013"
+  },
+  "business": {
+    "businessName": "Yarraville Flooring",
+    "phone": "0447 359 581",
+    "email": "jobs@floortilinyarraville.com.au",
+    "abn": "47 211 433 507",
+    "address": "Yarraville VIC 3013",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Tiles, Adhesive, Grout, Spacers",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for this one? 18m² of 600x600 porcelain tiles for a living area and hallway, customer's supplying the tiles. It's an existing concrete slab, needs cleaning, priming, and levelling low spots. Straight lay, 3mm grout.",
+    "mateAck": "Good one. I'll sort a Floor Tiling quote for you now.",
+    "clarifyingQuestion": "Cool — just to nail down the details for pricing, can you confirm the tile material and if the customer's already got the porcelain tiles on site?",
+    "clarifyingAnswer": "Yep, it's porcelain, and they're definitely supplying them and have 'em ready to go.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — covering 18m² of porcelain tile installation, including all substrate prep, straight lay, and 3mm grout, with the customer supplying the tiles."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a spacious, sunlit living room, tapping on a tablet, with a hallway visible in the background."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for this one? Eighteen square metres of six hundred by six hundred porcelain tiles for a living area and hallway, customer's supplying the tiles. It's an existing concrete slab, needs cleaning, priming, and levelling low spots. Straight lay, three millimetre grout."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Floor Tiling quote for you now. Cool — just to nail down the details for pricing, can you confirm the tile material and if the customer's already got the porcelain tiles on site?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yep, it's porcelain, and they're definitely supplying them and have 'em ready to go."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — covering eighteen square metres of porcelain tile installation, including all substrate prep, straight lay, and three millimetre grout, with the customer supplying the tiles."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

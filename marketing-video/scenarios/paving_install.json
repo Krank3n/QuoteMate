@@ -1,0 +1,78 @@
+{
+  "slug": "paving_install",
+  "title": "Paving quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "landscape_gardening",
+    "nicheId": "landscaping",
+    "categoryName": "Landscaping",
+    "nicheName": "Paving"
+  },
+  "templateId": "paving_install",
+  "params": {
+    "area": 30
+  },
+  "jobDescription": "32m² of 400x400 concrete pavers in a stretcher pattern, new path and small patio. Existing lawn to be cut out and excavated 100mm. Compacted road base, sand bedding, joint sand finish.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Tom Reilly",
+    "address": "Moonee Ponds VIC 3039"
+  },
+  "business": {
+    "businessName": "Moonee Ponds Landscaping",
+    "phone": "0418 156 204",
+    "email": "jobs@pavingmooneeponds.com.au",
+    "abn": "18 124 172 188",
+    "address": "Moonee Ponds VIC 3039",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Pavers, Road base, Bedding sand, Joint sand",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for some paving? We need thirty-two square metres of four-hundred by four-hundred concrete pavers in a stretcher pattern for a new path and small patio, with existing lawn cut out and excavated one hundred millimetres, then compacted road base, sand bedding, and a joint sand finish.",
+    "mateAck": "Good one. I'll sort a Paving quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is the existing surface lawn that needs to be cut out and excavated one hundred millimetres?",
+    "clarifyingAnswer": "Yeah, that's right, just the lawn.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for thirty-two square metres of four-hundred by four-hundred concrete pavers in a stretcher pattern, including excavation, road base, sand, and joint sand finish."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A landscaper stands in a sunny backyard, pointing at a patch of grass where a new path will go, with pavers stacked nearby."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for some paving? We need thirty-two square metres of four-hundred by four-hundred concrete pavers in a stretcher pattern for a new path and small patio, with existing lawn cut out and excavated one hundred millimetres, then compacted road base, sand bedding, and a joint sand finish."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Paving quote for you now. Righto — just to confirm, is the existing surface lawn that needs to be cut out and excavated one hundred millimetres?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's right, just the lawn."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for thirty-two square metres of four-hundred by four-hundred concrete pavers in a stretcher pattern, including excavation, road base, sand, and joint sand finish."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

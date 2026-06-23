@@ -1,0 +1,78 @@
+{
+  "slug": "ev_charger_install",
+  "title": "EV Charger Install quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "electrical",
+    "nicheId": "specialty",
+    "categoryName": "Electrical",
+    "nicheName": "EV Charger Install"
+  },
+  "templateId": "ev_charger_install",
+  "params": {
+    "chargers": 1
+  },
+  "jobDescription": "7kW Type 2 charger supplied by customer, mounted in garage approx 8m run from board, single phase. Surface conduit on garage wall, dedicated 32A circuit.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Elise Carter",
+    "address": "Preston VIC 3072"
+  },
+  "business": {
+    "businessName": "Preston Electrical",
+    "phone": "0428 226 334",
+    "email": "jobs@evchargeripreston.com.au",
+    "abn": "28 154 262 298",
+    "address": "Preston VIC 3072",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "EV charger unit, Heavy duty cable, Circuit breaker, Conduit",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for an EV charger install? It's a seven-kilowatt Type Two unit the customer's supplying, going in the garage about an eight-metre run from the board, single phase, with surface conduit and a dedicated thirty-two amp circuit.",
+    "mateAck": "Good one. I'll sort a EV Charger Install quote for you now.",
+    "clarifyingQuestion": "Cool — what's the specific model of the seven-kilowatt charger the customer is supplying?",
+    "clarifyingAnswer": "It's a Zappi Two, the tethered model.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for installing the customer-supplied Zappi Two seven-kilowatt Type Two charger, including an eight-metre single-phase run with surface conduit and a dedicated thirty-two amp circuit."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "The tradie, dressed in workwear, stands in a modern home's garage, looking at a wall where an EV charger might be mounted."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for an EV charger install? It's a seven-kilowatt Type Two unit the customer's supplying, going in the garage about an eight-metre run from the board, single phase, with surface conduit and a dedicated thirty-two amp circuit."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort an EV Charger Install quote for you now. Cool — what's the specific model of the seven-kilowatt charger the customer is supplying?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "It's a Zappi Two, the tethered model."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for installing the customer-supplied Zappi Two seven-kilowatt Type Two charger, including an eight-metre single-phase run with surface conduit and a dedicated thirty-two amp circuit."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

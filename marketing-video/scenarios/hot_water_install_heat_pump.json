@@ -1,0 +1,78 @@
+{
+  "slug": "hot_water_install_heat_pump",
+  "title": "Hot Water (Heat Pump) quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "plumbing",
+    "nicheId": "hot_water",
+    "categoryName": "Plumbing",
+    "nicheName": "Hot Water (Heat Pump)"
+  },
+  "templateId": "hot_water_install_heat_pump",
+  "params": {
+    "capacity": 270
+  },
+  "jobDescription": "Reclaim Energy 270L split heat pump, new concrete pad behind garage, refrigerant line set 4m run to tank. STC paperwork handled. Old electric storage taken to scrap.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Ben Trent",
+    "address": "Hampton VIC 3188"
+  },
+  "business": {
+    "businessName": "Hampton Plumbing",
+    "phone": "0424 198 282",
+    "email": "jobs@hotwaterhehampton.com.au",
+    "abn": "24 142 226 254",
+    "address": "Hampton VIC 3188",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Heat pump unit, Copper pipe, Fittings, PTR valve",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for a Reclaim Energy 270L split heat pump setup, including a new concrete pad out back, a four-metre refrigerant line run, all the STC paperwork sorted, and the old electric unit taken away?",
+    "mateAck": "Good one. I'll sort a Hot Water (Heat Pump) quote for you now.",
+    "clarifyingQuestion": "Righto — just confirming, it's a 270L split system, needs that new pad, STC paperwork done, and the old electric unit removed for scrap, correct?",
+    "clarifyingAnswer": "Spot on, Mate, that's exactly right.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers the Reclaim Energy 270L split system, new concrete pad, four-metre line set, STC rebate processing, and old unit removal."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie stands in a modern kitchen, looking at a phone, with a view through a large window to a backyard with a shed."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for a Reclaim Energy two hundred and seventy litre split heat pump setup, including a new concrete pad out back, a four-metre refrigerant line run, all the STC paperwork sorted, and the old electric unit taken away?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Hot Water (Heat Pump) quote for you now. Righto — just confirming, it's a two hundred and seventy litre split system, needs that new pad, STC paperwork done, and the old electric unit removed for scrap, correct?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate, that's exactly right."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — covering the Reclaim Energy two hundred and seventy litre split system, new concrete pad, four-metre line set, STC rebate processing, and old unit removal."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

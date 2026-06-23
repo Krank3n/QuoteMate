@@ -1,0 +1,79 @@
+{
+  "slug": "fence_repair",
+  "title": "Fence Repair quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "other",
+    "nicheId": "fencing",
+    "categoryName": "Trades",
+    "nicheName": "Fence Repair"
+  },
+  "templateId": "fence_repair",
+  "params": {
+    "palings": 8,
+    "posts": 1
+  },
+  "jobDescription": "Two posts snapped at ground level after the storm, plus about 8 palings to replace. Match existing 1.8m treated pine. Customer keen to keep capping rail.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Priya Nand",
+    "address": "Coburg VIC 3058"
+  },
+  "business": {
+    "businessName": "Coburg Trades",
+    "phone": "0411 107 113",
+    "email": "jobs@fencerepaicoburg.com.au",
+    "abn": "11 103 109 111",
+    "address": "Coburg VIC 3058",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Replacement palings, Posts, Rails, Concrete",
+  "conversation": {
+    "request": "Alright Mate, got a fence repair here, two posts snapped at ground level after the storm, plus about eight palings to replace, match existing one point eight metre treated pine, and the customer's keen to keep the capping rail.",
+    "mateAck": "Good one. I'll sort a Fence Repair quote for you now.",
+    "clarifyingQuestion": "Just to confirm — are we replacing two posts and eight palings, matching one point eight metre treated pine, and reusing the existing capping rail?",
+    "clarifyingAnswer": "Yep, two posts, eight palings, one point eight metre treated pine, and definitely keep that capping rail.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes new treated pine posts and palings, all hardware, labour for removal and installation, and careful reattachment of the existing capping."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a suburban backyard, assessing a storm-damaged timber fence with two broken posts and several loose palings."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Alright Mate, got a fence repair here, two posts snapped at ground level after the storm, plus about eight palings to replace, match existing one point eight metre treated pine, and the customer's keen to keep the capping rail."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Fence Repair quote for you now. Just to confirm — are we replacing two posts and eight palings, matching one point eight metre treated pine, and reusing the existing capping rail?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yep, two posts, eight palings, one point eight metre treated pine, and definitely keep that capping rail."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's the quote — it includes new treated pine posts and palings, all hardware, labour for removal and installation, and careful reattachment of the existing capping."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

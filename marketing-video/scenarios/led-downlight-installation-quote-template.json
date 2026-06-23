@@ -1,0 +1,76 @@
+{
+  "slug": "led-downlight-installation-quote-template",
+  "title": "LED Downlight Installation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "electricians",
+    "nicheId": "led-downlight-installation-quote-template",
+    "categoryName": "Electricians",
+    "nicheName": "LED Downlight Installation"
+  },
+  "templateId": "downlights",
+  "params": {},
+  "jobDescription": "Client: Mr. & Mrs. Smith, 12 Acacia Avenue, Burleigh Heads, QLD. Job: Replace existing twenty-eight (28) halogen downlights and install six (6) new downlights in previously unlit areas of a three-bedroom, two-bathroom brick veneer home, for a total of thirty-four (34) new LED downlights. All downlights to be 90mm cut-out, 10W, CCT selectable (3000K/4000K/5500K), IC-4 rated, with four (4) of these also IP44 rated for bathrooms. Supply and install one (1) Clipsal Iconic 400W LED trailing edge dimmer switch in the living room. Approximately one hundred and fifty (150) linear metres of 1.5mm2 TPS cable. Supply and install all necessary junction boxes, connectors, and cable ties. Minor ceiling plaster patching and paint touch-ups around existing halogen cut-outs as required. Disposal of old fittings.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 7,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Elise Carter",
+    "address": "Preston VIC 3072"
+  },
+  "business": {
+    "businessName": "Preston Electrician",
+    "phone": "0428 226 334",
+    "email": "jobs@leddownlightpreston.com.au",
+    "abn": "28 154 262 298",
+    "address": "Preston VIC 3072",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "LED downlights (IC-rated), LED drivers / transformers, Dimmer switch (trailing edge), Electrical cable (TPS)",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for the Smith's downlights?",
+    "mateAck": "Good one. I'll sort a LED Downlight Installation quote for you now.",
+    "clarifyingQuestion": "Cool — is this a brand new build or are we replacing existing fittings in an older home?",
+    "clarifyingAnswer": "Nah, it's an older place in Burleigh Heads, swapping out some dodgy old halogens for new LEDs.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full rundown for swapping out thirty-four halogen downlights for new LEDs, including a dimmer and all materials."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "An electrician in a tidy, modern Australian home, looking up at a ceiling where a downlight has been removed, holding a tablet."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for the Smith's downlights?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a L E D Downlight Installation quote for you now. Cool — is this a brand new build or are we replacing existing fittings in an older home?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah, it's an older place in Burleigh Heads, swapping out some dodgy old halogens for new L E Ds."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full rundown for swapping out thirty-four halogen downlights for new L E Ds, including one dimmer and all materials."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

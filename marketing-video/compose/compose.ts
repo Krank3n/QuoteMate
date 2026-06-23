@@ -24,6 +24,11 @@ const TMP = join(OUT, '_tmp');
 const W = 1080;
 const H = 1920;
 const FPS = 30;
+// Web delivery size — the site serves 540x960 (matches homepage walkthrough.mp4
+// + the existing trade videos). The pipeline builds at 1080x1920 then the final
+// is downscaled to this for publishing.
+const WEB_W = 540;
+const WEB_H = 960;
 // Trim the empty "booting" lead-in (blank chat) off the front of the app
 // capture so the chat content starts promptly after the presenter clip.
 const APP_HEAD_TRIM = Number(process.env.APP_HEAD_TRIM ?? 1.2);
@@ -237,13 +242,17 @@ function main(): void {
   // make libx264 emit an edit list with an empty edit at the start, which some
   // players (QuickTime) render as a fully black screen. Dropping B-frames +
   // zeroing the start removes it, so the deliverable plays everywhere.
+  // Downscale to the site's web-delivery size + CRF (matches walkthrough.mp4 /
+  // the trade videos — ~540x960, a few hundred kbps). `bf 0` keeps it free of
+  // the empty-edit that blanks QuickTime.
   const VENC = [
-    '-c:v', 'libx264', '-bf', '0', '-pix_fmt', 'yuv420p', '-crf', '20',
+    '-c:v', 'libx264', '-bf', '0', '-pix_fmt', 'yuv420p', '-crf', '26',
     '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709',
   ];
   if (voClips.length === 0 && !haveMusic) {
     // Nothing to dub — clean the concat into the final.
-    ff(['-i', concatV, '-vf', 'setpts=PTS-STARTPTS', '-af', 'aresample=async=1,asetpts=PTS-STARTPTS',
+    ff(['-i', concatV, '-vf', `setpts=PTS-STARTPTS,scale=${WEB_W}:${WEB_H}:flags=lanczos`,
+      '-af', 'aresample=async=1,asetpts=PTS-STARTPTS',
       ...VENC, '-c:a', 'aac', '-movflags', '+faststart', finalMp4]);
   } else {
     // Mix: base audio + each delayed Mate VO clip + optional looped music bed.
@@ -265,7 +274,7 @@ function main(): void {
       mixIns.push('[mus]');
     }
     parts.push(`${mixIns.join('')}amix=inputs=${mixIns.length}:duration=first:normalize=0[a]`);
-    parts.push(`[0:v]setpts=PTS-STARTPTS[v]`);
+    parts.push(`[0:v]setpts=PTS-STARTPTS,scale=${WEB_W}:${WEB_H}:flags=lanczos[v]`);
     ff([
       ...inputs,
       '-filter_complex', parts.join(';'),

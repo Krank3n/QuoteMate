@@ -1,0 +1,76 @@
+{
+  "slug": "kitchen-splashback-quote-template",
+  "title": "Kitchen Splashback quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "glaziers",
+    "nicheId": "kitchen-splashback-quote-template",
+    "categoryName": "Glaziers",
+    "nicheName": "Kitchen Splashback"
+  },
+  "templateId": "kitchen_cabinetry",
+  "params": {},
+  "jobDescription": "Supply and install a custom glass kitchen splashback for the Smith Residence in Bondi, NSW. Comprising three (3) panels of 6mm Starphire Toughened Glass, colour-backed in Dulux 'Grey Pail'. Panel dimensions: One (1) at 900mm wide x 750mm high (behind cooktop), one (1) at 600mm wide x 750mm high (next to cooktop), and one (1) at 1200mm wide x 750mm high (next to sink). Includes one (1) standard double powerpoint cutout and one (1) standard single powerpoint cutout. All visible edges to be polished. Installation with clear silicone adhesive, including site clean-up and protective packaging.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 4,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Mia Donnelly",
+    "address": "Essendon VIC 3040"
+  },
+  "business": {
+    "businessName": "Essendon Glazier",
+    "phone": "0434 268 412",
+    "email": "jobs@kitchensplasessendon.com.au",
+    "abn": "34 172 316 364",
+    "address": "Essendon VIC 3040",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Toughened glass panels (6mm), Colour backing (painted or vinyl), Silicone adhesive, Powerpoint and switch cutouts",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a kitchen splashback?",
+    "mateAck": "Good one. I'll sort a Kitchen Splashback quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, how many power point cutouts are we talking for this one?",
+    "clarifyingAnswer": "Yeah, two power point cutouts, one double and one single, both standard size.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for the toughened glass kitchen splashback, Dulux 'Grey Pail' backing, including the two power point cutouts and installation."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie (gender-neutral) stands in a modern kitchen with newly installed benchtops, holding a tape measure, looking at the wall where a splashback will go."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a kitchen splashback?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Kitchen Splashback quote for you now. Righto — just to confirm, how many power point cutouts are we talking for this one?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, two power point cutouts, one double and one single, both standard size."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for the six millimetre toughened glass kitchen splashback, Dulux 'Grey Pail' backing, including the two power point cutouts and installation."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

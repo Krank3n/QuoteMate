@@ -1,0 +1,78 @@
+{
+  "slug": "evap_cooler_service",
+  "title": "Evap Cooler Service quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "hvac",
+    "nicheId": "evaporative",
+    "categoryName": "Air Conditioning",
+    "nicheName": "Evap Cooler Service"
+  },
+  "templateId": "evap_cooler_service",
+  "params": {
+    "units": 1
+  },
+  "jobDescription": "One Bonaire roof-mounted evap, pads last replaced 4 years ago — full pad set replacement. Pump and bleed valve checked, sanitiser flush. Tile roof with crawl board access.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Cooper Vance",
+    "address": "Carnegie VIC 3163"
+  },
+  "business": {
+    "businessName": "Carnegie Air Conditioning",
+    "phone": "0452 394 646",
+    "email": "jobs@evapcoolercarnegie.com.au",
+    "abn": "52 226 478 562",
+    "address": "Carnegie VIC 3163",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Cooling pads, Water pump, Bleed valve, Sanitiser",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for an evap cooler service? It's a Bonaire roof-mounted unit, pads are four years old so needs a full set replaced, plus a pump and bleed valve check, sanitiser flush, and it's a tile roof with crawl board access.",
+    "mateAck": "Good one. I'll sort a Evap Cooler Service quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is the pump currently working alright?",
+    "clarifyingAnswer": "Yep, it's all good, just needs a check-up.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — full pad set replacement, pump and bleed valve check, and sanitiser flush for that Bonaire roof-mounted evap cooler."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands next to their ute in a suburban driveway, looking up at the roofline of a single-story brick house where an evaporative cooler is visible."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for an evap cooler service? It's a Bonaire roof-mounted unit, pads are four years old so needs a full set replaced, plus a pump and bleed valve check, sanitiser flush, and it's a tile roof with crawl board access."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Evap Cooler Service quote for you now. Just to confirm — is the pump currently working alright?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yep, it's all good, just needs a check-up."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — full pad set replacement, pump and bleed valve check, and sanitiser flush for that Bonaire roof-mounted evap cooler."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

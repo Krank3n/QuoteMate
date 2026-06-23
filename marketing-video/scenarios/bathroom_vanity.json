@@ -1,0 +1,79 @@
+{
+  "slug": "bathroom_vanity",
+  "title": "Bathroom Vanity quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "cabinet_making",
+    "nicheId": "vanities_laundry",
+    "categoryName": "Cabinetry",
+    "nicheName": "Bathroom Vanity"
+  },
+  "templateId": "bathroom_vanity",
+  "params": {
+    "widthMm": 1200,
+    "basins": 1
+  },
+  "jobDescription": "1200mm wall hung vanity, double undermount basin, 20mm engineered stone top with rolled edge. Polytec Woodmatt doors, two drawers with Blum soft-close. Mixers customer-supplied.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Mia Donnelly",
+    "address": "Essendon VIC 3040"
+  },
+  "business": {
+    "businessName": "Essendon Cabinetry",
+    "phone": "0434 268 412",
+    "email": "jobs@bathroomvaessendon.com.au",
+    "abn": "34 172 316 364",
+    "address": "Essendon VIC 3040",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Melamine carcass, Door fronts, Blum hinges, Drawer runners",
+  "conversation": {
+    "request": "Mate, I need a quote for a twelve hundred millimetre wall hung vanity, double undermount basin, twenty millimetre engineered stone top with a rolled edge, Polytec Woodmatt doors, two drawers with Blum soft-close, with mixers customer-supplied.",
+    "mateAck": "Good one. I'll sort a Bathroom Vanity quote for you now.",
+    "clarifyingQuestion": "Cool — just confirming, are the mixers definitely customer-supplied for this job?",
+    "clarifyingAnswer": "Yeah, that's right Mate, customer's sorting the mixers.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for a twelve hundred millimetre wall hung vanity, double undermount basin, twenty millimetre engineered stone top, Polytec Woodmatt doors, two Blum soft-close drawers, with customer-supplied mixers."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a newly tiled, partially finished bathroom, looking at his phone."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, I need a quote for a twelve hundred millimetre wall hung vanity, double undermount basin, twenty millimetre engineered stone top with a rolled edge, Polytec Woodmatt doors, two drawers with Blum soft-close, with mixers customer-supplied."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Bathroom Vanity quote for you now. Cool — just confirming, are the mixers definitely customer-supplied for this job?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's right Mate, customer's sorting the mixers."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for a twelve hundred millimetre wall hung vanity, with a double undermount basin, twenty millimetre engineered stone top, Polytec Woodmatt doors, two Blum soft-close drawers, and customer-supplied mixers."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

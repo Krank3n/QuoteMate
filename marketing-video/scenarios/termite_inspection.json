@@ -1,0 +1,76 @@
+{
+  "slug": "termite_inspection",
+  "title": "Termite Inspection quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "pest_control",
+    "nicheId": "termites",
+    "categoryName": "Pest Control",
+    "nicheName": "Termite Inspection"
+  },
+  "templateId": "termite_inspection",
+  "params": {},
+  "jobDescription": "Pre-purchase timber pest inspection on single-storey weatherboard with full subfloor access and tile roof void. Thermal, moisture meter, borescope to suspect areas. Written AS3660.2 report within 24 hours.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Marco Bianchi",
+    "address": "Northcote VIC 3070"
+  },
+  "business": {
+    "businessName": "Northcote Pest Control",
+    "phone": "0459 443 737",
+    "email": "jobs@termiteinsnorthcote.com.au",
+    "abn": "59 247 541 639",
+    "address": "Northcote VIC 3070",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Inspection report, Borescope tip, Calibration consumables",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a pre-purchase timber pest inspection? It's for a single-storey weatherboard, full subfloor and roof void access, with thermal, moisture meter, and borescope to suspect areas, and an AS3660.2 report within 24 hours.",
+    "mateAck": "Good one. I'll sort a Termite Inspection quote for you now.",
+    "clarifyingQuestion": "Righto — just checking, are there any active termites visible on site?",
+    "clarifyingAnswer": "Nah, not that I could see, just a standard pre-purchase inspection.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes a pre-purchase timber pest inspection for a single-storey home with full subfloor and roof void access, using thermal and moisture meters, borescope to suspect areas, and an AS3660.2 report delivered within 24 hours."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in a clean, modern kitchen, holding a tablet and looking at it intently."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a pre-purchase timber pest inspection? It's for a single-storey weatherboard, full subfloor and roof void access, with thermal, moisture meter, and borescope to suspect areas, and an A.S. three-six-six-zero point two report within twenty-four hours."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Termite Inspection quote for you now. Righto — just checking, are there any active termites visible on site?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah, not that I could see, just a standard pre-purchase inspection."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it includes a pre-purchase timber pest inspection for a single-storey home with full subfloor and roof void access, using thermal and moisture meters, borescope to suspect areas, and an A.S. three-six-six-zero point two report delivered within twenty-four hours."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "slug": "deck-quote-template",
+  "title": "Deck Building quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "carpenters",
+    "nicheId": "deck-quote-template",
+    "categoryName": "Carpenters",
+    "nicheName": "Deck Building"
+  },
+  "templateId": "deck_construction",
+  "params": {},
+  "jobDescription": "Construction of a new elevated timber deck, 4.0m x 6.0m (twenty-four square metres), at the rear of the property.\nDecking: Merbau 90x19mm standard grade, fixed with 50mm stainless steel screws.\nSubframe: Treated pine H3 joists 90x45mm at 450mm centres, treated pine H3 bearers 140x45mm.\nFootings: Twelve (12) concrete piers, 300mm diameter x 600mm deep, with galvanised post stirrups.\nFasteners: All structural connections with galvanised coach bolts and framing anchors.\nBalustrade: Stainless steel wire balustrade, 1.0m high, with Merbau 90x90mm posts and 90x42mm Merbau top rail. Total balustrade length: 14.0 linear metres.\nStairs: Three (3) step Merbau staircase, 1.2m wide, with Merbau 90x19mm treads and treated pine H3 stringers.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 90,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Sam Whitlock",
+    "address": "Brunswick VIC 3056"
+  },
+  "business": {
+    "businessName": "Brunswick Carpenter",
+    "phone": "0410 100 100",
+    "email": "jobs@deckbrunswick.com.au",
+    "abn": "10 100 100 100",
+    "address": "Brunswick VIC 3056",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Decking boards (Merbau, treated pine, composite), Joists and bearers, Concrete footings, Coach bolts and screws",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that new Merbau deck out the back?",
+    "mateAck": "Good one. I'll sort a Deck Building quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, for the balustrade, are we going with the stainless steel wire, or did they want glass panels?",
+    "clarifyingAnswer": "Nah, they're keen on the stainless wire with the timber top rail, like we talked about.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — all the materials, labour, and GST for a cracking new Merbau deck with stainless wire balustrade."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie standing on a partially built deck frame in a suburban backyard, with a house in the background and some tools scattered around."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that new Merbau deck out the back?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Deck Building quote for you now. Righto — just to confirm, for the balustrade, are we going with the stainless steel wire, or did they want glass panels?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah, they're keen on the stainless wire with the timber top rail, like we talked about."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — all the materials, labour, and G S T for a cracking new Merbau deck with stainless wire balustrade, measuring four metres by six metres."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

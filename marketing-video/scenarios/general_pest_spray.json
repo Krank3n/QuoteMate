@@ -1,0 +1,78 @@
+{
+  "slug": "general_pest_spray",
+  "title": "General Pest Treatment quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "pest_control",
+    "nicheId": "general_pest",
+    "categoryName": "Pest Control",
+    "nicheName": "General Pest Treatment"
+  },
+  "templateId": "general_pest_spray",
+  "params": {
+    "bedrooms": 3
+  },
+  "jobDescription": "3-bed brick home, full general treatment — internal skirtings and wet areas, external perimeter spray, roof void dust, cockroach gel in kitchen and laundry. Ant bait stations outside. 12-month warranty on common pests.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Elise Carter",
+    "address": "Preston VIC 3072"
+  },
+  "business": {
+    "businessName": "Preston Pest Control",
+    "phone": "0458 436 724",
+    "email": "jobs@generalpespreston.com.au",
+    "abn": "58 244 532 628",
+    "address": "Preston VIC 3072",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Residual insecticide, Cockroach gel, Ant bait, Roof void dust",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a general pest treatment on a three-bedroom brick home, including internal skirtings and wet areas, external perimeter spray, roof void dust, cockroach gel in kitchen and laundry, plus ant bait stations outside, all with a twelve-month warranty?",
+    "mateAck": "Good one. I'll sort a General Pest Treatment quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, are we targeting general pests like spiders and ants, and are there any pets or children on site?",
+    "clarifyingAnswer": "Yeah, full general treatment for spiders and ants, and no worries, no pets or kids will be around.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers a general pest treatment for a three-bedroom home, including internal, external, roof void, targeted roach and ant treatments, and a twelve-month warranty."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "The tradie, dressed in work shorts and a branded polo shirt, stands in a brightly lit, modern kitchen, holding a tablet."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a general pest treatment on a three-bedroom brick home, including internal skirtings and wet areas, external perimeter spray, roof void dust, cockroach gel in kitchen and laundry, plus ant bait stations outside, all with a twelve-month warranty?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a General Pest Treatment quote for you now. Righto — just to confirm, are we targeting general pests like spiders and ants, and are there any pets or children on site?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, full general treatment for spiders and ants, and no worries, no pets or kids will be around."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's the quote — it covers a general pest treatment for a three-bedroom home, including internal, external, roof void, targeted roach and ant treatments, and a twelve-month warranty."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

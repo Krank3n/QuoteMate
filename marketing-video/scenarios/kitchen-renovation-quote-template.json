@@ -1,0 +1,76 @@
+{
+  "slug": "kitchen-renovation-quote-template",
+  "title": "Kitchen Renovation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "builders",
+    "nicheId": "kitchen-renovation-quote-template",
+    "categoryName": "Builders",
+    "nicheName": "Kitchen Renovation"
+  },
+  "templateId": "bathroom_renovation",
+  "params": {},
+  "jobDescription": "Full kitchen renovation for an L-shaped kitchen, approximately 3.5 metres by 2.8 metres. Includes demolition of existing kitchen. New cabinetry: five 600mm wide soft-close drawer units, one 900mm corner blind cabinet, one 800mm sink base cabinet, all in a laminate finish. Wall cabinets: three 900mm wide x 720mm high units, one 600mm wide x 720mm high unit over fridge. Tall cabinet: one 600mm wide x 2100mm high pantry unit. Benchtops: 8.5 square metres of 20mm engineered stone, with one waterfall end (0.9m x 0.6m panel). Sink and tapware: Franke double bowl stainless steel undermount sink (780x440mm) and a chrome pull-out mixer tap. Appliances: Bosch 600mm electric wall oven (HBF113BR0A), Bosch 900mm induction cooktop (PXV975DC1E), and a Schweigen 900mm ducted rangehood (DS3170-9S). Splashback: 6 square metres of glossy white subway tiles (75x150mm), laid in a brick bond pattern. Electrical: Demolition and re-fit of ten new double power points, installation of one dedicated circuit for the oven, and three new downlights. Plumbing: Demolition and re-fit of hot/cold connections for the sink, new dishwasher point, and new connection for a fridge water dispenser.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 90,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Elise Carter",
+    "address": "Preston VIC 3072"
+  },
+  "business": {
+    "businessName": "Preston Builder",
+    "phone": "0413 121 139",
+    "email": "jobs@kitchenrenovpreston.com.au",
+    "abn": "13 109 127 133",
+    "address": "Preston VIC 3072",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Cabinetry (base, wall, tall), Stone or laminate benchtop, Sink and tapware, Appliances (oven, cooktop, rangehood)",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that kitchen reno down in Manly?",
+    "mateAck": "Good one. I'll sort a Kitchen Renovation quote for you now.",
+    "clarifyingQuestion": "Righto — just confirming the benchtop material, mate? Stone or laminate?",
+    "clarifyingAnswer": "Yeah, the clients are keen on a engineered stone, twenty millimetre thick.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — total of twenty-eight thousand, five hundred and fifty dollars, including all materials, appliances, and your labour."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie on a residential job site, standing in front of a partially demolished brick wall, with a ute visible in the background."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that kitchen reno down in Manly?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Kitchen Renovation quote for you now. Righto — just confirming the benchtop material, mate? Stone or laminate?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, the clients are keen on a engineered stone, twenty millimetre thick."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — total of twenty-eight thousand, five hundred and fifty dollars, including all materials, appliances, and your labour."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

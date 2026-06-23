@@ -1,0 +1,76 @@
+{
+  "slug": "roof-restoration-quote-template",
+  "title": "Roof Restoration quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "roofers",
+    "nicheId": "roof-restoration-quote-template",
+    "categoryName": "Roofers",
+    "nicheName": "Roof Restoration"
+  },
+  "templateId": "reroof_colorbond",
+  "params": {},
+  "jobDescription": "Full roof restoration for a single-story brick veneer home (1980s build) in Balmain, Sydney. Scope includes: high-pressure cleaning of the entire roof surface (205 square metres); replacement of thirteen broken terracotta tiles (customer to supply matching tiles or allow for sourcing common profile); flexible repointing of all ridge and hip capping (total 48 linear metres); application of one coat of acrylic roof sealer/primer (205 square metres); application of two coats of premium acrylic roof membrane paint (colour: Dulux Monument, 205 square metres); minor repairs to two valley irons (total 12 linear metres) and flashing around chimney (4 linear metres); removal and disposal of all job-related waste; and setup/dismantle of edge protection and safety harness system.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 56,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Jack Forsyth",
+    "address": "Pascoe Vale VIC 3044"
+  },
+  "business": {
+    "businessName": "Pascoe Vale Roofer",
+    "phone": "0420 170 230",
+    "email": "jobs@roofrestoratpascoevale.com.au",
+    "abn": "20 130 190 210",
+    "address": "Pascoe Vale VIC 3044",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "High-pressure roof cleaning, Broken tile replacement, Repointing compound (flexible), Roof sealer / primer",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for Mrs. Henderson's roof restoration in Balmain?",
+    "mateAck": "Good one. I'll sort a Roof Restoration quote for you now.",
+    "clarifyingQuestion": "Righto — just to lock in the scope, how many square metres are we looking at for the roof area, and how many broken tiles need replacing?",
+    "clarifyingAnswer": "Yeah, it's about two hundred and five square metres, and I counted thirteen busted tiles.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — full roof restoration for Mrs. Henderson's place, including all materials, labour, and waste removal, coming in at eleven thousand, two hundred and fifty dollars."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A suburban house with a tiled roof, scaffolding partially erected, and a ute parked in the driveway."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for Mrs. Henderson's roof restoration in Balmain?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Roof Restoration quote for you now. Righto — just to lock in the scope, how many square metres are we looking at for the roof area, and how many broken tiles need replacing?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, it's about two hundred and five square metres, and I counted thirteen busted tiles."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — full roof restoration for Mrs. Henderson's place, including all materials, labour, and waste removal, coming in at eleven thousand, two hundred and fifty dollars."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

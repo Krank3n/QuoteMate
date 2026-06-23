@@ -1,0 +1,79 @@
+{
+  "slug": "hedge_trimming",
+  "title": "Hedge Trimming quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "landscape_gardening",
+    "nicheId": "hedge_tree",
+    "categoryName": "Landscaping",
+    "nicheName": "Hedge Trimming"
+  },
+  "templateId": "hedge_trimming",
+  "params": {
+    "length": 10,
+    "height": 1.5
+  },
+  "jobDescription": "About 12m of hedge averaging 2m high, fairly overgrown — last cut 18 months ago. Green waste removed and disposed of.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Hayley Dorn",
+    "address": "Reservoir VIC 3073"
+  },
+  "business": {
+    "businessName": "Reservoir Landscaping",
+    "phone": "0415 135 165",
+    "email": "jobs@hedgetrimmreservoir.com.au",
+    "abn": "15 115 145 155",
+    "address": "Reservoir VIC 3073",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Hedge trimmer fuel, Waste bags, Tarp",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for a hedge trim? It's about twelve metres long, two metres high, pretty bushy 'cause it hasn't been touched in a year and a half, and they want the green waste gone.",
+    "mateAck": "Good one. I'll sort a Hedge Trimming quote for you now.",
+    "clarifyingQuestion": "Just to confirm — what's the exact length and height of the hedge, how overgrown is it, and do they definitely need waste removal?",
+    "clarifyingAnswer": "Yeah, it's twelve metres long, two metres high, pretty overgrown from eighteen months, and they absolutely want all the green waste removed.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers trimming twelve metres of overgrown hedge two metres high, including green waste removal and disposal."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a sunlit suburban backyard next to a long, dense hedge bordering a fence, a ute visible in the driveway beyond."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for a hedge trim? It's about twelve metres long, two metres high, pretty bushy 'cause it hasn't been touched in a year and a half, and they want the green waste gone."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Hedge Trimming quote for you now. Just to confirm — what's the exact length and height of the hedge, how overgrown is it, and do they definitely need waste removal?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, it's twelve metres long, two metres high, pretty overgrown from eighteen months, and they absolutely want all the green waste removed."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it covers trimming twelve metres of overgrown hedge two metres high, including green waste removal and disposal."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

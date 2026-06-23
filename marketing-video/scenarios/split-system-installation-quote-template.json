@@ -1,0 +1,76 @@
+{
+  "slug": "split-system-installation-quote-template",
+  "title": "Split System Installation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "hvac-technicians",
+    "nicheId": "split-system-installation-quote-template",
+    "categoryName": "HVAC Technicians",
+    "nicheName": "Split System Installation"
+  },
+  "templateId": "split_system_service",
+  "params": {},
+  "jobDescription": "Install one Daikin Cora 7.1kW split system unit (model FTXF71TV1B/RXF71TV1B) in the living room of a residential property in Campbelltown, NSW. Supply and install one wall mounting bracket for the outdoor unit. Run six metres of refrigerant copper piping and nine metres of electrical cable from the outdoor unit, situated on the ground, to the indoor unit, with a new external electrical isolator mounted adjacent to the outdoor unit. Install six metres of gravity-fed drain pipe. Include three metres of slimline PVC pipe cover/ducting in a cream finish. Commission the system and provide a compliance certificate.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 5,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Nadia Rahman",
+    "address": "Fitzroy North VIC 3068"
+  },
+  "business": {
+    "businessName": "Fitzroy North HVAC Technician",
+    "phone": "0421 177 243",
+    "email": "jobs@splitsystemifitzroynorth.com.au",
+    "abn": "21 133 199 221",
+    "address": "Fitzroy North VIC 3068",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Indoor and outdoor split system unit, Wall mounting bracket, Refrigerant copper piping, Electrical cable and isolator",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for this new split system installation?",
+    "mateAck": "Good one. I'll sort a Split System Installation quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is this for the Daikin seven point one kay double-u unit, and are we including three metres of the cream pipe cover ducting?",
+    "clarifyingAnswer": "Yeah, Mate, that's the one. Daikin seven point one kay double-u, and definitely chuck in those three metres of cream ducting.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for the Daikin 7.1kW split system install, including all materials and five hours labour, coming in at three thousand six hundred and fifty dollars."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Residential suburban house, tradie standing near a newly installed outdoor split system unit, looking at his tablet."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for this new split system installation?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Split System Installation quote for you now. Righto — just to confirm, is this for the Daikin seven point one kay double-u unit, and are we including three metres of the cream pipe cover ducting?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, Mate, that's the one. Daikin seven point one kay double-u, and definitely chuck in those three metres of cream ducting."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for the Daikin seven point one kay double-u split system install, including all materials and five hours labour, coming in at three thousand six hundred and fifty dollars."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}
