@@ -1,0 +1,79 @@
+{
+  "slug": "cabinet_door_replacement",
+  "title": "Cabinet Door Replacement quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "cabinet_making",
+    "nicheId": "repairs_refacing",
+    "categoryName": "Cabinetry",
+    "nicheName": "Cabinet Door Replacement"
+  },
+  "templateId": "cabinet_door_replacement",
+  "params": {
+    "doors": 12,
+    "drawers": 4
+  },
+  "jobDescription": "12 kitchen cabinet doors and 4 drawer fronts to replace. Existing carcasses in good condition, reuse. New Polytec Woodmatt doors, all new Blum soft-close hinges, customer-supplied handles.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Nadia Rahman",
+    "address": "Fitzroy North VIC 3068"
+  },
+  "business": {
+    "businessName": "Fitzroy North Cabinetry",
+    "phone": "0436 282 438",
+    "email": "jobs@cabinetdoofitzroynorth.com.au",
+    "abn": "36 178 334 386",
+    "address": "Fitzroy North VIC 3068",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Door panels, Drawer fronts, Blum hinges, Mounting plates",
+  "conversation": {
+    "request": "Mate, I need a quote for replacing twelve kitchen cabinet doors and four drawer fronts, keeping the existing carcasses, using Polytec Woodmatt, new Blum soft-close hinges, and the customer's handles.",
+    "mateAck": "Good one. I'll sort a Cabinet Door Replacement quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is it twelve doors and four drawer fronts, existing carcasses are good, you're replacing hinges, and the finish is Polytec Woodmatt?",
+    "clarifyingAnswer": "Spot on, Mate. Twelve doors, four drawers, carcasses are solid, new Blum soft-close hinges, and Polytec Woodmatt for the finish.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for twelve Polytec Woodmatt cabinet doors, four matching drawer fronts, and new Blum soft-close hinges, reusing existing carcasses."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a bright, modern kitchen, gesturing towards some existing cabinets."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, I need a quote for replacing twelve kitchen cabinet doors and four drawer fronts, keeping the existing carcasses, using Polytec Woodmatt, new Blum soft-close hinges, and the customer's handles."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Cabinet Door Replacement quote for you now. Just to confirm — is it twelve doors and four drawer fronts, existing carcasses are good, you're replacing hinges, and the finish is Polytec Woodmatt?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate. Twelve doors, four drawers, carcasses are solid, new Blum soft-close hinges, and Polytec Woodmatt for the finish."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for twelve Polytec Woodmatt cabinet doors, four matching drawer fronts, and new Blum soft-close hinges, reusing existing carcasses."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

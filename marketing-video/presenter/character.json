@@ -1,0 +1,11 @@
+{
+  "_comment": "The single recurring 'common human' presenter. Reused across EVERY scenario so the face/voice stay recognizable. Veo 3 drifts between clips, so keep this description verbatim and pin the same seed + reference image each run. If consistency isn't good enough at scale, this is the block to swap to a Higgsfield Soul ID.",
+  "id": "qm-presenter-v1",
+  "seed": 73411,
+  "referenceImage": "presenter/reference/qm-presenter-v1.png",
+  "description": "A friendly, down-to-earth Australian tradie in their early 30s, short dark wavy hair, light stubble, wearing a plain navy work polo shirt with no logos or text on it. They hold a smartphone close to their mouth in one hand and speak into it casually — like talking on speakerphone or leaving a voice note — the phone held up near their chin and mouth, lips clearly moving as they dictate. The phone is angled so its screen is turned AWAY from camera and never visible. Relaxed and conversational, in natural light.",
+  "setting": "standing on a tidy residential job site",
+  "voice": "Warm, casual Australian accent, unhurried, conversational — not an announcer.",
+  "action": "holding their phone close to their mouth and speaking into it",
+  "negative": "phone screen visible, any app or UI on the phone, screen glare, on-screen text, brand logos or text on clothing, studio lighting, exaggerated gestures, presenter podium, corporate look, looking only at the camera."
+}

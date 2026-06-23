@@ -1,0 +1,78 @@
+{
+  "slug": "drain_unblock",
+  "title": "Drain Unblock quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "plumbing",
+    "nicheId": "drain_services",
+    "categoryName": "Plumbing",
+    "nicheName": "Drain Unblock"
+  },
+  "templateId": "drain_unblock",
+  "params": {
+    "fixtures": 1
+  },
+  "jobDescription": "Kitchen sink and laundry both backing up — likely one shared blockage. Customer suspects tree roots in the boundary trap. CCTV inspection included after clear.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Jack Forsyth",
+    "address": "Pascoe Vale VIC 3044"
+  },
+  "business": {
+    "businessName": "Pascoe Vale Plumbing",
+    "phone": "0420 170 230",
+    "email": "jobs@drainunblopascoevale.com.au",
+    "abn": "20 130 190 210",
+    "address": "Pascoe Vale VIC 3044",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Drain cleaner, Plumbing tape, Rags",
+  "conversation": {
+    "request": "Mate, I've got a blocked drain job, kitchen sink and laundry both backing up, customer reckons it's tree roots at the boundary trap, and they want a CCTV inspection after.",
+    "mateAck": "Good one. I'll sort a Drain Unblock quote for you now.",
+    "clarifyingQuestion": "Righto — how long has this blockage been happening for?",
+    "clarifyingAnswer": "They said it only just started this morning, mate.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers clearing a shared kitchen and laundry blockage, suspected tree roots, plus a CCTV inspection post-clear."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A plumber stands in a customer's kitchen, looking at a kitchen sink, phone in hand."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, I've got a blocked drain job, kitchen sink and laundry both backing up, customer reckons it's tree roots at the boundary trap, and they want a CCTV inspection after."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Drain Unblock quote for you now. Righto — how long has this blockage been happening for?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "They said it only just started this morning, mate."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it covers clearing a shared kitchen and laundry blockage, suspected tree roots, plus a CCTV inspection post-clear."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

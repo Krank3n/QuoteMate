@@ -1,0 +1,78 @@
+{
+  "slug": "interior_walls_paint",
+  "title": "Interior Painting quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "painting",
+    "nicheId": "interior",
+    "categoryName": "Painting",
+    "nicheName": "Interior Painting"
+  },
+  "templateId": "interior_walls_paint",
+  "params": {
+    "area": 100
+  },
+  "jobDescription": "Three bedrooms and hallway — walls and ceilings, two coats low sheen. Minor patch and fill, light sand. Trim to be cut in but not painted. Furniture moved by customer.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Cooper Vance",
+    "address": "Carnegie VIC 3163"
+  },
+  "business": {
+    "businessName": "Carnegie Painting",
+    "phone": "0437 289 451",
+    "email": "jobs@interiorpacarnegie.com.au",
+    "abn": "37 181 343 397",
+    "address": "Carnegie VIC 3163",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Interior paint, Primer/sealer, Drop sheets, Masking tape",
+  "conversation": {
+    "request": "G'day Mate, I've got a three-bedroom and hallway interior painting job, walls and ceilings, two coats low sheen, with a bit of patch and fill, light sand. Trim needs cutting in, but not painted, and the customer's moving their own furniture. Can you get a quote sorted?",
+    "mateAck": "Good one. I'll sort a Interior Painting quote for you now.",
+    "clarifyingQuestion": "Righto — just confirming the scope is three bedrooms and a hallway, walls and ceilings, two coats low sheen, and minor patch and fill with a light sand, with trim cut-in but not painted?",
+    "clarifyingAnswer": "Yeah, that's the one: three bedrooms, one hallway, walls and ceilings, two coats, and just light prep for patch and fill, with the trim cut-in.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for three bedrooms and a hallway, walls and ceilings, two coats low sheen, with minor prep and trim cut-in, customer to move furniture."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a sunlit, unfurnished living room, looking at their phone."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "G'day Mate, I've got a three-bedroom and hallway interior painting job, walls and ceilings, two coats low sheen, with a bit of patch and fill, light sand. Trim needs cutting in, but not painted, and the customer's moving their own furniture. Can you get a quote sorted?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Interior Painting quote for you now. Righto — just confirming the scope is three bedrooms and a hallway, walls and ceilings, two coats low sheen, and minor patch and fill with a light sand, with trim cut-in but not painted?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's the one: three bedrooms, one hallway, walls and ceilings, two coats, and just light prep for patch and fill, with the trim cut-in."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for three bedrooms and a hallway, walls and ceilings, two coats low sheen, with minor prep and trim cut-in, customer to move furniture."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

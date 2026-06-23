@@ -1,0 +1,76 @@
+{
+  "slug": "paving-quote-template",
+  "title": "Paving Installation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "landscapers",
+    "nicheId": "paving-quote-template",
+    "categoryName": "Landscapers",
+    "nicheName": "Paving Installation"
+  },
+  "templateId": "garden_bed_install",
+  "params": {},
+  "jobDescription": "Supply and install a new paved patio and connecting pathway at 12 Acacia Avenue, Burleigh Heads. The patio is five metres by four metres, and the pathway is ten metres long by one point two metres wide, connecting from the patio to the side gate. This includes excavation to one hundred and fifty millimetres depth, laying geotextile fabric, and installing one hundred millimetres of compacted road base. A thirty-millimetre bedding sand layer will be used for thirty-two square metres of 'Coastal Grey' forty-millimetre thick concrete pavers. The perimeter will have twenty-eight linear metres of 'Charcoal' concrete border pavers installed as edge restraints. Finish with polymeric jointing sand and a final clean-up.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 48,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Cooper Vance",
+    "address": "Carnegie VIC 3163"
+  },
+  "business": {
+    "businessName": "Carnegie Landscaper",
+    "phone": "0437 289 451",
+    "email": "jobs@pavingcarnegie.com.au",
+    "abn": "37 181 343 397",
+    "address": "Carnegie VIC 3163",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Pavers (clay, concrete, or natural stone), Road base / crushed rock, Bedding sand, Polymeric jointing sand",
+  "conversation": {
+    "request": "Hey Mate, can you knock up a quote for that paving job at Burleigh Heads?",
+    "mateAck": "Good one. I'll sort a Paving Installation quote for you now.",
+    "clarifyingQuestion": "Cool — did the client have a specific style or brand of concrete paver in mind for that forty-millimetre thickness?",
+    "clarifyingAnswer": "Nah, just the standard ones are fine, Mate. The client's keen on keeping costs down.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — thirty-two square metres of paving, including excavation, base prep, pavers, edging, and jointing sand, all tallied up."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A landscaper on a residential property, standing near a partially excavated area for a patio, with paving materials stacked nearby."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you knock up a quote for that paving job at Burleigh Heads?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Paving Installation quote for you now. Cool — did the client have a specific style or brand of concrete paver in mind for that forty-millimetre thickness?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah, just the standard ones are fine, Mate. The client's keen on keeping costs down."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — thirty-two square metres of paving, including excavation, base prep, pavers, edging, and jointing sand, all tallied up."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

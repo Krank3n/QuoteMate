@@ -1,0 +1,79 @@
+{
+  "slug": "pool_fence_glass",
+  "title": "Pool Fence (Glass) quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "other",
+    "nicheId": "fencing",
+    "categoryName": "Trades",
+    "nicheName": "Pool Fence (Glass)"
+  },
+  "templateId": "pool_fence_glass",
+  "params": {
+    "length": 14,
+    "gates": 1
+  },
+  "jobDescription": "14m of frameless 12mm glass pool fencing, 1200mm height, mounted on existing concrete slab with core-drilled spigots. One self-closing gate. Compliant with AS1926.1.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Elise Carter",
+    "address": "Preston VIC 3072"
+  },
+  "business": {
+    "businessName": "Preston Trades",
+    "phone": "0413 121 139",
+    "email": "jobs@poolfencegpreston.com.au",
+    "abn": "13 109 127 133",
+    "address": "Preston VIC 3072",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "12mm toughened glass, Spigots, Gate panel, Hinges",
+  "conversation": {
+    "request": "Hey Mate, can you sort a quote for a frameless glass pool fence?",
+    "mateAck": "Good one. I'll sort a Pool Fence (Glass) quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is that fourteen linear metres of frameless glass, one gate, mounted on an existing concrete slab?",
+    "clarifyingAnswer": "Yeah, that's the one, Mate: fourteen metres, frameless, single gate, straight onto the concrete.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — fourteen metres of frameless twelve millimetre glass pool fencing, one gate, core-drilled onto concrete, all compliant with AS1926.1."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a sunny backyard with a newly installed concrete pool, looking at a tablet near a paved area awaiting the fence."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you sort a quote for a frameless glass pool fence?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Pool Fence (Glass) quote for you now. Righto — just to confirm, is that fourteen linear metres of frameless glass, one gate, mounted on an existing concrete slab?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's the one, Mate: fourteen metres, frameless, single gate, straight onto the concrete."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — fourteen metres of frameless twelve millimetre glass pool fencing, one gate, core-drilled onto concrete, all compliant with Australian Standard nineteen twenty-six point one."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "slug": "wardrobe_builtin",
+  "title": "Built-in Wardrobe quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "carpentry",
+    "nicheId": "custom_joinery",
+    "categoryName": "Carpentry",
+    "nicheName": "Built-in Wardrobe"
+  },
+  "templateId": "wardrobe_builtin",
+  "params": {
+    "length": 2.5,
+    "height": 2.4
+  },
+  "jobDescription": "2.7m wide x 2.4m high built-in wardrobe with 3 mirrored sliding doors. Internal split: half hanging (double rail) and half shelving + 4 drawers. Melamine internals.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Liam Brooks",
+    "address": "Footscray VIC 3011"
+  },
+  "business": {
+    "businessName": "Footscray Carpentry",
+    "phone": "0431 247 373",
+    "email": "jobs@builtinwarfootscray.com.au",
+    "abn": "31 163 289 331",
+    "address": "Footscray VIC 3011",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "MDF sheets, Melamine boards, Hanging rails, Drawer runners",
+  "conversation": {
+    "request": "Hey Mate, got a built-in wardrobe here, two point seven metres wide and two point four metres high, with three mirrored sliding doors, half double-rail hanging and half shelving plus four drawers, all melamine internals – can you get a quote sorted?",
+    "mateAck": "Good one. I'll sort a Built-in Wardrobe quote for you now.",
+    "clarifyingQuestion": "Just to confirm — what's the internal depth for the wardrobe?",
+    "clarifyingAnswer": "Yeah, make it six hundred millimetres deep, Mate.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a two point seven metre wide built-in wardrobe with three mirrored sliding doors, half hanging, half shelving, four drawers, all with melamine internals, and a six hundred millimetre depth."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a partially renovated bedroom, overlooking a suburban backyard with a newly laid patio."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, got a built-in wardrobe here, two point seven metres wide and two point four metres high, with three mirrored sliding doors, half double-rail hanging and half shelving plus four drawers, all melamine internals – can you get a quote sorted?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Built-in Wardrobe quote for you now. Just to confirm — what's the internal depth for the wardrobe?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, make it six hundred millimetres deep, Mate."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a two point seven metre wide built-in wardrobe, two point four metres high, with three mirrored sliding doors, half hanging, half shelving, four drawers, all melamine internals, and six hundred millimetre depth."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

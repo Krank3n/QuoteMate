@@ -1,0 +1,79 @@
+{
+  "slug": "split_system_install",
+  "title": "Split System Install quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "hvac",
+    "nicheId": "split_systems",
+    "categoryName": "Air Conditioning",
+    "nicheName": "Split System Install"
+  },
+  "templateId": "split_system_install",
+  "params": {
+    "units": 1,
+    "pipe_run": 4
+  },
+  "jobDescription": "One 5kW reverse-cycle split in main bedroom, back-to-back install on external wall, approx 3m pipe run. Power off existing GPO via new isolator. Brick veneer wall, single storey.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Mia Donnelly",
+    "address": "Essendon VIC 3040"
+  },
+  "business": {
+    "businessName": "Essendon Air Conditioning",
+    "phone": "0449 373 607",
+    "email": "jobs@splitsysteessendon.com.au",
+    "abn": "49 217 451 529",
+    "address": "Essendon VIC 3040",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Split system unit, Insulated refrigerant pipe, Drain pipe, Mounting bracket",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for a 5kW split system in a main bedroom, back-to-back install, about 3m of pipe, power from an existing GPO, brick veneer?",
+    "mateAck": "Good one. I'll sort a Split System Install quote for you now.",
+    "clarifyingQuestion": "Let me get this right — so that's one five kilowatt unit, back-to-back, with power from an existing GPO for a single-storey brick veneer?",
+    "clarifyingAnswer": "Spot on Mate, that's exactly right.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes supply and install of a 5kW split system, electrical work for a new isolator, and all standard materials for a back-to-back on brick veneer."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands on a paved patio next to a modern brick veneer house, looking at a wall with a new split system mounting bracket."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for a five kilowatt split system in a main bedroom, back-to-back install, about three metres of pipe, power from an existing GPO, brick veneer?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Split System Install quote for you now. Let me get this right — so that's one five kilowatt unit, back-to-back, with power from an existing GPO for a single-storey brick veneer?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on Mate, that's exactly right."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it includes supply and install of a five kilowatt split system, electrical work for a new isolator, and all standard materials for a back-to-back on brick veneer."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

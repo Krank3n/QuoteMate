@@ -1,0 +1,20 @@
+{
+  "name": "quotemate-marketing-video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Automated Mate Chat quote demo videos for the marketing site.",
+  "scripts": {
+    "quote": "tsx driver/generateQuote.ts",
+    "capture": "tsx capture/record.ts",
+    "presenter": "tsx presenter/generatePresenter.ts",
+    "compose": "tsx compose/compose.ts",
+    "all": "tsx run.ts",
+    "manifest": "tsx run.ts --all"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

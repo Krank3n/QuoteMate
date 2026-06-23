@@ -1,0 +1,58 @@
+{
+  "slug": "downlights",
+  "title": "LED downlights quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "electrical",
+    "nicheId": "power_lighting",
+    "categoryName": "Electrical",
+    "nicheName": "LED Downlights"
+  },
+  "templateId": "led_downlight_pack",
+  "params": { "packs": 1 },
+  "jobDescription": "Supply and install ten dimmable 90mm LED downlights through the living and kitchen, replacing existing halogens. Reuse existing wiring where possible. Tile roof with easy ceiling access.",
+  "labour": {
+    "rate": 95,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Elise Carter",
+    "address": "31 Gold St, Brunswick East VIC 3057"
+  },
+  "business": {
+    "businessName": "Brunswick East Electrical",
+    "phone": "0418 119 472",
+    "email": "jobs@brunswickeastelec.com.au",
+    "abn": "78 901 234 567",
+    "address": "Brunswick East VIC 3057",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Downlights, cable, junction boxes, clips",
+  "conversation": {
+    "request": "G'day, after a quote — ten LED downlights through the living and kitchen, replacing the old halogens.",
+    "mateAck": "Good one. I'll sort an LED downlight quote for you now.",
+    "clarifyingQuestion": "Let me get this right — ten 90 mil dimmable downlights, reusing the existing wiring where we can?",
+    "clarifyingAnswer": "Yeah, ten dimmables, reuse the wiring, easy roof access.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — ten dimmable LED downlights, the cable, the fittings, materials and labour all in."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "standing in a modern living room with a plain white ceiling visible above"
+  },
+  "voiceover": {
+    "voices": { "tradie": "Charon", "mate": "Puck" },
+    "lines": {
+      "ask": { "voice": "tradie", "text": "G'day, after a quote — ten LED downlights through the living and kitchen, replacing the old halogens." },
+      "reply": { "voice": "mate", "text": "Good one, I'll sort an LED downlight quote for you now. Let me get this right — ten ninety mil dimmable downlights, reusing the existing wiring where we can?" },
+      "answer": { "voice": "tradie", "text": "Yeah, ten dimmables, reuse the wiring, easy roof access." },
+      "reveal": { "voice": "mate", "text": "Here's your quote — ten dimmable LED downlights, the cable, the fittings, materials and labour all in." },
+      "pdf": { "voice": "tradie", "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy." }
+    }
+  }
+}

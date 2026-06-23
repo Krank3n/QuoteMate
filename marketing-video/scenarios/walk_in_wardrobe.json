@@ -1,0 +1,79 @@
+{
+  "slug": "walk_in_wardrobe",
+  "title": "Walk-in Wardrobe quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "cabinet_making",
+    "nicheId": "wardrobes",
+    "categoryName": "Cabinetry",
+    "nicheName": "Walk-in Wardrobe"
+  },
+  "templateId": "walk_in_wardrobe",
+  "params": {
+    "linearMetres": 6,
+    "height": 2.4
+  },
+  "jobDescription": "6 lm U-shape walk-in robe in master, 2.4m high. Two double-hang sections, one bank of 5 drawers with Blum soft-close runners, balance shelving. Open style — no doors. White melamine internals.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Tom Reilly",
+    "address": "Moonee Ponds VIC 3039"
+  },
+  "business": {
+    "businessName": "Moonee Ponds Cabinetry",
+    "phone": "0433 261 399",
+    "email": "jobs@walkinwardmooneeponds.com.au",
+    "abn": "33 169 307 353",
+    "address": "Moonee Ponds VIC 3039",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Melamine board, Hanging rails, Drawer runners, Drawer fronts",
+  "conversation": {
+    "request": "Hey Mate, can you knock up a quote for a walk-in wardrobe? It's a U-shape, six lineal metres, two point four high, white melamine. Needs two double-hang sections, one bank of five drawers with Blum soft-close, rest is shelving. Open style, no doors.",
+    "mateAck": "Good one. I'll sort a Walk-in Wardrobe quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, you want two double-hang sections, one bank of five drawers, and the rest shelving?",
+    "clarifyingAnswer": "Spot on, Mate. That's the one.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a six lineal metre U-shape walk-in robe, two double-hang, five drawers, and shelving, all in white melamine."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie sits at a kitchen island bench, reviewing plans on a tablet."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you knock up a quote for a walk-in wardrobe? It's a U-shape, six lineal metres, two point four high, white melamine. Needs two double-hang sections, one bank of five drawers with Blum soft-close, rest is shelving. Open style, no doors."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Walk-in Wardrobe quote for you now. Righto — just to confirm, you want two double-hang sections, one bank of five drawers, and the rest shelving?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate. That's the one."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a six lineal metre U-shape walk-in robe, two double-hang, five drawers, and shelving, all in white melamine."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

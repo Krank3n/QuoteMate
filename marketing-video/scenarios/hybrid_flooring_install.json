@@ -1,0 +1,78 @@
+{
+  "slug": "hybrid_flooring_install",
+  "title": "Hybrid Flooring Install quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "flooring",
+    "nicheId": "timber",
+    "categoryName": "Flooring",
+    "nicheName": "Hybrid Flooring Install"
+  },
+  "templateId": "hybrid_flooring_install",
+  "params": {
+    "area": 60
+  },
+  "jobDescription": "About 55m² across living, dining, hallway. Lift existing carpet and tack strip. Hybrid plank 1800x230 in mid-oak, acoustic underlay, scotia bead at edges.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Priya Nand",
+    "address": "Coburg VIC 3058"
+  },
+  "business": {
+    "businessName": "Coburg Flooring",
+    "phone": "0441 317 503",
+    "email": "jobs@hybridfloocoburg.com.au",
+    "abn": "41 193 379 441",
+    "address": "Coburg VIC 3058",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Hybrid flooring planks, Underlay, Scotia/beading, Expansion foam",
+  "conversation": {
+    "request": "Hey Mate, can you get a quote ready for that hybrid flooring job in Northcote?",
+    "mateAck": "Good one. I'll sort a Hybrid Flooring Install quote for you now.",
+    "clarifyingQuestion": "Cool — just checking the details: around fifty-five square metres, lifting existing carpet, mid-oak hybrid planks, and scotia bead?",
+    "clarifyingAnswer": "Yeah, that's the one.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers lifting carpet, installing fifty-five square metres of mid-oak hybrid planks with acoustic underlay and scotia."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie, mid-thirties, stands in a bright, empty living room, surveying the floor area."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you get a quote ready for that hybrid flooring job in Northcote?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Hybrid Flooring Install quote for you now. Cool — just checking the details: around fifty-five square metres, lifting existing carpet, mid-oak hybrid planks, and scotia bead?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's the one."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it covers lifting carpet, installing fifty-five square metres of mid-oak hybrid planks with acoustic underlay and scotia."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "slug": "driveway-gate-quote-template",
+  "title": "Driveway Gate quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "welders",
+    "nicheId": "driveway-gate-quote-template",
+    "categoryName": "Welders & Fabricators",
+    "nicheName": "Driveway Gate"
+  },
+  "templateId": "concrete_driveway",
+  "params": {},
+  "jobDescription": "Fabrication and installation of a new custom steel sliding driveway gate for a residential property in St Kilda, Melbourne. Gate dimensions: 4.5 metres wide x 1.8 metres high. Frame from 50x50x2.0mm SHS steel, with vertical infill battens fabricated from 50x10mm flat bar steel, spaced at 20mm gaps. Finish to be Monument colour powder coating. Supply and install two 100x100x3.0mm galvanised steel gate posts, 2.4 metres long each. Supply and install 6 metres of heavy-duty galvanised steel ground track with four heavy-duty steel gate wheels. Supply and install one BFT Deimos Ultra BT A600 sliding gate motor kit, including two remote controls and safety photo-cells. Supply and install one Aiphone JO-1MD video intercom system, including external gate station and internal monitor. Includes demolition and removal of existing old timber gate and posts, concrete footing for track, post installation, and electrical connection for motor and intercom. All necessary wiring and trenching included.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 50,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Marco Bianchi",
+    "address": "Northcote VIC 3070"
+  },
+  "business": {
+    "businessName": "Northcote Welders & Fabricator",
+    "phone": "0429 233 347",
+    "email": "jobs@drivewaygatenorthcote.com.au",
+    "abn": "29 157 271 309",
+    "address": "Northcote VIC 3070",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Gate frame and infill (steel or aluminium), Gate posts or tracks, Hinges or sliding wheel kit, Gate motor and automation kit",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that big sliding gate job in St Kilda?",
+    "mateAck": "Good one. I'll sort a Driveway Gate quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, for the finish on the gate and posts, are we going with the Monument powder coat or standard galvanising only? And for the intercom, is the Aiphone JO-1MD still the go?",
+    "clarifyingAnswer": "Yeah, Mate, definitely Monument powder coat for the gate and posts, looks way better. And stick with the Aiphone intercom, the client likes that one.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — covering the custom 4.5 by 1.8 metre Monument powder coated steel sliding gate, BFT motor, Aiphone intercom, and full installation for the St Kilda job."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie is on a residential street in St Kilda, looking at an old timber gate that needs replacing, with a brick fence backdrop."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that big sliding gate job in St Kilda?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Driveway Gate quote for you now. Righto — just to confirm, for the finish on the gate and posts, are we going with the Monument powder coat or standard galvanising only? And for the intercom, is the Aiphone J O-one M D still the go?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, Mate, definitely Monument powder coat for the gate and posts, looks way better. And stick with the Aiphone intercom, the client likes that one."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — covering the custom four point five by one point eight metre Monument powder coated steel sliding gate, B F T motor, Aiphone intercom, and full installation for the St Kilda job."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "slug": "timber_floor_polish",
+  "title": "Sand & Polish quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "flooring",
+    "nicheId": "timber",
+    "categoryName": "Flooring",
+    "nicheName": "Sand & Polish"
+  },
+  "templateId": "timber_floor_polish",
+  "params": {
+    "area": 50
+  },
+  "jobDescription": "About 65m² of existing tongue-and-groove pine floor through living and hallway. Heavy sand to bare timber, 3 coats water-based satin polyurethane. Keep natural timber colour.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Sam Whitlock",
+    "address": "Brunswick VIC 3056"
+  },
+  "business": {
+    "businessName": "Brunswick Flooring",
+    "phone": "0440 310 490",
+    "email": "jobs@sandpolishbrunswick.com.au",
+    "abn": "40 190 370 430",
+    "address": "Brunswick VIC 3056",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Floor polish/varnish, Sandpaper (various grits), Wood filler, Drop sheets",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for a floor sand and polish? It's for about sixty-five square metres of pine, living and hallway, heavy sand, three coats water-based satin poly, natural colour.",
+    "mateAck": "Good one. I'll sort a Sand & Polish quote for you now.",
+    "clarifyingQuestion": "Righto — just so I'm spot on, what's the existing finish on the floor, and can you confirm the floor area is exactly sixty-five square metres?",
+    "clarifyingAnswer": "Yeah, it's old varnish, and sixty-five square metres on the dot.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for sixty-five square metres of heavy sand on pine, three coats of water-based satin poly, keeping the natural timber colour."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A wide shot of a sunlit living room with an unfinished pine floor, showing a tradie standing centrally with a tablet."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for a floor sand and polish? It's for about sixty-five square metres of pine, living and hallway, heavy sand, three coats water-based satin poly, natural colour."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Sand & Polish quote for you now. Righto — just so I'm spot on, what's the existing finish on the floor, and can you confirm the floor area is exactly sixty-five square metres?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, it's old varnish, and sixty-five square metres on the dot."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for sixty-five square metres of heavy sand on pine, three coats of water-based satin poly, keeping the natural timber colour."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

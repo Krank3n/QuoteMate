@@ -1,0 +1,76 @@
+{
+  "slug": "colorbond-fence-quote-template",
+  "title": "Colorbond Fence quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "fencers",
+    "nicheId": "colorbond-fence-quote-template",
+    "categoryName": "Fencers",
+    "nicheName": "Colorbond Fence"
+  },
+  "templateId": "reroof_colorbond",
+  "params": {},
+  "jobDescription": "Supply and install a new 1.8m high Colorbond Fence in Monument colour for Mrs. Henderson at 14 Acacia Avenue, Sunnybank, QLD. This includes removal and disposal of approximately 25 linear metres of existing dilapidated timber fence. The new fence will be 25 linear metres, consisting of eleven (11) Colorbond fence panels (2.4m wide x 1.8m high), twelve (12) C-section steel posts (Monument, 2.4m long), twenty-two (22) top and bottom rails (Monument, 2.4m long), twelve (12) post caps, and twenty-four (24) bracket sets. Post footings will use twenty (20) bags of 20kg pre-mix concrete. Also includes one (1) 900mm wide x 1.8m high pedestrian gate in Monument, complete with gate frame, heavy-duty hinges, and a D-latch and striker.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 24,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Daniel Okafor",
+    "address": "Thornbury VIC 3071"
+  },
+  "business": {
+    "businessName": "Thornbury Fencer",
+    "phone": "0427 219 321",
+    "email": "jobs@colorbondfenthornbury.com.au",
+    "abn": "27 151 253 287",
+    "address": "Thornbury VIC 3071",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Colorbond fence sheets, Steel posts (C-section), Top and bottom rails, Post caps and brackets",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for Mrs. Henderson's new Colorbond fence on Acacia Avenue?",
+    "mateAck": "Good one. I'll sort a Colorbond Fence quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is she after the standard one point eight metre height, or the taller two point one metre fence?",
+    "clarifyingAnswer": "Nah, Mate, standard one point eight metre is perfect for her.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — all up, it's fifteen thousand, two hundred and fifty dollars, including materials, labour, and that new gate."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A suburban residential backyard, with an old, weathered timber fence partially removed, ready for a new Colorbond fence."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for Mrs. Henderson's new Colorbond fence on Acacia Avenue?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Colorbond Fence quote for you now. Just to confirm — is she after the standard one point eight metre height, or the taller two point one metre fence?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah, Mate, standard one point eight metre is perfect for her."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — all up, it's fifteen thousand, two hundred and fifty dollars, including materials, labour, and that new gate."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

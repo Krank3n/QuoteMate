@@ -1,0 +1,76 @@
+{
+  "slug": "bathroom-waterproofing-quote-template",
+  "title": "Bathroom Waterproofing quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "builders",
+    "nicheId": "bathroom-waterproofing-quote-template",
+    "categoryName": "Builders",
+    "nicheName": "Bathroom Waterproofing"
+  },
+  "templateId": "bathroom_renovation",
+  "params": {},
+  "jobDescription": "Waterproofing for a new main bathroom, dimensions three metres by two point five metres, located on the first floor of a residential build. Scope includes full floor waterproofing, shower recess waterproofing (one point two metres by zero point nine metres) extending up one point eight metres high on three walls, and perimeter wall waterproofing to one hundred and fifty millimetres high for the remainder of the bathroom. This job involves surface preparation, application of a compliant two-part flexible liquid waterproofing membrane system in two coats, installation of reinforcing tape to all internal corners and floor-to-wall junctions, and bond breaker tape. Includes supply and installation of an eighty millimetre hob formwork for the shower base. A waterproofing certificate compliant with AS3740 will be issued upon completion.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 12,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Priya Nand",
+    "address": "Coburg VIC 3058"
+  },
+  "business": {
+    "businessName": "Coburg Builder",
+    "phone": "0441 317 503",
+    "email": "jobs@bathroomwatecoburg.com.au",
+    "abn": "41 193 379 441",
+    "address": "Coburg VIC 3058",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Liquid waterproofing membrane, Reinforcing tape (corners and joints), Bond breaker tape, Primer / sealer",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for the waterproofing on that main bathroom at the new build?",
+    "mateAck": "Good one. I'll sort a Bathroom Waterproofing quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is that a hobbed shower or a hobless design?",
+    "clarifyingAnswer": "Yeah, it's a hobbed shower, Mate. Standard eighty-mil hob.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full breakdown for the new main bathroom waterproofing, including all materials, labour, and the AS3740 compliance certificate."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie stands at a new residential construction site, with timber framing visible in the background and a partially completed brick veneer wall."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for the waterproofing on that main bathroom at the new build?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Bathroom Waterproofing quote for you now. Righto — just to confirm, is that a hobbed shower or a hobless design?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, it's a hobbed shower, Mate. Standard eighty-millimetre hob."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full breakdown for the new main bathroom waterproofing, including all materials, labour, and the A S three seven four zero compliance certificate."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

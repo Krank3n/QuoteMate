@@ -1,0 +1,79 @@
+{
+  "slug": "concrete_driveway",
+  "title": "Concrete Driveway quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "other",
+    "nicheId": "concreting",
+    "categoryName": "Trades",
+    "nicheName": "Concrete Driveway"
+  },
+  "templateId": "concrete_driveway",
+  "params": {
+    "area": 48,
+    "thickness": 100
+  },
+  "jobDescription": "48m² driveway pour, 100mm thick with SL82 mesh. Plain trowel finish with sawn control joints. Existing gravel driveway to be excavated and compacted road base laid first.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Hayley Dorn",
+    "address": "Reservoir VIC 3073"
+  },
+  "business": {
+    "businessName": "Reservoir Trades",
+    "phone": "0445 345 555",
+    "email": "jobs@concretedrreservoir.com.au",
+    "abn": "45 205 415 485",
+    "address": "Reservoir VIC 3073",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Concrete, SL82 mesh, Formwork, Bar chairs",
+  "conversation": {
+    "request": "Mate, chuck together a quote for a concrete driveway: it's forty-eight square metres, one hundred millimetres thick with SL eighty-two mesh, plain trowel finish with sawn control joints, and we need to excavate the existing gravel and lay road base first.",
+    "mateAck": "Good one. I'll sort a Concrete Driveway quote for you now.",
+    "clarifyingQuestion": "Cool — just to lock it in, that's forty-eight square metres, one hundred millimetres thick, plain trowel finish, and you're removing existing gravel, right?",
+    "clarifyingAnswer": "Yeah, that's the lot, Mate.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a forty-eight square metre plain concrete driveway, one hundred millimetres thick, including excavation and road base prep."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands next to a partially excavated gravel driveway at a suburban house, holding a phone."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, chuck together a quote for a concrete driveway: it's forty-eight square metres, one hundred millimetres thick with SL eighty-two mesh, plain trowel finish with sawn control joints, and we need to excavate the existing gravel and lay road base first."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Concrete Driveway quote for you now. Cool — just to lock it in, that's forty-eight square metres, one hundred millimetres thick, plain trowel finish, and you're removing existing gravel, right?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's the lot, Mate."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a forty-eight square metre plain concrete driveway, one hundred millimetres thick, including excavation and road base prep."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

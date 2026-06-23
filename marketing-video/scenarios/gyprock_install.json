@@ -1,0 +1,78 @@
+{
+  "slug": "gyprock_install",
+  "title": "Gyprock / Plaster quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "other",
+    "nicheId": "gyprock",
+    "categoryName": "Trades",
+    "nicheName": "Gyprock / Plaster"
+  },
+  "templateId": "gyprock_install",
+  "params": {
+    "area": 22
+  },
+  "jobDescription": "New ceiling in extension — about 22m² standard 10mm plasterboard, 75mm cove cornice all round. Hang, set 3-coat ready for paint.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Tom Reilly",
+    "address": "Moonee Ponds VIC 3039"
+  },
+  "business": {
+    "businessName": "Moonee Ponds Trades",
+    "phone": "0448 366 594",
+    "email": "jobs@gyprockplamooneeponds.com.au",
+    "abn": "48 214 442 518",
+    "address": "Moonee Ponds VIC 3039",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Plasterboard, Cornice, Joint compound, Top coat",
+  "conversation": {
+    "request": "Mate, can you quickly sort a quote for a new plaster ceiling?",
+    "mateAck": "Good one. I'll sort a Gyprock / Plaster quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is this for a ceiling, around twenty-two square metres of standard board, and does it need seventy-five millimetre cove cornice?",
+    "clarifyingAnswer": "Yep, that's exactly right, mate.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for supplying and installing twenty-two square metres of ten millimetre standard plasterboard ceiling with seventy-five millimetre cove cornice, hung and three-coat set, ready for paint."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands on the dusty concrete slab of a new house extension, with a stack of plasterboard sheets leaning against a timber-framed wall."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you quickly sort a quote for a new plaster ceiling?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Gyprock / Plaster quote for you now. Just to confirm — is this for a ceiling, around twenty-two square metres of standard board, and does it need seventy-five millimetre cove cornice?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yep, that's exactly right, mate."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for supplying and installing twenty-two square metres of ten millimetre standard plasterboard ceiling with seventy-five millimetre cove cornice, hung and three-coat set, ready for paint."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

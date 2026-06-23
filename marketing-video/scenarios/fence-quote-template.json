@@ -1,0 +1,76 @@
+{
+  "slug": "fence-quote-template",
+  "title": "Fence Installation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "fencers",
+    "nicheId": "fence-quote-template",
+    "categoryName": "Fencers",
+    "nicheName": "Fence Installation"
+  },
+  "templateId": "garden_bed_install",
+  "params": {},
+  "jobDescription": "Supply and install thirty-two linear metres of one point eight metre high Colorbond 'Neetascreen' fencing in 'Basalt' colour. Includes removal and disposal of existing aged timber fence. Install seventeen galvanised steel fence posts, concreted into the ground at two point four metre centres. Supply and install fourteen Colorbond 'Neetascreen' panels and matching top/bottom rails. Install one one-metre wide Colorbond 'Neetascreen' pedestrian gate in 'Basalt' with standard gate latch, hinges, and two gate posts. All fixings and caps included. Concrete requirements: thirty-four twenty-kilogram bags of rapid set concrete.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 18,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Daniel Okafor",
+    "address": "Thornbury VIC 3071"
+  },
+  "business": {
+    "businessName": "Thornbury Fencer",
+    "phone": "0412 114 126",
+    "email": "jobs@fencethornbury.com.au",
+    "abn": "12 106 118 122",
+    "address": "Thornbury VIC 3071",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Fence panels or palings, Steel or timber posts, Concrete for post footings, Rails and brackets",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for that Colorbond job in Balmain?",
+    "mateAck": "Good one. I'll sort a Fence Installation quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is this for the full thirty-two metres of Colorbond 'Neetascreen' in Basalt, including the pedestrian gate and old fence removal?",
+    "clarifyingAnswer": "Yeah, that's the one. Thirty-two metres, one point eight high, Basalt 'Neetascreen', gate, and get rid of the old timber.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full breakdown for the thirty-two metre Colorbond fence, including the gate, old fence removal, and all materials."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie on a residential job site in a leafy suburban street, standing next to an old, dilapidated timber fence that needs replacing."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for that Colorbond job in Balmain?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Fence Installation quote for you now. Righto — just to confirm, is this for the full thirty-two metres of Colorbond 'Neetascreen' in Basalt, including the pedestrian gate and old fence removal?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's the one. Thirty-two metres, one point eight high, Basalt 'Neetascreen', gate, and get rid of the old timber."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full breakdown for the thirty-two metre Colorbond fence, including the gate, old fence removal, and all materials."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

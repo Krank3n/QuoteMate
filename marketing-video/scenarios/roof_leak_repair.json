@@ -1,0 +1,78 @@
+{
+  "slug": "roof_leak_repair",
+  "title": "Roof Leak / Tile Repair quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "roofing",
+    "nicheId": "roof_repairs",
+    "categoryName": "Roofing",
+    "nicheName": "Roof Leak / Tile Repair"
+  },
+  "templateId": "roof_leak_repair",
+  "params": {
+    "tiles": 6
+  },
+  "jobDescription": "Leak above ensuite ceiling, terracotta tile roof. Estimate 6 cracked tiles around valley plus failed pointing on ridge. Replace tiles, re-bed and point ridge cap, seal valley flashing. Work weather-dependent.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Ben Trent",
+    "address": "Hampton VIC 3188"
+  },
+  "business": {
+    "businessName": "Hampton Roofing",
+    "phone": "0454 408 672",
+    "email": "jobs@roofleaktihampton.com.au",
+    "abn": "54 232 496 584",
+    "address": "Hampton VIC 3188",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Replacement tiles, Roof silicone, Lead flashing, Storm sealant",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a roof leak job?",
+    "mateAck": "Good one. I'll sort a Roof Leak / Tile Repair quote for you now.",
+    "clarifyingQuestion": "Righto — for this roof leak, where's it showing inside, is it tile or metal, roughly how many tiles are cracked, are we looking at flashing, and will the ridge cap need pointing?",
+    "clarifyingAnswer": "It's above the ensuite ceiling, terracotta tile roof, I'd say about six cracked tiles near the valley, and yes, the ridge cap pointing is shot.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes replacing six terracotta tiles, re-bedding and pointing the ridge cap, and sealing the valley flashing."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands next to a ute in a residential driveway, looking up at the terracotta tiled roofline of a two-storey house."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a roof leak job?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Roof Leak / Tile Repair quote for you now. Righto — for this roof leak, where's it showing inside, is it tile or metal, roughly how many tiles are cracked, are we looking at flashing, and will the ridge cap need pointing?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "It's above the ensuite ceiling, terracotta tile roof, I'd say about six cracked tiles near the valley, and yes, the ridge cap pointing is shot."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — covering replacement of six terracotta tiles, re-bedding and pointing the ridge cap, and sealing the valley flashing."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

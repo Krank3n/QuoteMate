@@ -1,0 +1,79 @@
+{
+  "slug": "gutter_replace",
+  "title": "Gutter Replacement quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "roofing",
+    "nicheId": "gutters",
+    "categoryName": "Roofing",
+    "nicheName": "Gutter Replacement"
+  },
+  "templateId": "gutter_replace",
+  "params": {
+    "length": 40,
+    "downpipes": 4
+  },
+  "jobDescription": "42m of new Colorbond quad gutter in Woodland Grey, 4 downpipes 100x75 rectangular. Existing pine fascia sound — re-use. Old gutter removed and disposed. Single storey, scaffold not required.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Priya Nand",
+    "address": "Coburg VIC 3058"
+  },
+  "business": {
+    "businessName": "Coburg Roofing",
+    "phone": "0456 422 698",
+    "email": "jobs@gutterreplcoburg.com.au",
+    "abn": "56 238 514 606",
+    "address": "Coburg VIC 3058",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Colorbond gutter, Brackets, Joiners, Stop ends",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for a gutter replacement job?",
+    "mateAck": "Good one. I'll sort a Gutter Replacement quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is that forty-two metres of Woodland Grey Colorbond quad gutter, with four one hundred by seventy-five rectangular downpipes, reusing the existing fascia?",
+    "clarifyingAnswer": "Spot on, Mate, that's exactly it.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes forty-two metres of new Colorbond quad gutter, four downpipes, removal of the old gutter, and disposal."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in a high-vis shirt stands next to a single-story house with a ladder propped against the roofline, pointing to the existing gutters."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for a gutter replacement job?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Gutter Replacement quote for you now. Just to confirm — is that forty-two metres of Woodland Grey Colorbond quad gutter, with four one hundred by seventy-five rectangular downpipes, reusing the existing fascia?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate, that's exactly it."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — covering forty-two metres of new Colorbond quad gutter, four downpipes, removal of the old gutter, and disposal."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

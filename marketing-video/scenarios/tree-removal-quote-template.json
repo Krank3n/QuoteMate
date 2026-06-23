@@ -1,0 +1,76 @@
+{
+  "slug": "tree-removal-quote-template",
+  "title": "Tree Removal quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "arborists",
+    "nicheId": "tree-removal-quote-template",
+    "categoryName": "Arborists",
+    "nicheName": "Tree Removal"
+  },
+  "templateId": "pressure_clean",
+  "params": {},
+  "jobDescription": "Removal of one large Eucalyptus saligna (Sydney Blue Gum) approximately twenty-two metres tall with a trunk diameter of seventy-five centimetres at chest height, located three metres from the corner of a residential property at 12 Acacia Street, St Kilda, VIC. The tree requires sectional dismantling with rope and rigging techniques to avoid damage to the adjacent garage and fence. Includes chipping all branches on-site. Stump grinding for the removed Eucalyptus to a depth of three hundred millimetres below ground level. Also includes grinding of one existing smaller Jacaranda stump, fifty centimetres in diameter, next to the driveway. All green waste to be removed from site and disposed of responsibly. Access is good, no crane or traffic management required.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 10,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Hayley Dorn",
+    "address": "Reservoir VIC 3073"
+  },
+  "business": {
+    "businessName": "Reservoir Arborist",
+    "phone": "0430 240 360",
+    "email": "jobs@treeremovalreservoir.com.au",
+    "abn": "30 160 280 320",
+    "address": "Reservoir VIC 3073",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Tree felling and sectional dismantling, Stump grinding (below ground), Wood chipping on-site, Crane hire (if required)",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for that big gum tree removal job?",
+    "mateAck": "Good one. I'll sort a Tree Removal quote for you now.",
+    "clarifyingQuestion": "Righto — just to double-check, is that the twenty-two metre gum near the garage, and are we grinding both the new gum stump and the old Jacaranda one?",
+    "clarifyingAnswer": "Spot on, Mate. Big gum by the garage, and yeah, both stumps need grinding.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full breakdown for the big gum removal and both stump grinds, all waste disposal included."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie standing in a leafy suburban backyard, pointing towards a tall gum tree looming over a tiled roof and a brick garage."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for that big gum tree removal job?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Tree Removal quote for you now. Righto — just to double-check, is that the twenty-two metre gum near the garage, and are we grinding both the new gum stump and the old Jacaranda one?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate. Big gum by the garage, and yeah, both stumps need grinding."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full breakdown for the big gum removal, plus both stump grinds and all waste disposal, coming in at four thousand eight hundred and fifty dollars."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

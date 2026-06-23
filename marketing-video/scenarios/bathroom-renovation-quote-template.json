@@ -1,0 +1,76 @@
+{
+  "slug": "bathroom-renovation-quote-template",
+  "title": "Bathroom Renovation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "builders",
+    "nicheId": "bathroom-renovation-quote-template",
+    "categoryName": "Builders",
+    "nicheName": "Bathroom Renovation"
+  },
+  "templateId": "bathroom_renovation",
+  "params": {},
+  "jobDescription": "Full bathroom renovation in a residential property, approximately 2.8m x 3.2m (nine square metres floor area).\nDemolition: Full strip-out of existing bathroom, including tiles, fixtures, plasterboard, and old shower base.\nWaste Removal: Supply and manage one three cubic metre skip bin.\nWall Preparation: Install new six millimetre Villaboard cement sheeting to all wet areas (approximately sixty-seven point two square metres) and plasterboard to dry areas.\nWaterproofing: Two-coat application of compliant Class Three membrane to shower recess walls (five point zero four square metres), full bathroom floor (nine square metres), and wall-to-floor junctions. Install bond breaker and reinforcing tape.\nFloor Levelling: Self-levelling compound for floor if required (up to twenty millimetres).\nWall Tiles: Supply and lay six-hundred by three-hundred millimetre white rectified ceramic tiles to two point four metres height in shower recess and one point two metres height to remaining walls (total approximately forty-five square metres).\nFloor Tiles: Supply and lay three-hundred by three-hundred millimetre light grey matt porcelain tiles (nine square metres).\nTiling Materials: Quality flexible tile adhesive and epoxy grout for wet areas.\nVanity: Supply and install a nine-hundred millimetre wide, wall-hung timber-look vanity with a ceramic top and single basin.\nTapware: Supply and install chrome mixer taps for vanity and shower. Supply and install a rail shower with a three-function head.\nToilet: Supply and install a back-to-wall, rimless, soft-close toilet suite.\nShower Screen: Supply and install a nine-hundred millimetre wide by two-thousand millimetre high frameless glass shower panel.\nMirror: Supply and install a nine-hundred by seven-hundred-and-fifty millimetre frameless polished edge mirror.\nAccessories: Supply and install chrome toilet roll holder and towel rail.\nPlumbing: Rough-in and fit-off for new vanity, toilet, shower, and floor waste. Relocate existing shower mixer and floor waste within the room.\nElectrical: Install two new recessed LED downlights (ninety millimetre cut-out, ten Watt, warm white), one new exhaust fan (two-hundred-and-fifty millimetre diameter), and one double power point near the vanity. Install wiring for a new heated towel rail (client to supply).\nPainting: Two coats of mould-resistant paint to non-tiled walls and ceiling.\nCleanup: Final site clean and waste removal.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 60,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Priya Nand",
+    "address": "Coburg VIC 3058"
+  },
+  "business": {
+    "businessName": "Coburg Builder",
+    "phone": "0411 107 113",
+    "email": "jobs@bathroomrenocoburg.com.au",
+    "abn": "11 103 109 111",
+    "address": "Coburg VIC 3058",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Demolition and waste removal, Waterproofing membrane and tape, Wall and floor tiles, Tile adhesive and grout",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a full bathroom reno?",
+    "mateAck": "Good one. I'll sort a Bathroom Renovation quote for you now.",
+    "clarifyingQuestion": "Cool — are we talking a full strip-out and re-sheet for the walls, or just a re-tile over existing?",
+    "clarifyingAnswer": "Nah, full strip-out, mate. Everything back to studs, then new Villaboard before waterproofing and tiling.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a complete breakdown for that full bathroom renovation, including all your specified materials, sixty hours of labour, and waste removal."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie on a residential job site, outside a house where scaffolding is visible around a section under renovation, with some building materials stacked neatly nearby."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a full bathroom reno?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Bathroom Renovation quote for you now. Cool — are we talking a full strip-out and re-sheet for the walls, or just a re-tile over existing?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah, full strip-out, mate. Everything back to studs, then new Villaboard before waterproofing and tiling."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a complete breakdown for that full bathroom renovation, including all your specified materials, sixty hours of labour, and waste removal."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "slug": "toilet_install",
+  "title": "Toilet Install quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "plumbing",
+    "nicheId": "fixtures_fittings",
+    "categoryName": "Plumbing",
+    "nicheName": "Toilet Install"
+  },
+  "templateId": "toilet_install",
+  "params": {
+    "toilets": 1
+  },
+  "jobDescription": "One close-coupled toilet suite supplied by us, replacing existing S-trap. Tile floor — silicone seal around base. Old suite removed and disposed of.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Nadia Rahman",
+    "address": "Fitzroy North VIC 3068"
+  },
+  "business": {
+    "businessName": "Fitzroy North Plumbing",
+    "phone": "0421 177 243",
+    "email": "jobs@toiletinstfitzroynorth.com.au",
+    "abn": "21 133 199 221",
+    "address": "Fitzroy North VIC 3068",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Toilet suite, Flexible connector, Cistern washer, Pan collar",
+  "conversation": {
+    "request": "Mate, I need a quote for a toilet install; it's one close-coupled suite we're supplying, replacing an existing S-trap on a tiled floor, and we'll get rid of the old unit.",
+    "mateAck": "Good one. I'll sort a Toilet Install quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is it one toilet, you're supplying it, it's an S-trap, and the floor is tiled?",
+    "clarifyingAnswer": "Spot on; one toilet, we're supplying the suite, S-trap, and yep, tiled floor.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for installing one close-coupled toilet suite, replacing an S-trap on a tiled floor, including removal and disposal of the old unit."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a modern bathroom, inspecting the floor near a toilet."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, I need a quote for a toilet install; it's one close-coupled suite we're supplying, replacing an existing S-trap on a tiled floor, and we'll get rid of the old unit."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Toilet Install quote for you now. Just to confirm — is it one toilet, you're supplying it, it's an S-trap, and the floor is tiled?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on; one toilet, we're supplying the suite, S-trap, and yep, tiled floor."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for installing one close-coupled toilet suite, replacing an S-trap on a tiled floor, including removal and disposal of the old unit."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

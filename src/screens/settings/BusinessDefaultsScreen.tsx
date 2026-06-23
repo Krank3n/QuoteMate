@@ -34,7 +34,7 @@ export function BusinessDefaultsScreen() {
   const { businessSettings, setBusinessSettings } = useStore();
 
   const [laborRate, setLaborRate] = useState('85');
-  const [markup, setMarkup] = useState('20');
+  const [markup, setMarkup] = useState('30');
   const [laborMarkup, setLaborMarkup] = useState('20');
   const [defaultDepositPercentage, setDefaultDepositPercentage] = useState('0');
   const [requireDepositByDefault, setRequireDepositByDefault] = useState(false);
@@ -56,8 +56,8 @@ export function BusinessDefaultsScreen() {
   useEffect(() => {
     if (!businessSettings) return;
     const lr = businessSettings.defaultLaborRate?.toString() || '85';
-    const mk = businessSettings.defaultMarkup?.toString() || '20';
-    const lm = (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup ?? 20).toString();
+    const mk = businessSettings.defaultMarkup?.toString() || '30';
+    const lm = (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup ?? 30).toString();
     const dp = (businessSettings.defaultDepositPercentage ?? 0).toString();
     const rd = businessSettings.requireDepositByDefault === true;
     const tm = businessSettings.transportMarkupEnabled !== false;
@@ -137,7 +137,7 @@ export function BusinessDefaultsScreen() {
       await setBusinessSettings({
         ...businessSettings!,
         defaultLaborRate: parseFloat(laborRate) || 85,
-        defaultMarkup: parseFloat(markup) || 20,
+        defaultMarkup: parseFloat(markup) || 30,
         defaultLaborMarkup: parseFloat(laborMarkup) || 0,
         defaultDepositPercentage: Math.max(0, Math.min(100, parseFloat(defaultDepositPercentage) || 0)),
         requireDepositByDefault,

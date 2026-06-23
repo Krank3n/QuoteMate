@@ -1,0 +1,79 @@
+{
+  "slug": "deck_construction",
+  "title": "Deck Build quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "carpentry",
+    "nicheId": "outdoor",
+    "categoryName": "Carpentry",
+    "nicheName": "Deck Build"
+  },
+  "templateId": "deck_construction",
+  "params": {
+    "area": 20,
+    "height": 0.5
+  },
+  "jobDescription": "24m² merbau deck off the back of the house, 600mm off ground. Treated pine substructure, stirrup footings in concrete. One 4-step staircase, no balustrade required (under 1m).",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Marco Bianchi",
+    "address": "Northcote VIC 3070"
+  },
+  "business": {
+    "businessName": "Northcote Carpentry",
+    "phone": "0429 233 347",
+    "email": "jobs@deckbuildnorthcote.com.au",
+    "abn": "29 157 271 309",
+    "address": "Northcote VIC 3070",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Merbau decking boards, Treated pine joists, Galvanized joist hangers, Deck screws",
+  "conversation": {
+    "request": "Mate, can you sort a quote for a twenty-four square metre merbau deck, six hundred millimetres off the ground, with a treated pine substructure and a four-step staircase?",
+    "mateAck": "Good one. I'll sort a Deck Build quote for you now.",
+    "clarifyingQuestion": "Cool — just to confirm, is that a twenty-four square metre merbau deck, six hundred millimetres off the ground, with treated pine substructure, stirrup footings, and no balustrade required for the four-step staircase?",
+    "clarifyingAnswer": "Spot on, Mate.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes merbau decking, a treated pine substructure, stirrup footings, and a four-step staircase."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a suburban backyard, a new house wall behind them and a freshly dug area for deck footings visible."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you sort a quote for a twenty-four square metre merbau deck, six hundred millimetres off the ground, with a treated pine substructure and a four-step staircase?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Deck Build quote for you now. Cool — just to confirm, is that a twenty-four square metre merbau deck, six hundred millimetres off the ground, with treated pine substructure, stirrup footings, and no balustrade required for the four-step staircase?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it includes merbau decking, a treated pine substructure, stirrup footings, and a four-step staircase."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

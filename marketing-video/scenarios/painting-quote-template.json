@@ -1,0 +1,76 @@
+{
+  "slug": "painting-quote-template",
+  "title": "House Painting quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "painters",
+    "nicheId": "painting-quote-template",
+    "categoryName": "Painters",
+    "nicheName": "House Painting"
+  },
+  "templateId": "interior_walls_paint",
+  "params": {},
+  "jobDescription": "Client: Smith Residence, Balmain, NSW. Scope: Full interior repaint (walls and ceilings) and exterior trim repaint. Interior surfaces: Master Bedroom (4m x 3.5m, 2.7m high), Bedroom Two (3m x 3m, 2.7m high), Bedroom Three (3m x 3m, 2.7m high), Living Room (6m x 4m, 2.7m high), Kitchen (3.5m x 3m, 2.7m high). All these rooms include walls and ceilings. Hallway (5m x 1m, 2.7m high): Walls only. Bathroom One (2.5m x 2m, 2.4m high): Walls only. Bathroom Two (2.5m x 2m, 2.4m high): Walls only. All interior walls to receive two coats of premium washable low-sheen acrylic paint. Ceilings to be painted with flat ceiling white. Minor plaster repairs, filling, and sanding included. Exterior Trim: Front Entry Door (1 door) and frame. Six standard windows (1.2m x 1.5m) and frames. House eaves and fascia (approx. 40 linear metres perimeter). All exterior trim to receive two coats of exterior semi-gloss enamel paint. Prep includes scraping loose paint, sanding, and priming bare timber.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 48,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Marco Bianchi",
+    "address": "Northcote VIC 3070"
+  },
+  "business": {
+    "businessName": "Northcote Painter",
+    "phone": "0414 128 152",
+    "email": "jobs@paintingnorthcote.com.au",
+    "abn": "14 112 136 144",
+    "address": "Northcote VIC 3070",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Interior paint (walls and ceilings), Exterior paint, Primer and undercoat, Filler, sandpaper, and prep materials",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for the Smith job in Balmain?",
+    "mateAck": "Good one. I'll sort a House Painting quote for you now.",
+    "clarifyingQuestion": "Righto — are we talking interior walls and ceilings, plus exterior trim, and two coats throughout?",
+    "clarifyingAnswer": "Yeah, that's spot on Mate, two coats on all those interior surfaces, and the exterior trim too.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full interior and exterior trim repaint for the Smith place, including all prep and materials."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie, wearing work shorts and a t-shirt, standing in a partially painted living room, holding a paint roller."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for the Smith job in Balmain?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a House Painting quote for you now. Righto — are we talking interior walls and ceilings, plus exterior trim, and two coats throughout?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's spot on Mate, two coats on all those interior surfaces, and the exterior trim too."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full interior and exterior trim repaint for the Smith place, coming in at five thousand, eight hundred and fifty dollars, including all prep and materials."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "slug": "ev-charger-installation-quote-template",
+  "title": "EV Charger Installation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "electricians",
+    "nicheId": "ev-charger-installation-quote-template",
+    "categoryName": "Electricians",
+    "nicheName": "EV Charger Installation"
+  },
+  "templateId": "ev_charger_install",
+  "params": {},
+  "jobDescription": "Supply and install one seven-kilowatt (7kW) single-phase EV charger (e.g., Wallbox Pulsar Plus) at a residential property in Brunswick East, Melbourne. This includes a new dedicated twenty-two-metre run of six-millimetre two-core-and-earth TPS cable from the main switchboard to the garage, installed largely concealed within wall cavities, with three metres of surface-mounted heavy-duty grey conduit for the final external run to the charger location. Installation of one new thirty-two-amp circuit breaker and one dedicated Type A RCBO in the existing switchboard. Charger unit to be mounted on a brick wall using standard fixings. Testing and commissioning of the charger unit.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 5,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Nadia Rahman",
+    "address": "Fitzroy North VIC 3068"
+  },
+  "business": {
+    "businessName": "Fitzroy North Electrician",
+    "phone": "0436 282 438",
+    "email": "jobs@evchargerinsfitzroynorth.com.au",
+    "abn": "36 178 334 386",
+    "address": "Fitzroy North VIC 3068",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "EV charger unit (7kW or 22kW), Dedicated circuit cable (6mm or 10mm TPS), Circuit breaker and RCD, Conduit and cable support",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for that EV charger install in Brunswick East?",
+    "mateAck": "Good one. I'll sort a EV Charger Installation quote for you now.",
+    "clarifyingQuestion": "Cool — is the current main switchboard in good nick, or will it need a bit of an upgrade to handle the extra load?",
+    "clarifyingAnswer": "Nah, Mate, the switchboard was only upgraded last year. Plenty of room and capacity for the new circuit.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — all up, including the charger, cable, and labour, it's just under two thousand five hundred bucks."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie in a modern home garage, reviewing plans on a tablet."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for that E V charger install in Brunswick East?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a E V Charger Installation quote for you now. Cool — is the current main switchboard in good nick, or will it need a bit of an upgrade to handle the extra load?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah, Mate, the switchboard was only upgraded last year. Plenty of room and capacity for the new circuit."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — all up, including the charger, cable, and labour, it's just under two thousand five hundred bucks."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "slug": "kitchen_cabinetry",
+  "title": "Kitchen Cabinetry quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "cabinet_making",
+    "nicheId": "kitchens",
+    "categoryName": "Cabinetry",
+    "nicheName": "Kitchen Cabinetry"
+  },
+  "templateId": "kitchen_cabinetry",
+  "params": {
+    "linearMetres": 6,
+    "islandLm": 0
+  },
+  "jobDescription": "5.4 lm L-shape kitchen plus 2.4 lm island. Polytec Woodmatt doors, soft-close Blum hardware, 20mm Caesarstone benchtop with waterfall end on island. Demo old kitchen, integrated dishwasher, customer-supplied oven and cooktop.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Aisha Khan",
+    "address": "Yarraville VIC 3013"
+  },
+  "business": {
+    "businessName": "Yarraville Cabinetry",
+    "phone": "0432 254 386",
+    "email": "jobs@kitchencabyarraville.com.au",
+    "abn": "32 166 298 342",
+    "address": "Yarraville VIC 3013",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Melamine carcass board, Door panels, Blum hinges, Drawer runners",
+  "conversation": {
+    "request": "Mate, can you sort a quote for a kitchen reno? It's an L-shape with an island, Polytec Woodmatt doors, Caesarstone benchtop, plus demo and integrated appliances.",
+    "mateAck": "Good one. I'll sort a Kitchen Cabinetry quote for you now.",
+    "clarifyingQuestion": "Let me get this right — just to confirm, that's 5.4 linear metres L-shape, 2.4 linear metres island, Polytec Woodmatt doors, a 20mm Caesarstone benchtop with waterfall, and customer-supplied oven and cooktop?",
+    "clarifyingAnswer": "Spot on, Mate. All those details are correct.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full kitchen cabinetry fit-out including demo, Polytec Woodmatt doors, Caesarstone benchtop, and hardware, ready to go."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a bright, modern kitchen, looking at a tablet."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you sort a quote for a kitchen reno? It's an L-shape with an island, Polytec Woodmatt doors, Caesarstone benchtop, plus demo and integrated appliances."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Kitchen Cabinetry quote for you now. Let me get this right — just to confirm, that's five point four linear metres L-shape, two point four linear metres island, Polytec Woodmatt doors, a twenty millimetre Caesarstone benchtop with waterfall, and customer-supplied oven and cooktop?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate. All those details are correct."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full kitchen cabinetry fit-out including demo, Polytec Woodmatt doors, Caesarstone benchtop, and hardware, ready to go."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "slug": "gate_install",
+  "title": "Gate Install quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "other",
+    "nicheId": "fencing",
+    "categoryName": "Trades",
+    "nicheName": "Gate Install"
+  },
+  "templateId": "gate_install",
+  "params": {
+    "gates": 1,
+    "width": 0.9
+  },
+  "jobDescription": "One 900mm single Colorbond gate to match existing fence, self-closing hinges, magnetic child-safe latch. New steel posts and concrete footings.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Daniel Okafor",
+    "address": "Thornbury VIC 3071"
+  },
+  "business": {
+    "businessName": "Thornbury Trades",
+    "phone": "0412 114 126",
+    "email": "jobs@gateinstalthornbury.com.au",
+    "abn": "12 106 118 122",
+    "address": "Thornbury VIC 3071",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Gate frame, Hinges, Latch/lock, Posts",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a gate? Single Colorbond, nine hundred millimetres wide, self-closing hinges, magnetic child latch, new steel posts and concrete.",
+    "mateAck": "Good one. I'll sort a Gate Install quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, we're looking at a single gate, nine hundred millimetres wide, Colorbond, with self-closing hinges and a magnetic child-safe latch?",
+    "clarifyingAnswer": "Spot on, Mate; that's exactly right.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for a single nine hundred millimetre Colorbond gate, including self-closing hinges, a magnetic child-safe latch, new steel posts, and concrete footings."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "VEO: A tradie in work gear stands beside a new Colorbond fence section in a suburban backyard, overlooking an area prepped for a new gate installation, with some tools visible."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a gate? Single Colorbond, nine hundred millimetres wide, self-closing hinges, magnetic child latch, new steel posts and concrete."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Gate Install quote for you now. Righto — just to confirm, we're looking at a single gate, nine hundred millimetres wide, Colorbond, with self-closing hinges and a magnetic child-safe latch?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate; that's exactly right."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for a single nine hundred millimetre Colorbond gate, including self-closing hinges, a magnetic child-safe latch, new steel posts, and concrete footings."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

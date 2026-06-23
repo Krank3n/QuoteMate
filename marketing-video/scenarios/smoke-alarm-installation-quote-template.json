@@ -1,0 +1,76 @@
+{
+  "slug": "smoke-alarm-installation-quote-template",
+  "title": "Smoke Alarm Installation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "electricians",
+    "nicheId": "smoke-alarm-installation-quote-template",
+    "categoryName": "Electricians",
+    "nicheName": "Smoke Alarm Installation"
+  },
+  "templateId": "garden_bed_install",
+  "params": {},
+  "jobDescription": "Supply and install seven new Australian Standards compliant interconnected photoelectric smoke alarms in a two-story, four-bedroom dwelling in Ryde, NSW. This includes removing seven existing outdated ionisation smoke alarms. Four new alarms will be hardwired with ten-year lithium battery backups, requiring approximately twenty-five linear metres of interconnect cable run through ceiling spaces. The remaining three alarms will be wireless interconnected units with ten-year lithium battery backups, strategically placed on the upper floor. All new alarms will be mounted with appropriate bases and tested for full functionality and compliance. A final compliance certificate will be issued upon completion.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 7,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Priya Nand",
+    "address": "Coburg VIC 3058"
+  },
+  "business": {
+    "businessName": "Coburg Electrician",
+    "phone": "0411 107 113",
+    "email": "jobs@smokealarmincoburg.com.au",
+    "abn": "11 103 109 111",
+    "address": "Coburg VIC 3058",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Interconnected photoelectric smoke alarms, Mounting bases, Interconnect cable (if hardwired), Wireless interconnect module (if applicable)",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that smoke alarm job in Ryde?",
+    "mateAck": "Good one. I'll sort a Smoke Alarm Installation quote for you now.",
+    "clarifyingQuestion": "Cool — just to confirm, we're looking at seven interconnected photoelectric alarms, with four hardwired and three wireless ones, all with ten-year lithium batteries, yeah?",
+    "clarifyingAnswer": "Spot on, Mate. That's exactly it. And don't forget the certificate.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for supplying and installing seven interconnected smoke alarms at the Ryde job, including removal of the old ones and the compliance certificate."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie in a modern home interior, standing near a ceiling, looking at an old smoke alarm."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that smoke alarm job in Ryde?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Smoke Alarm Installation quote for you now. Cool — just to confirm, we're looking at *seven* interconnected photoelectric alarms, with *four* hardwired and *three* wireless ones, all with *ten-year* lithium batteries, yeah?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate. That's exactly it. And don't forget the certificate."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for supplying and installing *seven* interconnected smoke alarms at the Ryde job, including removal of the old ones and the compliance certificate."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "slug": "termite_barrier",
+  "title": "Termite Barrier (Chemical) quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "pest_control",
+    "nicheId": "termites",
+    "categoryName": "Pest Control",
+    "nicheName": "Termite Barrier (Chemical)"
+  },
+  "templateId": "termite_barrier",
+  "params": {
+    "perimeter": 50
+  },
+  "jobDescription": "Approx 48m perimeter around brick veneer slab home. ~30m soil trench (300 deep), ~18m concrete path requiring core drilling at 200 centres. Termidor SC chemical, 8-year warranty with annual inspection.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Hayley Dorn",
+    "address": "Reservoir VIC 3073"
+  },
+  "business": {
+    "businessName": "Reservoir Pest Control",
+    "phone": "0460 450 750",
+    "email": "jobs@termitebarreservoir.com.au",
+    "abn": "60 250 550 650",
+    "address": "Reservoir VIC 3073",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Termiticide concentrate, Spray tank, Trench sand, Concrete repair",
+  "conversation": {
+    "request": "Mate, can you sort a quote for a termite barrier? It's for approximately forty-eight metres perimeter around a brick veneer slab home, with about thirty metres of soil trench three hundred deep and eighteen metres of concrete path needing core drilling at two hundred centres, using Termidor SC chemical with an eight-year warranty and annual inspection.",
+    "mateAck": "Good one. I'll sort a Termite Barrier (Chemical) quote for you now.",
+    "clarifyingQuestion": "Let me get this right — is it a slab or stumps, and are there any pets we need to consider relocating for a short time?",
+    "clarifyingAnswer": "It's a slab home, and they've got two cats that will need to stay inside for a few hours after.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a Termite Barrier for approximately forty-eight metres, including thirty metres of soil trenching and eighteen metres of concrete path core drilling, using Termidor SC with an eight-year warranty and annual inspection."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A pest control tradie, wearing a branded polo shirt, stands in a neat, modern kitchen, tapping on his phone."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you sort a quote for a termite barrier? It's for approximately forty-eight metres perimeter around a brick veneer slab home, with about thirty metres of soil trench three hundred deep and eighteen metres of concrete path needing core drilling at two hundred centres, using Termidor S C chemical with an eight-year warranty and annual inspection."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Termite Barrier (Chemical) quote for you now. Let me get this right — is it a slab or stumps, and are there any pets we need to consider relocating for a short time?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "It's a slab home, and they've got two cats that will need to stay inside for a few hours after."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a Termite Barrier for approximately forty-eight metres, including thirty metres of soil trenching and eighteen metres of concrete path core drilling, using Termidor S C with an eight-year warranty and annual inspection."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "slug": "reroof_colorbond",
+  "title": "Re-Roof (Colorbond) quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "roofing",
+    "nicheId": "roof_install",
+    "categoryName": "Roofing",
+    "nicheName": "Re-Roof (Colorbond)"
+  },
+  "templateId": "reroof_colorbond",
+  "params": {
+    "area": 180
+  },
+  "jobDescription": "Strip and re-roof 185m² single-storey weatherboard, existing Colorbond → new Colorbond Trimdek in Surfmist. R1.3 anticon blanket. Standard 22° pitch, scaffolding required around full perimeter.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Ruby Saleh",
+    "address": "Bentleigh VIC 3204"
+  },
+  "business": {
+    "businessName": "Bentleigh Roofing",
+    "phone": "0453 401 659",
+    "email": "jobs@reroofcolobentleigh.com.au",
+    "abn": "53 229 487 573",
+    "address": "Bentleigh VIC 3204",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Colorbond sheets, Ridge capping, Anticon blanket, Screws",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a re-roof at the weatherboard job? It's one-eighty-five square metres, single-storey, existing Colorbond to new Trimdek Surfmist, twenty-two degrees pitch, and needs R1.3 anticon with full scaffold.",
+    "mateAck": "Good one. I'll sort a Re-Roof (Colorbond) quote for you now.",
+    "clarifyingQuestion": "Cool — just confirming it's one hundred and eighty-five square metres, single-storey, twenty-two degree pitch with anticon, and no asbestos suspected, yeah?",
+    "clarifyingAnswer": "Spot on, Mate, all correct and no asbestos.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes stripping and disposing of the old roof, supplying and installing new Trimdek Surfmist Colorbond with R1.3 anticon, and all scaffolding costs."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a sunlit backyard of a weatherboard house, looking up at the existing Colorbond roof, with some scaffolding already visible."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a re-roof at the weatherboard job? It's one hundred and eighty-five square metres, single-storey, existing Colorbond to new Trimdek Surfmist, twenty-two degrees pitch, and needs R one point three anticon with full scaffold."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Re-Roof (Colorbond) quote for you now. Cool — just confirming it's one hundred and eighty-five square metres, single-storey, twenty-two degree pitch with anticon, and no asbestos suspected, yeah?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate, all correct and no asbestos."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's the quote — it includes stripping and disposing of the old roof, supplying and installing new Trimdek Surfmist Colorbond with R one point three anticon, and all scaffolding costs."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

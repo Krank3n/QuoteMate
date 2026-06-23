@@ -1,0 +1,78 @@
+{
+  "slug": "pergola_build",
+  "title": "Pergola quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "carpentry",
+    "nicheId": "outdoor",
+    "categoryName": "Carpentry",
+    "nicheName": "Pergola"
+  },
+  "templateId": "pergola_build",
+  "params": {
+    "area": 24
+  },
+  "jobDescription": "4x6m attached pergola off rear of house, Colorbond roof on 100x100 treated pine posts in galv stirrups. Double LVL beam, 90x45 rafters at 600 centres. Council certifier required.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Hayley Dorn",
+    "address": "Reservoir VIC 3073"
+  },
+  "business": {
+    "businessName": "Reservoir Carpentry",
+    "phone": "0430 240 360",
+    "email": "jobs@pergolareservoir.com.au",
+    "abn": "30 160 280 320",
+    "address": "Reservoir VIC 3073",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Posts, LVL beams, Rafters, Roof sheeting",
+  "conversation": {
+    "request": "Mate, can you crunch the numbers for a four by six attached pergola, Colorbond roof, hundred by hundred treated pine posts, double LVL, ninety by forty-five rafters, and make sure to include the council certifier?",
+    "mateAck": "Good one. I'll sort a Pergola quote for you now.",
+    "clarifyingQuestion": "Let me get this right — so that's a standard rectangular four-by-six metre attached pergola with a Colorbond roof, specifically Custom Orb?",
+    "clarifyingAnswer": "Yeah Mate, spot on, Custom Orb is the go.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers all materials, labour, and the council certifier fee for your four by six metre Colorbond pergola."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a sunny suburban backyard, gesturing towards the rear of a modern brick house where a new pergola will be built, with some timber and tools visible nearby."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you crunch the numbers for a four by six attached pergola, Colorbond roof, one hundred by one hundred treated pine posts, double LVL, ninety by forty-five rafters, and make sure to include the council certifier?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Pergola quote for you now. Let me get this right — so that's a standard rectangular four by six metre attached pergola with a Colorbond roof, specifically Custom Orb?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah Mate, spot on, Custom Orb is the go."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it covers all materials, labour, and the council certifier fee for your four by six metre Colorbond pergola."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

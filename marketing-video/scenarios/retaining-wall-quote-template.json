@@ -1,0 +1,76 @@
+{
+  "slug": "retaining-wall-quote-template",
+  "title": "Retaining Wall quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "landscapers",
+    "nicheId": "retaining-wall-quote-template",
+    "categoryName": "Landscapers",
+    "nicheName": "Retaining Wall"
+  },
+  "templateId": "retaining_wall",
+  "params": {},
+  "jobDescription": "Supply and install a new two-tier concrete sleeper retaining wall, sixteen linear metres long, replacing an existing timber wall. The wall will be constructed using thirty-two concrete sleepers (two thousand millimetres long, two hundred millimetres high, eighty millimetres thick) stacked two high. Nine galvanised steel H-beam posts (one hundred Universal Column, fourteen kilograms per metre) will be set into concrete footings measuring three hundred by three hundred by six hundred millimetres deep. Includes supply and installation of sixteen linear metres of ninety-millimetre slotted ag pipe, half a cubic metre of twenty-millimetre drainage gravel, ten square metres of geotextile fabric behind the wall, and four cubic metres of clean backfill material.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 52,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Mia Donnelly",
+    "address": "Essendon VIC 3040"
+  },
+  "business": {
+    "businessName": "Essendon Landscaper",
+    "phone": "0419 163 217",
+    "email": "jobs@retainingwalessendon.com.au",
+    "abn": "19 127 181 199",
+    "address": "Essendon VIC 3040",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Retaining wall blocks or sleepers, Steel posts (galvanised H-beams), Concrete footings, Drainage gravel and ag pipe",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for that sixteen-metre concrete sleeper wall for the Taylors?",
+    "mateAck": "Good one. I'll sort a Retaining Wall quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, is this the two-tier wall, about sixteen metres long, using those standard concrete sleepers?",
+    "clarifyingAnswer": "Yeah, that's the one, two high, sixteen metres, the grey concrete ones.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a complete estimate for the Taylors' sixteen-metre concrete sleeper retaining wall, including all materials, labour, and drainage."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A residential backyard with an old, weathered timber retaining wall in need of replacement, next to a slightly sloped lawn."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for that sixteen-metre concrete sleeper wall for the Taylors?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Retaining Wall quote for you now. Righto — just to confirm, is this the two-tier wall, about sixteen metres long, using those standard concrete sleepers?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, that's the one, two high, sixteen metres, the grey concrete ones."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a complete estimate for the Taylors' sixteen-metre concrete sleeper retaining wall, including all materials, labour, and drainage."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

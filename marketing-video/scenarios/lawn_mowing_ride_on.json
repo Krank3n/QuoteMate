@@ -1,0 +1,78 @@
+{
+  "slug": "lawn_mowing_ride_on",
+  "title": "Lawn Mowing (Ride-On) quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "landscape_gardening",
+    "nicheId": "lawn_care",
+    "categoryName": "Landscaping",
+    "nicheName": "Lawn Mowing (Ride-On)"
+  },
+  "templateId": "lawn_mowing_ride_on",
+  "params": {
+    "area": 500
+  },
+  "jobDescription": "Approx 1500m² of lawn, includes edging around garden beds and driveway. Green waste left bagged at side gate for council pickup.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Marco Bianchi",
+    "address": "Northcote VIC 3070"
+  },
+  "business": {
+    "businessName": "Northcote Landscaping",
+    "phone": "0414 128 152",
+    "email": "jobs@lawnmowingnorthcote.com.au",
+    "abn": "14 112 136 144",
+    "address": "Northcote VIC 3070",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Fuel, Line trimmer cord, Waste bags",
+  "conversation": {
+    "request": "Alright Mate, got a lawn mowing job here, pretty standard stuff, ride-on.",
+    "mateAck": "Good one. I'll sort a Lawn Mowing (Ride-On) quote for you now.",
+    "clarifyingQuestion": "Righto — just confirming the area size, if edging or trimming is included, and what's happening with the green waste?",
+    "clarifyingAnswer": "Yeah, it's about fifteen hundred square metres of lawn, definitely needs edging around the garden beds and driveway, and we'll bag the green waste for council pickup at the side gate.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — fifteen hundred square metres of ride-on mowing, including edging, with bagged green waste at the side gate for pickup."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in a high-vis shirt stands next to a ride-on mower in a large, well-maintained suburban backyard with established garden beds and a paved driveway visible."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Alright Mate, got a lawn mowing job here, pretty standard stuff, ride-on."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Lawn Mowing (Ride-On) quote for you now. Righto — just confirming the area size, if edging or trimming is included, and what's happening with the green waste?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, it's about fifteen hundred square metres of lawn, definitely needs edging around the garden beds and driveway, and we'll bag the green waste for council pickup at the side gate."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — fifteen hundred square metres of ride-on mowing, including all edging, with the green waste bagged and left at the side gate for council pickup."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

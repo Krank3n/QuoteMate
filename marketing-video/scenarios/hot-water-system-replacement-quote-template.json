@@ -1,0 +1,76 @@
+{
+  "slug": "hot-water-system-replacement-quote-template",
+  "title": "Hot Water System Replacement quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "plumbers",
+    "nicheId": "hot-water-system-replacement-quote-template",
+    "categoryName": "Plumbers",
+    "nicheName": "Hot Water System Replacement"
+  },
+  "templateId": "hot_water_install",
+  "params": {},
+  "jobDescription": "Remove and dispose of existing 125L electric hot water system (Rheem 125L). Supply and install new 160L electric hot water system (Rheem Stellar 160L 3.6kW). Include new tempering valve (RMC HT50), pressure and temperature relief valve (PTR valve), and isolation valves. Connect to existing power supply and water lines. Replace approximately 2 metres of copper pipework with new 20mm copper, including necessary fittings (elbows, reducers). Insulate new pipework using Armaflex pipe insulation. Test and commission system. Clean up site.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 5,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Tom Reilly",
+    "address": "Moonee Ponds VIC 3039"
+  },
+  "business": {
+    "businessName": "Moonee Ponds Plumber",
+    "phone": "0418 156 204",
+    "email": "jobs@hotwatersystmooneeponds.com.au",
+    "abn": "18 124 172 188",
+    "address": "Moonee Ponds VIC 3039",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Hot water unit (gas, electric, or heat pump), Tempering valve, Pipe fittings and connections, Gas fittings (if applicable)",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a hot water system replacement?",
+    "mateAck": "Good one. I'll sort a Hot Water System Replacement quote for you now.",
+    "clarifyingQuestion": "Righto — is this for a standard electric, gas, or a heat pump system?",
+    "clarifyingAnswer": "Nah, just a straight swap for an electric, Mate. A 160L Rheem Stellar, same as we discussed.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full breakdown for the supply and install of that 160L electric hot water system, including all parts, labour, and old unit removal."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie in a laundry room, looking at an old hot water system."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a hot water system replacement?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Hot Water System Replacement quote for you now. Righto — is this for a standard electric, gas, or a heat pump system?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah, just a straight swap for an electric, Mate. A one hundred and sixty litre Rheem Stellar, same as we discussed."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full breakdown for the supply and install of that one hundred and sixty litre electric hot water system, including all parts, labour, and old unit removal."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

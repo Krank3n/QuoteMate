@@ -1,0 +1,79 @@
+{
+  "slug": "tv_entertainment_unit",
+  "title": "TV / Entertainment Unit quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "cabinet_making",
+    "nicheId": "entertainment_office",
+    "categoryName": "Cabinetry",
+    "nicheName": "TV / Entertainment Unit"
+  },
+  "templateId": "tv_entertainment_unit",
+  "params": {
+    "linearMetres": 3.5,
+    "height": 2.4
+  },
+  "jobDescription": "3.6 lm floor-to-ceiling TV unit in lounge. Centre TV recess, two flanking tall cupboards with adjustable shelving, low drawer bank under TV for AV gear. Polytec doors, push-to-open, cable grommets behind TV.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Jack Forsyth",
+    "address": "Pascoe Vale VIC 3044"
+  },
+  "business": {
+    "businessName": "Pascoe Vale Cabinetry",
+    "phone": "0435 275 425",
+    "email": "jobs@tventertaipascoevale.com.au",
+    "abn": "35 175 325 375",
+    "address": "Pascoe Vale VIC 3044",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Melamine carcass, Door fronts, Blum hinges, Drawer runners",
+  "conversation": {
+    "request": "Hey Mate, can you knock up a quote for a TV unit? It's three point six linear metres, floor-to-ceiling, Polytec doors, push-to-open, with a centre TV recess, two tall cupboards, and a low drawer bank for AV gear, and needs cable grommets behind the TV.",
+    "mateAck": "Good one. I'll sort a TV / Entertainment Unit quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is that three point six linear metres, floor-to-ceiling, with two tall cupboards and a low drawer bank, and you need those cable grommets for the TV and AV gear?",
+    "clarifyingAnswer": "Spot on, Mate. Three point six metres, floor-to-ceiling, and yep, don't forget those cable grommets.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a three point six metre floor-to-ceiling Polytec TV unit, with two tall cupboards, a low drawer bank, push-to-open doors, and cable management."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in a customer's bright, modern living room, looking at the wall where the TV unit will be installed."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you knock up a quote for a TV unit? It's three point six linear metres, floor-to-ceiling, Polytec doors, push-to-open, with a centre TV recess, two tall cupboards, and a low drawer bank for AV gear, and needs cable grommets behind the TV."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a TV / Entertainment Unit quote for you now. Just to confirm — is that three point six linear metres, floor-to-ceiling, with two tall cupboards and a low drawer bank, and you need those cable grommets for the TV and AV gear?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate. Three point six metres, floor-to-ceiling, and yep, don't forget those cable grommets."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a three point six metre floor-to-ceiling Polytec TV unit, with two tall cupboards, a low drawer bank, push-to-open doors, and cable management."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

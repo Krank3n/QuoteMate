@@ -1,0 +1,78 @@
+{
+  "slug": "power_point_install",
+  "title": "Power Points quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "electrical",
+    "nicheId": "power_lighting",
+    "categoryName": "Electrical",
+    "nicheName": "Power Points"
+  },
+  "templateId": "power_point_install",
+  "params": {
+    "points": 4
+  },
+  "jobDescription": "Four new double GPOs in the lounge — two on each end wall — running off the existing power circuit. Standard white 10A, no USB. Wall is gyprock with timber studs.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Priya Nand",
+    "address": "Coburg VIC 3058"
+  },
+  "business": {
+    "businessName": "Coburg Electrical",
+    "phone": "0411 107 113",
+    "email": "jobs@powerpointcoburg.com.au",
+    "abn": "11 103 109 111",
+    "address": "Coburg VIC 3058",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Power points, Electrical cable, Cable clips, Wall plates",
+  "conversation": {
+    "request": "Hey Mate, I need a quote for four new double GPOs in the lounge, two on each end wall, running off the existing circuit; standard white 10A, no USB, on gyprock walls.",
+    "mateAck": "Good one. I'll sort a Power Points quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, are we talking four double points, off the existing circuit, and standard non-USB?",
+    "clarifyingAnswer": "Yep, that's right, four double GPOs, existing circuit, and no USB.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes supply and install for four double GPOs, connection to existing power, plus all standard consumables and a tidy-up."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a modern lounge room, looking at a gyprock wall."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, I need a quote for four new double GPOs in the lounge, two on each end wall, running off the existing circuit; standard white ten amp, no USB, on gyprock walls."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Power Points quote for you now. Righto — just to confirm, are we talking four double points, off the existing circuit, and standard non-USB?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yep, that's right, four double GPOs, existing circuit, and no USB."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it includes supply and install for four double GPOs, connection to existing power, plus all standard consumables and a tidy-up."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "slug": "split_system_service",
+  "title": "Split System Service quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "hvac",
+    "nicheId": "split_systems",
+    "categoryName": "Air Conditioning",
+    "nicheName": "Split System Service"
+  },
+  "templateId": "split_system_service",
+  "params": {
+    "units": 1
+  },
+  "jobDescription": "Two splits — lounge and bedroom. Last serviced 3 years ago. Lounge unit cooling poorly, suspect low gas. Full clean of indoor coils, drain flush, filter swap, leak check and top-up if required.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Jack Forsyth",
+    "address": "Pascoe Vale VIC 3044"
+  },
+  "business": {
+    "businessName": "Pascoe Vale Air Conditioning",
+    "phone": "0450 380 620",
+    "email": "jobs@splitsystepascoevale.com.au",
+    "abn": "50 220 460 540",
+    "address": "Pascoe Vale VIC 3044",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Coil cleaner, Sanitiser, Drain cleaner, Refrigerant top-up",
+  "conversation": {
+    "request": "Mate, I need a quote for a split system service: two units, lounge and bedroom, last serviced three years ago, lounge one's cooling poorly so it'll need a full clean, drain flush, filter swap, leak check and regas.",
+    "mateAck": "Good one. I'll sort a Split System Service quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, it's two units, last serviced three years ago, with the lounge unit needing a regas and a full deep clean including new filters?",
+    "clarifyingAnswer": "Spot on, Mate, that's exactly right.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes a full service for two split systems, with a deep clean, filter swap, leak check, and regas for the lounge unit."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "VEO: A tradie stands in a suburban backyard, a portable toolbox open, with a split system outdoor unit visible on the wall."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, I need a quote for a split system service: two units, lounge and bedroom, last serviced three years ago, lounge one's cooling poorly so it'll need a full clean, drain flush, filter swap, leak check and regas."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Split System Service quote for you now. Righto — just to confirm, it's two units, last serviced three years ago, with the lounge unit needing a regas and a full deep clean including new filters?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate, that's exactly right."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full service for two split systems, deep clean, filter swap, leak check, and regas for the lounge unit."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "slug": "leaf_guard_install",
+  "title": "Leaf Guard Install quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "roofing",
+    "nicheId": "gutters",
+    "categoryName": "Roofing",
+    "nicheName": "Leaf Guard Install"
+  },
+  "templateId": "leaf_guard_install",
+  "params": {
+    "length": 40
+  },
+  "jobDescription": "Approx 40m of gutter on tile roof. Aluminium mesh 4mm aperture in Monument, valleys included. Customer in BAL-12.5 area — non-combustible mesh required.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Daniel Okafor",
+    "address": "Thornbury VIC 3071"
+  },
+  "business": {
+    "businessName": "Thornbury Roofing",
+    "phone": "0457 429 711",
+    "email": "jobs@leafguardithornbury.com.au",
+    "abn": "57 241 523 617",
+    "address": "Thornbury VIC 3071",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Aluminium mesh, Saddle clips, Screws, Valley mesh",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for some leaf guard?",
+    "mateAck": "Good one. I'll sort a Leaf Guard Install quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is that forty metres of gutter, on a tile roof, with valleys, in Monument, and does it need to be ember-rated for a BAL zone?",
+    "clarifyingAnswer": "Spot on, Mate: forty metres, tile roof, valleys, Monument, and yep, ember-rated for BAL-12.5.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — forty metres of Monument aluminium mesh leaf guard for a tile roof with valleys, including ember-rated materials for BAL-12.5."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in work gear stands next to a residential house with a ladder propped against the gutter line, a leafy tree overhanging the roof."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for some leaf guard?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Leaf Guard Install quote for you now. Just to confirm — is that forty metres of gutter, on a tile roof, with valleys, in Monument, and does it need to be ember-rated for a B.A.L. zone?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate: forty metres, tile roof, valleys, Monument, and yep, ember-rated for B.A.L. twelve point five."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — forty metres of Monument aluminium mesh leaf guard for a tile roof with valleys, including ember-rated materials for B.A.L. twelve point five."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

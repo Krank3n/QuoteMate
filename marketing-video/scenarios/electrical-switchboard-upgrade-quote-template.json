@@ -1,0 +1,76 @@
+{
+  "slug": "electrical-switchboard-upgrade-quote-template",
+  "title": "Switchboard Upgrade quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "electricians",
+    "nicheId": "electrical-switchboard-upgrade-quote-template",
+    "categoryName": "Electricians",
+    "nicheName": "Switchboard Upgrade"
+  },
+  "templateId": "switchboard_upgrade",
+  "params": {},
+  "jobDescription": "Replace existing ceramic fuse board with a new NHP Concept One IP65 24-pole surface-mount enclosure. Install one 63 Amp main switch, six 16 Amp RCBOs for general power and lighting circuits, one 20 Amp RCBO for the oven, and one 32 Amp RCBO for hot water. Install a type 2 surge protection device. Run five linear metres of 16 square millimetre consumer mains from the new switchboard to the existing service fuse. Install a new two point four metre earth stake and connect it to the main earthing bar. Conduct full testing and provide a Certificate of Compliance Electrical Work.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 6,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Aisha Khan",
+    "address": "Yarraville VIC 3013"
+  },
+  "business": {
+    "businessName": "Yarraville Electrician",
+    "phone": "0417 149 191",
+    "email": "jobs@electricalswyarraville.com.au",
+    "abn": "17 121 163 177",
+    "address": "Yarraville VIC 3013",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "New switchboard enclosure, RCDs / safety switches, Circuit breakers (MCBs), Main switch",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that switchboard upgrade?",
+    "mateAck": "Good one. I'll sort a Switchboard Upgrade quote for you now.",
+    "clarifyingQuestion": "Righto — just confirming, does this quote include a new earth stake installation?",
+    "clarifyingAnswer": "Yeah, definitely mate, the old one's practically gone.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a complete switchboard upgrade for a standard residential property, including all new safety switches and a new earth stake."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie standing in a dimly lit laundry or kitchen area next to an old, ceramic fuse box on a wall."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that switchboard upgrade?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Switchboard Upgrade quote for you now. Righto — just confirming, does this quote include a new earth stake installation?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, definitely mate, the old one's practically gone."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a complete switchboard upgrade for a standard residential property, including all new safety switches and a new earth stake."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

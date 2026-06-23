@@ -100,7 +100,7 @@ export function NewOnboardingScreen() {
 
     // Step 5: Rates
     const [laborRate, setLaborRate] = useState('85');
-    const [markup, setMarkup] = useState('20');
+    const [markup, setMarkup] = useState('30');
 
     // Step 6: Payments (Square)
     const [squareConnecting, setSquareConnecting] = useState(false);
@@ -439,7 +439,7 @@ export function NewOnboardingScreen() {
             const settings: BusinessSettings = {
                 businessName: businessName.trim(),
                 defaultLaborRate: parseFloat(laborRate) || 85,
-                defaultMarkup: parseFloat(markup) || 20,
+                defaultMarkup: parseFloat(markup) || 30,
             };
 
             if (phone.trim()) settings.phone = phone.trim();

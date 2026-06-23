@@ -1,0 +1,76 @@
+{
+  "slug": "carpet-cleaning-quote-template",
+  "title": "Carpet Steam Cleaning quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "cleaners",
+    "nicheId": "carpet-cleaning-quote-template",
+    "categoryName": "Cleaners",
+    "nicheName": "Carpet Steam Cleaning"
+  },
+  "templateId": "carpet_install",
+  "params": {},
+  "jobDescription": "Residential carpet steam cleaning for Mrs. Henderson, 12 Gumtree Lane, Northcote, VIC 3070. Scope includes: Lounge room (25 sq m) requiring hot water extraction, pre-spray treatment, stain spot treatment for a red wine spill, deodoriser application, and sanitiser application. Dining room (18 sq m) requiring hot water extraction, pre-spray treatment, and deodoriser application. Hallway (10 sq m) requiring hot water extraction, pre-spray treatment, and deodoriser application. Three bedrooms (each 12 sq m, total 36 sq m) each requiring hot water extraction, pre-spray treatment, and deodoriser application. Total carpet area: 89 sq m.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 4,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Tom Reilly",
+    "address": "Moonee Ponds VIC 3039"
+  },
+  "business": {
+    "businessName": "Moonee Ponds Cleaner",
+    "phone": "0433 261 399",
+    "email": "jobs@carpetcleanimooneeponds.com.au",
+    "abn": "33 169 307 353",
+    "address": "Moonee Ponds VIC 3039",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Hot water extraction / steam cleaning, Pre-spray treatment, Stain spot treatment, Deodoriser application",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for Mrs. Henderson's place?",
+    "mateAck": "Good one. I'll sort a Carpet Steam Cleaning quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, what are the approximate dimensions or square metres for each of those areas you mentioned?",
+    "clarifyingAnswer": "Yeah, the lounge is about twenty-five squares, dining is eighteen, hallway's ten, and the three bedrooms are twelve squares each.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers eighty-nine square metres of carpet steam cleaning, including pre-spray, stain treatment for the lounge, deodoriser for all areas, and a sanitiser for the lounge room."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A bright, modern living room with a plush rug, the tradie casually leaning against a vacuum cleaner, phone in hand."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for Mrs. Henderson's place?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Carpet Steam Cleaning quote for you now. Righto — just to confirm, what are the approximate dimensions or square metres for each of those areas you mentioned?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, the lounge is about twenty-five square metres, dining is eighteen square metres, hallway's ten square metres, and the three bedrooms are twelve square metres each."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it covers eighty-nine square metres of carpet steam cleaning, including pre-spray, stain treatment for the lounge, deodoriser for all areas, and a sanitiser for the lounge room."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

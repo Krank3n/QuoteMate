@@ -1,0 +1,78 @@
+{
+  "slug": "turf_laying",
+  "title": "Turf Supply & Lay quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "landscape_gardening",
+    "nicheId": "garden_install",
+    "categoryName": "Landscaping",
+    "nicheName": "Turf Supply & Lay"
+  },
+  "templateId": "turf_laying",
+  "params": {
+    "area": 50
+  },
+  "jobDescription": "60m² Sir Walter buffalo turf, existing lawn to be sprayed and removed first, 50mm topsoil added and levelled before lay.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Sam Whitlock",
+    "address": "Brunswick VIC 3056"
+  },
+  "business": {
+    "businessName": "Brunswick Landscaping",
+    "phone": "0410 100 100",
+    "email": "jobs@turfsupplybrunswick.com.au",
+    "abn": "10 100 100 100",
+    "address": "Brunswick VIC 3056",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Instant turf rolls, Top soil, Starter fertilizer, Soil leveling sand",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for turfing a backyard?",
+    "mateAck": "Good one. I'll sort a Turf Supply & Lay quote for you now.",
+    "clarifyingQuestion": "Cool — what are the total square metres, which turf variety, and what site prep is required?",
+    "clarifyingAnswer": "It's sixty square metres of Sir Walter buffalo, and we'll need to spray and remove the old lawn, then add and level fifty millimetres of topsoil before laying.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for sixty square metres of Sir Walter buffalo turf, including existing lawn removal, soil top-up, and laying."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie in work gear stands in a suburban backyard, looking at a patch of patchy grass next to a freshly built timber deck."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for turfing a backyard?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Turf Supply & Lay quote for you now. Cool — what are the total square metres, which turf variety, and what site prep is required?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "It's sixty square metres of Sir Walter buffalo, and we'll need to spray and remove the old lawn, then add and level fifty millimetres of topsoil before laying."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for sixty square metres of Sir Walter buffalo turf, including existing lawn removal, fifty millimetres of soil top-up, and laying."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "slug": "ducted_ac_install",
+  "title": "Ducted AC Install quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "hvac",
+    "nicheId": "ducted_systems",
+    "categoryName": "Air Conditioning",
+    "nicheName": "Ducted AC Install"
+  },
+  "templateId": "ducted_ac_install",
+  "params": {
+    "zones": 4,
+    "kw": 14
+  },
+  "jobDescription": "New 14kW Daikin inverter ducted, 4 zones across single-storey 220m² home. Indoor in roof space, condenser on side concrete pad. New return air grille in hallway. Existing ducted system removed and disposed.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Nadia Rahman",
+    "address": "Fitzroy North VIC 3068"
+  },
+  "business": {
+    "businessName": "Fitzroy North Air Conditioning",
+    "phone": "0451 387 633",
+    "email": "jobs@ductedacinfitzroynorth.com.au",
+    "abn": "51 223 469 551",
+    "address": "Fitzroy North VIC 3068",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Ducted unit, Zone controller, Motorised dampers, Insulated duct",
+  "conversation": {
+    "request": "Mate, need a quote for a new 14kW Daikin inverter ducted system, four zones, for a single-storey 220m² home. Indoor unit in the roof, condenser on the concrete pad, new return air grille in the hallway, and the old system needs to go.",
+    "mateAck": "Good one. I'll sort a Ducted AC Install quote for you now.",
+    "clarifyingQuestion": "Righto — just to confirm, it's a new 14kW ducted system, four zones, single-storey, and we're replacing an existing unit with good roof access?",
+    "clarifyingAnswer": "Spot on, Mate; new 14kW replacing the old one, single storey with four zones, and plenty of room up in the roof.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a complete supply and install for the 14kW Daikin ducted system, including all zoning, disposal of the old unit, and a new return air grille."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie stands beside a ute on a gravel driveway, looking towards the roofline of a modern brick single-storey home."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, need a quote for a new fourteen kilowatt Daikin inverter ducted system, four zones, for a single-storey two hundred and twenty square metre home. Indoor unit in the roof, condenser on the concrete pad, new return air grille in the hallway, and the old system needs to go."
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Ducted AC Install quote for you now. Righto — just to confirm, it's a new fourteen kilowatt ducted system, four zones, single-storey, and we're replacing an existing unit with good roof access?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate; new fourteen kilowatt replacing the old one, single storey with four zones, and plenty of room up in the roof."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full supply and install for the fourteen kilowatt Daikin ducted system, including all four zones, disposal of the old unit, and that new return air grille."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

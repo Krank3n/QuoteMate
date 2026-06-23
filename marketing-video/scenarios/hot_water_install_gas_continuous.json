@@ -1,0 +1,78 @@
+{
+  "slug": "hot_water_install_gas_continuous",
+  "title": "Hot Water (Gas Continuous) quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "plumbing",
+    "nicheId": "hot_water",
+    "categoryName": "Plumbing",
+    "nicheName": "Hot Water (Gas Continuous)"
+  },
+  "templateId": "hot_water_install_gas_continuous",
+  "params": {
+    "flow_rate": 26
+  },
+  "jobDescription": "Rinnai Infinity 26 LPG continuous flow, external mount on side wall, like-for-like swap of existing unit. New tempering valve and isolation cocks. Gas tightness test on completion.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Ruby Saleh",
+    "address": "Bentleigh VIC 3204"
+  },
+  "business": {
+    "businessName": "Bentleigh Plumbing",
+    "phone": "0423 191 269",
+    "email": "jobs@hotwatergabentleigh.com.au",
+    "abn": "23 139 217 243",
+    "address": "Bentleigh VIC 3204",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Continuous flow unit, Gas pipe, Water pipe, Fittings",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for a Rinnai Infinity twenty-six LPG continuous flow hot water system?",
+    "mateAck": "Good one. I'll sort a Hot Water (Gas Continuous) quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is that the twenty-six litres per minute unit, and definitely for LPG?",
+    "clarifyingAnswer": "Spot on, Mate, twenty-six litres per minute, and it's definitely LPG.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it includes the Rinnai Infinity twenty-six LPG unit, external installation, tempering valve, isolation cocks, and a gas tightness test."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a customer's laundry, looking at an old hot water unit."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for a Rinnai Infinity twenty-six LPG continuous flow hot water system?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Hot Water (Gas Continuous) quote for you now. Just to confirm — is that the twenty-six litres per minute unit, and definitely for LPG?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate, twenty-six litres per minute, and it's definitely LPG."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it includes the Rinnai Infinity twenty-six LPG unit, external installation, tempering valve, isolation cocks, and a gas tightness test."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

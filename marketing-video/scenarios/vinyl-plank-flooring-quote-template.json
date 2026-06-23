@@ -1,0 +1,76 @@
+{
+  "slug": "vinyl-plank-flooring-quote-template",
+  "title": "Vinyl Plank Flooring quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "flooring-installers",
+    "nicheId": "vinyl-plank-flooring-quote-template",
+    "categoryName": "Flooring Installers",
+    "nicheName": "Vinyl Plank Flooring"
+  },
+  "templateId": "hybrid_flooring_install",
+  "params": {},
+  "jobDescription": "Supply and install 'Coastal Living' Hybrid Vinyl Plank Flooring (1800mm x 228mm x 6.5mm, Spotted Gum finish) in a ground-floor Sydney suburban home. This includes removal and disposal of existing carpet and underlay from the living room (35 sqm), hallway (10 sqm), and two bedrooms (10 sqm each), totalling 65 square metres. Installation will cover these 65 square metres. Supply and install 50 linear metres of matching scotia. Supply and install six T-bar transition strips for doorways. Apply one coat of moisture barrier to the concrete slab subfloor. Includes standard subfloor preparation.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 14,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Jack Forsyth",
+    "address": "Pascoe Vale VIC 3044"
+  },
+  "business": {
+    "businessName": "Pascoe Vale Flooring Installer",
+    "phone": "0435 275 425",
+    "email": "jobs@vinylplankflpascoevale.com.au",
+    "abn": "35 175 325 375",
+    "address": "Pascoe Vale VIC 3044",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Hybrid / luxury vinyl plank flooring, Underlay (if not pre-attached), Transition strips (T-bar, reducer, end cap), Scotia or quarter round",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that vinyl plank job over in Balmain?",
+    "mateAck": "Good one. I'll sort a Vinyl Plank Flooring quote for you now.",
+    "clarifyingQuestion": "Cool — just to confirm, what's the existing flooring we're ripping up, and what's the subfloor like underneath?",
+    "clarifyingAnswer": "Yeah, it's old carpet, about sixty-five square metres, and it's a concrete slab underneath.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — it covers removing the old carpet, all the new hybrid vinyl plank, scotia, transitions, and the moisture barrier for the concrete slab."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie, mid-thirties, wearing work shorts and a t-shirt, stands in a bright, empty living room with a concrete slab floor, looking at their phone."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that vinyl plank job over in Balmain?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Vinyl Plank Flooring quote for you now. Cool — just to confirm, what's the existing flooring we're ripping up, and what's the subfloor like underneath?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, it's old carpet, about sixty-five square metres, and it's a concrete slab underneath."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — it covers removing the old carpet, all the new hybrid vinyl plank, scotia, transitions, and the moisture barrier for the concrete slab."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

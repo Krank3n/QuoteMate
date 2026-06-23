@@ -1,0 +1,76 @@
+{
+  "slug": "solar-installation-quote-template",
+  "title": "Solar Panel Installation quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "solar-installers",
+    "nicheId": "solar-installation-quote-template",
+    "categoryName": "Solar Installers",
+    "nicheName": "Solar Panel Installation"
+  },
+  "templateId": "garden_bed_install",
+  "params": {},
+  "jobDescription": "Supply and install a 6.6kW solar PV system for a single-storey residential property in Penrith, NSW, with a standard terracotta tile roof. System includes sixteen (16) Jinko 415W Tiger Neo N-Type panels, one (1) Sungrow 5kW Hybrid Inverter, and one (1) Sungrow 9.6kWh SBR Battery. Installation involves standard rail mounting for tiles, approximately twenty-five (25) metres of DC cabling and fifteen (15) metres of AC cabling, and all necessary isolator switches and circuit breakers. Labour includes panel and inverter mounting, battery installation, electrical wiring, and system commissioning. This quote will factor in the current STC rebate for the 6.6kW system.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 22,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Sam Whitlock",
+    "address": "Brunswick VIC 3056"
+  },
+  "business": {
+    "businessName": "Brunswick Solar Installer",
+    "phone": "0410 100 100",
+    "email": "jobs@solarinstallbrunswick.com.au",
+    "abn": "10 100 100 100",
+    "address": "Brunswick VIC 3056",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Solar panels (e.g., 415W), Inverter (string or micro), Mounting rails and clamps, DC and AC cabling",
+  "conversation": {
+    "request": "Hey Mate, can you whip up a quote for that solar install in Penrith?",
+    "mateAck": "Good one. I'll sort a Solar Panel Installation quote for you now.",
+    "clarifyingQuestion": "Just to confirm — are we including the 9.6kWh battery storage system in this one?",
+    "clarifyingAnswer": "Yeah, she definitely wants the battery for this job, Mate.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a 6.6kW solar system with a 9.6kWh battery for Penrith, including all materials, labour, and the STC rebate."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands on a single-storey terracotta tiled roof, looking out over a suburban backyard in the late afternoon sun."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Hey Mate, can you whip up a quote for that solar install in Penrith?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Solar Panel Installation quote for you now. Just to confirm — are we including the nine point six kay double-u aich battery storage system in this one?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, she definitely wants the battery for this job, Mate."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a six point six kay double-u solar system with a nine point six kay double-u aich battery for Penrith, including all materials, labour, and the S T C rebate."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

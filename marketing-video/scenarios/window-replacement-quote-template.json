@@ -1,0 +1,76 @@
+{
+  "slug": "window-replacement-quote-template",
+  "title": "Window Replacement quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "glaziers",
+    "nicheId": "window-replacement-quote-template",
+    "categoryName": "Glaziers",
+    "nicheName": "Window Replacement"
+  },
+  "templateId": "gutter_replace",
+  "params": {},
+  "jobDescription": "Replacement of five existing single-glazed aluminium windows with new thermally broken double-glazed aluminium frames (Monument colour) and clear low-E glass (4mm clear / 12mm argon / 4mm low-E) at a residential property in Balmain, Sydney.\n1. Living Room: One (1) sliding window, 2400mm (W) x 1800mm (H).\n2. Bedroom 1: One (1) casement window, 1200mm (W) x 1200mm (H).\n3. Bedroom 2: One (1) casement window, 1200mm (W) x 1200mm (H).\n4. Bathroom: One (1) fixed frosted window, 600mm (W) x 900mm (H).\n5. Kitchen: One (1) awning window, 900mm (W) x 900mm (H).\nScope includes removal of existing windows, supply and installation of new frames and glass, new internal architraves (primed pine), external flashing, sill trims, and sealant. Fly screens to be supplied and installed for all openable windows (Living Room, Bedroom 1, Bedroom 2, Kitchen).",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 16,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Liam Brooks",
+    "address": "Footscray VIC 3011"
+  },
+  "business": {
+    "businessName": "Footscray Glazier",
+    "phone": "0446 352 568",
+    "email": "jobs@windowreplacfootscray.com.au",
+    "abn": "46 208 424 496",
+    "address": "Footscray VIC 3011",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "New window frames (aluminium, timber, or uPVC), Double glazed glass units, Flashing and sill trims, Sealant and foam",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that window replacement job in Balmain?",
+    "mateAck": "Good one. I'll sort a Window Replacement quote for you now.",
+    "clarifyingQuestion": "Cool — are we going with aluminium, timber, or uPVC frames for this one?",
+    "clarifyingAnswer": "Yeah, mate, all aluminium, thermally broken, Monument colour.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for the five double-glazed aluminium window replacements in Balmain, including supply, install, and fly screens."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Tradie on-site at an older but well-maintained Sydney home, inside a living room with an existing single-glazed aluminium window."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that window replacement job in Balmain?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Window Replacement quote for you now. Cool — are we going with aluminium, timber, or you-pee-vee-cee frames for this one?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yeah, mate, all aluminium, thermally broken, Monument colour."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — for the five double-glazed aluminium window replacements in Balmain, including supply, install, and fly screens."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

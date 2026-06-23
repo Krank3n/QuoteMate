@@ -1,0 +1,76 @@
+{
+  "slug": "pergola-quote-template",
+  "title": "Pergola Construction quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "carpenters",
+    "nicheId": "pergola-quote-template",
+    "categoryName": "Carpenters",
+    "nicheName": "Pergola Construction"
+  },
+  "templateId": "pergola_build",
+  "params": {},
+  "jobDescription": "Construct and install a new freestanding timber pergola, approximately five metres long by three metres wide, attached to an existing paved patio area. This includes four treated pine posts, one hundred by one hundred millimetres, two point seven metres long, set into concrete footings with galvanised post stirrups. Two main beams, one hundred and forty by forty-five millimetres, five metres long, and two cross beams, one hundred and forty by forty-five millimetres, three metres long. Seven roof rafters, ninety by forty-five millimetres, three metres long. Roofing will be fifteen square metres of clear corrugated polycarbonate sheeting, fixed with appropriate flashing and fixings. All visible timber will be sanded and ready for painting by the homeowner. Includes disposal of all construction waste.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": 32,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Liam Brooks",
+    "address": "Footscray VIC 3011"
+  },
+  "business": {
+    "businessName": "Footscray Carpenter",
+    "phone": "0416 142 178",
+    "email": "jobs@pergolafootscray.com.au",
+    "abn": "16 118 154 166",
+    "address": "Footscray VIC 3011",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Posts (timber or steel), Beams and rafters, Roofing (polycarbonate, Colorbond, or shade cloth), Post brackets and stirrups",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for that pergola job?",
+    "mateAck": "Good one. I'll sort a Pergola Construction quote for you now.",
+    "clarifyingQuestion": "Cool — just confirming, is the client handling the council permit application themselves, or should I factor in some time for that?",
+    "clarifyingAnswer": "Nah, they're sorting the permit. Just need the build cost.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — a full breakdown for the timber pergola build, including materials, labour, and waste disposal, ready for your client."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "Backyard of a suburban home, with a partially built pergola frame over a paved patio area, tools scattered nearby."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for that pergola job?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Pergola Construction quote for you now. Cool — just confirming, is the client handling the council permit application themselves, or should I factor in some time for that?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Nah, they're sorting the permit. Just need the build cost."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — a full breakdown for the timber pergola build, including materials, labour, and waste disposal, ready for your client."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

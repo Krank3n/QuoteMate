@@ -11,6 +11,7 @@ package-lock.json
 .expo/
 dist/
 dist-web/
+dist-web-demo/
 web-build/
 
 # Environment variables
@@ -66,3 +67,4 @@ android/app/build/outputs/
 
 # Claude Code
 .claude/scheduled_tasks.lock
+dist-staging

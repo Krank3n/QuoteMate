@@ -1,0 +1,80 @@
+{
+  "slug": "fence_install_timber",
+  "title": "Timber Paling Fence quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "other",
+    "nicheId": "fencing",
+    "categoryName": "Trades",
+    "nicheName": "Timber Paling Fence"
+  },
+  "templateId": "fence_install_timber",
+  "params": {
+    "length": 20,
+    "height": 1.8,
+    "gates": 0
+  },
+  "jobDescription": "30m of 1.8m treated pine paling fence, lap-and-cap style with capping rail. Two 900mm gates with steel frame. Existing fence to be removed and disposed of.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Sam Whitlock",
+    "address": "Brunswick VIC 3056"
+  },
+  "business": {
+    "businessName": "Brunswick Trades",
+    "phone": "0410 100 100",
+    "email": "jobs@timberpalibrunswick.com.au",
+    "abn": "10 100 100 100",
+    "address": "Brunswick VIC 3056",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Treated pine palings, Posts, Rails, Capping",
+  "conversation": {
+    "request": "Mate, can you whip up a quote for 30m of 1.8m treated pine paling fence, lap-and-cap style, with capping rail, two 900mm steel-framed gates, and removal of the old one?",
+    "mateAck": "Good one. I'll sort a Timber Paling Fence quote for you now.",
+    "clarifyingQuestion": "Just to confirm — is that thirty metres of one point eight metre high fence, lap-and-cap style with a capping rail, and two nine hundred millimetre gates?",
+    "clarifyingAnswer": "Spot on, Mate, that's exactly right.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — covering 30m of 1.8m lap-and-cap treated pine fence, with capping, two 900mm steel gates, and old fence removal."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a suburban backyard, leaning on a partially removed old timber fence line, with a new stack of treated pine palings nearby."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you whip up a quote for thirty metres of one point eight metre treated pine paling fence, lap-and-cap style, with capping rail, two nine hundred millimetre steel-framed gates, and removal of the old one?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Timber Paling Fence quote for you now. Just to confirm — is that thirty metres of one point eight metre high fence, lap-and-cap style with a capping rail, and two nine hundred millimetre gates?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Spot on, Mate, that's exactly right."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's your quote — covering thirty metres of one point eight metre lap-and-cap treated pine fence, with capping, two nine hundred millimetre steel gates, and old fence removal."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}

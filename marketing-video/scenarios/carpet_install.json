@@ -1,0 +1,78 @@
+{
+  "slug": "carpet_install",
+  "title": "Carpet Supply & Lay quote, real prices, under a minute",
+  "trade": {
+    "categoryId": "flooring",
+    "nicheId": "carpet",
+    "categoryName": "Flooring",
+    "nicheName": "Carpet Supply & Lay"
+  },
+  "templateId": "carpet_install",
+  "params": {
+    "area": 40
+  },
+  "jobDescription": "Three bedrooms approx 42m² total, mid-grade twist pile in charcoal. Standard foam underlay. Old carpet and underlay removed and disposed. No stairs.",
+  "labour": {
+    "rate": 90,
+    "unit": "hours",
+    "hoursOverride": null,
+    "materialMarkupPercent": 30,
+    "laborMarkupPercent": 0
+  },
+  "customer": {
+    "name": "Daniel Okafor",
+    "address": "Thornbury VIC 3071"
+  },
+  "business": {
+    "businessName": "Thornbury Flooring",
+    "phone": "0442 324 516",
+    "email": "jobs@carpetsuppthornbury.com.au",
+    "abn": "42 196 388 452",
+    "address": "Thornbury VIC 3071",
+    "pdfTemplate": "bold",
+    "brandColor": "#0a0f1a"
+  },
+  "workingDetail": "Carpet, Underlay, Gripper strips, Joining tape",
+  "conversation": {
+    "request": "Mate, can you sort a quote for three bedrooms, roughly forty-two square metres, for charcoal mid-grade twist pile carpet with standard foam underlay, including uplift and disposal, no stairs?",
+    "mateAck": "Good one. I'll sort a Carpet Supply & Lay quote for you now.",
+    "clarifyingQuestion": "Righto — just confirming the total carpeted area is forty-two square metres across the three bedrooms?",
+    "clarifyingAnswer": "Yep, that's right, forty-two squares total across the three rooms.",
+    "matePricing": "Sweet — pricing it up now with live supplier rates…",
+    "reveal": "Here's the quote — for supplying and laying forty-two square metres of mid-grade twist pile carpet with standard underlay in three bedrooms, including uplift and disposal of the old carpet."
+  },
+  "presenter": {
+    "intro": "request",
+    "answer": "clarifyingAnswer",
+    "reaction": "That's the lot — real prices and everything. Sorted.",
+    "setting": "A tradie stands in a sunlit, unfurnished bedroom, measuring with a laser measurer."
+  },
+  "voiceover": {
+    "voices": {
+      "tradie": "Charon",
+      "mate": "Puck"
+    },
+    "lines": {
+      "ask": {
+        "voice": "tradie",
+        "text": "Mate, can you sort a quote for three bedrooms, roughly forty-two square metres, for charcoal mid-grade twist pile carpet with standard foam underlay, including uplift and disposal, no stairs?"
+      },
+      "reply": {
+        "voice": "mate",
+        "text": "Good one. I'll sort a Carpet Supply & Lay quote for you now. Righto — just confirming the total carpeted area is forty-two square metres across the three bedrooms?"
+      },
+      "answer": {
+        "voice": "tradie",
+        "text": "Yep, that's right, forty-two squares total across the three rooms."
+      },
+      "reveal": {
+        "voice": "mate",
+        "text": "Here's the quote — for supplying and laying forty-two square metres of mid-grade twist pile carpet with standard underlay in three bedrooms, including uplift and disposal of the old carpet."
+      },
+      "pdf": {
+        "voice": "tradie",
+        "text": "And there's the full quote — real prices, every line itemised, ready to send. Too easy."
+      }
+    }
+  }
+}
