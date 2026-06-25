@@ -74,7 +74,13 @@ export function AuthScreen() {
   const [request, response, promptAsync] = Google.useAuthRequest({
     iosClientId: process.env.GOOGLE_OAUTH_IOS_CLIENT_ID || undefined,
     androidClientId: androidClientId || undefined,
-    webClientId: process.env.GOOGLE_OAUTH_WEB_CLIENT_ID || undefined,
+    // Public web OAuth client ID (exposed in the browser anyway). Hardcoded as
+    // a fallback because non-EXPO_PUBLIC env vars are not inlined into the web
+    // bundle — without this, Google.useAuthRequest throws on web ("webClientId
+    // must be defined"), crashing the whole app to a white screen. Mirrors the
+    // hardcoded-fallback pattern in src/config/firebase.ts.
+    webClientId: process.env.GOOGLE_OAUTH_WEB_CLIENT_ID
+      || '652758863537-86a4q9860h9aalo36f4sb9tpt39ut7bs.apps.googleusercontent.com',
   });
 
   // Handle Google redirect result (for in-app browsers that can't use popups)

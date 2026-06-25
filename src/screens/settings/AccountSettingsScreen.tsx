@@ -62,7 +62,11 @@ export function AccountSettingsScreen() {
   const [, , googlePromptAsync] = Google.useAuthRequest({
     iosClientId: process.env.GOOGLE_OAUTH_IOS_CLIENT_ID || undefined,
     androidClientId: androidClientId || undefined,
-    webClientId: process.env.GOOGLE_OAUTH_WEB_CLIENT_ID || undefined,
+    // Public web OAuth client ID fallback — non-EXPO_PUBLIC env vars aren't
+    // inlined into the web bundle, so without this Google.useAuthRequest throws
+    // on web. See src/config/firebase.ts for the same pattern.
+    webClientId: process.env.GOOGLE_OAUTH_WEB_CLIENT_ID
+      || '652758863537-86a4q9860h9aalo36f4sb9tpt39ut7bs.apps.googleusercontent.com',
   });
 
   // Load email preferences from Firestore
