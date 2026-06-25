@@ -298,6 +298,22 @@ async function startNativeCapture(
  * `onChunk` fires repeatedly with base64-encoded 16-bit LE PCM at 16 kHz.
  * Call `handle.stop()` to end the capture.
  */
+/**
+ * Whether mic permission is already granted, WITHOUT prompting. Used to
+ * decide if Mate can silently auto-start the mic on tab focus — we only
+ * do so when the tradie has previously granted access, never to trigger a
+ * fresh permission prompt. Web always returns false (the getUserMedia
+ * prompt is part of capture itself).
+ */
+export async function micPermissionGranted(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  try {
+    return (await Audio.getPermissionsAsync()).granted;
+  } catch {
+    return false;
+  }
+}
+
 export async function startMicCapture(onChunk: (base64Pcm: string) => void): Promise<MicCaptureHandle> {
   let stopped = false;
 

@@ -14,6 +14,7 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useScrollToTop, useIsFocused } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { format } from 'date-fns';
 
 import { useStore } from '../store/useStore';
@@ -112,6 +113,20 @@ export function DashboardScreen() {
 
   const isFocused = useIsFocused();
   const isAppActive = useIsAppActive();
+
+  // Hide the "TRY" badge on the Mate button once the tradie has tapped it
+  // through to Mate at least once. Persisted so it stays hidden across app
+  // launches. Read on focus so a tap on another device / earlier session is
+  // reflected. Default true (show badge) until the stored flag says seen.
+  const [mateTrySeen, setMateTrySeen] = useState(false);
+  useEffect(() => {
+    if (!isFocused) return;
+    let cancelled = false;
+    AsyncStorage.getItem('mate_try_seen')
+      .then((v) => { if (!cancelled) setMateTrySeen(v === 'true'); })
+      .catch(() => { /* keep showing the badge if the read fails */ });
+    return () => { cancelled = true; };
+  }, [isFocused]);
   const animsRef = useRef<RNAnimated.CompositeAnimation[]>([]);
   const animTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -680,35 +695,60 @@ export function DashboardScreen() {
         </View>
       )}
 
-      {/* New Quote Button */}
-      <RNAnimated.View style={{ transform: [{ scale: btnPulse }, { rotate: btnTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
-        <View style={{
-          marginHorizontal: 20,
-          marginBottom: 24,
-          borderRadius: 12,
-          overflow: 'hidden',
-        }}>
-        <View style={{
-          borderRadius: 12,
-          shadowColor: colors.primary,
-          shadowOffset: { width: 0, height: 0 },
-          shadowRadius: 8,
-          shadowOpacity: 0.5,
-          elevation: 6,
-        }}>
+      {/* New Job + Mate buttons */}
+      <View style={styles.actionRow}>
+        <RNAnimated.View style={{ flex: 2, transform: [{ scale: btnPulse }, { rotate: btnTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
+          <View style={{
+            borderRadius: 12,
+            overflow: 'hidden',
+          }}>
+          <View style={{
+            borderRadius: 12,
+            shadowColor: colors.primary,
+            shadowOffset: { width: 0, height: 0 },
+            shadowRadius: 8,
+            shadowOpacity: 0.5,
+            elevation: 6,
+          }}>
+            <Button
+              mode="contained"
+              icon="plus-circle"
+              onPress={handleNewJob}
+              style={styles.newQuoteButton}
+              contentStyle={styles.newQuoteButtonContent}
+              accessibilityLabel="Start a new job"
+            >
+              New Job
+            </Button>
+          </View>
+          </View>
+        </RNAnimated.View>
+
+        <View style={[styles.mateButtonWrapper, { flex: 1 }]}>
           <Button
-            mode="contained"
-            icon="plus-circle"
-            onPress={handleNewJob}
-            style={styles.newQuoteButton}
-            contentStyle={styles.newQuoteButtonContent}
-            accessibilityLabel="Start a new job"
+            mode="contained-tonal"
+            icon="chat-processing"
+            onPress={async () => {
+              lightTap();
+              if (!mateTrySeen) {
+                setMateTrySeen(true);
+                await AsyncStorage.setItem('mate_try_seen', 'true');
+              }
+              navigation.navigate('Mate' as never);
+            }}
+            style={styles.mateButton}
+            contentStyle={styles.mateButtonContent}
+            accessibilityLabel="Talk to Mate"
           >
-            New Job
+            Mate
           </Button>
+          {!mateTrySeen && (
+            <View style={styles.tryBadge} pointerEvents="none">
+              <Text style={styles.tryBadgeText}>TRY</Text>
+            </View>
+          )}
         </View>
-        </View>
-      </RNAnimated.View>
+      </View>
 
       {/* Quick Stats */}
       <View style={styles.statsContainer}>
@@ -953,11 +993,43 @@ const styles = StyleSheet.create({
     zIndex: 10,
     elevation: 10,
   },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 20,
+    marginBottom: 24,
+  },
   newQuoteButton: {
     borderRadius: 12,
   },
   newQuoteButtonContent: {
     paddingVertical: 14,
+  },
+  mateButtonWrapper: {
+    position: 'relative',
+  },
+  mateButton: {
+    borderRadius: 12,
+  },
+  mateButtonContent: {
+    paddingVertical: 14,
+  },
+  tryBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: colors.primary,
+    borderRadius: 6,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    zIndex: 1,
+  },
+  tryBadgeText: {
+    fontSize: 7,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    color: colors.white,
   },
   statsContainer: {
     flexDirection: 'row',

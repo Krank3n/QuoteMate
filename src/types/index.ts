@@ -541,6 +541,10 @@ export interface BusinessSettings {
   // When on, the customerQuoteFollowUp scheduled function emails the
   // customer ~3 days after send and again ~7 days, capped at 2 nudges.
   autoCustomerFollowUpEnabled?: boolean;
+  // When on (the default — undefined counts as on), Mate auto-starts the
+  // mic on tab focus if mic permission is already granted, so voice mode is
+  // immediately live without a tap. Set false to opt out.
+  autoStartMicOnMate?: boolean;
   // Quote display settings
   showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)
   showMarkup?: boolean; // If true, allow per-document markup line. When undefined or false, markup is hidden across all documents. Default: false (hide markup).

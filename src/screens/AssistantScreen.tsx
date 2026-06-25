@@ -19,10 +19,12 @@ import {
   Pressable,
   Animated,
   Easing,
+  AppState,
 } from 'react-native';
+import type { AppStateStatus } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
@@ -32,9 +34,10 @@ import { sendAssistantTurn } from '../services/assistantService';
 import { openVoiceSession, VoiceSession } from '../services/assistant/voiceSession';
 import { LiveAuthError, LiveOfflineError, LiveQuotaError } from '../services/assistant/liveSession';
 import { rememberAppliedQuote } from '../services/assistant/quoteRefMap';
-import { startMicCapture, MicCaptureHandle, MicUnavailableError } from '../services/assistant/mic';
+import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGranted } from '../services/assistant/mic';
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import { shouldAutoStartMic } from './assistant/shouldAutoStartMic';
 
 // Tag for the screen-wake lock held during voice mode. Keeping it the same
 // across activate/deactivate calls means even if a second voice session
@@ -531,6 +534,7 @@ export function AssistantScreen() {
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const quotes = useStore((s) => s.quotes);
   const documents = useStore((s) => s.documents);
+  const businessSettings = useStore((s) => s.businessSettings);
 
   // Marketing demo playback — no-op unless this is a capture build with an
   // injected payload (see src/demo/demoPlayback.ts). Never runs for real users.
@@ -1644,6 +1648,17 @@ export function AssistantScreen() {
     }
   }, [stopVoiceSession, appendMessage, updateMessage, startConversation, micLevel, handleApply, handleDismiss, showQuoteInChat]);
 
+  // Keep the latest openVoiceMode / stopVoiceSession in refs so the
+  // auto-start focus effect below can call them without taking them as
+  // deps. Their identities change on every conversation mutation (via
+  // handleApply/handleDismiss), and depending on them directly would re-run
+  // the focus effect on every transcription chunk — tearing down the live
+  // voice session mid-turn.
+  const openVoiceModeRef = useRef(openVoiceMode);
+  useEffect(() => { openVoiceModeRef.current = openVoiceMode; }, [openVoiceMode]);
+  const stopVoiceSessionRef = useRef(stopVoiceSession);
+  useEffect(() => { stopVoiceSessionRef.current = stopVoiceSession; }, [stopVoiceSession]);
+
   const handleVoiceToggle = useCallback(async () => {
     if (voiceState !== 'idle') {
       await stopVoiceSession();
@@ -1673,13 +1688,71 @@ export function AssistantScreen() {
     setVoiceState('thinking');
   }, []);
 
-  // Always tear voice down when the screen unmounts so the mic isn't
-  // left hot in the background.
-  useEffect(() => {
-    return () => {
-      void stopVoiceSession();
-    };
-  }, [stopVoiceSession]);
+  // Auto-start voice mode when the Mate tab gains focus so the tradie can
+  // just start talking — but only when the setting is on (default) and mic
+  // permission is already granted, so we never trigger a fresh prompt. The
+  // cleanup tears voice down on blur/unmount (replacing the old standalone
+  // unmount effect) so the mic is never left hot in the background, and the
+  // AppState listener mutes on background and re-arms on return to
+  // foreground while the tab is still focused.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      const enabled = businessSettings?.autoStartMicOnMate !== false;
+      // Only auto-start once per focused visit. Without this, every
+      // navigation Mate launches (e.g. opening a draft) blurs and re-focuses
+      // this screen, tearing down and re-opening the voice session — a new
+      // WS connection, a fresh greeting, and burnt tokens each time. The
+      // ref resets on blur (cleanup) so a deliberate return to the tab can
+      // auto-start fresh.
+      let hasAutoStartedThisVisit = false;
+
+      const tryAutoStart = async () => {
+        if (hasAutoStartedThisVisit) return;
+        const granted = await micPermissionGranted();
+        if (cancelled) return;
+        if (
+          shouldAutoStartMic({
+            enabled,
+            voiceState: voiceStateRef.current,
+            permissionGranted: granted,
+            // We're inside useFocusEffect, so the screen is focused.
+            isFocused: true,
+            appActive: AppState.currentState === 'active',
+          }) &&
+          // openVoiceMode sets voiceModeRef synchronously; guard against a
+          // manual mic tap landing during the await above and opening a
+          // second concurrent session that orphans the first.
+          !voiceModeRef.current
+        ) {
+          hasAutoStartedThisVisit = true;
+          void openVoiceModeRef.current('sticky');
+        }
+      };
+
+      if (enabled) {
+        void tryAutoStart();
+      }
+
+      const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+        if (nextState === 'background' || nextState === 'inactive') {
+          void stopVoiceSessionRef.current();
+        } else if (nextState === 'active' && enabled) {
+          // Returning from a temporary background — re-arm even though we
+          // already auto-started this visit (the session was stopped on
+          // background).
+          hasAutoStartedThisVisit = false;
+          void tryAutoStart();
+        }
+      });
+
+      return () => {
+        cancelled = true;
+        sub.remove();
+        void stopVoiceSessionRef.current();
+      };
+    }, [businessSettings?.autoStartMicOnMate]),
+  );
 
   const handleCtaPress = useCallback(
     (message: ChatMessage) => {
