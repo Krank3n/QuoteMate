@@ -7720,9 +7720,10 @@ export const testQuoteFollowUpEmail = functions.https.onRequest(async (req, res)
   corsHandler(req, res, async () => {
     const sent = await sendQuoteFollowUpEmail(
       'thomas.andrew.hansen@gmail.com',
-      'Test Business',
+      'Tom Hansen',
       'Bathroom Renovation',
       2450.00,
+      req.query.noMaterials === '1' ? false : true,
       'test'
     );
     res.json({ success: sent });
@@ -9979,11 +9980,26 @@ export const quoteFollowUp = functions.pubsub
       const email = await getUserEmail(userDoc.id);
       if (!email) continue;
 
-      let businessName = '';
+      // Prefer the person's real name (Firebase Auth displayName) so the email
+      // can open with "Hey {name}". Fall back to the contact/business name on
+      // the settings doc — the email helper sanity-checks it and drops back to
+      // a generic greeting if it doesn't look like a person's name.
+      let recipientName = '';
       try {
-        const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
-        businessName = settingsDoc.data()?.businessName || '';
+        const userRecord = await admin.auth().getUser(userDoc.id);
+        recipientName = userRecord.displayName || '';
       } catch {}
+      if (!recipientName) {
+        try {
+          const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
+          const s = settingsDoc.data() || {};
+          recipientName = s.contactName || s.ownerName || s.businessName || '';
+        } catch {}
+      }
+
+      // A quote with no material line items gets a different nudge (try the
+      // materials generator) instead of the standard "how'd it go" ask.
+      const hasMaterials = Array.isArray(quote.materials) && quote.materials.length > 0;
 
       // Skip recipients we already know will hard-bounce (Apple private relay,
       // example.com test accounts, etc). Otherwise sendEmail logs a 'blocked'
@@ -9995,9 +10011,10 @@ export const quoteFollowUp = functions.pubsub
         ? false
         : await sendQuoteFollowUpEmail(
             email,
-            businessName,
+            recipientName,
             quote.job?.name || 'the job',
             quote.total || 0,
+            hasMaterials,
             userDoc.id
           );
 

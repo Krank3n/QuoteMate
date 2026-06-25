@@ -1835,43 +1835,65 @@ export async function handleUnsubscribe(userId: string, category: string): Promi
 // QUOTE FOLLOW-UP EMAIL (2hrs after first quote created)
 // ============================================================
 
+// Pull a sensible first name out of whatever name string we have. Returns
+// null when the value doesn't look like a real person's name (e.g. it's a
+// business name like "Joe's Plumbing Pty Ltd", an email, or junk) so the
+// caller can fall back to a generic greeting rather than "Hey Pty Ltd".
+function deriveFirstName(rawName?: string | null): string | null {
+  if (!rawName) return null;
+  const cleaned = rawName.trim();
+  if (!cleaned) return null;
+
+  // Looks like an email or contains digits/symbols → not a person's name.
+  if (/[@0-9]/.test(cleaned)) return null;
+
+  const first = cleaned.split(/\s+/)[0].replace(/[^A-Za-z'-]/g, '');
+  if (first.length < 2 || first.length > 20) return null;
+
+  // Common business-y tokens that shouldn't be greeted as a name.
+  const businessWords = new Set([
+    'the', 'pty', 'ltd', 'inc', 'co', 'company', 'services', 'service',
+    'group', 'trades', 'trade', 'solutions', 'pro', 'plumbing', 'electrical',
+    'building', 'constructions', 'construction', 'contracting', 'contractors',
+    'maintenance', 'enterprises', 'holdings',
+  ]);
+  if (businessWords.has(first.toLowerCase())) return null;
+
+  // Title-case it so "tom" / "TOM" both render as "Tom".
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+}
+
 export function sendQuoteFollowUpEmail(
   to: string,
-  businessName: string,
+  recipientName: string,
   jobName: string,
   total: number,
+  hasMaterials: boolean,
   userId: string
 ): Promise<boolean> {
   const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
-  const greeting = businessName || 'legend';
+  const firstName = deriveFirstName(recipientName);
+  const greeting = firstName ? `Hey ${firstName},` : 'Hey mate,';
+
+  // When the quote has no material line items, gently nudge them toward the
+  // AI materials generator instead of the usual "how'd it go" ask.
+  const noMaterialsLine = hasMaterials
+    ? ''
+    : `
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      One thing I noticed &mdash; there were no material items on the quote. Did you want to have a crack at generating them? The app can build a materials list with live pricing for you in a few seconds, so you're not leaving money on the table. Happy to walk you through it if you get stuck.
+    </p>`;
 
   const content = wrapEmailTemplate(`
-    <div style="text-align:center;margin:0 0 24px;">
-      <div style="background:#1e293b;border:2px solid #334155;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 12px;">
-        &#129488;
-      </div>
-    </div>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;text-align:center;line-height:1.3;">
-      G'day ${greeting}, quick check-in
-    </h1>
     <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
-      You just put together your first quote &mdash; <strong style="color:#f8fafc;">${jobName}</strong> for <strong style="color:#f8fafc;">$${total.toFixed(2)}</strong>. Ripper effort! We just wanted to check in and see how the experience was.
+      ${greeting}
     </p>
-
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-      Look, we're more invested in this than your mum asking about your love life. We genuinely want to make sure QuoteMate is helping you win more jobs and not giving you the run-around.
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      It's Tom from QuoteMate &mdash; I'm the guy that built it. Just saw your quote for <strong style="color:#f8fafc;">${jobName}</strong>, how did it go? Is there anything I can do to help out?
     </p>
-
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-      <strong style="color:#f8fafc;">Did the prices stack up?</strong> Was anything missing or off? Was it easy enough to use, or did you nearly chuck your phone at the wall?
-    </p>
-
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-      Even if everything went smooth as a cold beer on a Friday arvo, we'd still love to hear about it. And if something was a bit dodgy, that's even better &mdash; tell us so we can fix it up before your next one.
-    </p>
-
-    <p style="color:#f8fafc;font-size:15px;line-height:1.7;margin:0 0 4px;font-weight:600;">
-      Give us the quick version &mdash; one tap:
+${noMaterialsLine}
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Genuinely keen to hear how you found it &mdash; what worked, what didn't, anything that nearly made you chuck your phone at the wall. If you've got 10 seconds, just hit reply and let me know, or tap one of the buttons below.
     </p>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0 0;">
@@ -1903,32 +1925,15 @@ export function sendQuoteFollowUpEmail(
       </tr>
     </table>
 
-    <p style="color:#94a3b8;font-size:13px;line-height:1.6;margin:20px 0 0;text-align:center;">
-      Got more to say? We're all ears:
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:28px 0 0;">
+      Cheers,<br/>
+      Tom &mdash; QuoteMate &#127866;
     </p>
-
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
-      <tr>
-        <td align="center">
-          <table role="presentation" cellpadding="0" cellspacing="0">
-            <tr>
-              <td style="background:#f59e0b;border-radius:10px;text-align:center;">
-                <a href="${APP_LINK}" target="_blank" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Share Detailed Feedback</a>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-
-    <p style="color:#94a3b8;font-size:13px;line-height:1.6;margin:24px 0 0;text-align:center;">
-      No worries if you're flat out &mdash; we'll be here when you're ready. Cheers! &#127866;
-    </p>
-  `, { unsubscribeUrl, preheader: `How was your first quote? We'd love to hear about it.` });
+  `, { unsubscribeUrl, preheader: `How'd your quote for ${jobName} go? Anything I can help with?` });
 
   return sendEmail({
     to,
-    subject: `How'd your first quote go? 🤔`,
+    subject: firstName ? `${firstName}, how'd your first quote go?` : `How'd your first quote go?`,
     htmlContent: content,
     category: 'marketing',
     userId,
