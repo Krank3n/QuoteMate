@@ -84,7 +84,7 @@ import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
 import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
-import { applyAnchorScale, FloorplanAnalysis } from './floorplanScale';
+import { applyAnchorScale, scaleMaterialsToAnchor, FloorplanAnalysis } from './floorplanScale';
 import {
   QM_APP_FEE_PCT_ONLINE,
   QM_APP_FEE_PCT_ONLINE_FREE,
@@ -1745,6 +1745,7 @@ Provide a JSON response with the following structure:
       "sectionLaborHours": 1.5,
       "qualityTier": "(budget|standard|premium — see QUALITY TIER DETECTION below; inherits jobQualityTier when omitted)",
       "reasoning": "Why this material is needed AND the derivation math for any per-area, per-volume, or repeating-unit quantity (e.g. 'Pavers: 25m² ÷ 0.16m²-per-paver × 1.1 waste = 172'). For simple one-off items a short justification is fine.",
+      "planBasis": "(ONLY when a plan/drawing is attached and you grounded this quantity on the plan geometry: 'area' if it scales with floor area, 'perimeter' if it scales with edge length, 'volume' if it scales with area×depth, 'fixed' for one-off counts. Omit for non-plan jobs.)",
       "savedRateName": "(only set when matched to a saved rate)",
       "pricingSource": "(set to 'saved_rate' when matched)",
       "reeceProductId": "(only set when a Reece catalogue line clearly matches — copy the integer productId from the catalogue listing. Leave empty if unsure; the search layer will look it up.)"
@@ -1849,6 +1850,7 @@ FLOORPLAN ANALYSIS (only when one of the attached images is an architectural pla
 - If the scope involves removing/stripping existing surfaces, estimate "removalAreaM2" and a rough waste skip volume "removalBinM3".
 - ALWAYS include "assumptions" (what you inferred or could not read clearly) and "confidence": "high" ONLY when scale came from a scale bar or labelled dimension AND the two area methods agreed; "medium" when scale came from a stated total or grid spacing; "low" when scale was guessed or the drawing was hard to read. NEVER silently invent dimensions — if you can't establish scale at all, set detected:true, confidence:"low", omit the numbers, and say so in "assumptions".
 - Use the calibrated areas/perimeter to GROUND the material quantities above (e.g. m² of surface, lineal m of edge) instead of guessing — and show that derivation in each material's "reasoning".
+- For every material whose quantity you derived from the plan geometry, tag it with "planBasis": "area" (scales with floor area), "perimeter" (scales with edge length), or "volume" (scales with area×depth). One-off counts (gates, fixtures, single appliances) get "planBasis": "fixed". This lets the app deterministically re-scale quantities if the takeoff is anchored to a measurement the tradie stated, so the priced quantities never drift from the corrected areas.
 - Shape: "floorplanAnalysis": { "detected": true, "scale": "1:100", "calibration": { "source": "scale_bar|known_dimension|stated_total", "basisMm": 2520, "note": "..." }, "footprintDims": { "lengthM": 0, "widthM": 0 }, "totalAreaM2": 0, "perimeterM": 0, "zones": [ { "label": "...", "code": "...", "areaM2": 0, "dims": { "lengthM": 0, "widthM": 0 } } ], "removalAreaM2": 0, "removalBinM3": 0, "assumptions": "...", "confidence": "medium" }
 
 Return ONLY valid JSON, no other text.`;
@@ -1966,8 +1968,24 @@ Return ONLY valid JSON, no other text.`;
           ? applyAnchorScale(parsed.floorplanAnalysis as FloorplanAnalysis)
           : undefined;
 
+      // Phase 3 — when the takeoff was anchored onto a stated dimension, push the
+      // same correction through the material quantities so the priced line items
+      // match the corrected areas instead of the model's un-anchored read. Only
+      // materials the model tagged with a geometry planBasis are touched.
+      const anchoredMaterials =
+        floorplanAnalysis?.scaledToAnchor && typeof floorplanAnalysis.scaleFactorApplied === 'number'
+          ? scaleMaterialsToAnchor(repairedMaterials, floorplanAnalysis.scaleFactorApplied)
+          : repairedMaterials;
+      if (anchoredMaterials !== repairedMaterials) {
+        console.log('[floorplan anchor] scaled material quantities', {
+          uid: decodedToken.uid,
+          factor: floorplanAnalysis?.scaleFactorApplied,
+          materialCount: anchoredMaterials.length,
+        });
+      }
+
       res.status(200).json({
-        materials: repairedMaterials,
+        materials: anchoredMaterials,
         estimatedHours: parsed.estimatedHours || 8,
         jobSummary: parsed.jobSummary || '',
         flags: aiFlags,

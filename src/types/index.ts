@@ -58,6 +58,12 @@ export interface Material {
   // always taking the first/cheapest hit. Inherited from the job-level
   // qualityTier on the Quote when not set per-material.
   qualityTier?: 'budget' | 'standard' | 'premium';
+  // How this material's quantity relates to floorplan geometry, when the
+  // quantity was grounded on an attached plan. Lets the backend deterministically
+  // re-scale the quantity if the takeoff is anchored to a stated dimension.
+  planBasis?: 'area' | 'perimeter' | 'volume' | 'fixed';
+  // Set true when scaleMaterialsToAnchor adjusted this quantity to a stated anchor.
+  quantityScaledToAnchor?: boolean;
 }
 
 // Snapshot of a Reece order placed from QuoteMate against the user's trade

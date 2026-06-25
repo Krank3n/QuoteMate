@@ -73,7 +73,7 @@ describe('applyAnchorScale — post-scale math', () => {
     expect(result).toBe(input);
   });
 
-  it('sanity clamp: an implausibly large correction (>2×) returns unchanged', () => {
+  it('sanity clamp: an implausibly large correction (>2×) leaves numbers unchanged + breadcrumb', () => {
     // statedLength = 30m, modelAnchor = 10m → linearFactor = 3 (out of clamp).
     const input = base({
       totalAreaM2: 100,
@@ -83,10 +83,10 @@ describe('applyAnchorScale — post-scale math', () => {
     const result = applyAnchorScale(input);
     expect(result.scaledToAnchor).toBeUndefined();
     expect(result.totalAreaM2).toBe(100);
-    expect(result).toBe(input);
+    expect(result.assumptions).toMatch(/left as measured/i);
   });
 
-  it('sanity clamp: an implausibly small correction (<0.5×) returns unchanged', () => {
+  it('sanity clamp: an implausibly small correction (<0.5×) leaves numbers unchanged + breadcrumb', () => {
     // statedLength = 2m, modelAnchor = 10m → linearFactor = 0.2 (out of clamp).
     const input = base({
       totalAreaM2: 100,
@@ -96,7 +96,7 @@ describe('applyAnchorScale — post-scale math', () => {
     const result = applyAnchorScale(input);
     expect(result.scaledToAnchor).toBeUndefined();
     expect(result.totalAreaM2).toBe(100);
-    expect(result).toBe(input);
+    expect(result.assumptions).toMatch(/left as measured/i);
   });
 
   it('falls back to √totalAreaM2 when footprintDims is absent', () => {
@@ -186,5 +186,83 @@ describe('applyAnchorScale — post-scale math', () => {
       }),
     );
     expect(result.confidence).toBe('high');
+  });
+});
+
+import { scaleMaterialsToAnchor } from './floorplanScale';
+
+describe('applyAnchorScale — clamp breadcrumb', () => {
+  it('leaves an assumptions note when the implied correction is out of range', () => {
+    const result = applyAnchorScale(
+      base({
+        totalAreaM2: 100,
+        footprintDims: { lengthM: 10, widthM: 10 },
+        // 30 m stated vs 10 m measured → ×3 (out of the 0.5–2.0 clamp)
+        calibration: { source: 'stated_total', basisMm: 30000, note: '' },
+      }),
+    );
+    expect(result.totalAreaM2).toBe(100); // unchanged
+    expect(result.scaledToAnchor).toBeUndefined();
+    expect(result.assumptions).toMatch(/left as measured/i);
+    expect(result.assumptions).toMatch(/3\.00/);
+  });
+});
+
+describe('scaleMaterialsToAnchor — Phase 3 quantity correction', () => {
+  const factor = 1.2; // linear; area factor = 1.44
+
+  it('scales an area-section multiplier (geometry in sectionMultiplier)', () => {
+    const [m] = scaleMaterialsToAnchor(
+      [{ name: 'Pavers', quantity: 6.25, sectionMultiplier: 100, planBasis: 'area' }],
+      factor,
+    );
+    expect(m.quantity).toBe(6.25); // per-m² unchanged
+    expect(m.sectionMultiplier).toBeCloseTo(144, 3); // 100 × 1.2²
+    expect(m.quantityScaledToAnchor).toBe(true);
+  });
+
+  it('scales the per-unit quantity when the multiplier is 1 (geometry in quantity)', () => {
+    const [m] = scaleMaterialsToAnchor(
+      [{ name: 'Vinyl boxes', quantity: 269, requiredQty: 269, sectionMultiplier: 1, planBasis: 'area' }],
+      factor,
+    );
+    expect(m.quantity).toBeCloseTo(387.36, 2); // 269 × 1.44
+    expect(m.requiredQty).toBeCloseTo(387.36, 2);
+  });
+
+  it('scales a perimeter-basis quantity by the linear factor only', () => {
+    const [m] = scaleMaterialsToAnchor(
+      [{ name: 'Skirting', quantity: 50, sectionMultiplier: 1, planBasis: 'perimeter' }],
+      factor,
+    );
+    expect(m.quantity).toBeCloseTo(60, 3); // 50 × 1.2
+  });
+
+  it('scales volume by the area factor (fixed depth)', () => {
+    const [m] = scaleMaterialsToAnchor(
+      [{ name: 'Screed', quantity: 10, sectionMultiplier: 1, planBasis: 'volume' }],
+      factor,
+    );
+    expect(m.quantity).toBeCloseTo(14.4, 3); // 10 × 1.44
+  });
+
+  it('leaves fixed and untagged materials untouched', () => {
+    const out = scaleMaterialsToAnchor(
+      [
+        { name: 'Gate latch', quantity: 1, planBasis: 'fixed' },
+        { name: 'Untagged', quantity: 5 },
+      ],
+      factor,
+    );
+    expect(out[0].quantity).toBe(1);
+    expect(out[0].quantityScaledToAnchor).toBeUndefined();
+    expect(out[1].quantity).toBe(5);
+  });
+
+  it('is a no-op when the factor is ~1 or invalid', () => {
+    const mats = [{ name: 'X', quantity: 5, planBasis: 'area' }];
+    expect(scaleMaterialsToAnchor(mats, 1)).toBe(mats);
+    expect(scaleMaterialsToAnchor(mats, undefined)).toBe(mats);
+    expect(scaleMaterialsToAnchor(mats, 0)).toBe(mats);
   });
 });
