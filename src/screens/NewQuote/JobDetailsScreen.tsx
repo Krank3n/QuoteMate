@@ -924,6 +924,7 @@ export function JobDetailsScreen() {
           ...job,
           name: jobName || analysis.jobSummary || 'Custom Job',
           estimatedHours: analysis.estimatedHours,
+          ...(analysis.floorplanAnalysis ? { floorplanAnalysis: analysis.floorplanAnalysis } : {}),
         };
 
         // Get the latest document state and update it

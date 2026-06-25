@@ -117,6 +117,7 @@ export interface FloorplanZone {
   label: string;          // human label, e.g. "Master bedroom" or "FC01 area"
   code?: string;          // plan-printed code if any (FC01, R1, …)
   areaM2?: number;
+  removalAreaM2?: number; // strip-out / demolition scope for this zone
   dims?: { lengthM: number; widthM: number };
 }
 
@@ -131,11 +132,26 @@ export interface FloorplanAnalysis {
     basisMm?: number;             // the reference length used to set scale
     note: string;
   };
+  // Outer bounding-box dimensions the model measured for the whole plan.
+  footprintDims?: { lengthM: number; widthM: number };
   totalAreaM2?: number;
   perimeterM?: number;            // drives skirting / edging / cornice / kerb
   zones?: FloorplanZone[];
   removalAreaM2?: number;         // strip-out / demolition scope
   removalBinM3?: number;          // estimated waste skip volume
+  // Whether the takeoff was rescaled onto a user-stated/known real-world
+  // dimension, and the linear factor applied.
+  scaledToAnchor?: boolean;
+  scaleFactorApplied?: number;
+  // 'model' = measured/derived, 'user' = manually corrected.
+  source?: 'model' | 'user';
+  // User-edited overrides — when present these win over the measured values.
+  corrected?: {
+    totalAreaM2?: number;
+    perimeterM?: number;
+    removalBinM3?: number;
+    editedAt?: string;
+  };
   assumptions: string;            // what was inferred or could not be read
   confidence: 'low' | 'medium' | 'high';
 }

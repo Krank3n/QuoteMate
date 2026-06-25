@@ -5,6 +5,7 @@
 
 import { ANTHROPIC_API_KEY, GEMINI_API_KEY } from '@env';
 import { Material, FloorplanAnalysis } from '../types';
+import { normaliseFloorplanAnalysis } from './floorplanNormalise';
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase';
 // Lazy-import FileSystem (only available on native)
@@ -229,57 +230,10 @@ async function analyzeViaFirebaseFunction(
   };
 }
 
-/**
- * Coerce a raw floorplanAnalysis blob from the LLM into our typed shape, or
- * undefined when no plan was detected. Keeps only sane numeric values so a
- * hallucinated area never silently inflates quantities downstream.
- */
-function normaliseFloorplanAnalysis(raw: any): FloorplanAnalysis | undefined {
-  if (!raw || typeof raw !== 'object' || raw.detected !== true) return undefined;
-  const num = (v: any): number | undefined => {
-    const n = typeof v === 'number' ? v : parseFloat(v);
-    return Number.isFinite(n) && n > 0 ? n : undefined;
-  };
-  const confidence: FloorplanAnalysis['confidence'] =
-    raw.confidence === 'high' || raw.confidence === 'low' ? raw.confidence : 'medium';
-  const zones = Array.isArray(raw.zones)
-    ? raw.zones
-        .map((z: any) => ({
-          label: (z?.label || z?.code || 'Zone').toString(),
-          code: z?.code ? z.code.toString() : undefined,
-          areaM2: num(z?.areaM2),
-          dims:
-            num(z?.dims?.lengthM) && num(z?.dims?.widthM)
-              ? { lengthM: num(z.dims.lengthM)!, widthM: num(z.dims.widthM)! }
-              : undefined,
-        }))
-        .slice(0, 100)
-    : undefined;
-  return {
-    detected: true,
-    scale: raw.scale ? raw.scale.toString() : undefined,
-    calibration:
-      raw.calibration && typeof raw.calibration === 'object'
-        ? {
-            source:
-              raw.calibration.source === 'scale_bar' ||
-              raw.calibration.source === 'known_dimension' ||
-              raw.calibration.source === 'stated_total'
-                ? raw.calibration.source
-                : 'stated_total',
-            basisMm: num(raw.calibration.basisMm),
-            note: (raw.calibration.note || '').toString(),
-          }
-        : undefined,
-    totalAreaM2: num(raw.totalAreaM2),
-    perimeterM: num(raw.perimeterM),
-    zones: zones && zones.length ? zones : undefined,
-    removalAreaM2: num(raw.removalAreaM2),
-    removalBinM3: num(raw.removalBinM3),
-    assumptions: (raw.assumptions || '').toString(),
-    confidence,
-  };
-}
+// Coercion lives in a pure, dependency-free module so it stays unit-testable
+// without dragging react-native/firebase into the test runner. Re-exported
+// here for existing callers.
+export { normaliseFloorplanAnalysis };
 
 /**
  * Analyze job description via Google Gemini API (fallback)

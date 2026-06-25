@@ -55,6 +55,7 @@ import { shouldRunReeceFirst } from '../../services/supplierPriority';
 // screen's mount cheap — see Phase 7 of the perf plan.
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
+import { FloorplanTakeoffCard } from '../../components/FloorplanTakeoffCard';
 import { InlineAddMaterialRow } from '../../components/InlineAddMaterialRow';
 import { ActionSheet, type ActionSheetOption } from '../../components/ActionSheet';
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
@@ -1944,7 +1945,14 @@ export function MaterialsListScreen() {
     </TouchableOpacity>
   ) : null;
 
-  const listHeader = <WebContainer>{reeceBanner}</WebContainer>;
+  const listHeader = (
+    <WebContainer>
+      {currentQuote?.job?.floorplanAnalysis?.detected && (
+        <FloorplanTakeoffCard analysis={currentQuote.job.floorplanAnalysis} />
+      )}
+      {reeceBanner}
+    </WebContainer>
+  );
 
   const listEmpty = (
     <WebContainer>

@@ -84,6 +84,7 @@ import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
 import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
+import { applyAnchorScale, FloorplanAnalysis } from './floorplanScale';
 import {
   QM_APP_FEE_PCT_ONLINE,
   QM_APP_FEE_PCT_ONLINE_FREE,
@@ -1842,11 +1843,13 @@ FLOORPLAN ANALYSIS (only when one of the attached images is an architectural pla
   3. a total dimension the tradie stated in the job description (source "stated_total").
   When references disagree, prefer a real-world measurement the tradie supplied over a hard-to-read drawing, and note the discrepancy.
 - Derive every "areaM2", "dims" and "perimeterM" by measuring against that single scale — never by guessing. Compute "totalAreaM2" two independent ways and reconcile them: (a) the overall footprint from its outer dimensions, and (b) the sum of the zone areas. If they differ by more than ~15%, re-measure, report the reconciled figure, and lower "confidence".
+- ALWAYS echo "footprintDims": { "lengthM", "widthM" } — the overall outer bounding-box dimensions you measured for the whole plan (the longer side is "lengthM"). Report exactly what you measured here; do not pre-adjust it.
+- If the tradie stated any real-world measurement in the job description (a total length, a wall run, a room dimension), treat that as ground truth and record it in "calibration" — it overrides anything read off the drawing.
 - "perimeterM" is the outer boundary length (drives skirting/edging/cornice/kerb/fence runs). "zones" are the distinct regions you can identify, each { "label", "code" (a printed room number or area/finish code if shown, else omit), "areaM2", "dims": { "lengthM", "widthM" } }.
 - If the scope involves removing/stripping existing surfaces, estimate "removalAreaM2" and a rough waste skip volume "removalBinM3".
 - ALWAYS include "assumptions" (what you inferred or could not read clearly) and "confidence": "high" ONLY when scale came from a scale bar or labelled dimension AND the two area methods agreed; "medium" when scale came from a stated total or grid spacing; "low" when scale was guessed or the drawing was hard to read. NEVER silently invent dimensions — if you can't establish scale at all, set detected:true, confidence:"low", omit the numbers, and say so in "assumptions".
 - Use the calibrated areas/perimeter to GROUND the material quantities above (e.g. m² of surface, lineal m of edge) instead of guessing — and show that derivation in each material's "reasoning".
-- Shape: "floorplanAnalysis": { "detected": true, "scale": "1:100", "calibration": { "source": "scale_bar|known_dimension|stated_total", "basisMm": 2520, "note": "..." }, "totalAreaM2": 0, "perimeterM": 0, "zones": [ { "label": "...", "code": "...", "areaM2": 0, "dims": { "lengthM": 0, "widthM": 0 } } ], "removalAreaM2": 0, "removalBinM3": 0, "assumptions": "...", "confidence": "medium" }
+- Shape: "floorplanAnalysis": { "detected": true, "scale": "1:100", "calibration": { "source": "scale_bar|known_dimension|stated_total", "basisMm": 2520, "note": "..." }, "footprintDims": { "lengthM": 0, "widthM": 0 }, "totalAreaM2": 0, "perimeterM": 0, "zones": [ { "label": "...", "code": "...", "areaM2": 0, "dims": { "lengthM": 0, "widthM": 0 } } ], "removalAreaM2": 0, "removalBinM3": 0, "assumptions": "...", "confidence": "medium" }
 
 Return ONLY valid JSON, no other text.`;
 
@@ -1960,7 +1963,7 @@ Return ONLY valid JSON, no other text.`;
         parsed.floorplanAnalysis &&
         typeof parsed.floorplanAnalysis === 'object' &&
         parsed.floorplanAnalysis.detected === true
-          ? parsed.floorplanAnalysis
+          ? applyAnchorScale(parsed.floorplanAnalysis as FloorplanAnalysis)
           : undefined;
 
       res.status(200).json({
