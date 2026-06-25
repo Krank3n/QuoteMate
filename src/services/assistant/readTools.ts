@@ -27,6 +27,9 @@ import { Material } from '../../types';
 import { reviewQuoteMaterials } from '../../utils/quoteReview';
 import { isProposalId, resolveQuoteId } from './quoteRefMap';
 import { fuzzyScoreQuote } from './quoteFuzzy';
+import { getPillsForNiche } from '../../data/nichePills';
+import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
+import { isSpecialistSupplyNiche } from '../../data/specialistSupplyNiches';
 
 function requireUid(): string {
   const uid = auth.currentUser?.uid;
@@ -166,38 +169,76 @@ function serialize(v: unknown): unknown {
   return v;
 }
 
-export async function findCustomer(input: { query: string }): Promise<unknown> {
-  const uid = requireUid();
-  const q = (input.query || '').trim();
-  if (!q) return { matches: [], note: 'Empty query.' };
+// A flat customer record to score, drawn from any source (saved contacts,
+// recent quotes, Xero, the phone book). findCustomer merges several of these
+// before scoring so the model sees one ranked list regardless of where a name
+// actually lives.
+export interface CustomerCandidate {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  source: 'saved' | 'recent' | 'phone';
+}
 
-  const contactsRef = collection(db, 'users', uid, 'contacts');
-  const snap = await getDocs(query(contactsRef, fsLimit(500)));
+// Pure scoring/merge core shared by findCustomer (extracted so it's testable
+// without Firestore). Preserves the exact matchType/confidence/needsConfirmation
+// /ambiguous contract the system prompt reasons over — do not change the
+// algorithm here without updating the prompt.
+export function scoreCustomerCandidates(
+  query: string,
+  candidates: CustomerCandidate[],
+): {
+  matches: Array<{
+    contactId: string;
+    name: string;
+    phoneMasked?: string;
+    hasEmail: boolean;
+    matchType: 'phone' | 'exact' | 'close' | 'fuzzy' | 'sounds_like';
+    confidence: number;
+  }>;
+  confidence: number;
+  ambiguous: boolean;
+  needsConfirmation: boolean;
+  totalScanned: number;
+} {
+  const q = (query || '').trim();
   const qLower = stripDiacritics(q.toLowerCase());
   const qTokens = tokenize(q);
   const qPhone = normalizePhone(q);
   const isPhoneQuery = qPhone.length >= 4;
 
-  type Scored = { score: number; id: string; data: any; matchType: string; confidence: number };
+  // De-dupe across sources by normalized name (+ phone when present) so the
+  // same person from saved + recent + phone doesn't crowd the top five.
+  const seen = new Set<string>();
+  const deduped: CustomerCandidate[] = [];
+  for (const c of candidates) {
+    const phoneKey = c.phone ? normalizePhone(String(c.phone)) : '';
+    const key = `${stripDiacritics((c.name || '').toLowerCase())}|${phoneKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(c);
+  }
+
+  type Scored = { score: number; candidate: CustomerCandidate; matchType: string; confidence: number };
   const scored: Scored[] = [];
 
-  for (const d of snap.docs) {
-    const data = d.data();
-    const rawName = String(data.name || '');
+  for (const c of deduped) {
+    const rawName = String(c.name || '');
     const nameLower = stripDiacritics(rawName.toLowerCase());
     const nameTokens = tokenize(rawName);
-    const phone = data.phone ? normalizePhone(String(data.phone)) : '';
+    const phone = c.phone ? normalizePhone(String(c.phone)) : '';
 
     // Phone hits are unambiguous — short-circuit.
     if (isPhoneQuery && phone && (phone === qPhone || phone.endsWith(qPhone))) {
-      scored.push({ score: 1000, id: d.id, data, matchType: 'phone', confidence: 1 });
+      scored.push({ score: 1000, candidate: c, matchType: 'phone', confidence: 1 });
       continue;
     }
     if (!qTokens.length) continue;
 
     // Whole-string fast paths first.
     if (nameLower === qLower) {
-      scored.push({ score: 500, id: d.id, data, matchType: 'exact', confidence: 1 });
+      scored.push({ score: 500, candidate: c, matchType: 'exact', confidence: 1 });
       continue;
     }
 
@@ -225,42 +266,11 @@ export async function findCustomer(input: { query: string }): Promise<unknown> {
     else if (worstKind === 'sounds_like') matchType = 'sounds_like';
     else matchType = 'fuzzy';
 
-    scored.push({ score: confidence * 100, id: d.id, data, matchType, confidence });
+    scored.push({ score: confidence * 100, candidate: c, matchType, confidence });
   }
 
   scored.sort((a, b) => b.score - a.score);
   const top = scored.slice(0, 5);
-
-  // Augment top hits with their most recent document so Mate can disambiguate
-  // ("Sarah W — deck job last week vs Sarah M — bathroom in March").
-  const documentsRef = collection(db, 'users', uid, 'documents');
-  const matches = await Promise.all(
-    top.map(async ({ id, data }) => {
-      let lastJob: { jobName?: string; total?: number; createdAt?: string } | undefined;
-      try {
-        const docs = await getDocs(
-          query(documentsRef, where('contactId', '==', id), orderBy('createdAt', 'desc'), fsLimit(1)),
-        );
-        if (!docs.empty) {
-          const dData = docs.docs[0].data();
-          lastJob = {
-            jobName: dData.jobName || dData.job?.name,
-            total: typeof dData.total === 'number' ? dData.total : undefined,
-            createdAt: tsToIso(dData.createdAt),
-          };
-        }
-      } catch {
-        // contactId may not be indexed for very old data — leave undefined.
-      }
-      return {
-        contactId: id,
-        name: data.name,
-        phoneMasked: maskPhone(data.phone),
-        hasEmail: !!data.email,
-        lastJob,
-      };
-    }),
-  );
 
   // Tell Mate how sure we are. ambiguous = top match isn't clearly ahead, so
   // it needs to confirm with the tradie instead of silently picking #1.
@@ -275,18 +285,112 @@ export async function findCustomer(input: { query: string }): Promise<unknown> {
   const needsConfirmation =
     ambiguous || (!!topHit && topHit.matchType !== 'phone' && topHit.matchType !== 'exact');
 
-  const matchesWithMeta = matches.map((m, i) => ({
-    ...m,
-    matchType: top[i].matchType,
-    confidence: Math.round(top[i].confidence * 100) / 100,
+  const matches = top.map(({ candidate, matchType, confidence: conf }) => ({
+    contactId: candidate.id,
+    name: candidate.name,
+    phoneMasked: maskPhone(candidate.phone),
+    hasEmail: !!candidate.email,
+    matchType: matchType as 'phone' | 'exact' | 'close' | 'fuzzy' | 'sounds_like',
+    confidence: Math.round(conf * 100) / 100,
   }));
 
   return {
-    matches: matchesWithMeta,
+    matches,
     confidence,
     ambiguous,
     needsConfirmation,
-    totalScanned: snap.size,
+    totalScanned: candidates.length,
+  };
+}
+
+export async function findCustomer(input: { query: string }): Promise<unknown> {
+  const uid = requireUid();
+  const q = (input.query || '').trim();
+  if (!q) return { matches: [], note: 'Empty query.' };
+
+  // --- collect all candidates ---
+  const contactsRef = collection(db, 'users', uid, 'contacts');
+  const snap = await getDocs(query(contactsRef, fsLimit(500)));
+
+  const candidates: CustomerCandidate[] = [];
+  const savedContactIds = new Set<string>();
+
+  for (const d of snap.docs) {
+    const data = d.data();
+    candidates.push({
+      id: d.id,
+      name: String(data.name || ''),
+      phone: data.phone ? String(data.phone) : undefined,
+      email: data.email ? String(data.email) : undefined,
+      source: 'saved',
+    });
+    savedContactIds.add(d.id);
+  }
+
+  // best-effort recent contacts from quotes. Imported lazily so the pure
+  // helpers above stay unit-testable without Firestore at import time.
+  try {
+    const recentSnap = await getDocs(
+      query(collection(db, 'users', uid, 'documents'), where('type', '==', 'quote'), orderBy('updatedAt', 'desc'), fsLimit(50))
+    );
+    const seenNames = new Set<string>(candidates.map(c => stripDiacritics(c.name.toLowerCase())));
+    for (const d of recentSnap.docs) {
+      const data = d.data() as Record<string, unknown>;
+      const name = (data.customerName as string) ?? '';
+      if (!name || seenNames.has(stripDiacritics(name.toLowerCase()))) continue;
+      seenNames.add(stripDiacritics(name.toLowerCase()));
+      candidates.push({ id: d.id, name, phone: data.customerPhone as string | undefined, email: data.customerEmail as string | undefined, source: 'recent' });
+    }
+  } catch { /* best-effort */ }
+
+  // best-effort phone contacts. Imported lazily for the same reason.
+  try {
+    const { searchPhoneContacts } = await import('../contactService');
+    const phoneResults = await searchPhoneContacts(q);
+    const seenNames = new Set<string>(candidates.map(c => stripDiacritics(c.name.toLowerCase())));
+    for (const c of phoneResults) {
+      const name = c.name ?? '';
+      if (!name || seenNames.has(stripDiacritics(name.toLowerCase()))) continue;
+      seenNames.add(stripDiacritics(name.toLowerCase()));
+      candidates.push({ id: c.id ?? c.name, name, phone: c.phone, email: c.email, source: 'phone' });
+    }
+  } catch { /* best-effort */ }
+
+  // --- score across all sources ---
+  const scored = scoreCustomerCandidates(q, candidates);
+
+  // --- augment top saved-contact hits with their most recent document ---
+  // ("Sarah W — deck job last week vs Sarah M — bathroom in March")
+  const documentsRef = collection(db, 'users', uid, 'documents');
+  const matchesWithMeta = await Promise.all(
+    scored.matches.map(async (m) => {
+      if (!savedContactIds.has(m.contactId)) return m;
+      let lastJob: { jobName?: string; total?: number; createdAt?: string } | undefined;
+      try {
+        const docs = await getDocs(
+          query(documentsRef, where('contactId', '==', m.contactId), orderBy('createdAt', 'desc'), fsLimit(1)),
+        );
+        if (!docs.empty) {
+          const dData = docs.docs[0].data();
+          lastJob = {
+            jobName: dData.jobName || dData.job?.name,
+            total: typeof dData.total === 'number' ? dData.total : undefined,
+            createdAt: tsToIso(dData.createdAt),
+          };
+        }
+      } catch {
+        // contactId may not be indexed for very old data — leave undefined.
+      }
+      return { ...m, lastJob };
+    }),
+  );
+
+  return {
+    matches: matchesWithMeta,
+    confidence: scored.confidence,
+    ambiguous: scored.ambiguous,
+    needsConfirmation: scored.needsConfirmation,
+    totalScanned: candidates.length,
   };
 }
 
@@ -482,4 +586,110 @@ export async function getBusinessDefaults(): Promise<unknown> {
     pricesIncludeGst: data.pricesIncludeGst,
     abn: data.abn ? `...${String(data.abn).slice(-4)}` : undefined,
   };
+}
+
+// --- Job requirements -------------------------------------------------------
+//
+// The front of the refined quote pipeline: given a job type (category + niche,
+// or just free text), return the niche's must-ask questions, its pricing
+// method, and a couple of flags so Mate asks the right things up front instead
+// of inventing a checklist. resolveJobRequirements is pure (no Firestore) so it
+// can be unit-tested; getJobRequirements wraps it with the business-settings
+// fallback for the tool dispatcher.
+
+export interface JobRequirementsInput {
+  categoryId?: string;
+  nicheId?: string;
+  freeText?: string;
+}
+
+export interface JobRequirementsResult {
+  matched: { categoryId?: string; nicheId?: string; templateName?: string };
+  mustAskQuestions: string[];
+  pricingMethod?: string;
+  measurementDriven: boolean;
+  planHelps: boolean;
+  specialistSupply: boolean;
+  supplierBookPopulated: boolean;
+}
+
+const MEASUREMENT_DRIVEN_METHODS = new Set(['per_sqm', 'per_linear_m', 'per_cubic_m']);
+
+export function resolveJobRequirements(input: JobRequirementsInput): JobRequirementsResult {
+  let resolvedCategoryId = input.categoryId;
+  let resolvedNicheId = input.nicheId;
+  let template = NICHE_TEMPLATES.find(
+    (t) => t.categoryId === resolvedCategoryId && t.nicheId === resolvedNicheId,
+  );
+
+  // No niche pinned but we have a blurb — fuzzy-match it to the best template.
+  if (!template && input.freeText) {
+    const ft = input.freeText.toLowerCase().trim();
+    let best: { t: (typeof NICHE_TEMPLATES)[number]; score: number } | undefined;
+    for (const t of NICHE_TEMPLATES) {
+      // Prefer templates from the given category when one was supplied.
+      if (resolvedCategoryId && t.categoryId !== resolvedCategoryId) continue;
+      const nameLower = t.name.toLowerCase();
+      const exactSubstring = ft.includes(nameLower) || nameLower.includes(ft);
+      const score = exactSubstring ? 1 : similarity(ft, nameLower);
+      if (!best || score > best.score) best = { t, score };
+    }
+    if (best && best.score > 0.3) {
+      template = best.t;
+      resolvedCategoryId = best.t.categoryId;
+      resolvedNicheId = best.t.nicheId;
+    }
+  }
+
+  // Build the must-ask list. Pill labels are the individual topics to cover;
+  // questionsLine is the same content phrased as sentences, so we only use one.
+  // Prefer questionsLine as the single bundled entry when it exists (better
+  // phrasing); fall back to individual pill labels when there is no questionsLine.
+  const mustAskQuestions: string[] = [];
+  if (resolvedCategoryId && resolvedNicheId) {
+    if (template?.questionsLine) {
+      mustAskQuestions.push(template.questionsLine.trim());
+    } else {
+      const seen = new Set<string>();
+      for (const pill of getPillsForNiche(resolvedCategoryId, resolvedNicheId)) {
+        const label = pill.label.trim();
+        const key = label.toLowerCase();
+        if (label && !seen.has(key)) {
+          seen.add(key);
+          mustAskQuestions.push(label);
+        }
+      }
+    }
+  }
+
+  const pricingMethod = template?.pricingMethod || undefined;
+  const measurementDriven = !!pricingMethod && MEASUREMENT_DRIVEN_METHODS.has(pricingMethod);
+
+  return {
+    matched: {
+      categoryId: resolvedCategoryId,
+      nicheId: resolvedNicheId,
+      templateName: template?.name,
+    },
+    mustAskQuestions,
+    pricingMethod,
+    measurementDriven,
+    planHelps: measurementDriven,
+    specialistSupply: isSpecialistSupplyNiche(resolvedCategoryId, resolvedNicheId),
+    supplierBookPopulated: false,
+  };
+}
+
+export async function getJobRequirements(input: { category?: string; niche?: string; freeText?: string }): Promise<unknown> {
+  const uid = requireUid();
+  let { category, niche } = input;
+  if (!category && !niche) {
+    const snap = await getDoc(doc(db, 'users', uid, 'settings', 'business'));
+    if (snap.exists()) {
+      const data = snap.data() as Record<string, unknown>;
+      category = category ?? (data.tradeCategory as string) ?? (data.tradeCategories as string[])?.[0];
+      niche = niche ?? (data.tradeNiche as string) ?? (data.tradeNiches as string[])?.[0];
+    }
+  }
+  return resolveJobRequirements({ categoryId: category, nicheId: niche, freeText: input.freeText });
 }
