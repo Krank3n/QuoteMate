@@ -45,6 +45,7 @@ export function BusinessDefaultsScreen() {
   const [showMaterialCostsByDefault, setShowMaterialCostsByDefault] = useState(true);
   const [showLaborCostsByDefault, setShowLaborCostsByDefault] = useState(true);
   const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(false);
+  const [autoStartMic, setAutoStartMic] = useState(true);
   const [termsAndConditions, setTermsAndConditions] = useState('');
 
   const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
@@ -67,6 +68,7 @@ export function BusinessDefaultsScreen() {
     const smc = businessSettings.showMaterialCostsByDefault !== false;
     const slc = businessSettings.showLaborCostsByDefault !== false;
     const acf = businessSettings.autoCustomerFollowUpEnabled === true;
+    const asm = businessSettings.autoStartMicOnMate !== false;
     const tc = businessSettings.termsAndConditions ?? '';
 
     setLaborRate(lr);
@@ -81,9 +83,10 @@ export function BusinessDefaultsScreen() {
     setShowMaterialCostsByDefault(smc);
     setShowLaborCostsByDefault(slc);
     setAutoCustomerFollowUp(acf);
+    setAutoStartMic(asm);
     setTermsAndConditions(tc);
 
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, acf, tc }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, acf, asm, tc }));
   }, [businessSettings]);
 
   // Re-check on focus so the deposit + surcharge toggles unlock the moment
@@ -113,13 +116,14 @@ export function BusinessDefaultsScreen() {
       smc: showMaterialCostsByDefault,
       slc: showLaborCostsByDefault,
       acf: autoCustomerFollowUp,
+      asm: autoStartMic,
       tc: termsAndConditions,
     });
     return current !== initialSnapshot;
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
     transportMarkupEnabled, surchargePaymentFees, pricesIncludeGst,
-    showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, autoCustomerFollowUp, termsAndConditions,
+    showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, autoCustomerFollowUp, autoStartMic, termsAndConditions,
     initialSnapshot,
   ]);
 
@@ -148,6 +152,7 @@ export function BusinessDefaultsScreen() {
         showMaterialCostsByDefault,
         showLaborCostsByDefault,
         autoCustomerFollowUpEnabled: autoCustomerFollowUp,
+        autoStartMicOnMate: autoStartMic,
         termsAndConditions: termsAndConditions.trim() || undefined,
         termsUpdatedAt:
           termsAndConditions !== (businessSettings?.termsAndConditions ?? '')
@@ -318,6 +323,27 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={autoCustomerFollowUp}
                 onValueChange={setAutoCustomerFollowUp}
+                color={colors.primary}
+              />
+            </View>
+          </Surface>
+
+          <Surface style={styles.card}>
+            <Title style={styles.sectionTitle}>Mate (Voice Assistant)</Title>
+            <Text style={styles.helperText}>
+              How Mate behaves when you open the Mate tab.
+            </Text>
+
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Start mic automatically on Mate</Text>
+                <Text style={styles.toggleDescription}>
+                  Opens voice mode the moment you tap into Mate, so you can just start talking. Only happens if mic access is already granted.
+                </Text>
+              </View>
+              <Switch
+                value={autoStartMic}
+                onValueChange={setAutoStartMic}
                 color={colors.primary}
               />
             </View>
