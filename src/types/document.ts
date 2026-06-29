@@ -19,6 +19,7 @@ import type {
   TcAcceptance,
   XeroSyncStatus,
   LaborUnit,
+  SectionDisplay,
 } from './index';
 
 export type {
@@ -76,6 +77,9 @@ export interface Document {
   showMarkup?: boolean;
   showMaterialCosts?: boolean;
   showLaborCosts?: boolean;
+  // Tri-state display, takes precedence over the legacy booleans above.
+  materialsDisplay?: SectionDisplay;
+  laborDisplay?: SectionDisplay;
   showLaborBreakdown?: boolean;
 
   // ===== Travel adjustment =====

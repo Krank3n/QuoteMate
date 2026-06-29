@@ -30,6 +30,7 @@ import {
 } from './pdfGenerator';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
+import { resolveDisplay } from './shared/pdf/types';
 import {
   quoteRecordToDocumentRecord,
   invoiceRecordToDocumentRecord,
@@ -653,12 +654,14 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     }
   }
 
-  const showMaterialCostsEmail = quote.showMaterialCosts !== undefined
-    ? quote.showMaterialCosts !== false
-    : business.showMaterialCostsByDefault !== false;
-  const showLaborCostsEmail = quote.showLaborCosts !== undefined
-    ? quote.showLaborCosts !== false
-    : business.showLaborCostsByDefault !== false;
+  const showMaterialCostsEmail = resolveDisplay(
+    quote.materialsDisplay ?? business.materialsDisplayByDefault,
+    quote.showMaterialCosts ?? business.showMaterialCostsByDefault,
+  ) === 'full';
+  const showLaborCostsEmail = resolveDisplay(
+    quote.laborDisplay ?? business.laborDisplayByDefault,
+    quote.showLaborCosts ?? business.showLaborCostsByDefault,
+  ) === 'full';
 
   const htmlContent = buildQuoteEmailHtml({
     customerName: quote.customerName || 'Client',
@@ -712,6 +715,14 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
       showLaborCosts: quote.showLaborCosts !== undefined
         ? quote.showLaborCosts
         : business.showLaborCostsByDefault !== false,
+      materialsDisplay: resolveDisplay(
+        quote.materialsDisplay ?? business.materialsDisplayByDefault,
+        quote.showMaterialCosts ?? business.showMaterialCostsByDefault,
+      ),
+      laborDisplay: resolveDisplay(
+        quote.laborDisplay ?? business.laborDisplayByDefault,
+        quote.showLaborCosts ?? business.showLaborCostsByDefault,
+      ),
       travelAdjustment: quote.travelAdjustment,
       gst: quote.gst || 0,
       total: quote.total || 0,
@@ -866,12 +877,14 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     address: business.address, logoUrl, brandColor: business.brandColor,
   };
 
-  const showMaterialCostsEmail = invoice.showMaterialCosts !== undefined
-    ? invoice.showMaterialCosts !== false
-    : business.showMaterialCostsByDefault !== false;
-  const showLaborCostsEmail = invoice.showLaborCosts !== undefined
-    ? invoice.showLaborCosts !== false
-    : business.showLaborCostsByDefault !== false;
+  const showMaterialCostsEmail = resolveDisplay(
+    invoice.materialsDisplay ?? business.materialsDisplayByDefault,
+    invoice.showMaterialCosts ?? business.showMaterialCostsByDefault,
+  ) === 'full';
+  const showLaborCostsEmail = resolveDisplay(
+    invoice.laborDisplay ?? business.laborDisplayByDefault,
+    invoice.showLaborCosts ?? business.showLaborCostsByDefault,
+  ) === 'full';
 
   const plan = await resolveUserPlan(userId);
 
@@ -934,6 +947,14 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       showLaborCosts: invoice.showLaborCosts !== undefined
         ? invoice.showLaborCosts
         : business.showLaborCostsByDefault !== false,
+      materialsDisplay: resolveDisplay(
+        invoice.materialsDisplay ?? business.materialsDisplayByDefault,
+        invoice.showMaterialCosts ?? business.showMaterialCostsByDefault,
+      ),
+      laborDisplay: resolveDisplay(
+        invoice.laborDisplay ?? business.laborDisplayByDefault,
+        invoice.showLaborCosts ?? business.showLaborCostsByDefault,
+      ),
       travelAdjustment: invoice.travelAdjustment,
       gst: invoice.gst || 0,
       total: invoice.total || 0,

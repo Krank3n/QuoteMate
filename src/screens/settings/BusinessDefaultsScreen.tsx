@@ -16,6 +16,7 @@ import {
   Title,
   Button,
   Switch,
+  SegmentedButtons,
 } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
@@ -28,6 +29,8 @@ import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { checkSquareConnection } from '../../services/squareService';
 import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 import { PASSTHROUGH_SURCHARGE_PCT } from '../../../shared/pdf/squareFees';
+import { resolveDisplay } from '../../../shared/pdf';
+import type { SectionDisplay } from '../../types';
 
 export function BusinessDefaultsScreen() {
   const navigation = useNavigation<any>();
@@ -42,8 +45,8 @@ export function BusinessDefaultsScreen() {
   const [surchargePaymentFees, setSurchargePaymentFees] = useState(false);
   const [pricesIncludeGst, setPricesIncludeGst] = useState(false);
   const [showMarkup, setShowMarkup] = useState(false);
-  const [showMaterialCostsByDefault, setShowMaterialCostsByDefault] = useState(true);
-  const [showLaborCostsByDefault, setShowLaborCostsByDefault] = useState(true);
+  const [materialsDisplayByDefault, setMaterialsDisplayByDefault] = useState<SectionDisplay>('full');
+  const [laborDisplayByDefault, setLaborDisplayByDefault] = useState<SectionDisplay>('full');
   const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(false);
   const [autoStartMic, setAutoStartMic] = useState(true);
   const [termsAndConditions, setTermsAndConditions] = useState('');
@@ -65,8 +68,14 @@ export function BusinessDefaultsScreen() {
     const sf = businessSettings.surchargePaymentFees === true;
     const pig = businessSettings.pricesIncludeGst === true;
     const sm = businessSettings.showMarkup === true;
-    const smc = businessSettings.showMaterialCostsByDefault !== false;
-    const slc = businessSettings.showLaborCostsByDefault !== false;
+    const md = resolveDisplay(
+      businessSettings.materialsDisplayByDefault,
+      businessSettings.showMaterialCostsByDefault,
+    );
+    const ld = resolveDisplay(
+      businessSettings.laborDisplayByDefault,
+      businessSettings.showLaborCostsByDefault,
+    );
     const acf = businessSettings.autoCustomerFollowUpEnabled === true;
     const asm = businessSettings.autoStartMicOnMate !== false;
     const tc = businessSettings.termsAndConditions ?? '';
@@ -80,13 +89,13 @@ export function BusinessDefaultsScreen() {
     setSurchargePaymentFees(sf);
     setPricesIncludeGst(pig);
     setShowMarkup(sm);
-    setShowMaterialCostsByDefault(smc);
-    setShowLaborCostsByDefault(slc);
+    setMaterialsDisplayByDefault(md);
+    setLaborDisplayByDefault(ld);
     setAutoCustomerFollowUp(acf);
     setAutoStartMic(asm);
     setTermsAndConditions(tc);
 
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, acf, asm, tc }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, md, ld, acf, asm, tc }));
   }, [businessSettings]);
 
   // Re-check on focus so the deposit + surcharge toggles unlock the moment
@@ -113,8 +122,8 @@ export function BusinessDefaultsScreen() {
       sf: surchargePaymentFees,
       pig: pricesIncludeGst,
       sm: showMarkup,
-      smc: showMaterialCostsByDefault,
-      slc: showLaborCostsByDefault,
+      md: materialsDisplayByDefault,
+      ld: laborDisplayByDefault,
       acf: autoCustomerFollowUp,
       asm: autoStartMic,
       tc: termsAndConditions,
@@ -123,7 +132,7 @@ export function BusinessDefaultsScreen() {
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
     transportMarkupEnabled, surchargePaymentFees, pricesIncludeGst,
-    showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, autoCustomerFollowUp, autoStartMic, termsAndConditions,
+    showMarkup, materialsDisplayByDefault, laborDisplayByDefault, autoCustomerFollowUp, autoStartMic, termsAndConditions,
     initialSnapshot,
   ]);
 
@@ -149,8 +158,12 @@ export function BusinessDefaultsScreen() {
         surchargePaymentFees,
         pricesIncludeGst,
         showMarkup,
-        showMaterialCostsByDefault,
-        showLaborCostsByDefault,
+        materialsDisplayByDefault,
+        laborDisplayByDefault,
+        // Parallel write of the legacy booleans keeps Xero sync / web
+        // acceptance / email summary working for clients reading the old field.
+        showMaterialCostsByDefault: materialsDisplayByDefault !== 'hidden',
+        showLaborCostsByDefault: laborDisplayByDefault !== 'hidden',
         autoCustomerFollowUpEnabled: autoCustomerFollowUp,
         autoStartMicOnMate: autoStartMic,
         termsAndConditions: termsAndConditions.trim() || undefined,
@@ -278,31 +291,37 @@ export function BusinessDefaultsScreen() {
               />
             </View>
 
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Material Costs</Text>
-                <Text style={styles.toggleDescription}>
-                  When off, the materials breakdown and subtotal are hidden. Turn both this and labour off to show only the grand total.
-                </Text>
-              </View>
-              <Switch
-                value={showMaterialCostsByDefault}
-                onValueChange={setShowMaterialCostsByDefault}
-                color={colors.primary}
+            <View style={styles.segmentedField}>
+              <Text style={styles.toggleTitle}>Materials</Text>
+              <Text style={styles.toggleDescription}>
+                Full shows item prices. Items only shows the list without prices. Hidden removes the section entirely.
+              </Text>
+              <SegmentedButtons
+                value={materialsDisplayByDefault}
+                onValueChange={(v) => setMaterialsDisplayByDefault(v as SectionDisplay)}
+                style={styles.segmentedButtons}
+                buttons={[
+                  { value: 'full', label: 'Full' },
+                  { value: 'itemsOnly', label: 'Items' },
+                  { value: 'hidden', label: 'Hidden' },
+                ]}
               />
             </View>
 
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Labour Costs</Text>
-                <Text style={styles.toggleDescription}>
-                  When off, the labour breakdown and subtotal are hidden. Turn both this and materials off to show only the grand total.
-                </Text>
-              </View>
-              <Switch
-                value={showLaborCostsByDefault}
-                onValueChange={setShowLaborCostsByDefault}
-                color={colors.primary}
+            <View style={styles.segmentedField}>
+              <Text style={styles.toggleTitle}>Labour</Text>
+              <Text style={styles.toggleDescription}>
+                Full shows labour costs. Items only shows the work without costs. Hidden removes the section entirely.
+              </Text>
+              <SegmentedButtons
+                value={laborDisplayByDefault}
+                onValueChange={(v) => setLaborDisplayByDefault(v as SectionDisplay)}
+                style={styles.segmentedButtons}
+                buttons={[
+                  { value: 'full', label: 'Full' },
+                  { value: 'itemsOnly', label: 'Items' },
+                  { value: 'hidden', label: 'Hidden' },
+                ]}
               />
             </View>
           </Surface>
@@ -550,6 +569,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   toggleLabel: { flex: 1, marginRight: 12 },
+  segmentedField: {
+    paddingVertical: 10,
+  },
+  segmentedButtons: {
+    marginTop: 10,
+  },
   toggleTitle: {
     fontSize: 15,
     fontWeight: '600',

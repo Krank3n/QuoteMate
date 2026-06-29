@@ -31,6 +31,7 @@ import { previewDocumentPDF } from '../../utils/pdfGenerator';
 import { quoteToDocument, invoiceToDocument } from '../../types/documentAdapter';
 import { calculateDueDate, formatPaymentTerms } from '../../utils/invoiceCalculator';
 import type { PaymentTerms } from '../../types';
+import { resolveDisplay } from '../../../shared/pdf';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SendTypePill } from '../../components/SendSwitcher';
 import { SendDocumentButton } from '../../components/SendDocumentButton';
@@ -707,16 +708,14 @@ export function JobPreviewScreen() {
                 ? workingDoc.showMarkup === true
                 : businessSettings?.showMarkup === true
             }
-            showMaterialCosts={
-              workingDoc.showMaterialCosts !== undefined
-                ? workingDoc.showMaterialCosts
-                : businessSettings?.showMaterialCostsByDefault !== false
-            }
-            showLaborCosts={
-              workingDoc.showLaborCosts !== undefined
-                ? workingDoc.showLaborCosts
-                : businessSettings?.showLaborCostsByDefault !== false
-            }
+            materialsDisplay={resolveDisplay(
+              workingDoc.materialsDisplay ?? businessSettings?.materialsDisplayByDefault,
+              workingDoc.showMaterialCosts ?? businessSettings?.showMaterialCostsByDefault,
+            )}
+            laborDisplay={resolveDisplay(
+              workingDoc.laborDisplay ?? businessSettings?.laborDisplayByDefault,
+              workingDoc.showLaborCosts ?? businessSettings?.showLaborCostsByDefault,
+            )}
             requireDeposit={(workingDoc as any).requireDeposit === true}
             depositPercentage={Number((workingDoc as any).depositPercentage ?? 0)}
             onChange={handleDisplaySettingsChange}
