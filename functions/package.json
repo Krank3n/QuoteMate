@@ -16,6 +16,7 @@
     "node": "20"
   },
   "dependencies": {
+    "@google-analytics/data": "^6.1.0",
     "@sparticuz/chromium": "^143.0.4",
     "cheerio": "^1.2.0",
     "cors": "^2.8.5",

@@ -28,6 +28,7 @@ import {
 } from './email';
 export * from './adminCrm';
 export * from './tickets';
+export { adminTrafficStats } from './analyticsTraffic';
 export {
   adminLeadDiscovery,
   adminEnrichLeads,
