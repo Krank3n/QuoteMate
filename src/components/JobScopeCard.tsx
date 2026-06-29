@@ -30,6 +30,7 @@ import { formatDistanceToNowStrict } from 'date-fns';
 
 import type { Document } from '../types/document';
 import type { Invoice, PaymentTerms } from '../types';
+import { resolveDisplay } from '../../shared/pdf';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { calculateDueDate, formatPaymentTerms } from '../utils/invoiceCalculator';
@@ -321,16 +322,14 @@ export function JobScopeCard({
                 ? doc.showMarkup === true
                 : businessSettings?.showMarkup === true
             }
-            showMaterialCosts={
-              doc.showMaterialCosts !== undefined
-                ? doc.showMaterialCosts
-                : businessSettings?.showMaterialCostsByDefault !== false
-            }
-            showLaborCosts={
-              doc.showLaborCosts !== undefined
-                ? doc.showLaborCosts
-                : businessSettings?.showLaborCostsByDefault !== false
-            }
+            materialsDisplay={resolveDisplay(
+              doc.materialsDisplay ?? businessSettings?.materialsDisplayByDefault,
+              doc.showMaterialCosts ?? businessSettings?.showMaterialCostsByDefault,
+            )}
+            laborDisplay={resolveDisplay(
+              doc.laborDisplay ?? businessSettings?.laborDisplayByDefault,
+              doc.showLaborCosts ?? businessSettings?.showLaborCostsByDefault,
+            )}
             requireDeposit={doc.requireDeposit === true}
             depositPercentage={Number(doc.depositPercentage ?? 0)}
             onChange={handleDisplaySettingsChange}

@@ -1467,10 +1467,9 @@ function renderPricingRows(input: PricingRowsInput): string {
   const hasDeposit = !!(depositCredit && depositCredit > 0);
   const showMaterials = input.showMaterialCosts !== false;
   const showLabor = input.showLaborCosts !== false;
-  // The Subtotal row is only meaningful when at least one of its components
-  // is visible AND there's something separating it from the final Total —
-  // i.e. when the breakdown actually shows something distinct.
-  const showSubtotalRow = showMaterials || showLabor;
+  // The Subtotal row always renders so the customer can always see the ex/inc
+  // GST base — matching the PDF summary, which now shows Subtotal even when
+  // both the materials and labour breakdown rows are hidden.
   const row = (label: string, value: string, valueColor = '#111827') => `
             <tr>
               <td style="padding:10px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #eef0f3;">${label}</td>
@@ -1484,7 +1483,7 @@ function renderPricingRows(input: PricingRowsInput): string {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             ${showMaterials ? row('Materials', `$${materialsSubtotal.toFixed(2)}`) : ''}
             ${showLabor ? row('Labour', `$${laborTotal.toFixed(2)}`) : ''}
-            ${showSubtotalRow ? row('Subtotal', `$${subtotal.toFixed(2)}`) : ''}
+            ${row('Subtotal', `$${subtotal.toFixed(2)}`)}
             ${row('GST', `$${gst.toFixed(2)}`)}
             ${hasDeposit ? `
             <tr>

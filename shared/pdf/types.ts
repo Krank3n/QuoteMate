@@ -4,6 +4,28 @@
 
 export type PdfTemplateId = 'professional' | 'clean' | 'bold' | 'tradesman';
 
+/**
+ * Tri-state visibility for the materials / labour sections on a quote or
+ * invoice:
+ * - 'full'     — render the section with per-line prices and subtotals.
+ * - 'itemsOnly'— render the item/section names and quantities but strip
+ *                every price (unit price, line total, subtotals).
+ * - 'hidden'   — drop the section (and its summary row) entirely.
+ *
+ * Back-compat: the legacy `showMaterialCosts` / `showLaborCosts` booleans map
+ * to 'hidden' (false) vs 'full' (true/undefined) via `resolveDisplay`.
+ */
+export type SectionDisplay = 'full' | 'itemsOnly' | 'hidden';
+
+/**
+ * Resolve the effective tri-state display from the new enum field, falling
+ * back to the legacy boolean. `false` → 'hidden', everything else → 'full'.
+ */
+export const resolveDisplay = (
+  enumVal: SectionDisplay | undefined,
+  legacyBool: boolean | undefined,
+): SectionDisplay => enumVal ?? (legacyBool === false ? 'hidden' : 'full');
+
 export interface PdfTemplateInfo {
   id: PdfTemplateId;
   name: string;
@@ -69,6 +91,12 @@ export interface QuotePdfData {
   // AND the Labour row in the summary. Subtotal/GST/Total are still computed
   // and shown.
   showLaborCosts?: boolean;
+  // Tri-state materials display. Takes precedence over showMaterialCosts when
+  // present. 'itemsOnly' shows item names + quantities but no prices; 'hidden'
+  // drops the section. Subtotal/GST/Total always render regardless.
+  materialsDisplay?: SectionDisplay;
+  // Tri-state labour display. Same semantics as materialsDisplay.
+  laborDisplay?: SectionDisplay;
   travelAdjustment?: number;
   gst: number;
   total: number;

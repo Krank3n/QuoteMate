@@ -1,8 +1,8 @@
 // Core data models for QuoteMate
 
 // PDF Template types (imported from shared module for local use, re-exported for consumers)
-import type { PdfTemplateId, PdfTemplateInfo } from '../../shared/pdf/types';
-export type { PdfTemplateId, PdfTemplateInfo };
+import type { PdfTemplateId, PdfTemplateInfo, SectionDisplay } from '../../shared/pdf/types';
+export type { PdfTemplateId, PdfTemplateInfo, SectionDisplay };
 
 // Record of a customer accepting the business's T&Cs at payment time.
 // Stamped on the quote/invoice doc so the version they paid under is auditable.
@@ -308,6 +308,11 @@ export interface Quote {
   // and the Labour summary row are hidden. Undefined = inherit
   // BusinessSettings.showLaborCostsByDefault.
   showLaborCosts?: boolean;
+  // Tri-state materials display. Takes precedence over showMaterialCosts when
+  // present. 'itemsOnly' shows item names + quantities but no prices.
+  materialsDisplay?: SectionDisplay;
+  // Tri-state labour display. Takes precedence over showLaborCosts when present.
+  laborDisplay?: SectionDisplay;
   // Labour breakdown visibility on PDFs. When false, the per-section labour
   // rows are hidden and only the Labour Total is shown. Default: true.
   showLaborBreakdown?: boolean;
@@ -560,6 +565,11 @@ export interface BusinessSettings {
   showMaterialCostsByDefault?: boolean;
   // Default for new quotes' showLaborCosts. Same shape as above for labour.
   showLaborCostsByDefault?: boolean;
+  // Tri-state default for new quotes' materialsDisplay. Takes precedence over
+  // showMaterialCostsByDefault when present. Default: 'full'.
+  materialsDisplayByDefault?: SectionDisplay;
+  // Tri-state default for new quotes' laborDisplay. Default: 'full'.
+  laborDisplayByDefault?: SectionDisplay;
   // Payment method settings
   paymentMethods?: PaymentMethodSettings;
   // Branding
@@ -725,6 +735,11 @@ export interface Invoice {
   // and the Labour summary row are hidden. Undefined = inherit
   // BusinessSettings.showLaborCostsByDefault.
   showLaborCosts?: boolean;
+  // Tri-state materials display. Takes precedence over showMaterialCosts when
+  // present. 'itemsOnly' shows item names + quantities but no prices.
+  materialsDisplay?: SectionDisplay;
+  // Tri-state labour display. Takes precedence over showLaborCosts when present.
+  laborDisplay?: SectionDisplay;
   // Labour breakdown visibility on PDFs. When false, the per-section labour
   // rows are hidden and only the Labour Total is shown. Default: true.
   showLaborBreakdown?: boolean;

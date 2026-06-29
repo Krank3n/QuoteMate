@@ -12,16 +12,22 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, StyleSheet, Switch, TouchableOpacity, Pressable } from 'react-native';
-import { Text, TextInput, Surface, Divider } from 'react-native-paper';
+import { Text, TextInput, Surface, Divider, SegmentedButtons } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import { colors } from '../theme';
 import { checkSquareConnection } from '../services/squareService';
 import { formatCurrency } from '../utils/quoteCalculator';
+import type { SectionDisplay } from '../types';
 
 export interface InvoiceDisplaySettingsChange {
   showMarkup?: boolean;
+  // Tri-state enums are the source of truth. The legacy booleans are written
+  // alongside them (parallel write) so Xero sync, the web acceptance page and
+  // the email summary keep working.
+  materialsDisplay?: SectionDisplay;
+  laborDisplay?: SectionDisplay;
   showMaterialCosts?: boolean;
   showLaborCosts?: boolean;
   requireDeposit?: boolean;
@@ -33,8 +39,8 @@ interface InvoiceDisplaySettingsProps {
   mode: 'quote' | 'invoice';
   total: number;
   showMarkup: boolean;
-  showMaterialCosts: boolean;
-  showLaborCosts: boolean;
+  materialsDisplay: SectionDisplay;
+  laborDisplay: SectionDisplay;
   requireDeposit: boolean;
   depositPercentage: number;
   onChange: (partial: InvoiceDisplaySettingsChange) => void;
@@ -67,28 +73,29 @@ function computeDeposit(total: number, pct: number): number {
   return Math.round(total * (safe / 100) * 100) / 100;
 }
 
+function displayLabel(d: SectionDisplay): string {
+  return d === 'hidden' ? 'hidden' : d === 'itemsOnly' ? 'items only' : 'full';
+}
+
 function buildSummary({
   showMarkup,
-  showMaterialCosts,
-  showLaborCosts,
+  materialsDisplay,
+  laborDisplay,
   requireDeposit,
   depositPercentage,
   depositAmount,
 }: {
   showMarkup: boolean;
-  showMaterialCosts: boolean;
-  showLaborCosts: boolean;
+  materialsDisplay: SectionDisplay;
+  laborDisplay: SectionDisplay;
   requireDeposit: boolean;
   depositPercentage: number;
   depositAmount: number;
 }): string {
-  const hidden: string[] = [];
-  if (!showMarkup) hidden.push('markup');
-  if (!showMaterialCosts) hidden.push('materials');
-  if (!showLaborCosts) hidden.push('labour');
-
   const parts: string[] = [];
-  parts.push(hidden.length === 0 ? 'All breakdowns shown' : `Hidden: ${hidden.join(', ')}`);
+  parts.push(
+    `Materials ${displayLabel(materialsDisplay)} · Labour ${displayLabel(laborDisplay)}${showMarkup ? '' : ' · markup hidden'}`,
+  );
 
   if (requireDeposit && depositPercentage > 0) {
     parts.push(
@@ -105,8 +112,8 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
     mode,
     total,
     showMarkup,
-    showMaterialCosts,
-    showLaborCosts,
+    materialsDisplay,
+    laborDisplay,
     requireDeposit,
     depositPercentage,
     onChange,
@@ -193,18 +200,22 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
         onValueChange={(v) => onChange({ showMarkup: v })}
       />
       <Divider style={styles.rowDivider} />
-      <ToggleRow
-        title={`Show material breakdown on ${docLabel}`}
-        subtitle="When off, the materials breakdown and subtotal are hidden. Turn both this and labour off to show only the grand total."
-        value={showMaterialCosts}
-        onValueChange={(v) => onChange({ showMaterialCosts: v })}
+      <SegmentedRow
+        title={`Materials on ${docLabel}`}
+        subtitle="Full shows item prices. Items only shows the list without prices. Hidden removes the section entirely."
+        value={materialsDisplay}
+        onValueChange={(v) =>
+          onChange({ materialsDisplay: v, showMaterialCosts: v !== 'hidden' })
+        }
       />
       <Divider style={styles.rowDivider} />
-      <ToggleRow
-        title={`Show labour breakdown on ${docLabel}`}
-        subtitle="When off, the labour breakdown and subtotal are hidden. Turn both this and materials off to show only the grand total."
-        value={showLaborCosts}
-        onValueChange={(v) => onChange({ showLaborCosts: v })}
+      <SegmentedRow
+        title={`Labour on ${docLabel}`}
+        subtitle="Full shows labour costs. Items only shows the work without costs. Hidden removes the section entirely."
+        value={laborDisplay}
+        onValueChange={(v) =>
+          onChange({ laborDisplay: v, showLaborCosts: v !== 'hidden' })
+        }
       />
 
       <View style={styles.depositSection}>
@@ -277,8 +288,8 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
   if (variant === 'collapsible') {
     const summary = buildSummary({
       showMarkup,
-      showMaterialCosts,
-      showLaborCosts,
+      materialsDisplay,
+      laborDisplay,
       requireDeposit,
       depositPercentage,
       depositAmount: requireDeposit
@@ -382,6 +393,35 @@ function ToggleRow({
   );
 }
 
+function SegmentedRow({
+  title,
+  subtitle,
+  value,
+  onValueChange,
+}: {
+  title: string;
+  subtitle: string;
+  value: SectionDisplay;
+  onValueChange: (v: SectionDisplay) => void;
+}) {
+  return (
+    <View style={styles.segmentedRow}>
+      <Text style={styles.toggleTitle}>{title}</Text>
+      <Text style={styles.toggleSubtitle}>{subtitle}</Text>
+      <SegmentedButtons
+        value={value}
+        onValueChange={(v) => onValueChange(v as SectionDisplay)}
+        style={styles.segmentedButtons}
+        buttons={[
+          { value: 'full', label: 'Full' },
+          { value: 'itemsOnly', label: 'Items' },
+          { value: 'hidden', label: 'Hidden' },
+        ]}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   surface: {
     marginBottom: 12,
@@ -426,6 +466,12 @@ const styles = StyleSheet.create({
   },
   toggleRowDense: {
     paddingVertical: 10,
+  },
+  segmentedRow: {
+    paddingVertical: 14,
+  },
+  segmentedButtons: {
+    marginTop: 10,
   },
   toggleText: {
     flex: 1,

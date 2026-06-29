@@ -23,6 +23,7 @@ import { Platform, Alert } from 'react-native';
 import {
   buildQuotePdfHtml,
   buildInvoicePdfHtml,
+  resolveDisplay,
   QuotePdfData,
   InvoicePdfData,
   BusinessPdfData,
@@ -229,6 +230,14 @@ export async function generateDocumentPDF(
       showLaborCosts: doc.showLaborCosts !== undefined
         ? doc.showLaborCosts
         : businessSettings?.showLaborCostsByDefault !== false,
+      materialsDisplay: resolveDisplay(
+        doc.materialsDisplay ?? businessSettings?.materialsDisplayByDefault,
+        doc.showMaterialCosts ?? businessSettings?.showMaterialCostsByDefault,
+      ),
+      laborDisplay: resolveDisplay(
+        doc.laborDisplay ?? businessSettings?.laborDisplayByDefault,
+        doc.showLaborCosts ?? businessSettings?.showLaborCostsByDefault,
+      ),
       travelAdjustment: doc.travelAdjustment,
       gst: doc.gst,
       total: doc.total,
@@ -290,6 +299,14 @@ export async function generateDocumentPDF(
     showLaborCosts: doc.showLaborCosts !== undefined
       ? doc.showLaborCosts
       : businessSettings?.showLaborCostsByDefault !== false,
+    materialsDisplay: resolveDisplay(
+      doc.materialsDisplay ?? businessSettings?.materialsDisplayByDefault,
+      doc.showMaterialCosts ?? businessSettings?.showMaterialCostsByDefault,
+    ),
+    laborDisplay: resolveDisplay(
+      doc.laborDisplay ?? businessSettings?.laborDisplayByDefault,
+      doc.showLaborCosts ?? businessSettings?.showLaborCostsByDefault,
+    ),
     travelAdjustment: doc.travelAdjustment,
     gst: doc.gst,
     total: doc.total,

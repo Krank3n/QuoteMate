@@ -3,7 +3,7 @@
  * Used by both client (Expo Print) and server (Puppeteer) renderers
  */
 
-import { PdfMaterial, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId } from './types';
+import { PdfMaterial, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId, SectionDisplay, resolveDisplay } from './types';
 import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
@@ -101,15 +101,29 @@ export function generateMaterialsHTML(
   materials: PdfMaterial[],
   groupBySection: boolean,
   markupPercent: number = 0,
+  mode: SectionDisplay = 'full',
 ): string {
   if (materials.length === 0) {
     return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>`;
   }
 
+  // 'itemsOnly' strips every price: no Unit Price / Total columns, no
+  // per-section subtotals, no Materials Subtotal footer. Item names and
+  // quantities remain so the customer still sees the scope.
+  const itemsOnly = mode === 'itemsOnly';
+
   const multiplier = markupPercent > 0 ? (1 + markupPercent / 100) : 1;
   const displaySubtotal = sumRoundedLineTotals(materials, multiplier);
 
-  const tableHeader = `
+  const tableHeader = itemsOnly
+    ? `
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Quantity</th>
+      </tr>
+    </thead>`
+    : `
     <thead>
       <tr>
         <th>Item</th>
@@ -119,7 +133,13 @@ export function generateMaterialsHTML(
       </tr>
     </thead>`;
 
-  const materialRow = (m: PdfMaterial) => `
+  const materialRow = (m: PdfMaterial) => itemsOnly
+    ? `
+    <tr>
+      <td>${m.name}</td>
+      <td>${m.quantity} ${m.unit}</td>
+    </tr>`
+    : `
     <tr>
       <td>${m.name}</td>
       <td>${m.quantity} ${m.unit}</td>
@@ -135,10 +155,10 @@ export function generateMaterialsHTML(
         ${tableHeader}
         <tbody>
           ${materials.map(materialRow).join('')}
-          <tr class="total-row">
+          ${itemsOnly ? '' : `<tr class="total-row">
             <td colspan="3">Materials Subtotal</td>
             <td>${formatCurrency(displaySubtotal)}</td>
-          </tr>
+          </tr>`}
         </tbody>
       </table>`;
   }
@@ -168,26 +188,27 @@ export function generateMaterialsHTML(
       <table>
         <thead>
           <tr>
-            <th colspan="4" class="section-label">${sectionName}</th>
+            <th colspan="${itemsOnly ? 2 : 4}" class="section-label">${sectionName}</th>
           </tr>
           <tr>
             <th>Item</th>
             <th>Quantity</th>
-            <th>Unit Price</th>
-            <th>Total</th>
+            ${itemsOnly ? '' : `<th>Unit Price</th>
+            <th>Total</th>`}
           </tr>
         </thead>
         <tbody>
           ${sectionMaterials.map(materialRow).join('')}
-          <tr class="total-row">
+          ${itemsOnly ? '' : `<tr class="total-row">
             <td colspan="3">${sectionName} Subtotal</td>
             <td>${formatCurrency(sectionTotal)}</td>
-          </tr>
+          </tr>`}
         </tbody>
       </table>`;
   });
 
-  html += `
+  if (!itemsOnly) {
+    html += `
     <table>
       <tbody>
         <tr class="total-row">
@@ -196,6 +217,7 @@ export function generateMaterialsHTML(
         </tr>
       </tbody>
     </table>`;
+  }
 
   return html;
 }
@@ -336,11 +358,14 @@ export function generatePaymentMethodsHTML(
  * and an optional "General Labour" row for any extra hours added on top of
  * the section sums (laborExtraHours).
  */
-function buildLaborHTML(data: QuotePdfData): string {
+function buildLaborHTML(data: QuotePdfData, mode: SectionDisplay = 'full'): string {
   const hasSections = !!(data.sections && data.sections.length > 0);
   // When the user has hidden the breakdown, collapse sections to a single
   // "Labour" row showing only the total — no per-section rows.
   const showBreakdown = data.showLaborBreakdown !== false;
+  // 'itemsOnly' strips every dollar amount: no cost column, no Labour Total
+  // row, and the hours detail omits the per-hour rate (which would leak cost).
+  const itemsOnly = mode === 'itemsOnly';
   const extra = data.laborExtraHours || 0;
   // Labor markup is rolled into displayed labour prices unless the user has
   // opted into showing markup as a separate line on the document.
@@ -355,9 +380,14 @@ function buildLaborHTML(data: QuotePdfData): string {
   // so the customer-facing label still reads sensibly.
   const extraLabel = extra >= 0 ? 'General Labour' : 'Labour Adjustment';
   const extraDetails = data.showLaborHours
-    ? ` (${extra > 0 ? '+' : ''}${extra} ${extraUnitLabel} @ ${formatCurrency(extraRate * laborMul)}${extraRateLabel})`
+    ? itemsOnly
+      ? ` (${extra > 0 ? '+' : ''}${extra} ${extraUnitLabel})`
+      : ` (${extra > 0 ? '+' : ''}${extra} ${extraUnitLabel} @ ${formatCurrency(extraRate * laborMul)}${extraRateLabel})`
     : '';
   const displayLaborTotal = data.laborTotal * laborMul;
+  // Right-hand cost cell — suppressed entirely in itemsOnly mode.
+  const costCell = (amount: number) =>
+    itemsOnly ? '' : `<td style="text-align: right;">${formatCurrency(amount)}</td>`;
 
   // Collapsed view: a single "Labour" row with the displayed total.
   if (hasSections && !showBreakdown) {
@@ -368,7 +398,7 @@ function buildLaborHTML(data: QuotePdfData): string {
           <tbody>
             <tr>
               <td>Labour</td>
-              <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
+              ${costCell(displayLaborTotal)}
             </tr>
           </tbody>
         </table>
@@ -388,19 +418,24 @@ function buildLaborHTML(data: QuotePdfData): string {
                 typeof s.laborHoursTotal === 'number'
                   ? s.laborHoursTotal
                   : Math.round((s.laborHours || 0) * (s.multiplier || 1) * 100) / 100;
+              const sName = data.showLaborHours
+                ? itemsOnly
+                  ? `${s.name} (${sTotalUnits} ${sLabel})`
+                  : `${s.name} (${sTotalUnits} ${sLabel} @ ${formatCurrency(s.laborRate * laborMul)}${sRate})`
+                : s.name;
               return `<tr>
-                <td>${data.showLaborHours ? `${s.name} (${sTotalUnits} ${sLabel} @ ${formatCurrency(s.laborRate * laborMul)}${sRate})` : s.name}</td>
-                <td style="text-align: right;">${formatCurrency(s.laborTotal * laborMul)}</td>
+                <td>${sName}</td>
+                ${costCell(s.laborTotal * laborMul)}
               </tr>`;
             }).join('') : `<tr>
-              <td>${data.showLaborHours && data.laborHours && data.laborRate ? `Labour (${data.laborHours} ${(data.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(data.laborRate * laborMul)}${(data.laborUnit || 'hours') === 'days' ? '/day' : '/hr'})` : 'Labour'}</td>
-              <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
+              <td>${data.showLaborHours && data.laborHours && data.laborRate ? (itemsOnly ? `Labour (${data.laborHours} ${(data.laborUnit || 'hours') === 'days' ? 'days' : 'hours'})` : `Labour (${data.laborHours} ${(data.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(data.laborRate * laborMul)}${(data.laborUnit || 'hours') === 'days' ? '/day' : '/hr'})`) : 'Labour'}</td>
+              ${costCell(displayLaborTotal)}
             </tr>`}
             ${hasSections && extra !== 0 ? `<tr>
               <td>${extraLabel}${extraDetails}</td>
-              <td style="text-align: right;">${formatCurrency(extra * extraRate * laborMul)}</td>
+              ${costCell(extra * extraRate * laborMul)}
             </tr>` : ''}
-            ${hasSections ? `<tr class="total-row">
+            ${hasSections && !itemsOnly ? `<tr class="total-row">
               <td>Labour Total</td>
               <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
             </tr>` : ''}
@@ -430,14 +465,15 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   const subtotalLabel = inclusive ? 'Subtotal' : 'Subtotal (ex GST)';
   const gstLabel = inclusive ? 'Includes GST' : 'GST (10%)';
 
-  // Per-section visibility. When materials/labour costs are hidden, the
-  // corresponding subtotal row in the summary is hidden too. When BOTH are
-  // hidden, the Subtotal row is also dropped so the customer sees only the
-  // grand TOTAL (with GST disclosure). Subtotal/GST/Total still reconcile
-  // because displaySubtotal is computed regardless.
-  const showMaterials = data.showMaterialCosts !== false;
-  const showLabor = data.showLaborCosts !== false;
-  const showSubtotalLine = showMaterials || showLabor;
+  // Per-section visibility. The Materials Subtotal / Labour summary rows show
+  // their dollar amount only when that section is in 'full' display — under
+  // 'itemsOnly' or 'hidden' the per-section amount is suppressed. The Subtotal
+  // row ALWAYS renders (it discloses the ex/inc-GST base), and reconciles
+  // because displaySubtotal is computed regardless of section visibility.
+  const effMaterials = resolveDisplay(data.materialsDisplay, data.showMaterialCosts);
+  const effLabor = resolveDisplay(data.laborDisplay, data.showLaborCosts);
+  const showMaterials = effMaterials === 'full';
+  const showLabor = effLabor === 'full';
 
   return `
       <div class="summary">
@@ -453,12 +489,10 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
           <span>${formatCurrency(displayLaborTotal)}</span>
         </div>
         ` : ''}
-        ${showSubtotalLine ? `
         <div class="summary-row">
           <span>${subtotalLabel}</span>
           <span>${formatCurrency(displaySubtotal)}</span>
         </div>
-        ` : ''}
         ${!rollMarkup && data.markupAmount > 0 ? `
         <div class="summary-row">
           <span>Markup</span>
@@ -509,8 +543,10 @@ export function buildQuotePdfHtml(
 ): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
   const rollMarkup = quote.showMarkup !== true && quote.markup > 0;
-  const showMaterials = quote.showMaterialCosts !== false;
-  const showLabor = quote.showLaborCosts !== false;
+  const materialsDisplay = resolveDisplay(quote.materialsDisplay, quote.showMaterialCosts);
+  const laborDisplay = resolveDisplay(quote.laborDisplay, quote.showLaborCosts);
+  const showMaterials = materialsDisplay !== 'hidden';
+  const showLabor = laborDisplay !== 'hidden';
   const watermark = options?.watermark;
 
   return `
@@ -564,11 +600,11 @@ export function buildQuotePdfHtml(
       ${showMaterials ? `
       <div class="section-wrapper">
         <h3>Materials</h3>
-        ${generateMaterialsHTML(quote.materials, quote.groupMaterialsBySection === true, rollMarkup ? quote.markup : 0)}
+        ${generateMaterialsHTML(quote.materials, quote.groupMaterialsBySection === true, rollMarkup ? quote.markup : 0, materialsDisplay)}
       </div>
       ` : ''}
 
-      ${showLabor ? buildLaborHTML(quote) : ''}
+      ${showLabor ? buildLaborHTML(quote, laborDisplay) : ''}
 
       ${buildSummaryHTML(quote)}
 
@@ -601,8 +637,10 @@ export function buildInvoicePdfHtml(
 ): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
   const rollMarkup = invoice.showMarkup !== true && invoice.markup > 0;
-  const showMaterials = invoice.showMaterialCosts !== false;
-  const showLabor = invoice.showLaborCosts !== false;
+  const materialsDisplay = resolveDisplay(invoice.materialsDisplay, invoice.showMaterialCosts);
+  const laborDisplay = resolveDisplay(invoice.laborDisplay, invoice.showLaborCosts);
+  const showMaterials = materialsDisplay !== 'hidden';
+  const showLabor = laborDisplay !== 'hidden';
   const watermark = options?.watermark;
 
   const paidAmount = invoice.paidAmount || 0;
@@ -661,11 +699,11 @@ export function buildInvoicePdfHtml(
       ${showMaterials ? `
       <div class="section-wrapper">
         <h3>Materials</h3>
-        ${generateMaterialsHTML(invoice.materials, invoice.groupMaterialsBySection === true, rollMarkup ? invoice.markup : 0)}
+        ${generateMaterialsHTML(invoice.materials, invoice.groupMaterialsBySection === true, rollMarkup ? invoice.markup : 0, materialsDisplay)}
       </div>
       ` : ''}
 
-      ${showLabor ? buildLaborHTML(invoice) : ''}
+      ${showLabor ? buildLaborHTML(invoice, laborDisplay) : ''}
 
       ${buildSummaryHTML(invoice, paidAmount, amountDue, invoice.depositCredit)}
 
