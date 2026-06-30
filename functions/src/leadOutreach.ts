@@ -2180,41 +2180,58 @@ export const weeklyLeadDiscovery = functions
         await ref.set(updates, { merge: true });
         enriched++;
       }
+    }
 
-      if (cfg.autoGenerate) {
-        for (const leadId of totalCreated) {
-          const ref = db().doc(`leads/${leadId}`);
-          const snap = await ref.get();
-          if (!snap.exists) continue;
-          const lead: any = snap.data();
-          if (lead.status !== 'researched') continue;
-          // Only auto-generate if we have an email AND meaningful enrichment
-          if (!lead.email) continue;
-          if (lead.enrichmentConfidence === 'low') continue;
+    // Generate messages + queue. Runs INDEPENDENTLY of whether this run created
+    // new leads — otherwise a week where discovery dedupes everything (e.g.
+    // Sydney exhausted) leaves the queue empty and 0 sends. We sweep the whole
+    // 'researched' backlog (oldest first), not just leads created this run, so
+    // stranded leads from earlier weeks actually get queued. Capped per run to
+    // bound Claude cost; the auto-sender trickles them out under its daily cap.
+    if (cfg.autoGenerate) {
+      const genCap = Math.max(cfg.targetPerWeek, 50);
+      // Query by status only (no composite index needed) and sort oldest-first
+      // in memory — the researched backlog is at most a few hundred docs.
+      const backlogSnap = await db().collection('leads')
+        .where('status', '==', 'researched')
+        .get();
+      const backlogDocs = backlogSnap.docs.sort((a, b) => {
+        const am = (a.data() as any)?.enrichedAt?.toMillis?.() ?? 0;
+        const bm = (b.data() as any)?.enrichedAt?.toMillis?.() ?? 0;
+        return am - bm;
+      });
+      for (const d of backlogDocs) {
+        if (generated >= genCap) break;
+        const ref = d.ref;
+        const lead: any = d.data();
+        // Only auto-generate if we have an email AND meaningful enrichment, and
+        // we haven't already written a message for this lead.
+        if (!lead.email) continue;
+        if (lead.enrichmentConfidence === 'low') continue;
+        if (lead.generatedSubject && lead.generatedBody) continue;
 
-          const msg = await claudeGenerateMessage({
-            businessName: lead.businessName,
-            ownerName: lead.ownerName || null,
-            ownerNameSource: lead.ownerNameSource || null,
-            enrichmentConfidence: lead.enrichmentConfidence || null,
-            trade: lead.trade as Trade,
-            suburb: lead.suburb,
-            hooks: lead.personalizationHooks || [],
-            enrichmentSummary: lead.enrichmentSummary || '',
-          });
-          if (!msg || !msg.subject || !msg.body) continue;
-          const cleanBody = msg.body.replace(/\bAI\b/g, 'smart');
-          const cleanSubject = msg.subject.replace(/\bAI\b/g, 'smart');
-          await ref.set({
-            generatedSubject: cleanSubject,
-            generatedBody: cleanBody,
-            generatedBodyVersion: admin.firestore.FieldValue.increment(1),
-            generatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            status: 'queued' as LeadStatus,
-            queuedAt: admin.firestore.FieldValue.serverTimestamp(),
-          }, { merge: true });
-          generated++;
-        }
+        const msg = await claudeGenerateMessage({
+          businessName: lead.businessName,
+          ownerName: lead.ownerName || null,
+          ownerNameSource: lead.ownerNameSource || null,
+          enrichmentConfidence: lead.enrichmentConfidence || null,
+          trade: lead.trade as Trade,
+          suburb: lead.suburb,
+          hooks: lead.personalizationHooks || [],
+          enrichmentSummary: lead.enrichmentSummary || '',
+        });
+        if (!msg || !msg.subject || !msg.body) continue;
+        const cleanBody = msg.body.replace(/\bAI\b/g, 'smart');
+        const cleanSubject = msg.subject.replace(/\bAI\b/g, 'smart');
+        await ref.set({
+          generatedSubject: cleanSubject,
+          generatedBody: cleanBody,
+          generatedBodyVersion: admin.firestore.FieldValue.increment(1),
+          generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          status: 'queued' as LeadStatus,
+          queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        generated++;
       }
     }
 
