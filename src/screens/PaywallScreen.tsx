@@ -137,6 +137,7 @@ export function PaywallScreen() {
         localizedPrice: p.price,
         price: p.priceValue,
         currency: p.currency,
+        period: p.period, // 'monthly' | 'yearly' — used on web to match selectedPlan
       }));
       setProducts(formattedProducts as any);
     } catch (error: any) {
@@ -266,11 +267,13 @@ export function PaywallScreen() {
           return;
         }
 
-        const webProduct = products.length > 0 ? products[0] : {
-          productId: 'price_default',
-          title: 'Pro Monthly',
-          localizedPrice: '$49',
-        };
+        const webProduct =
+          products.find((p: any) => p.period === selectedPlan) ??
+          (products.length > 0 ? products[0] : {
+            productId: 'price_default',
+            title: 'Pro Monthly',
+            localizedPrice: '$49',
+          });
         setSelectedProduct(webProduct);
         setShowCheckoutModal(true);
         setIsUpgrading(false);
