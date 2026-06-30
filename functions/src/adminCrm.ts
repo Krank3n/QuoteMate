@@ -39,7 +39,8 @@ function requireAdmin(context: functions.https.CallableContext): string {
 //   - Client trial code (firestoreService.ts): isPro:false, NO platform, currentPeriodEnd stored as ISO STRING,
 //     plus trialStartedAt (ISO string). This accounts for 80 of the 82 docs.
 // "Canceled Pro" ≠ "trial expired" ≠ "free quota" — distinguish for the admin CRM.
-const TRIAL_DAYS = 7;
+// Must match src/utils/trialConfig.ts TRIAL_DAYS — update both together.
+const TRIAL_DAYS = 14;
 const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
 
 // Monthly-equivalent AUD we actually bill per subscription. Source of truth:
