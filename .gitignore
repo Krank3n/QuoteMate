@@ -62,8 +62,10 @@ android/app/release-new.keystore
 *.apk
 android/app/build/outputs/
 
-# iOS Provisioning Profiles
+# iOS Provisioning Profiles & App Store Connect API keys
 *.mobileprovision
+*.p8
+AuthKey_*.p8
 
 # Claude Code
 .claude/scheduled_tasks.lock

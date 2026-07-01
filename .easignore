@@ -22,6 +22,10 @@ android/app/release.keystore
 android/app/upload.keystore
 keystore.properties
 
+# App Store Connect API key — used by eas submit, not needed in the build tarball
+credentials/
+*.p8
+
 # Logs and temp files
 *.log
 npm-debug.log*

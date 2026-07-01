@@ -54,6 +54,16 @@ jobs:
         if: ${{ inputs.action == 'build' }}
         run: eas build --platform ${{ inputs.platform }} --profile ${{ inputs.profile }} --non-interactive --no-wait
 
+      # Restore the App Store Connect API key (.p8) from a repo secret so the iOS
+      # submit can authenticate to Apple non-interactively (no Apple ID / 2FA).
+      # The file is git-ignored, so it isn't in the checkout — we recreate it here.
+      # Secret: ASC_API_KEY_P8_BASE64 = `base64 -i credentials/AuthKey_MLTHZ74756.p8`
+      - name: Restore App Store Connect API key
+        if: ${{ inputs.action == 'submit' && (inputs.platform == 'ios' || inputs.platform == 'all') }}
+        run: |
+          mkdir -p credentials
+          echo "${{ secrets.ASC_API_KEY_P8_BASE64 }}" | base64 --decode > credentials/AuthKey_MLTHZ74756.p8
+
       # Submit the latest finished build to the stores (iOS → App Store review).
       - name: Submit
         if: ${{ inputs.action == 'submit' }}
