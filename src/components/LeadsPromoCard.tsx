@@ -2,7 +2,7 @@
  * LeadsPromoCard
  *
  * Dismissible promo on the Dashboard that pitches the call-answering service
- * (Katie) and taps through to the full pitch + interest form. Hides itself
+ * (Katie) and taps through to the full pitch + live demo call. Hides itself
  * once the user dismisses it or registers interest. Visibility state is
  * re-checked on screen focus so submitting on the detail screen makes the
  * card disappear when you come back.
@@ -54,7 +54,7 @@ export function LeadsPromoCard() {
         onPress={handleOpen}
         activeOpacity={0.85}
         accessibilityRole="button"
-        accessibilityLabel="Learn about never missing a call"
+        accessibilityLabel="Hear Katie answer a live demo call"
       >
         <Surface style={styles.card}>
           <View style={styles.iconCircle}>
@@ -63,7 +63,7 @@ export function LeadsPromoCard() {
           <View style={styles.text}>
             <Text style={styles.title}>Never miss a call</Text>
             <Text style={styles.subtitle} numberOfLines={2}>
-              Let Katie answer the calls you can’t — every missed call written up as a lead.
+              Hear it for yourself — Katie can call you in about 30 seconds, answering as your business.
             </Text>
           </View>
           <MaterialCommunityIcons name="chevron-right" size={24} color={colors.primary} />

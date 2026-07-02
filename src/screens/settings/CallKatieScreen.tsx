@@ -2,10 +2,12 @@
  * CallKatieScreen
  *
  * Settings → Integrations → "Never Miss a Call". Pitches the call-answering
- * service (Katie) and captures interest. The real phone setup is done by hand
- * for the first customers, so this screen's job is to explain the benefit and
- * collect enough detail for the founder to follow up — it doesn't wire up any
- * call routing itself.
+ * service (Katie) and lets the tradie hear it for themselves: one tap and Katie
+ * phones them within ~30 seconds, answering as THEIR business. After the demo
+ * call fires we hand off to CallKatie signup with their details pre-filled.
+ *
+ * "Prefer to talk to Tom first?" keeps the older white-glove interest form
+ * around as a secondary path (it emails the founder + stores the lead).
  *
  * Copy rule: describe what Katie *does* for the tradie. Never call it "AI".
  */
@@ -17,7 +19,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Platform,
+  Linking,
 } from 'react-native';
 import { Text, Surface, Title, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -28,6 +30,7 @@ import { RangeSlider } from '../../components/RangeSlider';
 import { AlertModal, AlertType } from '../../components/AlertModal';
 import { useStore } from '../../store/useStore';
 import { submitLeadInterest } from '../../services/leadInterest';
+import { requestKatieDemoCall, getKatieSignupLink } from '../../services/callKatieDemo';
 
 // "Missed money" calculator defaults/bounds. Tuned for a typical tradie:
 // a handful of missed calls a week, a job worth a few hundred up to several
@@ -46,11 +49,17 @@ function formatMoney(n: number): string {
   return '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+// Where the demo flow can be: waiting to ring, ringing, done (heard it), or
+// spent (hit the 2-call cap / partner rate limit). 'called' and 'limit' both
+// surface the "start your trial" conversion step.
+type DemoState = 'idle' | 'calling' | 'called' | 'limit';
+
 export function CallKatieScreen() {
   const businessSettings = useStore((s) => s.businessSettings);
 
   const [businessName, setBusinessName] = useState(businessSettings?.businessName || '');
   const [contactPhone, setContactPhone] = useState(businessSettings?.phone || '');
+  const website = (businessSettings?.website || '').trim();
   const [missedPerWeek, setMissedPerWeek] = useState(MISSED_CALLS_DEFAULT);
   const [jobValue, setJobValue] = useState(JOB_VALUE_DEFAULT);
   const [notes, setNotes] = useState('');
@@ -61,18 +70,73 @@ export function CallKatieScreen() {
   const lostPerYearRaw = missedPerWeek * 52 * jobValue * WIN_RATE;
   const lostPerYear = Math.round(lostPerYearRaw / 100) * 100;
   const lostPerMonth = Math.round(lostPerYearRaw / 12 / 50) * 50;
+
+  // Live demo state.
+  const [demoState, setDemoState] = useState<DemoState>('idle');
+  const [demoMessage, setDemoMessage] = useState('');
+  const [signupUrl, setSignupUrl] = useState<string | null>(null);
+  const [openingTrial, setOpeningTrial] = useState(false);
+
+  // Secondary "talk to Tom" interest form.
+  const [showInterest, setShowInterest] = useState(false);
   const [sending, setSending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+
   const [modal, setModal] = useState<{ visible: boolean; type: AlertType; title: string; message: string }>({
     visible: false, type: 'info', title: '', message: '',
   });
-
   const showModal = (type: AlertType, title: string, message: string) =>
     setModal({ visible: true, type, title, message });
 
-  const handleSubmit = async () => {
+  const handleDemoCall = async () => {
     if (!contactPhone.trim()) {
-      showModal('warning', 'Hold on', 'Pop in the best number to reach you on so we can get Katie set up.');
+      showModal('warning', 'Hold on', 'Pop in the number for Katie to ring so you can hear her in action.');
+      return;
+    }
+
+    setDemoState('calling');
+    try {
+      const result = await requestKatieDemoCall(contactPhone.trim());
+      if (result.status === 'success') {
+        setSignupUrl(result.signupUrl);
+        setDemoState('called');
+      } else if (result.status === 'limit') {
+        setDemoMessage(result.message);
+        setDemoState('limit');
+      } else {
+        setDemoState('idle');
+        showModal('error', 'Didn’t go through', result.message);
+      }
+    } catch {
+      setDemoState('idle');
+      showModal('error', 'Didn’t go through', 'Couldn’t reach Katie just now. Give it another crack in a sec.');
+    }
+  };
+
+  const handleStartTrial = async () => {
+    setOpeningTrial(true);
+    try {
+      // Ask the server for a fresh handoff link — this also records the tap so
+      // the recovery drip leaves them alone. Fall back to the URL we already
+      // have from the demo call so a hiccup never blocks signup.
+      let url: string;
+      try {
+        url = await getKatieSignupLink();
+      } catch {
+        if (!signupUrl) throw new Error('no-url');
+        url = signupUrl;
+      }
+      await Linking.openURL(url);
+    } catch {
+      showModal('error', 'Couldn’t open signup', 'Something went wrong opening the trial. Give it another go shortly.');
+    } finally {
+      setOpeningTrial(false);
+    }
+  };
+
+  const handleSubmitInterest = async () => {
+    if (!contactPhone.trim()) {
+      showModal('warning', 'Hold on', 'Pop in the best number to reach you on so Tom can get Katie set up.');
       return;
     }
 
@@ -94,6 +158,8 @@ export function CallKatieScreen() {
     }
   };
 
+  const conversion = demoState === 'called' || demoState === 'limit';
+
   return (
     <View style={styles.container}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
@@ -112,6 +178,104 @@ export function CallKatieScreen() {
               customer’s number, so a missed call never means a missed job.
             </Text>
           </Surface>
+
+          {/* Primary: hear it for yourself — live demo call → conversion */}
+          {conversion ? (
+            <Surface style={styles.demoCard}>
+              <View style={styles.demoIcon}>
+                <MaterialCommunityIcons
+                  name={demoState === 'called' ? 'phone-in-talk' : 'phone-check'}
+                  size={28}
+                  color={colors.primary}
+                />
+              </View>
+              {demoState === 'called' ? (
+                <>
+                  <Title style={styles.demoTitle}>Pick up — that’s Katie</Title>
+                  <Text style={styles.demoText}>
+                    She’s ringing {contactPhone.trim()} now, answering as{' '}
+                    {businessName.trim() || 'your business'}. Have a chat with her, ask about a job —
+                    that’s exactly what your customers will hear.
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Title style={styles.demoTitle}>You’ve heard her in action</Title>
+                  <Text style={styles.demoText}>{demoMessage}</Text>
+                </>
+              )}
+
+              <View style={styles.convertPanel}>
+                <Text style={styles.convertTitle}>Want her answering your real calls?</Text>
+                <Text style={styles.convertText}>
+                  Start your 14-day trial and Katie picks up every call you can’t.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.primaryButton, openingTrial && styles.buttonDisabled]}
+                  onPress={handleStartTrial}
+                  activeOpacity={0.85}
+                  disabled={openingTrial}
+                >
+                  {openingTrial ? (
+                    <ActivityIndicator size="small" color={colors.white} />
+                  ) : (
+                    <MaterialCommunityIcons name="rocket-launch" size={20} color={colors.white} />
+                  )}
+                  <Text style={styles.primaryButtonText}>
+                    {openingTrial ? 'Opening…' : 'Start your 14-day trial'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </Surface>
+          ) : (
+            <Surface style={styles.demoCard}>
+              <View style={styles.demoIcon}>
+                <MaterialCommunityIcons name="phone-ring" size={28} color={colors.primary} />
+              </View>
+              <Title style={styles.demoTitle}>Hear it for yourself</Title>
+              <Text style={styles.demoText}>
+                Tap below and Katie will call you in about 30 seconds — answering as your business,
+                just like she would for a real customer.
+              </Text>
+
+              <TextInput
+                label="Number for Katie to call"
+                mode="outlined"
+                style={styles.input}
+                placeholder="04xx xxx xxx"
+                keyboardType="phone-pad"
+                value={contactPhone}
+                onChangeText={setContactPhone}
+                disabled={demoState === 'calling'}
+              />
+
+              {!!website && (
+                <View style={styles.websiteRow}>
+                  <MaterialCommunityIcons name="web" size={16} color={colors.textSecondary} />
+                  <Text style={styles.websiteText}>
+                    She’ll bone up on <Text style={styles.websiteStrong}>{website}</Text> so she
+                    knows your business.
+                  </Text>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={[styles.primaryButton, demoState === 'calling' && styles.buttonDisabled]}
+                onPress={handleDemoCall}
+                activeOpacity={0.85}
+                disabled={demoState === 'calling'}
+              >
+                {demoState === 'calling' ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <MaterialCommunityIcons name="phone-plus" size={20} color={colors.white} />
+                )}
+                <Text style={styles.primaryButtonText}>
+                  {demoState === 'calling' ? 'Getting Katie on the line…' : 'Katie, call me in 30 seconds'}
+                </Text>
+              </TouchableOpacity>
+            </Surface>
+          )}
 
           {/* How it works */}
           <Surface style={styles.infoCard}>
@@ -133,7 +297,58 @@ export function CallKatieScreen() {
             />
           </Surface>
 
-          {/* Interest form OR submitted confirmation */}
+          {/* "Missed money" calculator — two sliders feed a live figure. */}
+          <Surface style={styles.card}>
+            <View style={styles.calcHeader}>
+              <MaterialCommunityIcons name="cash-multiple" size={18} color={colors.secondary} />
+              <Text style={styles.calcTitle}>What missed calls cost you</Text>
+            </View>
+
+            <View style={styles.sliderRow}>
+              <View style={styles.sliderLabelRow}>
+                <Text style={styles.sliderLabel}>Calls you miss a week</Text>
+                <Text style={styles.sliderValue}>{missedPerWeek}</Text>
+              </View>
+              <RangeSlider
+                min={0}
+                max={MISSED_CALLS_MAX}
+                step={1}
+                value={missedPerWeek}
+                onChange={setMissedPerWeek}
+              />
+            </View>
+
+            <View style={styles.sliderRow}>
+              <View style={styles.sliderLabelRow}>
+                <Text style={styles.sliderLabel}>What a typical job’s worth</Text>
+                <Text style={styles.sliderValue}>
+                  {formatMoney(jobValue)}{jobValue >= JOB_VALUE_MAX ? '+' : ''}
+                </Text>
+              </View>
+              <RangeSlider
+                min={JOB_VALUE_MIN}
+                max={JOB_VALUE_MAX}
+                step={JOB_VALUE_STEP}
+                value={jobValue}
+                onChange={setJobValue}
+              />
+            </View>
+
+            <View style={styles.resultPanel}>
+              <Text style={styles.resultLabel}>You could be missing out on</Text>
+              <Text style={styles.resultAmount}>{formatMoney(lostPerYear)}</Text>
+              <Text style={styles.resultPer}>
+                a year — about {formatMoney(lostPerMonth)} a month walking out the door
+              </Text>
+            </View>
+
+            <Text style={styles.calcCaption}>
+              Reckoned on even 1 in 3 of those callers booking the job. Katie answers them, so
+              you’re not the one who misses out.
+            </Text>
+          </Surface>
+
+          {/* Secondary: prefer a hand getting set up? Talk to Tom. */}
           {submitted ? (
             <Surface style={styles.doneCard}>
               <View style={styles.doneIcon}>
@@ -145,9 +360,9 @@ export function CallKatieScreen() {
                 now — keep on the tools.
               </Text>
             </Surface>
-          ) : (
+          ) : showInterest ? (
             <Surface style={styles.card}>
-              <Title style={styles.sectionTitle}>Keen to give it a crack?</Title>
+              <Title style={styles.sectionTitle}>Prefer to talk to Tom first?</Title>
               <Text style={styles.hint}>
                 Pop your details in and Tom’ll give you a bell to get Katie set up on your number.
                 No charge to have a chat.
@@ -171,57 +386,6 @@ export function CallKatieScreen() {
                 onChangeText={setContactPhone}
               />
 
-              {/* "Missed money" calculator — two sliders feed a live figure. */}
-              <View style={styles.calcCard}>
-                <View style={styles.calcHeader}>
-                  <MaterialCommunityIcons name="cash-multiple" size={18} color={colors.secondary} />
-                  <Text style={styles.calcTitle}>What missed calls cost you</Text>
-                </View>
-
-                <View style={styles.sliderRow}>
-                  <View style={styles.sliderLabelRow}>
-                    <Text style={styles.sliderLabel}>Calls you miss a week</Text>
-                    <Text style={styles.sliderValue}>{missedPerWeek}</Text>
-                  </View>
-                  <RangeSlider
-                    min={0}
-                    max={MISSED_CALLS_MAX}
-                    step={1}
-                    value={missedPerWeek}
-                    onChange={setMissedPerWeek}
-                  />
-                </View>
-
-                <View style={styles.sliderRow}>
-                  <View style={styles.sliderLabelRow}>
-                    <Text style={styles.sliderLabel}>What a typical job’s worth</Text>
-                    <Text style={styles.sliderValue}>
-                      {formatMoney(jobValue)}{jobValue >= JOB_VALUE_MAX ? '+' : ''}
-                    </Text>
-                  </View>
-                  <RangeSlider
-                    min={JOB_VALUE_MIN}
-                    max={JOB_VALUE_MAX}
-                    step={JOB_VALUE_STEP}
-                    value={jobValue}
-                    onChange={setJobValue}
-                  />
-                </View>
-
-                <View style={styles.resultPanel}>
-                  <Text style={styles.resultLabel}>You could be missing out on</Text>
-                  <Text style={styles.resultAmount}>{formatMoney(lostPerYear)}</Text>
-                  <Text style={styles.resultPer}>
-                    a year — about {formatMoney(lostPerMonth)} a month walking out the door
-                  </Text>
-                </View>
-
-                <Text style={styles.calcCaption}>
-                  Reckoned on even 1 in 3 of those callers booking the job. Katie answers them, so
-                  you’re not the one who misses out.
-                </Text>
-              </View>
-
               <TextInput
                 label="Anything else? (optional)"
                 mode="outlined"
@@ -234,24 +398,33 @@ export function CallKatieScreen() {
               />
 
               <TouchableOpacity
-                style={[styles.submitButton, (!contactPhone.trim() || sending) && styles.submitButtonDisabled]}
-                onPress={handleSubmit}
+                style={[styles.secondaryButton, (!contactPhone.trim() || sending) && styles.buttonDisabled]}
+                onPress={handleSubmitInterest}
                 activeOpacity={0.8}
                 disabled={sending}
               >
                 {sending ? (
-                  <ActivityIndicator size="small" color={colors.white} />
+                  <ActivityIndicator size="small" color={colors.primary} />
                 ) : (
-                  <MaterialCommunityIcons name="phone-plus" size={20} color={colors.white} />
+                  <MaterialCommunityIcons name="phone-plus" size={20} color={colors.primary} />
                 )}
-                <Text style={styles.submitButtonText}>{sending ? 'Sending…' : 'Register my interest'}</Text>
+                <Text style={styles.secondaryButtonText}>{sending ? 'Sending…' : 'Register my interest'}</Text>
               </TouchableOpacity>
             </Surface>
+          ) : (
+            <TouchableOpacity
+              style={styles.talkLink}
+              onPress={() => setShowInterest(true)}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons name="account-voice" size={18} color={colors.primary} />
+              <Text style={styles.talkLinkText}>Prefer to talk to Tom first?</Text>
+            </TouchableOpacity>
           )}
 
           <Text style={styles.footnote}>
-            Your details go straight to Tom, the developer. No call centres, no spam — just a hand
-            getting it set up right.
+            Katie calls Australian numbers only. No call centres, no spam — just a missed call
+            turned into a lead.
           </Text>
         </WebContainer>
       </ScrollView>
@@ -325,6 +498,98 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginTop: 8,
   },
+  demoCard: {
+    padding: 22,
+    marginBottom: 16,
+    borderRadius: 16,
+    elevation: 2,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.primary + '33',
+    alignItems: 'center',
+  },
+  demoIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primaryBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  demoTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.text,
+    textAlign: 'center',
+  },
+  demoText: {
+    fontSize: 14,
+    color: colors.onSurface,
+    textAlign: 'center',
+    lineHeight: 21,
+    marginTop: 6,
+    marginBottom: 16,
+  },
+  websiteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+    marginBottom: 16,
+  },
+  websiteText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  websiteStrong: {
+    fontWeight: '700',
+    color: colors.text,
+  },
+  convertPanel: {
+    alignSelf: 'stretch',
+    marginTop: 6,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.outline + '30',
+    alignItems: 'center',
+  },
+  convertTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+    textAlign: 'center',
+  },
+  convertText: {
+    fontSize: 13,
+    color: colors.onSurface,
+    textAlign: 'center',
+    lineHeight: 19,
+    marginTop: 4,
+    marginBottom: 14,
+  },
+  primaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    backgroundColor: colors.primary,
+    paddingVertical: 16,
+    borderRadius: 12,
+    gap: 8,
+  },
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
   infoCard: {
     padding: 18,
     marginBottom: 16,
@@ -386,15 +651,7 @@ const styles = StyleSheet.create({
   input: {
     marginBottom: 16,
     backgroundColor: colors.surface,
-  },
-  calcCard: {
-    marginTop: 4,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 14,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.outline + '30',
+    alignSelf: 'stretch',
   },
   calcHeader: {
     flexDirection: 'row',
@@ -460,23 +717,36 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: 12,
   },
-  submitButton: {
+  secondaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primary,
-    paddingVertical: 16,
+    backgroundColor: colors.primaryBg,
+    borderWidth: 1,
+    borderColor: colors.primary + '55',
+    paddingVertical: 15,
     borderRadius: 12,
-    marginTop: 20,
+    marginTop: 4,
     gap: 8,
   },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
-  submitButtonText: {
-    fontSize: 16,
+  secondaryButtonText: {
+    fontSize: 15,
     fontWeight: '700',
-    color: colors.white,
+    color: colors.primary,
+  },
+  talkLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    marginBottom: 8,
+  },
+  talkLinkText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.primary,
+    textDecorationLine: 'underline',
   },
   doneCard: {
     padding: 24,
