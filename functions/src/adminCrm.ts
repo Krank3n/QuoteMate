@@ -16,6 +16,17 @@ import {
   stageToInvoiceStatus,
 } from './shared/document/adapter';
 import type { DocumentStage, DocumentType } from './shared/document/types';
+// Subscription tier/status/billing derivation lives in a dependency-free module
+// so the admin CRM callables and the funnel analytics helpers share one source
+// of truth (and the latter stays unit-testable without firebase). See
+// subscription.helpers.ts.
+import { ts, deriveSubFields } from './subscription.helpers';
+import {
+  computeFunnelStats,
+  isActivatingDoc,
+  type FunnelUserInput,
+  type FunnelPayload,
+} from './adminFunnel.helpers';
 
 const db = () => admin.firestore();
 
@@ -30,130 +41,6 @@ function requireAdmin(context: functions.https.CallableContext): string {
     throw new functions.https.HttpsError('permission-denied', 'Admin access required.');
   }
   return uid;
-}
-
-// Subscription data lives at users/{uid}/profile/subscription — NOT at top-level
-// subscriptions/{uid} (which is empty in this app). Field shape varies by source:
-//   - Stripe webhook sets: isPro, platform:'web', cancelAtPeriodEnd, currentPeriod*, subscriptionId, customerId
-//   - Apple/Google validate: isPro:true, platform:'ios'|'android', currentPeriodEnd (Date)
-//   - Client trial code (firestoreService.ts): isPro:false, NO platform, currentPeriodEnd stored as ISO STRING,
-//     plus trialStartedAt (ISO string). This accounts for 80 of the 82 docs.
-// "Canceled Pro" ≠ "trial expired" ≠ "free quota" — distinguish for the admin CRM.
-// Must match src/utils/trialConfig.ts TRIAL_DAYS — update both together.
-const TRIAL_DAYS = 14;
-const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
-
-// Monthly-equivalent AUD we actually bill per subscription. Source of truth:
-// the live Stripe "Starter" prices ($49/mo, $328/yr); the iOS/Android yearly
-// SKUs are priced to match. Update here if prices change.
-const SUB_PRICE_AUD = { monthly: 49, yearly: 328 };
-
-// A subscription only contributes MRR if it's backed by a real billing record:
-// an app-store purchase (productId) or a Stripe subscription (subscriptionId /
-// priceId). Admin comps (platform 'admin_grant') and bare manual isPro flags
-// (owner / test / orphan accounts) have neither and bill $0 — counting them is
-// what inflated the old "9 × $29" estimate.
-function isBilledSub(sub: any): boolean {
-  if (!sub?.isPro) return false;
-  if (sub.platform === 'admin_grant') return false;
-  return !!(sub.productId || sub.subscriptionId || sub.priceId);
-}
-
-function subInterval(sub: any): 'yearly' | 'monthly' {
-  const i = String(sub?.interval || sub?.planInterval || '').toLowerCase();
-  if (i.startsWith('year') || i.startsWith('annual')) return 'yearly';
-  if (i.startsWith('month')) return 'monthly';
-  const sku = String(sub?.productId || sub?.priceId || '').toLowerCase();
-  if (sku.includes('year') || sku.includes('annual')) return 'yearly';
-  return 'monthly';
-}
-
-// Monthly recurring revenue this subscription represents (AUD), 0 if not billed.
-function monthlyRevenueAud(sub: any): number {
-  if (!isBilledSub(sub)) return 0;
-  return subInterval(sub) === 'yearly'
-    ? Math.round((SUB_PRICE_AUD.yearly / 12) * 100) / 100
-    : SUB_PRICE_AUD.monthly;
-}
-
-interface SubFields {
-  isPro: boolean;
-  canceling: boolean;
-  platform: string | null;
-  tier: 'pro' | 'pro_canceling' | 'trialing' | 'trial_expired' | 'free';
-  status: 'active' | 'canceling' | 'trialing' | 'trial_expired' | 'canceled' | 'free';
-  productId: string | null;
-  currentPeriodStart: number | null;
-  currentPeriodEnd: number | null;
-  validatedAt: number | null;
-  cancelAt: number | null;
-  trialStartedAt: number | null;
-  trialDaysRemaining: number | null;
-  billed: boolean;
-  interval: 'yearly' | 'monthly' | null;
-  monthlyAud: number;
-}
-
-function ts(v: any): number | null {
-  if (!v) return null;
-  if (typeof v === 'number') return v;
-  if (typeof v === 'string') {
-    const t = Date.parse(v);
-    return isNaN(t) ? null : t;
-  }
-  if (v._seconds) return v._seconds * 1000;
-  if (v.toMillis) return v.toMillis();
-  if (v instanceof Date) return v.getTime();
-  return null;
-}
-
-function deriveSubFields(sub: any | undefined | null): SubFields {
-  const isPro = !!sub?.isPro;
-  const canceling = isPro && !!sub?.cancelAtPeriodEnd;
-  const platform = sub?.platform || null;
-  const trialStartedAt = ts(sub?.trialStartedAt);
-  const now = Date.now();
-  const trialElapsed = trialStartedAt ? now - trialStartedAt : Infinity;
-  const inTrial = trialStartedAt !== null && trialElapsed < TRIAL_MS;
-  const trialDaysRemaining = inTrial ? Math.ceil((TRIAL_MS - trialElapsed) / (24 * 60 * 60 * 1000)) : null;
-
-  let tier: SubFields['tier'];
-  let status: SubFields['status'];
-  if (isPro) {
-    tier = canceling ? 'pro_canceling' : 'pro';
-    status = canceling ? 'canceling' : 'active';
-  } else if (inTrial) {
-    tier = 'trialing';
-    status = 'trialing';
-  } else if (trialStartedAt !== null && !inTrial) {
-    tier = 'trial_expired';
-    status = 'trial_expired';
-  } else if (platform === 'web' && sub?.subscriptionId) {
-    // Had a Stripe subscription that's no longer active = genuinely canceled Pro
-    tier = 'free';
-    status = 'canceled';
-  } else {
-    tier = 'free';
-    status = 'free';
-  }
-
-  return {
-    isPro,
-    canceling,
-    platform,
-    tier,
-    status,
-    productId: sub?.productId || null,
-    currentPeriodStart: ts(sub?.currentPeriodStart),
-    currentPeriodEnd: ts(sub?.currentPeriodEnd),
-    validatedAt: ts(sub?.validatedAt),
-    cancelAt: canceling ? ts(sub?.currentPeriodEnd) : null,
-    trialStartedAt,
-    trialDaysRemaining,
-    billed: isBilledSub(sub),
-    interval: isBilledSub(sub) ? subInterval(sub) : null,
-    monthlyAud: monthlyRevenueAud(sub),
-  };
 }
 
 // Returns a map of uid → raw sub data for every user with a subscription doc.
@@ -1877,6 +1764,87 @@ export const adminGetDocument = functions.https.onCall(async (data, context) => 
     document: cleaned,
   };
 });
+
+// ============================================================
+// BUSINESS HEALTH FUNNEL — signup → trial → sent quote → paying
+// ============================================================
+//
+// The founder's #1 metric is trial→paid conversion. adminFunnelStats joins
+// auth users + subscriptions + emailState + a single documents scan, then hands
+// the plain arrays to the pure helpers in adminFunnel.helpers.ts (unit tested).
+// Cached in adminStats/funnel with the same 15-min lazy-refresh pattern as
+// adminDashboardStats so the expensive scans run at most once every 15 minutes.
+
+// The full, uncached funnel computation. Thin wrapper: fetch, join, compute.
+async function computeFunnelPayload(): Promise<FunnelPayload> {
+  const firestore = db();
+  const now = Date.now();
+
+  const [authUsers, subs, emailStates, docsSnap] = await Promise.all([
+    listAllAuthUsers(),
+    fetchAllSubscriptions(),
+    fetchAllEmailStates(),
+    firestore.collectionGroup('documents').get(),
+  ]);
+
+  // One pass over every document: mark which uids have an activating (sent)
+  // doc — never a second documents scan.
+  const activatedUids = new Set<string>();
+  for (const d of docsSnap.docs) {
+    const uid = d.ref.parent.parent?.id;
+    if (!uid) continue;
+    if (isActivatingDoc(d.data() as any)) activatedUids.add(uid);
+  }
+
+  const inputs: FunnelUserInput[] = authUsers.map((u) => {
+    const es = emailStates.get(u.uid) || {};
+    const signupAt = ts(es.signupAt) || new Date(u.metadata.creationTime).getTime();
+    return {
+      uid: u.uid,
+      email: u.email || null,
+      businessName: u.displayName || null,
+      sub: subs.get(u.uid) || null,
+      signupAt,
+      lastActivityAt: ts(es.lastActivityAt),
+      hasSentDoc: activatedUids.has(u.uid),
+    };
+  });
+
+  return computeFunnelStats(inputs, now);
+}
+
+const FUNNEL_CACHE_TTL_MS = 15 * 60 * 1000;
+
+// Lazy-refresh cache wrapper, mirroring adminDashboardStats: serve
+// adminStats/funnel if generated within the last 15 minutes, else recompute and
+// refresh. Cache read/write failures never break the endpoint.
+export const adminFunnelStats = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .https.onCall(async (_data, context) => {
+    requireAdmin(context);
+    const cacheRef = db().collection('adminStats').doc('funnel');
+
+    try {
+      const cached = await cacheRef.get();
+      if (cached.exists) {
+        const data = cached.data() as any;
+        const generatedAt = typeof data?.generatedAt === 'number' ? data.generatedAt : 0;
+        if (data?.payload && Date.now() - generatedAt < FUNNEL_CACHE_TTL_MS) {
+          return { ...data.payload, cached: true };
+        }
+      }
+    } catch (err) {
+      console.error('adminFunnelStats cache read failed, computing live', err);
+    }
+
+    const result = await computeFunnelPayload();
+    try {
+      await cacheRef.set({ payload: result, generatedAt: Date.now() });
+    } catch (err) {
+      console.error('adminFunnelStats cache write failed', err);
+    }
+    return result;
+  });
 
 // ============================================================
 // MATE ASSISTANT CONVERSATIONS — transcripts for QA / accuracy tuning

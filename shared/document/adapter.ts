@@ -155,6 +155,10 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     notes: s.notes,
     draftEmailBody: s.draftEmailBody,
     draftEmailSubject: s.draftEmailSubject,
+    // First-send audit — shared across quote/invoice. Coerced to epoch-ms so
+    // a legacy Timestamp/Date/ISO sentAt lands as a number in the Document.
+    sentAt: toMs(s.sentAt),
+    sendMethod: s.sendMethod,
     paymentSyncError: s.paymentSyncError,
     disputeStatus: s.disputeStatus,
     disputeId: s.disputeId,
@@ -478,6 +482,8 @@ export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocument
     total: doc.total,
     sections: doc.sections,
     status: stageToQuoteStatus(doc.stage),
+    sentAt: doc.sentAt,
+    sendMethod: doc.sendMethod,
     draftStep: doc.draftStep,
     notes: doc.notes,
     aiSkipped: doc.aiSkipped,
@@ -587,6 +593,8 @@ export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocume
     showLaborCosts: doc.showLaborCosts,
     showLaborBreakdown: doc.showLaborBreakdown,
     status: stageToInvoiceStatus(doc.stage),
+    sentAt: doc.sentAt,
+    sendMethod: doc.sendMethod,
     paymentTerms: doc.paymentTerms ?? 'net_14',
     customPaymentDays: doc.customPaymentDays,
     paidDate: fromMs(paid?.paidAt),

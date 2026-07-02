@@ -1,6 +1,10 @@
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import { PASSTHROUGH_SURCHARGE_PCT } from './shared/pdf';
+import {
+  buildPaymentReceiptContentHtml,
+  PaymentReceiptContentInput,
+} from './paymentReceipt.helpers';
 
 // Brevo API configuration
 const getBrevoApiKey = (): string => {
@@ -205,7 +209,7 @@ function featureBullet(icon: string, text: string): string {
 }
 
 // Check if user has opted out of a given email category
-async function canSendEmail(userId: string, category: EmailCategory): Promise<boolean> {
+export async function canSendEmail(userId: string, category: EmailCategory): Promise<boolean> {
   if (category === 'transactional') return true; // Always send transactional
 
   try {
@@ -1244,6 +1248,43 @@ function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string;
   </table>
 </body>
 </html>`;
+}
+
+/**
+ * Customer-facing payment receipt, sent when a payment lands on an invoice
+ * (manual Record Payment or Square). Business-branded like the quote/invoice
+ * emails: the tradie's name is the sender and replies route to them.
+ */
+export function sendPaymentReceiptEmail(options: {
+  to: string;
+  userId: string;
+  business: { businessName?: string; brandColor?: string; logoUrl?: string };
+  replyToEmail?: string | null;
+  receipt: PaymentReceiptContentInput;
+}): Promise<boolean> {
+  const { to, userId, business, replyToEmail, receipt } = options;
+  const businessName = business.businessName || receipt.businessName;
+
+  const htmlContent = wrapQuoteEmailTemplate(buildPaymentReceiptContentHtml(receipt), {
+    brandColor: business.brandColor,
+    businessName,
+    logoUrl: business.logoUrl,
+    preheader: receipt.isFullyPaid
+      ? 'Your invoice is now paid in full.'
+      : 'Receipt for your payment.',
+  });
+
+  const invoiceRef = receipt.invoiceNumber ? ` — Invoice ${receipt.invoiceNumber}` : '';
+  return sendEmail({
+    to,
+    subject: `Receipt from ${businessName}${invoiceRef}`,
+    htmlContent,
+    category: 'transactional',
+    userId,
+    tags: ['payment-receipt'],
+    senderName: businessName,
+    replyTo: replyToEmail ? { email: replyToEmail, name: businessName } : undefined,
+  });
 }
 
 /**
@@ -2535,6 +2576,60 @@ export function sendDraftNudgeEmail(
     category: 'marketing',
     userId,
     tags: ['draft-nudge', `tier-${tier}`],
+    unsubscribeUrl,
+  });
+}
+
+/**
+ * Single-quote "ready to send" nudge: the quote is fully built (customer +
+ * materials, parked on the preview screen) but was never sent. Fires once per
+ * quote. Modelled on sendDraftNudgeEmail but scoped to one finished quote.
+ */
+export function sendReadyToSendNudgeEmail(
+  to: string,
+  businessName: string,
+  quote: { customerName?: string; quoteNumber?: string | null; total?: number },
+  daysOld: number,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const customerName = quote.customerName || 'your customer';
+  const total = quote.total || 0;
+  const formattedTotal = `$${total.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const ageText = daysOld <= 1 ? 'a day' : `${daysOld} days`;
+  // HTML-escaped variants for template interpolation; the subject stays raw
+  // (it's a plain-text header, not HTML).
+  const greeting = escapeHtml(businessName || "G'day");
+  const customerNameHtml = escapeHtml(customerName);
+  const quoteNumberHtml = escapeHtml(quote.quoteNumber || '');
+  const heading = quoteNumberHtml
+    ? `Quote ${quoteNumberHtml} for ${customerNameHtml} is built and ready`
+    : `Your quote for ${customerNameHtml} is built and ready`;
+
+  const content = wrapEmailTemplate(`
+    <div style="text-align:center;margin:0 0 24px;">
+      ${badge('READY TO SEND', '#78350f', '#e6b872')}
+    </div>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      ${greeting},
+    </p>
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;text-align:center;line-height:1.3;">
+      ${heading}
+    </h1>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;text-align:center;">
+      You built it ${ageText} ago and it hasn't gone out yet${total > 0 ? ` &mdash; that's <strong style="color:#f8fafc;">${formattedTotal}</strong> of work still sitting in your drafts` : ''}. Have a quick look and send it through.
+    </p>
+
+    ${ctaButton('Open in QuoteMate')}
+  `, { unsubscribeUrl, preheader: `Your quote for ${customerNameHtml} is built and ready to send${total > 0 ? ` &mdash; ${formattedTotal} of work still in drafts` : ''}.` });
+
+  return sendEmail({
+    to,
+    subject: `Your quote for ${customerName} is ready to send`,
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['ready-to-send-nudge'],
     unsubscribeUrl,
   });
 }

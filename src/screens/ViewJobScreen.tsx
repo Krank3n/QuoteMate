@@ -102,6 +102,7 @@ export function ViewJobScreen() {
   const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
   const { showAlert, dismissAlert, alertNode } = useAlertModal();
   const [convertSnackbar, setConvertSnackbar] = useState(false);
+  const [markedSentDocId, setMarkedSentDocId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState(job?.notes ?? '');
 
   useEffect(() => {
@@ -721,6 +722,38 @@ export function ViewJobScreen() {
     }
   };
 
+  // A silent SMS / Share / Export send moved the doc to its sent stage.
+  // Surface a Snackbar so the tradie sees the state change and can undo it
+  // (covers Android share-cancel / SMS-composer abandon marking sent falsely).
+  const handleMarkedSent = (doc: Document) => {
+    setMarkedSentDocId(doc.id);
+  };
+
+  const handleUndoMarkedSent = async () => {
+    const docId = markedSentDocId;
+    setMarkedSentDocId(null);
+    if (!docId) return;
+    // Rewind via the same path the StageSheet uses for a sent→draft downgrade.
+    // Look up the freshly-sent doc so its stamped sentAt/sendMethod ride along
+    // (undo restores only the stage/status; the audit fields stay).
+    const current = documents.find((d) => d.id === docId);
+    if (!current) return;
+    try {
+      await applyStageChange(current, 'draft', {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
+      });
+    } catch {
+      showAlert({
+        type: 'error',
+        title: 'Undo failed',
+        message: 'Something went wrong. Please try again.',
+      });
+    }
+  };
+
   const customerIsUnknown =
     !job.customerName || job.customerName.trim() === '' || job.customerName === 'Unknown customer';
 
@@ -876,6 +909,7 @@ export function ViewJobScreen() {
           onDismiss={() => setSendDialogDoc(null)}
           doc={sendDialogDoc}
           businessSettings={businessSettings}
+          onMarkedSent={handleMarkedSent}
         />
       ) : null}
 
@@ -901,6 +935,15 @@ export function ViewJobScreen() {
         duration={3000}
       >
         Converted to invoice
+      </Snackbar>
+
+      <Snackbar
+        visible={!!markedSentDocId}
+        onDismiss={() => setMarkedSentDocId(null)}
+        duration={6000}
+        action={{ label: 'Undo', onPress: handleUndoMarkedSent }}
+      >
+        Marked as sent
       </Snackbar>
 
     </View>

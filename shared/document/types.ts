@@ -20,6 +20,13 @@ export type DocumentStage =
 
 export type DocumentType = 'quote' | 'invoice';
 
+/**
+ * How a quote/invoice was delivered to the customer. Recorded alongside
+ * `sentAt` on the first send so the activity timeline can show not just when
+ * a doc went out but through which channel.
+ */
+export type SendMethod = 'email' | 'sms' | 'share' | 'export_pdf' | 'manual';
+
 export type DocumentPaymentKind = 'deposit' | 'balance' | 'manual';
 export type DocumentPaymentMethod = 'square' | 'bank' | 'cash' | 'other';
 

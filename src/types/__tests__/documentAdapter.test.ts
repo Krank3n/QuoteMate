@@ -300,6 +300,32 @@ describe('section labour round-trip', () => {
 
 });
 
+describe('first-send audit fields', () => {
+  it('projectShared carries sentAt+sendMethod', () => {
+    const doc = quoteToDocument(makeQuote({ sentAt: 1717200000000, sendMethod: 'sms' }));
+    expect(doc.sentAt).toBe(1717200000000);
+    expect(doc.sendMethod).toBe('sms');
+
+    const invDoc = invoiceToDocument(makeInvoice({ sentAt: 1717200000000, sendMethod: 'email' }));
+    expect(invDoc.sentAt).toBe(1717200000000);
+    expect(invDoc.sendMethod).toBe('email');
+  });
+
+  it('reverse adapters round-trip sentAt+sendMethod', () => {
+    const restoredQuote = documentToQuote(
+      quoteToDocument(makeQuote({ sentAt: 1717200000000, sendMethod: 'share' })),
+    );
+    expect(restoredQuote.sentAt).toBe(1717200000000);
+    expect(restoredQuote.sendMethod).toBe('share');
+
+    const restoredInvoice = documentToInvoice(
+      invoiceToDocument(makeInvoice({ sentAt: 1717200000000, sendMethod: 'export_pdf' })),
+    );
+    expect(restoredInvoice.sentAt).toBe(1717200000000);
+    expect(restoredInvoice.sendMethod).toBe('export_pdf');
+  });
+});
+
 describe('cross-type drop behaviour', () => {
   it('drops invoice-only fields when going document → quote', () => {
     const invoice = makeInvoice({ paymentTerms: 'net_30', xeroInvoiceId: 'xero-1' });

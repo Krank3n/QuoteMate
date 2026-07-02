@@ -16,10 +16,11 @@ import { useNavigation } from '@react-navigation/native';
 import { format } from 'date-fns';
 
 import { Quote, Invoice, BusinessSettings } from '../types';
-import { Document } from '../types/document';
+import { Document, SendMethod } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
+import { markDocumentSent } from '../utils/applyStageChange';
 import { useStore } from '../store/useStore';
 import { ensureCanDeliver } from '../utils/quoteDeliveryGuard';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
@@ -38,6 +39,13 @@ interface SendDocumentDialogProps {
   onDismiss: () => void;
   doc: Document;
   businessSettings: BusinessSettings | null;
+  /**
+   * Fired after a non-email send (SMS / Share / Export PDF) actually moves the
+   * doc out of draft into its sent stage. Hosts use this to surface a
+   * "Marked as sent" Snackbar with Undo. Not called on failure, nor when
+   * markDocumentSent no-ops because the doc had already left draft.
+   */
+  onMarkedSent?: (doc: Document, method: SendMethod) => void;
 }
 
 export function SendDocumentDialog({
@@ -45,13 +53,14 @@ export function SendDocumentDialog({
   onDismiss,
   doc,
   businessSettings,
+  onMarkedSent,
 }: SendDocumentDialogProps) {
   const navigation = useNavigation<any>();
   const isInvoice = doc.type === 'invoice';
   const quote: Quote = useMemo(() => documentToQuote(doc), [doc]);
   const invoice: Invoice = useMemo(() => documentToInvoice(doc), [doc]);
 
-  const { subscriptionStatus, saveDraft, saveInvoice } = useStore();
+  const { subscriptionStatus, saveDraft, saveQuote, saveInvoice, createInvoiceFromQuote } = useStore();
   const isTrialActive = !!(
     subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired
   );
@@ -236,6 +245,23 @@ export function SendDocumentDialog({
     onDismiss();
   };
 
+  // Record a non-email delivery (SMS / Share / Export) against the doc so its
+  // first-send audit is captured. Fully self-contained: a marking failure is
+  // swallowed — it must never surface an error to the user mid-send.
+  const recordSend = async (method: SendMethod) => {
+    // Only a doc still in draft actually transitions here; anything already
+    // sent/accepted no-ops inside markDocumentSent. Capture that up front so
+    // we only notify the host on a real draft→sent move (and never on failure).
+    const wasDraft = doc.stage === 'draft';
+    try {
+      await markDocumentSent(doc, method, { saveQuote, saveInvoice, createInvoiceFromQuote });
+    } catch {
+      // Best-effort audit; ignore.
+      return;
+    }
+    if (wasDraft) onMarkedSent?.(doc, method);
+  };
+
   const handleSendSMS = async () => {
     if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
@@ -248,6 +274,7 @@ export function SendDocumentDialog({
       : `sms:${phone}?body=${encodeURIComponent(message)}`;
     try {
       await Linking.openURL(url);
+      await recordSend('sms');
     } catch {
       Alert.alert('Error', 'Could not open SMS');
     }
@@ -261,7 +288,10 @@ export function SendDocumentDialog({
       const message = isInvoice
         ? `Invoice for ${invoice.customerName}\n${invoice.job.name}\nTotal: ${formatCurrency(invoice.total)}\nDue: ${format(new Date(invoice.dueDate), 'dd MMM yyyy')}`
         : `Quote for ${quote.customerName}\n${quote.job.name}\nTotal: ${formatCurrency(quote.total)}`;
-      await Share.share({ message, title: isInvoice ? 'Share Invoice' : 'Share Quote' });
+      const result = await Share.share({ message, title: isInvoice ? 'Share Invoice' : 'Share Quote' });
+      if (result.action === Share.sharedAction) {
+        await recordSend('share');
+      }
     } catch {
       Alert.alert('Error', `Could not share ${isInvoice ? 'invoice' : 'quote'}`);
     }
@@ -273,6 +303,7 @@ export function SendDocumentDialog({
     setActionSheetVisible(false);
     try {
       await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
+      await recordSend('export_pdf');
     } catch {
       Alert.alert('Error', 'Failed to export PDF. Please try again.');
     }

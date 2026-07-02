@@ -43,6 +43,7 @@ import type {
   DocumentPayment,
   DocumentPaymentLink,
   DocumentPaymentLinkKind,
+  SendMethod,
 } from './shared/document/types';
 
 type AnyData = Record<string, any>;
@@ -65,7 +66,7 @@ function isLikelyValidEmail(s: string): boolean {
  * the saved business email; falls back to the auth email when the business
  * email is missing or malformed. Returns null only when both are unusable.
  */
-async function resolveTradieReplyEmail(
+export async function resolveTradieReplyEmail(
   userId: string,
   businessEmail: string | undefined,
 ): Promise<string | null> {
@@ -217,6 +218,12 @@ export interface SetDocumentStageInput {
    * `updatedAt` is always stamped by this helper.
    */
   extraUpdates?: AnyData;
+  /**
+   * Delivery channel for a send transition. Only recorded when this call
+   * actually stamps a first-send `sentAt` (i.e. a real quote_sent/invoice_sent
+   * move), so it stays paired with the timestamp it describes.
+   */
+  sendMethod?: SendMethod;
 }
 
 export interface SetDocumentStageResult {
@@ -255,7 +262,7 @@ function recordStageViolation(
 export async function setDocumentStage(
   input: SetDocumentStageInput,
 ): Promise<SetDocumentStageResult> {
-  const { uid, docId, fromStage, toStage, reason, batch, extraUpdates } = input;
+  const { uid, docId, fromStage, toStage, reason, batch, extraUpdates, sendMethod } = input;
   const accepted = canTransition(fromStage, toStage);
   if (!accepted) {
     const callsite = new Error().stack;
@@ -268,9 +275,11 @@ export async function setDocumentStage(
     recordStageViolation(uid, docId, fromStage, toStage, reason, callsite);
   }
 
+  const transitions = stageTransitionTimestamps(fromStage, toStage);
   const update: AnyData = stripUndefined({
     ...(extraUpdates || {}),
-    ...stageTransitionTimestamps(fromStage, toStage),
+    ...transitions,
+    ...sendMethodPatch(transitions, sendMethod),
     stage: toStage,
     updatedAt: Date.now(),
   });
@@ -290,7 +299,7 @@ export async function setDocumentStage(
  * self-transitions don't reset the original timestamp) and only for the
  * field mapped to the incoming stage.
  */
-function stageTransitionTimestamps(
+export function stageTransitionTimestamps(
   fromStage: DocumentStage,
   toStage: DocumentStage,
 ): Record<string, number> {
@@ -310,6 +319,21 @@ function stageTransitionTimestamps(
     default:
       return {};
   }
+}
+
+/**
+ * Pair the delivery channel with the first-send timestamp. Returns
+ * `{ sendMethod }` only when this transition actually stamped a `sentAt`
+ * (a real quote_sent/invoice_sent move) AND a sendMethod was supplied —
+ * otherwise `{}`, so self-transitions and non-send stages never carry a
+ * stray sendMethod. Pure.
+ */
+export function sendMethodPatch(
+  transitions: Record<string, number>,
+  sendMethod: SendMethod | undefined,
+): { sendMethod?: SendMethod } {
+  if (transitions.sentAt !== undefined && sendMethod) return { sendMethod };
+  return {};
 }
 
 // ---------------------------------------------------------------------------
@@ -581,6 +605,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
   if (!isTestSend) {
     quoteUpdate.status = 'sent';
     quoteUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
+    quoteUpdate.sendMethod = 'email';
     quoteUpdate.aiEmailBody = emailBody;
     // Server-stamped updatedAt forces the client's mergeRemoteQuotes to
     // accept the 'sent' snapshot over its own in-flight saveDraft write.
@@ -596,6 +621,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
       toStage: 'quote_sent',
       reason: 'sendDocumentEmail:quote',
       batch,
+      sendMethod: 'email',
       extraUpdates: {
         aiEmailBody: emailBody,
         acceptanceTokenCreatedAt: Date.now(),
@@ -809,6 +835,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     invoiceUpdate.status = 'sent';
     invoiceUpdate.aiEmailBody = emailBody;
     invoiceUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
+    invoiceUpdate.sendMethod = 'email';
   }
   if (!isTestSend && termsToSend) {
     invoiceUpdate.termsSnapshot = termsToSend;
@@ -827,6 +854,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       fromStage: doc.stage,
       toStage: 'invoice_sent',
       reason: 'sendDocumentEmail:invoice',
+      sendMethod: 'email',
       extraUpdates: {
         aiEmailBody: emailBody,
         termsSnapshot: termsToSend ?? undefined,

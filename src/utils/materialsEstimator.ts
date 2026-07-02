@@ -4,6 +4,7 @@
  */
 
 import { generateId } from './generateId';
+import { withOrigin } from './materialOrigin';
 import { Material, JobTemplate, JobSpec } from '../types';
 
 interface JobInput {
@@ -173,7 +174,7 @@ export function estimateMaterialsFromTemplate(
   for (const templateMaterial of template.defaultMaterials) {
     const quantity = evaluateFormula(templateMaterial.quantityFormula, customParams);
 
-    const material: Material = {
+    const material: Material = withOrigin({
       id: generateId(),
       name: templateMaterial.name,
       quantity,
@@ -182,7 +183,7 @@ export function estimateMaterialsFromTemplate(
       totalPrice: 0,
       manualPriceOverride: false,
       searchTerm: templateMaterial.searchTerm,
-    };
+    } as Material, 'manual');
 
     materials.push(material);
   }

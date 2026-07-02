@@ -44,6 +44,14 @@ import {
 } from './bunningsScraperClient';
 import { searchMaterialPrice } from './webSearchPricing';
 import { pickBestCandidate, type RankableCandidate } from './candidateRanker';
+import { summarizePriceFetchOutcome } from './priceFetchTelemetry';
+import { withOrigin } from '../utils/materialOrigin';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../config/firebase';
+
+// Re-exported so the price-fetch summary shape has a single documented home
+// alongside the pipeline that produces it.
+export { summarizePriceFetchOutcome } from './priceFetchTelemetry';
 
 export interface PipelineEvent {
   phase: 'preflight' | 'analyzing' | 'building' | 'done';
@@ -187,7 +195,7 @@ export async function generateMaterialsForQuote(
     const baseQty = m.quantity || 1;
 
     if (matchedRate && typeof matchedRate.price === 'number' && matchedRate.price > 0) {
-      return {
+      return withOrigin({
         id: generateId(),
         name: m.name || matchedRate.productName,
         quantity: baseQty,
@@ -201,9 +209,9 @@ export async function generateMaterialsForQuote(
         favoriteProduct: matchedRate,
         ...(m.section ? { section: m.section } : {}),
         ...(m.templateBaseQuantity ? { templateBaseQuantity: m.templateBaseQuantity } : {}),
-      };
+      } as Material, 'recommended');
     }
-    return {
+    return withOrigin({
       id: generateId(),
       name: m.name || 'Unknown Material',
       quantity: baseQty,
@@ -214,7 +222,7 @@ export async function generateMaterialsForQuote(
       manualPriceOverride: false,
       ...(m.section ? { section: m.section } : {}),
       ...(m.templateBaseQuantity ? { templateBaseQuantity: m.templateBaseQuantity } : {}),
-    };
+    } as Material, 'recommended');
   });
 
   // Sections: collect distinct multipliers per section (trust only when
@@ -1129,6 +1137,20 @@ export async function fetchPricesForQuote(
     skipped: skippedCount,
     cancelled,
   });
+
+  // Fire-and-forget per-run outcome telemetry. One site here covers every
+  // caller of fetchPricesForQuote (materials list, Mate, wizard). Must never
+  // block or fail the price run — hence the swallowed rejection.
+  // bySource is computed over materialsToFetch (the rows this run actually
+  // worked on), not the whole quote — pre-priced rows would inflate it and
+  // re-runs would recount the entire quote.
+  const usageSummary = summarizePriceFetchOutcome(materialsToFetch, {
+    fetchedCount,
+    failedCount,
+    skippedCount,
+    cancelled,
+  });
+  httpsCallable(functions, 'reportPriceFetchUsage')(usageSummary).catch(() => {});
 
   return {
     updatedQuote: { ...quote, materials: updatedMaterials },
