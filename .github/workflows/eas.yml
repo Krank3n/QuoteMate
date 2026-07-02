@@ -64,6 +64,15 @@ jobs:
           mkdir -p credentials
           echo "${{ secrets.ASC_API_KEY_P8_BASE64 }}" | base64 --decode > credentials/AuthKey_MLTHZ74756.p8
 
+      # Restore the Google Play service account key from a repo secret so the
+      # Android submit can authenticate to Google Play non-interactively.
+      # Secret: PLAY_SERVICE_ACCOUNT_JSON_BASE64 = `base64 -i credentials/play-service-account.json`
+      - name: Restore Google Play service account key
+        if: ${{ inputs.action == 'submit' && (inputs.platform == 'android' || inputs.platform == 'all') }}
+        run: |
+          mkdir -p credentials
+          echo "${{ secrets.PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}" | base64 --decode > credentials/play-service-account.json
+
       # Submit the latest finished build to the stores (iOS → App Store review).
       - name: Submit
         if: ${{ inputs.action == 'submit' }}
