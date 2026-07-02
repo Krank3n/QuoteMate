@@ -10,6 +10,7 @@
 
 import React, { useState } from 'react';
 import { Alert } from 'react-native';
+import { Snackbar } from 'react-native-paper';
 
 import type { Job } from '../../shared/job/types';
 import type { Document } from '../types/document';
@@ -36,6 +37,7 @@ import {
 } from '../types/documentAdapter';
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { ensureSquareConnectedForPayment } from '../utils/quoteDeliveryGuard';
+import { applyStageChange } from '../utils/applyStageChange';
 import { useAlertModal } from './useAlertModal';
 
 interface UseJobActionsSheetOptions {
@@ -61,11 +63,15 @@ export function useJobActionsSheet(
   const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
+  const saveQuote = useStore((s) => s.saveQuote);
+  const saveInvoice = useStore((s) => s.saveInvoice);
+  const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
 
   const { showAlert, alertNode } = useAlertModal();
 
   const [actionsJob, setActionsJob] = useState<Job | null>(null);
   const [sendDialogDoc, setSendDialogDoc] = useState<Document | null>(null);
+  const [markedSentDocId, setMarkedSentDocId] = useState<string | null>(null);
   const [takePaymentTarget, setTakePaymentTarget] =
     useState<TakePaymentTarget | null>(null);
   const [followUpState, setFollowUpState] = useState<{
@@ -282,6 +288,38 @@ export function useJobActionsSheet(
     }
   };
 
+  // A silent SMS / Share / Export send moved the doc to its sent stage.
+  // Surface a Snackbar so the tradie sees the state change and can undo it
+  // (covers Android share-cancel / SMS-composer abandon marking sent falsely).
+  const handleMarkedSent = (doc: Document) => {
+    setMarkedSentDocId(doc.id);
+  };
+
+  const handleUndoMarkedSent = async () => {
+    const docId = markedSentDocId;
+    setMarkedSentDocId(null);
+    if (!docId) return;
+    // Rewind via the same path the StageSheet uses for a sent→draft downgrade.
+    // Look up the freshly-sent doc so its stamped sentAt/sendMethod ride along
+    // (undo restores only the stage/status; the audit fields stay).
+    const current = documents.find((d) => d.id === docId);
+    if (!current) return;
+    try {
+      await applyStageChange(current, 'draft', {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
+      });
+    } catch {
+      showAlert({
+        type: 'error',
+        title: 'Undo failed',
+        message: 'Something went wrong. Please try again.',
+      });
+    }
+  };
+
   // Look up the job the follow-up sheet's doc belongs to so we can
   // hand off customer contact info.
   const followUpJob = followUpState
@@ -305,6 +343,7 @@ export function useJobActionsSheet(
           onDismiss={() => setSendDialogDoc(null)}
           doc={sendDialogDoc}
           businessSettings={businessSettings}
+          onMarkedSent={handleMarkedSent}
         />
       ) : null}
 
@@ -330,6 +369,15 @@ export function useJobActionsSheet(
       ) : null}
 
       {alertNode}
+
+      <Snackbar
+        visible={!!markedSentDocId}
+        onDismiss={() => setMarkedSentDocId(null)}
+        duration={6000}
+        action={{ label: 'Undo', onPress: handleUndoMarkedSent }}
+      >
+        Marked as sent
+      </Snackbar>
     </>
   );
 

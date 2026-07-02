@@ -67,6 +67,9 @@ android/app/build/outputs/
 *.p8
 AuthKey_*.p8
 
+# Signing / submit credentials (App Store Connect .p8, Google Play service account JSON)
+credentials/
+
 # Claude Code
 .claude/scheduled_tasks.lock
 dist-staging

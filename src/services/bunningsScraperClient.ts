@@ -6,6 +6,8 @@
  * The proxy forwards to the same scraper microservice.
  */
 
+import { auth } from '../config/firebase';
+
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
 const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
   ? 'http://127.0.0.1:5001/hansendev/us-central1'
@@ -43,6 +45,22 @@ export interface ScraperSearchResponse {
 }
 
 /**
+ * Resolve the signed-in user's ID token for the authenticated scraper proxies.
+ * Never send "Bearer undefined": a missing token (cold-start auth restore,
+ * offline refresh) guarantees a 401 that the callers swallow as "no results",
+ * which reads as a silently unpriced quote. Throw a distinct error instead so
+ * the failure is at least logged.
+ */
+async function scraperAuthHeaders(): Promise<Record<string, string>> {
+  const idToken = await auth.currentUser?.getIdToken();
+  if (!idToken) {
+    console.warn('[bunningsScraper] no auth token available — skipping scraper call');
+    throw new Error('SCRAPER_AUTH_MISSING');
+  }
+  return { Authorization: `Bearer ${idToken}` };
+}
+
+/**
  * Search for products using the Bunnings scraper API
  */
 export async function searchBunningsProducts(
@@ -54,6 +72,7 @@ export async function searchBunningsProducts(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(await scraperAuthHeaders()),
       },
       body: JSON.stringify({
         searchTerm,
@@ -86,6 +105,7 @@ export async function getBunningsProduct(itemNumber: string): Promise<ScraperPro
   try {
     const response = await fetch(
       `${FIREBASE_FUNCTIONS_URL}/bunningsScraperProduct?itemNumber=${encodeURIComponent(itemNumber)}`,
+      { headers: await scraperAuthHeaders() },
     );
 
     if (!response.ok) {
@@ -107,11 +127,11 @@ export async function getBunningsProduct(itemNumber: string): Promise<ScraperPro
  */
 export async function checkScraperHealth(): Promise<boolean> {
   try {
+    // The health endpoint is deliberately unauthenticated (cheap liveness
+    // probe) — no Authorization header needed.
     const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/bunningsScraperHealth`, {
       method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
+      headers: { 'Accept': 'application/json' },
     });
 
     if (!response.ok) {
@@ -237,6 +257,7 @@ export async function batchFindBestMatchesProgressive(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(await scraperAuthHeaders()),
         },
         body: JSON.stringify({
           searches: chunkTerms.map((term) => ({
@@ -283,6 +304,15 @@ export async function batchFindBestMatchesProgressive(
       // (Re-throw cancellation immediately.)
       if (error instanceof Error && error.message === '__FETCH_CANCELLED__') {
         throw error;
+      }
+      // Auth failures (401 / missing token) are systematic — every remaining
+      // chunk will fail the same way. Log loudly so an unpriced quote is
+      // distinguishable from "scraper found nothing".
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg === 'SCRAPER_AUTH_MISSING' || msg.includes(' 401')) {
+        console.warn(`[bunningsScraper] batch chunk ${chunkIndex + 1}/${totalChunks} failed with an AUTH error — prices will be missing: ${msg}`);
+      } else {
+        console.warn(`[bunningsScraper] batch chunk ${chunkIndex + 1}/${totalChunks} failed: ${msg}`);
       }
       for (const term of chunkTerms) {
         chunkResults.set(term, []);

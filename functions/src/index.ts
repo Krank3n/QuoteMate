@@ -24,8 +24,18 @@ import {
   sendNewProSubscriptionEmail,
   sendMaterialListErrorEmail,
   sendDraftNudgeEmail,
+  sendReadyToSendNudgeEmail,
+  sendPaymentReceiptEmail,
   classifyUnsendable,
+  canSendEmail,
 } from './email';
+import {
+  invoiceLinkAmountDue,
+  isPaymentAlreadyApplied,
+  applySquarePaymentToInvoice,
+  evaluatePaymentReceipt,
+} from './paymentReceipt.helpers';
+import { shouldReadyToSendNudge, toMs } from './draftNudge.helpers';
 export * from './adminCrm';
 export * from './tickets';
 export { adminTrafficStats } from './analyticsTraffic';
@@ -58,6 +68,8 @@ export { assistantToken } from './assistantToken';
 export { assistantChat } from './assistantChat';
 export { generatePresenterClip } from './generatePresenterClip';
 export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts';
+export { reportPriceFetchUsage } from './featureUsage';
+import { recordMaterialsRecommend } from './featureUsage';
 import {
   buildXeroAuthHeaders,
   buildXeroLineItems,
@@ -73,12 +85,14 @@ import {
   applyPaymentToDocument,
   createOrRotatePaymentLink,
   logShimInvocation,
+  resolveTradieReplyEmail,
   type SquareLinkMinter,
 } from './documentHandlers';
 export { getStageViolationCounts, convertDocumentToInvoice } from './documentHandlers';
 export { onDocumentWriteSyncJob, backfillJobsFromDocuments } from './jobHandlers';
 export { storeGoogleCalendarToken, disconnectGoogleCalendar } from './googleCalendarAuth';
 export { onJobWriteSyncCal } from './googleCalendarSync';
+export { requestKatieDemoCall, getKatieSignupLink, katieRecoveryDrip } from './callKatie';
 import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './shared/document/adapter';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
@@ -1617,6 +1631,10 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 300 }).
     const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
     if (!decodedToken) return;
 
+    // Recommend-run telemetry clock — started after auth so it measures the
+    // actual analyse work, not the auth round-trip. See recordMaterialsRecommend.
+    const t0 = Date.now();
+
     try {
       const { jobDescription, tradeContext, photoBase64: photoBase64Input, photoUrls, existingMaterials, availableTemplates, userSavedRates } = req.body;
 
@@ -1985,6 +2003,12 @@ Return ONLY valid JSON, no other text.`;
         });
       }
 
+      recordMaterialsRecommend({
+        uid: decodedToken.uid,
+        success: true,
+        latencyMs: Date.now() - t0,
+      }).catch(() => {});
+
       res.status(200).json({
         materials: anchoredMaterials,
         estimatedHours: parsed.estimatedHours || 8,
@@ -1994,6 +2018,12 @@ Return ONLY valid JSON, no other text.`;
         ...(floorplanAnalysis && { floorplanAnalysis }),
       });
     } catch (error: any) {
+      recordMaterialsRecommend({
+        uid: decodedToken.uid,
+        success: false,
+        latencyMs: Date.now() - t0,
+      }).catch(() => {});
+
       const userEmail = await getUserEmail(decodedToken.uid);
       sendMaterialListErrorEmail(
         userEmail || '',
@@ -7749,6 +7779,13 @@ export const testAllEmails = functions.https.onRequest(async (req, res) => {
       { customerName: 'Matt Jellicoe', jobName: 'Fence Installation', total: 1632, daysOld: 4 },
       { customerName: 'Dawn', jobName: 'Driveway Concreting', total: 7506, daysOld: 2 },
     ], 2, 'test');
+    results.readyToSendNudge = await sendReadyToSendNudgeEmail(
+      to,
+      'HansenDev',
+      { customerName: 'Matt Jellicoe', quoteNumber: 'Q-042', total: 1632 },
+      2,
+      'test'
+    );
 
     res.json({ results });
   });
@@ -9763,6 +9800,60 @@ export const onInvoiceStatusChanged = functions.firestore
   });
 
 // -----------------------------------------------------------
+// onInvoicePaymentReceived — Firestore trigger: email the customer a receipt
+// whenever a payment lands on an invoice. Fires on any paidAmount increase,
+// which covers every payment path — manual Record Payment (app syncs the
+// invoice doc), Square pay link, and Tap to Pay (webhook writes the doc).
+// -----------------------------------------------------------
+export const onInvoicePaymentReceived = functions.firestore
+  .document('users/{userId}/invoices/{invoiceId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+    const { userId, invoiceId } = context.params;
+
+    const receipt = evaluatePaymentReceipt(before, after);
+    if (!receipt) return;
+
+    try {
+      const businessDoc = await db.doc(`users/${userId}/settings/business`).get();
+      const business = (businessDoc.exists ? businessDoc.data() : {}) as Record<string, any>;
+      const businessName = business.businessName || 'Your Tradie';
+      const rawLogo = business.logoStorageUrl || business.logoUri || '';
+      const logoUrl = /^https?:\/\//.test(rawLogo) ? rawLogo : undefined;
+
+      const paidDateValue = after.paidDate?.toDate?.() ?? new Date();
+      const paidDateText = paidDateValue.toLocaleDateString('en-AU', {
+        day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Australia/Sydney',
+      });
+
+      const replyToEmail = await resolveTradieReplyEmail(userId, business.email);
+      await sendPaymentReceiptEmail({
+        to: receipt.customerEmail,
+        userId,
+        business: { businessName, brandColor: business.brandColor, logoUrl },
+        replyToEmail,
+        receipt: {
+          customerName: after.customerName,
+          businessName,
+          invoiceNumber: after.invoiceNumber,
+          jobName: after.job?.name,
+          amountReceived: receipt.amountReceived,
+          isFullyPaid: receipt.isFullyPaid,
+          balanceDue: receipt.balanceDue,
+          paymentMethod: receipt.paymentMethod,
+          paidDateText,
+        },
+      });
+    } catch (err: any) {
+      // Best-effort: a receipt failure must never block the payment write.
+      functions.logger.warn('payment_receipt_email_failed', {
+        userId, invoiceId, message: err?.message,
+      });
+    }
+  });
+
+// -----------------------------------------------------------
 // onInvoiceOverdue — Scheduled daily: nudge about overdue invoices
 // -----------------------------------------------------------
 export const onInvoiceOverdue = functions.pubsub
@@ -9874,6 +9965,12 @@ export const customerQuoteFollowUp = functions.pubsub
       for (const quoteDoc of quotesSnapshot.docs) {
         const q = quoteDoc.data();
         if (!q.customerEmail) continue;
+        // Only follow up quotes the customer actually received by email. Docs
+        // marked sent via SMS/share/export (sendMethod set by the client) may
+        // never have reached this address — and an Android share-cancel can
+        // mark sent falsely. Legacy docs have no sendMethod and were always
+        // email sends, so they pass.
+        if (q.sendMethod && q.sendMethod !== 'email') continue;
         // Skip anything that has already moved on. status === 'sent' filter
         // catches most of this; the explicit checks defend against legacy
         // docs where the status flag wasn't flipped.
@@ -10178,6 +10275,60 @@ export const draftNudge = functions.pubsub
 
       for (const quoteDoc of draftsSnapshot.docs) {
         const quote = quoteDoc.data();
+
+        // "Ready to send" nudge: a fully-built quote (customer + materials,
+        // parked on the preview screen) that was never sent. Fires once per
+        // quote via readyToSendNudgedAt, independent of and before the generic
+        // aging-draft tier logic below. Mid-wizard drafts fail this check and
+        // fall through to the existing behaviour unchanged.
+        if (shouldReadyToSendNudge(quote, now.getTime())) {
+          try {
+            const email = await getUserEmail(userDoc.id);
+            if (email) {
+              let businessName = '';
+              try {
+                const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
+                businessName = settingsDoc.data()?.businessName || '';
+              } catch {}
+
+              const readyMs = toMs(quote.updatedAt ?? quote.createdAt) ?? now.getTime();
+              const daysOld = Math.max(1, Math.floor((now.getTime() - readyMs) / oneDayMs));
+
+              // Skip recipients we know will hard-bounce, but still record the
+              // flag so the scheduler doesn't retry them forever (mirrors
+              // quoteFollowUp). Marketing opt-outs get the same treatment —
+              // sendEmail would refuse anyway, so check up front rather than
+              // re-processing them every day for the 30-day window. Transient
+              // failures leave the flag unset.
+              const unsendable = classifyUnsendable(email);
+              const optedOut = !unsendable && !(await canSendEmail(userDoc.id, 'marketing'));
+              const sent = unsendable || optedOut
+                ? false
+                : await sendReadyToSendNudgeEmail(
+                    email,
+                    businessName,
+                    { customerName: quote.customerName, quoteNumber: quote.quoteNumber, total: quote.total || 0 },
+                    daysOld,
+                    userDoc.id
+                  );
+
+              if (sent || unsendable || optedOut) {
+                await quoteDoc.ref.update({
+                  readyToSendNudgedAt: admin.firestore.FieldValue.serverTimestamp(),
+                  // Top out the generic tier so it never double-nudges this quote.
+                  draftNudgeTier: 3,
+                });
+                nudgesSent++;
+              }
+            }
+          } catch (err: any) {
+            functions.logger.error(`draftNudge ready-to-send error for user ${userDoc.id}`, err?.message);
+            errors++;
+          }
+          // A ready-to-send quote is fully handled here; never fall into the
+          // generic aging-draft logic for it.
+          continue;
+        }
 
         // Skip incomplete drafts (no customer = probably just started)
         if (!quote.customerName) continue;
@@ -11213,6 +11364,11 @@ export const bunningsScraperSearch = functions.runWith({ timeoutSeconds: 120 }).
       return;
     }
 
+    // Auth only — no rate limit. A price run bursts ~30 scraper calls back to
+    // back and would trip the per-user buckets mid-run.
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+
     if (!SCRAPER_URL || !SCRAPER_API_KEY) {
       res.status(503).json({ success: false, error: 'Scraper not configured' });
       return;
@@ -11257,6 +11413,11 @@ export const bunningsScraperBatchSearch = functions.runWith({ timeoutSeconds: 54
       return;
     }
 
+    // Auth only — no rate limit. A price run bursts ~30 scraper calls back to
+    // back and would trip the per-user buckets mid-run.
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
+
     if (!SCRAPER_URL || !SCRAPER_API_KEY) {
       res.status(503).json({ success: false, error: 'Scraper not configured' });
       return;
@@ -11300,6 +11461,11 @@ export const bunningsScraperProduct = functions.runWith({ timeoutSeconds: 120 })
       res.status(405).json({ error: 'Method not allowed' });
       return;
     }
+
+    // Auth only — no rate limit. A price run bursts ~30 scraper calls back to
+    // back and would trip the per-user buckets mid-run.
+    const decodedToken = await verifyAuth(req, res);
+    if (!decodedToken) return;
 
     if (!SCRAPER_URL || !SCRAPER_API_KEY) {
       res.status(503).json({ success: false, error: 'Scraper not configured' });
@@ -12687,16 +12853,19 @@ async function createSquarePaymentLinkInternal(
   const tokens = await getSquareTokens(userId);
   if (!tokens) return null;
 
-  const total = Number(invoice.total) || 0;
-  if (total <= 0) return null;
+  // Charge the outstanding balance, not the full total — a part payment
+  // recorded against the invoice (deposit, progress payment) must not be
+  // billed a second time when the customer pays by link.
+  const amountDue = invoiceLinkAmountDue(invoice);
+  if (amountDue <= 0) return null;
 
   // Apply the business's card surcharge (if any) so the customer pays
-  // total + surcharge and Square's fee doesn't eat the tradie's margin.
+  // balance + surcharge and Square's fee doesn't eat the tradie's margin.
   const businessDoc = await firestore.doc(`users/${userId}/settings/business`).get();
   const businessSettings = businessDoc.exists ? businessDoc.data() : {};
   const plan = await getUserPlanServerSide(userId);
   const { chargedDollars, appFeeCents, surchargeSuffix } =
-    computeSquarePricing(total, businessSettings, 'online', plan);
+    computeSquarePricing(amountDue, businessSettings, 'online', plan);
 
   const amountCents = dollarsToCents(chargedDollars);
   const jobName = invoice.job?.name || 'Job';
@@ -13406,17 +13575,23 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
     if (!invoiceDoc.exists) return;
     const invoice = invoiceDoc.data()!;
 
-    // Idempotency: skip if we've already recorded this payment id.
-    if (invoice.squarePaymentId && invoice.squarePaymentId === payment.id) return;
+    // Idempotency: skip if we've already recorded this payment id. Every
+    // applied id accumulates in squarePaymentIds so a webhook redelivery of
+    // an OLDER payment (after a newer one overwrote squarePaymentId) can't
+    // double-apply.
+    if (isPaymentAlreadyApplied(invoice, payment.id)) return;
 
     const paidAmountDollars = centsToDollars(Number(payment?.amount_money?.amount) || 0);
     const total = Number(invoice.total) || 0;
-    // Cap at invoice total so a surcharged payment (total + 1.9%) doesn't
-    // report the invoice as "overpaid". The actual received amount is on
-    // Square's side for reconciliation/payout reports.
-    const paidAgainstInvoice = Math.min(paidAmountDollars, total);
-    const newPaidAmount = Math.max(Number(invoice.paidAmount) || 0, paidAgainstInvoice);
-    const newStatus = newPaidAmount + 0.005 >= total ? 'paid' : 'partial';
+    // Additive: a Square payment stacks on whatever is already paid (manual
+    // part payments included), capped at the remaining balance so a
+    // surcharged payment (balance + 1.9%) doesn't report as "overpaid". The
+    // actual received amount is on Square's side for payout reports.
+    const { newPaidAmount, newStatus, balanceDue } = applySquarePaymentToInvoice({
+      total,
+      existingPaidAmount: Number(invoice.paidAmount) || 0,
+      paymentDollars: paidAmountDollars,
+    });
 
     const invoiceTcSource: 'pay_link' | 'tap_to_pay' =
       idx.source === 'in_app' ? 'tap_to_pay' : 'pay_link';
@@ -13433,11 +13608,12 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         status: newStatus,
         paidAmount: newPaidAmount,
         paidTotal: newPaidAmount,
-        balanceDue: Math.max(0, total - newPaidAmount),
+        balanceDue,
         paidDate: admin.firestore.FieldValue.serverTimestamp(),
         paymentMethod: 'card',
         paymentNotes: `Square payment ${payment.id}`,
         squarePaymentId: payment.id,
+        squarePaymentIds: admin.firestore.FieldValue.arrayUnion(payment.id),
         squarePaidAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         // Reconciled successfully — drop any stale error banner.

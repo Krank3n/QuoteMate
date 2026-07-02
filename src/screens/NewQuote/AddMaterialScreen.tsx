@@ -33,6 +33,7 @@ import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { generateId } from '../../utils/generateId';
+import { withOrigin } from '../../utils/materialOrigin';
 
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
@@ -827,6 +828,10 @@ export function AddMaterialScreen() {
       };
     }
 
+    // Selecting a product from search is a hand-add — mark it manual (covers
+    // every branch above: AI estimate, local source, scraper/Reece, fallback).
+    newMaterial = withOrigin(newMaterial, 'manual');
+
     // Ask if user wants to save as a favorite for future quotes
     setSaveFavoriteDialog({ visible: true, material: newMaterial, item });
   };
@@ -1007,7 +1012,7 @@ export function AddMaterialScreen() {
       }
     } else {
       // Add new material
-      const newMaterial: Material = {
+      const newMaterial: Material = withOrigin({
         id: generateId(),
         name: manualName.trim(),
         quantity,
@@ -1017,7 +1022,7 @@ export function AddMaterialScreen() {
         manualPriceOverride: true,
         pricingSource: 'manual',
         section: selectedSection || undefined,
-      };
+      } as Material, 'manual');
 
       if (isPersonalRate) {
         const parsedKeywords = rateKeywords
@@ -1079,7 +1084,7 @@ export function AddMaterialScreen() {
     // Strip the local-cache `key` field — favoriteProduct stores the
     // original favorite shape so future edits can sync back.
     const { key: _key, ...favShape } = item;
-    const newMaterial: Material = {
+    const newMaterial: Material = withOrigin({
       id: generateId(),
       name: item.productName,
       quantity: 1,
@@ -1093,7 +1098,7 @@ export function AddMaterialScreen() {
       imageUrl: item.imageUrl,
       pricingSource: isPersonalRate || item.store === 'manual' ? 'manual' : 'scraper',
       favoriteProduct: favShape as FavoriteProductMapping,
-    };
+    } as Material, 'manual');
 
     addMaterialToQuote(newMaterial);
   };

@@ -8,8 +8,9 @@
  */
 
 import type { Quote, Invoice } from '../types';
-import type { Document, DocumentStage } from '../types/document';
+import type { Document, DocumentStage, SendMethod } from '../types/document';
 import { documentToQuote } from '../types/documentAdapter';
+import { isStageDowngrade } from '../../shared/document/stage';
 
 export interface ApplyStageChangeHelpers {
   saveQuote: (q: Quote) => Promise<void>;
@@ -46,6 +47,7 @@ export async function applyStageChange(
   doc: Document,
   target: DocumentStage,
   helpers: ApplyStageChangeHelpers,
+  sendMethod: SendMethod = 'manual',
 ): Promise<void> {
   // Convert-to-invoice: only meaningful on the quote side.
   if (target === 'invoice_sent' && doc.type === 'quote') {
@@ -75,7 +77,12 @@ export async function applyStageChange(
     // contract. Screens that call us already have the legacy invoice.
     const { documentToInvoice } = await import('../types/documentAdapter');
     const invoice = documentToInvoice(doc);
-    await helpers.saveInvoice({ ...invoice, status, updatedAt: new Date() });
+    // First-send audit: stamp sentAt + sendMethod the first time an invoice
+    // actually leaves draft. Never overwrite an existing sentAt.
+    const firstSend = target === 'invoice_sent' && !doc.sentAt
+      ? { sentAt: Date.now(), sendMethod }
+      : {};
+    await helpers.saveInvoice({ ...invoice, status, updatedAt: new Date(), ...firstSend });
     return;
   }
 
@@ -86,5 +93,27 @@ export async function applyStageChange(
     return;
   }
   const quote = documentToQuote(doc);
-  await helpers.saveQuote({ ...quote, status, updatedAt: new Date() });
+  // First-send audit: stamp sentAt + sendMethod the first time a quote
+  // actually leaves draft. Never overwrite an existing sentAt.
+  const firstSend = target === 'quote_sent' && !doc.sentAt
+    ? { sentAt: Date.now(), sendMethod }
+    : {};
+  await helpers.saveQuote({ ...quote, status, updatedAt: new Date(), ...firstSend });
+}
+
+/**
+ * Record that a document was delivered through a non-email channel (SMS,
+ * Share, Export PDF). Moves the doc into its sent stage and stamps the
+ * first-send audit fields via applyStageChange. No-op when the doc is already
+ * in (or past) its sent stage, so a re-share never rewrites the original
+ * first-send timestamp or drags an accepted/paid doc backwards.
+ */
+export async function markDocumentSent(
+  doc: Document,
+  sendMethod: SendMethod,
+  helpers: ApplyStageChangeHelpers,
+): Promise<void> {
+  const target: DocumentStage = doc.type === 'invoice' ? 'invoice_sent' : 'quote_sent';
+  if (doc.stage === target || isStageDowngrade(doc.stage, target)) return;
+  await applyStageChange(doc, target, helpers, sendMethod);
 }

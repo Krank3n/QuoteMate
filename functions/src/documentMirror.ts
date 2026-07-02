@@ -78,6 +78,21 @@ interface MirrorWriteResult {
 }
 
 /**
+ * First-send guard. Once a document's `sentAt` is stamped, it must never be
+ * overwritten — the email path re-stamps a fresh legacy `sentAt` on every
+ * re-send (documentHandlers writes serverTimestamp() to quotes/invoices on
+ * each send), and once the adapter carries that field through, a re-send would
+ * otherwise clobber the original first-send timestamp on the mirror. If the
+ * existing mirror already has a `sentAt`, strip `sentAt` + `sendMethod` from
+ * the incoming projection; otherwise pass it through unchanged. Pure.
+ */
+export function preserveFirstSend(existing: AnyData | null | undefined, toWrite: AnyData): AnyData {
+  if (existing?.sentAt === undefined) return toWrite;
+  const { sentAt: _sentAt, sendMethod: _sendMethod, ...rest } = toWrite;
+  return rest;
+}
+
+/**
  * Write the projection if it would not clobber a newer one already on disk.
  * The skip is based on updatedAt of the source vs the mirror — if the existing
  * mirror already reflects a strictly newer source updatedAt, leave it alone.
@@ -145,6 +160,9 @@ async function writeMirror(
         toWrite = rest;
       }
     }
+    // First-send wins: never let a re-send's fresh sentAt overwrite the
+    // originally-recorded one on the mirror.
+    toWrite = preserveFirstSend(existingData, toWrite);
   }
   await ref.set(stripUndefined(toWrite), { merge: true });
   return { written: true, skipped: false };

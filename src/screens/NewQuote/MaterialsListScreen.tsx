@@ -33,6 +33,7 @@ import { useNavigation, useIsFocused, useRoute } from '@react-navigation/native'
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import LottieView from 'lottie-react-native';
 import { generateId } from '../../utils/generateId';
+import { withOrigin } from '../../utils/materialOrigin';
 import { lightTap } from '../../utils/haptics';
 
 import { useStore } from '../../store/useStore';
@@ -702,7 +703,7 @@ export function MaterialsListScreen() {
       const sectionName = getUniqueSectionName(baseName);
 
       // Add materials with base quantities and multiplied totals
-      const templateMaterials: Material[] = template.materials.map((m) => ({
+      const templateMaterials: Material[] = template.materials.map((m) => withOrigin({
         ...m,
         id: generateId(),
         section: sectionName,
@@ -711,7 +712,7 @@ export function MaterialsListScreen() {
         totalPrice: (m.quantity * qty) * m.price,
         manualPriceOverride: m.manualPriceOverride ?? true,
         favoriteProduct: (m as any).favoriteProduct,
-      }));
+      }, 'manual'));
       newMaterials = [...newMaterials, ...templateMaterials];
 
       // Create QuoteSection with multiplier
@@ -1313,7 +1314,7 @@ export function MaterialsListScreen() {
   // already advanced it to the new draft.
   const buildModeJustChainedRef = useRef(false);
 
-  const createBlankDraftMaterial = useCallback((): Material => ({
+  const createBlankDraftMaterial = useCallback((): Material => withOrigin({
     id: generateId(),
     name: '',
     quantity: 1,
@@ -1322,7 +1323,7 @@ export function MaterialsListScreen() {
     totalPrice: 0,
     manualPriceOverride: true,
     pricingSource: 'manual',
-  } as Material), []);
+  } as Material, 'manual'), []);
 
   // "I'll build it myself" on the empty-state card — instead of jumping to
   // the full AddMaterial screen, drop a blank material into the quote and
@@ -1449,14 +1450,14 @@ export function MaterialsListScreen() {
   const handleConfirmLoadTemplate = (template: SectionTemplate) => {
     if (!currentQuote) return;
     const sectionName = getUniqueSectionName(template.name);
-    const newMaterials: Material[] = template.materials.map((m) => ({
+    const newMaterials: Material[] = template.materials.map((m) => withOrigin({
       ...m,
       id: generateId(),
       section: sectionName,
       templateBaseQuantity: m.quantity,
       manualPriceOverride: m.manualPriceOverride ?? true,
       favoriteProduct: (m as any).favoriteProduct,
-    }));
+    }, 'manual'));
 
     const existingSections = currentQuote.sections || [];
     const newSection: QuoteSection = {

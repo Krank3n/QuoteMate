@@ -26,6 +26,7 @@ import {
   type ExtractedSupplierContact,
 } from '../services/supplierListImporter';
 import { generateId } from '../utils/generateId';
+import { withOrigin } from '../utils/materialOrigin';
 import type { Material } from '../types';
 import type { InvoiceReviewRow } from '../components/InvoiceReviewModal';
 
@@ -88,7 +89,7 @@ const DEFAULT_LABELS: Record<InvoiceImportSource | 'default', string> = {
 function buildMaterialFromRow(row: InvoiceReviewRow, section?: string): Material {
   const quantity = Math.max(1, Math.round(row.qty || 1));
   const price = Number.isFinite(row.price) ? row.price : 0;
-  return {
+  return withOrigin({
     id: generateId(),
     name: row.name,
     quantity,
@@ -100,7 +101,7 @@ function buildMaterialFromRow(row: InvoiceReviewRow, section?: string): Material
     pricingSource: 'ai',
     priceConfidence: row.confidence,
     ...(section ? { section } : {}),
-  };
+  } as Material, 'manual');
 }
 
 export function useInvoiceImport(opts: UseInvoiceImportOptions): UseInvoiceImportResult {

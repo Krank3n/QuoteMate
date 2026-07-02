@@ -50,10 +50,11 @@ import { usePillMatcher, PillState } from '../../hooks/usePillMatcher';
 import { getTradeCategoryById, getTradeNicheById, PRICING_METHODS } from '../../constants/tradeCategories';
 import { createJobFromTemplate } from '../../utils/materialsEstimator';
 import { colors } from '../../theme';
-import { JobTemplate, QuotePhoto } from '../../types';
+import { JobTemplate, Material, QuotePhoto } from '../../types';
 import type { TemplateMatchInput } from '../../services/llmService';
 import { loadTemplates } from '../../services/sectionTemplateService';
 import { generateId } from '../../utils/generateId';
+import { withOrigin } from '../../utils/materialOrigin';
 import { getRecentJobTypeIds, recordJobTypeUsed, sortByRecency } from '../../utils/recentJobTypes';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -906,7 +907,7 @@ export function JobDetailsScreen() {
         const baseMaterials = convertLLMMaterialsToMaterials(analysis.materials);
 
         // Add IDs to materials and ensure all required fields are present
-        const materials = baseMaterials.map((m) => ({
+        const materials = baseMaterials.map((m) => withOrigin({
           id: generateId(),
           name: m.name || 'Unknown Material',
           quantity: m.quantity || 1,
@@ -917,7 +918,7 @@ export function JobDetailsScreen() {
           manualPriceOverride: false,
           ...(m.section && { section: m.section }),
           ...(m.qualityTier && { qualityTier: m.qualityTier }),
-        }));
+        } as Material, 'recommended'));
 
         // Update the job with analyzed data
         const analyzedJob = {

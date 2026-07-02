@@ -35,6 +35,22 @@
         "ascApiKeyPath": "./credentials/AuthKey_MLTHZ74756.p8",
         "ascApiKeyId": "MLTHZ74756",
         "ascApiKeyIssuerId": "93337ceb-6508-442d-88b8-5d94a33f7bd6"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./credentials/play-service-account.json",
+        "track": "production"
+      }
+    },
+    "preview": {
+      "ios": {
+        "ascAppId": "6754000046",
+        "ascApiKeyPath": "./credentials/AuthKey_MLTHZ74756.p8",
+        "ascApiKeyId": "MLTHZ74756",
+        "ascApiKeyIssuerId": "93337ceb-6508-442d-88b8-5d94a33f7bd6"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./credentials/play-service-account.json",
+        "track": "internal"
       }
     }
   }

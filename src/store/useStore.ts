@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
+import { withOrigin } from '../utils/materialOrigin';
 import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
 import { Document } from '../types/document';
 import {
@@ -2974,7 +2975,7 @@ export const useStore = create<AppState>((set, get) => ({
           // matches — the materials list pricing pass will resolve it on
           // next open (the old behaviour, preserved as the safety net).
           const baseUnit = normalizeMaterialUnit(proposal.unit);
-          const stub: Material = {
+          const stub: Material = withOrigin({
             id: generateId(),
             name: proposal.searchTerm,
             searchTerm: proposal.searchTerm,
@@ -2984,7 +2985,7 @@ export const useStore = create<AppState>((set, get) => ({
             totalPrice: 0,
             manualPriceOverride: false,
             ...(proposal.section ? { section: proposal.section } : {}),
-          };
+          } as Material, 'recommended');
 
           // Local supplier-book lookup. Best-effort — any failure falls
           // through to the $0 stub so we never block adding the row.
