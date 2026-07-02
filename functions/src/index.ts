@@ -79,6 +79,7 @@ export { getStageViolationCounts, convertDocumentToInvoice } from './documentHan
 export { onDocumentWriteSyncJob, backfillJobsFromDocuments } from './jobHandlers';
 export { storeGoogleCalendarToken, disconnectGoogleCalendar } from './googleCalendarAuth';
 export { onJobWriteSyncCal } from './googleCalendarSync';
+export { requestKatieDemoCall, getKatieSignupLink, katieRecoveryDrip } from './callKatie';
 import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './shared/document/adapter';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
