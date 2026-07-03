@@ -63,6 +63,9 @@ import { SupplierListCaptureModal } from '../../components/SupplierListCaptureMo
 import { InvoiceReviewModal } from '../../components/InvoiceReviewModal';
 import { useInvoiceImport } from '../../hooks/useInvoiceImport';
 import { CollapsibleSection } from '../../components/CollapsibleSection';
+import { ShimmerOverlay } from '../../components/ShimmerOverlay';
+import { AnimatedListItem } from '../../components/AnimatedListItem';
+import { getMaterialsEmptyState } from './materialsEmptyState';
 import { notificationService } from '../../services/notificationService';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 
@@ -1924,6 +1927,28 @@ export function MaterialsListScreen() {
 
   const showMaterialsList = !isAiAnalyzing && materials.length > 0;
 
+  // Empty-state hero — copy + tap action vary on job notes and plan (see
+  // materialsEmptyState.ts). 'add-notes' sends the user back to Job Details
+  // instead of dead-ending in the "No Description" modal.
+  const emptyContent = getMaterialsEmptyState({
+    hasJobNotes: !!currentQuote?.job?.description?.trim(),
+    isPro,
+  });
+  const handleEmptyHeroPress = () => {
+    lightTap();
+    switch (emptyContent.hero.action) {
+      case 'paywall':
+        navigation.navigate('Paywall' as never);
+        break;
+      case 'add-notes':
+        navigation.navigate('Details', { focusDescription: true });
+        break;
+      case 'generate':
+        handleGenerateMaterialsList();
+        break;
+    }
+  };
+
   const reeceBanner = (businessSettings?.tradeCategories?.includes('plumbing') || reeceReauthNeeded) &&
     (reeceConnected === false || reeceReauthNeeded) ? (
     <TouchableOpacity
@@ -1965,47 +1990,61 @@ export function MaterialsListScreen() {
         </View>
       ) : materials.length === 0 ? (
         <View style={styles.emptyState}>
-          <TouchableOpacity style={styles.emptyActionCard} onPress={() => {
-            if (!isPro) { navigation.navigate('Paywall' as never); return; }
-            handleGenerateMaterialsList();
-          }} activeOpacity={0.7}>
-            <View style={styles.emptyActionIconWrap}>
-              <MaterialCommunityIcons name="auto-fix" size={28} color={colors.primary} />
-            </View>
-            <View style={styles.emptyActionContent}>
-              <View style={styles.emptyActionTitleRow}>
-                <Text style={styles.emptyActionTitle}>Get recommended gear</Text>
-                {!isPro && <ProBadge size="small" />}
+          <AnimatedListItem index={0} style={styles.emptyItemWrap}>
+            <TouchableOpacity
+              style={styles.heroCard}
+              onPress={handleEmptyHeroPress}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={emptyContent.hero.ctaLabel}
+              accessibilityHint={emptyContent.hero.subtitle}
+            >
+              <View style={styles.heroTopRow}>
+                <View style={styles.heroIconWrap}>
+                  <MaterialCommunityIcons name="auto-fix" size={26} color={colors.onPrimary} />
+                </View>
+                <View style={styles.heroContent}>
+                  <View style={styles.heroTitleRow}>
+                    <Text style={styles.heroTitle}>{emptyContent.hero.title}</Text>
+                    {emptyContent.hero.showProBadge && <ProBadge size="small" />}
+                  </View>
+                  <Text style={styles.heroSubtitle}>{emptyContent.hero.subtitle}</Text>
+                </View>
               </View>
-              <Text style={styles.emptyActionDesc}>
-                We'll read your notes and pull the right gear, templates, and local suppliers.
-              </Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-          </TouchableOpacity>
+              <View style={styles.heroCta}>
+                <Text style={styles.heroCtaText}>{emptyContent.hero.ctaLabel}</Text>
+                <MaterialCommunityIcons name="arrow-right" size={18} color={colors.onPrimary} />
+              </View>
+              {/* Default white tint — a primary-green sweep is invisible on
+                  the dark-green card; white reads like the dashboard cards. */}
+              <ShimmerOverlay intensity={0.07} />
+            </TouchableOpacity>
+          </AnimatedListItem>
 
-          <TouchableOpacity style={styles.emptyActionCard} onPress={handleStartManualBuild} activeOpacity={0.7}>
-            <View style={[styles.emptyActionIconWrap, { backgroundColor: colors.surfaceLight }]}>
-              <MaterialCommunityIcons name="plus" size={28} color={colors.onSurface} />
-            </View>
-            <View style={styles.emptyActionContent}>
-              <Text style={styles.emptyActionTitle}>I'll build it myself</Text>
-              <Text style={styles.emptyActionDesc}>
-                Start empty and pull from your templates and local suppliers by hand.
-              </Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-          </TouchableOpacity>
+          <AnimatedListItem index={1} style={styles.emptyItemWrap}>
+            <TouchableOpacity style={styles.manualRow} onPress={handleStartManualBuild} activeOpacity={0.7}>
+              <View style={styles.manualIconWrap}>
+                <MaterialCommunityIcons name="plus" size={20} color={colors.onSurface} />
+              </View>
+              <View style={styles.heroContent}>
+                <Text style={styles.manualTitle}>{emptyContent.manual.title}</Text>
+                <Text style={styles.manualSubtitle}>{emptyContent.manual.subtitle}</Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+            </TouchableOpacity>
+          </AnimatedListItem>
 
-          <TouchableOpacity
-            style={styles.skipMaterialsButton}
-            onPress={handleNext}
-            activeOpacity={0.6}
-            hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
-          >
-            <Text style={styles.skipMaterialsText}>Labour only · skip materials</Text>
-            <MaterialCommunityIcons name="arrow-right" size={16} color={colors.primary} />
-          </TouchableOpacity>
+          <AnimatedListItem index={2}>
+            <TouchableOpacity
+              style={styles.skipMaterialsButton}
+              onPress={handleNext}
+              activeOpacity={0.6}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+            >
+              <Text style={styles.skipMaterialsText}>{emptyContent.skipLabel}</Text>
+              <MaterialCommunityIcons name="arrow-right" size={16} color={colors.primary} />
+            </TouchableOpacity>
+          </AnimatedListItem>
         </View>
       ) : null}
     </WebContainer>
@@ -2767,7 +2806,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingTop: '30%',
+    // Top-aligned (was '30%') so the hero card sits above the fold on small
+    // phones — it's the screen's primary action, not filler.
+    paddingTop: 28,
   },
   emptyText: {
     fontSize: 20,
@@ -2782,16 +2823,99 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 28,
   },
-  emptyActionCard: {
+  emptyItemWrap: {
+    width: '100%',
+  },
+  heroCard: {
+    width: '100%',
+    backgroundColor: colors.primaryBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    padding: 18,
+    marginBottom: 14,
+    overflow: 'hidden',
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  heroIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  heroContent: {
+    flex: 1,
+  },
+  heroTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heroTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.textDark,
+    marginBottom: 4,
+  },
+  heroSubtitle: {
+    fontSize: 13,
+    color: colors.text,
+    opacity: 0.85,
+    lineHeight: 19,
+  },
+  heroCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingVertical: 13,
+    marginTop: 16,
+  },
+  heroCtaText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.onPrimary,
+    letterSpacing: 0.2,
+  },
+  manualRow: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
     backgroundColor: colors.surface,
     borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.border,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  manualIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  manualTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  manualSubtitle: {
+    fontSize: 12.5,
+    color: colors.textMuted,
+    lineHeight: 17,
   },
   reeceBanner: {
     flexDirection: 'row',
@@ -2816,34 +2940,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     marginTop: 2,
-  },
-  emptyActionIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: colors.primaryBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  emptyActionContent: {
-    flex: 1,
-  },
-  emptyActionTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  emptyActionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 3,
-  },
-  emptyActionDesc: {
-    fontSize: 13,
-    color: colors.textMuted,
-    lineHeight: 18,
   },
   skipMaterialsButton: {
     flexDirection: 'row',

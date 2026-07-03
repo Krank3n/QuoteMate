@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, Animated, TextInput as RNTextInput } from 'react-native';
 import { Text, TextInput, Button, Surface, Title, ActivityIndicator } from 'react-native-paper';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider, sendEmailVerification, signOut } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -28,6 +28,42 @@ function isInAppBrowser(): boolean {
   return /FBAN|FBAV|Instagram|Line\/|Twitter|Snapchat|TikTok/i.test(ua);
 }
 
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+  '10minutemail.com',
+  '20minutemail.com',
+  '33mail.com',
+  'anonaddy.com',
+  'guerrillamail.com',
+  'mailinator.com',
+  'maildrop.cc',
+  'sharklasers.com',
+  'tempmail.com',
+  'temp-mail.org',
+  'throwawaymail.com',
+  'trashmail.com',
+  'yopmail.com',
+]);
+
+function validateSignupEmail(rawEmail: string): string | null {
+  const normalized = rawEmail.trim().toLowerCase();
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  if (!emailPattern.test(normalized)) {
+    return 'Please enter a valid email address';
+  }
+
+  const domain = normalized.split('@')[1];
+  const labels = domain.split('.');
+  if (labels.some(label => !label || label.startsWith('-') || label.endsWith('-'))) {
+    return 'Please enter a valid email address';
+  }
+
+  if (DISPOSABLE_EMAIL_DOMAINS.has(domain)) {
+    return 'Please use a real email address, not a temporary or disposable one';
+  }
+
+  return null;
+}
+
 // Save registration platform info so cloud functions know which platform the user signed up on
 async function saveRegistrationPlatform(uid: string, method: 'email' | 'google' | 'apple') {
   try {
@@ -47,6 +83,7 @@ export function AuthScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
   const [isProcessingOAuth, setIsProcessingOAuth] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -208,9 +245,18 @@ export function AuthScreen() {
     lightTap();
     setLoading(true);
     setError('');
+    setNotice('');
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+      await result.user.reload();
+      if (!result.user.emailVerified) {
+        await sendEmailVerification(result.user).catch(() => {});
+        await signOut(auth);
+        setError('Please verify your email before signing in. We sent a fresh verification link to your inbox.');
+        errorTap();
+        return;
+      }
       // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       setError(getErrorMessage(err.code));
@@ -223,6 +269,13 @@ export function AuthScreen() {
   const handleSignUp = async () => {
     if (!email || !password) {
       setError('Please enter email and password');
+      errorTap();
+      return;
+    }
+
+    const emailValidationError = validateSignupEmail(email);
+    if (emailValidationError) {
+      setError(emailValidationError);
       errorTap();
       return;
     }
@@ -242,11 +295,17 @@ export function AuthScreen() {
     lightTap();
     setLoading(true);
     setError('');
+    setNotice('');
 
     try {
-      const result = await createUserWithEmailAndPassword(auth, email, password);
+      const result = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
+      await sendEmailVerification(result.user);
       await saveRegistrationPlatform(result.user.uid, 'email');
-      // Navigation will happen automatically when auth state changes
+      await signOut(auth);
+      setIsSignUp(false);
+      setPassword('');
+      setConfirmPassword('');
+      setNotice('We sent a verification link to your email. Please verify it before signing in.');
     } catch (err: any) {
       setError(getErrorMessage(err.code));
       errorTap();
@@ -258,6 +317,7 @@ export function AuthScreen() {
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError('');
+    setNotice('');
 
     try {
       if (Platform.OS === 'web') {
@@ -296,6 +356,7 @@ export function AuthScreen() {
   };
 
   const handleAppleSignIn = async () => {
+    setNotice('');
     if (!appleAuthAvailable) {
       setError('Apple Sign-In is not available on this device');
       return;
@@ -450,11 +511,17 @@ export function AuthScreen() {
                 </Text>
               </View>
 
-              {/* Error message */}
+              {/* Error / notice messages */}
               {error ? (
                 <View style={styles.errorContainer}>
                   <MaterialCommunityIcons name="alert-circle-outline" size={18} color={colors.error} />
                   <Text style={styles.errorText}>{error}</Text>
+                </View>
+              ) : null}
+              {notice ? (
+                <View style={styles.noticeContainer}>
+                  <MaterialCommunityIcons name="email-check-outline" size={18} color={colors.success} />
+                  <Text style={styles.noticeText}>{notice}</Text>
                 </View>
               ) : null}
 
@@ -592,6 +659,7 @@ export function AuthScreen() {
                   onPress={() => {
                     setIsSignUp(!isSignUp);
                     setError('');
+                    setNotice('');
                   }}
                   disabled={loading}
                   labelStyle={styles.switchButtonLabel}
@@ -697,6 +765,24 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: '#FCA5A5',
+    fontSize: 13,
+    flex: 1,
+  },
+  noticeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 20,
+    width: '100%',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.3)',
+  },
+  noticeText: {
+    color: colors.success,
     fontSize: 13,
     flex: 1,
   },

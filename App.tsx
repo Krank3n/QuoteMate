@@ -16,7 +16,7 @@ import * as Linking from 'expo-linking';
 import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { KeyboardProvider, KeyboardToolbar } from 'react-native-keyboard-controller';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -202,6 +202,14 @@ export default function App() {
       if (!currentUser && auth.currentUser) {
         return;
       }
+      if (currentUser?.providerData.some((provider: any) => provider.providerId === 'password') && !currentUser.emailVerified) {
+        await signOut(auth);
+        setUser(null);
+        setUserDataLoaded(false);
+        initialisedForUidRef.current = null;
+        return;
+      }
+
       // If a *different* user lands here than the last session, wipe the
       // previous user's locally-cached data first. Otherwise loadQuotes /
       // loadBusinessSettings fall through to AsyncStorage when the new user's

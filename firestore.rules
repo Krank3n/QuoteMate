@@ -1,9 +1,30 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can read/write their own user document and ALL subcollections
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function emailVerified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return emailVerified() && request.auth.uid == userId;
+    }
+
+    // Let brand-new email/password signups record platform metadata before
+    // they are forced to verify. All real app data remains verified-only.
+    match /users/{userId}/settings/registrationInfo {
+      allow create, update: if signedIn() && request.auth.uid == userId;
+      allow read: if isOwner(userId);
+      allow delete: if false;
+    }
+
+    // Users can read/write their own user document and ALL subcollections,
+    // but only after their email has been verified.
     match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isOwner(userId);
     }
 
     // Unified documents collection (phase-1 dual-write mirror of quotes+invoices).
@@ -11,19 +32,19 @@ service cloud.firestore {
     // Explicit match is redundant with the wildcard above but documents intent
     // and gives a stable place to tighten rules in later phases.
     match /users/{userId}/documents/{docId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isOwner(userId);
     }
 
     // Jobs — owner-only (phase 8). Same pattern as documents: functionally
     // redundant with the wildcard, kept explicit so the rules file is
     // self-describing.
     match /users/{userId}/jobs/{jobId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isOwner(userId);
     }
 
     // Users can only read their own subscription data
     match /subscriptions/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
+      allow read: if isOwner(userId);
       // Only backend (admin) can write subscription data
       allow write: if false;
     }
@@ -41,25 +62,25 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Supplier profiles — any auth user can read, only owner can write
+    // Supplier profiles — any verified auth user can read, only verified owner can write
     match /suppliers/{supplierId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == resource.data.ownerUid;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.ownerUid;
+      allow read: if emailVerified();
+      allow write: if emailVerified() && request.auth.uid == resource.data.ownerUid;
+      allow create: if emailVerified() && request.auth.uid == request.resource.data.ownerUid;
 
-      // Price items — any auth user can read, only supplier owner can write
+      // Price items — any verified auth user can read, only supplier owner can write
       match /priceItems/{itemId} {
-        allow read: if request.auth != null;
-        allow write: if request.auth != null
+        allow read: if emailVerified();
+        allow write: if emailVerified()
           && request.auth.uid == get(/databases/$(database)/documents/suppliers/$(supplierId)).data.ownerUid;
       }
 
       // Subscribers — tradie can create/delete own doc, supplier owner can read all
       match /subscribers/{tradieUid} {
-        allow read: if request.auth != null
+        allow read: if emailVerified()
           && (request.auth.uid == tradieUid
               || request.auth.uid == get(/databases/$(database)/documents/suppliers/$(supplierId)).data.ownerUid);
-        allow create, delete: if request.auth != null && request.auth.uid == tradieUid;
+        allow create, delete: if emailVerified() && request.auth.uid == tradieUid;
       }
     }
 
@@ -72,14 +93,14 @@ service cloud.firestore {
     // in-app payment record). Owner can read for status display; only Cloud
     // Functions write.
     match /squarePaymentOrders/{orderId} {
-      allow read: if request.auth != null
+      allow read: if emailVerified()
         && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
 
     // Square payment-link index — same access pattern.
     match /squarePaymentLinks/{linkId} {
-      allow read: if request.auth != null
+      allow read: if emailVerified()
         && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
@@ -90,7 +111,7 @@ service cloud.firestore {
     // back to the invoice/quote. Read allowed for the owning tradie so the
     // client can resolve disputes linked in the UI.
     match /squarePayments/{paymentId} {
-      allow read: if request.auth != null
+      allow read: if emailVerified()
         && resource.data.userId == request.auth.uid;
       allow write: if false;
     }

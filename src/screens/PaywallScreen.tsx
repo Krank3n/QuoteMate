@@ -25,6 +25,7 @@ import { WebContainer } from '../components/WebContainer';
 import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
 import { CancellationReasonModal } from '../components/CancellationReasonModal';
 import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
+import { regularPriceLabel, discountPercent } from '../config/pricingConfig';
 
 const PRO_NUDGES = [
   "Your quotes deserve the VIP treatment",
@@ -675,6 +676,7 @@ export function PaywallScreen() {
             onPress={() => setSelectedPlan('monthly')}
           >
             <Text style={[styles.planOptionLabel, selectedPlan === 'monthly' && styles.planOptionLabelSelected]}>Monthly</Text>
+            <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('monthly')}</Text>
             <Text style={[styles.planOptionPrice, selectedPlan === 'monthly' && styles.planOptionPriceSelected]}>{getProductPrice(SUBSCRIPTION_SKUS.MONTHLY)}</Text>
             <Text style={[styles.planOptionPeriod, selectedPlan === 'monthly' && styles.planOptionPeriodSelected]}>/month</Text>
           </Pressable>
@@ -687,10 +689,17 @@ export function PaywallScreen() {
               <Text style={styles.saveBadgeText}>Save 44%</Text>
             </View>
             <Text style={[styles.planOptionLabel, selectedPlan === 'yearly' && styles.planOptionLabelSelected]}>Yearly</Text>
+            <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('yearly')}</Text>
             <Text style={[styles.planOptionPrice, selectedPlan === 'yearly' && styles.planOptionPriceSelected]}>{getProductPrice(SUBSCRIPTION_SKUS.YEARLY)}</Text>
             <Text style={[styles.planOptionPeriod, selectedPlan === 'yearly' && styles.planOptionPeriodSelected]}>/year</Text>
           </Pressable>
         </View>
+      )}
+
+      {!isPro && (
+        <Text style={styles.launchOffer}>
+          Launch offer · {discountPercent(selectedPlan)}% off the regular price
+        </Text>
       )}
 
       {/* Upgrade Section for Free Users */}
@@ -901,6 +910,13 @@ const styles = StyleSheet.create({
   planOptionLabelSelected: {
     color: colors.primary,
   },
+  planOptionRegularPrice: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.textMuted,
+    textDecorationLine: 'line-through',
+    marginBottom: 1,
+  },
   planOptionPrice: {
     fontSize: 30,
     fontWeight: 'bold',
@@ -916,6 +932,15 @@ const styles = StyleSheet.create({
   },
   planOptionPeriodSelected: {
     color: colors.onSurface,
+  },
+  launchOffer: {
+    textAlign: 'center',
+    color: colors.secondary,
+    fontWeight: '700',
+    fontSize: 13,
+    marginHorizontal: 20,
+    marginTop: -6,
+    marginBottom: 14,
   },
   saveBadge: {
     position: 'absolute',

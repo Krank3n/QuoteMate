@@ -174,6 +174,17 @@ function domainOf(email: string | null | undefined): string | null {
   return e.split('@')[1] || null;
 }
 
+function canSendToDomain(domainCounts: Map<string, number>, domain: string | null, perDomainMax: number): boolean {
+  if (!domain) return true;
+  const used = domainCounts.get(domain) || 0;
+  return used < Math.max(1, perDomainMax);
+}
+
+function recordDomainSend(domainCounts: Map<string, number>, domain: string | null): void {
+  if (!domain) return;
+  domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
+}
+
 function normaliseBusinessKey(name: string | null | undefined, suburb: string | null | undefined): string {
   const n = (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   const s = (suburb || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -1231,7 +1242,8 @@ export const adminApproveLeads = functions
       throw new functions.https.HttpsError('resource-exhausted', `daily cap reached (${dailyMax})${stageInfo}`);
     }
 
-    const sentDomains = new Set<string>();
+    const domainSendCounts = new Map<string, number>();
+    const perDomainMax = Math.max(1, Number(cfg.perDomainMax) || 1);
     let sent = 0;
     let skipped = 0;
     let failed = 0;
@@ -1262,8 +1274,10 @@ export const adminApproveLeads = functions
         await ref.set({ status: 'rejected' as LeadStatus, rejectionReason: 'is-existing-user', convertedUid: exUid }, { merge: true });
         skipped++; issues.push({ leadId, reason: 'existing-user' }); continue;
       }
-      // Per-domain cap: 1 send per batch
-      if (dom && sentDomains.has(dom)) { skipped++; issues.push({ leadId, reason: 'per_domain_cap' }); continue; }
+      // Per-domain cap (configurable; defaults to 1)
+      if (!canSendToDomain(domainSendCounts, dom, perDomainMax)) {
+        skipped++; issues.push({ leadId, reason: 'per_domain_cap' }); continue;
+      }
 
       const tags = ['lead_outreach', `lead:${leadId}`];
       if (lead.campaignId) tags.push(`campaign:${lead.campaignId}`);
@@ -1292,7 +1306,7 @@ export const adminApproveLeads = functions
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
         sentBy: adminUid,
       });
-      if (dom) sentDomains.add(dom);
+      recordDomainSend(domainSendCounts, dom);
       sent++;
     }
 
@@ -1318,11 +1332,12 @@ export const adminApproveLeads = functions
 
 async function sendOneLead(params: {
   leadId: string;
-  sentDomainsThisBatch: Set<string>;
+  domainSendCounts: Map<string, number>;
+  perDomainMax: number;
   bySender: 'admin' | 'auto';
   senderUid?: string;
 }): Promise<{ sent: boolean; reason?: string }> {
-  const { leadId, sentDomainsThisBatch, bySender, senderUid } = params;
+  const { leadId, domainSendCounts, perDomainMax, bySender, senderUid } = params;
   const ref = db().doc(`leads/${leadId}`);
   const snap = await ref.get();
   if (!snap.exists) return { sent: false, reason: 'not_found' };
@@ -1336,7 +1351,13 @@ async function sendOneLead(params: {
     await ref.set({ status: 'no_email' as LeadStatus }, { merge: true });
     return { sent: false, reason: 'no_email' };
   }
-  if (!lead.generatedSubject || !lead.generatedBody) return { sent: false, reason: 'no_message' };
+  if (!lead.generatedSubject || !lead.generatedBody) {
+    // Self-heal stale queued records missing generated content. Put them back
+    // to researched so generation can run again and they stop blocking the
+    // oldest-first queue scan forever.
+    await ref.set({ status: 'researched' as LeadStatus }, { merge: true });
+    return { sent: false, reason: 'no_message' };
+  }
 
   const dom = domainOf(email);
 
@@ -1351,7 +1372,9 @@ async function sendOneLead(params: {
     await ref.set({ status: 'rejected' as LeadStatus, rejectionReason: 'is-existing-user', convertedUid: exUid }, { merge: true });
     return { sent: false, reason: 'existing-user' };
   }
-  if (dom && sentDomainsThisBatch.has(dom)) return { sent: false, reason: 'per_domain_cap' };
+  if (!canSendToDomain(domainSendCounts, dom, perDomainMax)) {
+    return { sent: false, reason: 'per_domain_cap' };
+  }
 
   const tags = ['lead_outreach', `lead:${leadId}`];
   if (lead.campaignId) tags.push(`campaign:${lead.campaignId}`);
@@ -1376,7 +1399,7 @@ async function sendOneLead(params: {
     sentAt: admin.firestore.FieldValue.serverTimestamp(),
     sentBy: bySender === 'auto' ? 'auto-scheduler' : (senderUid || 'admin'),
   });
-  if (dom) sentDomainsThisBatch.add(dom);
+  recordDomainSend(domainSendCounts, dom);
   return { sent: true };
 }
 
@@ -1426,10 +1449,11 @@ export const autoSendQueuedLeads = functions.pubsub
     // Pick oldest queued leads. Pull a wider net than budget so we have
     // candidates to skip past (per-domain cap, missing email, etc.) without
     // running out.
+    const candidateLimit = Math.min(500, Math.max(100, budget * 20));
     const queuedSnap = await db().collection('leads')
       .where('status', '==', 'queued')
       .orderBy('queuedAt', 'asc')
-      .limit(budget * 4)
+      .limit(candidateLimit)
       .get();
 
     if (queuedSnap.empty) {
@@ -1437,7 +1461,8 @@ export const autoSendQueuedLeads = functions.pubsub
       return null;
     }
 
-    const sentDomains = new Set<string>();
+    const domainSendCounts = new Map<string, number>();
+    const perDomainMax = Math.max(1, Number(cfg.perDomainMax) || 1);
     let sent = 0;
     let skipped = 0;
     let failed = 0;
@@ -1445,7 +1470,12 @@ export const autoSendQueuedLeads = functions.pubsub
 
     for (const d of queuedSnap.docs) {
       if (sent >= budget) break;
-      const r = await sendOneLead({ leadId: d.id, sentDomainsThisBatch: sentDomains, bySender: 'auto' });
+      const r = await sendOneLead({
+        leadId: d.id,
+        domainSendCounts,
+        perDomainMax,
+        bySender: 'auto',
+      });
       if (r.sent) {
         sent++;
       } else {
@@ -1460,7 +1490,19 @@ export const autoSendQueuedLeads = functions.pubsub
       adminUid: 'system',
       action: 'auto_send_run',
       targetType: 'system',
-      payload: { sent, skipped, failed, budget, dailyRemaining, hourlyRemaining, skipReasons, stage: eff.stage?.label || null, day: eff.day || null },
+      payload: {
+        sent,
+        skipped,
+        failed,
+        budget,
+        candidateLimit,
+        perDomainMax,
+        dailyRemaining,
+        hourlyRemaining,
+        skipReasons,
+        stage: eff.stage?.label || null,
+        day: eff.day || null,
+      },
     });
 
     console.info(`autoSendQueuedLeads: sent=${sent}, skipped=${skipped}, failed=${failed}, budget=${budget}`);

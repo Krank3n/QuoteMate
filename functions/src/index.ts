@@ -7186,6 +7186,9 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
   const email = user.email;
   if (!email) return;
 
+  const isPasswordSignup = user.providerData?.some(provider => provider.providerId === 'password') ?? false;
+  const shouldSendSignupEmails = !isPasswordSignup || user.emailVerified;
+
   // Small delay to allow business settings to be saved after signup
   await new Promise(resolve => setTimeout(resolve, 5000));
 
@@ -7277,11 +7280,47 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
     }
   }
 
-  await Promise.all([
-    sendWelcomeEmail(email, businessName, user.uid),
-    sendNewUserNotificationEmail(email, platform, authMethod, businessName),
-  ]);
+  if (shouldSendSignupEmails) {
+    await Promise.all([
+      sendWelcomeEmail(email, businessName, user.uid),
+      sendNewUserNotificationEmail(email, platform, authMethod, businessName),
+    ]);
+  }
 });
+
+/**
+ * Scheduled: remove email/password accounts that never verified their inbox.
+ * This keeps typo/fake signups from lingering in Firebase Auth indefinitely.
+ */
+export const cleanupUnverifiedEmailUsers = functions.pubsub
+  .schedule('every day 03:30')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
+    let nextPageToken: string | undefined;
+    let deleted = 0;
+
+    do {
+      const result = await admin.auth().listUsers(1000, nextPageToken);
+      nextPageToken = result.pageToken;
+
+      const staleUsers = result.users.filter(user => {
+        const createdAt = Date.parse(user.metadata.creationTime || '');
+        const isPasswordUser = user.providerData.some(provider => provider.providerId === 'password');
+        return isPasswordUser && !user.emailVerified && Number.isFinite(createdAt) && createdAt < cutoffMs;
+      });
+
+      await Promise.all(staleUsers.map(async user => {
+        await Promise.allSettled([
+          admin.auth().deleteUser(user.uid),
+          (admin.firestore() as any).recursiveDelete(admin.firestore().doc(`users/${user.uid}`)),
+        ]);
+        deleted += 1;
+      }));
+    } while (nextPageToken);
+
+    console.log(`Deleted ${deleted} unverified email/password users`);
+  });
 
 /**
  * Unsubscribe endpoint - handles email unsubscribe links

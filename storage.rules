@@ -2,17 +2,21 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // User avatars / logos — users can write to their own user path
-    match /users/{userId}/{allPaths=**} {
-      allow read: if true;
-      allow write: if request.auth != null && request.auth.uid == userId;
+    function emailVerified() {
+      return request.auth != null && request.auth.token.email_verified == true;
     }
 
-    // Supplier logos — any auth user can read, only supplier owner can write
+    // User avatars / logos — users can write to their own user path after email verification
+    match /users/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if emailVerified() && request.auth.uid == userId;
+    }
+
+    // Supplier logos — any auth user can read, only verified supplier owner can write
     // Path: suppliers/{supplierId}/logo.{ext}
     match /suppliers/{supplierId}/{fileName} {
       allow read: if true;
-      allow write: if request.auth != null
+      allow write: if emailVerified()
         && request.auth.uid == firestore.get(/databases/(default)/documents/suppliers/$(supplierId)).data.ownerUid
         && request.resource.size < 2 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');

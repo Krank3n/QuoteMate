@@ -756,6 +756,26 @@ export function JobDetailsScreen() {
     }, 80);
   };
 
+  // The materials empty state's "Add job notes" hero lands here with
+  // focusDescription — scroll to the notes card and pop the keyboard. Unlike
+  // chip taps (scroll only), the user's explicit intent was "type notes now",
+  // so focusing is the right move. Param is cleared after handling so a later
+  // revisit of this screen doesn't replay the scroll/focus.
+  useEffect(() => {
+    if (route.params?.focusDescription !== true) return;
+    const timer = setTimeout(() => {
+      if (descriptionCardYRef.current > 0) {
+        scrollRef.current?.scrollTo({
+          y: Math.max(0, descriptionCardYRef.current - 8),
+          animated: true,
+        });
+      }
+      descriptionInputRef.current?.focus();
+      navigation.setParams({ focusDescription: undefined });
+    }, 350); // let the back-navigation transition settle first
+    return () => clearTimeout(timer);
+  }, [route.params?.focusDescription]);
+
   const handleParamChange = (key: string, value: string) => {
     setCustomParams((prev) => ({
       ...prev,
