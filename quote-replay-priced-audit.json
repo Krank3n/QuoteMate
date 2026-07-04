@@ -1,0 +1,1697 @@
+{
+  "summary": {
+    "generatedAt": "2026-07-03T09:03:37.063Z",
+    "model": "gemini-3.1-pro-preview",
+    "count": 10,
+    "verdictCounts": {
+      "fail": 5,
+      "review": 2,
+      "error": 3
+    }
+  },
+  "results": [
+    {
+      "id": "1783066073556-8royp7qz0",
+      "number": "QU-178306",
+      "stage": "draft",
+      "deterministicIssues": [],
+      "oracle": {
+        "verdict": "fail",
+        "summary": "The replay quote exhibits a severe structural regression, flattening the schema and dropping critical nested objects such as 'job', 'pricing', and 'sections'. Labor calculations and estimated hours were also lost or incorrectly mapped.",
+        "gaps": [
+          {
+            "kind": "schema_regression",
+            "severity": "high",
+            "item": "job object",
+            "stored": "{\"name\":\"Invalid Entry\",\"description\":\"No valid job description provided.\",\"template\":\"custom\",\"estimatedHours\":8}",
+            "replay": "undefined",
+            "recommendation": "Investigate the replay generation pipeline to ensure the 'job' object is properly constructed and not dropped."
+          },
+          {
+            "kind": "schema_regression",
+            "severity": "high",
+            "item": "pricing object",
+            "stored": "{\"total\":960,\"materialsSubtotal\":0,\"laborHours\":8,\"laborTotal\":960}",
+            "replay": "undefined",
+            "recommendation": "Ensure the pricing engine is invoked during replay and correctly maps outputs to the 'pricing' object."
+          },
+          {
+            "kind": "data_loss",
+            "severity": "high",
+            "item": "estimatedHours",
+            "stored": "8 (nested in job)",
+            "replay": "0 (root level)",
+            "recommendation": "Fix the mapping logic that incorrectly places 'estimatedHours' at the root level and resets it to 0."
+          }
+        ],
+        "testAssertions": [
+          "expect(replay).toHaveProperty('job')",
+          "expect(replay.job.estimatedHours).toBe(8)",
+          "expect(replay).toHaveProperty('pricing')",
+          "expect(replay.pricing.laborTotal).toBe(960)",
+          "expect(replay).toHaveProperty('id')",
+          "expect(replay).toHaveProperty('stage')"
+        ]
+      },
+      "storedRedacted": {
+        "id": "1783066073556-8royp7qz0",
+        "number": "QU-178306",
+        "stage": "draft",
+        "job": {
+          "name": "Invalid Entry",
+          "template": "custom",
+          "estimatedHours": 8,
+          "descriptionLength": 34
+        },
+        "pricing": {
+          "total": 960,
+          "materialsSubtotal": 0,
+          "laborHours": 8,
+          "laborTotal": 960
+        },
+        "sections": [],
+        "materials": []
+      },
+      "replay": {
+        "estimatedHours": 0,
+        "materialsSubtotal": 0,
+        "materials": []
+      }
+    },
+    {
+      "id": "1783065820733-vl8is328s",
+      "number": "QU-178306",
+      "stage": "draft",
+      "deterministicIssues": [
+        {
+          "code": "zero_priced_material",
+          "detail": "8 material(s) at $0 with positive qty"
+        }
+      ],
+      "oracle": {
+        "verdict": "review",
+        "summary": "The replay successfully priced materials that were unpriced in the stored quote and corrected massive overestimations in paint quantities by applying proper coverage rates. However, there is a data parsing error in the pack size extraction for the Sugar Soap product.",
+        "gaps": [
+          {
+            "kind": "Pricing",
+            "severity": "high",
+            "item": "Materials Subtotal",
+            "stored": "0",
+            "replay": "282.94",
+            "recommendation": "The stored quote failed to price any materials. Ensure the live pricing module is active and correctly integrated during initial quote generation."
+          },
+          {
+            "kind": "Quantity Calculation",
+            "severity": "high",
+            "item": "Paint Quantities",
+            "stored": "32L Ceiling Paint, 52L Wall Paint",
+            "replay": "6L Ceiling Paint (3x 2L packs), 9L Wall Paint (3x 4L packs)",
+            "recommendation": "The stored quote incorrectly assumed a 1:1 ratio of liters to square meters. The replay correctly applies a 14m²/L coverage rate. Add regression tests to enforce standard paint coverage calculations."
+          },
+          {
+            "kind": "Data Parsing",
+            "severity": "medium",
+            "item": "Sugar Soap Pack Size",
+            "stored": "1 L",
+            "replay": "Pack size 30L for 'Glitz 750ml Sugar Soap'",
+            "recommendation": "The product catalog parser incorrectly extracted '30L' as the pack size for a 750ml product. Update the regex/parsing logic for volume extraction to correctly identify '750ml' as 0.75L."
+          }
+        ],
+        "testAssertions": [
+          "expect(replay.materialsSubtotal).toBeGreaterThan(0)",
+          "expect(replay.materials.find(m => m.name.includes('Ceiling Paint')).requiredQty).toBeLessThan(10)",
+          "expect(replay.materials.find(m => m.name.includes('Wall Paint')).requiredQty).toBeLessThan(15)",
+          "expect(replay.materials.find(m => m.name.includes('Sugar Soap')).chosen.pack.packSize).toBe(0.75)"
+        ]
+      },
+      "storedRedacted": {
+        "id": "1783065820733-vl8is328s",
+        "number": "QU-178306",
+        "stage": "draft",
+        "job": {
+          "name": "Custom Job",
+          "template": "custom",
+          "estimatedHours": 16,
+          "descriptionLength": 85
+        },
+        "pricing": {
+          "total": 1795.2,
+          "materialsSubtotal": 0,
+          "laborHours": 2,
+          "laborTotal": 1360
+        },
+        "sections": [
+          {
+            "name": "Ceiling Painting",
+            "hours": 0.6,
+            "total": 408
+          },
+          {
+            "name": "Wall Painting",
+            "hours": 1.2,
+            "total": 816
+          },
+          {
+            "name": "Prep & Consumables",
+            "hours": 0.2,
+            "total": 136
+          }
+        ],
+        "materials": [
+          {
+            "name": "Ceiling Paint Flat White",
+            "quantity": 32,
+            "unit": "L",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Interior Wall Paint Low Sheen White",
+            "quantity": 52,
+            "unit": "L",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Painter's Masking Tape 24mm",
+            "quantity": 100,
+            "unit": "m",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Canvas Drop Sheet",
+            "quantity": 2,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Paint Roller Cover 230mm 10mm Nap",
+            "quantity": 2,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Cutting-In Paint Brush 50mm",
+            "quantity": 1,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Sugar Soap Liquid",
+            "quantity": 1,
+            "unit": "L",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Acrylic Gap Filler",
+            "quantity": 2,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0
+          }
+        ]
+      },
+      "replay": {
+        "estimatedHours": 16,
+        "materialsSubtotal": 282.94,
+        "materials": [
+          {
+            "name": "Ceiling Paint Flat White",
+            "searchTerm": "Ceiling Paint Flat White",
+            "quantity": 3,
+            "unit": "pack",
+            "reasoning": "8m x 4m = 32m² ceiling area. 2 coats = 64m² total coverage. At 14m²/L coverage, requires 4.57L. Adding 15% waste brings it to ~5.2L, rounded up to 6L.",
+            "requiredQty": 6,
+            "price": 39.9,
+            "totalPrice": 119.7,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Taubmans 2L White Flat Easycoat Ceiling Paint",
+              "price": 39.9,
+              "confidence": "high",
+              "itemNumber": "0400990",
+              "pack": {
+                "packSize": 2,
+                "packUnit": "L"
+              }
+            }
+          },
+          {
+            "name": "Interior Wall Paint Low Sheen White",
+            "searchTerm": "Interior Wall Paint Low Sheen White",
+            "quantity": 3,
+            "unit": "pack",
+            "reasoning": "24m perimeter x 2.4m height = 57.6m². Minus approx 7.6m² for doors/windows = 50m² wall area. 2 coats = 100m² coverage. At 14m²/L, requires 7.14L. Adding 15% waste brings it to ~8.2L, rounded up to 9L.",
+            "requiredQty": 9,
+            "price": 31.5,
+            "totalPrice": 94.5,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Spring 4L Low Sheen Interior Paint - 4L",
+              "price": 31.5,
+              "confidence": "high",
+              "itemNumber": "1401893",
+              "pack": {
+                "packSize": 4,
+                "packUnit": "L"
+              }
+            }
+          },
+          {
+            "name": "Painter's Masking Tape 24mm",
+            "searchTerm": "Painter's Masking Tape 24mm",
+            "quantity": 1,
+            "unit": "each",
+            "reasoning": "24m perimeter for skirting boards plus approx 15m for door and window frames. 50m covers the requirement with a small allowance for waste.",
+            "requiredQty": 50,
+            "price": 6.5,
+            "totalPrice": 6.5,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Paint Partner 24mm x 50m Blue 14 Day Resistance Masking Tape",
+              "price": 6.5,
+              "confidence": "high",
+              "itemNumber": "1210116",
+              "pack": {
+                "packSize": 50,
+                "packUnit": "m"
+              }
+            }
+          },
+          {
+            "name": "Canvas Drop Sheet",
+            "searchTerm": "Canvas Drop Sheet",
+            "quantity": 2,
+            "unit": "each",
+            "reasoning": "Two drop sheets required to adequately cover the floor space and allow for moving around the 8x4m studio without constantly shifting a single sheet.",
+            "requiredQty": 2,
+            "price": 20.4,
+            "totalPrice": 40.8,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Monarch 1.5 x 1.5m Leak-Proof Canvas Drop Sheet",
+              "price": 20.4,
+              "confidence": "high",
+              "itemNumber": "1660397",
+              "pack": {
+                "packSize": 1.5,
+                "packUnit": "m"
+              }
+            }
+          },
+          {
+            "name": "Paint Roller Cover 230mm 10mm Nap",
+            "searchTerm": "Paint Roller Cover 230mm 10mm Nap",
+            "quantity": 2,
+            "unit": "each",
+            "reasoning": "One roller cover dedicated to the flat ceiling paint and one for the low sheen wall paint to prevent cross-contamination of sheen levels.",
+            "requiredQty": 2,
+            "price": 4.4,
+            "totalPrice": 8.8,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "UNi-PRO 230mm 10mm Nap You Can Do It Paint Roller Cover",
+              "price": 4.4,
+              "confidence": "high",
+              "itemNumber": "1660040",
+              "pack": null
+            }
+          },
+          {
+            "name": "Cutting-In Paint Brush 50mm",
+            "searchTerm": "Cutting-In Paint Brush 50mm",
+            "quantity": 1,
+            "unit": "each",
+            "reasoning": "Standard requirement for cutting in corners, cornices, and around trim.",
+            "requiredQty": 1,
+            "price": 4.3,
+            "totalPrice": 4.3,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Paint Partner 50mm Paint Brush",
+              "price": 4.3,
+              "confidence": "high",
+              "itemNumber": "0794476",
+              "pack": null
+            }
+          },
+          {
+            "name": "Sugar Soap Liquid",
+            "searchTerm": "Sugar Soap Liquid",
+            "quantity": 1,
+            "unit": "pack",
+            "reasoning": "Required to wash down the 50m² of walls and 32m² of ceiling prior to painting to remove grease and dust for proper paint adhesion.",
+            "requiredQty": 1,
+            "price": 4.99,
+            "totalPrice": 4.99,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Glitz 750ml Sugar Soap For Floors",
+              "price": 4.99,
+              "confidence": "high",
+              "itemNumber": "4460695",
+              "pack": {
+                "packSize": 30,
+                "packUnit": "L"
+              }
+            }
+          },
+          {
+            "name": "Acrylic Gap Filler",
+            "searchTerm": "Acrylic Gap Filler",
+            "quantity": 1,
+            "unit": "each",
+            "reasoning": "One standard cartridge for patching minor cracks in cornices, skirting boards, and architraves during prep.",
+            "requiredQty": 1,
+            "price": 3.35,
+            "totalPrice": 3.35,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Parfix 450g White Gap Filler",
+              "price": 3.35,
+              "confidence": "high",
+              "itemNumber": "0443733",
+              "pack": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "1783046480805-mhirv3pwh",
+      "number": "QU-178304",
+      "stage": "draft",
+      "deterministicIssues": [
+        {
+          "code": "zero_priced_material",
+          "detail": "6 material(s) at $0 with positive qty"
+        }
+      ],
+      "oracle": {
+        "verdict": "fail",
+        "summary": "The replay failed due to severe item matching errors (e.g., decking boards matched to drill bits, structural pine matched to hitch pins) and a massive unit conversion error for nails resulting in a $10,000+ overcharge. Estimated hours also increased significantly from 19 to 52.",
+        "gaps": [
+          {
+            "kind": "item_matching",
+            "severity": "high",
+            "item": "Australian Mixed Hardwood Decking Board 140x19mm 5.4m",
+            "stored": "Unpriced / Manual",
+            "replay": "Craftright 4 Piece Forstner Drill Bit Set",
+            "recommendation": "Improve search term generation and semantic matching to prevent completely unrelated items (drill bits) from being selected for timber."
+          },
+          {
+            "kind": "item_matching",
+            "severity": "high",
+            "item": "Pine Structural Treated H3 140x45mm (Joists and Bearers)",
+            "stored": "Pine Structural Treated H3 140x45mm",
+            "replay": "ARk Hitch Pin Round",
+            "recommendation": "Fix the matching algorithm to prioritize timber products over unrelated hardware when searching for treated pine."
+          },
+          {
+            "kind": "unit_conversion",
+            "severity": "high",
+            "item": "Nails Flathead Pryda 35x3.15mm Galv",
+            "stored": "200 each, total $2402.00",
+            "replay": "728 each of 500g packs, total $10119.20",
+            "recommendation": "Implement unit awareness for fasteners. If the required quantity is in individual nails, and the product is a 500g pack, calculate how many packs are needed instead of buying 728 packs."
+          },
+          {
+            "kind": "item_matching",
+            "severity": "medium",
+            "item": "Weed Mat / Landscape Fabric",
+            "stored": "Unpriced",
+            "replay": "Saxon 14cm Weedmat Pin - 10 Pack",
+            "recommendation": "Ensure the matcher distinguishes between the primary material (mat) and its accessories (pins)."
+          },
+          {
+            "kind": "item_matching",
+            "severity": "medium",
+            "item": "Safety Mesh Fence Syneco 1x30m Orange",
+            "stored": "Safety Mesh Fence Syneco 1x30m Orange",
+            "replay": "Jack Wire Mesh Fence Anchors - 20 Pack",
+            "recommendation": "Ensure the matcher distinguishes between the fence mesh and its anchors."
+          },
+          {
+            "kind": "estimation",
+            "severity": "medium",
+            "item": "Estimated Hours",
+            "stored": "19 hours",
+            "replay": "52 hours",
+            "recommendation": "Review the labor estimation logic for a 50m2 deck. While 52 hours might be more realistic than 19, the discrepancy is large and should be validated."
+          }
+        ],
+        "testAssertions": [
+          "expect(replay.estimatedHours).toBeCloseTo(stored.job.estimatedHours, 0.2)",
+          "expect(replay.materialsSubtotal).toBeCloseTo(stored.pricing.materialsSubtotal, 0.2)",
+          "expect(replay.materials.find(m => m.name.includes('Hardwood Decking Board')).chosen.name).toMatch(/decking|board|timber/i)",
+          "expect(replay.materials.find(m => m.name.includes('Pine Structural Treated')).chosen.name).toMatch(/pine|timber|framing/i)",
+          "expect(replay.materials.find(m => m.name.includes('Nails Flathead')).totalPrice).toBeLessThan(500)"
+        ]
+      },
+      "storedRedacted": {
+        "id": "1783046480805-mhirv3pwh",
+        "number": "QU-178304",
+        "stage": "draft",
+        "job": {
+          "name": "Hardwood Deck Supply and Install",
+          "template": "custom",
+          "estimatedHours": 19,
+          "descriptionLength": 79
+        },
+        "pricing": {
+          "total": 13165.73,
+          "materialsSubtotal": 7574.04,
+          "laborHours": 2.4,
+          "laborTotal": 2400
+        },
+        "sections": [
+          {
+            "name": "Hardwood Deck Surface",
+            "hours": 0.3,
+            "total": 300
+          },
+          {
+            "name": "Deck Subframe - Joists",
+            "hours": 0.1,
+            "total": 100
+          },
+          {
+            "name": "Deck Subframe - Bearers",
+            "hours": 0.8,
+            "total": 800
+          },
+          {
+            "name": "Ground Preparation",
+            "hours": 0.3,
+            "total": 300
+          },
+          {
+            "name": "Deck Finishing",
+            "hours": 0.5,
+            "total": 500
+          },
+          {
+            "name": "Deck Edge Fascia",
+            "hours": 0.3,
+            "total": 300
+          },
+          {
+            "name": "Site Safety",
+            "hours": 0.3,
+            "total": 300
+          }
+        ],
+        "materials": [
+          {
+            "name": "Australian Mixed Hardwood Decking Board 140x19mm 5.4m",
+            "quantity": 40,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Pine Structural Treated H3 140x45mm 5.4m (Joists)",
+            "quantity": 12,
+            "unit": "each",
+            "price": 61.05,
+            "totalPrice": 732.5999999999999,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Pine Structural Treated H3 140x45mm 3.6m (Bearers)",
+            "quantity": 15,
+            "unit": "each",
+            "price": 13.65,
+            "totalPrice": 204.75,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Pedestal Foot Builders Edge Small 35-60mm",
+            "quantity": 24,
+            "unit": "each",
+            "price": 8.9,
+            "totalPrice": 213.60000000000002,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Joist Hanger 140mm Depth Pryda 45x140mm",
+            "quantity": 24,
+            "unit": "box",
+            "price": 75.99,
+            "totalPrice": 1823.7599999999998,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Multigrip SS316 Vuepro 40x40x100mm (Bearer Brackets)",
+            "quantity": 20,
+            "unit": "each",
+            "price": 2.52,
+            "totalPrice": 50.4,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Decking Screws Stainless Steel 10G x 50mm",
+            "quantity": 999,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Screw Bugle Batten 14G x 75mm Galv C3 (Subframe)",
+            "quantity": 100,
+            "unit": "box",
+            "price": 17.02,
+            "totalPrice": 1702,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Nails Flathead Pryda 35x3.15mm Galv",
+            "quantity": 200,
+            "unit": "each",
+            "price": 12.01,
+            "totalPrice": 2402,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Bearer Protectadeck 45mm x 50m Bearer Tape",
+            "quantity": 2,
+            "unit": "each",
+            "price": 43.04,
+            "totalPrice": 86.08,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Weed Mat / Landscape Fabric",
+            "quantity": 55,
+            "unit": "m²",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Gravel / Drainage Aggregate 20mm",
+            "quantity": 999,
+            "unit": "kg",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Shim Packing Titan Black 10x72x100mm",
+            "quantity": 30,
+            "unit": "each",
+            "price": 1.28,
+            "totalPrice": 38.4,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Decking Oil - Natural Finish",
+            "quantity": 14,
+            "unit": "L",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Fascia Board Hardwood 140x19mm 5.4m",
+            "quantity": 6,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Screw Coach HDG M10x40",
+            "quantity": 20,
+            "unit": "box",
+            "price": 13.65,
+            "totalPrice": 273,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Safety Mesh Fence Syneco 1x30m Orange",
+            "quantity": 1,
+            "unit": "each",
+            "price": 32.8,
+            "totalPrice": 32.8,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          },
+          {
+            "name": "Tarpaulin Medium Duty 3.25x5.3m",
+            "quantity": 1,
+            "unit": "each",
+            "price": 14.65,
+            "totalPrice": 14.65,
+            "pricingSource": "manual",
+            "priceConfidence": "high"
+          }
+        ]
+      },
+      "replay": {
+        "estimatedHours": 52,
+        "materialsSubtotal": 18809.72,
+        "materials": [
+          {
+            "name": "Australian Mixed Hardwood Decking Board 140x19mm 5.4m",
+            "searchTerm": "140x19mm hardwood decking board 5.4m",
+            "quantity": 18,
+            "unit": "pack",
+            "reasoning": "50m2 deck area. 140mm board + 4mm gap = 144mm coverage. 50 / 0.144 = 347 linear meters. Add 10% waste = 382m. 382m / 5.4m per board = 71 boards.",
+            "requiredQty": 71,
+            "price": 7.98,
+            "totalPrice": 143.64,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Craftright 4 Piece Forstner Drill Bit Set",
+              "price": 7.98,
+              "confidence": "high",
+              "itemNumber": "0598859",
+              "pack": {
+                "packSize": 4,
+                "packUnit": "each"
+              }
+            }
+          },
+          {
+            "name": "Pine Structural Treated H3 140x45mm (Joists)",
+            "searchTerm": "140x45mm H3 treated pine",
+            "quantity": 143,
+            "unit": "m",
+            "reasoning": "10m span spaced at 450mm requires 13 joists of 10m length = 130 linear meters. Add 10% waste = 143m.",
+            "requiredQty": 143,
+            "price": 15.98,
+            "totalPrice": 2285.14,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "ARk Hitch Pin Round ",
+              "price": 15.98,
+              "confidence": "high",
+              "itemNumber": "0625547",
+              "pack": {
+                "packSize": 3500,
+                "packUnit": "kg"
+              }
+            }
+          },
+          {
+            "name": "Pine Structural Treated H3 140x45mm (Bearers)",
+            "searchTerm": "140x45mm H3 treated pine",
+            "quantity": 44,
+            "unit": "m",
+            "reasoning": "5m span spaced at 1.5m requires 8 bearers of 5m length = 40 linear meters. Add 10% waste = 44m.",
+            "requiredQty": 44,
+            "price": 15.98,
+            "totalPrice": 703.12,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "ARk Hitch Pin Round ",
+              "price": 15.98,
+              "confidence": "high",
+              "itemNumber": "0625547",
+              "pack": {
+                "packSize": 3500,
+                "packUnit": "kg"
+              }
+            }
+          },
+          {
+            "name": "Pedestal Foot Builders Edge Small 35-60mm",
+            "searchTerm": "adjustable pedestal foot 35-60mm",
+            "quantity": 48,
+            "unit": "each",
+            "reasoning": "8 bearers supported every 1.2m along their 5m length (5 supports per bearer). 8 x 6 = 48 pedestals.",
+            "requiredQty": 48,
+            "price": 4.5,
+            "totalPrice": 216,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "CTA Adjustable Plastic Decking Pedestal 35-60mm",
+              "price": 4.5,
+              "confidence": "low",
+              "itemNumber": "unknown",
+              "pack": null
+            }
+          },
+          {
+            "name": "Joist Hanger 140mm Depth Pryda 45x140mm",
+            "searchTerm": "140x45mm joist hanger",
+            "quantity": 182,
+            "unit": "each",
+            "reasoning": "Assuming inline frame for low ground level. 13 joists intersecting 8 bearers creates 7 spans per joist. 13 x 7 x 2 ends = 182 hangers.",
+            "requiredQty": 182,
+            "price": 6.5,
+            "totalPrice": 1183,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "ITW Buildex 140x45mm Joist Hanger Galvanised",
+              "price": 6.5,
+              "confidence": "low",
+              "itemNumber": "unknown",
+              "pack": null
+            }
+          },
+          {
+            "name": "Multigrip SS316 Vuepro 40x40x100mm (Bearer Brackets)",
+            "searchTerm": "multigrip bracket stainless steel",
+            "quantity": 48,
+            "unit": "each",
+            "reasoning": "Used to secure bearers to pedestal feet or perimeter framing. 1 per pedestal foot.",
+            "requiredQty": 48,
+            "price": 1.06,
+            "totalPrice": 50.88,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Pryda 132 x 35mm Multigrips - Each",
+              "price": 1.06,
+              "confidence": "high",
+              "itemNumber": "0219902",
+              "pack": null
+            }
+          },
+          {
+            "name": "Decking Screws Stainless Steel 10G x 50mm",
+            "searchTerm": "10G x 50mm stainless decking screws",
+            "quantity": 34,
+            "unit": "pack",
+            "reasoning": "13 joists x 347 linear meters of decking / 0.45m spacing = 771 intersections. 2 screws per intersection = 1542. Add 10% waste = 1700 screws.",
+            "requiredQty": 1700,
+            "price": 12.95,
+            "totalPrice": 440.3,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Buildex 10G x 30mm Class 3 Sheet Metal Screws (Countersunk Head) - 50 Pack",
+              "price": 12.95,
+              "confidence": "high",
+              "itemNumber": "0920093",
+              "pack": {
+                "packSize": 50,
+                "packUnit": "each"
+              }
+            }
+          },
+          {
+            "name": "Screw Bugle Batten 14G x 75mm Galv C3 (Subframe)",
+            "searchTerm": "14G x 75mm bugle batten screw",
+            "quantity": 8,
+            "unit": "pack",
+            "reasoning": "For general subframe fixing and tying perimeter joists/bearers. Estimated 200 screws.",
+            "requiredQty": 200,
+            "price": 11.85,
+            "totalPrice": 94.8,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Buildex® 14G x 75mm Class 4 Bugle Batten Screws - 25 pack",
+              "price": 11.85,
+              "confidence": "high",
+              "itemNumber": "0890592",
+              "pack": {
+                "packSize": 25,
+                "packUnit": "each"
+              }
+            }
+          },
+          {
+            "name": "Nails Flathead Pryda 35x3.15mm Galv",
+            "searchTerm": "35x3.15mm connector nails",
+            "quantity": 728,
+            "unit": "each",
+            "reasoning": "4 nails per joist hanger. 182 hangers x 4 = 728 nails.",
+            "requiredQty": 728,
+            "price": 13.9,
+            "totalPrice": 10119.2,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Pryda Timber Connector Nails 35 x 3.15mm 500g",
+              "price": 13.9,
+              "confidence": "high",
+              "itemNumber": "1107055",
+              "pack": null
+            }
+          },
+          {
+            "name": "Bearer Protectadeck 45mm x 50m Bearer Tape",
+            "searchTerm": "45mm joist bearer tape",
+            "quantity": 9,
+            "unit": "each",
+            "reasoning": "Coverage for 130m of joists and 40m of bearers to protect timber from moisture.",
+            "requiredQty": 170,
+            "price": 16.5,
+            "totalPrice": 148.5,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Gyproc Joist and Bearer Isolation Tape 45mm x 20m",
+              "price": 16.5,
+              "confidence": "low",
+              "itemNumber": "unknown",
+              "pack": {
+                "packSize": 20,
+                "packUnit": "m"
+              }
+            }
+          },
+          {
+            "name": "Weed Mat / Landscape Fabric",
+            "searchTerm": "weed mat landscape fabric",
+            "quantity": 55,
+            "unit": "m²",
+            "reasoning": "50m2 deck area plus 10% for overlap and edges.",
+            "requiredQty": 55,
+            "price": 3.28,
+            "totalPrice": 180.4,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Saxon 14cm Weedmat Pin - 10 Pack",
+              "price": 3.28,
+              "confidence": "high",
+              "itemNumber": "3042244",
+              "pack": {
+                "packSize": 10,
+                "packUnit": "each"
+              }
+            }
+          },
+          {
+            "name": "Gravel / Drainage Aggregate 20mm",
+            "searchTerm": "20mm drainage gravel aggregate",
+            "quantity": 188,
+            "unit": "pack",
+            "reasoning": "50m2 area at 50mm depth = 2.5m3. Density of gravel is approx 1500kg/m3. 2.5 x 1500 = 3750kg.",
+            "requiredQty": 3750,
+            "price": 9.48,
+            "totalPrice": 1782.24,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Pavestone 20mm Crushed Rock Aggregate 20kg",
+              "price": 9.48,
+              "confidence": "low",
+              "itemNumber": "unknown",
+              "pack": {
+                "packSize": 20,
+                "packUnit": "kg"
+              }
+            }
+          },
+          {
+            "name": "Shim Packing Titan Black 10x72x100mm",
+            "searchTerm": "plastic packing shims",
+            "quantity": 96,
+            "unit": "each",
+            "reasoning": "For micro-adjusting levels on pedestal feet. Estimated 2 per pedestal.",
+            "requiredQty": 96,
+            "price": 1.35,
+            "totalPrice": 129.6,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Titan 10 x 72 x 100 mm Black Shim Packing",
+              "price": 1.35,
+              "confidence": "high",
+              "itemNumber": "0647612",
+              "pack": null
+            }
+          },
+          {
+            "name": "Decking Oil - Natural Finish",
+            "searchTerm": "natural decking oil",
+            "quantity": 10,
+            "unit": "L",
+            "reasoning": "50m2 deck area. Coverage approx 10m2 per litre. 5L per coat x 2 coats = 10L.",
+            "requiredQty": 10,
+            "price": 41,
+            "totalPrice": 410,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Timber Protect 1L Natural Water Based Decking Oil",
+              "price": 41,
+              "confidence": "high",
+              "itemNumber": "1400469",
+              "pack": {
+                "packSize": 1,
+                "packUnit": "L"
+              }
+            }
+          },
+          {
+            "name": "Fascia Board Hardwood 140x19mm 5.4m",
+            "searchTerm": "140x19mm hardwood fascia board 5.4m",
+            "quantity": 7,
+            "unit": "each",
+            "reasoning": "Perimeter of deck is 10+10+5+5 = 30m. Add 10% waste = 33m. 33m / 5.4m = 6.1, rounded up to 7 boards.",
+            "requiredQty": 7,
+            "price": 79.9,
+            "totalPrice": 559.3,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "140 x 19mm Hardwood DAR Fascia Board 5.4m",
+              "price": 79.9,
+              "confidence": "low",
+              "itemNumber": "unknown",
+              "pack": {
+                "packSize": 5.4,
+                "packUnit": "m"
+              }
+            }
+          },
+          {
+            "name": "Screw Coach HDG M10x40",
+            "searchTerm": "M10x40 coach screw",
+            "quantity": 50,
+            "unit": "each",
+            "reasoning": "For heavy duty structural tie-downs or fascia corner brackets.",
+            "requiredQty": 50,
+            "price": 0.9,
+            "totalPrice": 45,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Zenith M10 x 40mm Hot Dipped Galvanised Hex Head Coach Screw - Each",
+              "price": 0.9,
+              "confidence": "high",
+              "itemNumber": "2449357",
+              "pack": null
+            }
+          },
+          {
+            "name": "Safety Mesh Fence Syneco 1x30m Orange",
+            "searchTerm": "orange safety mesh fence",
+            "quantity": 30,
+            "unit": "m",
+            "reasoning": "To secure the 30m perimeter of the work site.",
+            "requiredQty": 30,
+            "price": 10.44,
+            "totalPrice": 313.2,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Jack Wire Mesh Fence Anchors - 20 Pack",
+              "price": 10.44,
+              "confidence": "high",
+              "itemNumber": "3042466",
+              "pack": {
+                "packSize": 20,
+                "packUnit": "each"
+              }
+            }
+          },
+          {
+            "name": "Tarpaulin Medium Duty 3.25x5.3m",
+            "searchTerm": "medium duty tarpaulin",
+            "quantity": 2,
+            "unit": "each",
+            "reasoning": "To cover and protect hardwood timber stacks from weather prior to installation.",
+            "requiredQty": 2,
+            "price": 2.7,
+            "totalPrice": 5.4,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Jack 1.2 x 1.8m Medium Duty Tarpaulin",
+              "price": 2.7,
+              "confidence": "high",
+              "itemNumber": "0597503",
+              "pack": {
+                "packSize": 1.8,
+                "packUnit": "m"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "1783037571377-qsc61hqev",
+      "number": "QU-178303",
+      "error": "Could not parse JSON: {\n  \"verdict\": \"fail\",\n  \"summary\": \"The replay quote successfully attempted to price many items that were previously unpriced, but the semantic search and matching algorithm failed significantly on several key items. It selected completely"
+    },
+    {
+      "id": "1782986737028-44bdugu9m",
+      "number": "QU-178298",
+      "stage": "draft",
+      "deterministicIssues": [
+        {
+          "code": "zero_priced_material",
+          "detail": "4 material(s) at $0 with positive qty"
+        }
+      ],
+      "oracle": {
+        "verdict": "fail",
+        "summary": "The replay successfully fetched prices but failed critically at semantic matching for 3 out of 4 materials. The system selected pointing compound instead of roof tiles, nozzles instead of sealant, and electrical conduit instead of pointing compound. Additionally, material quantities were altered during the replay.",
+        "gaps": [
+          {
+            "kind": "Semantic Match Failure",
+            "severity": "high",
+            "item": "Concrete Roof Tile",
+            "stored": "Concrete Roof Tile (qty 5)",
+            "replay": "Selleys 10L Terracotta / Monier Cottage Red Generation II Point Works (qty 10)",
+            "recommendation": "Improve semantic matching to differentiate between solid roof tiles and liquid/compound pointing products. The matcher likely over-indexed on 'Terracotta'."
+          },
+          {
+            "kind": "Semantic Match Failure",
+            "severity": "high",
+            "item": "Roof and Gutter Silicone Sealant",
+            "stored": "Roof and Gutter Silicone Sealant",
+            "replay": "Sika Resealable Cartridge Nozzles - 5 Pack",
+            "recommendation": "Adjust ranking weights to prioritize actual sealants over accessories like nozzles. Valid sealant candidates (Parfix, Selleys) were present in the candidates list but not chosen."
+          },
+          {
+            "kind": "Semantic Match Failure",
+            "severity": "high",
+            "item": "Flexible Roof Pointing Compound",
+            "stored": "Flexible Roof Pointing Compound",
+            "replay": "DETA 10m x 20mm Medium Duty Corrugated Conduit",
+            "recommendation": "Investigate vector/keyword search returning electrical conduit for roofing compound. The matcher likely over-indexed on the word 'Flexible'."
+          },
+          {
+            "kind": "Quantity Mutation",
+            "severity": "medium",
+            "item": "Concrete Roof Tile",
+            "stored": "quantity: 5",
+            "replay": "quantity: 10",
+            "recommendation": "Ensure the replay pipeline respects stored draft quantities rather than regenerating them, unless a dynamic recalculation flag is explicitly set."
+          }
+        ],
+        "testAssertions": [
+          "expect(replay.materials[0].chosen.name).toMatch(/tile/i)",
+          "expect(replay.materials[1].chosen.name).not.toMatch(/nozzle/i)",
+          "expect(replay.materials[2].chosen.name).not.toMatch(/conduit/i)",
+          "expect(replay.materials[0].quantity).toEqual(stored.materials[0].quantity)"
+        ]
+      },
+      "storedRedacted": {
+        "id": "1782986737028-44bdugu9m",
+        "number": "QU-178298",
+        "stage": "draft",
+        "job": {
+          "name": "Custom Job",
+          "template": "custom",
+          "estimatedHours": 3,
+          "descriptionLength": 4
+        },
+        "pricing": {
+          "total": 336.6,
+          "materialsSubtotal": 0,
+          "laborHours": 3,
+          "laborTotal": 255
+        },
+        "sections": [
+          {
+            "name": "Tile Replacement",
+            "hours": 1,
+            "total": 85
+          },
+          {
+            "name": "Ridge Capping Repointing",
+            "hours": 2,
+            "total": 170
+          }
+        ],
+        "materials": [
+          {
+            "name": "Concrete Roof Tile",
+            "quantity": 5,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Roof and Gutter Silicone Sealant",
+            "quantity": 1,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Flexible Roof Pointing Compound",
+            "quantity": 1,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0
+          },
+          {
+            "name": "Sand and Cement Mortar Mix",
+            "quantity": 20,
+            "unit": "kg",
+            "price": 0,
+            "totalPrice": 0
+          }
+        ]
+      },
+      "replay": {
+        "estimatedHours": 3,
+        "materialsSubtotal": 583.19,
+        "materials": [
+          {
+            "name": "Concrete Roof Tile",
+            "searchTerm": "Concrete Roof Tile standard profile",
+            "quantity": 10,
+            "unit": "each",
+            "reasoning": "Estimated 10 tiles for a 1-hour replacement job, allowing for 10% waste and breakages.",
+            "requiredQty": 10,
+            "price": 45,
+            "totalPrice": 450,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Selleys 10L Terracotta / Monier Cottage Red Generation II Point Works",
+              "price": 45,
+              "confidence": "high",
+              "itemNumber": "1141178",
+              "pack": {
+                "packSize": 10,
+                "packUnit": "L"
+              }
+            }
+          },
+          {
+            "name": "Roof and Gutter Silicone Sealant",
+            "searchTerm": "Roof and Gutter Silicone Sealant cartridge",
+            "quantity": 1,
+            "unit": "pack",
+            "reasoning": "1 cartridge for sealing minor gaps and securing cuts around replaced tiles.",
+            "requiredQty": 1,
+            "price": 2.99,
+            "totalPrice": 2.99,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Sika Resealable Cartridge Nozzles - 5 Pack",
+              "price": 2.99,
+              "confidence": "high",
+              "itemNumber": "1661791",
+              "pack": {
+                "packSize": 5,
+                "packUnit": "each"
+              }
+            }
+          },
+          {
+            "name": "Flexible Roof Pointing Compound",
+            "searchTerm": "Flexible Roof Pointing Compound",
+            "quantity": 10,
+            "unit": "L",
+            "reasoning": "10L of pointing compound covers approximately 10-15m of ridge capping, suitable for a 2-hour repointing task.",
+            "requiredQty": 10,
+            "price": 11.97,
+            "totalPrice": 119.7,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "DETA 10m x 20mm Medium Duty Corrugated Conduit",
+              "price": 11.97,
+              "confidence": "high",
+              "itemNumber": "0829437",
+              "pack": {
+                "packSize": 10,
+                "packUnit": "m"
+              }
+            }
+          },
+          {
+            "name": "Sand and Cement Mortar Mix",
+            "searchTerm": "Sand and Cement Mortar Mix",
+            "quantity": 1,
+            "unit": "pack",
+            "reasoning": "20kg of mortar mix for re-bedding any loose ridge caps prior to applying the flexible pointing.",
+            "requiredQty": 20,
+            "price": 10.5,
+            "totalPrice": 10.5,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Australian Builders 20kg Sand And Cement Mix Bag",
+              "price": 10.5,
+              "confidence": "high",
+              "itemNumber": "0760612",
+              "pack": {
+                "packSize": 20,
+                "packUnit": "kg"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "1782965577754-zsz4vpufv",
+      "number": "QU-178296",
+      "error": "Could not parse JSON: {\n  \"verdict\": \"fail\",\n  \"summary\": \"The replay quote exhibits severe product matching failures, selecting completely unrelated items (e.g., conduit saddles for concrete, angle brackets for mesh, sanding pads for formwork) which drastically"
+    },
+    {
+      "id": "1782965514777-0bwoqtefr",
+      "number": "QU-178296",
+      "stage": "draft",
+      "deterministicIssues": [
+        {
+          "code": "zero_priced_material",
+          "detail": "1 material(s) at $0 with positive qty"
+        }
+      ],
+      "oracle": {
+        "verdict": "fail",
+        "summary": "The replay successfully decomposed the generic 'Labour & Materials' line item from the stored quote into specific electrical components. However, it failed significantly on product matching by selecting a plumbing irrigation riser instead of electrical wire connectors (BP connectors).",
+        "gaps": [
+          {
+            "kind": "Product Match Error",
+            "severity": "high",
+            "item": "Wire Connectors (BP Connectors)",
+            "stored": "Labour & Materials (Generic)",
+            "replay": "GD Watermark 25mm x 300mm Poly Irrigation Riser Connector",
+            "recommendation": "Improve search term generation or product filtering to ensure electrical connectors are not matched with plumbing irrigation parts. Consider adding category filters to the search."
+          },
+          {
+            "kind": "Material Breakdown",
+            "severity": "low",
+            "item": "Materials List",
+            "stored": "Single generic item 'Labour & Materials' for $390",
+            "replay": "Itemized list of materials (Junction boxes, tape, cable, ties) for $120.70",
+            "recommendation": "The itemization is an improvement over the manual generic entry, but ensure the total material cost accurately reflects the job requirements."
+          }
+        ],
+        "testAssertions": [
+          "Replay should generate specific materials instead of generic 'Labour & Materials' entries.",
+          "Replay must not select plumbing parts for electrical components (e.g., BP connectors).",
+          "Replay estimated hours should match stored estimated hours (8)."
+        ]
+      },
+      "storedRedacted": {
+        "id": "1782965514777-0bwoqtefr",
+        "number": "QU-178296",
+        "stage": "draft",
+        "job": {
+          "name": "Bathroom Fan and Light Electrical Works",
+          "template": "custom",
+          "estimatedHours": 8,
+          "descriptionLength": 287
+        },
+        "pricing": {
+          "total": 1518,
+          "materialsSubtotal": 390,
+          "laborHours": 1,
+          "laborTotal": 760
+        },
+        "sections": [],
+        "materials": [
+          {
+            "name": "Labour & Materials",
+            "quantity": 1,
+            "unit": "each",
+            "price": 390,
+            "totalPrice": 390,
+            "pricingSource": "manual"
+          },
+          {
+            "name": "",
+            "quantity": 1,
+            "unit": "each",
+            "price": 0,
+            "totalPrice": 0,
+            "pricingSource": "manual"
+          }
+        ]
+      },
+      "replay": {
+        "estimatedHours": 8,
+        "materialsSubtotal": 120.7,
+        "materials": [
+          {
+            "name": "Electrical Junction Box",
+            "searchTerm": "electrical junction box standard",
+            "quantity": 3,
+            "unit": "each",
+            "reasoning": "Required to safely terminate and enclose the live wiring in the ceiling cavity while the plaster is removed and replaced.",
+            "requiredQty": 3,
+            "price": 3.61,
+            "totalPrice": 10.83,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "HPM Standard Wall Junction Box With Sliding Nuts",
+              "price": 3.61,
+              "confidence": "high",
+              "itemNumber": "7053636",
+              "pack": null
+            }
+          },
+          {
+            "name": "Wire Connectors (BP Connectors)",
+            "searchTerm": "BP connectors electrical",
+            "quantity": 15,
+            "unit": "each",
+            "reasoning": "Used to safely cap off individual wires during the disconnect phase and to reconnect the fixtures later.",
+            "requiredQty": 15,
+            "price": 3.7,
+            "totalPrice": 55.5,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "GD Watermark 25mm x 300mm Poly Irrigation Riser Connector",
+              "price": 3.7,
+              "confidence": "high",
+              "itemNumber": "4816126",
+              "pack": null
+            }
+          },
+          {
+            "name": "Electrical Tape",
+            "searchTerm": "PVC electrical tape",
+            "quantity": 1,
+            "unit": "each",
+            "reasoning": "Essential consumable for insulating wire ends, securing sheathing, and general electrical safety.",
+            "requiredQty": 1,
+            "price": 2.89,
+            "totalPrice": 2.89,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "DETA 20m 18mm Black Insulation PVC Tape - Black",
+              "price": 2.89,
+              "confidence": "high",
+              "itemNumber": "0381098",
+              "pack": {
+                "packSize": 20,
+                "packUnit": "m"
+              }
+            }
+          },
+          {
+            "name": "1.5mm² Twin and Earth Cable",
+            "searchTerm": "1.5mm twin and earth electrical cable",
+            "quantity": 1,
+            "unit": "each",
+            "reasoning": "A small contingency allowance to extend existing wiring in case the new ceiling height or fixture placement requires slightly more length.",
+            "requiredQty": 5,
+            "price": 49,
+            "totalPrice": 49,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Nexans 1.5mm Twin & Earth Cable 50m Roll",
+              "price": 49,
+              "confidence": "low",
+              "itemNumber": "unknown",
+              "pack": {
+                "packSize": 50,
+                "packUnit": "m"
+              }
+            }
+          },
+          {
+            "name": "Cable Ties",
+            "searchTerm": "nylon cable ties 200mm",
+            "quantity": 1,
+            "unit": "pack",
+            "reasoning": "To secure the loose cables to the ceiling joists, keeping them safe and out of the way for the plasterers.",
+            "requiredQty": 20,
+            "price": 2.48,
+            "totalPrice": 2.48,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Crescent 150 x 3.6mm Black Cable Ties - 25 Pack",
+              "price": 2.48,
+              "confidence": "high",
+              "itemNumber": "4431120",
+              "pack": {
+                "packSize": 25,
+                "packUnit": "each"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "1782962929152-mk1mrui2y",
+      "number": "QU-178296",
+      "error": "Gemini 503: {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"The service is currently unavailable.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n"
+    },
+    {
+      "id": "1782962455195-vokibs854",
+      "number": "QU-178296",
+      "stage": "draft",
+      "deterministicIssues": [],
+      "oracle": {
+        "verdict": "review",
+        "summary": "The replay successfully identified and priced necessary consumables (oil, herbicide, chain) that were completely missing from the stored quote. However, the replay exhibits unit conversion failures where requested quantities in Liters are fulfilled by smaller milliliter bottles without adjusting the purchase multiplier.",
+        "gaps": [
+          {
+            "kind": "Missing Materials",
+            "severity": "medium",
+            "item": "Materials Array",
+            "stored": "0 items, $0 subtotal",
+            "replay": "4 items, $88.55 subtotal",
+            "recommendation": "Update the baseline test to expect these standard tree removal consumables, as the replay's AI inference is more accurate than the stored draft."
+          },
+          {
+            "kind": "Unit Conversion Error",
+            "severity": "high",
+            "item": "Chainsaw Bar Oil",
+            "stored": "N/A",
+            "replay": "Requested 4 L, but priced 4 x 500ml bottles (Total 2L)",
+            "recommendation": "Implement unit normalization in the pricing engine so that if 4L is requested and a 500ml product is chosen, the purchase quantity is adjusted to 8."
+          },
+          {
+            "kind": "Unit Conversion Error",
+            "severity": "high",
+            "item": "2-Stroke Engine Oil",
+            "stored": "N/A",
+            "replay": "Requested 1 L, but priced 1 x 200ml bottle (Total 200ml)",
+            "recommendation": "Ensure the pricing engine adjusts required quantities based on the pack size or volume of the chosen candidate."
+          }
+        ],
+        "testAssertions": [
+          "expect(replay.materials.length).toBeGreaterThan(0)",
+          "expect(replay.materialsSubtotal).toBeGreaterThan(0)",
+          "expect(replay.materials.find(m => m.name === 'Chainsaw Bar Oil').totalPrice).toBeGreaterThan(0)",
+          "expect(calculateTotalVolume(replay.materials[0])).toEqual(replay.materials[0].requiredQty)"
+        ]
+      },
+      "storedRedacted": {
+        "id": "1782962455195-vokibs854",
+        "number": "QU-178296",
+        "stage": "draft",
+        "job": {
+          "name": "Custom Job",
+          "template": "custom",
+          "estimatedHours": 8,
+          "descriptionLength": 13
+        },
+        "pricing": {
+          "total": 1056,
+          "materialsSubtotal": 0,
+          "laborHours": 8,
+          "laborTotal": 800
+        },
+        "sections": [],
+        "materials": []
+      },
+      "replay": {
+        "estimatedHours": 8,
+        "materialsSubtotal": 88.55,
+        "materials": [
+          {
+            "name": "Chainsaw Bar Oil",
+            "searchTerm": "chainsaw bar oil",
+            "quantity": 4,
+            "unit": "L",
+            "reasoning": "Lubrication for the chainsaw bar and chain during a full 8-hour day of tree felling and bucking.",
+            "requiredQty": 4,
+            "price": 9.98,
+            "totalPrice": 39.92,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "PowerFit 500ml Bar and Chain Oil",
+              "price": 9.98,
+              "confidence": "high",
+              "itemNumber": "0346067",
+              "pack": null
+            }
+          },
+          {
+            "name": "2-Stroke Engine Oil",
+            "searchTerm": "2 stroke engine oil",
+            "quantity": 1,
+            "unit": "L",
+            "reasoning": "Required for mixing with unleaded petrol to run 2-stroke chainsaws for the duration of the job.",
+            "requiredQty": 1,
+            "price": 8.2,
+            "totalPrice": 8.2,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Powerfit 200ml Semi Synthetic 2 Stroke Oil",
+              "price": 8.2,
+              "confidence": "high",
+              "itemNumber": "3381277",
+              "pack": null
+            }
+          },
+          {
+            "name": "Tree and Stump Herbicide",
+            "searchTerm": "tree stump killer herbicide",
+            "quantity": 1,
+            "unit": "L",
+            "reasoning": "Applied directly to the freshly cut stump to poison the root system and prevent regrowth.",
+            "requiredQty": 1,
+            "price": 11.98,
+            "totalPrice": 11.98,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Defender Tree & Blackberry Killer Ready to Use 750mL",
+              "price": 11.98,
+              "confidence": "low",
+              "itemNumber": "unknown",
+              "pack": null
+            }
+          },
+          {
+            "name": "Replacement Chainsaw Chain",
+            "searchTerm": "chainsaw chain",
+            "quantity": 1,
+            "unit": "each",
+            "reasoning": "Standard allowance for one replacement chain due to heavy wear, dulling, or hitting embedded objects during a large removal.",
+            "requiredQty": 1,
+            "price": 28.45,
+            "totalPrice": 28.45,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Full Boar 12\" / 305mm Chainsaw Chain FBCSC-124345",
+              "price": 28.45,
+              "confidence": "high",
+              "itemNumber": "0624470",
+              "pack": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "1782932926690-ulovz2i4s",
+      "number": "QU-178293",
+      "stage": "quote_sent",
+      "deterministicIssues": [],
+      "oracle": {
+        "verdict": "fail",
+        "summary": "The replay failed significantly due to a severe semantic matching error where fuel system cleaner was priced as bulk diesel fuel, and a catalog scope error where services/rentals were searched in a retail materials database.",
+        "gaps": [
+          {
+            "kind": "semantic_match_error",
+            "severity": "high",
+            "item": "Diesel Fuel",
+            "stored": "1 each @ 115.83 (manual)",
+            "replay": "150 L @ 21.90 = 3285.00 (Matched with 'Nulon 300ml Diesel Fuel System Cleaner')",
+            "recommendation": "Implement category exclusions for 'additives/cleaners' when searching for bulk fuel, or flag bulk fuel as a non-retail commodity to be priced via a fuel index."
+          },
+          {
+            "kind": "catalog_scope_error",
+            "severity": "medium",
+            "item": "Truck and Excavator Hire",
+            "stored": "1 each @ 599.47 (manual)",
+            "replay": "Unpriced ($0.00)",
+            "recommendation": "Route equipment hire and dumping fees to a specialized service/rental pricing API rather than a standard retail material catalog."
+          },
+          {
+            "kind": "unit_conversion_error",
+            "severity": "low",
+            "item": "Clean Fill Dumping Fee",
+            "stored": "1 each @ 200.00 (manual)",
+            "replay": "20000 kg @ 0.00",
+            "recommendation": "Avoid converting bulk service units (tonnes/loads) into base physical units (kg) for API searches, as tipping fees are typically quoted per tonne or per load."
+          }
+        ],
+        "testAssertions": [
+          "expect(replay.materials.find(m => m.name === 'Diesel Fuel').chosen.name).not.toMatch(/cleaner/i)",
+          "expect(replay.materialsSubtotal).toBeLessThan(1500)",
+          "expect(replay.materials.find(m => m.name === 'Truck and Excavator Hire').priceStatus).toBe('priced')",
+          "expect(replay.materials.find(m => m.name === 'Clean Fill Dumping Fee').unit).toMatch(/tonne|load|each/i)"
+        ]
+      },
+      "storedRedacted": {
+        "id": "1782932926690-ulovz2i4s",
+        "number": "QU-178293",
+        "stage": "quote_sent",
+        "job": {
+          "name": "Excavated Fill Removal",
+          "template": "custom",
+          "estimatedHours": 8,
+          "descriptionLength": 52
+        },
+        "pricing": {
+          "total": 2099.2,
+          "materialsSubtotal": 915.3,
+          "laborHours": 1,
+          "laborTotal": 600
+        },
+        "sections": [],
+        "materials": [
+          {
+            "name": "Fuel",
+            "quantity": 1,
+            "unit": "each",
+            "price": 115.83,
+            "totalPrice": 115.83,
+            "pricingSource": "manual"
+          },
+          {
+            "name": "Dumping fee",
+            "quantity": 1,
+            "unit": "each",
+            "price": 200,
+            "totalPrice": 200,
+            "pricingSource": "manual"
+          },
+          {
+            "name": "Truck and excavator hire",
+            "quantity": 1,
+            "unit": "each",
+            "price": 599.47,
+            "totalPrice": 599.47,
+            "pricingSource": "manual"
+          }
+        ]
+      },
+      "replay": {
+        "estimatedHours": 8,
+        "materialsSubtotal": 3285,
+        "materials": [
+          {
+            "name": "Clean Fill Dumping Fee",
+            "searchTerm": "clean fill tipping fee",
+            "quantity": 20000,
+            "unit": "kg",
+            "reasoning": "Disposal cost for 20 tonnes of excavated fill, converted to the smallest physical unit (20,000 kg).",
+            "price": 0,
+            "totalPrice": 0,
+            "priceStatus": "unpriced"
+          },
+          {
+            "name": "Diesel Fuel",
+            "searchTerm": "diesel fuel",
+            "quantity": 150,
+            "unit": "L",
+            "reasoning": "Estimated fuel consumption for a tipper truck and excavator combo operating over an 8-hour shift.",
+            "requiredQty": 150,
+            "price": 21.9,
+            "totalPrice": 3285,
+            "priceStatus": "priced",
+            "chosen": {
+              "name": "Nulon 300ml Diesel Fuel System Cleaner",
+              "price": 21.9,
+              "confidence": "high",
+              "itemNumber": "0627958",
+              "pack": null
+            }
+          },
+          {
+            "name": "Truck and Excavator Hire",
+            "searchTerm": "truck and excavator combo hire day rate",
+            "quantity": 1,
+            "unit": "each",
+            "reasoning": "One full day hire of a tipper truck and excavator combo required to load and transport the fill.",
+            "price": 0,
+            "totalPrice": 0,
+            "priceStatus": "unpriced"
+          }
+        ]
+      }
+    }
+  ]
+}

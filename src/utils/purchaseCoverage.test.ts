@@ -44,15 +44,24 @@ describe('coverageSanePurchaseCount', () => {
   });
 
   describe('does NOT touch legitimate cases (clamp must never over-reduce)', () => {
-    it('leaves cheap small fastener packs alone (below the bulk price floor)', () => {
-      // Bugle batten screws at $24.66 — a normal small pack, not a bulk tub.
+    it('collapses cheap retail fastener packs when the requirement is an individual count', () => {
       expect(
         coverageSanePurchaseCount({
-          requirement: 470,
+          requirement: 100,
           name: 'Galvanized Bugle Batten Screws 14G x 100mm',
-          perPurchasePrice: 24.66,
+          perPurchasePrice: 17.02,
         }),
-      ).toBeNull();
+      ).toBe(1);
+    });
+
+    it('collapses nail tubs/boxes instead of treating the tub price as per nail', () => {
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 200,
+          name: 'Pryda Flathead Nails 35x3.15mm Galv',
+          perPurchasePrice: 12.01,
+        }),
+      ).toBe(2);
     });
 
     it('leaves piece-goods (boards) untouched', () => {

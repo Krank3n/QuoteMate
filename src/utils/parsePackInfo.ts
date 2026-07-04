@@ -32,9 +32,11 @@ const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit'] }> = [
   // Volume: "0.054m³", "0.5m3 bag", "1 cubic metre". Must precede the linear-m pattern.
   { re: new RegExp(String.raw`${NUM}\s*(?:m³|m3|cubic\s+(?:metres?|meters?))\b`, 'i'), unit: 'm³' },
   // Length: "5.4m length", "5.4m long", or just trailing "5.4m" / "2400mm" at end
-  { re: new RegExp(String.raw`\b${NUM}\s*m(?:etres?|eters?)?\b(?:\s+(?:length|long|roll))?`, 'i'), unit: 'm' },
+  { re: new RegExp(String.raw`\b${NUM}\s*m(?!l|m)(?:etres?|eters?)?\b(?:\s+(?:length|long|roll))?`, 'i'), unit: 'm' },
   { re: new RegExp(String.raw`\b${NUM}\s*mm\s+(?:length|long)\b`, 'i'), unit: 'm' }, // mm length → convert below
-  // Volume: "4L", "20 litre"
+  // Volume: "750ml", "4L", "20 litre". mL must precede L so "750ml" does
+  // not get misread or ignored; convert below.
+  { re: new RegExp(String.raw`\b${NUM}\s*(?:ml|millilitres?|milliliters?)\b`, 'i'), unit: 'L' },
   { re: new RegExp(String.raw`\b${NUM}\s*(?:l|lt|litres?|liters?)\b`, 'i'), unit: 'L' },
   // Weight: "20kg bag", "1kg tub"
   { re: new RegExp(String.raw`\b${NUM}\s*kg\b`, 'i'), unit: 'kg' },
@@ -61,8 +63,11 @@ export function parsePackInfo(productName: string | undefined | null): PackInfo 
   for (const { re, unit } of PATTERNS) {
     const match = title.match(re);
     if (!match) continue;
-    const size = parseFloat(match[1]);
+    let size = parseFloat(match[1]);
     if (!isFinite(size) || size <= 0) continue;
+    if (unit === 'L' && /(?:ml|millilitres?|milliliters?)/i.test(match[0])) {
+      size = size / 1000;
+    }
     // Skip nonsensical pack sizes (a "0.5 pack" or a "1 each" is just per-unit).
     if (unit === 'each' && size < 2) continue;
     return { packSize: size, packUnit: unit };

@@ -154,4 +154,47 @@ describe('pickBestCandidate', () => {
       expect(picked!.productName).toContain('Kitchen Mixer Tap');
     });
   });
+
+  describe('semantic category guard', () => {
+    it('does not pick drill bits for hardwood decking boards', () => {
+      const picked = pickBestCandidate([
+        c(24, 'Hardwood Drill Bit Set'),
+        c(82, 'Australian Hardwood Decking 140x19mm 5.4m'),
+      ], { searchTerm: 'Australian mixed hardwood decking board 140x19mm 5.4m' });
+      expect(picked!.productName).toContain('Decking');
+    });
+
+    it('returns null instead of applying unrelated timber hardware', () => {
+      const picked = pickBestCandidate([
+        c(13, 'Hitch Pin 140mm Zinc'),
+        c(9, 'Angle Bracket Galvanised'),
+      ], { searchTerm: 'Pine Structural Treated H3 140x45mm Joists' });
+      expect(picked).toBeNull();
+    });
+
+    it('rejects roof tile accessory/compound matches', () => {
+      const picked = pickBestCandidate([
+        c(18, 'Flexible Roof Pointing Compound'),
+        c(9, 'Silicone Nozzle Pack'),
+        c(6, 'Concrete Roof Tile Charcoal'),
+      ], { searchTerm: 'Concrete Roof Tile' });
+      expect(picked!.productName).toBe('Concrete Roof Tile Charcoal');
+    });
+
+    it('does not price diesel fuel as injector cleaner', () => {
+      const picked = pickBestCandidate([
+        c(21, 'Diesel Fuel System Cleaner'),
+        c(14, 'Diesel Additive Treatment'),
+      ], { searchTerm: 'Diesel Fuel' });
+      expect(picked).toBeNull();
+    });
+
+    it('does not price electrical wire connectors as irrigation fittings', () => {
+      const picked = pickBestCandidate([
+        c(7, '13mm Irrigation Barbed Connector'),
+        c(12, 'Electrical Wire Connector 10 Pack'),
+      ], { searchTerm: 'Wire Connectors BP Connectors Electrical' });
+      expect(picked!.productName).toContain('Electrical Wire Connector');
+    });
+  });
 });

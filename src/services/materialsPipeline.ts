@@ -402,6 +402,30 @@ class FetchCancelled extends Error {
   }
 }
 
+function deterministicFallbackUnitPrice(material: Material): number | null {
+  const name = `${material.searchTerm || ''} ${material.name || ''}`.toLowerCase();
+  const unit = material.unit;
+  // Last-resort visible estimate only. Real supplier/saved/API prices always
+  // win. Values are deliberately conservative AU retail-ish unit prices so the
+  // quote total is not silently $0 when search/AI returns nothing.
+  if (/decking.*board|deck.*board|hardwood.*decking|merbau|spotted\s+gum/.test(name)) return 75;
+  if (/treated\s+pine|structural\s+pine/.test(name)) return unit === 'm' ? 12 : 55;
+  if (/fascia.*board/.test(name)) return 65;
+  if (/roof\s+tile|concrete\s+tile/.test(name)) return 7;
+  if (/paint|ceiling\s+paint|wall\s+paint/.test(name)) return unit === 'L' ? 18 : 55;
+  if (/oil|sealer|stain/.test(name)) return unit === 'L' ? 25 : 80;
+  if (/weed\s+mat|geotextile|landscape\s+fabric/.test(name)) return unit === 'm²' ? 1.5 : 45;
+  if (/gravel|aggregate|road\s+base|crusher\s+dust|sand/.test(name)) return unit === 'kg' ? 0.25 : 12;
+  if (/screws?|nails?|brads?|staples?/.test(name)) return unit === 'each' ? 0.08 : 18;
+  if (/joist\s+hanger/.test(name)) return 8;
+  if (/bracket|multigrip|connector|clip/.test(name)) return 3;
+  if (/silicone|sealant|caulk/.test(name)) return 14;
+  if (/pointing\s+compound/.test(name)) return 55;
+  if (/diesel|petrol|fuel/.test(name)) return unit === 'L' ? 2.5 : null;
+  if (/hire|dump|tipping|disposal|skip/.test(name)) return 150;
+  return null;
+}
+
 export async function fetchPricesForQuote(
   args: FetchPricesArgs,
   callbacks: FetchPricesCallbacks = {},
@@ -762,9 +786,7 @@ export async function fetchPricesForQuote(
               // Bunnings tends to be the cheapest/most-popular SKU. See
               // candidateRanker for the tier-bias math.
               const product =
-                pickBestCandidate(candidates as RankableCandidate[], material, { jobQualityTier }) as ScraperProduct | null
-                || candidates[0]
-                || null;
+                pickBestCandidate(candidates as RankableCandidate[], material, { jobQualityTier }) as ScraperProduct | null;
               if (candidates.length > 0) candidatesByMaterialId.set(material.id, candidates);
               const ok = !!(product && product.price > 0);
               if (ok && product) {
@@ -849,9 +871,7 @@ export async function fetchPricesForQuote(
         // as the batch path above. The supplier ranker put a budget SKU
         // first; we want the one that matches this material's quality tier.
         const product =
-          pickBestCandidate(candidates as RankableCandidate[], material, { jobQualityTier }) as ScraperProduct | null
-          || candidates[0]
-          || null;
+          pickBestCandidate(candidates as RankableCandidate[], material, { jobQualityTier }) as ScraperProduct | null;
 
         if (product && product.price > 0) {
           material.price = supplierPriceForGstMode(product.price, gstInclusive);
@@ -895,9 +915,9 @@ export async function fetchPricesForQuote(
             material.price = supplierPriceForGstMode(aiResult.price, gstInclusive);
             material.manualPriceOverride = false;
             material.pricingSource = 'ai';
-            material.priceConfidence = aiResult.confidence || 'medium';
+            material.priceConfidence = 'low';
             if (aiResult.productName) material.name = aiResult.productName;
-            if (aiResult.store) material.description = `AI reckons about this much`;
+            material.description = 'Estimated price — verify with supplier before sending';
             applyPackAwarePricing(material, { productName: aiResult.productName });
             fetchedCount += 1;
             onEvent?.({
@@ -913,6 +933,27 @@ export async function fetchPricesForQuote(
         } catch {
           // fall through to failed
         }
+        const fallback = deterministicFallbackUnitPrice(material);
+        if (fallback && fallback > 0) {
+          const unitPrice = roundToTwoDecimals(supplierPriceForGstMode(fallback, gstInclusive));
+          material.price = unitPrice;
+          material.totalPrice = roundToTwoDecimals(unitPrice * material.quantity);
+          material.manualPriceOverride = false;
+          material.pricingSource = 'ai';
+          material.priceConfidence = 'low';
+          material.description = 'Fallback estimate — supplier search returned no reliable price; verify before sending';
+          fetchedCount += 1;
+          onEvent?.({
+            kind: 'item-priced',
+            phase: 'individual',
+            materialId: material.id,
+            name: material.name,
+            success: true,
+            progress: { current: fetchedCount, total: materialsToFetch.length },
+          });
+          continue;
+        }
+
         failedCount += 1;
         onEvent?.({
           kind: 'item-priced',

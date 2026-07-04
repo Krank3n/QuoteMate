@@ -10,7 +10,9 @@
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "audit:quote-quality": "npx ts-node scripts/quoteQualityOracle.ts",
+    "audit:replay-priced": "npx ts-node scripts/replayRecentQuotesWithPrices.ts"
   },
   "engines": {
     "node": "20"

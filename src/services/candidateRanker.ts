@@ -80,6 +80,77 @@ function tokenize(s: string | undefined): string[] {
     .filter((t) => t.length > 2);
 }
 
+const STOP_TOKENS = new Set([
+  'and', 'the', 'for', 'with', 'gal', 'galv', 'galvanised', 'galvanized',
+  'stainless', 'steel', 'white', 'black', 'natural', 'heavy', 'duty', 'pack',
+  'each', 'small', 'medium', 'large', 'premium', 'standard', 'budget',
+]);
+
+function importantTokens(s: string | undefined): string[] {
+  return tokenize(s).filter((t) => !STOP_TOKENS.has(t) && !/^\d+$/.test(t));
+}
+
+function hasAny(haystack: string, words: string[]): boolean {
+  return words.some((w) => haystack.includes(w));
+}
+
+/**
+ * Hard semantic gate for the most expensive real-world failure families. The
+ * scraper occasionally returns a high-confidence lexical hit from the wrong
+ * category (e.g. "hardwood decking board" → "hardwood drill bit"). Ranking
+ * alone can't save that because the bad result may be first and priced. Return
+ * false only for clear category contradictions; borderline rows still flow to
+ * the LLM reconcile/estimate path.
+ */
+function isSemanticallyCompatible(query: string, productName: string): boolean {
+  const q = query.toLowerCase();
+  const p = productName.toLowerCase();
+
+  if (/\b(?:decking\s+boards?|deck\s+boards?|hardwood\s+decking|merbau|spotted\s+gum)\b/.test(q)) {
+    if (hasAny(p, ['drill bit', 'saw blade', 'screw', 'oil', 'stain', 'bracket', 'hanger'])) return false;
+    return hasAny(p, ['decking', 'deck board', 'timber', 'hardwood', 'merbau', 'spotted gum', 'modwood', 'composite']);
+  }
+
+  if (/\b(?:treated\s+pine|structural\s+pine|h3|h4)\b/.test(q) && /\b(?:joists?|bearers?|timber|pine)\b/.test(q)) {
+    if (hasAny(p, ['hitch pin', 'bracket', 'hanger', 'screw', 'bolt', 'nail', 'plate'])) return false;
+    return hasAny(p, ['treated pine', 'structural pine', 'timber', 'h3', 'h4', 'mgp', 'f7']);
+  }
+
+  if (/\broof\s+tiles?\b|\bconcrete\s+roof\s+tiles?\b/.test(q)) {
+    if (hasAny(p, ['pointing', 'sealant', 'nozzle', 'conduit', 'adhesive'])) return false;
+    return hasAny(p, ['roof tile', 'roofing tile', 'concrete tile', 'terracotta tile', 'tile']);
+  }
+
+  if (/\b(?:silicone|sealant)\b/.test(q)) {
+    if (hasAny(p, ['nozzle', 'applicator', 'scraper', 'tool only'])) return false;
+    return hasAny(p, ['silicone', 'sealant', 'sikaflex', 'selleys', 'parfix', 'caulk']);
+  }
+
+  if (/\bpointing\s+compound\b|\broof\s+pointing\b/.test(q)) {
+    if (hasAny(p, ['conduit', 'saddle', 'bracket', 'mesh'])) return false;
+    return hasAny(p, ['pointing', 'compound', 'flexipoint', 'roof']);
+  }
+
+  if (/\b(?:diesel|petrol|fuel)\b/.test(q)) {
+    if (hasAny(p, ['cleaner', 'additive', 'treatment', 'stabiliser', 'conditioner', 'injector'])) return false;
+  }
+
+  if (/\bwire\s+connectors?\b|\bbp\s+connectors?\b|\belectrical\s+connectors?\b/.test(q)) {
+    if (hasAny(p, ['irrigation', 'hose', 'poly', 'sprinkler', 'barbed'])) return false;
+    return hasAny(p, ['wire', 'connector', 'electrical', 'terminal', 'bp connector', 'joiner']);
+  }
+
+  return true;
+}
+
+function tokenCoverageScore(query: string | undefined, productName: string | undefined): number {
+  const tokens = importantTokens(query);
+  if (tokens.length === 0) return 1;
+  const p = (productName || '').toLowerCase();
+  const hits = tokens.filter((t) => p.includes(t)).length;
+  return hits / tokens.length;
+}
+
 /**
  * Pick the best candidate for a material from a list of search hits.
  *
@@ -104,8 +175,18 @@ export function pickBestCandidate<T extends RankableCandidate>(
   if (!candidates || candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
 
-  const priced = candidates.filter((c) => typeof c.price === 'number' && c.price > 0);
-  if (priced.length === 0) return candidates[0];
+  const query = material.searchTerm || material.name || '';
+  const hadPricedCandidates = candidates.some((c) => typeof c.price === 'number' && c.price > 0);
+  const priced = candidates.filter((c) =>
+    typeof c.price === 'number' &&
+    c.price > 0 &&
+    isSemanticallyCompatible(query, c.productName || '')
+  );
+  // If there were priced candidates but every one failed the semantic gate,
+  // return null so callers can estimate/flag instead of silently applying an
+  // unrelated SKU. If the supplier truly returned no prices, preserve the old
+  // fallback for callers that use the product metadata only.
+  if (priced.length === 0) return hadPricedCandidates ? null : candidates[0];
   if (priced.length === 1) return priced[0];
 
   const tier: QualityTier = material.qualityTier || options.jobQualityTier || 'standard';
@@ -113,7 +194,7 @@ export function pickBestCandidate<T extends RankableCandidate>(
   const sortedPrices = priced.map((c) => c.price).sort((a, b) => a - b);
   const median = sortedPrices[Math.floor(sortedPrices.length / 2)];
 
-  const searchTokens = tokenize(material.searchTerm || material.name);
+  const searchTokens = importantTokens(query);
 
   const scored = priced.map((c, idx) => {
     let score = 0;
@@ -144,7 +225,13 @@ export function pickBestCandidate<T extends RankableCandidate>(
     if (searchTokens.length > 0) {
       const name = (c.productName || '').toLowerCase();
       const hits = searchTokens.filter((t) => name.includes(t)).length;
+      const coverage = tokenCoverageScore(query, c.productName);
       score += hits * 0.75;
+      // Strong penalty for low token overlap. This catches wrong-family hits
+      // such as "roof tile" → "roof pointing nozzle" while preserving normal
+      // cases where dimensions/colour tokens differ.
+      if (coverage < 0.34) score -= 4;
+      else if (coverage < 0.5) score -= 1.5;
     }
 
     // 3. Junk-price penalty — anything priced under 20% of the median
