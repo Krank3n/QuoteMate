@@ -71,6 +71,13 @@ export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts'
 export { reportPriceFetchUsage } from './featureUsage';
 import { recordMaterialsRecommend } from './featureUsage';
 import {
+  AccountReclaimRecord,
+  reclaimDocIdForEmail,
+  shouldReclaim,
+  reclaimCopyPlan,
+  buildProRestorePatch,
+} from './accountReclaim.helpers';
+import {
   buildXeroAuthHeaders,
   buildXeroLineItems,
   pushQuoteToXeroCore,
@@ -7186,8 +7193,41 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
   const email = user.email;
   if (!email) return;
 
-  const isPasswordSignup = user.providerData?.some(provider => provider.providerId === 'password') ?? false;
-  const shouldSendSignupEmails = !isPasswordSignup || user.emailVerified;
+  // July 2026 incident recovery: if this email belonged to an account that
+  // was wrongly deleted, copy its surviving Cloud Storage assets (logo,
+  // quote photos) across to the new uid. One-shot per record; never blocks
+  // the rest of signup.
+  try {
+    const reclaimRef = admin.firestore().doc(`accountReclaims/${reclaimDocIdForEmail(email)}`);
+    const reclaimSnap = await reclaimRef.get();
+    const record = reclaimSnap.exists ? (reclaimSnap.data() as AccountReclaimRecord) : undefined;
+    if (record && shouldReclaim(record, user.uid)) {
+      const bucket = admin.storage().bucket();
+      const [files] = await bucket.getFiles({ prefix: `users/${record.oldUid}/` });
+      const plan = reclaimCopyPlan(record.oldUid!, user.uid, files.map(f => f.name));
+      await Promise.all(plan.map(({ from, to }) => bucket.file(from).copy(to)));
+
+      // Deleted payers get Pro back immediately — their store billing never
+      // stopped, so access must not wait on device receipt re-validation.
+      const proPatch = buildProRestorePatch(record, new Date());
+      if (proPatch) {
+        await admin.firestore().doc(`users/${user.uid}/profile/subscription`).set({
+          ...proPatch,
+          validatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+
+      await reclaimRef.set({
+        claimedByUid: user.uid,
+        claimedAt: admin.firestore.FieldValue.serverTimestamp(),
+        copiedFiles: plan.length,
+        restoredPro: !!proPatch,
+      }, { merge: true });
+      console.log(`accountReclaim: restored ${plan.length} files, pro=${!!proPatch}, ${record.oldUid} -> ${user.uid} (${email})`);
+    }
+  } catch (error) {
+    console.error('accountReclaim failed (signup continues):', error);
+  }
 
   // Small delay to allow business settings to be saved after signup
   await new Promise(resolve => setTimeout(resolve, 5000));
@@ -7280,47 +7320,11 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
     }
   }
 
-  if (shouldSendSignupEmails) {
-    await Promise.all([
-      sendWelcomeEmail(email, businessName, user.uid),
-      sendNewUserNotificationEmail(email, platform, authMethod, businessName),
-    ]);
-  }
+  await Promise.all([
+    sendWelcomeEmail(email, businessName, user.uid),
+    sendNewUserNotificationEmail(email, platform, authMethod, businessName),
+  ]);
 });
-
-/**
- * Scheduled: remove email/password accounts that never verified their inbox.
- * This keeps typo/fake signups from lingering in Firebase Auth indefinitely.
- */
-export const cleanupUnverifiedEmailUsers = functions.pubsub
-  .schedule('every day 03:30')
-  .timeZone('Australia/Sydney')
-  .onRun(async () => {
-    const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
-    let nextPageToken: string | undefined;
-    let deleted = 0;
-
-    do {
-      const result = await admin.auth().listUsers(1000, nextPageToken);
-      nextPageToken = result.pageToken;
-
-      const staleUsers = result.users.filter(user => {
-        const createdAt = Date.parse(user.metadata.creationTime || '');
-        const isPasswordUser = user.providerData.some(provider => provider.providerId === 'password');
-        return isPasswordUser && !user.emailVerified && Number.isFinite(createdAt) && createdAt < cutoffMs;
-      });
-
-      await Promise.all(staleUsers.map(async user => {
-        await Promise.allSettled([
-          admin.auth().deleteUser(user.uid),
-          (admin.firestore() as any).recursiveDelete(admin.firestore().doc(`users/${user.uid}`)),
-        ]);
-        deleted += 1;
-      }));
-    } while (nextPageToken);
-
-    console.log(`Deleted ${deleted} unverified email/password users`);
-  });
 
 /**
  * Unsubscribe endpoint - handles email unsubscribe links

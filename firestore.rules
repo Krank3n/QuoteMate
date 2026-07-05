@@ -5,24 +5,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function emailVerified() {
-      return signedIn() && request.auth.token.email_verified == true;
-    }
-
     function isOwner(userId) {
-      return emailVerified() && request.auth.uid == userId;
+      return signedIn() && request.auth.uid == userId;
     }
 
-    // Let brand-new email/password signups record platform metadata before
-    // they are forced to verify. All real app data remains verified-only.
-    match /users/{userId}/settings/registrationInfo {
-      allow create, update: if signedIn() && request.auth.uid == userId;
-      allow read: if isOwner(userId);
-      allow delete: if false;
-    }
-
-    // Users can read/write their own user document and ALL subcollections,
-    // but only after their email has been verified.
+    // Users can read/write their own user document and ALL subcollections.
     match /users/{userId}/{document=**} {
       allow read, write: if isOwner(userId);
     }
@@ -64,24 +51,33 @@ service cloud.firestore {
 
     // Supplier profiles — any verified auth user can read, only verified owner can write
     match /suppliers/{supplierId} {
-      allow read: if emailVerified();
-      allow write: if emailVerified() && request.auth.uid == resource.data.ownerUid;
-      allow create: if emailVerified() && request.auth.uid == request.resource.data.ownerUid;
+      allow read: if signedIn();
+      allow write: if signedIn() && request.auth.uid == resource.data.ownerUid;
+      allow create: if signedIn() && request.auth.uid == request.resource.data.ownerUid;
 
       // Price items — any verified auth user can read, only supplier owner can write
       match /priceItems/{itemId} {
-        allow read: if emailVerified();
-        allow write: if emailVerified()
+        allow read: if signedIn();
+        allow write: if signedIn()
           && request.auth.uid == get(/databases/$(database)/documents/suppliers/$(supplierId)).data.ownerUid;
       }
 
       // Subscribers — tradie can create/delete own doc, supplier owner can read all
       match /subscribers/{tradieUid} {
-        allow read: if emailVerified()
+        allow read: if signedIn()
           && (request.auth.uid == tradieUid
               || request.auth.uid == get(/databases/$(database)/documents/suppliers/$(supplierId)).data.ownerUid);
-        allow create, delete: if emailVerified() && request.auth.uid == tradieUid;
+        allow create, delete: if signedIn() && request.auth.uid == tradieUid;
       }
+    }
+
+    // Account-reclaim records (July 2026 deletion-incident recovery).
+    // A signed-in user may read only the record for their own email — the
+    // client uses it to recognise a re-registration and preserve local data.
+    // Writes are Cloud Functions/admin only.
+    match /accountReclaims/{email} {
+      allow read: if signedIn() && request.auth.token.email == email;
+      allow write: if false;
     }
 
     // Pending links — no client access (Cloud Functions only)
@@ -93,14 +89,14 @@ service cloud.firestore {
     // in-app payment record). Owner can read for status display; only Cloud
     // Functions write.
     match /squarePaymentOrders/{orderId} {
-      allow read: if emailVerified()
+      allow read: if signedIn()
         && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
 
     // Square payment-link index — same access pattern.
     match /squarePaymentLinks/{linkId} {
-      allow read: if emailVerified()
+      allow read: if signedIn()
         && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
@@ -111,7 +107,7 @@ service cloud.firestore {
     // back to the invoice/quote. Read allowed for the owning tradie so the
     // client can resolve disputes linked in the UI.
     match /squarePayments/{paymentId} {
-      allow read: if emailVerified()
+      allow read: if signedIn()
         && resource.data.userId == request.auth.uid;
       allow write: if false;
     }

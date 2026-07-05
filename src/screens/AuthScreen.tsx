@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, Animated, TextInput as RNTextInput } from 'react-native';
 import { Text, TextInput, Button, Surface, Title, ActivityIndicator } from 'react-native-paper';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider, sendEmailVerification, signOut } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider, sendEmailVerification } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -248,15 +248,7 @@ export function AuthScreen() {
     setNotice('');
 
     try {
-      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
-      await result.user.reload();
-      if (!result.user.emailVerified) {
-        await sendEmailVerification(result.user).catch(() => {});
-        await signOut(auth);
-        setError('Please verify your email before signing in. We sent a fresh verification link to your inbox.');
-        errorTap();
-        return;
-      }
+      await signInWithEmailAndPassword(auth, email.trim(), password);
       // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       setError(getErrorMessage(err.code));
@@ -299,13 +291,9 @@ export function AuthScreen() {
 
     try {
       const result = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
-      await sendEmailVerification(result.user);
+      await sendEmailVerification(result.user).catch(() => {});
       await saveRegistrationPlatform(result.user.uid, 'email');
-      await signOut(auth);
-      setIsSignUp(false);
-      setPassword('');
-      setConfirmPassword('');
-      setNotice('We sent a verification link to your email. Please verify it before signing in.');
+      // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       setError(getErrorMessage(err.code));
       errorTap();
@@ -446,7 +434,8 @@ export function AuthScreen() {
       case 'auth/user-not-found':
         return 'No account found with this email';
       case 'auth/wrong-password':
-        return 'Incorrect password';
+      case 'auth/invalid-credential':
+        return 'Incorrect email or password';
       case 'auth/email-already-in-use':
         return 'Email already in use';
       case 'auth/weak-password':

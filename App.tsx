@@ -16,7 +16,7 @@ import * as Linking from 'expo-linking';
 import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import { KeyboardProvider, KeyboardToolbar } from 'react-native-keyboard-controller';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -24,6 +24,7 @@ import { useStore } from './src/store/useStore';
 import { useJobStore } from './src/store/useJobStore';
 
 const LAST_USER_UID_KEY = '@quotemate:lastUserUid';
+const LAST_USER_EMAIL_KEY = '@quotemate:lastUserEmail';
 import { theme, colors } from './src/theme';
 
 // Custom navigation theme to match our dark theme
@@ -45,6 +46,8 @@ import { NewOnboardingScreen } from './src/screens/NewOnboardingScreen';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { subscriptionSyncService } from './src/services/subscriptionSyncService';
 import { auth } from './src/config/firebase';
+import { shouldClearLocalData } from './src/utils/localDataReset';
+import { fetchReclaimedOldUid } from './src/services/accountReclaimService';
 import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
 import { documentService } from './src/services/documentService';
@@ -202,33 +205,45 @@ export default function App() {
       if (!currentUser && auth.currentUser) {
         return;
       }
-      if (currentUser?.providerData.some((provider: any) => provider.providerId === 'password') && !currentUser.emailVerified) {
-        await signOut(auth);
-        setUser(null);
-        setUserDataLoaded(false);
-        initialisedForUidRef.current = null;
-        return;
-      }
-
-      // If a *different* user lands here than the last session, wipe the
+      // If a *different identity* signs in than the last session, wipe the
       // previous user's locally-cached data first. Otherwise loadQuotes /
       // loadBusinessSettings fall through to AsyncStorage when the new user's
       // Firestore returns empty, showing (and re-uploading) the old user's
-      // quotes/settings under the new account.
+      // quotes/settings under the new account. Deliberately NOT wiped: sign-out
+      // and same-email re-registrations (new uid, same person) — after the
+      // July 2026 account-deletion incident the device copy can be the only
+      // surviving copy, and the fall-through re-upload is how it's restored.
       const newUid = currentUser?.uid ?? null;
+      const newEmail = currentUser?.email ?? null;
       let lastUid: string | null = null;
+      let lastEmail: string | null = null;
       try {
-        lastUid = await AsyncStorage.getItem(LAST_USER_UID_KEY);
+        [lastUid, lastEmail] = await Promise.all([
+          AsyncStorage.getItem(LAST_USER_UID_KEY),
+          AsyncStorage.getItem(LAST_USER_EMAIL_KEY),
+        ]);
       } catch {
         // ignore - treat as no last user
       }
-      if (lastUid && lastUid !== newUid) {
+      let clearLocal = shouldClearLocalData({ lastUid, lastEmail, newUid, newEmail });
+      if (clearLocal && newEmail) {
+        // Last-chance veto before wiping: devices that predate the stored
+        // email can still be recognised via the incident-recovery map — if
+        // this email's deleted account is exactly the account this device
+        // last held, it's the same person re-registering.
+        const reclaimOldUid = await fetchReclaimedOldUid(newEmail);
+        clearLocal = shouldClearLocalData({ lastUid, lastEmail, newUid, newEmail, reclaimOldUid });
+      }
+      if (clearLocal) {
         await useStore.getState().clearAllData();
         useJobStore.getState().cleanup();
       }
       if (newUid) {
         try {
           await AsyncStorage.setItem(LAST_USER_UID_KEY, newUid);
+          if (newEmail) {
+            await AsyncStorage.setItem(LAST_USER_EMAIL_KEY, newEmail);
+          }
         } catch {
           // best-effort
         }
