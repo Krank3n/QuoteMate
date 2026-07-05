@@ -104,7 +104,14 @@ function parseLooseJson(text: string): any {
   throw new Error(`Could not parse JSON: ${trimmed.slice(0, 240)}`);
 }
 
-async function geminiJson(apiKey: string, model: string, prompt: string, maxOutputTokens = 16000): Promise<any> {
+function sleep(ms: number): Promise<void> { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+function isTransientGeminiError(err: any): boolean {
+  const msg = String(err?.message || err || '');
+  return /ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN|aborted|timeout|503|502|504|429/i.test(msg);
+}
+
+async function geminiJsonOnce(apiKey: string, model: string, prompt: string, maxOutputTokens = 16000): Promise<any> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 180000);
   let res: any;
@@ -123,12 +130,34 @@ async function geminiJson(apiKey: string, model: string, prompt: string, maxOutp
   return parseLooseJson(text);
 }
 
+async function geminiJson(apiKey: string, model: string, prompt: string, maxOutputTokens = 16000): Promise<any> {
+  let lastErr: any;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      return await geminiJsonOnce(apiKey, model, prompt, maxOutputTokens);
+    } catch (err: any) {
+      lastErr = err;
+      if (!isTransientGeminiError(err) || attempt === 4) break;
+      const backoff = 1500 * attempt * attempt;
+      console.warn(`Gemini transient error on ${model} attempt ${attempt}; retrying in ${backoff}ms: ${String(err?.message || err).replace(/key=[^\s&]+/g, 'key=REDACTED')}`);
+      await sleep(backoff);
+    }
+  }
+  if (lastErr?.message) lastErr.message = String(lastErr.message).replace(/key=[^\s&]+/g, 'key=REDACTED');
+  throw lastErr;
+}
+
 async function geminiJsonWithFallback(apiKey: string, model: string, prompt: string, maxOutputTokens = 16000): Promise<any> {
   try {
     return await geminiJson(apiKey, model, prompt, maxOutputTokens);
   } catch (err) {
     if (model === 'gemini-2.5-pro') throw err;
-    return await geminiJson(apiKey, 'gemini-2.5-pro', prompt, maxOutputTokens);
+    try {
+      return await geminiJson(apiKey, 'gemini-2.5-pro', prompt, maxOutputTokens);
+    } catch (fallbackErr: any) {
+      if (fallbackErr?.message) fallbackErr.message = String(fallbackErr.message).replace(/key=[^\s&]+/g, 'key=REDACTED');
+      throw fallbackErr;
+    }
   }
 }
 
