@@ -203,7 +203,7 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
   }
 
   if (/formwork\s+pegs?|timber\s+pegs?|hardwood\s+pegs?|stakes?/.test(q)) {
-    if (hasAny(p, ['formply', 'plywood', 'sheet', 'panel', 'garden edging', 'metal garden', 'rust metal'])) return false;
+    if (hasAny(p, ['formply', 'plywood', 'sheet', 'panel', 'peg board', 'pegboard', 'garden edging', 'metal garden', 'rust metal'])) return false;
     return hasAny(p, ['peg', 'stake', 'pointed', 'hardwood', 'timber']);
   }
 
@@ -229,7 +229,7 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
   }
 
   if (/sliding\s+gate\s+wheels?|gate\s+wheels?/.test(q)) {
-    if (hasAny(p, ['track', 'rail', 'guide', 'stop', 'latch'])) return false;
+    if (hasAny(p, ['track', 'rail', 'guide', 'stop', 'latch', 'carabiner', 's-biner'])) return false;
     return hasAny(p, ['wheel', 'roller']);
   }
 
@@ -247,6 +247,10 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
     if (hasAny(p, ['timber', 'pine', 'sleeper', 'paling'])) return false;
     return hasAny(p, ['h post', 'h-post', 'h section', 'h-section', '100uc', 'steel']);
   }
+
+  const qColor = colorbondColour(q);
+  const pColor = colorbondColour(p);
+  if (qColor && pColor && qColor !== pColor) return false;
 
   if (/colorbond\s+fence\s+(?:sheet|panel)|fence\s+(?:sheet|panel).*colorbond/.test(q)) {
     if (hasAny(p, ['post', 'rail', 'bracket', 'cap', 'screw'])) return false;
@@ -438,6 +442,16 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
     if (qGauge && pGauge && Math.abs(qGauge - pGauge) > 0.05) return false;
   }
 
+  if (/wall\s+plugs?|masonry\s+(?:anchors?|plugs?)|wall\s+anchors?/.test(q)) {
+    if (hasAny(p, ['spout', 'tap', 'plumbing', 'outlet'])) return false;
+    return hasAny(p, ['plug', 'anchor', 'ankascrew', 'masonry']);
+  }
+
+  if (/silver\s+solder|brazing\s+rod|solder\s+rod/.test(q)) {
+    if (hasAny(p, ['aluminium', 'aluminum', 'welding electrode', 'mig wire'])) return false;
+    return hasAny(p, ['silver solder', 'brazing rod', 'brazing alloy', 'solder']);
+  }
+
   if (/thread\s+(?:seal|tape)|gas\s+(?:teflon|ptfe)|yellow\s+gas\s+thread/.test(q)) {
     if (hasAny(p, ['anti slip', 'anti-slip', 'grip tape', 'cloth tape', 'electrical tape'])) return false;
     return hasAny(p, ['thread seal', 'thread tape', 'ptfe', 'teflon', 'gas thread']);
@@ -494,6 +508,11 @@ function firstKgWeight(s: string): number | null {
 function cableGauge(s: string): number | null {
   const m = s.match(/\b(\d+(?:\.\d+)?)\s*mm(?:²|2)?\b/i);
   return m ? parseFloat(m[1]) : null;
+}
+
+function colorbondColour(s: string): string | null {
+  const m = s.match(/\b(surfmist|night\s+sky|woodland\s+grey|monument|basalt|domain|dune|paperbark|jasper|manor\s+red|pale\s+eucalypt|shale\s+grey|windspray)\b/i);
+  return m ? m[1].toLowerCase().replace(/\s+/g, ' ') : null;
 }
 
 function cableCoreCount(s: string): number | null {

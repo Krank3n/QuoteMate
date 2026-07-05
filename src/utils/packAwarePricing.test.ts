@@ -15,6 +15,20 @@ function mat(quantity: number, unit: Material['unit'], price = 12): Material {
 }
 
 describe('applyPackAwarePricing', () => {
+  it('converts each-count length products when the requested each has a nominal length', () => {
+    const m = mat(2, 'each', 18.57);
+    m.name = 'Sliding Gate Track 3m';
+    applyPackAwarePricing(m, {
+      productName: 'Richmond 1m Bolt Down Gate Track for Sliding Gates',
+      packSize: 1,
+      packUnit: 'm',
+    });
+    expect(m.quantity).toBe(6);
+    expect(m.unit).toBe('each');
+    expect(m.packSize).toBe(1);
+    expect(m.packUnit).toBe('m');
+  });
+
   it('prefers compatible title pack info over incompatible scraper yield metadata', () => {
     const m = mat(240, 'kg', 12.48);
     applyPackAwarePricing(m, {

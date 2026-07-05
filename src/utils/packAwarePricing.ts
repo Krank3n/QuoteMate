@@ -62,16 +62,25 @@ export function applyPackAwarePricing(
   }
 
   const packUnitNormalised = packUnit ? PACK_UNIT_EQUIVALENT[packUnit] : undefined;
+  const nominalLengthPerEach = firstMetreLength(`${material.name} ${material.searchTerm || ''}`);
+  const lengthEachToMetres =
+    material.unit === 'each' &&
+    packUnitNormalised === 'm' &&
+    nominalLengthPerEach &&
+    /track|gutter|downpipe|pipe|conduit|rail|length/i.test(`${material.name} ${material.searchTerm || ''} ${productNameLower}`);
+  const effectiveRequired = lengthEachToMetres ? required * nominalLengthPerEach : required;
+
   const unitsCompatible =
     !!requiredUnitNormalised &&
     !!packUnitNormalised &&
     (requiredUnitNormalised === packUnitNormalised ||
+      !!lengthEachToMetres ||
       (/pointing|compound|mortar|adhesive/i.test(`${material.name} ${productNameLower}`) &&
         ((requiredUnitNormalised === 'L' && packUnitNormalised === 'kg') ||
          (requiredUnitNormalised === 'kg' && packUnitNormalised === 'L'))));
 
-  if (packSize && packSize > 1 && packUnit && unitsCompatible) {
-    const packsNeeded = Math.max(1, Math.ceil(required / packSize));
+  if (packSize && (packSize > 1 || lengthEachToMetres) && packUnit && unitsCompatible) {
+    const packsNeeded = Math.max(1, Math.ceil(effectiveRequired / packSize));
     material.quantity = packsNeeded;
     material.unit = packUnit === 'm' || packUnit === 'm²' || packUnit === 'm³' ? 'each' : 'pack';
     material.packSize = packSize;
@@ -82,4 +91,11 @@ export function applyPackAwarePricing(
     material.packUnit = undefined;
   }
   material.totalPrice = roundToTwoDecimals(material.quantity * material.price);
+}
+
+function firstMetreLength(s: string): number | null {
+  const m = s.match(/\b(\d+(?:\.\d+)?)\s*m\b/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  return n > 0 && n <= 20 ? n : null;
 }

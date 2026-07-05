@@ -270,6 +270,13 @@ function shouldUseTradeFallbackInsteadOfRetail(m: ReplayMaterial): boolean {
   return false;
 }
 
+function firstMetreLengthText(s: string): number | null {
+  const m = s.match(/\b(\d+(?:\.\d+)?)\s*m\b/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  return n > 0 && n <= 20 ? n : null;
+}
+
 function priceReplay(materials: ReplayMaterial[], candidates: Map<string, ScraperProduct[]>): any[] {
   return materials.map(m => {
     if (shouldUseTradeFallbackInsteadOfRetail(m)) {
@@ -291,14 +298,18 @@ function priceReplay(materials: ReplayMaterial[], candidates: Map<string, Scrape
     const suspiciousSuppliedEachPack = rawSuppliedPack?.packUnit === 'each' && rawSuppliedPack.packSize > 100 && !/\b(?:pack|box|pcs?|pieces?|jar|tub|carton|case)\b/i.test(chosen.productName || '');
     const suppliedPack = suspiciousSuppliedEachPack ? null : rawSuppliedPack;
     const compatible = (a?: string, b?: string) => normUnit(a) === normUnit(b) || (/pointing|compound|mortar|adhesive/i.test(`${m.name} ${chosen.productName}`) && ((normUnit(a) === 'L' && normUnit(b) === 'kg') || (normUnit(a) === 'kg' && normUnit(b) === 'L')));
-    const suppliedCompatible = suppliedPack && compatible(m.unit, suppliedPack.packUnit);
-    const titleCompatible = titlePack && compatible(m.unit, titlePack.packUnit);
+    const nominalLengthPerEach = firstMetreLengthText(`${m.name} ${m.searchTerm}`);
+    const lengthEachToMetres = m.unit === 'each' && nominalLengthPerEach && /track|gutter|downpipe|pipe|conduit|rail|length/i.test(`${m.name} ${m.searchTerm} ${chosen.productName}`);
+    const compatibleWithLength = (unit?: string, packUnit?: string) => compatible(unit, packUnit) || (!!lengthEachToMetres && normUnit(packUnit) === 'm');
+    const suppliedCompatible = suppliedPack && compatibleWithLength(m.unit, suppliedPack.packUnit);
+    const titleCompatible = titlePack && compatibleWithLength(m.unit, titlePack.packUnit);
     const pack = titleCompatible ? titlePack : suppliedCompatible ? suppliedPack : titlePack || suppliedPack || parsePackInfo(`${chosen.productName} ${chosen.description || ''}`);
     const unitPrice = chosen.priceIncGst || chosen.price;
     let purchaseCount = m.quantity;
     let purchaseUnit = m.unit;
-    if (pack && pack.packSize > 0 && compatible(m.unit, pack.packUnit)) {
-      purchaseCount = Math.max(1, Math.ceil(m.quantity / pack.packSize));
+    if (pack && pack.packSize > 0 && compatibleWithLength(m.unit, pack.packUnit)) {
+      const effectiveRequired = lengthEachToMetres ? m.quantity * nominalLengthPerEach! : m.quantity;
+      purchaseCount = Math.max(1, Math.ceil(effectiveRequired / pack.packSize));
       purchaseUnit = ['m', 'm²', 'm³'].includes(pack.packUnit) ? 'each' : 'pack';
     } else if (/screws?|nails?|brads?|staples?|(?:wire|lever)\s+connectors?|wago\s+connectors?/i.test(m.name) && m.quantity >= 10 && unitPrice >= 5) {
       purchaseCount = Math.max(1, Math.ceil(m.quantity / (unitPrice >= 80 ? 500 : 100)));
