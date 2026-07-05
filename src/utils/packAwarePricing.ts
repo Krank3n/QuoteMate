@@ -75,7 +75,7 @@ export function applyPackAwarePricing(
     !!packUnitNormalised &&
     (requiredUnitNormalised === packUnitNormalised ||
       !!lengthEachToMetres ||
-      (/pointing|compound|mortar|adhesive/i.test(`${material.name} ${productNameLower}`) &&
+      (/(?:pointing|compound|mortar|adhesive|marking\s+paint|spray\s+paint|line\s+marking)/i.test(`${material.name} ${productNameLower}`) &&
         ((requiredUnitNormalised === 'L' && packUnitNormalised === 'kg') ||
          (requiredUnitNormalised === 'kg' && packUnitNormalised === 'L'))));
 

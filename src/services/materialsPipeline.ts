@@ -453,7 +453,7 @@ function deterministicFallbackUnitPrice(material: Material): number | null {
   if (/diesel|petrol|fuel|unleaded/.test(name)) return unit === 'L' ? 2.5 : unit === 'each' ? 35 : null;
   if (/concrete\s+pump|pump\s+hire/.test(name)) return 850;
   if (/hook\s*bin|soil\s+disposal|spoil\s+disposal|dirt\s+disposal|heavy\s+waste/.test(name)) return unit === 'm³' ? 110 : unit === 'kg' ? 0.18 : 1200;
-  if (/skip/.test(name)) return unit === 'm³' ? 110 : 650;
+  if (/skip/.test(name)) return /\b2\s*m(?:³|3|\b)|2m(?:³|3)?/.test(name) ? 300 : unit === 'm³' ? 110 : 650;
   if (/green\s+waste.*(?:disposal|dump|tip)|(?:disposal|dump|tip).*green\s+waste/.test(name)) return unit === 'kg' ? 0.1 : unit === 'm³' ? 60 : 120;
   if (/dump|tipping|disposal/.test(name)) return unit === 'kg' ? 0.25 : 250;
   if (/hire/.test(name)) return 250;

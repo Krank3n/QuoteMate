@@ -275,7 +275,7 @@ function deterministicFallbackUnitPrice(m: ReplayMaterial): number | null {
   if (/diesel|petrol|fuel|unleaded/.test(name)) return m.unit === 'L' ? 2.5 : m.unit === 'each' ? 35 : null;
   if (/concrete\s+pump|pump\s+hire/.test(name)) return 850;
   if (/hook\s*bin|soil\s+disposal|spoil\s+disposal|dirt\s+disposal|heavy\s+waste/.test(name)) return m.unit === 'm³' ? 110 : m.unit === 'kg' ? 0.18 : 1200;
-  if (/skip/.test(name)) return m.unit === 'm³' ? 110 : 650;
+  if (/skip/.test(name)) return /\b2\s*m(?:³|3|\b)|2m(?:³|3)?/.test(name) ? 300 : m.unit === 'm³' ? 110 : 650;
   if (/green\s+waste.*(?:disposal|dump|tip)|(?:disposal|dump|tip).*green\s+waste/.test(name)) return m.unit === 'kg' ? 0.1 : m.unit === 'm³' ? 60 : 120;
   if (/dump|tipping|disposal/.test(name)) return m.unit === 'kg' ? 0.25 : 250;
   if (/hire/.test(name)) return 250;
@@ -326,7 +326,7 @@ function priceReplay(materials: ReplayMaterial[], candidates: Map<string, Scrape
     const rawSuppliedPack = chosen.packSize && chosen.packUnit ? { packSize: chosen.packSize, packUnit: chosen.packUnit } : null;
     const suspiciousSuppliedEachPack = rawSuppliedPack?.packUnit === 'each' && rawSuppliedPack.packSize > 100 && !/\b(?:pack|box|pcs?|pieces?|jar|tub|carton|case)\b/i.test(chosen.productName || '');
     const suppliedPack = suspiciousSuppliedEachPack ? null : rawSuppliedPack;
-    const compatible = (a?: string, b?: string) => normUnit(a) === normUnit(b) || (/pointing|compound|mortar|adhesive/i.test(`${m.name} ${chosen.productName}`) && ((normUnit(a) === 'L' && normUnit(b) === 'kg') || (normUnit(a) === 'kg' && normUnit(b) === 'L')));
+    const compatible = (a?: string, b?: string) => normUnit(a) === normUnit(b) || (/(?:pointing|compound|mortar|adhesive|marking\s+paint|spray\s+paint|line\s+marking)/i.test(`${m.name} ${chosen.productName}`) && ((normUnit(a) === 'L' && normUnit(b) === 'kg') || (normUnit(a) === 'kg' && normUnit(b) === 'L')));
     const nominalLengthPerEach = firstMetreLengthText(`${m.name} ${m.searchTerm}`);
     const lengthEachToMetres = m.unit === 'each' && nominalLengthPerEach && /track|gutter|downpipe|pipe|conduit|rail|length/i.test(`${m.name} ${m.searchTerm} ${chosen.productName}`);
     const compatibleWithLength = (unit?: string, packUnit?: string) => compatible(unit, packUnit) || (!!lengthEachToMetres && normUnit(packUnit) === 'm');

@@ -209,6 +209,7 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
 
   if (/rapid\s+set\s+concrete|concrete\s+mix|post\s+concrete/.test(q)) {
     if (hasAny(p, ['membrane', 'waterproof', 'sealant', 'paint', 'primer', 'liquid'])) return false;
+    if (/rapid\s+set/.test(q) && !/rapid|quick|fast/i.test(p)) return false;
     if (/concrete\s+mix/.test(q) && /sand\s*(?:&|and)\s*cement|cement\s+mortar/.test(p)) return false;
     const qKg = firstKgWeight(q);
     const pKg = firstKgWeight(p);
@@ -251,6 +252,11 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
   const qColor = colorbondColour(q);
   const pColor = colorbondColour(p);
   if (qColor && pColor && qColor !== pColor) return false;
+
+  if (/colorbond\s+fence\s+post|fence\s+post.*colorbond/.test(q)) {
+    if (hasAny(p, ['cap', 'post cap', 'rail', 'sheet', 'panel', 'bracket', 'shs', 'rhs'])) return false;
+    return hasAny(p, ['post']) && hasAny(p, ['colorbond', 'fence']);
+  }
 
   if (/colorbond\s+fence\s+(?:sheet|panel)|fence\s+(?:sheet|panel).*colorbond/.test(q)) {
     if (hasAny(p, ['post', 'rail', 'bracket', 'cap', 'screw'])) return false;
@@ -334,7 +340,7 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
   }
 
   if (/(?:p[-\s]?trap|s[-\s]?trap|waste\s+trap|sink\s+waste\s+trap)/.test(q)) {
-    if (hasAny(p, ['reducer', 'adaptor', 'adapter', 'bend', 'elbow', 'pipe length'])) return false;
+    if (hasAny(p, ['pan connector', 'toilet', 'reducer', 'adaptor', 'adapter', 'bend', 'elbow', 'pipe length'])) return false;
     return hasAny(p, ['p trap', 'p-trap', 's trap', 's-trap', 'waste trap', 'trap']);
   }
 
@@ -382,6 +388,16 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
   if (/hydrochloric\s+acid|muriatic\s+acid/.test(q)) {
     if (hasAny(p, ['dry acid', 'sodium bisulfate', 'sodium bisulphate', 'granular'])) return false;
     return hasAny(p, ['hydrochloric', 'muriatic', 'acid']);
+  }
+
+  if (/drain\s+clean(?:er|ing)|blocked\s+drain\s+liquid/.test(q)) {
+    if (hasAny(p, ['laundry', 'detergent', 'washing liquid', 'dishwashing'])) return false;
+    return hasAny(p, ['drain cleaner', 'drain clean', 'caustic', 'drain']);
+  }
+
+  if (/degreaser|concrete\s+cleaner|driveway\s+cleaner/.test(q)) {
+    if (hasAny(p, ['membrane', 'waterproofing', 'bitumen', 'blackseal', 'sealer'])) return false;
+    return hasAny(p, ['degreaser', 'cleaner', 'concrete cleaner', 'driveway cleaner']);
   }
 
   if (/mineral\s+oil\s+absorbent|oil\s+absorbent|spill\s+absorbent/.test(q)) {
