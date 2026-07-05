@@ -34,7 +34,7 @@ export interface CoverageInput {
 // Bulk consumables that genuinely come in tubs/boxes/drums priced per bulk unit.
 // Deliberately excludes "bolt", "bracket", "anchor", "clip" — those are commonly
 // sold individually, so a high price means one expensive item, not a bulk tub.
-const BULK_FASTENER_RE = /\b(?:screws?|nails?|brads?|staples?|tek\s*screws?)\b/i;
+const BULK_FASTENER_RE = /\b(?:screws?|nails?|brads?|staples?|tek\s*screws?|(?:wire|lever)\s+connectors?|wago\s+connectors?)\b/i;
 const LIQUID_RE = /\b(?:oil|sealer|stain|paint|varnish|primer|undercoat|lacquer)\b/i;
 
 // A fastener/liquid product at or above this price is effectively always a bulk

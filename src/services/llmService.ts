@@ -393,8 +393,11 @@ QUALITY TIER DETECTION — read the job description for tier qualifiers and set 
 CRITICAL — emit quantities in the SMALLEST INDIVIDUAL UNIT, not in guessed packs:
 - Screws / nails / clips / fasteners → emit the individual count and unit "each" (e.g. 750 each, NOT "1 pack").
 - Concrete / sand / cement → emit the count of bags and unit "each" (e.g. 20 each for 20 bags).
-- Timber / decking / fascia → emit linear metres and unit "m" (e.g. 75 m).
-- Tape / membrane / sarking → emit linear metres and unit "m" (e.g. 150 m).
+- Timber/decking/fascia sold as continuous coverage → emit linear metres and unit "m" (e.g. 75 m).
+- Discrete structural members that cannot be safely spliced from offcuts (posts, studs, joists, rafters, beams, steel RHS/SHS gate rails/posts) → emit the required piece count and unit "each", and include the required member length in the name/searchTerm (e.g. "14 each 65x65 galvanised steel post 2.4m", not "25.2 m steel post").
+- Tape sold by length → emit linear metres and unit "m" (e.g. 50 m).
+- Membrane / sarking / building wrap / vapour barrier / geotextile → emit covered area and unit "m²" (e.g. 58 m²), not roll count.
+- Sheet goods (plasterboard, fibre cement, villaboard, cladding sheets, plywood) → emit required covered area and unit "m²" unless the tradie explicitly gave a sheet count.
 - Paint / oil / sealer → emit total litres and unit "L" (e.g. 8 L).
 The pricing layer reads pack/length size from the product page (e.g. "Box of 500", "5.4m length", "20m roll") and computes how many packs to buy. If you guess pack counts yourself you will get them wrong — you have no way to know how many clips are in a pack.
 
@@ -404,7 +407,7 @@ DO NOT set sectionMultiplier equal to a material's own quantity — sectionMulti
 
 SANITY-CHECK every quantity before returning. The most common failure is over-spec'ing repeating elements by 3-10×. For ANY job in ANY trade, derive each quantity from a structural anchor — never guess:
 
-- REPEATING LINEAR ELEMENTS (deck joists, fence posts, wall studs, ceiling battens, roof rafters): count = ceil(span / centres) + 1. A 5m-wide deck with joists at 450mm = 12 joists, NOT 60. A 30m fence at 2.4m bays = 13 posts, NOT 30.
+- REPEATING LINEAR ELEMENTS (deck joists, fence posts, wall studs, ceiling battens, roof rafters): count = ceil(span / centres) + 1. A 5m-wide deck with joists at 450mm = 12 joists, NOT 60. A 30m fence at 2.4m bays = 13 posts, NOT 30. Because these are discrete structural members, output them as each with member length; do NOT pool total metres and assume offcuts can be spliced.
 - PER-AREA ELEMENTS (decking clips, tiles, plasterboard sheets, paving, downlights, GPOs): count = area × density. Hidden deck clips ~17/m². 600x600 tiles ~2.78/m². Don't multiply density by 5.
 - LINEAR MATERIAL FROM AREA (decking boards, weatherboard, cladding): linear metres = area / board_width. 50m² of 137mm decking = ~365 lm, NOT 1000+.
 - ONE-PER-UNIT ITEMS (hinges per door, taps per basin, downpipes per roof side, post stirrups per post): count = N units × items_per_unit (usually 1-3).
@@ -424,6 +427,7 @@ Guidelines:
 - GOOD examples: "brass stop valve 15mm quarter turn", "treated pine H3 90x45 2.4m", "PTFE thread tape 12mm"
 - BAD examples: "Kinetic valve", "Ozito drill", "Ramset anchor" (these are brand-specific)
 - Use common material specifications: timber grades (H3/H4), dimensions, thread sizes, capacities
+- Include all materials/equipment explicitly requested in the scope, including hire/service rows like concrete pump, skip bin, disposal/tipping, fuel, stump grinder teeth/chains. These should be line items even if they will use fallback/trade estimates.
 - Include all materials needed: primary materials, fasteners, adhesives, finishes, etc.
 - Be realistic with quantities - round up for waste (typically 10-15% extra)
 - Include safety/prep materials if relevant (sandpaper, drop sheets, cleaning supplies, etc.)

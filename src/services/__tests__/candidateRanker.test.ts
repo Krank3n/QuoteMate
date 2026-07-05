@@ -189,12 +189,230 @@ describe('pickBestCandidate', () => {
       expect(picked).toBeNull();
     });
 
+    it('does not price unleaded petrol as engine oil', () => {
+      const picked = pickBestCandidate([
+        c(15, 'Husqvarna XP 4-Stroke Engine Oil 1L'),
+        c(22, 'Fuel System Cleaner'),
+      ], { searchTerm: 'Unleaded Petrol' });
+      expect(picked).toBeNull();
+    });
+
     it('does not price electrical wire connectors as irrigation fittings', () => {
       const picked = pickBestCandidate([
         c(7, '13mm Irrigation Barbed Connector'),
         c(12, 'Electrical Wire Connector 10 Pack'),
       ], { searchTerm: 'Wire Connectors BP Connectors Electrical' });
       expect(picked!.productName).toContain('Electrical Wire Connector');
+    });
+
+    it('does not map steel RHS to retaining wall H posts', () => {
+      const picked = pickBestCandidate([
+        c(50, 'Galvanised Retaining Wall H Post 900mm'),
+        c(120, 'Galvanised Steel RHS 100 x 50 x 2.0mm'),
+      ], { searchTerm: '100x50mm Galvanised Steel RHS' });
+      expect(picked!.productName).toContain('RHS');
+    });
+
+    it('does not map sliding gate wheels to tracks', () => {
+      const picked = pickBestCandidate([
+        c(60, 'Sliding Gate Track 3m'),
+        c(28, 'Sliding Gate Wheel 90mm'),
+      ], { searchTerm: 'Sliding Gate Wheels 90mm' });
+      expect(picked!.productName).toContain('Wheel');
+    });
+
+    it('does not map geotextile to irrigation stakes', () => {
+      const picked = pickBestCandidate([
+        c(6, 'Irrigation Spray Stake 10 Pack'),
+        c(85, 'Geotextile Filter Fabric Roll'),
+      ], { searchTerm: 'Geotextile Filter Wrap AS140' });
+      expect(picked!.productName).toContain('Geotextile');
+    });
+
+    it('does not map disposal fees to retail products', () => {
+      const picked = pickBestCandidate([
+        c(20, 'Organic Fertiliser Bag'),
+        c(12, 'Garden Waste Bags'),
+      ], { searchTerm: 'Green Waste Disposal Allowance' });
+      expect(picked).toBeNull();
+    });
+
+    it('does not map rapid set concrete to liquid membrane', () => {
+      const picked = pickBestCandidate([
+        c(188, 'Liquid Waterproofing Membrane 15L'),
+        c(9, 'Rapid Set Concrete Mix 20kg'),
+      ], { searchTerm: 'Rapid Set Concrete Mix 20kg' });
+      expect(picked!.productName).toContain('Concrete');
+    });
+
+    it('does not map pool gates to posts', () => {
+      const picked = pickBestCandidate([
+        c(35, 'Black Aluminium Fence Post'),
+        c(220, 'Black Aluminium Pool Gate 975x1200mm'),
+      ], { searchTerm: 'Black Aluminium Standard Pool Gate 975x1200mm' });
+      expect(picked!.productName).toContain('Gate');
+    });
+
+    it('does not map roof tiles to carpet tiles', () => {
+      const picked = pickBestCandidate([
+        c(9, 'Charcoal Carpet Tile'),
+        c(7, 'Concrete Roof Tile Charcoal'),
+      ], { searchTerm: 'Concrete Roof Tile standard profile' });
+      expect(picked!.productName).toContain('Roof Tile');
+    });
+
+    it('does not map wire connectors to EV charging cables', () => {
+      const picked = pickBestCandidate([
+        c(180, 'EV Charging Cable Type 2'),
+        c(12, 'Wago Wire Connector 10 Pack'),
+      ], { searchTerm: 'wire connectors wago bp' });
+      expect(picked!.productName).toContain('Wago');
+    });
+
+    it('does not map fence rail timber to brackets', () => {
+      const picked = pickBestCandidate([
+        c(4, 'Galvanised Angle Bracket'),
+        c(18, 'Treated Pine Fence Rail 75x38mm'),
+      ], { searchTerm: '75x38mm Treated Pine Fence Rail' });
+      expect(picked!.productName).toContain('Rail');
+    });
+
+    it('does not accept undersized screws for a longer screw requirement', () => {
+      const picked = pickBestCandidate([
+        c(20, 'Self Drilling Metal Screws 10g x 16mm'),
+        c(28, 'Self Drilling Metal Screws 10g x 45mm'),
+      ], { searchTerm: 'Self-Drilling Metal Screws 10g x 45mm' });
+      expect(picked!.productName).toContain('45mm');
+    });
+
+    it('does not select different TPS cable gauge', () => {
+      const picked = pickBestCandidate([
+        c(40, 'Deta10 m 2.5mm² 2-Core + Earth Power Cable'),
+        c(32, 'Deta 10m 1.5mm² Twin and Earth Cable'),
+      ], { searchTerm: '1.5mm 2 core and earth TPS electrical cable' });
+      expect(picked!.productName).toContain('1.5mm');
+    });
+
+    it('does not select a different RHS profile dimension', () => {
+      const picked = pickBestCandidate([
+        c(50, 'Australian Handyman Supplies 50 x 50mm x 2.4m Galvanised Steel Fence Post'),
+        c(90, '100 x 50mm Galvanised Steel RHS 2.4m'),
+      ], { searchTerm: '100x50mm Galvanised Steel RHS' });
+      expect(picked!.productName).toContain('100 x 50');
+    });
+
+    it('does not map electrical tape to anti-slip tape', () => {
+      const picked = pickBestCandidate([
+        c(12, 'Black Anti-Slip Grip Tape'),
+        c(4, 'PVC Electrical Insulation Tape Black'),
+      ], { searchTerm: 'black electrical tape roll' });
+      expect(picked!.productName).toContain('Electrical');
+    });
+
+    it('does not match formwork pegs to formply sheets', () => {
+      const picked = pickBestCandidate([
+        c(80, 'Formply Sheet 2400 x 1200mm'),
+        c(3, 'Hardwood Formwork Peg 450mm'),
+      ], { searchTerm: 'hardwood formwork pegs' });
+      expect(picked!.productName).toContain('Peg');
+    });
+
+    it('does not use retail bag products for bulk road base or crusher dust', () => {
+      const picked = pickBestCandidate([
+        c(9, 'Road Base 20kg Bag'),
+        c(12, 'Crusher Dust 20kg Bag'),
+      ], { searchTerm: 'Road base bulk 2m³' });
+      expect(picked).toBeNull();
+    });
+
+    it('rejects dimensionless structural/profile products when an exact profile is required', () => {
+      const picked = pickBestCandidate([
+        c(65, 'Galvanised Steel Fence Post 2.4m'),
+        c(90, '100 x 50mm Galvanised Steel RHS 2.4m'),
+      ], { searchTerm: '100x50mm Galvanised Steel RHS' });
+      expect(picked!.productName).toContain('100 x 50');
+    });
+
+    it('does not accept the wrong cable core count', () => {
+      const picked = pickBestCandidate([
+        c(80, 'Deta 10m 2.5mm² 4-Core + Earth Cable'),
+        c(45, 'Deta 10m 2.5mm² 2-Core + Earth Cable'),
+      ], { searchTerm: '2.5mm 2 core and earth TPS electrical cable' });
+      expect(picked!.productName).toContain('2-Core');
+    });
+
+    it('does not match gate catchers to hinges or tracks', () => {
+      const picked = pickBestCandidate([
+        c(40, 'Heavy Duty Gate Hinge'),
+        c(60, 'Sliding Gate Track 3m'),
+        c(28, 'Sliding Gate Catcher Receiver'),
+      ], { searchTerm: 'Sliding gate catcher receiver' });
+      expect(picked!.productName).toContain('Catcher');
+    });
+
+    it('rejects a single priced incompatible candidate instead of blindly accepting it', () => {
+      const picked = pickBestCandidate([
+        c(36.67, 'Australian Handyman Supplies 50 x 50mm x 2.4m Galvanised Steel Fence Post'),
+      ], { searchTerm: '100x50x2.0mm Galvanised RHS' });
+      expect(picked).toBeNull();
+    });
+
+    it('does not match copper pipe to fittings or saddle clips', () => {
+      const picked = pickBestCandidate([
+        c(4.38, 'Brasshards 20mm 90 Degrees Copper Capillary Elbow'),
+        c(35, '20mm Copper Pipe 3m Length'),
+      ], { searchTerm: '20mm copper pipe B type' });
+      expect(picked!.productName).toContain('Pipe');
+    });
+
+    it('does not match pipe lagging to saddle clips', () => {
+      const picked = pickBestCandidate([
+        c(11.02, 'Kinetic 15mm Galvanised BSP Pipe Saddle Clips - 10 Pack'),
+        c(6, '15mm Foam Pipe Insulation Lagging 1m'),
+      ], { searchTerm: '15mm pipe insulation lagging' });
+      expect(picked!.productName).toContain('Insulation');
+    });
+
+    it('does not substitute shower diverters for non-return isolation valves', () => {
+      const picked = pickBestCandidate([
+        c(25.2, 'Kinetic 15mm Chrome Dual Valve Handspray Water Diverter'),
+        c(18, '15mm Non Return Isolation Valve'),
+      ], { searchTerm: '15mm non-return isolation duo valve' });
+      expect(picked!.productName).toContain('Non Return');
+    });
+
+    it('does not match structural base plates to plumbing cover plates', () => {
+      const picked = pickBestCandidate([
+        c(2.32, 'Kinetic 20mm BSP Stainless Steel Cover Plate'),
+      ], { searchTerm: '150x150x10 steel base plate' });
+      expect(picked).toBeNull();
+    });
+
+    it('does not match plasterboard sheets to tape', () => {
+      const picked = pickBestCandidate([
+        c(12, 'Plasterboard Jointing Tape 75m'),
+        c(18, '10mm Plasterboard Sheet 2400 x 1200mm'),
+      ], { searchTerm: '10mm plasterboard sheets 2400x1200' });
+      expect(picked!.productName).toContain('Sheet');
+    });
+
+    it('does not match Colorbond fence rails or sheets to posts', () => {
+      expect(pickBestCandidate([
+        c(30, 'Colorbond Fence Post Surfmist'),
+        c(18, 'Colorbond Fence Rail 2.4m Surfmist'),
+      ], { searchTerm: 'Colorbond fence rail 2.4m Surfmist' })!.productName).toContain('Rail');
+      expect(pickBestCandidate([
+        c(30, 'Colorbond Fence Post Surfmist'),
+        c(38, 'Colorbond Fence Sheet 1.8m Surfmist'),
+      ], { searchTerm: 'Colorbond fence sheet 1.8m Surfmist' })!.productName).toContain('Sheet');
+    });
+
+    it('rejects much-too-long nails for a shorter nail requirement', () => {
+      const picked = pickBestCandidate([
+        c(12, 'Galvanised Bullet Head Nails 100mm'),
+        c(18, 'Galvanised Flat Head Nails 50mm'),
+      ], { searchTerm: 'Galvanised flat head nails 50mm' });
+      expect(picked!.productName).toContain('50mm');
     });
   });
 });

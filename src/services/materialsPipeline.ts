@@ -408,22 +408,92 @@ function deterministicFallbackUnitPrice(material: Material): number | null {
   // Last-resort visible estimate only. Real supplier/saved/API prices always
   // win. Values are deliberately conservative AU retail-ish unit prices so the
   // quote total is not silently $0 when search/AI returns nothing.
+  if (/screws?|nails?|brads?|staples?/.test(name)) return unit === 'each' ? 0.08 : 18;
+  if (/(?:wire|lever)\s+connectors?|wago\s+connectors?/.test(name)) return unit === 'each' ? 0.5 : 25;
+  if (/exposed\s+aggregate\s+concrete|ready[-\s]?mix\s+concrete|concrete\s+for\s+slab|slab\s+concrete/.test(name)) return unit === 'm³' ? 300 : 12;
+  if (/rinnai\s*b26|continuous\s+flow\s+gas\s+hot\s+water|gas\s+hot\s+water\s+heater/.test(name)) return 1350;
+  if (/gas\s+compliance\s+certificate|compliance\s+certificate/.test(name)) return 150;
+  if (/stump\s+grinder\s+(?:replacement\s+)?teeth|grinder\s+teeth/.test(name)) return 35;
+  if (/material\s+delivery|delivery\s+fee/.test(name)) return 150;
+  if (/colorbond\s+fence\s+(?:sheet|panel)|fence\s+(?:sheet|panel).*colorbond/.test(name)) return 38;
+  if (/colorbond\s+fence\s+rail|fence\s+rail.*colorbond/.test(name)) return 18;
+  if (/\b(?:rhs|shs)\b|rectangular\s+hollow|square\s+hollow/.test(name)) return unit === 'm' ? 45 : 180;
+  if (/steel\s+base\s+plate|base\s+plate/.test(name)) return 28;
+  if (/steel\s+post|galvanised\s+post|galvanized\s+post/.test(name)) return unit === 'm' ? 38 : 90;
+  if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding/.test(name)) return unit === 'm²' ? 12 : 35;
+  if (/floor\s+tiles?|wall\s+tiles?|ceramic\s+tiles?|porcelain\s+tiles?/.test(name) && !/roof/.test(name)) return unit === 'm²' ? 45 : 30;
+  if (/\bgrout\b/.test(name)) return unit === 'kg' ? 4 : 55;
+  if (/\b(?:pvc|pex)\b.*\bpipe\b|\bpipe\b.*\b(?:pvc|pex)\b|waste\s+pipe|dwv\s+pipe/.test(name)) return unit === 'm' ? 8 : 24;
+  if (/basin\s+mixer|mixer\s+tap/.test(name)) return 140;
+  if (/plumber'?s?\s+putty|plumbing\s+putty/.test(name)) return 12;
+  if (/disposable\s+coveralls?|painters?\s+coveralls?|coveralls?/.test(name)) return 12;
+  if (/debris\s+netting|safety\s+debris|shade\s+cloth|safety\s+mesh/.test(name)) return unit === 'm²' ? 2 : 80;
   if (/decking.*board|deck.*board|hardwood.*decking|merbau|spotted\s+gum/.test(name)) return 75;
-  if (/treated\s+pine|structural\s+pine/.test(name)) return unit === 'm' ? 12 : 55;
+  if (/palings?|paling/.test(name)) return 3.5;
+  if (/fence\s+rail|75\s*x\s*38.*rail/.test(name)) return unit === 'm' ? 4 : 15;
+  if (/90\s*x\s*45|70\s*x\s*35|framing\s+timber|mgp10|mgp12|structural\s+pine|treated\s+pine/.test(name)) return unit === 'm' ? 8 : 15;
   if (/fascia.*board/.test(name)) return 65;
   if (/roof\s+tile|concrete\s+tile/.test(name)) return 7;
   if (/paint|ceiling\s+paint|wall\s+paint/.test(name)) return unit === 'L' ? 18 : 55;
   if (/oil|sealer|stain/.test(name)) return unit === 'L' ? 25 : 80;
   if (/weed\s+mat|geotextile|landscape\s+fabric/.test(name)) return unit === 'm²' ? 1.5 : 45;
-  if (/gravel|aggregate|road\s+base|crusher\s+dust|sand/.test(name)) return unit === 'kg' ? 0.25 : 12;
-  if (/screws?|nails?|brads?|staples?/.test(name)) return unit === 'each' ? 0.08 : 18;
+  if (/road\s+base|crusher\s+dust|aggregate\s+base/.test(name)) return unit === 'm³' ? 110 : unit === 'kg' ? 0.08 : 95;
+  if (/gravel|aggregate|sand/.test(name)) return unit === 'm³' ? 120 : unit === 'kg' ? 0.12 : 12;
+  if (/sliding\s+gate\s+(?:catcher|receiver|stop)|gate\s+(?:catcher|receiver|stop)/.test(name)) return 30;
+  if (/sliding\s+gate\s+wheels?|gate\s+wheels?/.test(name)) return 35;
+  if (/electrical\s+tape|insulation\s+tape/.test(name)) return 5;
   if (/joist\s+hanger/.test(name)) return 8;
   if (/bracket|multigrip|connector|clip/.test(name)) return 3;
   if (/silicone|sealant|caulk/.test(name)) return 14;
-  if (/pointing\s+compound/.test(name)) return 55;
-  if (/diesel|petrol|fuel/.test(name)) return unit === 'L' ? 2.5 : null;
-  if (/hire|dump|tipping|disposal|skip/.test(name)) return 150;
+  if (/pointing\s+compound/.test(name)) return unit === 'L' ? 5.5 : 55;
+  if (/airless\s+sprayer\s+cleanup|sprayer\s+cleanup|pump\s+armor|pump\s+protector/.test(name)) return unit === 'L' ? 18 : 35;
+  if (/2[-\s]?stroke.*(?:fuel|mix)|chainsaw\s+fuel|fuel\s+mix/.test(name)) return unit === 'L' ? 5 : null;
+  if (/2[-\s]?stroke\s+(?:engine\s+)?oil/.test(name)) return unit === 'L' ? 18 : 22;
+  if (/vehicle\s+(?:running\s+)?(?:costs?|fuel)|travel\s+fuel/.test(name)) return 35;
+  if (/diesel|petrol|fuel|unleaded/.test(name)) return unit === 'L' ? 2.5 : unit === 'each' ? 35 : null;
+  if (/concrete\s+pump|pump\s+hire/.test(name)) return 850;
+  if (/hook\s*bin|soil\s+disposal|spoil\s+disposal|dirt\s+disposal|heavy\s+waste/.test(name)) return unit === 'm³' ? 110 : unit === 'kg' ? 0.18 : 1200;
+  if (/skip/.test(name)) return unit === 'm³' ? 110 : 650;
+  if (/green\s+waste.*(?:disposal|dump|tip)|(?:disposal|dump|tip).*green\s+waste/.test(name)) return unit === 'kg' ? 0.1 : unit === 'm³' ? 60 : 120;
+  if (/dump|tipping|disposal/.test(name)) return unit === 'kg' ? 0.25 : 250;
+  if (/hire/.test(name)) return 250;
   return null;
+}
+
+function shouldUseTradeFallbackInsteadOfRetail(material: Material): boolean {
+  const name = `${material.searchTerm || ''} ${material.name || ''}`.toLowerCase();
+  const qty = material.requiredQty ?? material.quantity;
+  if (/rinnai\s*b26|continuous\s+flow\s+gas\s+hot\s+water|gas\s+hot\s+water\s+heater|gas\s+compliance\s+certificate|compliance\s+certificate|stump\s+grinder\s+(?:replacement\s+)?teeth|grinder\s+teeth|material\s+delivery|delivery\s+fee/.test(name)) return true;
+  if (/colorbond\s+fence\s+(?:sheet|panel|rail)|fence\s+(?:sheet|panel|rail).*colorbond/.test(name)) return true;
+  if (/\b(?:rhs|shs)\b|rectangular\s+hollow|square\s+hollow|steel\s+base\s+plate|base\s+plate/.test(name)) return true;
+  if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding|floor\s+tiles?|wall\s+tiles?|\bgrout\b|basin\s+mixer|mixer\s+tap|plumber'?s?\s+putty|plumbing\s+putty|debris\s+netting|safety\s+debris/.test(name)) return true;
+  if (/road\s+base|crusher\s+dust|aggregate\s+base/.test(name)) return true;
+  if (/green\s+waste|tip\s*fee|tipping|dumping|disposal|hook\s*bin|soil\s+disposal|spoil\s+disposal|dirt\s+disposal|heavy\s+waste/.test(name)) return true;
+  if (/vehicle\s+(?:running\s+)?(?:costs?|fuel)|travel\s+fuel/.test(name)) return true;
+  if (/\b(?:diesel|petrol|unleaded|machine\s+fuel)\b/.test(name)) return true;
+  if (/2[-\s]?stroke.*(?:fuel|mix)|chainsaw\s+fuel|fuel\s+mix|2[-\s]?stroke\s+(?:engine\s+)?oil/.test(name)) return true;
+  if (/airless\s+sprayer\s+cleanup|sprayer\s+cleanup|pump\s+armor|pump\s+protector/.test(name)) return true;
+  if (/concrete\s+pump|pump\s+hire|skip|\bhire\b/.test(name)) return true;
+  // Concrete slabs/driveways/paths in m³ are supplied by a ready-mix truck or
+  // mini-mix supplier. Never convert these to hundreds of retail 20kg bags.
+  if ((/exposed\s+aggregate\s+concrete|ready[-\s]?mix\s+concrete|concrete\s+for\s+slab|slab\s+concrete|\b\d{2}\s*mpa\b.*concrete|concrete.*\b\d{2}\s*mpa\b/.test(name)) && (material.unit === 'm³' || qty >= 0.5)) return true;
+  return false;
+}
+
+function applyVisibleFallbackEstimate(material: Material, gstInclusive: boolean): boolean {
+  const fallback = deterministicFallbackUnitPrice(material);
+  if (!(fallback && fallback > 0)) return false;
+  const unitPrice = roundToTwoDecimals(supplierPriceForGstMode(fallback, gstInclusive));
+  material.price = unitPrice;
+  material.totalPrice = roundToTwoDecimals(unitPrice * material.quantity);
+  material.manualPriceOverride = false;
+  material.pricingSource = 'ai';
+  material.priceConfidence = 'low';
+  material.description = 'Fallback trade estimate — supplier search skipped/returned no reliable retail match; verify before sending';
+  material.bunningsItemNumber = undefined;
+  material.productUrl = undefined;
+  material.imageUrl = undefined;
+  return true;
 }
 
 export async function fetchPricesForQuote(
@@ -566,6 +636,29 @@ export async function fetchPricesForQuote(
     });
   }
 
+  // Force visible fallback estimates for known non-retail/trade-service rows.
+  // These should not hit Bunnings/Reece at all unless the user has an explicit
+  // saved/manual supplier rate (handled above). Quality > false precision.
+  const forcedFallbackTerms = new Set<string>();
+  for (const m of updatedMaterials) {
+    checkCancel();
+    if (m.price > 0 && !m.manualPriceOverride) continue;
+    if (!shouldUseTradeFallbackInsteadOfRetail(m)) continue;
+    if (applyVisibleFallbackEstimate(m, gstInclusive)) {
+      const term = m.searchTerm || m.name;
+      forcedFallbackTerms.add(term);
+      fetchedCount += 1;
+      onEvent?.({
+        kind: 'item-priced',
+        phase: 'individual',
+        materialId: m.id,
+        name: m.name,
+        success: true,
+        progress: { current: fetchedCount, total: materialsToFetch.length },
+      });
+    }
+  }
+
   const reecePricedTerms = new Set<string>();
 
   // Helper used by both Reece pre-pass and post-pass.
@@ -687,7 +780,7 @@ export async function fetchPricesForQuote(
     let batchResults: Map<string, ScraperProduct[]> | null = null;
     const remainingTerms = materialsToFetch
       .map((m) => m.searchTerm || m.name)
-      .filter((term) => !locallyPricedTerms.has(term) && !reecePricedTerms.has(term));
+      .filter((term) => !locallyPricedTerms.has(term) && !reecePricedTerms.has(term) && !forcedFallbackTerms.has(term));
 
     if (remainingTerms.length > 0) {
       onEvent?.({

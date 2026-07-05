@@ -106,6 +106,18 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
   const q = query.toLowerCase();
   const p = productName.toLowerCase();
 
+  const qDim = parseFirstDim(q);
+  if (qDim) {
+    const pDim = parseFirstDim(p);
+    const strictDimQuery = /rhs|rectangular\s+hollow|steel\s+post|h[-\s]?post|post|rail|paling|sleeper|gate|panel|timber|pine|steel|anchor|bolt|screw/.test(q);
+    if (strictDimQuery && (!pDim || pDim !== qDim)) return false;
+  }
+
+  if (/structural\s+pine|framing\s+pine|90x45|70x35|140x45|\bh2\b|\bh3\b/.test(q) && /pine|timber|framing|studs?|plates?|noggings?|joists?/.test(q)) {
+    if (hasAny(p, ['pin', 'drive pin', 'ramset', 'bracket', 'hanger', 'screw', 'bolt', 'nail'])) return false;
+    return hasAny(p, ['pine', 'timber', 'framing', 'mgp', 'h2', 'h3']);
+  }
+
   if (/\b(?:decking\s+boards?|deck\s+boards?|hardwood\s+decking|merbau|spotted\s+gum)\b/.test(q)) {
     if (hasAny(p, ['drill bit', 'saw blade', 'screw', 'oil', 'stain', 'bracket', 'hanger'])) return false;
     return hasAny(p, ['decking', 'deck board', 'timber', 'hardwood', 'merbau', 'spotted gum', 'modwood', 'composite']);
@@ -117,7 +129,7 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
   }
 
   if (/\broof\s+tiles?\b|\bconcrete\s+roof\s+tiles?\b/.test(q)) {
-    if (hasAny(p, ['pointing', 'sealant', 'nozzle', 'conduit', 'adhesive'])) return false;
+    if (hasAny(p, ['pointing', 'sealant', 'nozzle', 'conduit', 'adhesive', 'mesh', 'compound', 'carpet', 'floor tile', 'vinyl', 'solar', 'mounting', 'bracket'])) return false;
     return hasAny(p, ['roof tile', 'roofing tile', 'concrete tile', 'terracotta tile', 'tile']);
   }
 
@@ -126,18 +138,328 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
     return hasAny(p, ['silicone', 'sealant', 'sikaflex', 'selleys', 'parfix', 'caulk']);
   }
 
+  if (/\brinnai\b/.test(q) && !/\brinnai\b/.test(p)) return false;
+
+  if (/copper\s+(?:fittings?|elbows?|tees?|sockets?|couplings?)/.test(q)) {
+    if (hasAny(p, ['angle bracket', 'bracket', 'galvanised bracket', 'steel bracket'])) return false;
+    return hasAny(p, ['copper', 'brass', 'press', 'capillary']) && hasAny(p, ['fitting', 'elbow', 'tee', 'socket', 'coupling']);
+  }
+
+  if (/copper\s+pipe|copper\s+tube/.test(q)) {
+    if (hasAny(p, ['elbow', 'coupling', 'tee', 'capillary', 'saddle', 'clip', 'bracket', 'valve', 'adaptor', 'adapter', 'bender', 'tube bender', 'tool'])) return false;
+    return hasAny(p, ['copper pipe', 'copper tube', 'tube length', 'pipe length']);
+  }
+
+  if (/pipe\s+(?:insulation|lagging)|lagging/.test(q)) {
+    if (hasAny(p, ['saddle', 'clip', 'bracket', 'galvanised bsp', 'galvanized bsp'])) return false;
+    return hasAny(p, ['lagging', 'insulation', 'foam tube', 'pipe wrap']);
+  }
+
+  if (/(?:duo|non[-\s]?return|isolation)\s+valve|valve.*non[-\s]?return|valve.*isolation/.test(q)) {
+    if (hasAny(p, ['handspray', 'hand spray', 'shower', 'diverter', 'tap adaptor', 'adapter'])) return false;
+    return hasAny(p, ['valve', 'non return', 'non-return', 'isolation', 'duo']);
+  }
+
+  if (/steel\s+base\s+plate|base\s+plate/.test(q)) {
+    if (hasAny(p, ['cover plate', 'flange', 'bsp', 'plumbing', 'escutcheon', 'rise stainless'])) return false;
+    return hasAny(p, ['base plate', 'steel plate', 'flat plate', 'weld plate']);
+  }
+
   if (/\bpointing\s+compound\b|\broof\s+pointing\b/.test(q)) {
-    if (hasAny(p, ['conduit', 'saddle', 'bracket', 'mesh'])) return false;
-    return hasAny(p, ['pointing', 'compound', 'flexipoint', 'roof']);
+    if (hasAny(p, ['conduit', 'saddle', 'bracket', 'mesh', 'fibre cement', 'jointing'])) return false;
+    return hasAny(p, ['pointing', 'flexipoint']) || (p.includes('roof') && p.includes('compound'));
   }
 
-  if (/\b(?:diesel|petrol|fuel)\b/.test(q)) {
-    if (hasAny(p, ['cleaner', 'additive', 'treatment', 'stabiliser', 'conditioner', 'injector'])) return false;
+  if (/\brhs\b|rectangular\s+hollow\s+section|galvanised\s+steel\s+rhs|galvanized\s+steel\s+rhs/.test(q)) {
+    if (hasAny(p, ['retaining wall', 'h post', 'h-section', 'timber', 'pine', 'stake', 'fence post'])) return false;
+    return hasAny(p, ['rhs', 'rectangular hollow', 'steel tube', 'galvanised steel', 'galvanized steel']);
   }
 
-  if (/\bwire\s+connectors?\b|\bbp\s+connectors?\b|\belectrical\s+connectors?\b/.test(q)) {
-    if (hasAny(p, ['irrigation', 'hose', 'poly', 'sprinkler', 'barbed'])) return false;
-    return hasAny(p, ['wire', 'connector', 'electrical', 'terminal', 'bp connector', 'joiner']);
+  if (/\bshs\b|square\s+hollow\s+section/.test(q)) {
+    if (hasAny(p, ['fireplace', 'poker', 'tool', 'accessory', 'timber', 'pine'])) return false;
+    return hasAny(p, ['shs', 'square hollow', 'steel tube']);
+  }
+
+  if (/exposed\s+aggregate\s+concrete|\b\d{2}\s*mpa\b.*concrete|concrete.*\b\d{2}\s*mpa\b/.test(q)) {
+    if (hasAny(p, ['20kg', '10kg', 'bag', 'rapid set', 'quick set'])) return false;
+    return hasAny(p, ['concrete', 'exposed aggregate', 'ready mix', 'readymix']);
+  }
+
+  if (/ready[-\s]?mix\s+concrete|concrete\s+for\s+slab|slab\s+concrete/.test(q)) {
+    if (hasAny(p, ['bag', 'bagged', '20kg', '10kg', 'rapid set', 'quick set'])) return false;
+    return hasAny(p, ['ready mix', 'readymix', 'concrete']);
+  }
+
+  if (/road\s+base|crusher\s+dust|aggregate\s+base/.test(q)) {
+    // Bulk civil materials should be quoted from a landscape/civil supplier by
+    // m³/tonne, not matched to small Bunnings retail bags or unrelated cleaners.
+    return false;
+  }
+
+  if (/sl72|reinforcing\s+mesh|reo\s+mesh/.test(q)) {
+    if (hasAny(p, ['trench mesh', 'small mesh', '1.8m x 1m', '1800 x 1000'])) return false;
+    if (/sl72/.test(q) && !/sl72/i.test(p)) return false;
+    return hasAny(p, ['sl72', 'reinforcing mesh', 'reo mesh', 'mesh sheet']);
+  }
+
+  if (/formwork\s+pegs?|timber\s+pegs?|hardwood\s+pegs?|stakes?/.test(q)) {
+    if (hasAny(p, ['formply', 'plywood', 'sheet', 'panel', 'garden edging', 'metal garden', 'rust metal'])) return false;
+    return hasAny(p, ['peg', 'stake', 'pointed', 'hardwood', 'timber']);
+  }
+
+  if (/rapid\s+set\s+concrete|concrete\s+mix|post\s+concrete/.test(q)) {
+    if (hasAny(p, ['membrane', 'waterproof', 'sealant', 'paint', 'primer', 'liquid'])) return false;
+    if (/concrete\s+mix/.test(q) && /sand\s*(?:&|and)\s*cement|cement\s+mortar/.test(p)) return false;
+    const qKg = firstKgWeight(q);
+    const pKg = firstKgWeight(p);
+    if (qKg && pKg && Math.abs(qKg - pKg) > 0.1) return false;
+    return hasAny(p, ['concrete', 'cement', 'rapid set', 'quick set']);
+  }
+
+  if (/sliding\s+gate\s+track|gate\s+track/.test(q)) {
+    if (hasAny(p, ['wardrobe', 'internal door', 'plastic', 'shower', 'curtain'])) return false;
+    return hasAny(p, ['gate track', 'sliding gate track', 'bolt down']) || (p.includes('track') && p.includes('gate'));
+  }
+
+  if (/sliding\s+gate\s+(?:catcher|receiver|stop)|gate\s+(?:catcher|receiver|stop)/.test(q)) {
+    if (hasAny(p, ['carabiner', 's-biner', 'track', 'rail', 'wheel', 'hinge', 'hinges'])) return false;
+    if (/catcher|receiver/.test(q)) return hasAny(p, ['catch', 'catcher', 'receiver']);
+    if (/\bstop\b/.test(q)) return hasAny(p, ['stop', 'stopper']);
+    return hasAny(p, ['catch', 'catcher', 'receiver', 'stop']);
+  }
+
+  if (/sliding\s+gate\s+wheels?|gate\s+wheels?/.test(q)) {
+    if (hasAny(p, ['track', 'rail', 'guide', 'stop', 'latch'])) return false;
+    return hasAny(p, ['wheel', 'roller']);
+  }
+
+  if (/pool\s+gate|aluminium\s+.*gate|aluminum\s+.*gate/.test(q)) {
+    if (hasAny(p, ['post', 'fence panel', 'balustrade panel'])) return false;
+    return hasAny(p, ['gate']);
+  }
+
+  if (/galvanised\s+steel\s+post|galvanized\s+steel\s+post|steel\s+post/.test(q) && !/h[-\s]?post|100uc/.test(q)) {
+    if (hasAny(p, ['sleeper', 'retaining wall', 'timber', 'pine', 'star picket'])) return false;
+    return hasAny(p, ['steel post', 'galvanised post', 'galvanized post', 'fence post']);
+  }
+
+  if (/\b(?:h[-\s]?post|100uc|steel\s+h\s*post)\b/.test(q)) {
+    if (hasAny(p, ['timber', 'pine', 'sleeper', 'paling'])) return false;
+    return hasAny(p, ['h post', 'h-post', 'h section', 'h-section', '100uc', 'steel']);
+  }
+
+  if (/colorbond\s+fence\s+(?:sheet|panel)|fence\s+(?:sheet|panel).*colorbond/.test(q)) {
+    if (hasAny(p, ['post', 'rail', 'bracket', 'cap', 'screw'])) return false;
+    return hasAny(p, ['sheet', 'panel', 'infill']) && hasAny(p, ['colorbond', 'fence']);
+  }
+
+  if (/colorbond\s+fence\s+rail|fence\s+rail.*colorbond/.test(q)) {
+    if (hasAny(p, ['post', 'sheet', 'panel', 'bracket', 'cap'])) return false;
+    return hasAny(p, ['rail']) && hasAny(p, ['colorbond', 'fence']);
+  }
+
+  if (/corrugated\s+metal\s+roof|metal\s+roofing|colorbond|zincalume/.test(q)) {
+    if (hasAny(p, ['polycarbonate', 'plastic', 'pvc', 'foam', 'infill', 'closure strip'])) return false;
+    return hasAny(p, ['metal', 'steel', 'colorbond', 'zincalume', 'corrugated']) && !hasAny(p, ['infill']);
+  }
+
+  if (/downpipe/.test(q)) {
+    if (hasAny(p, ['adaptor', 'adapter', 'bend', 'elbow', 'clip', 'bracket', 'outlet', 'cover', 'guard'])) return false;
+    return hasAny(p, ['downpipe']) && hasAny(p, ['length', 'pipe']);
+  }
+
+  if (/gutter\s+(?:quad|profile|length)|quad\s+gutter/.test(q)) {
+    if (hasAny(p, ['stop end', 'strap', 'bracket', 'clip', 'outlet', 'corner'])) return false;
+    return hasAny(p, ['gutter']) && hasAny(p, ['quad', 'length', 'profile']);
+  }
+
+  if (/vapou?r\s+barrier|building\s+wrap|sarking|wall\s+wrap|roof\s+sarking|builders?\s+plastic/.test(q)) {
+    if (hasAny(p, ['tape', 'jointing', 'flashing tape', 'foil tape'])) return false;
+    return hasAny(p, ['wrap', 'sarking', 'vapour barrier', 'vapor barrier', 'membrane', 'film', 'sheeting']);
+  }
+
+  if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding|fibre\s+cement\s+cladding|fiber\s+cement\s+cladding/.test(q)) {
+    if (hasAny(p, ['screw', 'nail', 'drill bit', 'bit', 'tape', 'jointing', 'sealant', 'adhesive', 'compound', 'patch', 'repair panel', 'pinboard'])) return false;
+    return hasAny(p, ['sheet', 'board', 'panel', 'plasterboard', 'villaboard', 'fibre cement', 'fiber cement', 'cladding']);
+  }
+
+  if (/floor\s+tiles?|wall\s+tiles?|ceramic\s+tiles?|porcelain\s+tiles?/.test(q) && !/roof/.test(q)) {
+    if (hasAny(p, ['grate', 'drain', 'insert', 'spacer', 'adhesive', 'trim'])) return false;
+    return hasAny(p, ['tile', 'tiles']);
+  }
+
+  if (/\bgrout\b/.test(q)) {
+    if (hasAny(p, ['cleaner', 'spray', 'brush', 'sealer', 'sealer remover', 'repair tube'])) return false;
+    const qKg = firstKgWeight(q);
+    if (qKg && /\b\d+(?:\.\d+)?\s*(?:g|grams?)\b/i.test(p) && !/kg/i.test(p)) return false;
+    return hasAny(p, ['grout']);
+  }
+
+  if (/toilet\s+suite|back\s+to\s+wall\s+toilet/.test(q)) {
+    if (hasAny(p, ['seat', 'hinge', 'button', 'cistern only', 'pan only'])) return false;
+    return hasAny(p, ['toilet suite', 'suite', 'back to wall toilet']);
+  }
+
+  if (/3[-\s]?phase|three[-\s]?phase|5[-\s]?pin/.test(q)) {
+    if (hasAny(p, ['trailer', '12v', '7 pin flat', 'automotive'])) return false;
+  }
+
+  if (/gland/.test(q)) {
+    if (hasAny(p, ['conduit length', 'conduit roll', 'rigid conduit', 'corrugated conduit']) && !p.includes('gland')) return false;
+    return hasAny(p, ['gland', 'cable gland', 'conduit gland']);
+  }
+
+  if (/coveralls?|disposable\s+coveralls?|painters?\s+coveralls?/.test(q)) {
+    if (hasAny(p, ['roller cover', 'paint roller', 'brush', 'drop sheet'])) return false;
+    return hasAny(p, ['coverall', 'coveralls', 'disposable suit', 'protective suit']);
+  }
+
+  if (/\b(?:pvc|pex)\b.*\bpipe\b|\bpipe\b.*\b(?:pvc|pex)\b|waste\s+pipe|dwv\s+pipe/.test(q)) {
+    if (hasAny(p, ['bend', 'elbow', 'reducer', 'adaptor', 'adapter', 'tee', 'junction', 'cap'])) return false;
+    return hasAny(p, ['pipe', 'length']);
+  }
+
+  if (/plumber'?s?\s+putty|plumbing\s+putty/.test(q)) {
+    if (hasAny(p, ['glazing', 'water putty', 'wood putty', 'hard setting', 'linseed'])) return false;
+    return hasAny(p, ['plumber', 'plumbers', 'plumbing putty', 'sanitary putty']);
+  }
+
+  if (/basin\s+mixer|mixer\s+tap/.test(q)) {
+    if (hasAny(p, ['cartridge', 'aerator', 'spout only', 'handle only'])) return false;
+    return hasAny(p, ['mixer', 'tap']);
+  }
+
+  if (/(?:p[-\s]?trap|s[-\s]?trap|waste\s+trap|sink\s+waste\s+trap)/.test(q)) {
+    if (hasAny(p, ['reducer', 'adaptor', 'adapter', 'bend', 'elbow', 'pipe length'])) return false;
+    return hasAny(p, ['p trap', 'p-trap', 's trap', 's-trap', 'waste trap', 'trap']);
+  }
+
+  if (/debris\s+netting|safety\s+debris|shade\s+cloth|safety\s+mesh/.test(q)) {
+    if (hasAny(p, ['patio blind', 'retractable', 'roller blind', 'awning'])) return false;
+    return hasAny(p, ['shade cloth', 'mesh', 'netting', 'barrier']);
+  }
+
+  if (/marking\s+paint|spot\s+marking\s+paint|spray\s+and\s+mark/.test(q)) {
+    if (hasAny(p, ['handle', 'wand', 'applicator', 'gun'])) return false;
+    return hasAny(p, ['paint', 'spray and mark', 'marking']);
+  }
+
+  if (/palings?|paling/.test(q)) {
+    if (hasAny(p, ['cladding', 'decking', 'screening', 'sleeper', 'acoustic', 'pinboard', 'panel board'])) return false;
+    return hasAny(p, ['paling', 'fence paling']);
+  }
+
+  if (/fence\s+rails?|treated\s+pine\s+.*rails?|timber\s+rails?/.test(q)) {
+    if (hasAny(p, ['bracket', 'brace', 'hanger', 'plate', 'post'])) return false;
+    return hasAny(p, ['rail', 'treated pine', 'timber']);
+  }
+
+  if (/brackets?|fence\s+panel\s+brackets?/.test(q)) {
+    if (hasAny(p, ['post', 'panel', 'gate']) && !hasAny(p, ['bracket', 'clip', 'fixing'])) return false;
+    return hasAny(p, ['bracket', 'clip', 'fixing']);
+  }
+
+  if (/ring\s+shank|coil\s+nails?|fencing\s+nails?/.test(q)) {
+    if (hasAny(p, ['brad', 'finishing', 'finish nail', 'pin nail', 'connector nail', 'timber connector'])) return false;
+    if (/coil/.test(q) && !/coil/i.test(p)) return false;
+    return hasAny(p, ['ring shank', 'coil nail', 'fencing nail', 'nail']);
+  }
+
+  if (/geotextile|filter\s+wrap|filter\s+fabric/.test(q)) {
+    if (hasAny(p, ['irrigation', 'spray', 'stake', 'sprinkler', 'dripper'])) return false;
+    return hasAny(p, ['geotextile', 'filter fabric', 'filter wrap', 'landscape fabric', 'weed mat', 'fabric']);
+  }
+
+  if (/sugar\s+soap.*liquid|liquid.*sugar\s+soap/.test(q)) {
+    if (hasAny(p, ['wipes', 'wipe'])) return false;
+    return hasAny(p, ['sugar soap', 'liquid', 'spray']);
+  }
+
+  if (/hydrochloric\s+acid|muriatic\s+acid/.test(q)) {
+    if (hasAny(p, ['dry acid', 'sodium bisulfate', 'sodium bisulphate', 'granular'])) return false;
+    return hasAny(p, ['hydrochloric', 'muriatic', 'acid']);
+  }
+
+  if (/mineral\s+oil\s+absorbent|oil\s+absorbent|spill\s+absorbent/.test(q)) {
+    if (hasAny(p, ['grate', 'drain', 'pvc', 'floor waste', 'plumbing'])) return false;
+    return hasAny(p, ['absorbent', 'spill', 'sorb', 'kitty litter', 'granules']);
+  }
+
+  if (/surface\s+retarder|concrete\s+retarder|rugasol/.test(q)) {
+    if (hasAny(p, ['sealer', 'sealant', 'cleaner'])) return false;
+    return hasAny(p, ['retarder', 'rugasol']);
+  }
+
+  if (/airless\s+sprayer\s+cleanup|sprayer\s+cleanup|pump\s+armor|pump\s+protector/.test(q)) {
+    if (hasAny(p, ['bug', 'tar', 'car', 'automotive', 'detailing'])) return false;
+    return hasAny(p, ['pump armor', 'pump protector', 'sprayer', 'cleaner', 'solvent']);
+  }
+
+  if (/spot\s+marking\s+paint|marking\s+paint|spray\s+and\s+mark/.test(q)) {
+    if (hasAny(p, ['marble', 'decorative', 'wall paint', 'craft'])) return false;
+    return hasAny(p, ['marking', 'spray and mark', 'line marking', 'spot']);
+  }
+
+  if (/circuit\s+breaker|\bmcb\b|\brcbo\b/.test(q)) {
+    if (hasAny(p, ['connector strip', 'terminal', 'busbar', 'enclosure'])) return false;
+    if (/3[-\s]?pole|three[-\s]?pole/.test(q) && !/3[-\s]?pole|three[-\s]?pole/i.test(p)) return false;
+    return hasAny(p, ['breaker', 'mcb', 'rcbo', 'rccb']);
+  }
+
+  const qCores = cableCoreCount(q);
+  const pCores = cableCoreCount(p);
+  if (qCores && pCores && qCores !== pCores) return false;
+
+  if (/green\s+waste|disposal|tip\s*fee|tipping|dumping/.test(q)) {
+    if (hasAny(p, ['fertiliser', 'fertilizer', 'mulch', 'compost', 'bag'])) return false;
+    // Service fees are usually not retail products. Let the pricing layer use
+    // an explicit estimate/manual flag rather than a bogus SKU.
+    return false;
+  }
+
+  if (/\b(?:diesel|petrol|fuel|unleaded|machine\s+fuel)\b/.test(q)) {
+    if (hasAny(p, ['cleaner', 'additive', 'treatment', 'stabiliser', 'conditioner', 'injector', 'jerry can', 'fuel can', 'container', 'mixing bottle', 'engine oil', '4-stroke oil', '2-stroke oil', 'bar oil'])) return false;
+  }
+
+  if (/screws?|anchors?|bolts?|nails?/.test(q)) {
+    const qLen = firstMmLength(q);
+    const pLen = firstMmLength(p);
+    if (qLen && pLen) {
+      if (pLen < qLen * 0.75) return false;
+      // For fasteners, being much too long is also wrong (e.g. 50mm paling
+      // nails must not become 100mm framing nails).
+      if (/nails?|screws?/.test(q) && pLen > qLen * 1.5) return false;
+    }
+  }
+
+  if (/tps|cable|twin\s+and\s+earth/.test(q)) {
+    const qGauge = cableGauge(q);
+    const pGauge = cableGauge(p);
+    if (qGauge && pGauge && Math.abs(qGauge - pGauge) > 0.05) return false;
+  }
+
+  if (/thread\s+(?:seal|tape)|gas\s+(?:teflon|ptfe)|yellow\s+gas\s+thread/.test(q)) {
+    if (hasAny(p, ['anti slip', 'anti-slip', 'grip tape', 'cloth tape', 'electrical tape'])) return false;
+    return hasAny(p, ['thread seal', 'thread tape', 'ptfe', 'teflon', 'gas thread']);
+  }
+
+  if (/electrical\s+tape|insulation\s+tape/.test(q)) {
+    if (hasAny(p, ['anti slip', 'anti-slip', 'grip tape', 'cloth tape'])) return false;
+    return hasAny(p, ['electrical tape', 'insulation tape', 'pvc tape']);
+  }
+
+  if (/2[-\s]?stroke\s+(?:engine\s+)?oil/.test(q)) {
+    if (hasAny(p, ['4-stroke', '4 stroke', 'four stroke'])) return false;
+    return hasAny(p, ['2-stroke', '2 stroke', 'two stroke', 'engine oil', 'oil']);
+  }
+
+  if (/2[-\s]?stroke\s+fuel|fuel\s+mix/.test(q)) {
+    if (hasAny(p, ['2 stroke oil', '2-stroke oil', 'engine oil', 'mixing bottle', 'bottle'])) return false;
+  }
+
+  if (/\bwire\s+connectors?\b|\bbp\s+connectors?\b|\belectrical\s+connectors?\b|\bwago\b/.test(q)) {
+    if (hasAny(p, ['irrigation', 'hose', 'poly', 'sprinkler', 'barbed', 'ev charging', 'charging cable', 'extension lead'])) return false;
+    return hasAny(p, ['wire connector', 'electrical connector', 'terminal', 'bp connector', 'wago', 'joiner']);
   }
 
   return true;
@@ -149,6 +471,37 @@ function tokenCoverageScore(query: string | undefined, productName: string | und
   const p = (productName || '').toLowerCase();
   const hits = tokens.filter((t) => p.includes(t)).length;
   return hits / tokens.length;
+}
+
+function parseFirstDim(s: string): string | null {
+  const m = s.toLowerCase().match(/\b(\d{2,4})\s*x\s*(\d{2,4})(?:\s*mm)?(?:\s*x\s*\d+(?:\.\d+)?\s*m{1,2})?\b|\b(\d{2,4})\s*×\s*(\d{2,4})(?:\s*mm)?(?:\s*×\s*\d+(?:\.\d+)?\s*m{1,2})?\b/);
+  if (!m) return null;
+  const a = m[1] || m[3];
+  const b = m[2] || m[4];
+  return `${parseInt(a, 10)}x${parseInt(b, 10)}`;
+}
+
+function firstMmLength(s: string): number | null {
+  const matches = [...s.matchAll(/\b(\d{1,4})\s*mm\b/gi)].map(m => parseInt(m[1], 10)).filter(n => n > 0);
+  return matches.length ? matches[matches.length - 1] : null;
+}
+
+function firstKgWeight(s: string): number | null {
+  const m = s.match(/\b(\d+(?:\.\d+)?)\s*kg\b/i);
+  return m ? parseFloat(m[1]) : null;
+}
+
+function cableGauge(s: string): number | null {
+  const m = s.match(/\b(\d+(?:\.\d+)?)\s*mm(?:²|2)?\b/i);
+  return m ? parseFloat(m[1]) : null;
+}
+
+function cableCoreCount(s: string): number | null {
+  const m = s.match(/\b(\d+)\s*[- ]?cores?\b|\b(\d+)c(?:\+e)?\b|\b(two|three|four)\s+cores?\b/i);
+  if (!m) return null;
+  if (m[1] || m[2]) return parseInt(m[1] || m[2], 10);
+  const word = (m[3] || '').toLowerCase();
+  return word === 'two' ? 2 : word === 'three' ? 3 : word === 'four' ? 4 : null;
 }
 
 /**
@@ -173,8 +526,6 @@ export function pickBestCandidate<T extends RankableCandidate>(
   options: PickOptions = {},
 ): T | null {
   if (!candidates || candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0];
-
   const query = material.searchTerm || material.name || '';
   const hadPricedCandidates = candidates.some((c) => typeof c.price === 'number' && c.price > 0);
   const priced = candidates.filter((c) =>

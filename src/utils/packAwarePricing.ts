@@ -37,20 +37,38 @@ export function applyPackAwarePricing(
 
   let packSize = product.packSize;
   let packUnit = product.packUnit as Material['unit'] | undefined;
-  if (!packSize || !packUnit) {
+
+  const requiredUnitNormalised = PACK_UNIT_EQUIVALENT[material.unit];
+
+  // Prefer pack info compatible with the material requirement. Scrapers can
+  // surface secondary coverage/yield values (e.g. concrete bag description says
+  // "yields 1.1L") even though the purchasable pack is "10kg" in the title.
+  // If the supplied pack unit is missing OR incompatible, parse the product
+  // title and use it when it matches the requirement unit.
+  const productNameLower = (product.productName || '').toLowerCase();
+  const suspiciousSuppliedEachPack =
+    packUnit === 'each' &&
+    packSize &&
+    packSize > 100 &&
+    !/\b(?:pack|box|pcs?|pieces?|jar|tub|carton|case)\b/i.test(product.productName || '');
+  const suppliedPackUnitNormalised = packUnit ? PACK_UNIT_EQUIVALENT[packUnit] : undefined;
+  if (suspiciousSuppliedEachPack || !packSize || !packUnit || (requiredUnitNormalised && suppliedPackUnitNormalised !== requiredUnitNormalised)) {
     const parsed = parsePackInfo(product.productName);
-    if (parsed) {
+    const parsedUnitNormalised = parsed ? PACK_UNIT_EQUIVALENT[parsed.packUnit as Material['unit']] : undefined;
+    if (parsed && (!requiredUnitNormalised || parsedUnitNormalised === requiredUnitNormalised || !packSize || !packUnit)) {
       packSize = parsed.packSize;
       packUnit = parsed.packUnit;
     }
   }
 
-  const requiredUnitNormalised = PACK_UNIT_EQUIVALENT[material.unit];
   const packUnitNormalised = packUnit ? PACK_UNIT_EQUIVALENT[packUnit] : undefined;
   const unitsCompatible =
     !!requiredUnitNormalised &&
     !!packUnitNormalised &&
-    requiredUnitNormalised === packUnitNormalised;
+    (requiredUnitNormalised === packUnitNormalised ||
+      (/pointing|compound|mortar|adhesive/i.test(`${material.name} ${productNameLower}`) &&
+        ((requiredUnitNormalised === 'L' && packUnitNormalised === 'kg') ||
+         (requiredUnitNormalised === 'kg' && packUnitNormalised === 'L'))));
 
   if (packSize && packSize > 1 && packUnit && unitsCompatible) {
     const packsNeeded = Math.max(1, Math.ceil(required / packSize));

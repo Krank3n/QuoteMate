@@ -23,8 +23,8 @@ const NUM = String.raw`(\d+(?:\.\d+)?)`;
 const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit'] }> = [
   // "Box of 500", "Pack of 100", "Bag of 60", "Tub of 250"
   { re: new RegExp(String.raw`\b(?:box|pack|packet|bag|tub|carton|case)\s+of\s+${NUM}\b`, 'i'), unit: 'each' },
-  // "500 pack", "100-pack", "100pk"
-  { re: new RegExp(String.raw`\b${NUM}\s*[- ]?(?:pack|pk)\b`, 'i'), unit: 'each' },
+  // "500 pack", "100-pack", "100pk", "2400 Box"
+  { re: new RegExp(String.raw`\b${NUM}\s*[- ]?(?:pack|pk|box|carton)\b`, 'i'), unit: 'each' },
   // "500 pieces", "500pc", "500 pcs"
   { re: new RegExp(String.raw`\b${NUM}\s*(?:pieces|piece|pcs|pc)\b`, 'i'), unit: 'each' },
   // Area: "30m²", "30 sqm", "30 sq m", "30m2 roll". Must precede the linear-m pattern.
@@ -32,14 +32,16 @@ const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit'] }> = [
   // Volume: "0.054m³", "0.5m3 bag", "1 cubic metre". Must precede the linear-m pattern.
   { re: new RegExp(String.raw`${NUM}\s*(?:m³|m3|cubic\s+(?:metres?|meters?))\b`, 'i'), unit: 'm³' },
   // Length: "5.4m length", "5.4m long", or just trailing "5.4m" / "2400mm" at end
-  { re: new RegExp(String.raw`\b${NUM}\s*m(?!l|m)(?:etres?|eters?)?\b(?:\s+(?:length|long|roll))?`, 'i'), unit: 'm' },
+  { re: new RegExp(String.raw`(?<![\d.])${NUM}\s*m(?![lm²2a-z])(?:\s+(?:length|long|roll))?`, 'i'), unit: 'm' },
   { re: new RegExp(String.raw`\b${NUM}\s*mm\s+(?:length|long)\b`, 'i'), unit: 'm' }, // mm length → convert below
+  // Weight: "20kg bag", "900g tub". Keep before liquids because concrete
+  // descriptions often include a secondary wet yield ("10kg ... yields 1.1L")
+  // while the purchasable pack size is the kg bag. Grams convert to kg below.
+  { re: new RegExp(String.raw`\b${NUM}\s*(?:kg|g|grams?)\b`, 'i'), unit: 'kg' },
   // Volume: "750ml", "4L", "20 litre". mL must precede L so "750ml" does
   // not get misread or ignored; convert below.
   { re: new RegExp(String.raw`\b${NUM}\s*(?:ml|millilitres?|milliliters?)\b`, 'i'), unit: 'L' },
   { re: new RegExp(String.raw`\b${NUM}\s*(?:l|lt|litres?|liters?)\b`, 'i'), unit: 'L' },
-  // Weight: "20kg bag", "1kg tub"
-  { re: new RegExp(String.raw`\b${NUM}\s*kg\b`, 'i'), unit: 'kg' },
 ];
 
 const MM_LENGTH_RE = new RegExp(String.raw`\b${NUM}\s*mm\s+(?:length|long)\b`, 'i');
@@ -52,6 +54,15 @@ export function parsePackInfo(productName: string | undefined | null): PackInfo 
   if (!productName) return null;
   const title = productName.trim();
   if (!title) return null;
+
+  // Roll/sheet area from dimensions, e.g. "2m x 20m roll" = 40m². Must run
+  // before plain length parsing so m² requirements don't buy one roll per m.
+  const areaDims = title.match(/\b(\d+(?:\.\d+)?)\s*(mm|m)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(mm|m)\b/i);
+  if (areaDims && /\b(?:roll|fabric|mat|geotextile|membrane|sheet|sheeting|film|wrap|sarking|barrier|insulation|plastic|polyethylene|poly)\b/i.test(title)) {
+    const a = parseFloat(areaDims[1]) / (areaDims[2].toLowerCase() === 'mm' ? 1000 : 1);
+    const b = parseFloat(areaDims[3]) / (areaDims[4].toLowerCase() === 'mm' ? 1000 : 1);
+    if (a > 0 && b > 0) return { packSize: Math.round(a * b * 100) / 100, packUnit: 'm²' };
+  }
 
   // Special-case mm lengths — convert to metres so packUnit stays in 'm'.
   const mmMatch = title.match(MM_LENGTH_RE);
@@ -66,6 +77,9 @@ export function parsePackInfo(productName: string | undefined | null): PackInfo 
     let size = parseFloat(match[1]);
     if (!isFinite(size) || size <= 0) continue;
     if (unit === 'L' && /(?:ml|millilitres?|milliliters?)/i.test(match[0])) {
+      size = size / 1000;
+    }
+    if (unit === 'kg' && /\d\s*(?:g|grams?)\b/i.test(match[0]) && !/kg/i.test(match[0])) {
       size = size / 1000;
     }
     // Skip nonsensical pack sizes (a "0.5 pack" or a "1 each" is just per-unit).
