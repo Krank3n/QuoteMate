@@ -26,6 +26,12 @@ export interface Material {
   // emits the per-unit need here and `quantity` is the rounded-up pack count
   // the tradie actually buys. totalPrice = quantity * price stays correct.
   requiredQty?: number;
+  // The unit requiredQty is stated in — the material's ORIGINAL unit before
+  // pack conversion mutates `unit` to a purchase unit. Without it, an
+  // each-requirement priced against a length SKU (7 posts, 2.4m each) is
+  // unrecoverable: packUnit says 'm' but requiredQty means 7 posts, and
+  // consumers that read requiredQty in packUnit under-buy 3×.
+  requiredUnit?: Material['unit'];
   // Set when a priced product is a multi-unit pack/length. packSize is in
   // packUnit (e.g. 500 each, 5.4 m, 20 m). Used to recompute quantity from
   // requiredQty whenever the price source changes.

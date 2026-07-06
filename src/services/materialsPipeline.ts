@@ -23,7 +23,7 @@ import { buildTradeContext } from '../utils/buildTradeContext';
 import { supplierPriceForGstMode, roundToTwoDecimals } from '../utils/quoteCalculator';
 import { applyPackAwarePricing } from '../utils/packAwarePricing';
 import { parsePackInfo } from '../utils/parsePackInfo';
-import { coverageSanePurchaseCount } from '../utils/purchaseCoverage';
+import { coverageSanePurchaseCount, coverageFloorPurchaseCount } from '../utils/purchaseCoverage';
 import { parseJobAreaM2, geometricSanePieceCount } from '../utils/geometricCoverage';
 import {
   analyzeJobDescription,
@@ -1074,7 +1074,11 @@ export async function fetchPricesForQuote(
           id: m.id,
           name: m.searchTerm || m.name,
           requirement: m.requiredQty ?? m.quantity,
-          requirementUnit: (m.packUnit ?? m.unit) as string,
+          // requiredQty is stated in the material's ORIGINAL unit, not the
+          // pack unit. Labelling "7 posts (each)" as packUnit 'm' made the
+          // reconcile LLM divide by the 2.4m length and return 3 posts —
+          // the systematic under-buy class in the replay audit.
+          requirementUnit: (m.requiredUnit ?? m.packUnit ?? m.unit) as string,
           candidates: cands.slice(0, 5).map((c) => {
             // Forward the product's pack/volume size so the reconcile LLM can
             // see that a $151 product is a 500-screw tub rather than guessing
@@ -1186,16 +1190,33 @@ export async function fetchPricesForQuote(
             // (e.g. 19 tubs of decking screws when 1 covers a 10 m² deck). Uses
             // the candidate's real pack size when known, else a conservative
             // bulk assumption for high-priced fastener/liquid rows only.
+            const candidateParsedPack = parsePackInfo(chosen?.productName);
             const candidatePackSize =
               (chosen as { packSize?: number } | undefined)?.packSize ??
-              parsePackInfo(chosen?.productName)?.packSize;
+              candidateParsedPack?.packSize;
+            const candidatePackUnit =
+              (chosen as { packUnit?: string } | undefined)?.packUnit ??
+              candidateParsedPack?.packUnit;
+            // Coverage FLOOR against reconcile under-buys: the LLM sometimes
+            // returns a purchaseCount its own reasoning contradicts (3 posts
+            // for a 7-post requirement). Raise to the minimum that covers the
+            // requirement; honours the LLM's explicit requirement correction.
+            const floor = coverageFloorPurchaseCount({
+              requirement: m.requiredQty,
+              correctedRequirement: r.correctedRequirement,
+              name: m.name,
+              requirementUnit: (m.requiredUnit ?? m.packUnit ?? m.unit) as string,
+              packSize: candidatePackSize ?? undefined,
+              packUnit: candidatePackUnit,
+            });
+            const flooredCount = floor !== null && floor > originalCount ? floor : originalCount;
             const sane = coverageSanePurchaseCount({
               requirement: m.requiredQty,
               name: m.name,
               perPurchasePrice: impliedUnitInc,
               packSize: candidatePackSize ?? undefined,
             });
-            const purchaseCount = sane !== null && sane < originalCount ? sane : originalCount;
+            const purchaseCount = sane !== null && sane < flooredCount ? sane : flooredCount;
             m.quantity = purchaseCount;
             if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
             // Establish a 2dp unit price and derive the line total from it so

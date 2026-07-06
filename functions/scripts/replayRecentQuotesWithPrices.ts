@@ -1,7 +1,8 @@
 /**
- * End-to-end-ish replay audit for recent quotes:
+ * End-to-end replay audit for recent quotes:
  *   Firestore recent quote -> Gemini Pro material regeneration -> Bunnings scraper
- *   live price fetch -> simple pack-aware priced replay -> Gemini Pro comparison
+ *   live price fetch -> pack-aware priced replay -> production reconcile pass
+ *   (shared prompt + deterministic coverage sweep) -> Gemini Pro comparison
  *
  * Read-only: does not write to Firestore.
  *
@@ -17,24 +18,18 @@ import * as path from 'path';
 import fetch from 'node-fetch';
 import { checkDocumentIntegrity } from '../src/shared/document/integrityCheck';
 import { pickBestCandidate, RankableCandidate } from '../../src/services/candidateRanker';
+import { parsePackInfo } from '../../src/utils/parsePackInfo';
+import { buildReconcilePrompt, ReconcileDecision } from '../src/reconcile.helpers';
+import { buildReconcileItems, applyReconcileDecisions, finalCoverageSweep, ReplayPricedRow } from './replayReconcile';
+import { normalizeGapKind, replayDeterministicIssues, capVerdict } from './replayOracle.helpers';
+
+// Same model + token budget as production's reconcile endpoint (callGeminiLiteJson).
+const RECONCILE_MODEL = 'gemini-3.1-flash-lite';
 
 interface Args { limit: number; project: string; model: string; out: string; uid?: string; diverse: boolean; perUser: number }
 interface DocLike { id: string; uid: string; number?: string; type?: string; stage?: string; createdAt?: any; job?: any; materials?: any[]; sections?: any[]; total?: number; materialsSubtotal?: number; laborHours?: number; laborTotal?: number; [k: string]: any }
 interface ReplayMaterial { name: string; searchTerm: string; quantity: number; unit: string; reasoning?: string }
 interface ScraperProduct { productName: string; description?: string; price: number; priceIncGst?: number; unit?: string; itemNumber?: string; productUrl?: string; confidence?: string; packSize?: number; packUnit?: string }
-
-const NUM = String.raw`(\d+(?:\.\d+)?)`;
-const PACK_PATTERNS: Array<{ re: RegExp; unit: string }> = [
-  { re: new RegExp(String.raw`\b(?:box|pack|packet|bag|tub|carton|case)\s+of\s+${NUM}\b`, 'i'), unit: 'each' },
-  { re: new RegExp(String.raw`\b${NUM}\s*[- ]?(?:pack|pk|box|carton)\b`, 'i'), unit: 'each' },
-  { re: new RegExp(String.raw`\b${NUM}\s*(?:pieces|piece|pcs|pc)\b`, 'i'), unit: 'each' },
-  { re: new RegExp(String.raw`${NUM}\s*(?:m²|m2|sqm|sq\s*m|square\s+(?:metres?|meters?))\b`, 'i'), unit: 'm²' },
-  { re: new RegExp(String.raw`${NUM}\s*(?:m³|m3|cubic\s+(?:metres?|meters?))\b`, 'i'), unit: 'm³' },
-  { re: new RegExp(String.raw`(?<![\d.])${NUM}\s*m(?![lm²2a-z])(?:\s+(?:length|long|roll))?`, 'i'), unit: 'm' },
-  { re: new RegExp(String.raw`\b${NUM}\s*(?:kg|g|grams?)\b`, 'i'), unit: 'kg' },
-  { re: new RegExp(String.raw`\b${NUM}\s*(?:ml|millilitres?|milliliters?)\b`, 'i'), unit: 'L' },
-  { re: new RegExp(String.raw`\b${NUM}\s*(?:l|lt|litres?|liters?)\b`, 'i'), unit: 'L' },
-];
 
 function parseArgs(): Args {
   const raw = process.argv.slice(2);
@@ -50,26 +45,6 @@ function parseArgs(): Args {
   };
 }
 function tsToMs(t: any): number { return typeof t?.toMillis === 'function' ? t.toMillis() : typeof t?._seconds === 'number' ? t._seconds * 1000 : typeof t === 'number' ? t : 0; }
-function parsePackInfo(title?: string | null): { packSize: number; packUnit: string } | null {
-  if (!title) return null;
-  const areaDims = title.match(/\b(\d+(?:\.\d+)?)\s*(mm|m)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(mm|m)\b/i);
-  if (areaDims && /\b(?:roll|fabric|mat|geotextile|membrane|sheet|sheeting|film|wrap|sarking|barrier|insulation|plastic|polyethylene|poly)\b/i.test(title)) {
-    const a = parseFloat(areaDims[1]) / (areaDims[2].toLowerCase() === 'mm' ? 1000 : 1);
-    const b = parseFloat(areaDims[3]) / (areaDims[4].toLowerCase() === 'mm' ? 1000 : 1);
-    if (a > 0 && b > 0) return { packSize: Math.round(a * b * 100) / 100, packUnit: 'm²' };
-  }
-  const mm = title.match(/\b(\d{4})\s*mm\s+(?:length|long)\b/i);
-  if (mm) return { packSize: parseInt(mm[1], 10) / 1000, packUnit: 'm' };
-  for (const p of PACK_PATTERNS) {
-    const m = title.match(p.re); if (!m) continue;
-    let size = parseFloat(m[1]); if (!(size > 0)) continue;
-    if (p.unit === 'L' && /(?:ml|millilitres?|milliliters?)/i.test(m[0])) size = size / 1000;
-    if (p.unit === 'kg' && /\d\s*(?:g|grams?)\b/i.test(m[0]) && !/kg/i.test(m[0])) size = size / 1000;
-    if (p.unit === 'each' && size < 2) continue;
-    return { packSize: size, packUnit: p.unit };
-  }
-  return null;
-}
 function normUnit(u: string | undefined): string | undefined { return ({ pack: 'each', box: 'each', each: 'each', m: 'm', 'm²': 'm²', m2: 'm²', 'm³': 'm³', m3: 'm³', kg: 'kg', L: 'L' } as any)[u || '']; }
 
 function parseLooseJson(text: string): any {
@@ -344,7 +319,7 @@ function priceReplay(materials: ReplayMaterial[], candidates: Map<string, Scrape
       purchaseCount = Math.max(1, Math.ceil(m.quantity / (unitPrice >= 80 ? 500 : 100)));
       purchaseUnit = 'pack';
     }
-    return { ...m, requiredQty: m.quantity, quantity: purchaseCount, unit: purchaseUnit, price: unitPrice, totalPrice: Math.round(unitPrice * purchaseCount * 100) / 100, priceStatus: 'priced', chosen: { name: chosen.productName, price: unitPrice, confidence: chosen.confidence, itemNumber: chosen.itemNumber, pack }, candidates: ranked.slice(0, 3).map(p => ({ name: p.productName, price: p.priceIncGst || p.price, confidence: p.confidence })) };
+    return { ...m, requiredQty: m.quantity, requiredUnit: m.unit, quantity: purchaseCount, unit: purchaseUnit, price: unitPrice, totalPrice: Math.round(unitPrice * purchaseCount * 100) / 100, priceStatus: 'priced', chosen: { name: chosen.productName, price: unitPrice, confidence: chosen.confidence, itemNumber: chosen.itemNumber, pack }, candidates: ranked.slice(0, 3).map(p => ({ name: p.productName, price: p.priceIncGst || p.price, confidence: p.confidence })) };
   });
 }
 
@@ -354,7 +329,9 @@ function comparePrompt(stored: any, replay: any): string {
 Important scope: the replay JSON is intentionally a PARTIAL replay containing regenerated materials, live/estimated material prices, material subtotal, and estimatedHours. It is NOT expected to include full QuoteMate document schema, customer metadata, nested pricing totals, sections, markup, GST, or final quote total. Do NOT flag missing quote schema/metadata/pricing object as a failure.
 
 Compare the stored quote's materials/labour to the freshly regenerated-and-live-priced material replay. Identify actionable gaps in material generation, supplier product matching, pack/unit conversion, fallback estimates, and labour realism. Return ONLY JSON:
-{ "verdict": "pass"|"review"|"fail", "summary": string, "gaps": [ { "kind": string, "severity": "low"|"medium"|"high", "item": string, "stored": string, "replay": string, "recommendation": string } ], "testAssertions": string[] }
+{ "verdict": "pass"|"review"|"fail", "summary": string, "gaps": [ { "kind": "product_match"|"quantity"|"unit_conversion"|"pack_conversion"|"pricing"|"fallback_estimate"|"missing_material"|"material_generation"|"labour"|"other", "severity": "low"|"medium"|"high", "item": string, "stored": string, "replay": string, "recommendation": string } ], "testAssertions": string[] }
+
+"kind" MUST be exactly one of the ten enum values above — do not invent variants. Pick the closest: wrong product category matched → product_match; wrong count → quantity; wrong unit maths → unit_conversion; wrong pack size maths → pack_conversion; wrong or implausible price → pricing; a bad general-knowledge fallback price → fallback_estimate; a material the job needs but the list lacks → missing_material; a poorly structured/decomposed materials list → material_generation; unrealistic hours → labour; anything else → other.
 
 Verdict guidance:
 - pass: replay materially improves or matches the stored quote; only low/medium notes.
@@ -391,13 +368,42 @@ async function main() {
       if (mats.length === 0) throw new Error('Regeneration returned no materials');
       process.stdout.write(`${mats.length} mats, fetch prices... `);
       const cand = await scraperBatch([...new Set(mats.map(m => m.searchTerm))]);
-      const priced = priceReplay(mats, cand);
-      const replay = { estimatedHours: gen.estimatedHours, materialsSubtotal: Math.round(priced.reduce((s, m) => s + (m.totalPrice || 0), 0) * 100) / 100, materials: priced };
+      const priced = priceReplay(mats, cand) as ReplayPricedRow[];
+
+      // ── Production reconcile pass (same prompt/model as the deployed
+      // endpoint) + deterministic coverage sweep. Best-effort like production:
+      // an LLM failure leaves rows as the per-row pack-aware pricing set them,
+      // but is recorded so runs that skipped reconcile are visible.
+      let reconciled = priced;
+      const reconcileMeta: any = { attempted: 0, applied: 0, estimated: 0, rejected: 0 };
+      const { items: reconcileItems, candidatesById } = buildReconcileItems(priced, cand);
+      reconcileMeta.attempted = reconcileItems.length;
+      if (reconcileItems.length > 0) {
+        process.stdout.write(`reconcile ${reconcileItems.length}... `);
+        try {
+          const parsed = await geminiJson(geminiKey, RECONCILE_MODEL, buildReconcilePrompt(reconcileItems, d.job?.name, d.job?.description), 8000);
+          const decisions: ReconcileDecision[] = Array.isArray(parsed?.results) ? parsed.results : [];
+          reconciled = applyReconcileDecisions(priced, decisions, candidatesById);
+          for (const dec of decisions) {
+            if (dec.decision === 'apply') reconcileMeta.applied++;
+            else if (dec.decision === 'estimate') reconcileMeta.estimated++;
+            else if (dec.decision === 'reject') reconcileMeta.rejected++;
+          }
+        } catch (err: any) {
+          reconcileMeta.error = String(err?.message || err);
+        }
+      }
+      finalCoverageSweep(reconciled, d.job?.description);
+
+      const replay = { estimatedHours: gen.estimatedHours, reconcile: reconcileMeta, materialsSubtotal: Math.round(reconciled.reduce((s, m) => s + (m.totalPrice || 0), 0) * 100) / 100, materials: reconciled };
       process.stdout.write('compare... ');
       const stored = { id: d.id, number: d.number, stage: d.stage, job: { name: d.job?.name, description: d.job?.description, template: d.job?.template, estimatedHours: d.job?.estimatedHours }, pricing: { total: d.total, materialsSubtotal: d.materialsSubtotal, laborHours: d.laborHours, laborTotal: d.laborTotal }, sections: (d.sections || []).map((s: any) => ({ name: s.name, hours: s.laborHoursTotal || s.laborHours, total: s.laborTotal })), materials: (d.materials || []).map((m: any) => ({ name: m.name, quantity: m.quantity, unit: m.unit, price: m.price, totalPrice: m.totalPrice, requiredQty: m.requiredQty, packSize: m.packSize, packUnit: m.packUnit, pricingSource: m.pricingSource, priceConfidence: m.priceConfidence })) };
       const oracle = await geminiJsonWithFallback(geminiKey, args.model, comparePrompt(stored, replay));
-      console.log(oracle.verdict);
-      results.push({ id: d.id, number: d.number, stage: d.stage, deterministicIssues: checkDocumentIntegrity(d as any), oracle, storedRedacted: { ...stored, job: { ...stored.job, description: undefined, descriptionLength: d.job?.description?.length || 0 } }, replay: { ...replay, materials: replay.materials.map((m: any) => ({ ...m, candidates: undefined })) } });
+      if (Array.isArray(oracle?.gaps)) for (const g of oracle.gaps) g.kind = normalizeGapKind(g.kind);
+      const replayIssues = replayDeterministicIssues(replay);
+      capVerdict(oracle, replayIssues);
+      console.log(oracle.verdict + (oracle.rawVerdict ? ` (capped from ${oracle.rawVerdict})` : ''));
+      results.push({ id: d.id, number: d.number, stage: d.stage, deterministicIssues: checkDocumentIntegrity(d as any), replayDeterministicIssues: replayIssues, oracle, storedRedacted: { ...stored, job: { ...stored.job, description: undefined, descriptionLength: d.job?.description?.length || 0 } }, replay: { ...replay, materials: replay.materials.map((m: any) => ({ ...m, candidates: undefined })) } });
     } catch (err: any) {
       console.log(`ERROR ${err.message}`);
       results.push({ id: d.id, number: d.number, error: err.message });

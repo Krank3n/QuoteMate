@@ -92,3 +92,68 @@ export function coverageSanePurchaseCount(input: CoverageInput): number | null {
   }
   return null;
 }
+
+export interface CoverageFloorInput {
+  /** The tradie's underlying requirement (requiredQty), in requirementUnit. */
+  requirement: number;
+  /** The reconcile LLM's explicit corrected requirement, when it deliberately
+   *  corrected an inflated round-1 quantity. Takes precedence. */
+  correctedRequirement?: number;
+  /** Material name — used to exclude bulk fasteners/liquids (where "each"
+   *  never means "one purchase") and to recognise discrete piece-goods. */
+  name: string;
+  /** Unit the requirement is stated in ('each', 'kg', 'L', 'm', 'm²', 'm³'). */
+  requirementUnit?: string;
+  /** Chosen candidate's pack size, in packUnit. */
+  packSize?: number;
+  packUnit?: string;
+}
+
+// Discrete structural/piece goods sold one per purchase: a requirement of
+// "7 each" posts can never be covered by fewer than 7 purchases. Excludes
+// spliceable linear goods (gutter, pipe, conduit) where fewer longer lengths
+// legitimately cover an each-requirement. `(?![-–])` keeps "Post-Mix
+// Concrete" from reading as a post.
+const PIECE_GOOD_RE = /\b(?:posts?(?![-–])|palings?|pickets?|sleepers?|boards?|rails?|plinths?|studs?|joists?|bearers?|rafters?|battens?|lintels?|beams?|panels?|sheets?|bags?)\b/i;
+
+const FLOOR_UNIT_EQUIVALENT: Record<string, string> = {
+  each: 'each', pack: 'each', box: 'each',
+  m: 'm', 'm²': 'm²', m2: 'm²', 'm³': 'm³', m3: 'm³',
+  kg: 'kg', l: 'L', L: 'L',
+};
+
+/**
+ * Mirror image of coverageSanePurchaseCount: a floor against reconcile
+ * UNDER-buys (LLM returns a purchaseCount that cannot cover the requirement,
+ * e.g. 3 posts for a 7-post requirement). Returns the minimum purchase count
+ * that covers the requirement, or null to signal "can't be computed safely".
+ * Callers should only ever raise: `count = Math.max(count, floor)`.
+ *
+ * Deliberately conservative: bulk fasteners/liquids are excluded (their
+ * "each" requirement is divisible into unknown pack sizes), and without a
+ * unit-compatible pack size only recognised discrete piece-goods get the
+ * one-per-purchase floor.
+ */
+export function coverageFloorPurchaseCount(input: CoverageFloorInput): number | null {
+  const requirement =
+    input.correctedRequirement && input.correctedRequirement > 0
+      ? input.correctedRequirement
+      : input.requirement;
+  if (!(requirement > 0)) return null;
+  if (BULK_FASTENER_RE.test(input.name) || LIQUID_RE.test(input.name)) return null;
+
+  const ru = input.requirementUnit ? FLOOR_UNIT_EQUIVALENT[input.requirementUnit] : undefined;
+  const pu = input.packUnit ? FLOOR_UNIT_EQUIVALENT[input.packUnit] : undefined;
+
+  // Known pack size in the requirement's own units — divide by it.
+  if (input.packSize && input.packSize > 0 && ru && pu && ru === pu) {
+    return Math.max(1, Math.ceil(requirement / input.packSize));
+  }
+
+  // Discrete piece-goods: one purchase covers exactly one required item.
+  if (ru === 'each' && PIECE_GOOD_RE.test(input.name)) {
+    return Math.max(1, Math.ceil(requirement));
+  }
+
+  return null;
+}

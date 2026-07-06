@@ -1,3 +1,4 @@
+import { describe, it, expect } from 'vitest';
 import { healSection } from './healInflatedSections';
 
 // Tracy's QU-177865 numbers — the production case that motivated this script.

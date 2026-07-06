@@ -33,6 +33,12 @@ export function applyPackAwarePricing(
   if (material.requiredQty === undefined) {
     material.requiredQty = material.quantity;
   }
+  // Record the requirement's own unit before pack conversion overwrites
+  // `unit` with a purchase unit ('each'/'pack') — reconcile and coverage
+  // guards need to know what requiredQty actually counts.
+  if (material.requiredUnit === undefined) {
+    material.requiredUnit = material.unit;
+  }
   const required = material.requiredQty;
 
   let packSize = product.packSize;

@@ -1339,6 +1339,11 @@ export interface ReconcileResult {
   chosenIndex?: number;
   /** Per-purchase price when decision='estimate' (no candidate matched). */
   estimatedUnitPrice?: number;
+  /** Set only when the LLM deliberately corrected an inflated round-1
+   *  requirement (REQUIREMENT SANITY). Same units as the stated requirement.
+   *  The coverage floor uses this instead of requiredQty so legitimate
+   *  corrections aren't undone. */
+  correctedRequirement?: number;
   purchaseCount?: number;
   purchaseUnit?: string;
   totalPrice?: number;

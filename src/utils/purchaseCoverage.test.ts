@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { coverageSanePurchaseCount } from './purchaseCoverage';
+import { coverageSanePurchaseCount, coverageFloorPurchaseCount } from './purchaseCoverage';
 
 describe('coverageSanePurchaseCount', () => {
   describe('the QU-178011 failures it exists to fix', () => {
@@ -106,5 +106,133 @@ describe('coverageSanePurchaseCount', () => {
         coverageSanePurchaseCount({ requirement: 6, name: 'Timber Oil', perPurchasePrice: 90 }),
       ).toBe(2);
     });
+  });
+});
+
+describe('coverageFloorPurchaseCount', () => {
+  describe('the QU-178290 under-buys it exists to fix', () => {
+    it('raises 3 posts back to the 7-post requirement (each piece-good, length SKU)', () => {
+      // Requirement "7 each" was mislabelled as metres; the reconcile LLM
+      // divided by the 2.4m length and returned 3. One purchase = one post.
+      expect(
+        coverageFloorPurchaseCount({
+          requirement: 7,
+          name: '100x75mm H4 Treated Hardwood Post 2.4m',
+          requirementUnit: 'each',
+          packSize: 2.4,
+          packUnit: 'm',
+        }),
+      ).toBe(7);
+    });
+
+    it('raises 132 palings back to the 197-paling requirement', () => {
+      expect(
+        coverageFloorPurchaseCount({
+          requirement: 197,
+          name: '1500x75x16mm CCA Treated Pine Paddle Pop Paling',
+          requirementUnit: 'each',
+          packSize: 1.5,
+          packUnit: 'm',
+        }),
+      ).toBe(197);
+    });
+
+    it('raises 3 concrete bags back to a 480kg requirement over 20kg bags', () => {
+      expect(
+        coverageFloorPurchaseCount({
+          requirement: 480,
+          name: 'Post-Mix Concrete 20kg Bag',
+          requirementUnit: 'kg',
+          packSize: 20,
+          packUnit: 'kg',
+        }),
+      ).toBe(24);
+    });
+  });
+
+  it('honours the LLM correctedRequirement instead of the inflated round-1 figure', () => {
+    // 223 boards was inflated; the LLM corrected to 22 — the floor must not
+    // re-inflate a legitimate correction.
+    expect(
+      coverageFloorPurchaseCount({
+        requirement: 223,
+        correctedRequirement: 22,
+        name: 'Merbau Decking Board 5.4m',
+        requirementUnit: 'each',
+      }),
+    ).toBe(22);
+  });
+
+  it('never touches bulk fasteners or liquids (each ≠ one purchase)', () => {
+    expect(
+      coverageFloorPurchaseCount({
+        requirement: 600,
+        name: 'Stainless Steel Decking Screws 10G x 50mm',
+        requirementUnit: 'each',
+      }),
+    ).toBeNull();
+    expect(
+      coverageFloorPurchaseCount({
+        requirement: 12,
+        name: 'Merbau Decking Oil',
+        requirementUnit: 'L',
+      }),
+    ).toBeNull();
+  });
+
+  it('does not read "Post-Mix Concrete" as a post piece-good', () => {
+    // Without a unit-compatible pack size, a concrete mix each-requirement
+    // gets no floor via the accidental \bpost\b match.
+    expect(
+      coverageFloorPurchaseCount({
+        requirement: 24,
+        name: 'Post-Mix Concrete',
+        requirementUnit: 'each',
+        packSize: 10,
+        packUnit: 'kg',
+      }),
+    ).toBeNull();
+  });
+
+  it('floors bag each-requirements one-per-purchase when named as bags', () => {
+    expect(
+      coverageFloorPurchaseCount({
+        requirement: 24,
+        name: 'Post-Mix Concrete 20kg Bag',
+        requirementUnit: 'each',
+        packSize: 10,
+        packUnit: 'kg',
+      }),
+    ).toBe(24);
+  });
+
+  it('returns null for spliceable linear goods where fewer longer lengths may cover', () => {
+    expect(
+      coverageFloorPurchaseCount({
+        requirement: 6,
+        name: 'Colorbond Quad Gutter 4m',
+        requirementUnit: 'each',
+        packSize: 4,
+        packUnit: 'm',
+      }),
+    ).toBeNull();
+  });
+
+  it('divides by a unit-compatible pack size (screw box case is excluded, timber m case works)', () => {
+    expect(
+      coverageFloorPurchaseCount({
+        requirement: 38.4,
+        name: '75x38mm H3 Treated Pine Fence Rail',
+        requirementUnit: 'm',
+        packSize: 4.8,
+        packUnit: 'm',
+      }),
+    ).toBe(8);
+  });
+
+  it('returns null with no requirement or a zero requirement', () => {
+    expect(
+      coverageFloorPurchaseCount({ requirement: 0, name: 'Treated Pine Post', requirementUnit: 'each' }),
+    ).toBeNull();
   });
 });
