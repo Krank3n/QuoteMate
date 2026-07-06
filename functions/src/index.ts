@@ -81,6 +81,14 @@ import {
   pickLogoObject,
 } from './accountReclaim.helpers';
 import {
+  RecoveredQuoteRecord,
+  RecoveredContactRecord,
+  buildRecoveredQuoteDoc,
+  buildRecoveredContactDoc,
+  shouldInjectRecoveredDocs,
+  INCIDENT_DATE,
+} from './accountReclaim.rebuild';
+import {
   buildXeroAuthHeaders,
   buildXeroLineItems,
   pushQuoteToXeroCore,
@@ -7362,6 +7370,94 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
     sendNewUserNotificationEmail(email, platform, authMethod, businessName, reclaimedAccount),
   ]);
 });
+
+/**
+ * Delayed sweep: inject rebuilt quotes + contacts for reclaimed accounts
+ * (July 2026 deletion incident). Parsed records live at
+ * reclaimData/{oldUid}.json in the default bucket. Runs ≥24h after a claim
+ * and only when no pre-incident quote history exists — the client's
+ * loadQuotes/loadContacts are cloud-wins-no-merge, so injecting earlier
+ * would make a returning device discard its richer local cache instead of
+ * re-uploading it.
+ */
+export const restoreRecoveredDocuments = functions.pubsub
+  .schedule('every 4 hours')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const bucket = admin.storage().bucket();
+    const now = Date.now();
+    const claims = await db.collection('accountReclaims').get();
+    let injected = 0;
+
+    for (const claimDoc of claims.docs) {
+      const data = claimDoc.data();
+      const uid = data.claimedByUid as string | undefined;
+      const oldUid = data.oldUid as string | undefined;
+      if (!uid || !oldUid) continue;
+
+      // Any quote created before the incident proves a device restored the
+      // real history — never inject on top of that.
+      const preIncident = await db.collection(`users/${uid}/quotes`)
+        .where('createdAt', '<', INCIDENT_DATE).limit(1).get();
+
+      const proceed = shouldInjectRecoveredDocs({
+        claimedAtMs: data.claimedAt?.toMillis?.() ?? null,
+        alreadyRestored: !!data.docsRestoredAt,
+        hasPreIncidentQuotes: !preIncident.empty,
+        nowMs: now,
+      });
+      if (!proceed) {
+        if (!preIncident.empty && !data.docsRestoredAt) {
+          await claimDoc.ref.set({ docsRestoredAt: admin.firestore.FieldValue.serverTimestamp(), docsRestored: 'skipped-device-restore' }, { merge: true });
+        }
+        continue;
+      }
+
+      const dataFile = bucket.file(`reclaimData/${oldUid}.json`);
+      const [exists] = await dataFile.exists();
+      if (!exists) {
+        await claimDoc.ref.set({ docsRestoredAt: admin.firestore.FieldValue.serverTimestamp(), docsRestored: 'no-recovered-data' }, { merge: true });
+        continue;
+      }
+      const [buf] = await dataFile.download();
+      const payload = JSON.parse(buf.toString()) as {
+        quotes?: RecoveredQuoteRecord[];
+        contacts?: RecoveredContactRecord[];
+      };
+      const email = claimDoc.id;
+
+      let quotesWritten = 0;
+      for (const [i, rec] of (payload.quotes ?? []).entries()) {
+        const doc = buildRecoveredQuoteDoc(rec, i, email);
+        if (!doc) continue;
+        await db.doc(`users/${uid}/quotes/${doc.id}`).set(doc, { merge: false });
+        quotesWritten += 1;
+      }
+
+      // Contacts: only when the account has none (same cloud-wins concern).
+      let contactsWritten = 0;
+      const existingContacts = await db.collection(`users/${uid}/contacts`).limit(1).get();
+      if (existingContacts.empty) {
+        const nowIso = new Date().toISOString();
+        for (const [i, rec] of (payload.contacts ?? []).entries()) {
+          const doc = buildRecoveredContactDoc(rec, i, nowIso);
+          if (!doc) continue;
+          await db.doc(`users/${uid}/contacts/${doc.id}`).set(doc, { merge: false });
+          contactsWritten += 1;
+        }
+      }
+
+      await claimDoc.ref.set({
+        docsRestoredAt: admin.firestore.FieldValue.serverTimestamp(),
+        docsRestored: { quotes: quotesWritten, contacts: contactsWritten },
+      }, { merge: true });
+      injected += 1;
+      console.log(`restoreRecoveredDocuments: ${email} -> ${quotesWritten} quotes, ${contactsWritten} contacts`);
+    }
+
+    if (injected > 0) console.log(`restoreRecoveredDocuments: injected for ${injected} accounts`);
+  });
 
 /**
  * Grant floor for incident-restored Pro (July 2026 deletion incident).
