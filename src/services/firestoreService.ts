@@ -395,6 +395,26 @@ class FirestoreService {
   }
 
   /**
+   * Cloud floor for the next-quote-number counter. Written by the July 2026
+   * incident-reclaim function so restored accounts continue numbering where
+   * they left off; absent for everyone else.
+   */
+  async loadQuoteCounterFloor(): Promise<number | null> {
+    const userId = this.getUserId();
+    if (!userId) {
+      return null;
+    }
+
+    try {
+      const snapshot = await getDoc(doc(db, 'users', userId, 'settings', 'counters'));
+      const n = snapshot.exists() ? snapshot.data()?.nextQuoteNumber : null;
+      return typeof n === 'number' && Number.isFinite(n) && n >= 1 ? Math.floor(n) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
    * Load subscription status from Firestore
    */
   async loadSubscriptionStatus(): Promise<SubscriptionStatus | null> {

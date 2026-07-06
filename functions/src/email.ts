@@ -2111,6 +2111,7 @@ export function sendNewUserNotificationEmail(
   platform: string,
   authMethod: string,
   businessName: string,
+  reclaimed = false,
 ): Promise<boolean> {
   const platformLabels: Record<string, string> = {
     ios: 'iOS (iPhone/iPad)',
@@ -2168,7 +2169,7 @@ export function sendNewUserNotificationEmail(
 
   return sendEmail({
     to: ADMIN_EMAIL,
-    subject: `New QuoteMate user: ${userEmail} (${platformDisplay})`,
+    subject: `${reclaimed ? 'Returning' : 'New'} QuoteMate user: ${userEmail} (${platformDisplay})`,
     htmlContent: content,
     category: 'transactional',
     tags: ['admin-notification', 'new-user'],

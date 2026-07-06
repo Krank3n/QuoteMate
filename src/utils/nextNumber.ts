@@ -41,3 +41,20 @@ export function reconcileNextNumber<T>(params: {
   }
   return Math.max(cached, derivedMax + 1);
 }
+
+/**
+ * Pick the next-quote-number from multiple counter sources: the device's
+ * cached counter, the in-memory value, and (for accounts restored after the
+ * July 2026 deletion incident) a cloud floor written by the reclaim
+ * function from the account's recovered sent-quote history — so numbering
+ * continues where it left off instead of restarting at 1 and colliding
+ * with numbers customers already hold. Highest valid candidate wins.
+ */
+export function resolveNextQuoteNumber(
+  ...candidates: Array<number | null | undefined>
+): number | null {
+  const valid = candidates
+    .filter((n): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 1)
+    .map(Math.floor);
+  return valid.length ? Math.max(...valid) : null;
+}

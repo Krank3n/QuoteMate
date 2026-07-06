@@ -14,6 +14,12 @@ export interface AccountReclaimRecord {
   /** Set once a new signup has claimed this record; reclaim never runs twice. */
   claimedByUid?: string;
   /**
+   * Next quote number the account should continue from (highest recovered
+   * sent-quote number + 1). Written to users/{uid}/settings/counters at
+   * claim time; the client takes the max of this floor and its local counter.
+   */
+  nextQuoteNumber?: number;
+  /**
    * Present for accounts that were paying subscribers when deleted. Their
    * app-store billing (Apple/Google) kept running independently of Firebase,
    * so on re-registration they get Pro restored immediately — receipt

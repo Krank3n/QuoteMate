@@ -7200,11 +7200,13 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
   // was wrongly deleted, copy its surviving Cloud Storage assets (logo,
   // quote photos) across to the new uid. One-shot per record; never blocks
   // the rest of signup.
+  let reclaimedAccount = false;
   try {
     const reclaimRef = admin.firestore().doc(`accountReclaims/${reclaimDocIdForEmail(email)}`);
     const reclaimSnap = await reclaimRef.get();
     const record = reclaimSnap.exists ? (reclaimSnap.data() as AccountReclaimRecord) : undefined;
     if (record && shouldReclaim(record, user.uid)) {
+      reclaimedAccount = true;
       const bucket = admin.storage().bucket();
       const [files] = await bucket.getFiles({ prefix: `users/${record.oldUid}/` });
       const plan = reclaimCopyPlan(record.oldUid!, user.uid, files.map(f => f.name));
@@ -7224,6 +7226,15 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
         await admin.firestore().doc(`users/${user.uid}/settings/business`).set({
           logoUri,
           syncedAt: new Date().toISOString(),
+        }, { merge: true });
+      }
+
+      // Continue quote numbering from the recovered history so new quotes
+      // don't restart at 1 and collide with numbers customers already hold.
+      if (typeof record.nextQuoteNumber === 'number' && record.nextQuoteNumber >= 1) {
+        await admin.firestore().doc(`users/${user.uid}/settings/counters`).set({
+          nextQuoteNumber: Math.floor(record.nextQuoteNumber),
+          restoredFromIncident: 'incident-2026-07',
         }, { merge: true });
       }
 
@@ -7343,9 +7354,12 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
     }
   }
 
+  // Reclaimed users already got a personal apology/outreach email — a
+  // "welcome newcomer" right after it reads tone-deaf, so skip it. The
+  // founder notification still goes, marked as a return.
   await Promise.all([
-    sendWelcomeEmail(email, businessName, user.uid),
-    sendNewUserNotificationEmail(email, platform, authMethod, businessName),
+    ...(reclaimedAccount ? [] : [sendWelcomeEmail(email, businessName, user.uid)]),
+    sendNewUserNotificationEmail(email, platform, authMethod, businessName, reclaimedAccount),
   ]);
 });
 

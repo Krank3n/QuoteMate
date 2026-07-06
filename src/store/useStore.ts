@@ -26,7 +26,7 @@ import { reviewQuoteMaterials, isFlaggedRow, QuoteReview } from '../utils/quoteR
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
-import { reconcileNextNumber } from '../utils/nextNumber';
+import { reconcileNextNumber, resolveNextQuoteNumber } from '../utils/nextNumber';
 import { firestoreService, ASSISTANT_LOGGING_ENABLED } from '../services/firestoreService';
 import { documentService } from '../services/documentService';
 // Static import — see note on the call sites below. Dynamic `import()` here
@@ -1328,9 +1328,15 @@ export const useStore = create<AppState>((set, get) => ({
   loadNextQuoteNumber: async () => {
     try {
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.NEXT_QUOTE_NUMBER);
-      if (stored) {
-        const nextQuoteNumber = parseInt(stored, 10);
-        set({ nextQuoteNumber });
+      const local = stored ? parseInt(stored, 10) : null;
+      // Cloud floor exists only for incident-restored accounts — keeps their
+      // numbering continuing from the recovered history instead of QU-1.
+      const cloudFloor = auth.currentUser
+        ? await firestoreService.loadQuoteCounterFloor()
+        : null;
+      const next = resolveNextQuoteNumber(local, cloudFloor, get().nextQuoteNumber);
+      if (next !== null) {
+        set({ nextQuoteNumber: next });
       }
     } catch (error) {
       // silently ignore
