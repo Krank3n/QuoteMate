@@ -33,6 +33,7 @@ import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { generateId } from '../../utils/generateId';
+import { savedItemsSelectable } from './supplierBookMode';
 import { withOrigin } from '../../utils/materialOrigin';
 
 import { useStore } from '../../store/useStore';
@@ -1074,7 +1075,9 @@ export function AddMaterialScreen() {
   const handleSelectSavedItemImpl = async (item: any) => {
     // Standalone "manage supplier book" mode (opened from Settings) has no
     // active quote — tapping an item should open it for editing instead.
-    if (supplierBookOnly) {
+    // Opened from a quote section (routeSection present), tapping ADDS the
+    // item to that section like the normal Saved tab.
+    if (!savedItemsSelectable({ supplierBookOnly, hasQuoteSection: !!routeSection })) {
       (navigation as any).push(editRouteName, { savedItemKey: item.key });
       return;
     }
@@ -1617,7 +1620,7 @@ export function AddMaterialScreen() {
       <SavedItemRow
         item={item}
         isExpanded={expandedSavedItems.has(item.key)}
-        selectable={!supplierBookOnly}
+        selectable={savedItemsSelectable({ supplierBookOnly, hasQuoteSection: !!routeSection })}
         editRouteName={editRouteName}
         onToggleExpand={handleToggleSavedExpand}
         onSelect={handleSelectSavedItem}
@@ -1625,7 +1628,7 @@ export function AddMaterialScreen() {
         onDelete={handleDeleteSavedItem}
       />
     ),
-    [expandedSavedItems, supplierBookOnly, editRouteName, handleToggleSavedExpand, handleSelectSavedItem, handleEditSavedItem, handleDeleteSavedItem],
+    [expandedSavedItems, supplierBookOnly, routeSection, editRouteName, handleToggleSavedExpand, handleSelectSavedItem, handleEditSavedItem, handleDeleteSavedItem],
   );
 
   // Group saved items by supplier (`store`) for the SectionList. Personal-rate

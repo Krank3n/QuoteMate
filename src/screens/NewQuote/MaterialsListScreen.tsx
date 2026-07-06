@@ -33,6 +33,7 @@ import { useNavigation, useIsFocused, useRoute } from '@react-navigation/native'
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import LottieView from 'lottie-react-native';
 import { generateId } from '../../utils/generateId';
+import { needsPriceFetch } from '../../utils/priceFetchGate';
 import { withOrigin } from '../../utils/materialOrigin';
 import { lightTap } from '../../utils/haptics';
 
@@ -1034,7 +1035,7 @@ export function MaterialsListScreen() {
     // Mate's chat-side apply path calls the same service and renders the same
     // events into its working card.
 
-    const materialsNeedingPrices = materials.filter(m => !(m.price > 0 && !m.manualPriceOverride));
+    const materialsNeedingPrices = materials.filter(needsPriceFetch);
     const estimatedSeconds = Math.max(Math.ceil(materialsNeedingPrices.length / 3) * 35, 35);
     setFetchedItemNames([]);
     setFetchPhase('idle');

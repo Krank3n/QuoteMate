@@ -18,6 +18,7 @@ import {
   SectionTemplate,
 } from '../types';
 import { generateId } from '../utils/generateId';
+import { needsPriceFetch } from '../utils/priceFetchGate';
 import { buildTradeContext } from '../utils/buildTradeContext';
 import { supplierPriceForGstMode, roundToTwoDecimals } from '../utils/quoteCalculator';
 import { applyPackAwarePricing } from '../utils/packAwarePricing';
@@ -515,10 +516,10 @@ export async function fetchPricesForQuote(
     if (shouldCancel?.()) throw new FetchCancelled();
   };
 
-  // Set of materials that need pricing (skip already-priced, non-overridden).
-  const materialsToFetch = updatedMaterials.filter(
-    (m) => !(m.price > 0 && !m.manualPriceOverride),
-  );
+  // Set of materials that need pricing. Priced rows are never re-fetched —
+  // locked or not — so saved personal rates and hand-typed prices survive a
+  // "Get Prices" run (rows wanting a re-price are zeroed beforehand).
+  const materialsToFetch = updatedMaterials.filter(needsPriceFetch);
 
   if (materialsToFetch.length === 0) {
     onEvent?.({ kind: 'complete', fetched: 0, failed: 0, skipped: updatedMaterials.length, cancelled: false });
@@ -580,7 +581,7 @@ export async function fetchPricesForQuote(
     for (let i = 0; i < updatedMaterials.length; i++) {
       checkCancel();
       const m = updatedMaterials[i];
-      if (m.price > 0 && !m.manualPriceOverride) continue;
+      if (!needsPriceFetch(m)) continue;
       const term = m.searchTerm || m.name;
       let hits: { price: number; productName?: string; productUrl?: string; imageUrl?: string; unit?: string }[] = [];
       try {
@@ -642,7 +643,7 @@ export async function fetchPricesForQuote(
   const forcedFallbackTerms = new Set<string>();
   for (const m of updatedMaterials) {
     checkCancel();
-    if (m.price > 0 && !m.manualPriceOverride) continue;
+    if (!needsPriceFetch(m)) continue;
     if (!shouldUseTradeFallbackInsteadOfRetail(m)) continue;
     if (applyVisibleFallbackEstimate(m, gstInclusive)) {
       const term = m.searchTerm || m.name;
@@ -923,7 +924,7 @@ export async function fetchPricesForQuote(
     if (useReeceApi && !reeceFirst && !reeceReauthNeeded) {
       const unpriced = new Set<string>();
       for (const m of updatedMaterials) {
-        if (m.price > 0 && !m.manualPriceOverride) continue;
+        if (!needsPriceFetch(m)) continue;
         unpriced.add(m.searchTerm || m.name);
       }
       if (unpriced.size > 0) {
@@ -937,7 +938,7 @@ export async function fetchPricesForQuote(
     }
 
     // ── Per-item individual fallback ──
-    const stillUnpriced = updatedMaterials.filter((m) => !(m.price > 0 && !m.manualPriceOverride));
+    const stillUnpriced = updatedMaterials.filter(needsPriceFetch);
     if (stillUnpriced.length > 0) {
       onEvent?.({
         kind: 'phase-start',
@@ -950,7 +951,7 @@ export async function fetchPricesForQuote(
     for (let i = 0; i < updatedMaterials.length; i++) {
       checkCancel();
       const material = updatedMaterials[i];
-      if (material.price > 0 && !material.manualPriceOverride) continue;
+      if (!needsPriceFetch(material)) continue;
       fetchIndex += 1;
       const searchTerm = material.searchTerm || material.name;
 
