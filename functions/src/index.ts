@@ -70,12 +70,15 @@ export { generatePresenterClip } from './generatePresenterClip';
 export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts';
 export { reportPriceFetchUsage } from './featureUsage';
 import { recordMaterialsRecommend } from './featureUsage';
+import { randomUUID } from 'crypto';
 import {
   AccountReclaimRecord,
   reclaimDocIdForEmail,
   shouldReclaim,
   reclaimCopyPlan,
   buildProRestorePatch,
+  buildProFloorPatch,
+  pickLogoObject,
 } from './accountReclaim.helpers';
 import {
   buildXeroAuthHeaders,
@@ -7207,6 +7210,23 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
       const plan = reclaimCopyPlan(record.oldUid!, user.uid, files.map(f => f.name));
       await Promise.all(plan.map(({ from, to }) => bucket.file(from).copy(to)));
 
+      // Re-point the business logo: the app displays whatever URL is in
+      // settings/business.logoUri (no path-convention fallback), so mint a
+      // download token for the copied file and write the pointer. Same
+      // pattern as scripts/setUserLogo.ts.
+      const logoPath = pickLogoObject(plan.map(p => p.to));
+      if (logoPath) {
+        const token = randomUUID();
+        await bucket.file(logoPath).setMetadata({
+          metadata: { firebaseStorageDownloadTokens: token },
+        });
+        const logoUri = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(logoPath)}?alt=media&token=${token}`;
+        await admin.firestore().doc(`users/${user.uid}/settings/business`).set({
+          logoUri,
+          syncedAt: new Date().toISOString(),
+        }, { merge: true });
+      }
+
       // Deleted payers get Pro back immediately — their store billing never
       // stopped, so access must not wait on device receipt re-validation.
       const proPatch = buildProRestorePatch(record, new Date());
@@ -7222,8 +7242,11 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
         claimedAt: admin.firestore.FieldValue.serverTimestamp(),
         copiedFiles: plan.length,
         restoredPro: !!proPatch,
+        // Absolute grant end, resolved at claim time — the floor trigger
+        // reads this to defend the grant against client clobbers.
+        ...(proPatch ? { incidentProUntil: proPatch.incidentProUntil } : {}),
       }, { merge: true });
-      console.log(`accountReclaim: restored ${plan.length} files, pro=${!!proPatch}, ${record.oldUid} -> ${user.uid} (${email})`);
+      console.log(`accountReclaim: restored ${plan.length} files, logo=${!!logoPath}, pro=${!!proPatch}, ${record.oldUid} -> ${user.uid} (${email})`);
     }
   } catch (error) {
     console.error('accountReclaim failed (signup continues):', error);
@@ -7325,6 +7348,34 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
     sendNewUserNotificationEmail(email, platform, authMethod, businessName),
   ]);
 });
+
+/**
+ * Grant floor for incident-restored Pro (July 2026 deletion incident).
+ * The client's saveSubscriptionStatus does a full setDoc, so a post-signup
+ * client write — or a receipt sync on a device with no store purchases —
+ * can clobber a freshly-restored grant with isPro:false. Whenever the
+ * subscription doc is written without isPro, re-assert any unexpired grant
+ * recorded on the user's claimed accountReclaims record. No-ops (and thus
+ * terminates) once the doc is compliant.
+ */
+export const enforceIncidentProFloor = functions.firestore
+  .document('users/{userId}/profile/subscription')
+  .onWrite(async (change, context) => {
+    const after = change.after.exists ? (change.after.data() as Record<string, unknown>) : null;
+    if (after && after.isPro === true) return; // compliant — also the loop terminator
+
+    const userId = context.params.userId as string;
+    const claims = await admin.firestore().collection('accountReclaims')
+      .where('claimedByUid', '==', userId).limit(1).get();
+    if (claims.empty) return;
+
+    const incidentProUntil = claims.docs[0].data()?.incidentProUntil as string | undefined;
+    const patch = buildProFloorPatch(after, incidentProUntil, new Date());
+    if (!patch) return;
+
+    await change.after.ref.set(patch, { merge: true });
+    console.log(`incidentProFloor: re-asserted Pro for ${userId} until ${incidentProUntil}`);
+  });
 
 /**
  * Unsubscribe endpoint - handles email unsubscribe links

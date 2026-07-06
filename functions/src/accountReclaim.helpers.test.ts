@@ -4,6 +4,9 @@ import {
   shouldReclaim,
   reclaimCopyPlan,
   buildProRestorePatch,
+  buildProFloorPatch,
+  grantEndDate,
+  pickLogoObject,
 } from './accountReclaim.helpers';
 
 describe('reclaimDocIdForEmail — email normalisation', () => {
@@ -126,5 +129,72 @@ describe('buildProRestorePatch — deleted-payer Pro restoration', () => {
     );
     expect(patch!.platform).toBe('unknown');
     expect(patch!.plan).toBeNull();
+  });
+
+  it('resolves a durationDays grant from the claim moment and stamps the absolute end', () => {
+    const patch = buildProRestorePatch(
+      { oldUid: 'old1', restorePro: { plan: 'goodwill', durationDays: 30 } },
+      now,
+    );
+    expect(patch!.isPro).toBe(true);
+    expect(patch!.incidentProUntil).toBe('2026-08-05T00:00:00.000Z');
+    expect((patch!.currentPeriodEnd as Date).toISOString()).toBe('2026-08-05T00:00:00.000Z');
+  });
+
+  it('proUntil wins over durationDays when both are present', () => {
+    expect(
+      grantEndDate({ proUntil: '2027-09-09T00:00:00Z', durationDays: 30 }, now)!.toISOString(),
+    ).toBe('2027-09-09T00:00:00.000Z');
+  });
+
+  it('grants nothing for zero/negative durations', () => {
+    expect(buildProRestorePatch({ oldUid: 'o', restorePro: { durationDays: 0 } }, now)).toBeNull();
+    expect(buildProRestorePatch({ oldUid: 'o', restorePro: { durationDays: -5 } }, now)).toBeNull();
+  });
+});
+
+describe('buildProFloorPatch — grant defence against client clobbers', () => {
+  const now = new Date('2026-07-06T00:00:00Z');
+  const until = '2026-10-06T00:00:00Z';
+
+  it('re-asserts Pro when a client write downgraded it', () => {
+    const patch = buildProFloorPatch({ isPro: false, plan: 'free' }, until, now);
+    expect(patch).toMatchObject({ isPro: true, incidentProUntil: until });
+  });
+
+  it('re-creates the grant when the doc was deleted', () => {
+    expect(buildProFloorPatch(null, until, now)).toMatchObject({ isPro: true });
+  });
+
+  it('no-ops when the doc is already Pro (loop terminator)', () => {
+    expect(buildProFloorPatch({ isPro: true }, until, now)).toBeNull();
+  });
+
+  it('lets a lapsed grant expire naturally', () => {
+    expect(buildProFloorPatch({ isPro: false }, '2026-07-05T00:00:00Z', now)).toBeNull();
+  });
+
+  it('no-ops without a grant', () => {
+    expect(buildProFloorPatch({ isPro: false }, undefined, now)).toBeNull();
+  });
+});
+
+describe('pickLogoObject — logo detection among reclaimed files', () => {
+  it('finds the logo among quote photos', () => {
+    expect(
+      pickLogoObject(['users/newU/quote-photos/1.jpg', 'users/newU/logo.jpg']),
+    ).toBe('users/newU/logo.jpg');
+  });
+
+  it('accepts png and uppercase extensions', () => {
+    expect(pickLogoObject(['users/newU/logo.PNG'])).toBe('users/newU/logo.PNG');
+  });
+
+  it('ignores logo-named files nested deeper', () => {
+    expect(pickLogoObject(['users/newU/quote-photos/logo.jpg'])).toBeNull();
+  });
+
+  it('returns null when there is no logo', () => {
+    expect(pickLogoObject(['users/newU/quote-photos/1.jpg'])).toBeNull();
   });
 });
