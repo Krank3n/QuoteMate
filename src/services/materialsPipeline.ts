@@ -29,7 +29,9 @@ import {
   analyzeJobDescription,
   convertLLMMaterialsToMaterials,
   reconcilePricedMaterials,
+  type ReconcileResult,
 } from './llmService';
+import { simplifySearchTerm } from '../utils/simplifySearchTerm';
 import { loadAllFavoritesForLLM, loadFavoritesFromLocal } from './materialFavorites';
 import { searchLocalSources } from './localMaterialSearch';
 import { loadGroups as loadSupplierGroups } from './supplierGroupService';
@@ -479,6 +481,145 @@ function shouldUseTradeFallbackInsteadOfRetail(material: Material): boolean {
   // mini-mix supplier. Never convert these to hundreds of retail 20kg bags.
   if ((/exposed\s+aggregate\s+concrete|ready[-\s]?mix\s+concrete|concrete\s+for\s+slab|slab\s+concrete|\b\d{2}\s*mpa\b.*concrete|concrete.*\b\d{2}\s*mpa\b/.test(name)) && (material.unit === 'm³' || qty >= 0.5)) return true;
   return false;
+}
+
+type ReconcileOutcome = 'applied' | 'estimated' | 'rejected' | 'skipped';
+
+/**
+ * Apply one reconcile decision to a material — shared by the first reconcile
+ * pass and the rejected-row rescue pass so both apply identical semantics
+ * (candidate enrichment, coverage floor against under-buys, over-buy clamp,
+ * 2dp unit price with derived line total).
+ */
+function applyReconcileResult(
+  m: Material,
+  r: ReconcileResult,
+  cands: ScraperProduct[],
+  gstInclusive: boolean,
+): ReconcileOutcome {
+  if (r.decision === 'reject') {
+    m.price = 0;
+    m.totalPrice = 0;
+    m.priceConfidence = 'low';
+    m.description = r.rejectReason || 'Product mismatch — verify before sending';
+    return 'rejected';
+  }
+  if (
+    r.decision === 'estimate' &&
+    typeof r.estimatedUnitPrice === 'number' &&
+    r.estimatedUnitPrice > 0 &&
+    typeof r.purchaseCount === 'number' &&
+    r.purchaseCount > 0
+  ) {
+    if (m.requiredQty === undefined) m.requiredQty = m.quantity;
+    // Deterministic coverage guard — no candidate matched, so no pack
+    // size is known; relies on the estimated unit price being bulk.
+    let estPurchaseCount = r.purchaseCount;
+    const estSane = coverageSanePurchaseCount({
+      requirement: m.requiredQty,
+      name: m.name,
+      perPurchasePrice: r.estimatedUnitPrice,
+    });
+    if (estSane !== null && estSane < estPurchaseCount) estPurchaseCount = estSane;
+    m.quantity = estPurchaseCount;
+    if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
+    // Unit price is the source of truth at 2dp; derive the line total
+    // from it so quantity × price === totalPrice always holds. (Stop
+    // trusting the LLM's r.totalPrice, which drifts from the unit price.)
+    const estimatedUnit = roundToTwoDecimals(supplierPriceForGstMode(r.estimatedUnitPrice, gstInclusive));
+    m.price = estimatedUnit;
+    m.totalPrice = roundToTwoDecimals(estimatedUnit * estPurchaseCount);
+    m.priceConfidence = 'low';
+    m.pricingSource = 'ai';
+    m.description = r.coverageNote || r.reasoning || 'Estimated — verify with supplier';
+    m.bunningsItemNumber = undefined;
+    m.productUrl = undefined;
+    m.imageUrl = undefined;
+    m.brand = undefined;
+    m.stockCheckedAt = undefined;
+    return 'estimated';
+  }
+  if (r.decision === 'apply' && typeof r.purchaseCount === 'number' && r.purchaseCount > 0) {
+    const idx = typeof r.chosenIndex === 'number' ? r.chosenIndex : 0;
+    const chosen = cands[idx];
+    if (chosen) {
+      if (chosen.itemNumber) {
+        if (m.pricingSource === 'api') {
+          m.reeceItemNumber = chosen.itemNumber;
+        } else {
+          m.bunningsItemNumber = chosen.itemNumber;
+        }
+      }
+      if (chosen.productUrl) m.productUrl = chosen.productUrl;
+      if (chosen.imageUrl) m.imageUrl = chosen.imageUrl;
+      if (chosen.description) m.description = chosen.description;
+      if (
+        chosen.brand &&
+        chosen.brand.toLowerCase() !== 'bunnings' &&
+        chosen.brand.toLowerCase() !== 'bunnings.com.au' &&
+        chosen.brand.toLowerCase() !== 'reece'
+      ) {
+        m.brand = chosen.brand;
+      }
+      if (chosen.stockCheckedAt) m.stockCheckedAt = chosen.stockCheckedAt;
+    }
+    if (m.requiredQty === undefined) m.requiredQty = m.quantity;
+    const originalCount = r.purchaseCount;
+    // Per-purchase price: prefer the chosen candidate's real shelf price,
+    // else the LLM's implied unit price (its total ÷ its count).
+    const candidatePrice = chosen && chosen.price > 0 ? chosen.price : 0;
+    const impliedUnitInc =
+      candidatePrice > 0
+        ? candidatePrice
+        : typeof r.totalPrice === 'number' && r.totalPrice > 0
+          ? r.totalPrice / originalCount
+          : 0;
+    // Deterministic coverage guard against bulk fastener/oil over-buys
+    // (e.g. 19 tubs of decking screws when 1 covers a 10 m² deck). Uses
+    // the candidate's real pack size when known, else a conservative
+    // bulk assumption for high-priced fastener/liquid rows only.
+    const candidateParsedPack = parsePackInfo(chosen?.productName);
+    const candidatePackSize =
+      (chosen as { packSize?: number } | undefined)?.packSize ??
+      candidateParsedPack?.packSize;
+    const candidatePackUnit =
+      (chosen as { packUnit?: string } | undefined)?.packUnit ??
+      candidateParsedPack?.packUnit;
+    // Coverage FLOOR against reconcile under-buys: the LLM sometimes
+    // returns a purchaseCount its own reasoning contradicts (3 posts
+    // for a 7-post requirement). Raise to the minimum that covers the
+    // requirement; honours the LLM's explicit requirement correction.
+    const floor = coverageFloorPurchaseCount({
+      requirement: m.requiredQty,
+      correctedRequirement: r.correctedRequirement,
+      name: m.name,
+      requirementUnit: (m.requiredUnit ?? m.packUnit ?? m.unit) as string,
+      packSize: candidatePackSize ?? undefined,
+      packUnit: candidatePackUnit,
+    });
+    const flooredCount = floor !== null && floor > originalCount ? floor : originalCount;
+    const sane = coverageSanePurchaseCount({
+      requirement: m.requiredQty,
+      name: m.name,
+      perPurchasePrice: impliedUnitInc,
+      packSize: candidatePackSize ?? undefined,
+    });
+    const purchaseCount = sane !== null && sane < flooredCount ? sane : flooredCount;
+    m.quantity = purchaseCount;
+    if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
+    // Establish a 2dp unit price and derive the line total from it so
+    // quantity × price === totalPrice always holds — this also kills the
+    // float drift that printed $182.22 next to "96 × $1.90".
+    if (impliedUnitInc > 0) {
+      const unitPrice = roundToTwoDecimals(supplierPriceForGstMode(impliedUnitInc, gstInclusive));
+      m.price = unitPrice;
+      m.totalPrice = roundToTwoDecimals(unitPrice * purchaseCount);
+    }
+    if (r.confidence) m.priceConfidence = r.confidence;
+    if (r.coverageNote) m.description = r.coverageNote;
+    return 'applied';
+  }
+  return 'skipped';
 }
 
 function applyVisibleFallbackEstimate(material: Material, gstInclusive: boolean): boolean {
@@ -1099,6 +1240,7 @@ export async function fetchPricesForQuote(
     if (reconcileItems.length > 0) {
       onEvent?.({ kind: 'reconcile-start' });
       onEvent?.({ kind: 'phase-start', phase: 'reconcile', status: 'Sorting pack sizes and quantities…' });
+      const rejectedRows: Material[] = [];
       try {
         const results = await reconcilePricedMaterials(reconcileItems, {
           jobName: quote.job?.name,
@@ -1108,132 +1250,101 @@ export async function fetchPricesForQuote(
         for (const m of updatedMaterials) {
           const r = byId.get(m.id);
           if (!r) continue;
-          if (r.decision === 'reject') {
-            m.price = 0;
-            m.totalPrice = 0;
-            m.priceConfidence = 'low';
-            m.description = r.rejectReason || 'Product mismatch — verify before sending';
-            continue;
-          }
-          if (
-            r.decision === 'estimate' &&
-            typeof r.estimatedUnitPrice === 'number' &&
-            r.estimatedUnitPrice > 0 &&
-            typeof r.purchaseCount === 'number' &&
-            r.purchaseCount > 0
-          ) {
-            if (m.requiredQty === undefined) m.requiredQty = m.quantity;
-            // Deterministic coverage guard — no candidate matched, so no pack
-            // size is known; relies on the estimated unit price being bulk.
-            let estPurchaseCount = r.purchaseCount;
-            const estSane = coverageSanePurchaseCount({
-              requirement: m.requiredQty,
-              name: m.name,
-              perPurchasePrice: r.estimatedUnitPrice,
-            });
-            if (estSane !== null && estSane < estPurchaseCount) estPurchaseCount = estSane;
-            m.quantity = estPurchaseCount;
-            if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
-            // Unit price is the source of truth at 2dp; derive the line total
-            // from it so quantity × price === totalPrice always holds. (Stop
-            // trusting the LLM's r.totalPrice, which drifts from the unit price.)
-            const estimatedUnit = roundToTwoDecimals(supplierPriceForGstMode(r.estimatedUnitPrice, gstInclusive));
-            m.price = estimatedUnit;
-            m.totalPrice = roundToTwoDecimals(estimatedUnit * estPurchaseCount);
-            m.priceConfidence = 'low';
-            m.pricingSource = 'ai';
-            m.description = r.coverageNote || r.reasoning || 'Estimated — verify with supplier';
-            m.bunningsItemNumber = undefined;
-            m.productUrl = undefined;
-            m.imageUrl = undefined;
-            m.brand = undefined;
-            m.stockCheckedAt = undefined;
-            continue;
-          }
-          if (r.decision === 'apply' && typeof r.purchaseCount === 'number' && r.purchaseCount > 0) {
-            const cands = candidatesByMaterialId.get(m.id) || [];
-            const idx = typeof r.chosenIndex === 'number' ? r.chosenIndex : 0;
-            const chosen = cands[idx];
-            if (chosen) {
-              if (chosen.itemNumber) {
-                if (m.pricingSource === 'api') {
-                  m.reeceItemNumber = chosen.itemNumber;
-                } else {
-                  m.bunningsItemNumber = chosen.itemNumber;
-                }
-              }
-              if (chosen.productUrl) m.productUrl = chosen.productUrl;
-              if (chosen.imageUrl) m.imageUrl = chosen.imageUrl;
-              if (chosen.description) m.description = chosen.description;
-              if (
-                chosen.brand &&
-                chosen.brand.toLowerCase() !== 'bunnings' &&
-                chosen.brand.toLowerCase() !== 'bunnings.com.au' &&
-                chosen.brand.toLowerCase() !== 'reece'
-              ) {
-                m.brand = chosen.brand;
-              }
-              if (chosen.stockCheckedAt) m.stockCheckedAt = chosen.stockCheckedAt;
-            }
-            if (m.requiredQty === undefined) m.requiredQty = m.quantity;
-            const originalCount = r.purchaseCount;
-            // Per-purchase price: prefer the chosen candidate's real shelf price,
-            // else the LLM's implied unit price (its total ÷ its count).
-            const candidatePrice = chosen && chosen.price > 0 ? chosen.price : 0;
-            const impliedUnitInc =
-              candidatePrice > 0
-                ? candidatePrice
-                : typeof r.totalPrice === 'number' && r.totalPrice > 0
-                  ? r.totalPrice / originalCount
-                  : 0;
-            // Deterministic coverage guard against bulk fastener/oil over-buys
-            // (e.g. 19 tubs of decking screws when 1 covers a 10 m² deck). Uses
-            // the candidate's real pack size when known, else a conservative
-            // bulk assumption for high-priced fastener/liquid rows only.
-            const candidateParsedPack = parsePackInfo(chosen?.productName);
-            const candidatePackSize =
-              (chosen as { packSize?: number } | undefined)?.packSize ??
-              candidateParsedPack?.packSize;
-            const candidatePackUnit =
-              (chosen as { packUnit?: string } | undefined)?.packUnit ??
-              candidateParsedPack?.packUnit;
-            // Coverage FLOOR against reconcile under-buys: the LLM sometimes
-            // returns a purchaseCount its own reasoning contradicts (3 posts
-            // for a 7-post requirement). Raise to the minimum that covers the
-            // requirement; honours the LLM's explicit requirement correction.
-            const floor = coverageFloorPurchaseCount({
-              requirement: m.requiredQty,
-              correctedRequirement: r.correctedRequirement,
-              name: m.name,
-              requirementUnit: (m.requiredUnit ?? m.packUnit ?? m.unit) as string,
-              packSize: candidatePackSize ?? undefined,
-              packUnit: candidatePackUnit,
-            });
-            const flooredCount = floor !== null && floor > originalCount ? floor : originalCount;
-            const sane = coverageSanePurchaseCount({
-              requirement: m.requiredQty,
-              name: m.name,
-              perPurchasePrice: impliedUnitInc,
-              packSize: candidatePackSize ?? undefined,
-            });
-            const purchaseCount = sane !== null && sane < flooredCount ? sane : flooredCount;
-            m.quantity = purchaseCount;
-            if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
-            // Establish a 2dp unit price and derive the line total from it so
-            // quantity × price === totalPrice always holds — this also kills the
-            // float drift that printed $182.22 next to "96 × $1.90".
-            if (impliedUnitInc > 0) {
-              const unitPrice = roundToTwoDecimals(supplierPriceForGstMode(impliedUnitInc, gstInclusive));
-              m.price = unitPrice;
-              m.totalPrice = roundToTwoDecimals(unitPrice * purchaseCount);
-            }
-            if (r.confidence) m.priceConfidence = r.confidence;
-            if (r.coverageNote) m.description = r.coverageNote;
-          }
+          const outcome = applyReconcileResult(m, r, candidatesByMaterialId.get(m.id) || [], gstInclusive);
+          if (outcome === 'rejected') rejectedRows.push(m);
         }
       } catch {
         // Reconciliation is best-effort — fall back to whatever the per-row
         // pack-aware regex worked out.
+      }
+
+      // ── Rejected-row rescue ──
+      // A reject means every candidate was the wrong category — usually
+      // because the search term was over-specified ("2400x100x100mm CCA
+      // Treated Hardwood Post" returns drill bits). Retry once with a
+      // category-level term, re-reconcile so the category gate still guards
+      // the new candidates, and fall back to a visible estimate rather than
+      // shipping a $0 row on the customer's quote.
+      if (rejectedRows.length > 0) {
+        try {
+          const rescueTerm = new Map<string, string>();
+          const rescueCands = new Map<string, ScraperProduct[]>();
+          for (const m of rejectedRows) {
+            checkCancel();
+            const simplified = simplifySearchTerm(m.searchTerm || m.name);
+            if (!simplified) continue;
+            try {
+              const cands = await findCandidatesForMaterial(simplified);
+              if (cands.length > 0) {
+                rescueTerm.set(m.id, simplified);
+                rescueCands.set(m.id, cands);
+              }
+            } catch {
+              // one search miss shouldn't kill the rescue for other rows
+            }
+          }
+          if (rescueCands.size > 0) {
+            const rescueItems = rejectedRows
+              .filter((m) => rescueCands.has(m.id))
+              .map((m) => ({
+                id: m.id,
+                name: rescueTerm.get(m.id) || m.name,
+                requirement: m.requiredQty ?? m.quantity,
+                requirementUnit: (m.requiredUnit ?? m.packUnit ?? m.unit) as string,
+                candidates: (rescueCands.get(m.id) || []).slice(0, 5).map((c) => {
+                  const parsed = parsePackInfo(c.productName);
+                  return {
+                    name: c.productName,
+                    price: c.price,
+                    url: c.productUrl,
+                    description: c.description,
+                    packSize: (c as { packSize?: number }).packSize ?? parsed?.packSize,
+                    packUnit: (c as { packUnit?: string }).packUnit ?? parsed?.packUnit,
+                  };
+                }),
+              }));
+            const rescueResults = await reconcilePricedMaterials(rescueItems, {
+              jobName: quote.job?.name,
+              jobDescription: quote.job?.description,
+            });
+            const rescueById = new Map(rescueResults.map((r) => [r.id, r]));
+            for (const m of rejectedRows) {
+              const r = rescueById.get(m.id);
+              if (!r) continue;
+              const outcome = applyReconcileResult(m, r, rescueCands.get(m.id) || [], gstInclusive);
+              if (outcome === 'applied' || outcome === 'estimated') {
+                // The simplified term found the product family — keep it so
+                // future re-pricing doesn't repeat the dead-end search.
+                m.searchTerm = rescueTerm.get(m.id) || m.searchTerm;
+              }
+            }
+          }
+        } catch {
+          // Rescue is best-effort; rows keep their reject state.
+        }
+
+        // Safety net for rows still unpriced after the rescue: a visible
+        // low-confidence estimate beats a $0 row — stored quotes show $0
+        // rows shipping to customers. Same order as the individual path.
+        for (const m of rejectedRows) {
+          checkCancel();
+          if (m.price > 0) continue;
+          try {
+            const aiResult = await searchMaterialPrice(m.searchTerm || m.name, hardwareStores);
+            if (aiResult.price) {
+              m.price = supplierPriceForGstMode(aiResult.price, gstInclusive);
+              m.manualPriceOverride = false;
+              m.pricingSource = 'ai';
+              m.priceConfidence = 'low';
+              m.totalPrice = roundToTwoDecimals(m.price * m.quantity);
+              m.description = 'Estimated price — verify with supplier before sending';
+              continue;
+            }
+          } catch {
+            // fall through to the deterministic table
+          }
+          applyVisibleFallbackEstimate(m, gstInclusive);
+        }
       }
     }
 

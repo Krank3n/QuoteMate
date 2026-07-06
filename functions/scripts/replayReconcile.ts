@@ -14,6 +14,7 @@
 import { coverageSanePurchaseCount, coverageFloorPurchaseCount } from '../../src/utils/purchaseCoverage';
 import { parseJobAreaM2, geometricSanePieceCount } from '../../src/utils/geometricCoverage';
 import { parsePackInfo } from '../../src/utils/parsePackInfo';
+import { simplifySearchTerm } from '../../src/utils/simplifySearchTerm';
 import { ReconcileItem, ReconcileItemCandidate, ReconcileDecision } from '../src/reconcile.helpers';
 
 export interface ReplayScraperCandidate {
@@ -197,6 +198,106 @@ export function applyReconcileDecisions(
     }
     return m;
   });
+}
+
+export interface RescueDeps {
+  /** Batch search by term — the replay's scraperBatch. */
+  fetchCandidates: (terms: string[]) => Promise<Map<string, ReplayScraperCandidate[]>>;
+  /** Run the reconcile LLM over rescue items and return its decisions. */
+  reconcile: (items: ReconcileItem[]) => Promise<ReconcileDecision[]>;
+  /** Deterministic last-resort unit price; null = leave the row at $0. */
+  fallbackUnitPrice?: (row: ReplayPricedRow) => number | null;
+}
+
+export interface RescueMeta {
+  rejected: number;
+  retried: number;
+  rescued: number;
+  estimatedFallback: number;
+  stillUnpriced: number;
+}
+
+/**
+ * Rejected-row rescue — mirrors production's materialsPipeline pass: rows the
+ * reconcile pass rejected get one retry with a category-level simplified
+ * search term (re-reconciled so the category gate still guards the new
+ * candidates), then a visible deterministic estimate rather than a $0 row.
+ */
+export async function rescueRejectedRows(
+  rows: ReplayPricedRow[],
+  deps: RescueDeps
+): Promise<{ rows: ReplayPricedRow[]; meta: RescueMeta }> {
+  const meta: RescueMeta = { rejected: 0, retried: 0, rescued: 0, estimatedFallback: 0, stillUnpriced: 0 };
+  const rejectedIdx = rows
+    .map((m, i) => ({ m, i }))
+    .filter(({ m }) => m.priceStatus === 'rejected');
+  meta.rejected = rejectedIdx.length;
+  let out = rows;
+
+  const termByIdx = new Map<number, string>();
+  for (const { m, i } of rejectedIdx) {
+    const simplified = simplifySearchTerm(m.searchTerm || m.name);
+    if (simplified) termByIdx.set(i, simplified);
+  }
+
+  if (termByIdx.size > 0) {
+    const cands = await deps.fetchCandidates([...new Set(termByIdx.values())]);
+    const items: ReconcileItem[] = [];
+    const candidatesById = new Map<string, ReconcileItemCandidate[]>();
+    for (const [i, term] of termByIdx) {
+      const m = rows[i];
+      const found = cands.get(term) || [];
+      if (found.length === 0) continue;
+      const id = `row-${i}`;
+      const mapped = found.slice(0, 5).map((c) => {
+        const parsed = parsePackInfo(c.productName);
+        return {
+          name: c.productName,
+          price: c.priceIncGst || c.price,
+          url: c.productUrl,
+          description: c.description,
+          packSize: c.packSize ?? parsed?.packSize,
+          packUnit: c.packUnit ?? parsed?.packUnit,
+        };
+      });
+      items.push({
+        id,
+        name: term,
+        requirement: m.requiredQty ?? m.quantity,
+        requirementUnit: m.requiredUnit ?? m.chosen?.pack?.packUnit ?? m.unit,
+        candidates: mapped,
+      });
+      candidatesById.set(id, mapped);
+    }
+    if (items.length > 0) {
+      meta.retried = items.length;
+      const decisions = await deps.reconcile(items);
+      out = applyReconcileDecisions(rows, decisions, candidatesById);
+      for (const [i, term] of termByIdx) {
+        const m = out[i];
+        if (m.priceStatus !== 'rejected' && m.price > 0 && m.reconcile) {
+          m.searchTerm = term;
+          meta.rescued++;
+        }
+      }
+    }
+  }
+
+  // Safety net: still-$0 rejected rows get a visible deterministic estimate.
+  for (const { i } of rejectedIdx) {
+    const m = out[i];
+    if (m.price > 0) continue;
+    const fallback = deps.fallbackUnitPrice?.(m);
+    if (fallback && fallback > 0) {
+      m.price = fallback;
+      m.totalPrice = round2(fallback * m.quantity);
+      m.priceStatus = 'estimated-fallback';
+      meta.estimatedFallback++;
+    } else {
+      meta.stillUnpriced++;
+    }
+  }
+  return { rows: out, meta };
 }
 
 /**

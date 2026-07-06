@@ -20,7 +20,7 @@ import { checkDocumentIntegrity } from '../src/shared/document/integrityCheck';
 import { pickBestCandidate, RankableCandidate } from '../../src/services/candidateRanker';
 import { parsePackInfo } from '../../src/utils/parsePackInfo';
 import { buildReconcilePrompt, ReconcileDecision } from '../src/reconcile.helpers';
-import { buildReconcileItems, applyReconcileDecisions, finalCoverageSweep, ReplayPricedRow } from './replayReconcile';
+import { buildReconcileItems, applyReconcileDecisions, finalCoverageSweep, rescueRejectedRows, ReplayPricedRow } from './replayReconcile';
 import { normalizeGapKind, replayDeterministicIssues, capVerdict } from './replayOracle.helpers';
 
 // Same model + token budget as production's reconcile endpoint (callGeminiLiteJson).
@@ -393,6 +393,24 @@ async function main() {
           reconcileMeta.error = String(err?.message || err);
         }
       }
+
+      // Rejected-row rescue — simplified-term retry + visible fallback,
+      // mirroring production. Best-effort like the reconcile pass itself.
+      try {
+        const rescue = await rescueRejectedRows(reconciled, {
+          fetchCandidates: scraperBatch,
+          reconcile: async items => {
+            const parsed = await geminiJson(geminiKey, RECONCILE_MODEL, buildReconcilePrompt(items, d.job?.name, d.job?.description), 8000);
+            return Array.isArray(parsed?.results) ? parsed.results : [];
+          },
+          fallbackUnitPrice: row => deterministicFallbackUnitPrice({ name: row.name, searchTerm: row.searchTerm, quantity: row.quantity, unit: row.unit }),
+        });
+        reconciled = rescue.rows;
+        reconcileMeta.rescue = rescue.meta;
+      } catch (err: any) {
+        reconcileMeta.rescueError = String(err?.message || err);
+      }
+
       finalCoverageSweep(reconciled, d.job?.description);
 
       const replay = { estimatedHours: gen.estimatedHours, reconcile: reconcileMeta, materialsSubtotal: Math.round(reconciled.reduce((s, m) => s + (m.totalPrice || 0), 0) * 100) / 100, materials: reconciled };

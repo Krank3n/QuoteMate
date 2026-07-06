@@ -3,6 +3,7 @@ import {
   buildReconcileItems,
   applyReconcileDecisions,
   finalCoverageSweep,
+  rescueRejectedRows,
   ReplayPricedRow,
   ReplayScraperCandidate,
 } from './replayReconcile';
@@ -196,5 +197,83 @@ describe('finalCoverageSweep', () => {
     finalCoverageSweep([m], '5m x 2m deck');
     expect(m.quantity).toBe(2);
     expect(m.totalPrice).toBe(85);
+  });
+});
+
+describe('rescueRejectedRows', () => {
+  const rejectedPost = (): ReplayPricedRow => ({
+    name: '2400x100x100mm CCA Treated Hardwood Post',
+    searchTerm: '2400x100x100mm CCA treated hardwood post',
+    quantity: 14,
+    unit: 'each',
+    requiredQty: 14,
+    requiredUnit: 'each',
+    price: 0,
+    totalPrice: 0,
+    priceStatus: 'rejected',
+    reconcile: { decision: 'reject', note: 'All candidates were drill bits' },
+  });
+
+  it('rescues a rejected row via simplified-term search + re-reconcile', async () => {
+    const fetched: string[] = [];
+    const { rows, meta } = await rescueRejectedRows([rejectedPost()], {
+      fetchCandidates: async (terms) => {
+        fetched.push(...terms);
+        return new Map([[
+          'treated hardwood post',
+          [{ productName: '100 x 100mm 2.4m Hardwood Post', price: 41.5 }],
+        ]]);
+      },
+      reconcile: async (items) => [
+        { id: items[0].id, decision: 'apply', chosenIndex: 0, purchaseCount: 14, purchaseUnit: 'each', confidence: 'medium' },
+      ],
+    });
+    expect(fetched).toEqual(['treated hardwood post']);
+    expect(rows[0].price).toBe(41.5);
+    expect(rows[0].quantity).toBe(14);
+    expect(rows[0].priceStatus).toBe('priced');
+    expect(rows[0].searchTerm).toBe('treated hardwood post');
+    expect(meta).toMatchObject({ rejected: 1, retried: 1, rescued: 1, stillUnpriced: 0 });
+  });
+
+  it('keeps the category gate: a re-rejected row falls to the deterministic estimate', async () => {
+    const { rows, meta } = await rescueRejectedRows([rejectedPost()], {
+      fetchCandidates: async () => new Map([[
+        'treated hardwood post',
+        [{ productName: 'Steel Star Picket 1800mm', price: 8.9 }],
+      ]]),
+      reconcile: async (items) => [
+        { id: items[0].id, decision: 'reject', rejectReason: 'Still no timber posts' },
+      ],
+      fallbackUnitPrice: () => 45,
+    });
+    expect(rows[0].priceStatus).toBe('estimated-fallback');
+    expect(rows[0].price).toBe(45);
+    expect(rows[0].totalPrice).toBe(630);
+    expect(meta).toMatchObject({ rescued: 0, estimatedFallback: 1, stillUnpriced: 0 });
+  });
+
+  it('leaves the row at $0 when there is no simplification and no fallback price', async () => {
+    const alreadySimple = rejectedPost();
+    alreadySimple.searchTerm = 'oil absorbent granules';
+    alreadySimple.name = 'oil absorbent granules';
+    const { rows, meta } = await rescueRejectedRows([alreadySimple], {
+      fetchCandidates: async () => new Map(),
+      reconcile: async () => [],
+      fallbackUnitPrice: () => null,
+    });
+    expect(rows[0].price).toBe(0);
+    expect(rows[0].priceStatus).toBe('rejected');
+    expect(meta).toMatchObject({ rejected: 1, retried: 0, rescued: 0, stillUnpriced: 1 });
+  });
+
+  it('does not touch rows that were not rejected', async () => {
+    const pricedRow = row();
+    const { rows, meta } = await rescueRejectedRows([pricedRow], {
+      fetchCandidates: async () => { throw new Error('should not be called'); },
+      reconcile: async () => { throw new Error('should not be called'); },
+    });
+    expect(rows[0]).toEqual(pricedRow);
+    expect(meta.rejected).toBe(0);
   });
 });
