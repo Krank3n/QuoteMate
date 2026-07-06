@@ -28,6 +28,7 @@ web-build/
 # Audit script output (contains sanitized customer quote data)
 audit-recent-quotes.json
 audit-*.json
+quote-replay-priced-audit*.json
 
 # OS
 .DS_Store
