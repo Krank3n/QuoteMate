@@ -26,7 +26,7 @@ import { normalizeGapKind, replayDeterministicIssues, capVerdict } from './repla
 // Same model + token budget as production's reconcile endpoint (callGeminiLiteJson).
 const RECONCILE_MODEL = 'gemini-3.1-flash-lite';
 
-interface Args { limit: number; project: string; model: string; out: string; uid?: string; diverse: boolean; perUser: number }
+interface Args { limit: number; project: string; model: string; out: string; uid?: string; diverse: boolean; perUser: number; numbers?: Set<string> }
 interface DocLike { id: string; uid: string; number?: string; type?: string; stage?: string; createdAt?: any; job?: any; materials?: any[]; sections?: any[]; total?: number; materialsSubtotal?: number; laborHours?: number; laborTotal?: number; [k: string]: any }
 interface ReplayMaterial { name: string; searchTerm: string; quantity: number; unit: string; reasoning?: string }
 interface ScraperProduct { productName: string; description?: string; price: number; priceIncGst?: number; unit?: string; itemNumber?: string; productUrl?: string; confidence?: string; packSize?: number; packUnit?: string }
@@ -42,6 +42,9 @@ function parseArgs(): Args {
     uid: get('uid'),
     diverse: (get('diverse') || 'false') === 'true',
     perUser: Math.max(1, Math.min(parseInt(get('per-user') || '2', 10), 10)),
+    // Retry filter: only replay these quote numbers (e.g. re-running quotes a
+    // previous run lost to transient network errors).
+    numbers: get('numbers') ? new Set(get('numbers')!.split(',').map(s => s.trim()).filter(Boolean)) : undefined,
   };
 }
 function tsToMs(t: any): number { return typeof t?.toMillis === 'function' ? t.toMillis() : typeof t?._seconds === 'number' ? t._seconds * 1000 : typeof t === 'number' ? t : 0; }
@@ -163,6 +166,7 @@ async function fetchRecent(args: Args): Promise<DocLike[]> {
       const d = { id: ds.id, uid: u.id, ...(ds.data() as any) } as DocLike;
       if (d.type && d.type !== 'quote') continue;
       if (!d.job?.description) continue;
+      if (args.numbers && !args.numbers.has(d.number || '')) continue;
       all.push(d);
     }
   }

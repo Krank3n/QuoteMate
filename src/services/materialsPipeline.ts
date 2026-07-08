@@ -32,6 +32,7 @@ import {
   type ReconcileResult,
 } from './llmService';
 import { simplifySearchTerm } from '../utils/simplifySearchTerm';
+import { stampAsPriced } from '../utils/asPriced';
 import { loadAllFavoritesForLLM, loadFavoritesFromLocal } from './materialFavorites';
 import { searchLocalSources } from './localMaterialSearch';
 import { loadGroups as loadSupplierGroups } from './supplierGroupService';
@@ -46,9 +47,10 @@ import {
   type ScraperProduct,
 } from './bunningsScraperClient';
 import { searchMaterialPrice } from './webSearchPricing';
-import { pickBestCandidate, type RankableCandidate } from './candidateRanker';
+import { pickBestCandidate, isSemanticallyCompatible, type RankableCandidate } from './candidateRanker';
 import { summarizePriceFetchOutcome } from './priceFetchTelemetry';
 import { withOrigin } from '../utils/materialOrigin';
+import { withKeepAwake } from '../utils/withKeepAwake';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../config/firebase';
 
@@ -101,7 +103,16 @@ export class PipelineCancelled extends Error {
  * Persistence (saveDraft) is left to the caller — this function is pure(-ish)
  * apart from the LLM + favourites reads.
  */
-export async function generateMaterialsForQuote(
+export function generateMaterialsForQuote(
+  args: GenerateMaterialsArgs,
+  callbacks: GenerateMaterialsCallbacks = {},
+): Promise<GenerateMaterialsResult> {
+  // Held awake for the whole run — a sleeping phone drops the network and
+  // kills the generation mid-flight (see withKeepAwake).
+  return withKeepAwake(() => generateMaterialsForQuoteInner(args, callbacks));
+}
+
+async function generateMaterialsForQuoteInner(
   args: GenerateMaterialsArgs,
   callbacks: GenerateMaterialsCallbacks = {},
 ): Promise<GenerateMaterialsResult> {
@@ -342,6 +353,10 @@ export type PricingEvent =
       name: string;
       success: boolean;
       progress?: { current: number; total: number };
+      /** Cloned snapshot of the row as just priced (price, qty, product
+       *  metadata). Present on success so callers can render the real price
+       *  the moment it lands instead of $0 until the pipeline finishes. */
+      material?: Material;
     }
   | {
       kind: 'batch-chunk';
@@ -638,7 +653,16 @@ function applyVisibleFallbackEstimate(material: Material, gstInclusive: boolean)
   return true;
 }
 
-export async function fetchPricesForQuote(
+export function fetchPricesForQuote(
+  args: FetchPricesArgs,
+  callbacks: FetchPricesCallbacks = {},
+): Promise<FetchPricesResult> {
+  // Same wake guard as generateMaterialsForQuote — price fetches routinely
+  // run past the screen-sleep timeout.
+  return withKeepAwake(() => fetchPricesForQuoteInner(args, callbacks));
+}
+
+async function fetchPricesForQuoteInner(
   args: FetchPricesArgs,
   callbacks: FetchPricesCallbacks = {},
 ): Promise<FetchPricesResult> {
@@ -761,6 +785,7 @@ export async function fetchPricesForQuote(
         name: m.name,
         success: true,
         progress: { current: fetchedCount, total: materialsToFetch.length },
+        material: { ...m },
       });
     }
   } catch {
@@ -797,6 +822,7 @@ export async function fetchPricesForQuote(
         name: m.name,
         success: true,
         progress: { current: fetchedCount, total: materialsToFetch.length },
+        material: { ...m },
       });
     }
   }
@@ -903,6 +929,7 @@ export async function fetchPricesForQuote(
         name: m.name,
         success: true,
         progress: { current: fetchedCount, total: materialsToFetch.length },
+        material: { ...m },
       });
     }
     return reauth;
@@ -1036,6 +1063,7 @@ export async function fetchPricesForQuote(
                 materialId: material.id,
                 name: material.name,
                 success: ok,
+                material: ok ? { ...material } : undefined,
               });
             }
 
@@ -1137,6 +1165,7 @@ export async function fetchPricesForQuote(
             name: material.name,
             success: true,
             progress: { current: fetchedCount, total: materialsToFetch.length },
+            material: { ...material },
           });
           continue;
         }
@@ -1162,6 +1191,7 @@ export async function fetchPricesForQuote(
               name: material.name,
               success: true,
               progress: { current: fetchedCount, total: materialsToFetch.length },
+              material: { ...material },
             });
             continue;
           }
@@ -1185,6 +1215,7 @@ export async function fetchPricesForQuote(
             name: material.name,
             success: true,
             progress: { current: fetchedCount, total: materialsToFetch.length },
+            material: { ...material },
           });
           continue;
         }
@@ -1202,15 +1233,30 @@ export async function fetchPricesForQuote(
     }
 
     // ── Reconciliation pass ──
+    // Gate the candidate lists handed to the reconcile LLM with the same
+    // semantic/spec gate round-1 ranking uses. Without this the LLM sees the
+    // raw scraper results and can "apply" a candidate the gate already
+    // refused — the replay audit caught it choosing 70x35 framing pine for a
+    // 140x45 rafter request. chosenIndex indexes this gated list, so the
+    // apply step below must read from the same map.
+    const gatedCandidatesByMaterialId = new Map<string, ScraperProduct[]>();
+    for (const m of updatedMaterials) {
+      const raw = candidatesByMaterialId.get(m.id);
+      if (!raw || raw.length === 0) continue;
+      const gated = raw.filter((c) =>
+        isSemanticallyCompatible(m.searchTerm || m.name, c.productName || ''),
+      );
+      if (gated.length > 0) gatedCandidatesByMaterialId.set(m.id, gated);
+    }
     const reconcileItems = updatedMaterials
       .filter((m) => {
         if (m.manualPriceOverride) return false;
         if (m.pricingSource === 'manual') return false;
-        const cands = candidatesByMaterialId.get(m.id);
+        const cands = gatedCandidatesByMaterialId.get(m.id);
         return !!cands && cands.length > 0;
       })
       .map((m) => {
-        const cands = candidatesByMaterialId.get(m.id) || [];
+        const cands = gatedCandidatesByMaterialId.get(m.id) || [];
         return {
           id: m.id,
           name: m.searchTerm || m.name,
@@ -1250,7 +1296,7 @@ export async function fetchPricesForQuote(
         for (const m of updatedMaterials) {
           const r = byId.get(m.id);
           if (!r) continue;
-          const outcome = applyReconcileResult(m, r, candidatesByMaterialId.get(m.id) || [], gstInclusive);
+          const outcome = applyReconcileResult(m, r, gatedCandidatesByMaterialId.get(m.id) || [], gstInclusive);
           if (outcome === 'rejected') rejectedRows.push(m);
         }
       } catch {
@@ -1275,9 +1321,15 @@ export async function fetchPricesForQuote(
             if (!simplified) continue;
             try {
               const cands = await findCandidatesForMaterial(simplified);
-              if (cands.length > 0) {
+              // Gate against the ORIGINAL material name — the simplified
+              // term dropped specs on purpose to broaden the search, but the
+              // specs still decide what's an acceptable substitute.
+              const gated = cands.filter((c) =>
+                isSemanticallyCompatible(m.name, c.productName || ''),
+              );
+              if (gated.length > 0) {
                 rescueTerm.set(m.id, simplified);
-                rescueCands.set(m.id, cands);
+                rescueCands.set(m.id, gated);
               }
             } catch {
               // one search miss shouldn't kill the rescue for other rows
@@ -1418,6 +1470,11 @@ export async function fetchPricesForQuote(
     cancelled,
   });
   httpsCallable(functions, 'reportPriceFetchUsage')(usageSummary).catch(() => {});
+
+  // Baseline for send-time edit telemetry: every pipeline-priced row records
+  // the state this run left it in, so edits the tradie makes before sending
+  // can be logged as confirmed pipeline misses.
+  stampAsPriced(updatedMaterials);
 
   return {
     updatedQuote: { ...quote, materials: updatedMaterials },

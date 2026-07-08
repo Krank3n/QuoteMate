@@ -38,6 +38,23 @@ describe('buildReconcileItems', () => {
     expect(candidatesById.get('row-0')).toHaveLength(2);
   });
 
+  it('drops spec-incompatible candidates before the LLM sees them', () => {
+    // The QU-178270 class: a 140x45 rafter request must never be offered a
+    // 70x35 candidate to "apply".
+    const cand = new Map([[
+      'rafters 140x45mm h2 treated pine',
+      [
+        { productName: '70 x 35mm Outdoor Framing H3 Treated Pine', price: 15.9 },
+        { productName: '140 x 45mm MGP10 H2 Framing Pine 4.8m', price: 42.8 },
+      ],
+    ]]);
+    const rows = [row({ name: 'Rafters 140x45mm H2 Treated Pine', searchTerm: 'rafters 140x45mm h2 treated pine' })];
+    const { items } = buildReconcileItems(rows, cand);
+    expect(items).toHaveLength(1);
+    expect(items[0].candidates).toHaveLength(1);
+    expect(items[0].candidates[0].name).toContain('140 x 45');
+  });
+
   it('skips trade-fallback rows and rows without candidates', () => {
     const cand = new Map([['decking screws 50mm', screwsCandidates]]);
     const rows = [

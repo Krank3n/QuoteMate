@@ -37,6 +37,13 @@ describe('buildReconcilePrompt', () => {
     expect(prompt).toContain('set correctedRequirement to your corrected requirement');
   });
 
+  it('includes the wrong-spec structural rule in the category gate', () => {
+    const prompt = buildReconcilePrompt(items);
+    expect(prompt).toContain('Same family, WRONG SPEC');
+    expect(prompt).toContain('140x45 rafter request must NOT apply a 70x35');
+    expect(prompt).toContain('4-core cable ≠ 2-core cable');
+  });
+
   it('adds the job context block only when job info is provided', () => {
     const bare = buildReconcilePrompt(items);
     expect(bare).not.toContain('JOB CONTEXT');

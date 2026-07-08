@@ -416,3 +416,77 @@ describe('pickBestCandidate', () => {
     });
   });
 });
+
+describe('spec-mismatch gate — the QU-178270/178227/178239 audit failures', () => {
+  it('refuses undersized framing pine for a 140x45 rafter request', () => {
+    // The garage-roof failure: "dangerously undersized structural timber".
+    expect(pickBestCandidate([
+      c(15.9, '70 x 35mm Outdoor Framing H3 Treated Pine'),
+      c(29.9, '100 x 100mm H4 Treated Pine Post'),
+    ], { searchTerm: 'Rafters 140x45mm H2 Treated Pine' })).toBeNull();
+  });
+
+  it('refuses 70x35 for a 90x45 MGP10 request but accepts the right section', () => {
+    const picked = pickBestCandidate([
+      c(12.5, '70 x 35mm Outdoor Framing H3 Treated Pine'),
+      c(19.8, '90 x 45mm MGP10 Untreated Framing Pine'),
+    ], { searchTerm: '90x45mm H3 Treated Pine MGP10' });
+    expect(picked!.productName).toContain('90 x 45');
+  });
+
+  it('treats a 45x90 SKU as the same cross-section as a 90x45 request', () => {
+    const picked = pickBestCandidate([
+      c(19.8, '45 x 90mm MGP10 Framing Pine'),
+    ], { searchTerm: '90x45 framing pine stud' });
+    expect(picked).not.toBeNull();
+  });
+
+  it('reads three-number dims as cross-section + length', () => {
+    // "2400x100x100mm" request ↔ "100 x 100mm 2.4m" SKU: same 100x100 section.
+    const picked = pickBestCandidate([
+      c(41.5, '100 x 100mm 2.4m H4 Treated Hardwood Post'),
+    ], { searchTerm: '2400x100x100mm CCA Treated Hardwood Post' });
+    expect(picked).not.toBeNull();
+    // "100x75x3000mm" request must NOT accept a 100x100 candidate.
+    expect(pickBestCandidate([
+      c(41.5, '100 x 100mm 3.6m H4 Treated Pine Sawn CCA'),
+    ], { searchTerm: '100x75x3000mm H4 Treated Hardwood Fence Post' })).toBeNull();
+  });
+
+  it('refuses 2-core cable for a 4-core requirement', () => {
+    expect(pickBestCandidate([
+      c(89, 'Deta 20m 2.5mm² 2-Core + Earth Power Cable'),
+    ], { searchTerm: '2.5mm² 4 Core + Earth TPS Cable' })).toBeNull();
+  });
+
+  it('refuses the cable itself when the request is for cable CLIPS', () => {
+    expect(pickBestCandidate([
+      c(45, 'Olex 20m 1.5mm² 2-Core + Earth Flat Power Cable'),
+    ], { searchTerm: '1.5mm² Flat Cable Clips' })).toBeNull();
+  });
+
+  it('refuses a powerboard for a circuit identification label request', () => {
+    expect(pickBestCandidate([
+      c(32, 'Click 4 Outlet Individually Switched Surge Powerboard'),
+    ], { searchTerm: 'Circuit Identification Label' })).toBeNull();
+  });
+
+  it('refuses a decking panel for a decking oil request', () => {
+    expect(pickBestCandidate([
+      c(120, 'Good Times Decking 1113 x 555mm Merbau Single Panel Modular Decking'),
+    ], { searchTerm: 'Merbau Decking Oil' })).toBeNull();
+  });
+
+  it('still accepts a real decking oil', () => {
+    const picked = pickBestCandidate([
+      c(89, 'Intergrain UltraDeck Timber Oil 4L Merbau'),
+    ], { searchTerm: 'Merbau Decking Oil' });
+    expect(picked).not.toBeNull();
+  });
+
+  it('refuses BBQ charcoal for a fuel allowance row', () => {
+    expect(pickBestCandidate([
+      c(19.98, 'Jumbuck 7kg Lumpwood Charcoal BBQ Fuel'),
+    ], { searchTerm: 'Fuel Allowance' })).toBeNull();
+  });
+});

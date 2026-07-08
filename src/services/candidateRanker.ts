@@ -101,8 +101,14 @@ function hasAny(haystack: string, words: string[]): boolean {
  * alone can't save that because the bad result may be first and priced. Return
  * false only for clear category contradictions; borderline rows still flow to
  * the LLM reconcile/estimate path.
+ *
+ * Exported so the reconcile/rescue item builders can gate the candidate lists
+ * handed to the LLM — replay audits showed the reconcile pass applying
+ * spec-mismatched candidates (70x35 framing for a 140x45 rafter request) that
+ * this gate had already refused in round-1 ranking, because the LLM was given
+ * the raw ungated scraper results.
  */
-function isSemanticallyCompatible(query: string, productName: string): boolean {
+export function isSemanticallyCompatible(query: string, productName: string): boolean {
   const q = query.toLowerCase();
   const p = productName.toLowerCase();
 
@@ -113,8 +119,29 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
     if (strictDimQuery && (!pDim || pDim !== qDim)) return false;
   }
 
+  // Accessory-vs-substance asymmetry: a request whose subject is an accessory
+  // (clips for a cable, caps for a post, labels for a switchboard) must match
+  // a product that IS that accessory — not the thing it attaches to. Real
+  // failures: "1.5mm² flat cable clips" → 20m of actual cable; "circuit
+  // identification label" → a powerboard.
+  const qAccessory = q.match(/\b(clips?|caps?|labels?|saddles?|grommets?|hangers?)\b/);
+  if (qAccessory) {
+    const stem = qAccessory[1].replace(/s$/, '');
+    if (!p.includes(stem)) return false;
+  }
+
+  // Finish products (oil/stain/sealer) must not match the surface they coat:
+  // "Merbau decking oil" → an actual Merbau decking panel. Early-return so a
+  // legitimate oil isn't then rejected by the decking-BOARDS family rule
+  // below (which treats 'oil' in a candidate as a wrong-category signal).
+  if (/\b(?:decking|deck|timber|merbau)\b.*\b(?:oil|stain|sealer)\b|\b(?:oil|stain|sealer)\b.*\b(?:decking|deck)\b/.test(q)) {
+    return hasAny(p, ['oil', 'stain', 'sealer', 'finish', 'coat']);
+  }
+
   if (/structural\s+pine|framing\s+pine|90x45|70x35|140x45|\bh2\b|\bh3\b/.test(q) && /pine|timber|framing|studs?|plates?|noggings?|joists?/.test(q)) {
-    if (hasAny(p, ['pin', 'drive pin', 'ramset', 'bracket', 'hanger', 'screw', 'bolt', 'nail'])) return false;
+    // \bpins?\b (not a bare 'pin' substring) — "framing pine" contains 'pin'
+    // and a substring check rejected every legitimate pine candidate here.
+    if (/\bpins?\b/.test(p) || hasAny(p, ['drive pin', 'ramset', 'bracket', 'hanger', 'screw', 'bolt', 'nail'])) return false;
     return hasAny(p, ['pine', 'timber', 'framing', 'mgp', 'h2', 'h3']);
   }
 
@@ -438,7 +465,7 @@ function isSemanticallyCompatible(query: string, productName: string): boolean {
   }
 
   if (/\b(?:diesel|petrol|fuel|unleaded|machine\s+fuel)\b/.test(q)) {
-    if (hasAny(p, ['cleaner', 'additive', 'treatment', 'stabiliser', 'conditioner', 'injector', 'jerry can', 'fuel can', 'container', 'mixing bottle', 'engine oil', '4-stroke oil', '2-stroke oil', 'bar oil'])) return false;
+    if (hasAny(p, ['cleaner', 'additive', 'treatment', 'stabiliser', 'conditioner', 'injector', 'jerry can', 'fuel can', 'container', 'mixing bottle', 'engine oil', '4-stroke oil', '2-stroke oil', 'bar oil', 'charcoal', 'bbq', 'heat bead', 'firewood', 'firelighter'])) return false;
   }
 
   if (/screws?|anchors?|bolts?|nails?/.test(q)) {
@@ -504,11 +531,22 @@ function tokenCoverageScore(query: string | undefined, productName: string | und
 }
 
 function parseFirstDim(s: string): string | null {
-  const m = s.toLowerCase().match(/\b(\d{2,4})\s*x\s*(\d{2,4})(?:\s*mm)?(?:\s*x\s*\d+(?:\.\d+)?\s*m{1,2})?\b|\b(\d{2,4})\s*×\s*(\d{2,4})(?:\s*mm)?(?:\s*×\s*\d+(?:\.\d+)?\s*m{1,2})?\b/);
+  // Two- or three-number dimension chains: "90x45", "90 x 45mm", and
+  // length-bearing forms like "2400x100x100mm" / "100x75x3000mm". The metre
+  // suffix variant ("90x45mm x 2.4m") never captures a third integer because
+  // decimals don't match, which is what we want — 2.4 is a length.
+  const m = s.toLowerCase().match(/\b(\d{2,4})\s*[x×]\s*(\d{2,4})(?:\s*[x×]\s*(\d{2,5}))?\s*(?:mm)?\b/);
   if (!m) return null;
-  const a = m[1] || m[3];
-  const b = m[2] || m[4];
-  return `${parseInt(a, 10)}x${parseInt(b, 10)}`;
+  const nums = [parseInt(m[1], 10), parseInt(m[2], 10)];
+  if (m[3]) nums.push(parseInt(m[3], 10));
+  // Three numbers = cross-section + a length; the length is the largest
+  // ("2400x100x100" and "100x75x3000" both mean a 100-ish cross-section).
+  if (nums.length === 3) nums.splice(nums.indexOf(Math.max(...nums)), 1);
+  // Orientation-insensitive: a "45x90" SKU is the same timber as a "90x45"
+  // request — normalise to large-first so equality means same cross-section.
+  const [a, b] = nums;
+  const [hi, lo] = a >= b ? [a, b] : [b, a];
+  return `${hi}x${lo}`;
 }
 
 function firstMmLength(s: string): number | null {

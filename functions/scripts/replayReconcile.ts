@@ -15,6 +15,7 @@ import { coverageSanePurchaseCount, coverageFloorPurchaseCount } from '../../src
 import { parseJobAreaM2, geometricSanePieceCount } from '../../src/utils/geometricCoverage';
 import { parsePackInfo } from '../../src/utils/parsePackInfo';
 import { simplifySearchTerm } from '../../src/utils/simplifySearchTerm';
+import { isSemanticallyCompatible } from '../../src/services/candidateRanker';
 import { ReconcileItem, ReconcileItemCandidate, ReconcileDecision } from '../src/reconcile.helpers';
 
 export interface ReplayScraperCandidate {
@@ -67,7 +68,12 @@ export function buildReconcileItems(
   const candidatesById = new Map<string, ReconcileItemCandidate[]>();
   rows.forEach((row, i) => {
     if (row.priceStatus === 'estimated-trade') return;
-    const cands = candidatesBySearchTerm.get(row.searchTerm) || [];
+    // Same semantic/spec gate as round-1 ranking — the reconcile LLM must
+    // never be offered a candidate the gate already refused (70x35 framing
+    // for a 140x45 rafter request).
+    const cands = (candidatesBySearchTerm.get(row.searchTerm) || []).filter((c) =>
+      isSemanticallyCompatible(row.searchTerm || row.name, c.productName || '')
+    );
     if (cands.length === 0) return;
     const id = `row-${i}`;
     const mapped = cands.slice(0, 5).map((c) => {
@@ -246,7 +252,11 @@ export async function rescueRejectedRows(
     const candidatesById = new Map<string, ReconcileItemCandidate[]>();
     for (const [i, term] of termByIdx) {
       const m = rows[i];
-      const found = cands.get(term) || [];
+      // Gate against the ORIGINAL name — the simplified term dropped specs
+      // to broaden the search, but specs still decide what's acceptable.
+      const found = (cands.get(term) || []).filter((c) =>
+        isSemanticallyCompatible(m.name, c.productName || '')
+      );
       if (found.length === 0) continue;
       const id = `row-${i}`;
       const mapped = found.slice(0, 5).map((c) => {
