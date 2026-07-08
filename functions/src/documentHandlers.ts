@@ -37,6 +37,7 @@ import {
   documentRecordToInvoiceRecord,
 } from './shared/document/adapter';
 import { canTransition } from './shared/document/stage';
+import { summarizeMaterialEdits, type SentMaterialLike } from './materialEdits.helpers';
 import type {
   DocumentRecord,
   DocumentStage,
@@ -634,6 +635,26 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   await batch.commit();
+
+  // Material-edit telemetry: diff the sent rows against their asPriced
+  // pipeline snapshots and log the tradie's corrections — ground truth for
+  // pricing-pipeline accuracy. Zero-edit sends are logged too (the success
+  // signal). Best-effort: must never break a send.
+  if (!isTestSend) {
+    try {
+      const editSummary = summarizeMaterialEdits((quote.materials as SentMaterialLike[]) || []);
+      if (editSummary) {
+        await firestore.collection('materialEditLogs').add({
+          userId,
+          quoteId: docId,
+          sentAt: admin.firestore.FieldValue.serverTimestamp(),
+          ...editSummary,
+        });
+      }
+    } catch (err: any) {
+      functions.logger.warn('material_edit_log_failed', { docId, message: err?.message });
+    }
+  }
 
   const acceptanceUrl = input.acceptanceUrlForToken
     ? input.acceptanceUrlForToken(token)

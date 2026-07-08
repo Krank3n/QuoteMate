@@ -58,6 +58,17 @@ export interface Material {
   // Pricing and product metadata
   pricingSource?: 'scraper' | 'api' | 'ai' | 'manual'; // Where the price came from
   priceConfidence?: 'high' | 'medium' | 'low'; // AI price confidence level
+  // Snapshot of the row as the pricing pipeline last left it (see
+  // utils/asPriced.ts). Send-time telemetry diffs the sent row against this
+  // to log tradie corrections — confirmed pipeline misses. Absent on
+  // hand-priced rows and quotes priced before this field shipped.
+  asPriced?: {
+    price: number;
+    quantity: number;
+    name: string;
+    pricingSource?: Material['pricingSource'];
+    priceConfidence?: Material['priceConfidence'];
+  };
   imageUrl?: string; // Product image URL
   description?: string; // Product description
   brand?: string; // Product brand
