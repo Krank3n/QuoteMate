@@ -13,6 +13,7 @@ import {
   Paragraph,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useScrollToTop, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { format } from 'date-fns';
@@ -732,9 +733,7 @@ export function DashboardScreen() {
         </RNAnimated.View>
 
         <View style={[styles.mateButtonWrapper, { flex: 1 }]}>
-          <Button
-            mode="contained-tonal"
-            icon="chat-processing"
+          <Pressable
             onPress={async () => {
               lightTap();
               if (!mateTrySeen) {
@@ -743,12 +742,21 @@ export function DashboardScreen() {
               }
               navigation.navigate('Mate' as never);
             }}
-            style={styles.mateButton}
-            contentStyle={styles.mateButtonContent}
+            accessibilityRole="button"
             accessibilityLabel="Talk to Mate"
+            style={({ pressed }) => [styles.mateButtonGlow, pressed && styles.mateButtonPressed]}
           >
-            Mate
-          </Button>
+            <LinearGradient
+              colors={['#243247', colors.surface]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.mateButton}
+            >
+              <MaterialCommunityIcons name="chat-processing" size={20} color="#E6B872" />
+              <Text style={styles.mateButtonLabel}>Mate</Text>
+              <ShimmerOverlay tint="#E6B872" intensity={0.1} duration={5000} />
+            </LinearGradient>
+          </Pressable>
           {!mateTrySeen && (
             <View style={styles.tryBadge} pointerEvents="none">
               <Text style={styles.tryBadgeText}>TRY</Text>
@@ -1002,7 +1010,7 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     gap: 12,
     marginHorizontal: 20,
     marginBottom: 24,
@@ -1016,17 +1024,45 @@ const styles = StyleSheet.create({
   mateButtonWrapper: {
     position: 'relative',
   },
-  mateButton: {
+  mateButtonGlow: {
+    flex: 1,
     borderRadius: 12,
+    backgroundColor: colors.surface,
+    shadowColor: colors.secondary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 8,
+    shadowOpacity: 0.3,
+    elevation: 4,
   },
-  mateButtonContent: {
-    paddingVertical: 14,
+  mateButtonPressed: {
+    transform: [{ scale: 0.97 }],
+    shadowOpacity: 0.15,
+  },
+  mateButton: {
+    flex: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(207, 161, 83, 0.55)',
+  },
+  mateButtonLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    color: '#E6B872',
   },
   tryBadge: {
     position: 'absolute',
     top: -6,
     right: -6,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: '#E6B872',
     borderRadius: 6,
     paddingHorizontal: 4,
     paddingVertical: 1,
@@ -1036,7 +1072,7 @@ const styles = StyleSheet.create({
     fontSize: 7,
     fontWeight: '700',
     letterSpacing: 0.4,
-    color: colors.white,
+    color: '#E6B872',
   },
   statsContainer: {
     flexDirection: 'row',
