@@ -19,6 +19,7 @@ import fetch from 'node-fetch';
 import { checkDocumentIntegrity } from '../src/shared/document/integrityCheck';
 import { pickBestCandidate, RankableCandidate } from '../../src/services/candidateRanker';
 import { parsePackInfo } from '../../src/utils/parsePackInfo';
+import { isNonRetailTradeRow, tradeFallbackUnitPrice } from '../../src/utils/tradeFallback';
 import { buildReconcilePrompt, ReconcileDecision } from '../src/reconcile.helpers';
 import { buildReconcileItems, applyReconcileDecisions, finalCoverageSweep, rescueRejectedRows, ReplayPricedRow } from './replayReconcile';
 import { normalizeGapKind, replayDeterministicIssues, capVerdict } from './replayOracle.helpers';
@@ -26,7 +27,7 @@ import { normalizeGapKind, replayDeterministicIssues, capVerdict } from './repla
 // Same model + token budget as production's reconcile endpoint (callGeminiLiteJson).
 const RECONCILE_MODEL = 'gemini-3.1-flash-lite';
 
-interface Args { limit: number; project: string; model: string; out: string; uid?: string; diverse: boolean; perUser: number; numbers?: Set<string> }
+interface Args { limit: number; project: string; model: string; out: string; uid?: string; diverse: boolean; perUser: number; numbers?: Set<string>; noOracle: boolean }
 interface DocLike { id: string; uid: string; number?: string; type?: string; stage?: string; createdAt?: any; job?: any; materials?: any[]; sections?: any[]; total?: number; materialsSubtotal?: number; laborHours?: number; laborTotal?: number; [k: string]: any }
 interface ReplayMaterial { name: string; searchTerm: string; quantity: number; unit: string; reasoning?: string }
 interface ScraperProduct { productName: string; description?: string; price: number; priceIncGst?: number; unit?: string; itemNumber?: string; productUrl?: string; confidence?: string; packSize?: number; packUnit?: string }
@@ -45,6 +46,9 @@ function parseArgs(): Args {
     // Retry filter: only replay these quote numbers (e.g. re-running quotes a
     // previous run lost to transient network errors).
     numbers: get('numbers') ? new Set(get('numbers')!.split(',').map(s => s.trim()).filter(Boolean)) : undefined,
+    // Row-level validations (did routing/pricing behave) don't need the LLM
+    // judge — skip it to save cost and verdict noise.
+    noOracle: (get('no-oracle') || 'false') === 'true',
   };
 }
 function tsToMs(t: any): number { return typeof t?.toMillis === 'function' ? t.toMillis() : typeof t?._seconds === 'number' ? t._seconds * 1000 : typeof t === 'number' ? t : 0; }
@@ -207,76 +211,7 @@ async function scraperBatch(terms: string[]): Promise<Map<string, ScraperProduct
   return out;
 }
 
-function deterministicFallbackUnitPrice(m: ReplayMaterial): number | null {
-  const name = `${m.searchTerm} ${m.name}`.toLowerCase();
-  if (/screws?|nails?/.test(name)) return m.unit === 'each' ? 0.08 : 18;
-  if (/(?:wire|lever)\s+connectors?|wago\s+connectors?/.test(name)) return m.unit === 'each' ? 0.5 : 25;
-  if (/exposed\s+aggregate\s+concrete|ready[-\s]?mix\s+concrete|concrete\s+for\s+slab|slab\s+concrete/.test(name)) return m.unit === 'm³' ? 300 : 12;
-  if (/rinnai\s*b26|continuous\s+flow\s+gas\s+hot\s+water|gas\s+hot\s+water\s+heater/.test(name)) return 1350;
-  if (/gas\s+compliance\s+certificate|compliance\s+certificate/.test(name)) return 150;
-  if (/stump\s+grinder\s+(?:replacement\s+)?teeth|grinder\s+teeth/.test(name)) return 35;
-  if (/material\s+delivery|delivery\s+fee/.test(name)) return 150;
-  if (/colorbond\s+fence\s+(?:sheet|panel)|fence\s+(?:sheet|panel).*colorbond/.test(name)) return 38;
-  if (/colorbond\s+fence\s+rail|fence\s+rail.*colorbond/.test(name)) return 18;
-  if (/\b(?:rhs|shs)\b|rectangular\s+hollow|square\s+hollow/.test(name)) return m.unit === 'm' ? 45 : 180;
-  if (/steel\s+base\s+plate|base\s+plate/.test(name)) return 28;
-  if (/steel\s+post|galvanised\s+post|galvanized\s+post/.test(name)) return m.unit === 'm' ? 38 : 90;
-  if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding/.test(name)) return m.unit === 'm²' ? 12 : 35;
-  if (/floor\s+tiles?|wall\s+tiles?|ceramic\s+tiles?|porcelain\s+tiles?/.test(name) && !/roof/.test(name)) return m.unit === 'm²' ? 45 : 30;
-  if (/\bgrout\b/.test(name)) return m.unit === 'kg' ? 4 : 55;
-  if (/\b(?:pvc|pex)\b.*\bpipe\b|\bpipe\b.*\b(?:pvc|pex)\b|waste\s+pipe|dwv\s+pipe/.test(name)) return m.unit === 'm' ? 8 : 24;
-  if (/basin\s+mixer|mixer\s+tap/.test(name)) return 140;
-  if (/plumber'?s?\s+putty|plumbing\s+putty/.test(name)) return 12;
-  if (/disposable\s+coveralls?|painters?\s+coveralls?|coveralls?/.test(name)) return 12;
-  if (/debris\s+netting|safety\s+debris|shade\s+cloth|safety\s+mesh/.test(name)) return m.unit === 'm²' ? 2 : 80;
-  if (/decking.*board|deck.*board|hardwood.*decking|merbau|spotted\s+gum/.test(name)) return 75;
-  if (/palings?|paling/.test(name)) return 3.5;
-  if (/fence\s+rail|75\s*x\s*38.*rail/.test(name)) return m.unit === 'm' ? 4 : 15;
-  if (/90\s*x\s*45|70\s*x\s*35|framing\s+timber|mgp10|mgp12|structural\s+pine|treated\s+pine/.test(name)) return m.unit === 'm' ? 8 : 15;
-  if (/fascia.*board/.test(name)) return 65;
-  if (/roof\s+tile|concrete\s+tile/.test(name)) return 7;
-  if (/paint/.test(name)) return m.unit === 'L' ? 18 : 55;
-  if (/oil|sealer|stain/.test(name)) return m.unit === 'L' ? 25 : 80;
-  if (/weed\s+mat|geotextile|landscape\s+fabric/.test(name)) return m.unit === 'm²' ? 1.5 : 45;
-  if (/road\s+base|crusher\s+dust|aggregate\s+base/.test(name)) return m.unit === 'm³' ? 110 : m.unit === 'kg' ? 0.08 : 95;
-  if (/gravel|aggregate|sand/.test(name)) return m.unit === 'm³' ? 120 : m.unit === 'kg' ? 0.12 : 12;
-  if (/sliding\s+gate\s+(?:catcher|receiver|stop)|gate\s+(?:catcher|receiver|stop)/.test(name)) return 30;
-  if (/sliding\s+gate\s+wheels?|gate\s+wheels?/.test(name)) return 35;
-  if (/electrical\s+tape|insulation\s+tape/.test(name)) return 5;
-  if (/joist\s+hanger/.test(name)) return 8;
-  if (/bracket|multigrip|connector|clip/.test(name)) return 3;
-  if (/silicone|sealant|caulk/.test(name)) return 14;
-  if (/pointing\s+compound/.test(name)) return m.unit === 'L' ? 5.5 : 55;
-  if (/airless\s+sprayer\s+cleanup|sprayer\s+cleanup|pump\s+armor|pump\s+protector/.test(name)) return m.unit === 'L' ? 18 : 35;
-  if (/2[-\s]?stroke.*(?:fuel|mix)|chainsaw\s+fuel|fuel\s+mix/.test(name)) return m.unit === 'L' ? 5 : null;
-  if (/2[-\s]?stroke\s+(?:engine\s+)?oil/.test(name)) return m.unit === 'L' ? 18 : 22;
-  if (/vehicle\s+(?:running\s+)?(?:costs?|fuel)|travel\s+fuel/.test(name)) return 35;
-  if (/diesel|petrol|fuel|unleaded/.test(name)) return m.unit === 'L' ? 2.5 : m.unit === 'each' ? 35 : null;
-  if (/concrete\s+pump|pump\s+hire/.test(name)) return 850;
-  if (/hook\s*bin|soil\s+disposal|spoil\s+disposal|dirt\s+disposal|heavy\s+waste/.test(name)) return m.unit === 'm³' ? 110 : m.unit === 'kg' ? 0.18 : 1200;
-  if (/skip/.test(name)) return /\b2\s*m(?:³|3|\b)|2m(?:³|3)?/.test(name) ? 300 : m.unit === 'm³' ? 110 : 650;
-  if (/green\s+waste.*(?:disposal|dump|tip)|(?:disposal|dump|tip).*green\s+waste/.test(name)) return m.unit === 'kg' ? 0.1 : m.unit === 'm³' ? 60 : 120;
-  if (/dump|tipping|disposal/.test(name)) return m.unit === 'kg' ? 0.25 : 250;
-  if (/hire/.test(name)) return 250;
-  return null;
-}
 
-function shouldUseTradeFallbackInsteadOfRetail(m: ReplayMaterial): boolean {
-  const name = `${m.searchTerm} ${m.name}`.toLowerCase();
-  if (/rinnai\s*b26|continuous\s+flow\s+gas\s+hot\s+water|gas\s+hot\s+water\s+heater|gas\s+compliance\s+certificate|compliance\s+certificate|stump\s+grinder\s+(?:replacement\s+)?teeth|grinder\s+teeth|material\s+delivery|delivery\s+fee/.test(name)) return true;
-  if (/colorbond\s+fence\s+(?:sheet|panel|rail)|fence\s+(?:sheet|panel|rail).*colorbond/.test(name)) return true;
-  if (/\b(?:rhs|shs)\b|rectangular\s+hollow|square\s+hollow|steel\s+base\s+plate|base\s+plate/.test(name)) return true;
-  if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding|floor\s+tiles?|wall\s+tiles?|\bgrout\b|basin\s+mixer|mixer\s+tap|plumber'?s?\s+putty|plumbing\s+putty|debris\s+netting|safety\s+debris/.test(name)) return true;
-  if (/road\s+base|crusher\s+dust|aggregate\s+base/.test(name)) return true;
-  if (/green\s+waste|tip\s*fee|tipping|dumping|disposal|hook\s*bin|soil\s+disposal|spoil\s+disposal|dirt\s+disposal|heavy\s+waste/.test(name)) return true;
-  if (/vehicle\s+(?:running\s+)?(?:costs?|fuel)|travel\s+fuel/.test(name)) return true;
-  if (/\b(?:diesel|petrol|unleaded|machine\s+fuel)\b/.test(name)) return true;
-  if (/2[-\s]?stroke.*(?:fuel|mix)|chainsaw\s+fuel|fuel\s+mix|2[-\s]?stroke\s+(?:engine\s+)?oil/.test(name)) return true;
-  if (/airless\s+sprayer\s+cleanup|sprayer\s+cleanup|pump\s+armor|pump\s+protector/.test(name)) return true;
-  if (/concrete\s+pump|pump\s+hire|skip|\bhire\b/.test(name)) return true;
-  if ((/exposed\s+aggregate\s+concrete|ready[-\s]?mix\s+concrete|concrete\s+for\s+slab|slab\s+concrete|\b\d{2}\s*mpa\b.*concrete|concrete.*\b\d{2}\s*mpa\b/.test(name)) && (m.unit === 'm³' || m.quantity >= 0.5)) return true;
-  return false;
-}
 
 function firstMetreLengthText(s: string): number | null {
   const m = s.match(/\b(\d+(?:\.\d+)?)\s*m\b/i);
@@ -287,9 +222,12 @@ function firstMetreLengthText(s: string): number | null {
 
 function priceReplay(materials: ReplayMaterial[], candidates: Map<string, ScraperProduct[]>): any[] {
   return materials.map(m => {
-    if (shouldUseTradeFallbackInsteadOfRetail(m)) {
-      const fallback = deterministicFallbackUnitPrice(m);
+    if (isNonRetailTradeRow(`${m.searchTerm} ${m.name}`, m.unit, m.quantity)) {
+      const fallback = tradeFallbackUnitPrice(`${m.searchTerm} ${m.name}`, m.unit);
       if (fallback && fallback > 0) return { ...m, price: fallback, totalPrice: Math.round(fallback * m.quantity * 100) / 100, priceStatus: 'estimated-trade', candidates: [] };
+      // Route-to-trade means NEVER retail — a table-less row stays unpriced
+      // rather than matching a keyword-adjacent SKU (the umbrella-base bug).
+      return { ...m, price: 0, totalPrice: 0, priceStatus: 'unpriced-trade', candidates: [] };
     }
     const ranked = (candidates.get(m.searchTerm) || []).filter(p => p.price > 0).sort((a, b) => {
       const score = (x: ScraperProduct) => x.confidence === 'high' ? 0 : x.confidence === 'medium' ? 1 : 2;
@@ -297,7 +235,7 @@ function priceReplay(materials: ReplayMaterial[], candidates: Map<string, Scrape
     });
     const chosen = pickBestCandidate(ranked as RankableCandidate[], { name: m.name, searchTerm: m.searchTerm }) as ScraperProduct | null;
     if (!chosen) {
-      const fallback = deterministicFallbackUnitPrice(m);
+      const fallback = tradeFallbackUnitPrice(`${m.searchTerm} ${m.name}`, m.unit);
       if (fallback && fallback > 0) return { ...m, price: fallback, totalPrice: Math.round(fallback * m.quantity * 100) / 100, priceStatus: 'estimated', candidates: ranked.slice(0, 3).map(p => ({ name: p.productName, price: p.priceIncGst || p.price, confidence: p.confidence })) };
       return { ...m, price: 0, totalPrice: 0, priceStatus: 'unpriced', candidates: ranked.slice(0, 3).map(p => ({ name: p.productName, price: p.priceIncGst || p.price, confidence: p.confidence })) };
     }
@@ -407,7 +345,7 @@ async function main() {
             const parsed = await geminiJson(geminiKey, RECONCILE_MODEL, buildReconcilePrompt(items, d.job?.name, d.job?.description), 8000);
             return Array.isArray(parsed?.results) ? parsed.results : [];
           },
-          fallbackUnitPrice: row => deterministicFallbackUnitPrice({ name: row.name, searchTerm: row.searchTerm, quantity: row.quantity, unit: row.unit }),
+          fallbackUnitPrice: row => tradeFallbackUnitPrice(`${row.searchTerm} ${row.name}`, row.unit),
         });
         reconciled = rescue.rows;
         reconcileMeta.rescue = rescue.meta;
@@ -420,11 +358,14 @@ async function main() {
       const replay = { estimatedHours: gen.estimatedHours, reconcile: reconcileMeta, materialsSubtotal: Math.round(reconciled.reduce((s, m) => s + (m.totalPrice || 0), 0) * 100) / 100, materials: reconciled };
       process.stdout.write('compare... ');
       const stored = { id: d.id, number: d.number, stage: d.stage, job: { name: d.job?.name, description: d.job?.description, template: d.job?.template, estimatedHours: d.job?.estimatedHours }, pricing: { total: d.total, materialsSubtotal: d.materialsSubtotal, laborHours: d.laborHours, laborTotal: d.laborTotal }, sections: (d.sections || []).map((s: any) => ({ name: s.name, hours: s.laborHoursTotal || s.laborHours, total: s.laborTotal })), materials: (d.materials || []).map((m: any) => ({ name: m.name, quantity: m.quantity, unit: m.unit, price: m.price, totalPrice: m.totalPrice, requiredQty: m.requiredQty, packSize: m.packSize, packUnit: m.packUnit, pricingSource: m.pricingSource, priceConfidence: m.priceConfidence })) };
-      const oracle = await geminiJsonWithFallback(geminiKey, args.model, comparePrompt(stored, replay));
-      if (Array.isArray(oracle?.gaps)) for (const g of oracle.gaps) g.kind = normalizeGapKind(g.kind);
+      let oracle: any = null;
+      if (!args.noOracle) {
+        oracle = await geminiJsonWithFallback(geminiKey, args.model, comparePrompt(stored, replay));
+        if (Array.isArray(oracle?.gaps)) for (const g of oracle.gaps) g.kind = normalizeGapKind(g.kind);
+      }
       const replayIssues = replayDeterministicIssues(replay);
-      capVerdict(oracle, replayIssues);
-      console.log(oracle.verdict + (oracle.rawVerdict ? ` (capped from ${oracle.rawVerdict})` : ''));
+      if (oracle) capVerdict(oracle, replayIssues);
+      console.log(oracle ? oracle.verdict + (oracle.rawVerdict ? ` (capped from ${oracle.rawVerdict})` : '') : `no-oracle (${replayIssues.length} deterministic issues)`);
       results.push({ id: d.id, number: d.number, stage: d.stage, deterministicIssues: checkDocumentIntegrity(d as any), replayDeterministicIssues: replayIssues, oracle, storedRedacted: { ...stored, job: { ...stored.job, description: undefined, descriptionLength: d.job?.description?.length || 0 } }, replay: { ...replay, materials: replay.materials.map((m: any) => ({ ...m, candidates: undefined })) } });
     } catch (err: any) {
       console.log(`ERROR ${err.message}`);

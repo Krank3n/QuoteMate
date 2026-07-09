@@ -59,6 +59,9 @@ describe('buildReconcileItems', () => {
     const cand = new Map([['decking screws 50mm', screwsCandidates]]);
     const rows = [
       row({ priceStatus: 'estimated-trade' }),
+      // Non-retail rows the table couldn't price must stay out of reconcile
+      // even though the batch search prefetched candidates for their term.
+      row({ priceStatus: 'unpriced-trade' }),
       row({ searchTerm: 'no candidates here' }),
     ];
     const { items } = buildReconcileItems(rows, cand);

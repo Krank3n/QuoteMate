@@ -67,7 +67,11 @@ export function buildReconcileItems(
   const items: ReconcileItem[] = [];
   const candidatesById = new Map<string, ReconcileItemCandidate[]>();
   rows.forEach((row, i) => {
-    if (row.priceStatus === 'estimated-trade') return;
+    // Non-retail rows never reconcile — the batch search prefetches
+    // candidates for every term, so without this skip an unpriced trade row
+    // (e.g. "PPE Consumables Allowance") gets handed retail candidates the
+    // routing already excluded and the LLM applies one (ear muffs, $11).
+    if (row.priceStatus === 'estimated-trade' || row.priceStatus === 'unpriced-trade') return;
     // Same semantic/spec gate as round-1 ranking — the reconcile LLM must
     // never be offered a candidate the gate already refused (70x35 framing
     // for a 140x45 rafter request).

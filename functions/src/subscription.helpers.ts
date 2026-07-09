@@ -22,14 +22,35 @@ export const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
 // SKUs are priced to match. Update here if prices change.
 const SUB_PRICE_AUD = { monthly: 49, yearly: 328 };
 
+// Apple StoreKit 2 purchase tokens are JWS blobs (header.payload.signature)
+// whose payload records the purchase environment ('Sandbox' | 'Production').
+// validateAppleReceipt writes isPro + productId even when Apple validation
+// fails, so a sandbox/TestFlight purchase is otherwise indistinguishable from
+// a paid sub. Reads an explicit `environment` field first so a backfill can
+// override without re-decoding.
+export function subEnvironment(sub: any): string | null {
+  if (typeof sub?.environment === 'string') return sub.environment;
+  const token = sub?.purchaseToken;
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null; // legacy base64 receipts aren't JWS
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return typeof payload?.environment === 'string' ? payload.environment : null;
+  } catch {
+    return null;
+  }
+}
+
 // A subscription only contributes MRR if it's backed by a real billing record:
 // an app-store purchase (productId) or a Stripe subscription (subscriptionId /
-// priceId). Admin comps (platform 'admin_grant') and bare manual isPro flags
-// (owner / test / orphan accounts) have neither and bill $0 — counting them is
-// what inflated the old "9 × $29" estimate.
+// priceId). Admin comps (platform 'admin_grant'), bare manual isPro flags
+// (owner / test / orphan accounts), and App Store sandbox purchases bill $0 —
+// counting them is what inflated the old "9 × $29" estimate.
 export function isBilledSub(sub: any): boolean {
   if (!sub?.isPro) return false;
   if (sub.platform === 'admin_grant') return false;
+  if ((subEnvironment(sub) || '').toLowerCase() === 'sandbox') return false;
   return !!(sub.productId || sub.subscriptionId || sub.priceId);
 }
 

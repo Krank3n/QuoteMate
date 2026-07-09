@@ -25,9 +25,25 @@ const SUB_PRICE_AUD = { monthly: 49, yearly: 328 }; // live Stripe "Starter"; st
 // hardcodes 7 — that's a bug that misclassifies trials; this tool uses the true 14.
 const TRIAL_MS = 14 * 24 * 60 * 60 * 1000;
 
+// Mirrors src/subscription.helpers.ts subEnvironment — StoreKit 2 purchase
+// tokens are JWS blobs whose payload records 'Sandbox' | 'Production'.
+function subEnvironment(sub) {
+  if (sub && typeof sub.environment === 'string') return sub.environment;
+  const token = sub && sub.purchaseToken;
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return typeof payload.environment === 'string' ? payload.environment : null;
+  } catch {
+    return null;
+  }
+}
 function isBilledSub(sub) {
   if (!sub || !sub.isPro) return false;
   if (sub.platform === 'admin_grant') return false;
+  if ((subEnvironment(sub) || '').toLowerCase() === 'sandbox') return false;
   return !!(sub.productId || sub.subscriptionId || sub.priceId);
 }
 function subInterval(sub) {
