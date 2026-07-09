@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import { auth } from '../config/firebase';
 import { jobService } from '../services/jobService';
 import { generateId } from '../utils/generateId';
+import { preserveSnapshotIdentity } from '../utils/snapshotIdentity';
 import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
 
@@ -89,7 +90,19 @@ export const useJobStore = create<JobState>((set, get) => ({
   listenToJobs: () => {
     if (!auth.currentUser) return;
     jobService.listenToJobs((jobs) => {
-      set({ jobs, jobsLoaded: true });
+      // Snapshots echo our own writes (and server aggregate-trigger writes)
+      // with fresh instances of every job. Reuse the previous instances for
+      // unchanged jobs — and skip the set entirely on a no-op echo — so
+      // subscribers (Dashboard, JobsList) don't re-render mid-navigation.
+      const prev = get().jobs;
+      const stable = preserveSnapshotIdentity(
+        prev,
+        jobs,
+        (j) => j.id,
+        (j) => (typeof j.updatedAt === 'number' ? j.updatedAt : NaN),
+      );
+      if (stable === prev && get().jobsLoaded) return;
+      set({ jobs: stable, jobsLoaded: true });
     });
   },
 

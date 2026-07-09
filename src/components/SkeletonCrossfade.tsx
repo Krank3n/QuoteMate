@@ -10,13 +10,19 @@ interface SkeletonCrossfadeProps {
   loaded: boolean;
   skeleton: React.ReactNode;
   children: React.ReactNode;
+  /**
+   * Set when the content must fill a flex parent (e.g. a FlatList that
+   * scrolls). The wrappers are content-sized by default, which would give a
+   * flex:1 child no height.
+   */
+  fill?: boolean;
 }
 
 const FADE_OUT_DURATION = 250;
 const FADE_IN_DURATION = 350;
 const FADE_IN_DELAY = 80;
 
-export function SkeletonCrossfade({ loaded, skeleton, children }: SkeletonCrossfadeProps) {
+export function SkeletonCrossfade({ loaded, skeleton, children, fill }: SkeletonCrossfadeProps) {
   const [showSkeleton, setShowSkeleton] = useState(!loaded);
   const skeletonOpacity = useRef(new Animated.Value(loaded ? 0 : 1)).current;
   const contentOpacity = useRef(new Animated.Value(loaded ? 1 : 0)).current;
@@ -48,16 +54,14 @@ export function SkeletonCrossfade({ loaded, skeleton, children }: SkeletonCrossf
     }
   }, [loaded]);
 
-  if (!loaded && !showSkeleton) {
-    return <>{skeleton}</>;
-  }
-
-  if (loaded && !showSkeleton) {
-    return <>{children}</>;
-  }
-
+  // The tree shape is deliberately constant: children always live inside the
+  // same View > Animated.View slot. Returning bare `{children}` once the
+  // crossfade finished (the previous shape) changed their position in the
+  // tree, so React unmounted and remounted them — replaying every entrance
+  // animation inside (visible as the content blinking and fading in twice).
+  const fillStyle = fill ? styles.fill : undefined;
   return (
-    <View>
+    <View style={fillStyle}>
       {showSkeleton && (
         <Animated.View style={{ opacity: skeletonOpacity }}>
           {skeleton}
@@ -65,10 +69,13 @@ export function SkeletonCrossfade({ loaded, skeleton, children }: SkeletonCrossf
       )}
       {loaded && (
         <Animated.View
-          style={{
-            opacity: contentOpacity,
-            transform: [{ translateY: contentSlide }],
-          }}
+          style={[
+            fillStyle,
+            {
+              opacity: contentOpacity,
+              transform: [{ translateY: contentSlide }],
+            },
+          ]}
         >
           {children}
         </Animated.View>
@@ -76,3 +83,7 @@ export function SkeletonCrossfade({ loaded, skeleton, children }: SkeletonCrossf
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  fill: { flex: 1 },
+});

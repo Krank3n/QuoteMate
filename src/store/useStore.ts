@@ -27,6 +27,7 @@ import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { reconcileNextNumber, resolveNextQuoteNumber } from '../utils/nextNumber';
+import { preserveSnapshotIdentity } from '../utils/snapshotIdentity';
 import { firestoreService, ASSISTANT_LOGGING_ENABLED } from '../services/firestoreService';
 import { documentService } from '../services/documentService';
 // Static import — see note on the call sites below. Dynamic `import()` here
@@ -752,7 +753,18 @@ export const useStore = create<AppState>((set, get) => ({
       prefix: 'Q',
       cached: get().nextQuoteNumber,
     });
-    set({ quotes: merged, nextQuoteNumber: reconciledNextNumber });
+
+    // Listener echoes of our own writes deliver fresh instances of unchanged
+    // quotes. Keep the old instances (and skip the write entirely when
+    // nothing moved) so subscribers don't re-render mid-navigation.
+    const stable = preserveSnapshotIdentity(
+      local,
+      merged,
+      (q) => q.id,
+      (q) => (q.updatedAt instanceof Date ? q.updatedAt.getTime() : NaN),
+    );
+    if (stable === local && reconciledNextNumber === get().nextQuoteNumber) return;
+    set({ quotes: stable, nextQuoteNumber: reconciledNextNumber });
   },
 
   // Save quote to storage
@@ -1683,7 +1695,16 @@ export const useStore = create<AppState>((set, get) => ({
       prefix: 'INV',
       cached: get().nextInvoiceNumber,
     });
-    set({ invoices: merged, nextInvoiceNumber: reconciledNextNumber });
+
+    // Same echo-suppression as mergeRemoteQuotes.
+    const stable = preserveSnapshotIdentity(
+      local,
+      merged,
+      (i) => i.id,
+      (i) => (i.updatedAt instanceof Date ? i.updatedAt.getTime() : NaN),
+    );
+    if (stable === local && reconciledNextNumber === get().nextInvoiceNumber) return;
+    set({ invoices: stable, nextInvoiceNumber: reconciledNextNumber });
   },
 
   deleteInvoice: async (invoiceId: string) => {

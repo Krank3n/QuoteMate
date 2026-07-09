@@ -214,6 +214,7 @@ export function JobsListScreen() {
       <WebContainer style={styles.listContainer}>
         <SkeletonCrossfade
           loaded={initialLoaded}
+          fill
           skeleton={
             <View style={{ padding: 16 }}>
               <SkeletonCardList count={4} />

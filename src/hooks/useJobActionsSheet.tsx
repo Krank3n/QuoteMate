@@ -8,7 +8,7 @@
  * element mounts all four sheets as portals.
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Alert } from 'react-native';
 import { Snackbar } from 'react-native-paper';
 
@@ -47,12 +47,39 @@ interface UseJobActionsSheetOptions {
   onDuplicated?: (cloneJobId: string) => void;
 }
 
+// Stable empty array so the gated selectors below return a constant while
+// their sheet is closed — Zustand then bails on the re-render.
+const NO_DOCS: Document[] = [];
+const NO_JOBS: Job[] = [];
+
 export function useJobActionsSheet(
   navigation: any,
   options: UseJobActionsSheetOptions = {},
 ) {
-  const { jobs, saveJob, deleteJob, duplicateJob } = useJobStore();
-  const documents = useStore((s) => s.documents);
+  const [actionsJob, setActionsJob] = useState<Job | null>(null);
+  const [sendDialogDoc, setSendDialogDoc] = useState<Document | null>(null);
+  const [markedSentDocId, setMarkedSentDocId] = useState<string | null>(null);
+  const [takePaymentTarget, setTakePaymentTarget] =
+    useState<TakePaymentTarget | null>(null);
+  const [followUpState, setFollowUpState] = useState<{
+    doc: Document;
+    tone: FollowUpTone;
+  } | null>(null);
+
+  // Selector-form subscriptions only. This hook is mounted by Dashboard and
+  // JobsList, so a bare `useJobStore()` / broad `documents` subscription here
+  // re-rendered both screens on EVERY job/document store write — including
+  // the Firestore listener echoes that land right as the user navigates back
+  // (the "janky return to home" bug). Actions are stable fn refs; the two
+  // data reads are gated on their sheet actually being open, and handlers
+  // read fresh state via getState() at call time.
+  const saveJob = useJobStore((s) => s.saveJob);
+  const deleteJob = useJobStore((s) => s.deleteJob);
+  const duplicateJob = useJobStore((s) => s.duplicateJob);
+  // Only the FollowUpSheet needs jobs at render time (customer contact info).
+  const jobs = useJobStore((s) => (followUpState ? s.jobs : NO_JOBS));
+  // Only the actions sheet needs documents at render time (primaryDoc prop).
+  const documents = useStore((s) => (actionsJob ? s.documents : NO_DOCS));
   const deleteQuote = useStore((s) => s.deleteQuote);
   const deleteInvoice = useStore((s) => s.deleteInvoice);
   const businessSettings = useStore((s) => s.businessSettings);
@@ -68,16 +95,6 @@ export function useJobActionsSheet(
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
 
   const { showAlert, alertNode } = useAlertModal();
-
-  const [actionsJob, setActionsJob] = useState<Job | null>(null);
-  const [sendDialogDoc, setSendDialogDoc] = useState<Document | null>(null);
-  const [markedSentDocId, setMarkedSentDocId] = useState<string | null>(null);
-  const [takePaymentTarget, setTakePaymentTarget] =
-    useState<TakePaymentTarget | null>(null);
-  const [followUpState, setFollowUpState] = useState<{
-    doc: Document;
-    tone: FollowUpTone;
-  } | null>(null);
 
   const primaryDocForJob = (job: Job): Document | null => {
     if (job.primaryDocumentId) {
@@ -302,7 +319,9 @@ export function useJobActionsSheet(
     // Rewind via the same path the StageSheet uses for a sent→draft downgrade.
     // Look up the freshly-sent doc so its stamped sentAt/sendMethod ride along
     // (undo restores only the stage/status; the audit fields stay).
-    const current = documents.find((d) => d.id === docId);
+    // getState(), not the render-time `documents` — the actions sheet is
+    // closed by the time Undo fires, so the gated subscription is empty.
+    const current = useStore.getState().documents.find((d) => d.id === docId);
     if (!current) return;
     try {
       await applyStageChange(current, 'draft', {
@@ -381,8 +400,12 @@ export function useJobActionsSheet(
     </>
   );
 
+  // Stable identity — passed as a prop to memo'd JobCards, so a fresh
+  // closure every render would defeat their React.memo.
+  const open = useCallback((job: Job) => setActionsJob(job), []);
+
   return {
-    open: (job: Job) => setActionsJob(job),
+    open,
     element,
   };
 }

@@ -178,7 +178,12 @@ export default function App() {
   // few seconds after the dashboard mounts, and the data-load Promise.all
   // runs twice — which feels (and looks) like the app reloading itself.
   const initialisedForUidRef = useRef<string | null>(null);
-  const { isOnboarded, checkOnboarding, loadQuotes, loadBusinessSettings, loadSubscription, loadNextQuoteNumber, loadXeroConnection, loadContacts, loadDocuments, listenToDocuments } = useStore();
+  // Selector, NOT a bare useStore() destructure — the bare form subscribes
+  // App to the whole store, so every quote save / listener echo re-rendered
+  // the entire app tree (NavigationContainer down), dropping frames right as
+  // the user navigated. isOnboarded is the only state App renders from; the
+  // load actions are stable and fetched via getState() inside the effects.
+  const isOnboarded = useStore((s) => s.isOnboarded);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [showUpdateSheet, setShowUpdateSheet] = useState(false);
 
@@ -190,6 +195,17 @@ export default function App() {
   const DEMO_CAPTURE = isDemoCaptureActive();
 
   useEffect(() => {
+    const {
+      checkOnboarding,
+      loadQuotes,
+      loadBusinessSettings,
+      loadSubscription,
+      loadNextQuoteNumber,
+      loadXeroConnection,
+      loadContacts,
+      loadDocuments,
+      listenToDocuments,
+    } = useStore.getState();
     // Listen to authentication state changes
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       // Firebase's React Native AsyncStorage persistence sometimes refires
@@ -376,6 +392,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const {
+      checkOnboarding,
+      loadQuotes,
+      loadBusinessSettings,
+      loadSubscription,
+      loadNextQuoteNumber,
+      loadContacts,
+    } = useStore.getState();
     async function initialize() {
       try {
         // First-paint critical: cached state from AsyncStorage for instant UI.
@@ -439,7 +463,7 @@ export default function App() {
           const AsyncStorage = require('@react-native-async-storage/async-storage').default;
           await AsyncStorage.setItem('@quotemate:subscription', JSON.stringify(subscriptionStatus));
           await firestoreService.saveSubscriptionStatus(subscriptionStatus);
-          await loadSubscription();
+          await useStore.getState().loadSubscription();
 
           alert('Subscription activated! You now have unlimited quote analyses.');
         }

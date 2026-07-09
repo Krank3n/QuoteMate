@@ -385,7 +385,14 @@ export function DashboardScreen() {
 
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
   const [scheduleSheetJob, setScheduleSheetJob] = useState<Job | null>(null);
-  const handleJobStagePress = (job: Job) => setStageSheetJob(job);
+  // Stable identities — these go into memo'd JobCards; fresh closures every
+  // render would make React.memo useless and re-render all cards on every
+  // dashboard render.
+  const handleJobStagePress = useCallback((job: Job) => setStageSheetJob(job), []);
+  const handleJobPress = useCallback(
+    (jobId: string) => navigation.navigate('ViewJob', { jobId }),
+    [navigation],
+  );
   const handleJobStageSelect = async (target: JobStage) => {
     if (!stageSheetJob) return;
     const job = stageSheetJob;
@@ -839,7 +846,7 @@ export function DashboardScreen() {
                 <View>
                   <JobCard
                     job={job}
-                    onPress={(jobId) => navigation.navigate('ViewJob', { jobId })}
+                    onPress={handleJobPress}
                     onStagePress={handleJobStagePress}
                     onMenuPress={jobActions.open}
                   />
