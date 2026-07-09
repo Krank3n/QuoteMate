@@ -34,6 +34,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import LottieView from 'lottie-react-native';
 import { generateId } from '../../utils/generateId';
 import { needsPriceFetch } from '../../utils/priceFetchGate';
+import { initialFetchEstimateSeconds, reestimateFetchSeconds, applyPricedRow, mergePipelineMaterials } from '../../utils/priceFetchProgress';
 import { withOrigin } from '../../utils/materialOrigin';
 import { lightTap } from '../../utils/haptics';
 
@@ -611,6 +612,10 @@ export function MaterialsListScreen() {
   const [fetchEstimateSeconds, setFetchEstimateSeconds] = useState(0);
   const fetchCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fetchStartTimeRef = useRef<number>(0);
+  // When the Bunnings batch phase actually started (first batch-chunk event).
+  // Countdown re-estimates measure chunk pace from here, not from fetch start,
+  // so preflight/local/Reece time doesn't inflate the per-chunk average.
+  const batchStartedAtRef = useRef<number>(0);
 
   // Match selector state for web scraping pricing
   const [matchSelectorVisible, setMatchSelectorVisible] = useState(false);
@@ -1036,7 +1041,8 @@ export function MaterialsListScreen() {
     // events into its working card.
 
     const materialsNeedingPrices = materials.filter(needsPriceFetch);
-    const estimatedSeconds = Math.max(Math.ceil(materialsNeedingPrices.length / 3) * 35, 35);
+    const estimatedSeconds = initialFetchEstimateSeconds(materialsNeedingPrices.length);
+    batchStartedAtRef.current = 0;
     setFetchedItemNames([]);
     setFetchPhase('idle');
     setCurrentFetchingName('');
@@ -1076,16 +1082,21 @@ export function MaterialsListScreen() {
               setBatchChunkProgress({ current: event.chunkIndex, total: event.totalChunks });
               setFetchProgress(event.progress);
               if (event.currentName) setCurrentFetchingName(event.currentName);
-              // Re-estimate countdown based on actual chunk pace.
-              if (fetchCountdownRef.current) {
-                const chunksRemaining = event.totalChunks - event.chunkIndex;
-                if (chunksRemaining <= 0) {
-                  fetchEstimateSecondsRef.current = 0;
-                  setFetchEstimateSeconds(0);
-                } else {
-                  const elapsedMs = Date.now() - fetchStartTimeRef.current;
-                  const avgMsPerChunk = elapsedMs / Math.max(event.chunkIndex, 1);
-                  const newEstimate = Math.ceil((avgMsPerChunk * chunksRemaining) / 1000);
+              // Re-estimate countdown based on actual chunk pace. The
+              // chunkIndex-0 event fires before any chunk has completed —
+              // it only marks when the batch phase started; re-estimating
+              // off it crushed the countdown to a few seconds and made it
+              // jump back up when the first real chunk landed.
+              if (event.chunkIndex === 0) {
+                batchStartedAtRef.current = Date.now();
+              } else if (fetchCountdownRef.current) {
+                const newEstimate = reestimateFetchSeconds({
+                  completedChunks: event.chunkIndex,
+                  totalChunks: event.totalChunks,
+                  batchStartedAtMs: batchStartedAtRef.current || fetchStartTimeRef.current,
+                  nowMs: Date.now(),
+                });
+                if (newEstimate !== null) {
                   fetchEstimateSecondsRef.current = newEstimate;
                   setFetchEstimateSeconds(newEstimate);
                 }
@@ -1099,6 +1110,22 @@ export function MaterialsListScreen() {
               setFetchedItemNames(prev => [...prev, { name: event.name, success: event.success }]);
               if (event.success) triggerPriceFlash(event.materialId);
               if (event.progress) setFetchProgress(event.progress);
+              // Patch the priced row into the live document so the list
+              // shows the real price as it lands — previously rows sat at
+              // $0 (behind the flash animation) until the whole pipeline
+              // finished and the final apply below swapped everything in.
+              // Read the doc fresh from the store: this closure's
+              // currentQuote goes stale after the first patch.
+              if (event.success && event.material) {
+                const state = useStore.getState();
+                const liveDoc = mode === 'invoice' ? state.currentInvoice : state.currentQuote;
+                if (liveDoc?.materials) {
+                  updateQuote({
+                    ...liveDoc,
+                    materials: applyPricedRow(liveDoc.materials, event.material),
+                  } as any);
+                }
+              }
             } else if (event.kind === 'reece-reauth') {
               setReeceReauthNeeded(true);
               setReeceConnected(false);
@@ -1135,16 +1162,22 @@ export function MaterialsListScreen() {
       // handles partial-progress save + success message.
       if (cancelled) throw new Error('__FETCH_CANCELLED__');
 
-            // Final persist to ensure all fetched prices reach Firestore. The
-      // intermediate chunk-callback updateQuote() calls only mutate local
+      // Final persist to ensure all fetched prices reach Firestore. The
+      // intermediate item-priced updateQuote() patches only mutate local
       // state; without saveDraft here a screen close / app restart loses
       // every price we just scraped (Firestore would still show $0 for
-      // every material). Same pattern as the post-generation save.
-      if (currentQuote) {
-        await saveDraft({
-          ...currentQuote,
-          materials: [...updatedMaterials],
-        } as any);
+      // every material). Merge against the LIVE document, not this
+      // closure's stale snapshot — the fetch modal is dismissable, so the
+      // user may have added/removed rows while prices streamed in.
+      {
+        const state = useStore.getState();
+        const liveDoc = (mode === 'invoice' ? state.currentInvoice : state.currentQuote) ?? currentQuote;
+        if (liveDoc) {
+          await saveDraft({
+            ...liveDoc,
+            materials: mergePipelineMaterials(liveDoc.materials || [], updatedMaterials),
+          } as any);
+        }
       }
 
       // Show appropriate message based on results
@@ -1181,11 +1214,13 @@ export function MaterialsListScreen() {
       if (error?.message === '__FETCH_CANCELLED__') {
         // Cancelled via the cancel promise — persist any partial progress
         // so the user doesn't lose prices that did come through. Same
-        // saveDraft reasoning as the success-path persist above.
-        if (currentQuote) {
+        // live-document merge reasoning as the success-path persist above.
+        const state = useStore.getState();
+        const liveDoc = (mode === 'invoice' ? state.currentInvoice : state.currentQuote) ?? currentQuote;
+        if (liveDoc) {
           await saveDraft({
-            ...currentQuote,
-            materials: [...updatedMaterials],
+            ...liveDoc,
+            materials: mergePipelineMaterials(liveDoc.materials || [], updatedMaterials),
           } as any);
         }
         if (fetchedCount > 0) {
@@ -2327,8 +2362,13 @@ export function MaterialsListScreen() {
               style={styles.fetchEstimateIcon}
             />
             <Text style={styles.fetchEstimateTitle}>{chasingTitle}</Text>
-            <Text style={styles.fetchEstimateTime}>
-              {Math.floor(fetchEstimateSeconds / 60)}:{String(fetchEstimateSeconds % 60).padStart(2, '0')}
+            {/* If the estimate runs out while the tail passes (individual
+                items, pack-size reconcile) are still going, say so instead
+                of sitting frozen on 0:00. */}
+            <Text style={[styles.fetchEstimateTime, fetchEstimateSeconds <= 0 && styles.fetchEstimateTimeOverrun]}>
+              {fetchEstimateSeconds > 0
+                ? `${Math.floor(fetchEstimateSeconds / 60)}:${String(fetchEstimateSeconds % 60).padStart(2, '0')}`
+                : 'Nearly there…'}
             </Text>
             {fetchEstimateSeconds >= 10 && getTimeFunFact(fetchEstimateSeconds) ? (
               <Text style={styles.fetchFunFact}>
@@ -3693,6 +3733,10 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontVariant: ['tabular-nums'],
     marginBottom: 4,
+  },
+  fetchEstimateTimeOverrun: {
+    fontSize: 24,
+    lineHeight: 48,
   },
   fetchEstimateSubtext: {
     fontSize: 14,
