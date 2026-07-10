@@ -9,7 +9,10 @@ export default {
   expo: {
     name: "QuoteMate",
     slug: "quotemate",
-    version: "1.45",
+    // 1.46: adds the @sentry/react-native NATIVE module. Do not publish JS
+    // built from this tree as an OTA for 1.45 — the appVersion runtime
+    // policy below is what stops that from happening automatically.
+    version: "1.46",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -24,6 +27,16 @@ export default {
       policy: "appVersion"
     },
     plugins: [
+      [
+        // Native crash reporting + source-map upload wiring (CNG: applied at
+        // prebuild). Sourcemap upload during EAS builds needs SENTRY_AUTH_TOKEN
+        // in EAS env; builds still succeed without it, stacks are just minified.
+        "@sentry/react-native/expo",
+        {
+          organization: process.env.SENTRY_ORG || "hansendev",
+          project: process.env.SENTRY_PROJECT || "quotemate",
+        },
+      ],
       [
         "expo-build-properties",
         {

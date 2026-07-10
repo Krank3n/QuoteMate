@@ -1,7 +1,9 @@
-const { getDefaultConfig } = require('expo/metro-config');
+// Sentry's wrapper around expo/metro-config: same defaults plus debug-ID
+// injection so uploaded source maps match the bundles the app ships.
+const { getSentryExpoConfig } = require('@sentry/react-native/metro');
 const path = require('path');
 
-const config = getDefaultConfig(__dirname);
+const config = getSentryExpoConfig(__dirname);
 
 // Watchman is broken on this machine — its daemon hangs on spawn (the OS killed
 // the old daemon with SIGTERM and the 2025.10.06 build won't come back cleanly

@@ -5,6 +5,7 @@
 
 import 'react-native-gesture-handler';
 import React, { useEffect, useRef, useState } from 'react';
+import { initSentry, wrapRootComponent } from './src/config/sentry';
 import { Platform, View, Image, StyleSheet, LogBox, InteractionManager } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -166,7 +167,12 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
   }
 }
 
-export default function App() {
+// As early as possible so crashes during startup/data-load are captured —
+// the July 2026 ghost-job crash happened right here, between mount and the
+// first Firestore snapshot render.
+initSentry();
+
+function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -574,3 +580,5 @@ const appStyles = StyleSheet.create({
     marginTop: 16,
   },
 });
+
+export default wrapRootComponent(App);
