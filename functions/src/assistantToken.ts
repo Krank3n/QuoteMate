@@ -14,6 +14,7 @@ import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import cors from 'cors';
+import { todayKey, reserveTurnUpdate, refundTurnUpdate, Plan } from './assistantQuota.helpers';
 
 const corsHandler = cors({ origin: true });
 const db = () => admin.firestore();
@@ -25,12 +26,6 @@ const db = () => admin.firestore();
 const GEMINI_MODEL = 'gemini-3.1-flash-live-preview';
 const TOKEN_TTL_MINUTES = 30;
 const NEW_SESSION_WINDOW_MINUTES = 1;
-
-const QUOTA = {
-  free: { turns: 20 },
-  trial: { turns: 200 },
-  pro: { turns: 200 },
-};
 
 export interface RateLimitConfig { maxRequests: number; windowMs: number }
 const HEAVY: RateLimitConfig = { maxRequests: 10, windowMs: 60_000 };
@@ -91,39 +86,45 @@ export async function getEffectivePlan(uid: string): Promise<'free' | 'trial' | 
   }
 }
 
-function todayKey(): string {
-  const d = new Date();
-  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
-}
-
-interface UsageDoc { turns: number; outputTokens: number; inputTokens: number }
-
 export async function checkAndReserveQuota(
   uid: string,
-  plan: 'free' | 'trial' | 'pro',
+  plan: Plan,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const limit = QUOTA[plan];
   const ref = db().doc(`users/${uid}/assistantUsage/${todayKey()}`);
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
-    const data = (snap.data() as Partial<UsageDoc>) || {};
-    const turns = (data.turns ?? 0) + 1;
-    if (turns > limit.turns) {
-      return { ok: false, reason: `You've hit today's Mate limit (${limit.turns} turns). It resets at midnight UTC.` } as const;
-    }
+    const result = reserveTurnUpdate(snap.data(), plan);
+    if (!result.ok) return { ok: false, reason: result.reason } as const;
     tx.set(
       ref,
-      {
-        turns,
-        outputTokens: data.outputTokens ?? 0,
-        inputTokens: data.inputTokens ?? 0,
-        plan,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
+      { ...result.update, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
       { merge: true },
     );
     return { ok: true } as const;
   });
+}
+
+// Give back a turn reserved by checkAndReserveQuota when the downstream call
+// (Gemini / token mint) failed — a failed request must not eat the user's
+// daily allowance. Best-effort: a refund that itself fails is logged and
+// swallowed, never surfaced to the user.
+export async function refundQuotaTurn(uid: string): Promise<void> {
+  const ref = db().doc(`users/${uid}/assistantUsage/${todayKey()}`);
+  try {
+    await db().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const update = refundTurnUpdate(snap.data());
+      if (!update) return;
+      tx.set(
+        ref,
+        { ...update, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+    });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.warn('[assistantQuota] refund failed', err?.message);
+  }
 }
 
 interface AuthTokenResponse {
@@ -205,6 +206,8 @@ export const assistantToken = functions
       } catch (err: any) {
         // eslint-disable-next-line no-console
         console.warn('[assistantToken] mint failed', err?.message);
+        // The turn was reserved above but no session came of it — refund.
+        await refundQuotaTurn(uid);
         res.status(502).json({ error: 'Mate is offline — try again in a moment.', detail: err?.message });
       }
     });

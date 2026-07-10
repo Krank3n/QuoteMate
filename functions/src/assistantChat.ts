@@ -27,6 +27,7 @@ import {
   checkRateLimit,
   getEffectivePlan,
   checkAndReserveQuota,
+  refundQuotaTurn,
   RateLimitConfig,
 } from './assistantToken';
 import { recordChatUsage } from './assistantCosts';
@@ -62,7 +63,10 @@ export const assistantChat = functions
       }
 
       // Reserve quota once per user turn (first call only). Tool-loop
-      // continuations pass countTurn=false and don't re-charge.
+      // continuations pass countTurn=false and don't re-charge. If the
+      // Gemini call below then fails, the reserved turn is refunded — a
+      // failed request must not eat the user's daily allowance.
+      let reservedTurn = false;
       if (countTurn) {
         const plan = await getEffectivePlan(decoded.uid);
         const quota = await checkAndReserveQuota(decoded.uid, plan);
@@ -70,6 +74,7 @@ export const assistantChat = functions
           res.status(402).json({ error: quota.reason, code: 'QUOTA_EXCEEDED' });
           return;
         }
+        reservedTurn = true;
       }
 
       const body: Record<string, unknown> = { contents };
@@ -85,6 +90,7 @@ export const assistantChat = functions
           body: JSON.stringify(body),
         });
       } catch (err: any) {
+        if (reservedTurn) await refundQuotaTurn(decoded.uid);
         res.status(502).json({ error: 'Mate is offline — try again in a moment.', detail: err?.message });
         return;
       }
@@ -93,12 +99,14 @@ export const assistantChat = functions
       if (!geminiRes.ok) {
         // eslint-disable-next-line no-console
         console.warn('[assistantChat] gemini error', geminiRes.status, text.slice(0, 300));
+        if (reservedTurn) await refundQuotaTurn(decoded.uid);
         res.status(502).json({ error: 'Mate hit a snag — try again in a moment.' });
         return;
       }
 
       let parsed: any;
       try { parsed = JSON.parse(text); } catch {
+        if (reservedTurn) await refundQuotaTurn(decoded.uid);
         res.status(502).json({ error: 'Mate returned an unreadable reply.' });
         return;
       }
