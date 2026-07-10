@@ -162,10 +162,13 @@ const TRADE_PITCH: Record<Trade, string> = {
 // HELPERS — normalisation, dedupe, suppression
 // ============================================================
 
-function normaliseEmail(s: string | null | undefined): string | null {
+export function normaliseEmail(s: string | null | undefined): string | null {
   if (!s) return null;
   const t = String(s).trim().toLowerCase();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t) ? t : null;
+  // No '/' anywhere: scrapers hand us protocol-relative junk like
+  // "//kirsten@example.com", which reads as a valid address but then
+  // builds an invalid leadSuppression doc path and poisons the send queue.
+  return /^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(t) ? t : null;
 }
 
 function domainOf(email: string | null | undefined): string | null {
@@ -202,12 +205,23 @@ async function findExistingUserByEmail(email: string): Promise<string | null> {
   }
 }
 
+/**
+ * Build a leadSuppression doc ID that is always a single valid Firestore
+ * path segment. Scraped values can contain '/' (protocol-relative emails,
+ * some base64-style Google Place IDs), which would otherwise make
+ * doc(`leadSuppression/${id}`) throw. '%2F' keeps every existing
+ * suppression doc (no slashes possible before) addressable unchanged.
+ */
+export function suppressionDocId(type: string, value: string): string {
+  return `${type}:${value}`.replace(/\//g, '%2F');
+}
+
 async function isSuppressed(keys: { email?: string; domain?: string; phone?: string; placeId?: string }): Promise<{ suppressed: boolean; reason?: string }> {
   const checks: Array<{ id: string; type: string }> = [];
-  if (keys.email) checks.push({ id: `email:${keys.email}`, type: 'email' });
-  if (keys.domain) checks.push({ id: `domain:${keys.domain}`, type: 'domain' });
-  if (keys.phone) checks.push({ id: `phone:${keys.phone}`, type: 'phone' });
-  if (keys.placeId) checks.push({ id: `placeId:${keys.placeId}`, type: 'placeId' });
+  if (keys.email) checks.push({ id: suppressionDocId('email', keys.email), type: 'email' });
+  if (keys.domain) checks.push({ id: suppressionDocId('domain', keys.domain), type: 'domain' });
+  if (keys.phone) checks.push({ id: suppressionDocId('phone', keys.phone), type: 'phone' });
+  if (keys.placeId) checks.push({ id: suppressionDocId('placeId', keys.placeId), type: 'placeId' });
   for (const c of checks) {
     const snap = await db().doc(`leadSuppression/${c.id}`).get();
     if (snap.exists) return { suppressed: true, reason: (snap.data() as any)?.reason || 'suppressed' };
@@ -216,7 +230,7 @@ async function isSuppressed(keys: { email?: string; domain?: string; phone?: str
 }
 
 async function addSuppression(params: { type: 'email' | 'domain' | 'phone' | 'placeId'; value: string; reason: string }): Promise<void> {
-  const id = `${params.type}:${params.value}`;
+  const id = suppressionDocId(params.type, params.value);
   await db().doc(`leadSuppression/${id}`).set({
     type: params.type,
     value: params.value,
@@ -1470,18 +1484,28 @@ export const autoSendQueuedLeads = functions.pubsub
 
     for (const d of queuedSnap.docs) {
       if (sent >= budget) break;
-      const r = await sendOneLead({
-        leadId: d.id,
-        domainSendCounts,
-        perDomainMax,
-        bySender: 'auto',
-      });
+      // One lead throwing must not abort the run: the scan is oldest-first,
+      // so an uncaught error here dammed the entire queue behind a single
+      // poison lead (Jun-Jul 2026: a scraped "//user@domain" email blocked
+      // all sends for 11 days).
+      let r: { sent: boolean; reason?: string };
+      try {
+        r = await sendOneLead({
+          leadId: d.id,
+          domainSendCounts,
+          perDomainMax,
+          bySender: 'auto',
+        });
+      } catch (err) {
+        console.error(`autoSendQueuedLeads: sendOneLead threw for lead ${d.id}`, err);
+        r = { sent: false, reason: 'exception' };
+      }
       if (r.sent) {
         sent++;
       } else {
         const reason = r.reason || 'unknown';
         skipReasons[reason] = (skipReasons[reason] || 0) + 1;
-        if (reason === 'send_failed') failed++;
+        if (reason === 'send_failed' || reason === 'exception') failed++;
         else skipped++;
       }
     }
