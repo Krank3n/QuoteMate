@@ -47,6 +47,16 @@ interface StageMeta {
   bgColor: string;
 }
 
+/**
+ * Stage meta with a safe fallback. A server aggregate write racing a client
+ * job delete has produced stage-less "ghost" job docs in production (see
+ * syncJobAggregates), and JobCard renders whatever the listener delivers —
+ * one malformed doc must never hard-crash every screen that shows jobs.
+ */
+export function stageMetaFor(stage: JobStage | undefined): StageMeta {
+  return JOB_STAGE_META[stage as JobStage] ?? JOB_STAGE_META.inquiry;
+}
+
 export const JOB_STAGE_META: Record<JobStage, StageMeta> = {
   inquiry: {
     chipLabel: 'Inquiry',

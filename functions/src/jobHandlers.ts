@@ -268,7 +268,8 @@ async function syncJobAggregates(userId: string, jobId: string): Promise<void> {
   const existingUpdatedAt = Number(job.updatedAt) || 0;
   const updatedAt = Math.max(existingUpdatedAt, docMaxUpdatedAt) || Date.now();
 
-  await jobRef.set(
+  await applyJobAggregatePatch(
+    jobRef,
     {
       ...aggregates,
       ...userFields,
@@ -276,8 +277,38 @@ async function syncJobAggregates(userId: string, jobId: string): Promise<void> {
       ...stageStamp,
       updatedAt,
     },
-    { merge: true },
+    () =>
+      functions.logger.warn('syncJobAggregates: job deleted mid-flight, skipping aggregate write', {
+        userId, jobId,
+      }),
   );
+}
+
+/** gRPC status code Firestore uses for update() on a missing document. */
+const GRPC_NOT_FOUND = 5;
+
+/**
+ * Apply the aggregate patch with update(), not set({merge}): if the client
+ * deleted or re-keyed the Job between the trigger's read and this write, a
+ * merge-set would recreate it as a stage-less "ghost" doc holding only
+ * aggregates — which then renders as a malformed card on every device (the
+ * July 2026 crash-on-open). NOT_FOUND just means the Job is gone and there
+ * is nothing left to aggregate onto.
+ */
+export async function applyJobAggregatePatch(
+  jobRef: { update: (data: Record<string, unknown>) => Promise<unknown> },
+  patch: Record<string, unknown>,
+  onMissing: () => void,
+): Promise<void> {
+  try {
+    await jobRef.update(patch);
+  } catch (err) {
+    if ((err as { code?: number }).code === GRPC_NOT_FOUND) {
+      onMissing();
+      return;
+    }
+    throw err;
+  }
 }
 
 // Map Job stage → write-once timestamp field on the Job document.

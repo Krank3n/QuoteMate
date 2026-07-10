@@ -30,7 +30,7 @@ import { deriveDuration } from '../utils/deriveDuration';
 import { useNavigation } from '@react-navigation/native';
 import { useIsAppActive } from '../hooks/useIsAppActive';
 
-import { JOB_STAGE_META } from './JobStageSheet';
+import { stageMetaFor } from './JobStageSheet';
 import { ShimmerOverlay } from './ShimmerOverlay';
 import { selectionTap } from '../utils/haptics';
 import { openJobPreview } from '../utils/openJobPreview';
@@ -113,11 +113,11 @@ function pickStageStatus(job: Job): { label: string; ms: number } {
   const key = STAGE_TIMESTAMP_KEY[job.stage];
   const stamped = key ? (job[key] as number | undefined) : undefined;
   const ms = stamped || job.updatedAt || job.createdAt;
-  return { label: STAGE_STATUS_LABELS[job.stage], ms };
+  return { label: STAGE_STATUS_LABELS[job.stage] ?? STAGE_STATUS_LABELS.inquiry, ms };
 }
 
 export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress, onMenuPress }: JobCardProps) {
-  const meta = JOB_STAGE_META[job.stage];
+  const meta = stageMetaFor(job.stage);
   // Live-derive the headline price from attached docs so a draft quote
   // shows its running total here without waiting on the server-side
   // syncJobAggregates trigger. Mirrors the precedence used on

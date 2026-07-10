@@ -27,7 +27,7 @@ import { JobDetailHeader } from '../components/JobDetailHeader';
 import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { StageSheet } from '../components/StageSheet';
-import { JobStageSheet, JOB_STAGE_META } from '../components/JobStageSheet';
+import { JobStageSheet, stageMetaFor } from '../components/JobStageSheet';
 import {
   crossesContractLine,
   depositHasBeenPaid,
@@ -168,7 +168,7 @@ export function ViewJobScreen() {
     );
   }
 
-  const meta = JOB_STAGE_META[job.stage];
+  const meta = stageMetaFor(job.stage);
   // Duration comes from the primary attached doc's labour rather than
   // duplicate fields on the Job itself. Prefer the explicitly-linked
   // primaryDocumentId when it's still on the job; otherwise fall back to
