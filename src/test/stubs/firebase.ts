@@ -11,3 +11,5 @@ export const auth: { currentUser: { uid: string } | null } = {
 };
 
 export const db = {} as unknown;
+
+export const functions = {} as unknown;

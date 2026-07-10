@@ -26,16 +26,48 @@ import { MATE_SYSTEM_PROMPT } from './assistant/systemPrompt';
 import { TOOL_DECLARATIONS } from './assistant/toolSchemas';
 import { dispatchToolCall } from './assistant/toolDispatcher';
 import {
+  CHAT_TIMEOUT_MS,
   FIREBASE_FUNCTIONS_URL,
   MAX_HISTORY_TURNS,
   LiveAuthError,
   LiveOfflineError,
   LiveQuotaError,
+  fetchWithTimeout,
 } from './assistant/liveSession';
 
 // Hard cap on tool round-trips per turn — a model that keeps calling tools
 // can't spin forever. Real turns settle in 1-3 hops.
 const MAX_TOOL_HOPS = 8;
+
+// One automatic retry on transient transport failures (network drop, timeout,
+// 502/503/504) before surfacing an error bubble — a single blip on site
+// shouldn't cost the tradie their typed message. 4xx (quota, rate limit, bad
+// request) never retries. Known trade-off: if the first attempt reached the
+// server but the response was lost, the retry can reserve a second quota
+// turn; bounded at one, and server-side refund-on-failure is tracked
+// separately.
+const TRANSIENT_STATUSES = new Set([502, 503, 504]);
+const CHAT_RETRY_DELAY_MS = 800;
+
+async function postChatWithRetry(idToken: string, body: string): Promise<Response> {
+  let lastErr: any;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, CHAT_RETRY_DELAY_MS));
+    try {
+      const response = await fetchWithTimeout(`${FIREBASE_FUNCTIONS_URL}/assistantChat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body,
+      }, CHAT_TIMEOUT_MS);
+      if (TRANSIENT_STATUSES.has(response.status) && attempt === 0) continue;
+      return response;
+    } catch (err: any) {
+      lastErr = err;
+    }
+  }
+  if (lastErr instanceof LiveOfflineError) throw lastErr;
+  throw new LiveOfflineError(lastErr?.message || 'Network error.');
+}
 
 interface GeminiFunctionCall {
   name: string;
@@ -72,21 +104,12 @@ async function callChat(
   const idToken = await auth.currentUser?.getIdToken();
   if (!idToken) throw new LiveAuthError('Sign in to use Mate.');
 
-  let response: Response;
-  try {
-    response = await fetch(`${FIREBASE_FUNCTIONS_URL}/assistantChat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-      body: JSON.stringify({
-        contents,
-        systemInstruction: { parts: [{ text: MATE_SYSTEM_PROMPT }] },
-        tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
-        countTurn,
-      }),
-    });
-  } catch (err: any) {
-    throw new LiveOfflineError(err?.message || 'Network error.');
-  }
+  const response = await postChatWithRetry(idToken, JSON.stringify({
+    contents,
+    systemInstruction: { parts: [{ text: MATE_SYSTEM_PROMPT }] },
+    tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+    countTurn,
+  }));
 
   if (response.status === 402) {
     const data = await response.json().catch(() => ({}));

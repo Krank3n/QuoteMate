@@ -38,6 +38,8 @@ import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGr
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { shouldAutoStartMic } from './assistant/shouldAutoStartMic';
+import { voiceActionForAppState, VOICE_INACTIVE_GRACE_MS } from './assistant/voiceAppStatePolicy';
+import { createVoiceOpenGate } from './assistant/voiceOpenGate';
 
 // Tag for the screen-wake lock held during voice mode. Keeping it the same
 // across activate/deactivate calls means even if a second voice session
@@ -1165,7 +1167,13 @@ export function AssistantScreen() {
     lastVoiceActivityRef.current = Date.now();
   }, []);
 
+  // Serialises opens against stops — see voiceOpenGate for the two races.
+  const voiceOpenGateRef = useRef(createVoiceOpenGate());
+
   const stopVoiceSession = useCallback(async () => {
+    // Cancel any open still in flight so it can't resurrect refs after
+    // this teardown finishes.
+    voiceOpenGateRef.current.invalidate();
     const mic = micRef.current;
     const queue = audioQueueRef.current;
     const session = voiceSessionRef.current;
@@ -1237,6 +1245,15 @@ export function AssistantScreen() {
   }, [navigation, handleNewChat, isEmpty]);
 
   const openVoiceMode = useCallback(async (mode: 'sticky' | 'ptt') => {
+    // One open at a time. The auto-start path awaits a permission check
+    // before landing here, so a manual tap can arrive concurrently — without
+    // this, both opens run and the loser's mic/queue/socket are orphaned.
+    const gate = voiceOpenGateRef.current;
+    const openToken = gate.tryBegin();
+    if (openToken === null || voiceModeRef.current) {
+      if (openToken !== null) gate.end(openToken);
+      return;
+    }
     voiceModeRef.current = mode;
     setVoiceMode(mode);
 
@@ -1276,7 +1293,42 @@ export function AssistantScreen() {
         userBubbleTextRef.current = '';
       };
 
+      // The audio queue is single-use — stop() is terminal (no restart), so a
+      // reconnect swaps in a fresh queue rather than reusing the drained one.
+      const makeQueue = () => {
+        const q = createAudioQueue();
+        q.setOnActiveChange((active) => {
+          matePlayingRef.current = active;
+          // Audio playback is itself activity — don't time out mid-reply.
+          if (active) touchVoiceActivity();
+        });
+        return q;
+      };
+
       session = await openVoiceSession(seedHistory, {
+        onReconnecting: (attempt) => {
+          // The socket dropped mid-session (patchy site coverage). Whatever
+          // turn was in flight is gone — flush the half-open bubbles so the
+          // next turn starts clean, cut the stale audio, and show connecting
+          // instead of an error.
+          touchVoiceActivity();
+          userBubbleIdRef.current = null;
+          userBubbleTextRef.current = '';
+          assistantBubbleIdRef.current = null;
+          assistantBubbleTextRef.current = '';
+          const staleQueue = audioQueueRef.current;
+          audioQueueRef.current = null;
+          matePlayingRef.current = false;
+          if (staleQueue) { try { void staleQueue.stop(); } catch { /* noop */ } }
+          setVoiceState('connecting');
+          // eslint-disable-next-line no-console
+          console.log('[Mate voice] reconnecting, attempt', attempt);
+        },
+        onReconnected: () => {
+          touchVoiceActivity();
+          audioQueueRef.current = makeQueue();
+          setVoiceState('listening');
+        },
         onInputTranscription: (text, finished) => {
           if (!text) return;
           // Real speech detected by server VAD — keep the watchdog at bay.
@@ -1500,15 +1552,27 @@ export function AssistantScreen() {
         onClose: () => {
           void stopVoiceSession();
         },
+      }, {
+        // Sticky sessions ride out socket drops (job-site coverage comes and
+        // goes); PTT is single-shot — half a push-to-talk turn can't be
+        // restored, so it just ends like before.
+        reconnect: mode === 'sticky',
+        // Reseed with the latest transcript so turns spoken since the
+        // original open survive the reconnect.
+        getSeedHistory: () =>
+          useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [],
       });
 
+      // A stop landed while the mint/handshake was in flight — this open is
+      // cancelled. Close the fresh session instead of resurrecting refs the
+      // teardown just nulled (hot mic + live socket behind an idle UI).
+      if (!gate.isCurrent(openToken)) {
+        try { session.close(); } catch { /* noop */ }
+        return;
+      }
+
       voiceSessionRef.current = session;
-      audioQueueRef.current = createAudioQueue();
-      audioQueueRef.current.setOnActiveChange((active) => {
-        matePlayingRef.current = active;
-        // Audio playback is itself activity — don't time out mid-reply.
-        if (active) touchVoiceActivity();
-      });
+      audioQueueRef.current = makeQueue();
 
       // Sticky-only idle watchdog. PTT auto-closes on turnComplete already,
       // so it doesn't need this. We only ever fire the auto-close when the
@@ -1586,7 +1650,7 @@ export function AssistantScreen() {
       // first call also triggers the browser permission prompt, so this
       // is awaited.
       try {
-        micRef.current = await startMicCapture((chunk) => {
+        const mic = await startMicCapture((chunk) => {
           // Half-duplex: while Mate's audio reply is playing, drop mic
           // chunks so the speaker output doesn't get echoed back into
           // Gemini's server-side VAD as a fresh user turn (which was the
@@ -1612,6 +1676,13 @@ export function AssistantScreen() {
             }
           }
         });
+        // A stop landed while the mic was spinning up — release it instead
+        // of assigning it into a ref the teardown already nulled.
+        if (!gate.isCurrent(openToken)) {
+          try { void mic.stop(); } catch { /* noop */ }
+          return;
+        }
+        micRef.current = mic;
       } catch (err: any) {
         appendMessage(convoId!, {
           id: generateId(),
@@ -1628,6 +1699,7 @@ export function AssistantScreen() {
       }
 
       setVoiceState('listening');
+      gate.end(openToken);
     } catch (err: any) {
       // eslint-disable-next-line no-console
       console.warn('[Mate voice] open failed', err?.name, err?.message);
@@ -1734,20 +1806,55 @@ export function AssistantScreen() {
         void tryAutoStart();
       }
 
+      // 'inactive' (iOS: Control Center, notification shade, call banner)
+      // gets a grace window instead of an instant teardown — see
+      // voiceAppStatePolicy. 'background' still stops immediately.
+      let inactiveGraceTimer: ReturnType<typeof setTimeout> | null = null;
+      const clearInactiveGrace = () => {
+        if (inactiveGraceTimer) {
+          clearTimeout(inactiveGraceTimer);
+          inactiveGraceTimer = null;
+        }
+      };
+
       const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-        if (nextState === 'background' || nextState === 'inactive') {
-          void stopVoiceSessionRef.current();
-        } else if (nextState === 'active' && enabled) {
-          // Returning from a temporary background — re-arm even though we
-          // already auto-started this visit (the session was stopped on
-          // background).
-          hasAutoStartedThisVisit = false;
-          void tryAutoStart();
+        const action = voiceActionForAppState({
+          nextState,
+          hasVoiceSession: !!voiceModeRef.current,
+          graceRunning: !!inactiveGraceTimer,
+        });
+        switch (action) {
+          case 'stop':
+            clearInactiveGrace();
+            void stopVoiceSessionRef.current();
+            break;
+          case 'start-grace':
+            inactiveGraceTimer = setTimeout(() => {
+              inactiveGraceTimer = null;
+              // eslint-disable-next-line no-console
+              console.log('[Mate voice] inactive grace expired — stopping session');
+              void stopVoiceSessionRef.current();
+            }, VOICE_INACTIVE_GRACE_MS);
+            break;
+          case 'cancel-grace':
+            clearInactiveGrace();
+            if (enabled) {
+              // Returning from a temporary background — re-arm even though we
+              // already auto-started this visit (the session was stopped on
+              // background). If the session rode out a grace window it's
+              // still open, and tryAutoStart's voiceState guard is a no-op.
+              hasAutoStartedThisVisit = false;
+              void tryAutoStart();
+            }
+            break;
+          case 'ignore':
+            break;
         }
       });
 
       return () => {
         cancelled = true;
+        clearInactiveGrace();
         sub.remove();
         void stopVoiceSessionRef.current();
       };

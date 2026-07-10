@@ -9,6 +9,18 @@
 //   * Output carries audio chunks alongside text — the screen drives the
 //     queue in audioPlayer; the bubble shows the transcription.
 //
+// Reconnection: tradies are on job sites with patchy coverage, so a mid-
+// conversation socket drop is the norm, not the exception. When an
+// established socket drops without the user closing it, the session re-mints
+// a token, opens a fresh socket, and reseeds the transcript — surfacing
+// onReconnecting/onReconnected instead of onError/onClose, which now only
+// fire when the session is truly over. Only sticky voice opts in
+// (opts.reconnect); PTT stays single-shot because a half-finished
+// push-to-talk turn can't be restored (the user's audio isn't in the
+// transcript). Each reconnect attempt mints a fresh token (they're
+// single-use), which reserves a quota turn server-side — the attempt cap
+// bounds that cost.
+//
 // The text path (`sendAssistantTurn`) is unchanged and intentionally
 // stays single-shot — burning a token mint per text turn is cheap and
 // the simpler lifecycle keeps that path easy to debug.
@@ -19,12 +31,30 @@ import { functions } from '../../config/firebase';
 import { MATE_SYSTEM_PROMPT } from './systemPrompt';
 import { TOOL_DECLARATIONS, CONTROL_TOOL_DECLARATIONS, isControlTool } from './toolSchemas';
 import { dispatchToolCall } from './toolDispatcher';
-import { LIVE_WS_BASE, MAX_HISTORY_TURNS, LiveOfflineError, mintLiveToken } from './liveSession';
+import {
+  LIVE_WS_BASE,
+  MAX_HISTORY_TURNS,
+  LiveAuthError,
+  LiveOfflineError,
+  LiveQuotaError,
+  mintLiveToken,
+} from './liveSession';
+
+// If the socket opens but the server never acks the setup frame (silently
+// rejected token, half-open connection), fail the connect instead of leaving
+// the UI stuck on "connecting" forever.
+export const SETUP_TIMEOUT_MS = 12_000;
+// Backoff between reconnect attempts. Length = max attempts.
+export const RECONNECT_DELAYS_MS = [600, 1600, 3200];
+// Cap on clientContent frames (typed text / context notes) queued while a
+// reconnect is in flight. Anything beyond this is dropped oldest-first.
+const MAX_PENDING_CLIENT_FRAMES = 20;
 
 // Live API only sends usageMetadata to the client; the server-side proxy
 // never sees it (the WS runs device→Gemini on an ephemeral token). We
-// accumulate per-modality totals across the session and report once on
-// close so /admin/ai-costs can attribute real voice spend to the user.
+// accumulate per-modality totals per physical connection and report once as
+// each socket closes — across reconnects that yields one report per socket,
+// so /admin/ai-costs still attributes real voice spend to the user.
 interface LiveUsageTotals {
   inputTextTokens: number;
   outputTextTokens: number;
@@ -129,10 +159,33 @@ export interface VoiceSessionCallbacks {
   onShowQuote?: (quoteId: string) => { ok: boolean; error?: string };
   /** One model turn finished; ready for the next user turn. */
   onTurnComplete?: () => void;
-  /** Fatal error; the session is closed. */
+  /**
+   * The socket dropped mid-session and an automatic reconnect attempt is
+   * starting (attempt is 1-based). Whatever turn was in flight is gone —
+   * the screen should flush half-open bubbles and show a connecting state.
+   */
+  onReconnecting?: (attempt: number) => void;
+  /** Reconnect succeeded — session is live again with the transcript reseeded. */
+  onReconnected?: () => void;
+  /** Fatal error; the session is closed. Never fires for a drop that reconnects. */
   onError?: (err: Error) => void;
-  /** The server closed the connection (graceful or otherwise). */
+  /** The session is over — user close, server close (PTT), or reconnect exhausted. */
   onClose?: (code: number | undefined) => void;
+}
+
+export interface VoiceSessionOptions {
+  /**
+   * Reconnect automatically when an established socket drops. Sticky voice
+   * passes true; PTT leaves it off (single-shot turn — the user's audio isn't
+   * in the transcript, so half a turn can't be restored).
+   */
+  reconnect?: boolean;
+  /**
+   * Fresh transcript to reseed a reconnected session, so turns that happened
+   * after the original open aren't lost. Falls back to the history passed to
+   * openVoiceSession.
+   */
+  getSeedHistory?: () => ChatMessage[];
 }
 
 export interface VoiceSession {
@@ -151,271 +204,432 @@ export interface VoiceSession {
   endUserTurn: () => void;
   /** Close the WS — drops any in-flight model output. */
   close: () => void;
-  /** True until close() runs or the server closes. */
+  /** True until close() runs, the server closes (PTT), or reconnects exhaust. */
   isOpen: () => boolean;
+}
+
+function buildSeedTurns(history: ChatMessage[]) {
+  return history
+    .slice(-MAX_HISTORY_TURNS)
+    .filter((m) => m.text?.trim())
+    .map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.text }],
+    }));
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// One physical socket. The facade returned by openVoiceSession outlives these
+// across reconnects.
+interface Connection {
+  send: (frame: any) => void;
+  sendMicChunk: (b64: string) => void;
+  close: () => void;
+  isUsable: () => boolean;
 }
 
 export async function openVoiceSession(
   history: ChatMessage[],
   cb: VoiceSessionCallbacks,
+  opts: VoiceSessionOptions = {},
 ): Promise<VoiceSession> {
-  const { token, model } = await mintLiveToken('voice');
+  // ---- session-level state, shared across physical connections ----
+  let alive = true; // false once the user closed or recovery gave up
+  let reconnecting = false;
+  let conn: Connection | null = null;
+  // Closes the socket of a connect attempt that hasn't settled yet, so a
+  // user close during a reconnect doesn't leave it dangling until the
+  // setup timeout.
+  let abortInFlightConnect: (() => void) | null = null;
+  const pendingClientFrames: any[] = [];
 
-  return new Promise<VoiceSession>((resolve, reject) => {
-    const url = `${LIVE_WS_BASE}?access_token=${encodeURIComponent(token)}`;
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(url);
-    } catch (err: any) {
-      reject(new LiveOfflineError(err?.message || 'WebSocket init failed.'));
+  // Single funnel for "the session is over" — guarantees onClose fires once
+  // and onError only rides along when there's a real failure to surface.
+  let finished = false;
+  const finishSession = (code?: number, err?: Error) => {
+    if (finished) return;
+    finished = true;
+    alive = false;
+    if (err) cb.onError?.(err);
+    cb.onClose?.(code);
+  };
+
+  // An established socket dropped without close() being called.
+  const handleDrop = (code?: number) => {
+    if (!alive) {
+      finishSession(code);
       return;
     }
+    if (opts.reconnect) {
+      void runReconnect(code);
+      return;
+    }
+    finishSession(code);
+  };
 
-    let open = true;
-    let setupAcked = false;
-    const pendingChunks: string[] = [];
-    let resolved = false;
-    const usageTotals = emptyUsageTotals();
-    let usageReported = false;
-    const flushUsage = () => {
-      if (usageReported) return;
-      usageReported = true;
-      // Fire-and-forget — the WS is already torn down by the time this runs.
-      void reportLiveUsage(model, usageTotals);
-    };
-
-    const safeSend = (frame: any) => {
-      if (!open) return;
-      try {
-        ws.send(JSON.stringify(frame));
-      } catch (err: any) {
-        cb.onError?.(new LiveOfflineError(err?.message || 'Send failed.'));
+  async function runReconnect(dropCode?: number): Promise<void> {
+    if (reconnecting || !alive) return;
+    reconnecting = true;
+    conn = null;
+    let lastErr: Error | null = null;
+    for (let attempt = 1; attempt <= RECONNECT_DELAYS_MS.length; attempt++) {
+      // Re-check before every attempt: the user may have closed during the
+      // previous attempt's backoff or in-flight connect. Without this the
+      // callback fires after teardown and wedges the screen on 'connecting'.
+      if (!alive) {
+        reconnecting = false;
+        return;
       }
-    };
-
-    const closeSession = (code?: number) => {
-      if (!open) return;
-      open = false;
-      try { ws.close(); } catch { /* noop */ }
-      flushUsage();
-      cb.onClose?.(code);
-    };
-
-    const session: VoiceSession = {
-      sendMicChunk: (b64) => {
-        if (!open || !b64) return;
-        if (!setupAcked) {
-          // Drain after setupComplete so we don't lose the start of the
-          // first utterance.
-          pendingChunks.push(b64);
+      cb.onReconnecting?.(attempt);
+      await sleep(RECONNECT_DELAYS_MS[attempt - 1]);
+      if (!alive) {
+        reconnecting = false;
+        return; // user closed while we were waiting
+      }
+      try {
+        const seed = opts.getSeedHistory ? opts.getSeedHistory() : history;
+        const next = await connectOnce(seed);
+        if (!alive) {
+          // User closed while the connect was in flight — don't resurrect.
+          next.close();
+          reconnecting = false;
           return;
         }
-        safeSend({
-          realtimeInput: {
-            audio: { mimeType: 'audio/pcm;rate=16000', data: b64 },
-          },
-        });
-      },
-      sendUserText: (text) => {
-        if (!open || !text.trim()) return;
-        safeSend({
-          clientContent: {
-            turns: [{ role: 'user', parts: [{ text }] }],
-            turnComplete: true,
-          },
-        });
-      },
-      sendContextNote: (text) => {
-        if (!open || !text.trim()) return;
-        safeSend({
-          clientContent: {
-            turns: [{ role: 'user', parts: [{ text }] }],
-            turnComplete: false,
-          },
-        });
-      },
-      endUserTurn: () => {
+        conn = next;
+        reconnecting = false;
+        cb.onReconnected?.();
+        return;
+      } catch (err: any) {
+        lastErr = err instanceof Error ? err : new LiveOfflineError('Voice reconnect failed.');
+        // Quota/auth failures won't heal with another attempt — bail now
+        // rather than burning more mints.
+        if (err instanceof LiveQuotaError || err instanceof LiveAuthError) break;
+      }
+    }
+    reconnecting = false;
+    finishSession(dropCode, lastErr ?? new LiveOfflineError('Voice connection lost.'));
+  }
+
+  // Mint a token, open a socket, resolve once the server acks the setup
+  // frame. Rejects on error/close/timeout before that ack.
+  async function connectOnce(seedHistory: ChatMessage[]): Promise<Connection> {
+    const { token, model } = await mintLiveToken('voice');
+
+    return new Promise<Connection>((resolve, reject) => {
+      const url = `${LIVE_WS_BASE}?access_token=${encodeURIComponent(token)}`;
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(url);
+      } catch (err: any) {
+        reject(new LiveOfflineError(err?.message || 'WebSocket init failed.'));
+        return;
+      }
+      abortInFlightConnect = () => {
+        try { ws.close(); } catch { /* noop */ }
+      };
+
+      let open = true; // this socket is usable
+      let setupAcked = false;
+      let settled = false; // this promise resolved/rejected
+      const pendingChunks: string[] = [];
+      const usageTotals = emptyUsageTotals();
+      let usageReported = false;
+      const flushUsage = () => {
+        if (usageReported) return;
+        usageReported = true;
+        // Fire-and-forget — the WS is already torn down by the time this runs.
+        void reportLiveUsage(model, usageTotals);
+      };
+
+      const setupTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        open = false;
+        try { ws.close(); } catch { /* noop */ }
+        reject(new LiveOfflineError('Voice connection timed out during setup.'));
+      }, SETUP_TIMEOUT_MS);
+
+      const safeSend = (frame: any) => {
         if (!open) return;
-        safeSend({ realtimeInput: { audioStreamEnd: true } });
-      },
-      close: () => closeSession(),
-      isOpen: () => open,
-    };
+        try {
+          ws.send(JSON.stringify(frame));
+        } catch {
+          // A failed send means the socket is on its way out. Close it and
+          // let onclose decide between reconnect and final teardown.
+          try { ws.close(); } catch { /* noop */ }
+        }
+      };
 
-    ws.onopen = () => {
-      // Seed the session with prior conversation history as system turns
-      // so Mate picks up where the chat left off.
-      const seedTurns = history
-        .slice(-MAX_HISTORY_TURNS)
-        .filter((m) => m.text?.trim())
-        .map((m) => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.text }],
-        }));
-
-      const setup = {
-        setup: {
-          model: `models/${model}`,
-          generationConfig: {
-            responseModalities: ['AUDIO'],
-            // Pin the session to English. gemini-live-2.5-flash is a
-            // half-cascade model, so it accepts speechConfig.languageCode
-            // (native-audio models don't). Without it the ASR auto-detects
-            // per utterance and intermittently renders plain English in
-            // another language (a known Live preview bug — e.g. a stray
-            // "à compter de Non, je ne pense pas." for "No, I don't think
-            // so."). en-US is the only widely-supported English code: en-AU
-            // and en-GB are NOT on the supported list and get rejected,
-            // which would kill the whole setup frame. The Aussie *tone*
-            // comes from the system prompt + the chosen voice, not this.
-            speechConfig: { languageCode: 'en-US' },
-          },
-          systemInstruction: { parts: [{ text: MATE_SYSTEM_PROMPT }] },
-          // Voice gets the control tools on top of the shared set so the tradie
-          // can accept/cancel a card by voice when they can't tap.
-          tools: [{ functionDeclarations: [...TOOL_DECLARATIONS, ...CONTROL_TOOL_DECLARATIONS] }],
-          // Server-side VAD — Mate replies when the tradie stops speaking,
-          // no client-side turn boundary needed.
-          realtimeInputConfig: {
-            automaticActivityDetection: {
-              disabled: false,
-              silenceDurationMs: 1200,
-              prefixPaddingMs: 300,
+      const connection: Connection = {
+        send: safeSend,
+        sendMicChunk: (b64) => {
+          if (!open || !b64) return;
+          if (!setupAcked) {
+            // Drain after setupComplete so we don't lose the start of the
+            // first utterance.
+            pendingChunks.push(b64);
+            return;
+          }
+          safeSend({
+            realtimeInput: {
+              audio: { mimeType: 'audio/pcm;rate=16000', data: b64 },
             },
+          });
+        },
+        close: () => {
+          if (!open) return;
+          open = false;
+          try { ws.close(); } catch { /* noop */ }
+          flushUsage();
+        },
+        isUsable: () => open && setupAcked,
+      };
+
+      ws.onopen = () => {
+        // Seed the session with prior conversation history as system turns
+        // so Mate picks up where the chat left off.
+        const seedTurns = buildSeedTurns(seedHistory);
+
+        const setup = {
+          setup: {
+            model: `models/${model}`,
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              // Pin the session to English. gemini-live-2.5-flash is a
+              // half-cascade model, so it accepts speechConfig.languageCode
+              // (native-audio models don't). Without it the ASR auto-detects
+              // per utterance and intermittently renders plain English in
+              // another language (a known Live preview bug — e.g. a stray
+              // "à compter de Non, je ne pense pas." for "No, I don't think
+              // so."). en-US is the only widely-supported English code: en-AU
+              // and en-GB are NOT on the supported list and get rejected,
+              // which would kill the whole setup frame. The Aussie *tone*
+              // comes from the system prompt + the chosen voice, not this.
+              speechConfig: { languageCode: 'en-US' },
+            },
+            systemInstruction: { parts: [{ text: MATE_SYSTEM_PROMPT }] },
+            // Voice gets the control tools on top of the shared set so the tradie
+            // can accept/cancel a card by voice when they can't tap.
+            tools: [{ functionDeclarations: [...TOOL_DECLARATIONS, ...CONTROL_TOOL_DECLARATIONS] }],
+            // Server-side VAD — Mate replies when the tradie stops speaking,
+            // no client-side turn boundary needed.
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                disabled: false,
+                silenceDurationMs: 1200,
+                prefixPaddingMs: 300,
+              },
+            },
+            // Get both transcriptions — bubble shows the heard user text and
+            // the spoken reply text alongside the audio playback.
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
           },
-          // Get both transcriptions — bubble shows the heard user text and
-          // the spoken reply text alongside the audio playback.
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
+        };
+        safeSend(setup);
+
+        // Seed history as a separate clientContent turn after setup so the
+        // model has context but doesn't speak yet — turnComplete=false keeps
+        // it as a soft prefix.
+        if (seedTurns.length) {
+          safeSend({ clientContent: { turns: seedTurns, turnComplete: false } });
+        }
+
+        // Replay anything the tradie typed (or context notes queued) while
+        // this reconnect was in flight, in order, after the seed.
+        if (pendingClientFrames.length) {
+          for (const frame of pendingClientFrames.splice(0)) safeSend(frame);
+        }
+      };
+
+      ws.onmessage = async (event: any) => {
+        let raw: string;
+        const data: any = event.data;
+        if (typeof data === 'string') raw = data;
+        else if (data && typeof data.text === 'function') raw = await data.text();
+        else if (data instanceof ArrayBuffer) raw = new TextDecoder().decode(data);
+        else raw = String(data);
+
+        let msg: any;
+        try { msg = JSON.parse(raw); } catch { return; }
+
+        // usageMetadata can ride along with serverContent, toolCall, or arrive on
+        // its own — always sample it before branching on the message type.
+        if (msg?.usageMetadata) {
+          accumulateLiveUsage(usageTotals, msg.usageMetadata);
+        }
+
+        if (msg?.setupComplete && !setupAcked) {
+          setupAcked = true;
+          // Flush any mic chunks captured before setupComplete arrived.
+          for (const chunk of pendingChunks) {
+            safeSend({
+              realtimeInput: { audio: { mimeType: 'audio/pcm;rate=16000', data: chunk } },
+            });
+          }
+          pendingChunks.length = 0;
+          if (!settled) {
+            settled = true;
+            clearTimeout(setupTimer);
+            // Socket is established — it's reachable via conn.close() now.
+            abortInFlightConnect = null;
+            resolve(connection);
+          }
+          return;
+        }
+
+        const toolCalls = msg?.toolCall?.functionCalls;
+        if (Array.isArray(toolCalls) && toolCalls.length) {
+          try {
+            const results = await Promise.all(
+              toolCalls.map(async (call: any) => {
+                const name = String(call.name);
+                const id = String(call.id);
+                // Control tools (accept/cancel the on-screen card) don't hit the
+                // dispatcher — hand the decision to the screen and ack the model
+                // with whatever it reports back.
+                if (isControlTool(name)) {
+                  const decision = name === 'apply_pending_proposal' ? 'apply' : 'cancel';
+                  const proposalId = call.args?.proposalId ? String(call.args.proposalId) : undefined;
+                  const response =
+                    cb.onControlAction?.(decision, proposalId) ?? { ok: false, error: 'Voice control unavailable.' };
+                  return { name, id, response, proposal: undefined as Proposal | undefined };
+                }
+                const r = await dispatchToolCall({ name, id, args: call.args || {} });
+                // show_quote is a screen action — let the screen render it and
+                // tell the model whether the quote actually resolved.
+                if (r.view?.kind === 'show_quote') {
+                  const response = cb.onShowQuote?.(r.view.quoteId) ?? { ok: true };
+                  return { name: r.name, id: r.id, response, proposal: undefined as Proposal | undefined };
+                }
+                return { name: r.name, id: r.id, response: r.response, proposal: r.proposal };
+              }),
+            );
+            for (const r of results) {
+              if (r.proposal) cb.onProposal?.(r.proposal);
+            }
+            safeSend({
+              toolResponse: {
+                functionResponses: results.map((r) => ({ name: r.name, id: r.id, response: r.response })),
+              },
+            });
+          } catch (err: any) {
+            cb.onError?.(new LiveOfflineError(err?.message || 'Tool dispatch failed.'));
+          }
+          return;
+        }
+
+        const serverContent = msg?.serverContent;
+        const parts = serverContent?.modelTurn?.parts;
+        if (Array.isArray(parts)) {
+          for (const part of parts) {
+            if (part?.inlineData?.data) {
+              cb.onAudioChunk?.(part.inlineData.data);
+            } else if (typeof part?.text === 'string') {
+              cb.onTextDelta?.(part.text);
+            }
+          }
+        }
+        if (serverContent?.inputTranscription) {
+          const t = serverContent.inputTranscription;
+          cb.onInputTranscription?.(String(t.text || ''), !!t.finished);
+        }
+        if (serverContent?.outputTranscription) {
+          const t = serverContent.outputTranscription;
+          cb.onOutputTranscription?.(String(t.text || ''), !!t.finished);
+        }
+        if (serverContent?.turnComplete) {
+          cb.onTurnComplete?.();
+        }
+      };
+
+      ws.onerror = (event: any) => {
+        // eslint-disable-next-line no-console
+        console.warn('[Mate voice] ws error', event?.message || event);
+        if (!settled) {
+          settled = true;
+          open = false;
+          clearTimeout(setupTimer);
+          flushUsage();
+          try { ws.close(); } catch { /* noop */ }
+          reject(new LiveOfflineError('Voice connection error.'));
+        }
+        // Post-setup transport errors are always followed by onclose, which
+        // owns the reconnect-or-finish decision.
+      };
+
+      ws.onclose = (event: any) => {
+        const wasUsable = open;
+        open = false;
+        clearTimeout(setupTimer);
+        flushUsage();
+        if (!settled) {
+          settled = true;
+          reject(new LiveOfflineError(`Voice connection closed (${event?.code || 'unknown'}).`));
+          return;
+        }
+        // wasUsable=false means connection.close() already ran (user close or
+        // superseded socket) — handleDrop still funnels through finishSession,
+        // which no-ops if close() already finished the session.
+        if (wasUsable || !alive) handleDrop(event?.code);
+      };
+    });
+  }
+
+  const queueClientFrame = (frame: any) => {
+    pendingClientFrames.push(frame);
+    if (pendingClientFrames.length > MAX_PENDING_CLIENT_FRAMES) pendingClientFrames.shift();
+  };
+
+  const session: VoiceSession = {
+    sendMicChunk: (b64) => {
+      // Deliberately dropped while reconnecting — replaying seconds-old audio
+      // in a burst would read as one garbled utterance to server VAD.
+      if (!alive || !b64) return;
+      conn?.sendMicChunk(b64);
+    },
+    sendUserText: (text) => {
+      if (!alive || !text.trim()) return;
+      const frame = {
+        clientContent: {
+          turns: [{ role: 'user', parts: [{ text }] }],
+          turnComplete: true,
         },
       };
-      safeSend(setup);
+      if (conn?.isUsable()) conn.send(frame);
+      else if (reconnecting) queueClientFrame(frame);
+    },
+    sendContextNote: (text) => {
+      if (!alive || !text.trim()) return;
+      const frame = {
+        clientContent: {
+          turns: [{ role: 'user', parts: [{ text }] }],
+          turnComplete: false,
+        },
+      };
+      if (conn?.isUsable()) conn.send(frame);
+      else if (reconnecting) queueClientFrame(frame);
+    },
+    endUserTurn: () => {
+      if (!alive) return;
+      if (conn?.isUsable()) conn.send({ realtimeInput: { audioStreamEnd: true } });
+    },
+    close: () => {
+      alive = false;
+      pendingClientFrames.length = 0;
+      const c = conn;
+      conn = null;
+      c?.close();
+      // Also kill any connect attempt still mid-handshake (reconnect in
+      // flight) so its socket doesn't dangle until the setup timeout.
+      abortInFlightConnect?.();
+      abortInFlightConnect = null;
+      finishSession(undefined);
+    },
+    isOpen: () => alive,
+  };
 
-      // Seed history as a separate clientContent turn after setup so the
-      // model has context but doesn't speak yet — turnComplete=false keeps
-      // it as a soft prefix.
-      if (seedTurns.length) {
-        safeSend({ clientContent: { turns: seedTurns, turnComplete: false } });
-      }
-    };
-
-    ws.onmessage = async (event: any) => {
-      let raw: string;
-      const data: any = event.data;
-      if (typeof data === 'string') raw = data;
-      else if (data && typeof data.text === 'function') raw = await data.text();
-      else if (data instanceof ArrayBuffer) raw = new TextDecoder().decode(data);
-      else raw = String(data);
-
-      let msg: any;
-      try { msg = JSON.parse(raw); } catch { return; }
-
-      // usageMetadata can ride along with serverContent, toolCall, or arrive on
-      // its own — always sample it before branching on the message type.
-      if (msg?.usageMetadata) {
-        accumulateLiveUsage(usageTotals, msg.usageMetadata);
-      }
-
-      if (msg?.setupComplete && !setupAcked) {
-        setupAcked = true;
-        // Flush any mic chunks captured before setupComplete arrived.
-        for (const chunk of pendingChunks) {
-          safeSend({
-            realtimeInput: { audio: { mimeType: 'audio/pcm;rate=16000', data: chunk } },
-          });
-        }
-        pendingChunks.length = 0;
-        if (!resolved) {
-          resolved = true;
-          resolve(session);
-        }
-        return;
-      }
-
-      const toolCalls = msg?.toolCall?.functionCalls;
-      if (Array.isArray(toolCalls) && toolCalls.length) {
-        try {
-          const results = await Promise.all(
-            toolCalls.map(async (call: any) => {
-              const name = String(call.name);
-              const id = String(call.id);
-              // Control tools (accept/cancel the on-screen card) don't hit the
-              // dispatcher — hand the decision to the screen and ack the model
-              // with whatever it reports back.
-              if (isControlTool(name)) {
-                const decision = name === 'apply_pending_proposal' ? 'apply' : 'cancel';
-                const proposalId = call.args?.proposalId ? String(call.args.proposalId) : undefined;
-                const response =
-                  cb.onControlAction?.(decision, proposalId) ?? { ok: false, error: 'Voice control unavailable.' };
-                return { name, id, response, proposal: undefined as Proposal | undefined };
-              }
-              const r = await dispatchToolCall({ name, id, args: call.args || {} });
-              // show_quote is a screen action — let the screen render it and
-              // tell the model whether the quote actually resolved.
-              if (r.view?.kind === 'show_quote') {
-                const response = cb.onShowQuote?.(r.view.quoteId) ?? { ok: true };
-                return { name: r.name, id: r.id, response, proposal: undefined as Proposal | undefined };
-              }
-              return { name: r.name, id: r.id, response: r.response, proposal: r.proposal };
-            }),
-          );
-          for (const r of results) {
-            if (r.proposal) cb.onProposal?.(r.proposal);
-          }
-          safeSend({
-            toolResponse: {
-              functionResponses: results.map((r) => ({ name: r.name, id: r.id, response: r.response })),
-            },
-          });
-        } catch (err: any) {
-          cb.onError?.(new LiveOfflineError(err?.message || 'Tool dispatch failed.'));
-        }
-        return;
-      }
-
-      const serverContent = msg?.serverContent;
-      const parts = serverContent?.modelTurn?.parts;
-      if (Array.isArray(parts)) {
-        for (const part of parts) {
-          if (part?.inlineData?.data) {
-            cb.onAudioChunk?.(part.inlineData.data);
-          } else if (typeof part?.text === 'string') {
-            cb.onTextDelta?.(part.text);
-          }
-        }
-      }
-      if (serverContent?.inputTranscription) {
-        const t = serverContent.inputTranscription;
-        cb.onInputTranscription?.(String(t.text || ''), !!t.finished);
-      }
-      if (serverContent?.outputTranscription) {
-        const t = serverContent.outputTranscription;
-        cb.onOutputTranscription?.(String(t.text || ''), !!t.finished);
-      }
-      if (serverContent?.turnComplete) {
-        cb.onTurnComplete?.();
-      }
-    };
-
-    ws.onerror = (event: any) => {
-      // eslint-disable-next-line no-console
-      console.warn('[Mate voice] ws error', event?.message || event);
-      cb.onError?.(new LiveOfflineError('Voice connection error.'));
-      if (!resolved) {
-        resolved = true;
-        reject(new LiveOfflineError('Voice connection error.'));
-      }
-    };
-
-    ws.onclose = (event: any) => {
-      const wasOpen = open;
-      open = false;
-      flushUsage();
-      cb.onClose?.(event?.code);
-      if (!resolved && wasOpen) {
-        resolved = true;
-        reject(new LiveOfflineError(`Voice connection closed (${event?.code || 'unknown'}).`));
-      }
-    };
-  });
+  conn = await connectOnce(history);
+  return session;
 }
