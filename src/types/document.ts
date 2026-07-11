@@ -90,6 +90,9 @@ export interface Document {
   // Inclusive vs exclusive at the time this document was created. Calculator
   // and PDF render branch on this; falls back to BusinessSettings when undefined.
   pricesIncludeGst?: boolean;
+  // GST registration at the time this document was created. undefined/true =
+  // registered; false = not registered (gst is 0 and no GST line is rendered).
+  gstRegistered?: boolean;
 
   // ===== T&Cs snapshot (shared between quote and invoice flows) =====
   termsSnapshot?: string;

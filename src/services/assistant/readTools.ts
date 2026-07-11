@@ -584,6 +584,7 @@ export async function getBusinessDefaults(): Promise<unknown> {
     defaultMarkup: data.defaultMarkup,
     defaultLaborMarkup: data.defaultLaborMarkup,
     pricesIncludeGst: data.pricesIncludeGst,
+    gstRegistered: data.gstRegistered,
     abn: data.abn ? `...${String(data.abn).slice(-4)}` : undefined,
   };
 }

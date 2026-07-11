@@ -82,6 +82,7 @@ export function calculateDocumentTotals(
   laborMarkupPercent: number = 0,
   laborExtraHours: number = 0,
   pricesIncludeGst: boolean = false,
+  gstRegistered: boolean = true,
 ): {
   materialsSubtotal: number;
   laborTotal: number;
@@ -101,15 +102,18 @@ export function calculateDocumentTotals(
   const markupAmount = materialMarkupAmount + laborMarkupAmount;
   const travelAdjustmentAmount = subtotal * (travelAdjustment / 100);
   const subtotalWithMarkup = subtotal + markupAmount + travelAdjustmentAmount;
+  // Not registered: no GST at all → total is just the subtotal.
   // Inclusive: line prices already include GST → total stays at subtotal,
   // GST is extracted as 1/11 for tax-invoice disclosure.
   // Exclusive: line prices are ex-GST → 10% GST is added on top.
-  const total = pricesIncludeGst
+  const total = !gstRegistered || pricesIncludeGst
     ? subtotalWithMarkup
     : subtotalWithMarkup * 1.1;
-  const gst = pricesIncludeGst
-    ? total - total / 1.1
-    : subtotalWithMarkup * 0.1;
+  const gst = !gstRegistered
+    ? 0
+    : pricesIncludeGst
+      ? total - total / 1.1
+      : subtotalWithMarkup * 0.1;
   return {
     materialsSubtotal: roundToTwoDecimals(materialsSubtotal),
     laborTotal: roundToTwoDecimals(laborTotal),
@@ -215,6 +219,7 @@ export function updateDocumentCalculations(doc: Document): Document {
     doc.laborMarkup ?? doc.markup ?? 0,
     doc.laborExtraHours ?? 0,
     doc.pricesIncludeGst === true,
+    doc.gstRegistered !== false,
   );
   return {
     ...doc,

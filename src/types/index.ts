@@ -384,6 +384,10 @@ export interface Quote {
   // prices are ex-GST and 10% is added on top. Falls back to the business
   // setting when undefined (legacy quotes).
   pricesIncludeGst?: boolean;
+  // Whether the business was GST-registered when the quote was created.
+  // undefined/true = registered; false = not registered (no GST calculated
+  // or shown, document carries a "No GST has been charged" note).
+  gstRegistered?: boolean;
 
   // T&Cs snapshot taken at send-time so later edits to the BusinessProfile
   // T&Cs don't rewrite history. The hash identifies the exact version the
@@ -611,6 +615,12 @@ export interface BusinessSettings {
   // ex-GST and 10% GST is added on top. Snapshotted onto each Quote/Invoice
   // at creation time so toggling the setting later doesn't rewrite history.
   pricesIncludeGst?: boolean;
+  // Whether the business is registered for GST. undefined/true = registered
+  // (pricesIncludeGst decides inclusive vs exclusive); false = not registered:
+  // no GST is calculated or shown anywhere, and documents carry a "No GST has
+  // been charged" note. Snapshotted onto each Quote/Invoice like
+  // pricesIncludeGst.
+  gstRegistered?: boolean;
   // Terms & Conditions shown on the quote/invoice PDF and recorded as
   // accepted when the customer pays. Editable in Settings → Business Profile.
   // When blank, the PDF falls back to the built-in AU tradie default so new
@@ -806,6 +816,8 @@ export interface Invoice {
 
   // GST mode snapshotted at invoice creation. See Quote.pricesIncludeGst.
   pricesIncludeGst?: boolean;
+  // GST registration snapshotted at invoice creation. See Quote.gstRegistered.
+  gstRegistered?: boolean;
 
   // T&Cs snapshot taken at send-time — see Quote.termsSnapshot.
   termsSnapshot?: string;

@@ -10,6 +10,9 @@ export type {
   LegacyDocumentRecord,
 } from './types';
 
+export type { GstMode } from './gstMode';
+export { resolveGstMode, keepSupplierPriceInclusive, NO_GST_NOTE } from './gstMode';
+
 export {
   LEGAL_TRANSITIONS,
   canTransition,

@@ -7,6 +7,7 @@ import { PdfMaterial, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplate
 import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
+import { resolveGstMode, NO_GST_NOTE } from '../document/gstMode';
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -423,12 +424,14 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   const displayMaterialsSubtotal = sumRoundedLineTotals(data.materials, materialMul);
   const displayLaborTotal = data.laborTotal * laborMul;
   const displaySubtotal = displayMaterialsSubtotal + displayLaborTotal;
-  const inclusive = data.pricesIncludeGst === true;
+  const gstMode = resolveGstMode(data);
   // Under exclusive mode the GST line is *added* to reach the total, so it
   // sits above the divider as a separate addend. Under inclusive mode it's
   // disclosure only — shown beneath the line items, not added to anything.
-  const subtotalLabel = inclusive ? 'Subtotal' : 'Subtotal (ex GST)';
-  const gstLabel = inclusive ? 'Includes GST' : 'GST (10%)';
+  // A business that isn't GST-registered gets no GST row at all, just the
+  // "No GST has been charged" note.
+  const subtotalLabel = gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal';
+  const gstLabel = gstMode === 'inclusive' ? 'Includes GST' : 'GST (10%)';
 
   // Per-section visibility. When materials/labour costs are hidden, the
   // corresponding subtotal row in the summary is hidden too. When BOTH are
@@ -471,10 +474,12 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
           <span>${formatCurrency(data.subtotal * (data.travelAdjustment / 100))}</span>
         </div>
         ` : ''}
+        ${gstMode !== 'none' ? `
         <div class="summary-row">
           <span>${gstLabel}</span>
           <span>${formatCurrency(data.gst)}</span>
         </div>
+        ` : ''}
         ${depositCredit && depositCredit > 0 ? `
         <div class="summary-row" style="color: #28a745;">
           <span>Deposit already paid</span>
@@ -486,6 +491,12 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
           <span>${depositCredit && depositCredit > 0 ? 'BALANCE DUE' : 'TOTAL'}</span>
           <span>${formatCurrency(data.total)}</span>
         </div>
+        ${gstMode === 'none' ? `
+        <div class="summary-row" style="font-size: 0.85em; color: #666;">
+          <span>${NO_GST_NOTE}</span>
+          <span></span>
+        </div>
+        ` : ''}
         ${paidAmount && paidAmount > 0 ? `
         <div class="summary-row" style="color: #28a745;">
           <span>Amount Paid</span>

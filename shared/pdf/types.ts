@@ -76,6 +76,9 @@ export interface QuotePdfData {
   // the extracted 1/11 component. When false (default), prices are ex-GST and
   // 10% is added on top. Determines totals labelling and arithmetic.
   pricesIncludeGst?: boolean;
+  // undefined/true = GST-registered. false = not registered: no GST row is
+  // rendered and the summary carries a "No GST has been charged" note.
+  gstRegistered?: boolean;
   notes?: string;
   showLaborHours?: boolean;
   // When false, hide per-section labour rows on the PDF and show only the

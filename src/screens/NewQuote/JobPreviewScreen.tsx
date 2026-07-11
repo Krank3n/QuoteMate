@@ -776,6 +776,7 @@ export function JobPreviewScreen() {
           }
           travelAdjustmentPercent={workingDoc.travelAdjustment}
           pricesIncludeGst={workingDoc.pricesIncludeGst === true}
+          gstRegistered={workingDoc.gstRegistered}
         />
 
         <Surface style={documentStyles.section}>

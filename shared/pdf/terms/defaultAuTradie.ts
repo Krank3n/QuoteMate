@@ -6,8 +6,8 @@
  * coverage. The app treats T&Cs as opt-in: this template only gets inserted
  * when the tradie taps "Use starter template" in Settings.
  *
- * Two variants — the GST line is the only difference. Pick based on the
- * business's pricesIncludeGst setting via {@link defaultAuTradieTerms}.
+ * Three variants — the GST line is the only difference. Pick based on the
+ * business's GST mode via {@link defaultAuTradieTerms}.
  */
 const TERMS_INCLUSIVE = `- This quote is valid for 30 days from the date of issue.
 - A deposit locks in your booking. Deposits are non-refundable once work has started or materials have been ordered.
@@ -27,9 +27,23 @@ const TERMS_EXCLUSIVE = `- This quote is valid for 30 days from the date of issu
 
 Paying means you're happy with these terms.`;
 
-/** Pick the starter template variant matching the business's GST mode. */
-export function defaultAuTradieTerms(pricesIncludeGst: boolean): string {
-  return pricesIncludeGst ? TERMS_INCLUSIVE : TERMS_EXCLUSIVE;
+const TERMS_NONE = `- This quote is valid for 30 days from the date of issue.
+- A deposit locks in your booking. Deposits are non-refundable once work has started or materials have been ordered.
+- Final payment is due on completion unless otherwise agreed.
+- GST is not applicable — no GST is charged on this quote.
+- Anything outside the work described above is quoted separately before we do it.
+- Workmanship is guaranteed for 12 months from completion.
+
+Paying means you're happy with these terms.`;
+
+/**
+ * Pick the starter template variant matching the business's GST mode.
+ * Accepts either the legacy boolean (pricesIncludeGst) or a GstMode string.
+ */
+export function defaultAuTradieTerms(mode: boolean | 'exclusive' | 'inclusive' | 'none'): string {
+  if (mode === 'none') return TERMS_NONE;
+  if (mode === true || mode === 'inclusive') return TERMS_INCLUSIVE;
+  return TERMS_EXCLUSIVE;
 }
 
 /**
@@ -40,7 +54,7 @@ export function defaultAuTradieTerms(pricesIncludeGst: boolean): string {
 export function isUnmodifiedStarterTerms(text: string | undefined): boolean {
   if (!text) return false;
   const trimmed = text.trim();
-  return trimmed === TERMS_INCLUSIVE.trim() || trimmed === TERMS_EXCLUSIVE.trim();
+  return trimmed === TERMS_INCLUSIVE.trim() || trimmed === TERMS_EXCLUSIVE.trim() || trimmed === TERMS_NONE.trim();
 }
 
 /**

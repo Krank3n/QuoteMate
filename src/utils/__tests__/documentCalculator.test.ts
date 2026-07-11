@@ -391,6 +391,58 @@ describe('calculateDocumentTotals', () => {
     expect(calc.gst).toBe(9.09);
   });
 
+  // ===== Not GST-registered =====
+  //
+  // gstRegistered=false (10th positional arg) models a business under the
+  // $75k GST threshold: no GST is calculated at all — total is exactly the
+  // subtotal-with-markup and gst is 0, regardless of pricesIncludeGst.
+
+  it('not registered: gst is 0 and total equals subtotal', () => {
+    const calc = calculateDocumentTotals(
+      [material({ totalPrice: 1000 })],
+      0, 0, 0, 0, undefined, 0, 0,
+      false, // pricesIncludeGst (don't-care)
+      false, // gstRegistered
+    );
+    expect(calc.total).toBe(1000);
+    expect(calc.gst).toBe(0);
+  });
+
+  it('not registered: composes with markup + travel (no 10% anywhere)', () => {
+    // $1000 materials + 10% markup + 5% travel = 1000 + 100 + 50 = 1150
+    const calc = calculateDocumentTotals(
+      [material({ totalPrice: 1000 })],
+      0, 0, 10, 5, undefined, 0, 0,
+      false,
+      false,
+    );
+    expect(calc.markupAmount).toBe(100);
+    expect(calc.travelAdjustmentAmount).toBe(50);
+    expect(calc.total).toBe(1150);
+    expect(calc.gst).toBe(0);
+  });
+
+  it('not registered: pricesIncludeGst=true is ignored (still no GST extracted)', () => {
+    const calc = calculateDocumentTotals(
+      [material({ totalPrice: 1100 })],
+      0, 0, 0, 0, undefined, 0, 0,
+      true,  // inclusive would normally extract 1/11
+      false, // but not registered wins
+    );
+    expect(calc.total).toBe(1100);
+    expect(calc.gst).toBe(0);
+  });
+
+  it('gstRegistered defaults to true: omitting it keeps exclusive +10% behaviour', () => {
+    const calc = calculateDocumentTotals(
+      [material({ totalPrice: 1000 })],
+      0, 0, 0, 0, undefined, 0, 0,
+      false,
+    );
+    expect(calc.total).toBeCloseTo(1100, 2);
+    expect(calc.gst).toBeCloseTo(100, 2);
+  });
+
   it('exclusive vs inclusive on the same line items: total differs by 10% × subtotal-with-markup', () => {
     // Same inputs, one inclusive one exclusive. The exclusive total = inclusive
     // total + GST applied a SECOND time. This catches regressions where the

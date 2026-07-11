@@ -44,6 +44,7 @@ import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapp
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice, supplierPriceForGstMode } from '../../utils/quoteCalculator';
+import { keepSupplierPriceInclusive } from '../../../shared/document';
 import { parsePackInfo } from '../../utils/parsePackInfo';
 import { applyPackAwarePricing } from '../../utils/packAwarePricing';
 import {
@@ -1876,7 +1877,7 @@ export function MaterialsListScreen() {
                 <InlineAddMaterialRow
                   sectionName={item.sectionName}
                   onAdd={addMaterialToQuoteInline}
-                  pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
+                  pricesIncludeGst={keepSupplierPriceInclusive(currentQuote ?? {})}
                   businessSettings={businessSettings}
                   supplierGroups={supplierGroups}
                   reeceConnected={reeceConnected === true}
@@ -1920,7 +1921,7 @@ export function MaterialsListScreen() {
             onAdd={() => { /* unused in edit mode */ }}
             onUpdate={handleUpdateMaterial}
             onExitEdit={exitEdit}
-            pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
+            pricesIncludeGst={keepSupplierPriceInclusive(currentQuote ?? {})}
             businessSettings={businessSettings}
             supplierGroups={supplierGroups}
             reeceConnected={reeceConnected === true}
@@ -2107,7 +2108,7 @@ export function MaterialsListScreen() {
             <InlineAddMaterialRow
               sectionName=""
               onAdd={addMaterialToQuoteInline}
-              pricesIncludeGst={currentQuote?.pricesIncludeGst === true}
+              pricesIncludeGst={keepSupplierPriceInclusive(currentQuote ?? {})}
               businessSettings={businessSettings}
               supplierGroups={supplierGroups}
               reeceConnected={reeceConnected === true}

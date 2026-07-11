@@ -432,3 +432,36 @@ describe('checkDocumentIntegrity — real production shapes', () => {
     expect(issues).not.toContain('labour_total_mismatch');
   });
 });
+
+describe('checkDocumentIntegrity — not GST-registered', () => {
+  function buildNotRegistered(over: Partial<any> = {}): any {
+    // Same $300 doc as buildClean but gstRegistered=false: no GST, total = subtotal.
+    return buildClean({ gstRegistered: false, gst: 0, total: 300, ...over });
+  }
+
+  it('accepts total = subtotal-with-markup and gst = 0', () => {
+    expect(checkDocumentIntegrity(buildNotRegistered())).toEqual([]);
+  });
+
+  it('accepts markup composing without any 10%', () => {
+    // 300 subtotal + 10% material markup on $100 materials = $10 → total 310
+    expect(checkDocumentIntegrity(buildNotRegistered({ markup: 10, markupAmount: 10, total: 310 }))).toEqual([]);
+  });
+
+  it('flags total_mismatch when a non-registered doc still carries a +10% total', () => {
+    const issues = checkDocumentIntegrity(buildNotRegistered({ total: 330 }));
+    expect(codes(issues)).toContain('total_mismatch');
+  });
+
+  it('flags a non-zero stored gst on a non-registered doc', () => {
+    const issues = checkDocumentIntegrity(buildNotRegistered({ gst: 30, total: 300 }));
+    expect(codes(issues)).toContain('total_mismatch');
+    expect(issues.find((i) => i.detail.includes('not-GST-registered'))).toBeTruthy();
+  });
+
+  it('undefined gstRegistered still means registered (legacy docs)', () => {
+    // buildClean has no gstRegistered — the exclusive +10% expectation must hold.
+    expect(checkDocumentIntegrity(buildClean())).toEqual([]);
+    expect(codes(checkDocumentIntegrity(buildClean({ total: 300 })))).toContain('total_mismatch');
+  });
+});

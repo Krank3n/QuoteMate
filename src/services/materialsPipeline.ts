@@ -21,6 +21,7 @@ import { generateId } from '../utils/generateId';
 import { needsPriceFetch } from '../utils/priceFetchGate';
 import { buildTradeContext } from '../utils/buildTradeContext';
 import { supplierPriceForGstMode, roundToTwoDecimals } from '../utils/quoteCalculator';
+import { keepSupplierPriceInclusive } from '../../shared/document';
 import { applyPackAwarePricing } from '../utils/packAwarePricing';
 import { parsePackInfo } from '../utils/parsePackInfo';
 import { coverageSanePurchaseCount, coverageFloorPurchaseCount } from '../utils/purchaseCoverage';
@@ -606,7 +607,11 @@ async function fetchPricesForQuoteInner(
   const { quote, businessSettings } = args;
   const { onEvent, shouldCancel } = callbacks;
 
-  const gstInclusive = quote.pricesIncludeGst === true;
+  // "Keep supplier prices inc-GST" applies in inclusive mode AND when the
+  // business isn't GST-registered — a non-registered tradie pays GST on
+  // materials and can't claim it back, so stripping 1/11 would under-price
+  // every line. Only exclusive mode divides by 1.1.
+  const gstInclusive = keepSupplierPriceInclusive(quote);
   const updatedMaterials: Material[] = quote.materials.map((m) => ({ ...m }));
   // Job-level quality tier inferred at analysis time. Inherited by any
   // material that doesn't carry its own tier. See candidateRanker for the

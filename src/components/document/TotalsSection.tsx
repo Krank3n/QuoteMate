@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { Text, Surface, Divider } from 'react-native-paper';
 import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
+import { resolveGstMode, NO_GST_NOTE } from '../../../shared/document';
 import { documentStyles } from './documentStyles';
 
 interface TotalsSectionProps {
@@ -18,6 +19,7 @@ interface TotalsSectionProps {
   travelAdjustmentAmount?: number;
   travelAdjustmentPercent?: number;
   pricesIncludeGst?: boolean;
+  gstRegistered?: boolean;
   style?: any;
 }
 
@@ -34,12 +36,14 @@ export function TotalsSection({
   travelAdjustmentAmount = 0,
   travelAdjustmentPercent = 0,
   pricesIncludeGst = false,
+  gstRegistered,
   style,
 }: TotalsSectionProps) {
   const showMarkup = hideMarkup ? false : (hideZeroMarkup ? markup > 0 : true);
   const showTravel = travelAdjustmentAmount > 0;
-  const subtotalLabel = pricesIncludeGst ? 'Subtotal' : 'Subtotal (ex GST)';
-  const gstLabel = pricesIncludeGst ? 'Includes GST' : 'GST (10%)';
+  const gstMode = resolveGstMode({ gstRegistered, pricesIncludeGst });
+  const subtotalLabel = gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal';
+  const gstLabel = gstMode === 'inclusive' ? 'Includes GST' : 'GST (10%)';
 
   return (
     <Surface style={[documentStyles.totalSection, style]}>
@@ -63,15 +67,20 @@ export function TotalsSection({
           <Text style={documentStyles.summaryValue}>{formatCurrency(travelAdjustmentAmount)}</Text>
         </View>
       )}
-      <View style={documentStyles.summaryRow}>
-        <Text style={documentStyles.summaryLabel}>{gstLabel}</Text>
-        <Text style={documentStyles.summaryValue}>{formatCurrency(gst)}</Text>
-      </View>
+      {gstMode !== 'none' && (
+        <View style={documentStyles.summaryRow}>
+          <Text style={documentStyles.summaryLabel}>{gstLabel}</Text>
+          <Text style={documentStyles.summaryValue}>{formatCurrency(gst)}</Text>
+        </View>
+      )}
       <Divider style={documentStyles.divider} />
       <View style={documentStyles.totalRow}>
         <Text style={documentStyles.totalLabel}>TOTAL</Text>
         <Text style={documentStyles.totalValue}>{formatCurrency(total)}</Text>
       </View>
+      {gstMode === 'none' && (
+        <Text style={styles.noGstNote}>{NO_GST_NOTE}</Text>
+      )}
       {paidAmount !== undefined && paidAmount > 0 && (
         <>
           <View style={[documentStyles.summaryRow, { marginTop: 8 }]}>
@@ -91,6 +100,11 @@ export function TotalsSection({
 }
 
 const styles = StyleSheet.create({
+  noGstNote: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
   balanceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

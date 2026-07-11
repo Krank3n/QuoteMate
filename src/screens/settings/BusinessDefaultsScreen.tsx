@@ -16,6 +16,7 @@ import {
   Title,
   Button,
   Switch,
+  SegmentedButtons,
 } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
@@ -28,6 +29,13 @@ import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { checkSquareConnection } from '../../services/squareService';
 import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 import { PASSTHROUGH_SURCHARGE_PCT } from '../../../shared/pdf/squareFees';
+import { resolveGstMode, GstMode } from '../../../shared/document';
+
+const GST_MODE_DESCRIPTIONS: Record<GstMode, string> = {
+  exclusive: 'Prices you enter are ex-GST. The quote adds 10% GST to the total.',
+  inclusive: 'Prices you enter are inc-GST. The quote shows GST as a 1/11 disclosure.',
+  none: 'For businesses not registered for GST. No GST is added or shown — quotes and invoices carry a "No GST has been charged" note.',
+};
 
 export function BusinessDefaultsScreen() {
   const navigation = useNavigation<any>();
@@ -40,7 +48,7 @@ export function BusinessDefaultsScreen() {
   const [requireDepositByDefault, setRequireDepositByDefault] = useState(false);
   const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
   const [surchargePaymentFees, setSurchargePaymentFees] = useState(false);
-  const [pricesIncludeGst, setPricesIncludeGst] = useState(false);
+  const [gstMode, setGstMode] = useState<GstMode>('exclusive');
   const [showMarkup, setShowMarkup] = useState(false);
   const [showMaterialCostsByDefault, setShowMaterialCostsByDefault] = useState(true);
   const [showLaborCostsByDefault, setShowLaborCostsByDefault] = useState(true);
@@ -63,7 +71,7 @@ export function BusinessDefaultsScreen() {
     const rd = businessSettings.requireDepositByDefault === true;
     const tm = businessSettings.transportMarkupEnabled !== false;
     const sf = businessSettings.surchargePaymentFees === true;
-    const pig = businessSettings.pricesIncludeGst === true;
+    const gm = resolveGstMode(businessSettings);
     const sm = businessSettings.showMarkup === true;
     const smc = businessSettings.showMaterialCostsByDefault !== false;
     const slc = businessSettings.showLaborCostsByDefault !== false;
@@ -78,7 +86,7 @@ export function BusinessDefaultsScreen() {
     setRequireDepositByDefault(rd);
     setTransportMarkupEnabled(tm);
     setSurchargePaymentFees(sf);
-    setPricesIncludeGst(pig);
+    setGstMode(gm);
     setShowMarkup(sm);
     setShowMaterialCostsByDefault(smc);
     setShowLaborCostsByDefault(slc);
@@ -86,7 +94,7 @@ export function BusinessDefaultsScreen() {
     setAutoStartMic(asm);
     setTermsAndConditions(tc);
 
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, pig, sm, smc, slc, acf, asm, tc }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, gm, sm, smc, slc, acf, asm, tc }));
   }, [businessSettings]);
 
   // Re-check on focus so the deposit + surcharge toggles unlock the moment
@@ -111,7 +119,7 @@ export function BusinessDefaultsScreen() {
       rd: requireDepositByDefault,
       tm: transportMarkupEnabled,
       sf: surchargePaymentFees,
-      pig: pricesIncludeGst,
+      gm: gstMode,
       sm: showMarkup,
       smc: showMaterialCostsByDefault,
       slc: showLaborCostsByDefault,
@@ -122,7 +130,7 @@ export function BusinessDefaultsScreen() {
     return current !== initialSnapshot;
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
-    transportMarkupEnabled, surchargePaymentFees, pricesIncludeGst,
+    transportMarkupEnabled, surchargePaymentFees, gstMode,
     showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, autoCustomerFollowUp, autoStartMic, termsAndConditions,
     initialSnapshot,
   ]);
@@ -147,7 +155,8 @@ export function BusinessDefaultsScreen() {
         requireDepositByDefault,
         transportMarkupEnabled,
         surchargePaymentFees,
-        pricesIncludeGst,
+        pricesIncludeGst: gstMode === 'inclusive',
+        gstRegistered: gstMode !== 'none',
         showMarkup,
         showMaterialCostsByDefault,
         showLaborCostsByDefault,
@@ -232,29 +241,31 @@ export function BusinessDefaultsScreen() {
               />
             </View>
 
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Prices include GST</Text>
-                <Text style={styles.toggleDescription}>
-                  {pricesIncludeGst
-                    ? 'Prices you enter are inc-GST. The quote shows GST as a 1/11 disclosure.'
-                    : 'Prices you enter are ex-GST. The quote adds 10% GST to the total.'}
-                </Text>
-              </View>
-              <Switch
-                value={pricesIncludeGst}
+            <View style={styles.gstModeSection}>
+              <Text style={styles.toggleTitle}>GST on quotes &amp; invoices</Text>
+              <SegmentedButtons
+                value={gstMode}
                 onValueChange={(next) => {
-                  setPricesIncludeGst(next);
-                  // Keep the starter T&C's GST line in sync when toggling —
+                  const mode = next as GstMode;
+                  setGstMode(mode);
+                  // Keep the starter T&C's GST line in sync when switching —
                   // but only if the tradie hasn't hand-edited the template.
                   // If they've customised the wording we leave it alone so
                   // we don't clobber their changes.
                   if (isUnmodifiedStarterTerms(termsAndConditions)) {
-                    setTermsAndConditions(defaultAuTradieTerms(next));
+                    setTermsAndConditions(defaultAuTradieTerms(mode));
                   }
                 }}
-                color={colors.primary}
+                buttons={[
+                  { value: 'exclusive', label: 'Add 10%' },
+                  { value: 'inclusive', label: 'Included' },
+                  { value: 'none', label: 'Not registered' },
+                ]}
+                style={styles.gstModeButtons}
               />
+              <Text style={styles.toggleDescription}>
+                {GST_MODE_DESCRIPTIONS[gstMode]}
+              </Text>
             </View>
           </Surface>
 
@@ -460,7 +471,7 @@ export function BusinessDefaultsScreen() {
                   <Button
                     mode="text"
                     compact
-                    onPress={() => setTermsAndConditions(defaultAuTradieTerms(pricesIncludeGst))}
+                    onPress={() => setTermsAndConditions(defaultAuTradieTerms(gstMode))}
                   >
                     Reset to starter
                   </Button>
@@ -474,7 +485,7 @@ export function BusinessDefaultsScreen() {
                 <Button
                   mode="contained-tonal"
                   icon="file-document-plus"
-                  onPress={() => setTermsAndConditions(defaultAuTradieTerms(pricesIncludeGst))}
+                  onPress={() => setTermsAndConditions(defaultAuTradieTerms(gstMode))}
                 >
                   Use starter template
                 </Button>
@@ -550,6 +561,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   toggleLabel: { flex: 1, marginRight: 12 },
+  gstModeSection: { paddingVertical: 10 },
+  gstModeButtons: { marginTop: 8, marginBottom: 6 },
   toggleTitle: {
     fontSize: 15,
     fontWeight: '600',

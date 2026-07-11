@@ -6078,6 +6078,8 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           markupAmount: display.markupAmount,
           travelAdjustmentAmount: foundQuote.travelAdjustmentAmount || 0,
           gst: foundQuote.gst,
+          pricesIncludeGst: foundQuote.pricesIncludeGst === true,
+          gstRegistered: foundQuote.gstRegistered !== false,
           total: foundQuote.total,
           notes: foundQuote.notes,
           createdAt: foundQuote.createdAt,
@@ -6924,6 +6926,11 @@ function generateAcceptancePage(token: string): string {
     function renderQuote(quote, business) {
       const content = document.getElementById('content');
 
+      // GST mode: 'none' = business not registered for GST (no GST line,
+      // "No GST has been charged" note). undefined gstRegistered = registered.
+      var gstMode = quote.gstRegistered === false ? 'none'
+        : quote.pricesIncludeGst === true ? 'inclusive' : 'exclusive';
+
       // Set brand color as CSS variable
       if (business.brandColor) {
         document.documentElement.style.setProperty('--accent', business.brandColor);
@@ -7006,11 +7013,14 @@ function generateAcceptancePage(token: string): string {
             '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>' : '') +
           (quote.showSubtotal !== false ?
             ((quote.markupAmount || quote.travelAdjustmentAmount) ?
-              '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Subtotal' : 'Subtotal (ex GST)') + '</span><span>' + formatCurrency(quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0)) + '</span></div>' :
-              '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Subtotal' : 'Subtotal (ex GST)') + '</span><span>' + formatCurrency(quote.subtotal) + '</span></div>')
+              '<div class="totals-row"><span>' + (gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal') + '</span><span>' + formatCurrency(quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0)) + '</span></div>' :
+              '<div class="totals-row"><span>' + (gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal') + '</span><span>' + formatCurrency(quote.subtotal) + '</span></div>')
             : '') +
-          '<div class="totals-row"><span>' + (quote.pricesIncludeGst === true ? 'Includes GST' : 'GST (10%)') + '</span><span>' + formatCurrency(quote.gst) + '</span></div>' +
+          (gstMode !== 'none' ?
+            '<div class="totals-row"><span>' + (gstMode === 'inclusive' ? 'Includes GST' : 'GST (10%)') + '</span><span>' + formatCurrency(quote.gst) + '</span></div>' : '') +
           '<div class="totals-row total"><span>Total</span><span class="amount">' + formatCurrency(quote.total) + '</span></div>' +
+          (gstMode === 'none' ?
+            '<div class="totals-row" style="font-size:0.85em;color:#666;"><span>No GST has been charged.</span><span></span></div>' : '') +
         '</div>' +
 
         (quote.notes ?
@@ -10997,8 +11007,8 @@ export const pushInvoiceToXero = functions.https.onRequest((req, res) => {
         DueDate: formatDate(invoice.dueDate),
         Status: xeroStatus,
         // Tell Xero whether our UnitAmounts already include GST or not, so it
-        // applies the right tax treatment. Mirrors the doc's pricesIncludeGst.
-        LineAmountTypes: invoice.pricesIncludeGst === true ? 'Inclusive' : 'Exclusive',
+        // applies the right tax treatment. Mirrors the doc's GST mode.
+        LineAmountTypes: invoice.gstRegistered === false ? 'NoTax' : invoice.pricesIncludeGst === true ? 'Inclusive' : 'Exclusive',
         LineItems: lineItems,
         CurrencyCode: 'AUD',
       };
@@ -11309,7 +11319,10 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
           }
         }
 
-        // Build line items
+        // Build line items. Not GST-registered → BAS Excluded lines and a
+        // NoTax payload so Xero doesn't add 10% back on.
+        const invGstRegistered = invoice.gstRegistered !== false;
+        const invTaxType = invGstRegistered ? 'OUTPUT' : 'BASEXCLUDED';
         const lineItems: any[] = [];
         if (invoice.materials && Array.isArray(invoice.materials)) {
           for (const mat of invoice.materials) {
@@ -11318,7 +11331,7 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
               Quantity: mat.quantity || 1,
               UnitAmount: mat.price || 0,
               AccountCode: '200',
-              TaxType: 'OUTPUT',
+              TaxType: invTaxType,
             });
           }
         }
@@ -11331,7 +11344,7 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
                 Quantity: totalHours,
                 UnitAmount: s.laborRate,
                 AccountCode: '200',
-                TaxType: 'OUTPUT',
+                TaxType: invTaxType,
               });
             }
           }
@@ -11341,14 +11354,14 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
             Quantity: invoice.laborHours,
             UnitAmount: invoice.laborRate,
             AccountCode: '200',
-            TaxType: 'OUTPUT',
+            TaxType: invTaxType,
           });
         }
         if (invoice.markupAmount > 0) {
-          lineItems.push({ Description: 'Markup', Quantity: 1, UnitAmount: invoice.markupAmount, AccountCode: '200', TaxType: 'OUTPUT' });
+          lineItems.push({ Description: 'Markup', Quantity: 1, UnitAmount: invoice.markupAmount, AccountCode: '200', TaxType: invTaxType });
         }
         if (lineItems.length === 0) {
-          lineItems.push({ Description: invoice.job?.name || 'Services', Quantity: 1, UnitAmount: invoice.subtotal || 0, AccountCode: '200', TaxType: 'OUTPUT' });
+          lineItems.push({ Description: invoice.job?.name || 'Services', Quantity: 1, UnitAmount: invoice.subtotal || 0, AccountCode: '200', TaxType: invTaxType });
         }
 
         let xeroStatus = 'DRAFT';
@@ -11365,7 +11378,7 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
           Date: formatDate(invoice.issueDate),
           DueDate: formatDate(invoice.dueDate),
           Status: xeroStatus,
-          LineAmountTypes: 'Exclusive',
+          LineAmountTypes: invGstRegistered ? 'Exclusive' : 'NoTax',
           LineItems: lineItems,
           CurrencyCode: 'AUD',
         };

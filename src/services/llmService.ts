@@ -596,8 +596,9 @@ export async function generateQuoteEmail(params: {
   businessName: string;
   customerName: string;
   photoDescriptions?: string[];
+  gstRegistered?: boolean;
 }): Promise<string> {
-  const { jobName, jobDescription, materials, laborHours, total, businessName, customerName, photoDescriptions } = params;
+  const { jobName, jobDescription, materials, laborHours, total, businessName, customerName, photoDescriptions, gstRegistered } = params;
 
   const prompt = createEmailPrompt(params);
 
@@ -642,7 +643,7 @@ export async function generateQuoteEmail(params: {
     }
 
     // Final fallback - return a basic template
-    return getDefaultEmailBody(customerName, jobName, total, businessName);
+    return getDefaultEmailBody(customerName, jobName, total, businessName, gstRegistered);
   }
 }
 
@@ -655,8 +656,9 @@ function createEmailPrompt(params: {
   businessName: string;
   customerName: string;
   photoDescriptions?: string[];
+  gstRegistered?: boolean;
 }): string {
-  const { jobName, jobDescription, materials, laborHours, total, businessName, customerName, photoDescriptions } = params;
+  const { jobName, jobDescription, materials, laborHours, total, businessName, customerName, photoDescriptions, gstRegistered } = params;
 
   let photosSection = '';
   if (photoDescriptions?.length) {
@@ -670,7 +672,7 @@ function createEmailPrompt(params: {
 Job: ${jobName}
 Description: ${jobDescription}
 Key materials: ${materialsSummary}
-Total: $${total.toFixed(2)} (inc GST)
+Total: $${total.toFixed(2)}${gstRegistered === false ? '' : ' (inc GST)'}
 Business: ${businessName}
 Client: ${customerName}${photosSection}
 
@@ -756,9 +758,11 @@ export function getDefaultEmailBody(
   customerName: string,
   jobName: string,
   total: number,
-  businessName: string
+  businessName: string,
+  gstRegistered?: boolean
 ): string {
-  return `Please find attached your quotation for ${jobName}.\n\nThis quote includes all materials and labour required to complete the work as discussed. The total amount is $${total.toFixed(2)} (inc GST).\n\nThis quote is valid for 30 days from the date of issue. If you have any questions, please don't hesitate to get in touch.`;
+  const totalSuffix = gstRegistered === false ? '' : ' (inc GST)';
+  return `Please find attached your quotation for ${jobName}.\n\nThis quote includes all materials and labour required to complete the work as discussed. The total amount is $${total.toFixed(2)}${totalSuffix}.\n\nThis quote is valid for 30 days from the date of issue. If you have any questions, please don't hesitate to get in touch.`;
 }
 
 /**
@@ -775,8 +779,9 @@ export async function generateInvoiceEmail(params: {
   customerName: string;
   dueDate: string;
   invoiceNumber?: string;
+  gstRegistered?: boolean;
 }): Promise<string> {
-  const { jobName, jobDescription, materials, laborHours, total, businessName, customerName, dueDate, invoiceNumber } = params;
+  const { jobName, jobDescription, materials, laborHours, total, businessName, customerName, dueDate, invoiceNumber, gstRegistered } = params;
 
   const materialsSummary = materials.slice(0, 10).map(m => `${m.name} (${m.quantity} ${m.unit})`).join(', ');
 
@@ -786,7 +791,7 @@ Job: ${jobName}
 Description: ${jobDescription}
 Key materials: ${materialsSummary}
 Labour: ${laborHours} hours
-Total: $${total.toFixed(2)} (inc GST)
+Total: $${total.toFixed(2)}${gstRegistered === false ? '' : ' (inc GST)'}
 Business: ${businessName}
 Client: ${customerName}
 ${invoiceNumber ? `Invoice #: ${invoiceNumber}` : ''}
@@ -842,7 +847,7 @@ Return ONLY the email body text, no JSON wrapping or quotes.`;
       // Gemini fallback also failed
     }
 
-    return getDefaultInvoiceEmailBody(customerName, jobName, total, businessName, dueDate);
+    return getDefaultInvoiceEmailBody(customerName, jobName, total, businessName, dueDate, gstRegistered);
   }
 }
 
@@ -854,10 +859,12 @@ export function getDefaultInvoiceEmailBody(
   jobName: string,
   total: number,
   businessName: string,
-  dueDate: string
+  dueDate: string,
+  gstRegistered?: boolean
 ): string {
   const dueDateFormatted = new Date(dueDate).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
-  return `Please find attached your invoice for ${jobName}.\n\nThis invoice covers all materials and labour for the completed work as agreed. The total amount is $${total.toFixed(2)} (inc GST).\n\nPayment is due by ${dueDateFormatted}. If you have any questions about this invoice, please don't hesitate to get in touch.`;
+  const totalSuffix = gstRegistered === false ? '' : ' (inc GST)';
+  return `Please find attached your invoice for ${jobName}.\n\nThis invoice covers all materials and labour for the completed work as agreed. The total amount is $${total.toFixed(2)}${totalSuffix}.\n\nPayment is due by ${dueDateFormatted}. If you have any questions about this invoice, please don't hesitate to get in touch.`;
 }
 
 /**

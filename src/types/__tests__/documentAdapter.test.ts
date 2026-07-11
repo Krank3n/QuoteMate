@@ -343,3 +343,23 @@ describe('cross-type drop behaviour', () => {
     expect((asInvoice as any).aiEmailBody).toBeUndefined();
   });
 });
+
+describe('gstRegistered snapshot round-trip', () => {
+  it('carries gstRegistered=false quote → document → quote', () => {
+    const quote = makeQuote({ gstRegistered: false, pricesIncludeGst: false });
+    const restored = documentToQuote(quoteToDocument(quote));
+    expect(restored.gstRegistered).toBe(false);
+    expect(restored.pricesIncludeGst).toBe(false);
+  });
+
+  it('leaves legacy quotes without the field untouched (undefined, not false)', () => {
+    const restored = documentToQuote(quoteToDocument(makeQuote()));
+    expect(restored.gstRegistered).toBeUndefined();
+  });
+
+  it('carries gstRegistered=false invoice → document → invoice', () => {
+    const invoice = makeInvoice({ gstRegistered: false });
+    const restored = documentToInvoice(invoiceToDocument(invoice));
+    expect(restored.gstRegistered).toBe(false);
+  });
+});

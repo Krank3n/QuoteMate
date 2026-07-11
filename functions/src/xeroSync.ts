@@ -85,13 +85,19 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
   const showMaterials = doc.showMaterialCosts !== false;
   const showLabor = doc.showLaborCosts !== false;
 
+  // Not GST-registered: line amounts carry no tax component at all — BAS
+  // Excluded keeps the sale off the GST section of the tradie's BAS.
+  const gstRegistered = doc.gstRegistered !== false;
+  const taxType = gstRegistered ? 'OUTPUT' : 'BASEXCLUDED';
+
   // Pre-GST grand total the customer signed for. doc.subtotal is *pre-markup*
   // (materials + labour only), so it under-counts; derive from doc.total
   // instead. Inclusive mode: line UnitAmounts already include GST. Exclusive
-  // mode: strip the 10% Xero will add back on.
+  // mode: strip the 10% Xero will add back on. Not registered: total has no
+  // GST in it, send as-is.
   const total = Number(doc.total ?? 0);
   const summaryAmount =
-    doc.pricesIncludeGst === true
+    !gstRegistered || doc.pricesIncludeGst === true
       ? total
       : Math.round((total / 1.1) * 100) / 100;
 
@@ -102,7 +108,7 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
       Quantity: 1,
       UnitAmount: summaryAmount,
       AccountCode: '200',
-      TaxType: 'OUTPUT',
+      TaxType: taxType,
     }];
   }
 
@@ -115,7 +121,7 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
         Quantity: mat.quantity || 1,
         UnitAmount: mat.price || 0,
         AccountCode: '200',
-        TaxType: 'OUTPUT',
+        TaxType: taxType,
       });
     }
   }
@@ -142,7 +148,7 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
           Quantity: quantity,
           UnitAmount: rate,
           AccountCode: '200',
-          TaxType: 'OUTPUT',
+          TaxType: taxType,
         });
       }
 
@@ -154,7 +160,7 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
           Quantity: extraHours,
           UnitAmount: topRate,
           AccountCode: '200',
-          TaxType: 'OUTPUT',
+          TaxType: taxType,
         });
       }
     } else if ((Number(doc.laborHours) || 0) > 0 && (Number(doc.laborRate) || 0) > 0) {
@@ -163,7 +169,7 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
         Quantity: doc.laborHours,
         UnitAmount: doc.laborRate,
         AccountCode: '200',
-        TaxType: 'OUTPUT',
+        TaxType: taxType,
       });
     }
   }
@@ -174,7 +180,7 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
       Quantity: 1,
       UnitAmount: doc.markupAmount,
       AccountCode: '200',
-      TaxType: 'OUTPUT',
+      TaxType: taxType,
     });
   }
 
@@ -184,7 +190,7 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
       Quantity: 1,
       UnitAmount: summaryAmount,
       AccountCode: '200',
-      TaxType: 'OUTPUT',
+      TaxType: taxType,
     });
   }
 
@@ -296,7 +302,7 @@ export async function pushQuoteToXeroCore(
     Reference: quote.job?.name || undefined,
     Date: formatXeroDate(issueDate),
     ExpiryDate: formatXeroDate(expiryDate),
-    LineAmountTypes: quote.pricesIncludeGst === true ? 'Inclusive' : 'Exclusive',
+    LineAmountTypes: quote.gstRegistered === false ? 'NoTax' : quote.pricesIncludeGst === true ? 'Inclusive' : 'Exclusive',
     LineItems: lineItems,
     CurrencyCode: 'AUD',
   };

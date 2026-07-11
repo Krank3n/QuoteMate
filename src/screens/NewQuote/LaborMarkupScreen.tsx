@@ -265,6 +265,7 @@ export function LaborMarkupScreen() {
         laborMarkupPercent,
         extraHoursLocal,
         currentQuote.pricesIncludeGst === true,
+        currentQuote.gstRegistered !== false,
       );
 
       // Save labor and calculated values before leaving. Both updateQuote
@@ -352,6 +353,7 @@ export function LaborMarkupScreen() {
     laborMarkupPercent,
     extraHoursDerived,
     currentQuote.pricesIncludeGst === true,
+    currentQuote.gstRegistered !== false,
   );
 
   // Helper: unit labels
@@ -890,14 +892,16 @@ export function LaborMarkupScreen() {
           </Text>
         </View>
 
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>
-            {currentQuote.pricesIncludeGst === true ? 'Includes GST' : 'GST (10%)'}
-          </Text>
-          <Text style={styles.summaryValue}>
-            {formatCurrency(calculation.gst)}
-          </Text>
-        </View>
+        {currentQuote.gstRegistered !== false && (
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>
+              {currentQuote.pricesIncludeGst === true ? 'Includes GST' : 'GST (10%)'}
+            </Text>
+            <Text style={styles.summaryValue}>
+              {formatCurrency(calculation.gst)}
+            </Text>
+          </View>
+        )}
 
         <Divider style={styles.divider} />
 

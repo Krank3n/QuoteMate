@@ -41,6 +41,7 @@ import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
 import { Material, FavoriteProductMapping } from '../../types';
 import { colors } from '../../theme';
 import { formatCurrency, supplierPriceForGstMode } from '../../utils/quoteCalculator';
+import { keepSupplierPriceInclusive } from '../../../shared/document';
 import { ProBadge } from '../../components/ProBadge';
 import { getReeceConnectionStatus } from '../../services/reeceApi';
 import {
@@ -748,7 +749,7 @@ export function AddMaterialScreen() {
 
   const handleSelectProductImpl = async (item: any) => {
     let newMaterial: Material;
-    const inclusive = currentQuote?.pricesIncludeGst === true;
+    const inclusive = keepSupplierPriceInclusive(currentQuote ?? {});
     const adjustedPrice = supplierPriceForGstMode(item.price || 0, inclusive);
 
     if (item.isAiEstimate) {

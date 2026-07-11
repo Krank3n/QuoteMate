@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import { PASSTHROUGH_SURCHARGE_PCT } from './shared/pdf';
+import { NO_GST_NOTE } from './shared/document/gstMode';
 import {
   buildPaymentReceiptContentHtml,
   PaymentReceiptContentInput,
@@ -1139,6 +1140,9 @@ interface QuoteEmailData {
   subtotal: number;
   gst: number;
   total: number;
+  // false = business not GST-registered: hide the GST row and the
+  // "(inc GST)" total label, and show a "No GST has been charged" note.
+  gstRegistered?: boolean;
   acceptanceUrl?: string;
   photoUrls?: string[];
   // Deposit shown to the customer above the Accept button so they know what
@@ -1486,12 +1490,15 @@ function renderPaymentMethodCard(title: string, bodyHtml: string): string {
     </div>`;
 }
 
-interface PricingRowsInput {
+export interface PricingRowsInput {
   materialsSubtotal: number;
   laborTotal: number;
   subtotal: number;
   gst: number;
   total: number;
+  // false = not GST-registered: no GST row, plain "Total" label, "No GST
+  // has been charged" note under the total.
+  gstRegistered?: boolean;
   accent: string;
   // When set and > 0, render a "Deposit already paid" line and rename the
   // total label to "Balance due". Invoice-only.
@@ -1503,8 +1510,9 @@ interface PricingRowsInput {
   showLaborCosts?: boolean;
 }
 
-function renderPricingRows(input: PricingRowsInput): string {
+export function renderPricingRows(input: PricingRowsInput): string {
   const { materialsSubtotal, laborTotal, subtotal, gst, total, accent, depositCredit } = input;
+  const gstRegistered = input.gstRegistered !== false;
   const hasDeposit = !!(depositCredit && depositCredit > 0);
   const showMaterials = input.showMaterialCosts !== false;
   const showLabor = input.showLaborCosts !== false;
@@ -1526,7 +1534,7 @@ function renderPricingRows(input: PricingRowsInput): string {
             ${showMaterials ? row('Materials', `$${materialsSubtotal.toFixed(2)}`) : ''}
             ${showLabor ? row('Labour', `$${laborTotal.toFixed(2)}`) : ''}
             ${showSubtotalRow ? row('Subtotal', `$${subtotal.toFixed(2)}`) : ''}
-            ${row('GST', `$${gst.toFixed(2)}`)}
+            ${gstRegistered ? row('GST', `$${gst.toFixed(2)}`) : ''}
             ${hasDeposit ? `
             <tr>
               <td style="padding:10px 0;color:#059669;font-size:13px;border-bottom:1px solid #eef0f3;">Deposit already paid</td>
@@ -1539,9 +1547,13 @@ function renderPricingRows(input: PricingRowsInput): string {
         <td style="padding:14px 22px 18px;background:#f9fafb;border-top:2px solid #111827;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="color:#111827;font-size:14px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;">${hasDeposit ? 'Balance Due' : 'Total (inc GST)'}</td>
+              <td style="color:#111827;font-size:14px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;">${hasDeposit ? 'Balance Due' : gstRegistered ? 'Total (inc GST)' : 'Total'}</td>
               <td style="color:${accent};font-size:22px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums;letter-spacing:-0.3px;">$${total.toFixed(2)}</td>
             </tr>
+            ${gstRegistered ? '' : `
+            <tr>
+              <td colspan="2" style="color:#6b7280;font-size:12px;padding-top:6px;">${NO_GST_NOTE}</td>
+            </tr>`}
           </table>
         </td>
       </tr>
@@ -1708,6 +1720,7 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     subtotal: data.subtotal,
     gst: data.gst,
     total: data.total,
+    gstRegistered: data.gstRegistered,
     accent,
     depositCredit: isInvoice ? data.depositCredit : undefined,
     showMaterialCosts: data.showMaterialCosts,
@@ -1826,6 +1839,8 @@ interface InvoiceEmailData {
   subtotal: number;
   gst: number;
   total: number;
+  // See QuoteEmailData.gstRegistered.
+  gstRegistered?: boolean;
   invoiceNumber?: string;
   dueDate: string; // ISO date string
   payNowUrl?: string; // Square hosted payment link (only present when tradie has Square connected)

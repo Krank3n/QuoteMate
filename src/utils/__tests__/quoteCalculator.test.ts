@@ -373,6 +373,33 @@ describe('updateQuoteCalculations integration', () => {
     expect(updated.sections!.map((x) => x.laborTotal)).toEqual([800, 150, 150]);
   });
 
+  it('not GST-registered quote: total = subtotal + markup, gst = 0', () => {
+    const quote = buildQuote({
+      materials: [m({ quantity: 1, price: 500, totalPrice: 500 })],
+      laborHours: 5,
+      laborRate: 100, // $500 labour
+      markup: 10,
+      laborMarkup: 0,
+      gstRegistered: false,
+    });
+    const updated = updateQuoteCalculations(quote);
+    // 500 + 500 = 1000 subtotal, +$50 material markup = 1050, no GST
+    expect(updated.subtotal).toBe(1000);
+    expect(updated.markupAmount).toBe(50);
+    expect(updated.gst).toBe(0);
+    expect(updated.total).toBe(1050);
+  });
+
+  it('legacy quote without gstRegistered stays registered (exclusive +10%)', () => {
+    const quote = buildQuote({
+      materials: [m({ quantity: 1, price: 1000, totalPrice: 1000 })],
+    });
+    expect(quote.gstRegistered).toBeUndefined();
+    const updated = updateQuoteCalculations(quote);
+    expect(updated.gst).toBeCloseTo(100, 2);
+    expect(updated.total).toBeCloseTo(1100, 2);
+  });
+
   it('preserves estimatedHours when no sections (legacy fallback)', () => {
     const quote = buildQuote({
       laborHours: 8,

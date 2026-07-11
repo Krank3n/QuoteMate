@@ -71,6 +71,7 @@ interface DocLike {
   gst?: number;
   total?: number;
   pricesIncludeGst?: boolean;
+  gstRegistered?: boolean;
   materials?: any[];
   sections?: any[];
   job?: { estimatedHours?: number };
@@ -171,18 +172,28 @@ export function checkDocumentIntegrity(d: DocLike, opts: IntegrityCheckOptions =
     }
   }
 
-  // 7. Total under inclusive/exclusive GST mode
+  // 7. Total under the GST mode (not registered / inclusive / exclusive)
   if (typeof d.total === 'number') {
     const sub = Number(d.subtotal) || 0;
     const markup = Number(d.markupAmount) || 0;
     const travel = (Number(d.travelAdjustment) || 0) / 100 * sub;
     const subWithMarkup = sub + markup + travel;
-    const expectedTotal = d.pricesIncludeGst ? round2(subWithMarkup) : round2(subWithMarkup * 1.1);
+    const notRegistered = d.gstRegistered === false;
+    const expectedTotal = notRegistered || d.pricesIncludeGst
+      ? round2(subWithMarkup)
+      : round2(subWithMarkup * 1.1);
     if (!nearlyEqual(expectedTotal, d.total, tol)) {
       issues.push({
         code: 'total_mismatch',
-        detail: `stored total=${d.total}, recomputed=${expectedTotal} (pricesIncludeGst=${!!d.pricesIncludeGst})`,
+        detail: `stored total=${d.total}, recomputed=${expectedTotal} (gstRegistered=${d.gstRegistered !== false}, pricesIncludeGst=${!!d.pricesIncludeGst})`,
         expected: expectedTotal, actual: d.total, diff: round2(d.total - expectedTotal),
+      });
+    }
+    if (notRegistered && typeof d.gst === 'number' && Math.abs(d.gst) > tol) {
+      issues.push({
+        code: 'total_mismatch',
+        detail: `gst=${d.gst} stored on a not-GST-registered document (expected 0)`,
+        expected: 0, actual: d.gst, diff: round2(d.gst),
       });
     }
   }

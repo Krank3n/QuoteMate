@@ -37,6 +37,7 @@ export function calculateQuote(
   laborMarkupPercent: number = 0,
   laborExtraHours: number = 0,
   pricesIncludeGst: boolean = false,
+  gstRegistered: boolean = true,
 ): QuoteCalculation {
   const calc = calculateDocumentTotals(
     materials,
@@ -48,6 +49,7 @@ export function calculateQuote(
     laborMarkupPercent,
     laborExtraHours,
     pricesIncludeGst,
+    gstRegistered,
   );
   return {
     materialsSubtotal: calc.materialsSubtotal,
@@ -157,6 +159,7 @@ export function updateQuoteCalculations(quote: Quote): Quote {
     healed.laborMarkup ?? healed.markup ?? 0,
     healed.laborExtraHours ?? 0,
     healed.pricesIncludeGst === true,
+    healed.gstRegistered !== false,
   );
 
   return {

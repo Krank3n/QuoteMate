@@ -430,6 +430,7 @@ function ExpandedSections({
         travelAdjustmentAmount={travelAdjustmentAmount}
         travelAdjustmentPercent={travelAdjustmentPercent}
         pricesIncludeGst={(doc as any).pricesIncludeGst === true}
+        gstRegistered={(doc as any).gstRegistered}
         style={sectionOverride}
       />
     </View>
