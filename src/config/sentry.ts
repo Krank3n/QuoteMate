@@ -12,8 +12,10 @@
  */
 import * as Sentry from '@sentry/react-native';
 
-// From the Sentry project's "Client Keys (DSN)" settings page.
-export const SENTRY_DSN = '';
+// From the Sentry project's "Client Keys (DSN)" settings page
+// (org hansendev-0p, project react-native).
+export const SENTRY_DSN =
+  'https://7146851bfa0ff7f9f48d88aa693acb11@o4511709818781696.ingest.us.sentry.io/4511709865639936';
 
 /** Report only from real builds that actually have a project to report to. */
 export function shouldEnableSentry(dsn: string, isDev: boolean): boolean {

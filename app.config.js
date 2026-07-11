@@ -33,8 +33,8 @@ export default {
         // in EAS env; builds still succeed without it, stacks are just minified.
         "@sentry/react-native/expo",
         {
-          organization: process.env.SENTRY_ORG || "hansendev",
-          project: process.env.SENTRY_PROJECT || "quotemate",
+          organization: process.env.SENTRY_ORG || "hansendev-0p",
+          project: process.env.SENTRY_PROJECT || "react-native",
         },
       ],
       [
