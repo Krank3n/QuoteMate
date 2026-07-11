@@ -33,6 +33,7 @@ import {
   type ReconcileResult,
 } from './llmService';
 import { simplifySearchTerm } from '../utils/simplifySearchTerm';
+import { withPreservedCorrections } from './floorplanTakeoff';
 import { stampAsPriced } from '../utils/asPriced';
 import { isNonRetailTradeRow, tradeFallbackUnitPrice } from '../utils/tradeFallback';
 import { loadAllFavoritesForLLM, loadFavoritesFromLocal } from './materialFavorites';
@@ -299,7 +300,14 @@ async function generateMaterialsForQuoteInner(
     job: {
       ...quote.job,
       estimatedHours: analysis.estimatedHours,
-      ...(analysis.floorplanAnalysis ? { floorplanAnalysis: analysis.floorplanAnalysis } : {}),
+      ...(analysis.floorplanAnalysis
+        ? {
+            floorplanAnalysis: withPreservedCorrections(
+              analysis.floorplanAnalysis,
+              quote.job?.floorplanAnalysis,
+            ),
+          }
+        : {}),
     } as Quote['job'],
     sections: [...existingSections, ...newSections],
     materials: hasExistingMaterials ? [...quote.materials, ...generatedMaterials] : generatedMaterials,

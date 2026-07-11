@@ -1,24 +1,30 @@
 /**
- * FloorplanTakeoffCard — read-only takeoff summary for a job whose photos
- * included an architectural plan/drawing.
+ * FloorplanTakeoffCard — takeoff summary for a job whose photos included an
+ * architectural plan/drawing.
  *
  * Surfaces the measured geometry (total area, per-zone areas, perimeter, waste
- * volume) plus a confidence chip and an assumptions footnote, so the tradie can
- * see and sanity-check what was read off the plan instead of trusting silently
- * baked-in numbers. Read-only in this PR — no edit affordances yet.
+ * volume) plus a confidence chip and an assumptions footnote. The three
+ * headline numbers are editable when the parent supplies `onEdit`: correcting
+ * a number IS the calibration — no extra fields, toggles or jargon. A
+ * corrected value shows the measured figure underneath ("measured 760"), and
+ * correcting the total offers a one-tap "scale the other areas to match".
  */
 
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { FloorplanAnalysis } from '../types';
-import { resolvedTakeoff } from '../services/floorplanTakeoff';
+import { resolvedTakeoff, TakeoffEditField } from '../services/floorplanTakeoff';
 import { colors } from '../theme';
 
 interface FloorplanTakeoffCardProps {
   analysis: FloorplanAnalysis;
+  /** Called with the corrected value when the tradie edits a number. */
+  onEdit?: (field: TakeoffEditField, value: number) => void;
+  /** Called when the tradie accepts scaling the zone areas by an area factor. */
+  onScaleZones?: (areaFactor: number) => void;
 }
 
 const CONFIDENCE_META: Record<
@@ -39,11 +45,11 @@ function fmt(n: number): string {
 // chip means for the numbers, rather than just colour-coded anxiety.
 const CONFIDENCE_GUIDANCE: Record<FloorplanAnalysis['confidence'], string> = {
   low: 'Measurements may be approximate — check before quoting',
-  medium: 'Measurements estimated from plan',
+  medium: 'Measurements estimated from plan — tap a number to correct it',
   high: "Measurements match the plan's stated scale",
 };
 
-export function FloorplanTakeoffCard({ analysis }: FloorplanTakeoffCardProps) {
+export function FloorplanTakeoffCard({ analysis, onEdit, onScaleZones }: FloorplanTakeoffCardProps) {
   const takeoff = resolvedTakeoff(analysis);
   const zones = (takeoff.zones ?? []).filter(
     (z) => typeof z.areaM2 === 'number' && z.areaM2 > 0,
@@ -55,6 +61,12 @@ export function FloorplanTakeoffCard({ analysis }: FloorplanTakeoffCardProps) {
   const perimeter = typeof takeoff.perimeterM === 'number' ? takeoff.perimeterM : 0;
   const removalBin = typeof takeoff.removalBinM3 === 'number' ? takeoff.removalBinM3 : 0;
 
+  const [editingField, setEditingField] = useState<TakeoffEditField | null>(null);
+  const [draft, setDraft] = useState('');
+  // Set after a total-area correction while zones exist: the area factor the
+  // tradie can apply to the other areas with one tap.
+  const [pendingZoneFactor, setPendingZoneFactor] = useState<number | null>(null);
+
   // A detected plan with no usable metrics renders as a hollow header (just a
   // title + confidence chip), which reads as "measured" while showing nothing.
   // Don't show the card at all in that case.
@@ -64,7 +76,101 @@ export function FloorplanTakeoffCard({ analysis }: FloorplanTakeoffCardProps) {
     return null;
   }
 
-  const guidance = CONFIDENCE_GUIDANCE[takeoff.confidence];
+  const guidance = onEdit
+    ? CONFIDENCE_GUIDANCE[takeoff.confidence]
+    : CONFIDENCE_GUIDANCE[takeoff.confidence]?.replace(' — tap a number to correct it', '');
+
+  const startEdit = (field: TakeoffEditField, current: number) => {
+    if (!onEdit) return;
+    setEditingField(field);
+    setDraft(fmt(current));
+  };
+
+  const commitEdit = () => {
+    if (!editingField || !onEdit) return;
+    const value = parseFloat(draft.replace(',', '.'));
+    const field = editingField;
+    setEditingField(null);
+    if (!isFinite(value) || value <= 0) return;
+    const previous =
+      field === 'totalAreaM2' ? totalArea : field === 'perimeterM' ? perimeter : removalBin;
+    if (previous > 0 && Math.abs(value - previous) / previous < 0.001) return;
+    onEdit(field, value);
+    if (field === 'totalAreaM2' && previous > 0 && zones.length > 0 && onScaleZones) {
+      setPendingZoneFactor(value / previous);
+    }
+  };
+
+  const metricRow = (
+    field: TakeoffEditField,
+    icon: string,
+    label: string,
+    value: number,
+    unit: string,
+  ) => {
+    if (value <= 0) return null;
+    const measured =
+      field === 'totalAreaM2'
+        ? analysis.totalAreaM2
+        : field === 'perimeterM'
+          ? analysis.perimeterM
+          : analysis.removalBinM3;
+    const corrected =
+      typeof analysis.corrected?.[field] === 'number' &&
+      typeof measured === 'number' &&
+      Math.abs(analysis.corrected[field]! - measured) / measured >= 0.001;
+
+    if (editingField === field) {
+      return (
+        <View style={styles.row}>
+          <View style={styles.rowIcon}>
+            <MaterialCommunityIcons name={icon as any} size={18} color={colors.primary} />
+          </View>
+          <Text style={styles.rowLabel}>{label}</Text>
+          <TextInput
+            style={styles.editInput}
+            value={draft}
+            onChangeText={setDraft}
+            keyboardType="decimal-pad"
+            autoFocus
+            selectTextOnFocus
+            onSubmitEditing={commitEdit}
+            onBlur={commitEdit}
+            accessibilityLabel={`Edit ${label.toLowerCase()}`}
+          />
+          <Text style={styles.editUnit}>{unit}</Text>
+        </View>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        style={styles.row}
+        onPress={() => startEdit(field, value)}
+        disabled={!onEdit}
+        accessibilityRole={onEdit ? 'button' : undefined}
+        accessibilityLabel={onEdit ? `${label} ${fmt(value)} ${unit}. Tap to correct.` : undefined}
+      >
+        <View style={styles.rowIcon}>
+          <MaterialCommunityIcons name={icon as any} size={18} color={colors.primary} />
+        </View>
+        <Text style={styles.rowLabel}>{label}</Text>
+        <View style={styles.rowValueBlock}>
+          <Text style={styles.rowValue}>{`${fmt(value)} ${unit}`}</Text>
+          {corrected && typeof measured === 'number' ? (
+            <Text style={styles.rowMeasured}>{`measured ${fmt(measured)}`}</Text>
+          ) : null}
+        </View>
+        {onEdit ? (
+          <MaterialCommunityIcons
+            name={'pencil-outline' as any}
+            size={15}
+            color={colors.textMuted}
+          />
+        ) : null}
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.card}>
@@ -86,70 +192,59 @@ export function FloorplanTakeoffCard({ analysis }: FloorplanTakeoffCardProps) {
 
       {guidance ? <Text style={styles.guidance}>{guidance}</Text> : null}
 
-      {typeof takeoff.totalAreaM2 === 'number' && takeoff.totalAreaM2 > 0 ? (
-        <MetricRow
-          icon="vector-square"
-          label="Total area"
-          value={`${fmt(takeoff.totalAreaM2)} m²`}
-        />
-      ) : null}
+      {metricRow('totalAreaM2', 'vector-square', 'Total area', totalArea, 'm²')}
+      {metricRow('perimeterM', 'vector-polyline', 'Perimeter', perimeter, 'm')}
+      {metricRow('removalBinM3', 'dump-truck', 'Waste volume', removalBin, 'm³')}
 
-      {typeof takeoff.perimeterM === 'number' && takeoff.perimeterM > 0 ? (
-        <MetricRow
-          icon="vector-polyline"
-          label="Perimeter"
-          value={`${fmt(takeoff.perimeterM)} m`}
-        />
-      ) : null}
-
-      {typeof takeoff.removalBinM3 === 'number' && takeoff.removalBinM3 > 0 ? (
-        <MetricRow
-          icon="dump-truck"
-          label="Waste volume"
-          value={`${fmt(takeoff.removalBinM3)} m³`}
-        />
+      {pendingZoneFactor !== null && onScaleZones ? (
+        <View style={styles.scalePrompt}>
+          <Text style={styles.scalePromptText}>Scale the other areas to match?</Text>
+          <TouchableOpacity
+            style={styles.scalePromptButton}
+            onPress={() => {
+              onScaleZones(pendingZoneFactor);
+              setPendingZoneFactor(null);
+            }}
+          >
+            <Text style={styles.scalePromptButtonText}>Scale them</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setPendingZoneFactor(null)}>
+            <Text style={styles.scalePromptDismiss}>Keep as measured</Text>
+          </TouchableOpacity>
+        </View>
       ) : null}
 
       {zones.length > 0 ? (
         <View style={styles.zonesBlock}>
           <Text style={styles.zonesHeading}>Areas</Text>
-          {zones.map((z, i) => (
-            <View key={`${z.code ?? z.label}-${i}`} style={styles.zoneRow}>
-              {z.code ? (
-                <View style={styles.zoneChip}>
-                  <Text style={styles.zoneChipText}>{z.code}</Text>
-                </View>
-              ) : null}
-              <Text style={styles.zoneLabel} numberOfLines={1}>
-                {z.label}
-              </Text>
-              <Text style={styles.zoneValue}>{fmt(z.areaM2!)} m²</Text>
-            </View>
-          ))}
+          {zones.map((z, i) => {
+            // Net edge length (boundary minus doorways/openings) — the
+            // quotable skirting/coving run for this zone, when measured.
+            const netEdge =
+              typeof z.perimeterM === 'number' && z.perimeterM > 0
+                ? Math.max(0, z.perimeterM - (z.openingsDeductionM ?? 0))
+                : undefined;
+            return (
+              <View key={`${z.code ?? z.label}-${i}`} style={styles.zoneRow}>
+                {z.code ? (
+                  <View style={styles.zoneChip}>
+                    <Text style={styles.zoneChipText}>{z.code}</Text>
+                  </View>
+                ) : null}
+                <Text style={styles.zoneLabel} numberOfLines={1}>
+                  {z.label}
+                </Text>
+                {netEdge !== undefined ? (
+                  <Text style={styles.zoneEdge}>{`edge ${fmt(netEdge)} m`}</Text>
+                ) : null}
+                <Text style={styles.zoneValue}>{fmt(z.areaM2!)} m²</Text>
+              </View>
+            );
+          })}
         </View>
       ) : null}
 
       {assumptions ? <Text style={styles.assumptions}>{assumptions}</Text> : null}
-    </View>
-  );
-}
-
-function MetricRow({
-  icon,
-  label,
-  value,
-}: {
-  icon: string;
-  label: string;
-  value: string;
-}) {
-  return (
-    <View style={styles.row}>
-      <View style={styles.rowIcon}>
-        <MaterialCommunityIcons name={icon as any} size={18} color={colors.primary} />
-      </View>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
     </View>
   );
 }
@@ -227,10 +322,67 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text,
   },
+  rowValueBlock: {
+    alignItems: 'flex-end',
+  },
   rowValue: {
     fontSize: 14,
     fontWeight: '700',
     color: colors.text,
+  },
+  rowMeasured: {
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  editInput: {
+    minWidth: 72,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    textAlign: 'right',
+  },
+  editUnit: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  scalePrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: colors.primaryBg,
+    flexWrap: 'wrap',
+  },
+  scalePromptText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text,
+    minWidth: 140,
+  },
+  scalePromptButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: colors.primary,
+  },
+  scalePromptButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.surface,
+  },
+  scalePromptDismiss: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
   },
   zonesBlock: {
     gap: 6,
@@ -263,6 +415,10 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: colors.text,
+  },
+  zoneEdge: {
+    fontSize: 12,
+    color: colors.textSecondary,
   },
   zoneValue: {
     fontSize: 13,

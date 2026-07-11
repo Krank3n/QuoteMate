@@ -60,6 +60,11 @@ import { shouldRunReeceFirst } from '../../services/supplierPriority';
 import { getTradeCategoryById, getTradeNicheById, TRADE_CATEGORIES } from '../../constants/tradeCategories';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
 import { FloorplanTakeoffCard } from '../../components/FloorplanTakeoffCard';
+import {
+  resolvedTakeoff,
+  scaleMaterialsForTakeoffCorrection,
+  type TakeoffEditField,
+} from '../../services/floorplanTakeoff';
 import { InlineAddMaterialRow } from '../../components/InlineAddMaterialRow';
 import { ActionSheet, type ActionSheetOption } from '../../components/ActionSheet';
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
@@ -2008,10 +2013,60 @@ export function MaterialsListScreen() {
     </TouchableOpacity>
   ) : null;
 
+  // Takeoff correction = calibration (issue #32 Phase 2). The tradie edits a
+  // number on the card; we persist it in floorplanAnalysis.corrected (model
+  // fields untouched) and rescale the material quantities that were grounded
+  // on the geometry that number drives.
+  const handleTakeoffEdit = useCallback(
+    (field: TakeoffEditField, value: number) => {
+      const fa = currentQuote?.job?.floorplanAnalysis;
+      if (!currentQuote || !fa) return;
+      const previous = resolvedTakeoff(fa)[field];
+      const nextAnalysis = {
+        ...fa,
+        corrected: { ...fa.corrected, [field]: value, editedAt: new Date().toISOString() },
+      };
+      const nextMaterials =
+        typeof previous === 'number' && previous > 0
+          ? scaleMaterialsForTakeoffCorrection(materials, field, value / previous)
+          : materials;
+      updateQuote({
+        ...currentQuote,
+        job: { ...currentQuote.job, floorplanAnalysis: nextAnalysis },
+        materials: nextMaterials,
+      });
+    },
+    [currentQuote, materials, updateQuote],
+  );
+
+  const handleTakeoffScaleZones = useCallback(
+    (areaFactor: number) => {
+      const fa = currentQuote?.job?.floorplanAnalysis;
+      if (!currentQuote || !fa || !isFinite(areaFactor) || areaFactor <= 0) return;
+      const nextAnalysis = {
+        ...fa,
+        corrected: {
+          ...fa.corrected,
+          zonesScaledBy: (fa.corrected?.zonesScaledBy ?? 1) * areaFactor,
+          editedAt: new Date().toISOString(),
+        },
+      };
+      updateQuote({
+        ...currentQuote,
+        job: { ...currentQuote.job, floorplanAnalysis: nextAnalysis },
+      });
+    },
+    [currentQuote, updateQuote],
+  );
+
   const listHeader = (
     <WebContainer>
       {currentQuote?.job?.floorplanAnalysis?.detected && (
-        <FloorplanTakeoffCard analysis={currentQuote.job.floorplanAnalysis} />
+        <FloorplanTakeoffCard
+          analysis={currentQuote.job.floorplanAnalysis}
+          onEdit={handleTakeoffEdit}
+          onScaleZones={handleTakeoffScaleZones}
+        />
       )}
       {reeceBanner}
     </WebContainer>

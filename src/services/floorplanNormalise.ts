@@ -22,6 +22,8 @@ export function normaliseFloorplanAnalysis(raw: any): FloorplanAnalysis | undefi
           label: (z?.label || z?.code || 'Zone').toString(),
           code: z?.code ? z.code.toString() : undefined,
           areaM2: num(z?.areaM2),
+          perimeterM: num(z?.perimeterM),
+          openingsDeductionM: num(z?.openingsDeductionM),
           removalAreaM2: num(z?.removalAreaM2),
           dims:
             num(z?.dims?.lengthM) && num(z?.dims?.widthM)

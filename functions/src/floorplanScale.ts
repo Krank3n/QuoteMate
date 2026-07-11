@@ -18,6 +18,10 @@ export interface FloorplanZone {
   label: string;
   code?: string;
   areaM2?: number;
+  // Zone boundary length and total width of doorways/openings in it; the net
+  // (perimeterM - openingsDeductionM) is the quotable skirting/coving run.
+  perimeterM?: number;
+  openingsDeductionM?: number;
   removalAreaM2?: number;
   dims?: { lengthM: number; widthM: number };
 }
@@ -129,6 +133,12 @@ export function applyAnchorScale(analysis: FloorplanAnalysis): FloorplanAnalysis
       if (typeof zone.areaM2 === 'number') zone.areaM2 = zone.areaM2 * areaFactor;
       if (typeof zone.removalAreaM2 === 'number') {
         zone.removalAreaM2 = zone.removalAreaM2 * areaFactor;
+      }
+      if (typeof zone.perimeterM === 'number') {
+        zone.perimeterM = zone.perimeterM * linearFactor;
+      }
+      if (typeof zone.openingsDeductionM === 'number') {
+        zone.openingsDeductionM = zone.openingsDeductionM * linearFactor;
       }
       if (zone.dims) {
         zone.dims = {

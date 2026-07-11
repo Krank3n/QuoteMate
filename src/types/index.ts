@@ -149,6 +149,11 @@ export interface FloorplanZone {
   label: string;          // human label, e.g. "Master bedroom" or "FC01 area"
   code?: string;          // plan-printed code if any (FC01, R1, …)
   areaM2?: number;
+  // Zone boundary length and the total width of doorways/openings in it.
+  // Net edge (perimeterM - openingsDeductionM) drives skirting/coving/edging
+  // lineal metres for zones where the finish needs edge treatment.
+  perimeterM?: number;
+  openingsDeductionM?: number;
   removalAreaM2?: number; // strip-out / demolition scope for this zone
   dims?: { lengthM: number; widthM: number };
 }
@@ -179,10 +184,16 @@ export interface FloorplanAnalysis {
   // 'model' = measured/derived, 'user' = manually corrected.
   source?: 'model' | 'user';
   // User-edited overrides — when present these win over the measured values.
+  // Model fields are never overwritten, so re-analysis can't wipe a correction
+  // and the card can show "measured → corrected".
   corrected?: {
     totalAreaM2?: number;
     perimeterM?: number;
     removalBinM3?: number;
+    // Area factor applied to the model's zone areas when the user accepted
+    // "scale the other areas to match" after correcting the total. Zones stay
+    // stored as measured; this scales them at read time (lengths by its √).
+    zonesScaledBy?: number;
     editedAt?: string;
   };
   assumptions: string;            // what was inferred or could not be read

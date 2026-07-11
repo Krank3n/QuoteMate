@@ -85,3 +85,19 @@ describe('normaliseFloorplanAnalysis — new fields', () => {
     ).toBeUndefined();
   });
 });
+
+describe('normaliseFloorplanAnalysis — zone edge fields', () => {
+  it('coerces zone perimeterM/openingsDeductionM, dropping non-finite/≤0', () => {
+    const r = normaliseFloorplanAnalysis({
+      ...detected,
+      zones: [
+        { label: 'FC03', code: 'FC03', areaM2: 80, perimeterM: 95.4, openingsDeductionM: 10.4 },
+        { label: 'FC01', areaM2: 500, perimeterM: 'huge', openingsDeductionM: -2 },
+      ],
+    });
+    expect(r?.zones?.[0].perimeterM).toBe(95.4);
+    expect(r?.zones?.[0].openingsDeductionM).toBe(10.4);
+    expect(r?.zones?.[1].perimeterM).toBeUndefined();
+    expect(r?.zones?.[1].openingsDeductionM).toBeUndefined();
+  });
+});

@@ -168,6 +168,22 @@ describe('applyAnchorScale — post-scale math', () => {
     expect(result.totalAreaM2).toBeCloseTo(400, 5);
   });
 
+  it('scales zone perimeterM and openingsDeductionM by the linear factor', () => {
+    const result = applyAnchorScale(
+      base({
+        totalAreaM2: 100,
+        footprintDims: { lengthM: 10, widthM: 10 },
+        calibration: { source: 'stated_total', basisMm: 20000, note: '' },
+        zones: [{ label: 'Wet area', code: 'FC03', areaM2: 40, perimeterM: 30, openingsDeductionM: 4 }],
+      }),
+    );
+    // factor 2: zone lengths double, so the net edge (perimeter - openings) doubles too.
+    const zone = result.zones![0];
+    expect(zone.perimeterM).toBeCloseTo(60, 5);
+    expect(zone.openingsDeductionM).toBeCloseTo(8, 5);
+    expect(zone.perimeterM! - zone.openingsDeductionM!).toBeCloseTo(52, 5);
+  });
+
   it('scales zones (areas, removal, dims) too', () => {
     const result = applyAnchorScale(
       base({

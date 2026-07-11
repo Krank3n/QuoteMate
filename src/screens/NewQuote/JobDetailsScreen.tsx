@@ -52,6 +52,7 @@ import { createJobFromTemplate } from '../../utils/materialsEstimator';
 import { colors } from '../../theme';
 import { JobTemplate, Material, QuotePhoto } from '../../types';
 import type { TemplateMatchInput } from '../../services/llmService';
+import { withPreservedCorrections } from '../../services/floorplanTakeoff';
 import { loadTemplates } from '../../services/sectionTemplateService';
 import { generateId } from '../../utils/generateId';
 import { withOrigin } from '../../utils/materialOrigin';
@@ -940,17 +941,27 @@ export function JobDetailsScreen() {
           ...(m.qualityTier && { qualityTier: m.qualityTier }),
         } as Material, 'recommended'));
 
-        // Update the job with analyzed data
+        // Get the latest document state and update it
+        const state = useStore.getState();
+        const latestDocument = mode === 'invoice' ? state.currentInvoice : state.currentQuote;
+
+        // Update the job with analyzed data. Corrections the tradie made on a
+        // previous takeoff live on the latest document's job — carry them
+        // forward so re-analysing can't wipe an edit.
         const analyzedJob = {
           ...job,
           name: jobName || analysis.jobSummary || 'Custom Job',
           estimatedHours: analysis.estimatedHours,
-          ...(analysis.floorplanAnalysis ? { floorplanAnalysis: analysis.floorplanAnalysis } : {}),
+          ...(analysis.floorplanAnalysis
+            ? {
+                floorplanAnalysis: withPreservedCorrections(
+                  analysis.floorplanAnalysis,
+                  latestDocument?.job?.floorplanAnalysis,
+                ),
+              }
+            : {}),
         };
 
-        // Get the latest document state and update it
-        const state = useStore.getState();
-        const latestDocument = mode === 'invoice' ? state.currentInvoice : state.currentQuote;
         if (latestDocument) {
           const finalDocument = {
             ...latestDocument,
