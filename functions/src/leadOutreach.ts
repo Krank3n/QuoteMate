@@ -375,6 +375,22 @@ function pickFromAddressComponents(comps: PlacesDetailsResult['address_component
   return m?.long_name || null;
 }
 
+// `region=au` on textsearch is only a ranking bias, not a restriction —
+// ambiguous suburb names (Liverpool, Newcastle, …) resolve to the UK unless
+// the query names the country. The details-level check below is the hard
+// guarantee; this just stops Google returning a page of UK results.
+export function buildDiscoveryQuery(phrase: string, suburb: string): string {
+  const s = suburb.trim();
+  return /\baustralia\b/i.test(s) ? `${phrase} ${s}` : `${phrase} ${s}, Australia`;
+}
+
+// Fails open when the country component is missing so a sparse Details
+// response can't drop a genuine Australian lead.
+export function isNonAustralianPlace(comps: PlacesDetailsResult['address_components'] | undefined): boolean {
+  const country = comps?.find(c => c.types.includes('country'));
+  return !!country && country.short_name !== 'AU';
+}
+
 // ============================================================
 // WEBSITE ENRICHMENT — fetch + cheerio + Claude extraction
 // ============================================================
@@ -750,12 +766,13 @@ export const adminLeadDiscovery = functions
     let dedupedSuppressed = 0;
     let dedupedExistingUser = 0;
     let placeFetchFailures = 0;
+    let skippedNonAu = 0;
     const sample: any[] = [];
     const searchErrors: string[] = [];
 
     for (const suburb of suburbs) {
       for (const phrase of TRADE_QUERY[trade]) {
-        const query = `${phrase} ${suburb}`;
+        const query = buildDiscoveryQuery(phrase, suburb);
         let results: PlacesSearchResult[] = [];
         try {
           results = await placesTextSearch(query);
@@ -791,6 +808,7 @@ export const adminLeadDiscovery = functions
           // here, no Claude here).
           const det = await placesDetails(r.place_id);
           if (!det) { placeFetchFailures++; continue; }
+          if (isNonAustralianPlace(det.address_components)) { skippedNonAu++; continue; }
 
           const phone = det.formatted_phone_number || null;
           const intlPhone = det.international_phone_number || null;
@@ -854,6 +872,7 @@ export const adminLeadDiscovery = functions
         dedupedSuppressed,
         dedupedExistingUser,
         placeFetchFailures,
+        skippedNonAu,
         status: 'completed',
         completedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
@@ -864,7 +883,7 @@ export const adminLeadDiscovery = functions
       action: 'lead_discovery',
       targetType: 'lead_campaign',
       targetId: campaignId,
-      payload: { trade, suburbs, maxResults, created, dedupedExisting, dedupedSuppressed, dedupedExistingUser, dryRun },
+      payload: { trade, suburbs, maxResults, created, dedupedExisting, dedupedSuppressed, dedupedExistingUser, skippedNonAu, dryRun },
     });
 
     return {
@@ -875,6 +894,7 @@ export const adminLeadDiscovery = functions
       dedupedSuppressed,
       dedupedExistingUser,
       placeFetchFailures,
+      skippedNonAu,
       searchErrors,
       sample: dryRun ? sample.slice(0, 10) : undefined,
     };
@@ -2054,10 +2074,11 @@ async function runDiscoveryBatch(params: {
     for (const phrase of TRADE_QUERY[trade]) {
       if (created.length >= maxResults) break;
       let results: PlacesSearchResult[] = [];
+      const query = buildDiscoveryQuery(phrase, suburb);
       try {
-        results = await placesTextSearch(`${phrase} ${suburb}`);
+        results = await placesTextSearch(query);
       } catch (e: any) {
-        console.warn(`runDiscoveryBatch: places search failed for "${phrase} ${suburb}":`, e?.message);
+        console.warn(`runDiscoveryBatch: places search failed for "${query}":`, e?.message);
         continue;
       }
 
@@ -2079,6 +2100,7 @@ async function runDiscoveryBatch(params: {
 
         const det = await placesDetails(r.place_id);
         if (!det) continue;
+        if (isNonAustralianPlace(det.address_components)) continue;
 
         const phone = det.formatted_phone_number || null;
         const intlPhone = det.international_phone_number || null;

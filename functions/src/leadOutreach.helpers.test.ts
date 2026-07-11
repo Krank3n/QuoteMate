@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normaliseEmail, suppressionDocId } from './leadOutreach';
+import { normaliseEmail, suppressionDocId, buildDiscoveryQuery, isNonAustralianPlace } from './leadOutreach';
 
 /**
  * Regression tests for the Jun-Jul 2026 poisoned send queue: a scraped
@@ -44,5 +44,53 @@ describe('suppressionDocId', () => {
     const id = suppressionDocId('placeId', 'AbC//dEf/g');
     expect(id).toBe('placeId:AbC%2F%2FdEf%2Fg');
     expect(id.includes('/')).toBe(false);
+  });
+});
+
+/**
+ * Regression tests for the Jul 2026 UK-leads incident: discovery for suburb
+ * "Liverpool" returned Liverpool UK businesses (Mersey Fencing Ltd, Liverpool
+ * One Fencing, …) because the Places query never named the country and
+ * `region=au` is only a ranking bias, not a restriction.
+ */
+describe('buildDiscoveryQuery', () => {
+  it('appends Australia to disambiguate suburb names shared with the UK', () => {
+    expect(buildDiscoveryQuery('fencing contractor', 'Liverpool')).toBe(
+      'fencing contractor Liverpool, Australia',
+    );
+    expect(buildDiscoveryQuery('roofer', 'Newcastle')).toBe('roofer Newcastle, Australia');
+  });
+
+  it('does not double-append when the suburb already names the country', () => {
+    expect(buildDiscoveryQuery('plumber', 'Liverpool NSW Australia')).toBe(
+      'plumber Liverpool NSW Australia',
+    );
+    expect(buildDiscoveryQuery('plumber', 'liverpool australia')).toBe('plumber liverpool australia');
+  });
+
+  it('trims whitespace from custom suburb input', () => {
+    expect(buildDiscoveryQuery('painter', '  Byron Bay ')).toBe('painter Byron Bay, Australia');
+  });
+});
+
+describe('isNonAustralianPlace', () => {
+  const comp = (shortName: string, longName: string) => ({
+    long_name: longName,
+    short_name: shortName,
+    types: ['country', 'political'],
+  });
+
+  it('rejects a UK business that slipped past the query bias', () => {
+    expect(isNonAustralianPlace([comp('GB', 'United Kingdom')])).toBe(true);
+  });
+
+  it('keeps Australian businesses', () => {
+    expect(isNonAustralianPlace([comp('AU', 'Australia')])).toBe(false);
+  });
+
+  it('fails open when the country component is missing or components are absent', () => {
+    expect(isNonAustralianPlace([{ long_name: 'NSW', short_name: 'NSW', types: ['administrative_area_level_1'] }])).toBe(false);
+    expect(isNonAustralianPlace([])).toBe(false);
+    expect(isNonAustralianPlace(undefined)).toBe(false);
   });
 });
