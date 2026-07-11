@@ -43,6 +43,7 @@ export function normaliseFloorplanAnalysis(raw: any): FloorplanAnalysis | undefi
                 ? raw.calibration.source
                 : 'stated_total',
             basisMm: num(raw.calibration.basisMm),
+            statedLengthMm: num(raw.calibration.statedLengthMm),
             note: (raw.calibration.note || '').toString(),
           }
         : undefined,

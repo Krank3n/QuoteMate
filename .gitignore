@@ -73,3 +73,6 @@ credentials/
 # Claude Code
 .claude/scheduled_tasks.lock
 dist-staging
+
+# Warragul ground-truth replay outputs (testWarragulPlan.ts)
+functions/warragul-replay-*.json

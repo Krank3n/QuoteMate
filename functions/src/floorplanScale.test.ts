@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { applyAnchorScale, FloorplanAnalysis } from './floorplanScale';
+import {
+  applyAnchorScale,
+  isAnchorLaundered,
+  mergeBlindTakeoff,
+  materialAnchorFactor,
+  FloorplanAnalysis,
+} from './floorplanScale';
 
 function base(overrides: Partial<FloorplanAnalysis>): FloorplanAnalysis {
   return {
@@ -58,6 +64,57 @@ describe('applyAnchorScale — post-scale math', () => {
     expect(result.removalAreaM2).toBeCloseTo(200, 5);
     expect(result.removalBinM3).toBeCloseTo(40, 5);
     expect(result.perimeterM).toBeCloseTo(80, 5);
+  });
+
+  it('REGRESSION (Warragul live replay): statedLengthMm anchors even when the drawing was measured off a known_dimension', () => {
+    // The production failure mode this fixes: the model used to adopt the
+    // stated 49 m as its own footprint length (factor 49/49 = no-op). Now it
+    // measures the drawing independently (source: known_dimension) and echoes
+    // the stated length separately — the anchor must fire off that echo.
+    const result = applyAnchorScale(
+      base({
+        totalAreaM2: 590,
+        footprintDims: { lengthM: 45.5, widthM: 13 },
+        calibration: { source: 'known_dimension', basisMm: 2520, statedLengthMm: 49000, note: '' },
+      }),
+    );
+    const factor = 49 / 45.5;
+    expect(result.scaledToAnchor).toBe(true);
+    expect(result.scaleFactorApplied).toBeCloseTo(factor, 5);
+    expect(result.totalAreaM2).toBeCloseTo(590 * factor * factor, 1);
+  });
+
+  it('statedLengthMm wins over legacy basisMm under stated_total', () => {
+    const result = applyAnchorScale(
+      base({
+        totalAreaM2: 100,
+        footprintDims: { lengthM: 10, widthM: 10 },
+        // Legacy basisMm says 12 m, the explicit echo says 15 m — echo wins.
+        calibration: { source: 'stated_total', basisMm: 12000, statedLengthMm: 15000, note: '' },
+      }),
+    );
+    expect(result.scaleFactorApplied).toBeCloseTo(1.5, 5);
+    expect(result.totalAreaM2).toBeCloseTo(225, 3);
+  });
+
+  it('unusable statedLengthMm (0 / NaN) falls back to the legacy stated_total path', () => {
+    const result = applyAnchorScale(
+      base({
+        totalAreaM2: 100,
+        footprintDims: { lengthM: 10, widthM: 10 },
+        calibration: { source: 'stated_total', basisMm: 12000, statedLengthMm: 0, note: '' },
+      }),
+    );
+    expect(result.scaleFactorApplied).toBeCloseTo(1.2, 5);
+
+    const unchanged = applyAnchorScale(
+      base({
+        totalAreaM2: 100,
+        footprintDims: { lengthM: 10, widthM: 10 },
+        calibration: { source: 'known_dimension', basisMm: 2520, statedLengthMm: NaN, note: '' },
+      }),
+    );
+    expect(unchanged.scaledToAnchor).toBeUndefined();
   });
 
   it('known_dimension is NOT a footprint anchor — returns the analysis unchanged', () => {
@@ -264,5 +321,107 @@ describe('scaleMaterialsToAnchor — Phase 3 quantity correction', () => {
     expect(scaleMaterialsToAnchor(mats, 1)).toBe(mats);
     expect(scaleMaterialsToAnchor(mats, undefined)).toBe(mats);
     expect(scaleMaterialsToAnchor(mats, 0)).toBe(mats);
+  });
+});
+
+describe('isAnchorLaundered', () => {
+  const laundered = base({
+    totalAreaM2: 980,
+    footprintDims: { lengthM: 49, widthM: 20 },
+    calibration: { source: 'stated_total', basisMm: 49000, statedLengthMm: 49000, note: '' },
+  });
+
+  it('detects a footprint length copied from the stated value (±2%)', () => {
+    expect(isAnchorLaundered(laundered)).toBe(true);
+    expect(
+      isAnchorLaundered(base({
+        footprintDims: { lengthM: 48.5, widthM: 20 },
+        calibration: { source: 'stated_total', statedLengthMm: 49000, note: '' },
+      })),
+    ).toBe(true);
+  });
+
+  it('is false for an independent measurement, or when either value is missing', () => {
+    expect(
+      isAnchorLaundered(base({
+        footprintDims: { lengthM: 45.5, widthM: 13 },
+        calibration: { source: 'known_dimension', statedLengthMm: 49000, note: '' },
+      })),
+    ).toBe(false);
+    expect(isAnchorLaundered(base({ footprintDims: { lengthM: 49, widthM: 20 } }))).toBe(false);
+    expect(
+      isAnchorLaundered(base({ calibration: { source: 'stated_total', statedLengthMm: 49000, note: '' } })),
+    ).toBe(false);
+  });
+});
+
+describe('mergeBlindTakeoff', () => {
+  const original = base({
+    totalAreaM2: 980,
+    perimeterM: 138,
+    removalAreaM2: 980,
+    removalBinM3: 10,
+    footprintDims: { lengthM: 49, widthM: 20 },
+    zones: [{ label: 'FC01', code: 'FC01', areaM2: 729 }],
+    calibration: { source: 'stated_total', basisMm: 49000, statedLengthMm: 49000, note: '' },
+    assumptions: 'orig',
+  });
+  const blind = base({
+    totalAreaM2: 640,
+    perimeterM: 150,
+    footprintDims: { lengthM: 46, widthM: 14 },
+    zones: [{ label: 'FC01', code: 'FC01', areaM2: 500 }],
+    calibration: { source: 'known_dimension', basisMm: 2520, note: 'grid bay 9-10' },
+    confidence: 'medium',
+  });
+
+  it('replaces geometry with the blind measurement and carries the stated echo', () => {
+    const merged = mergeBlindTakeoff(original, blind);
+    expect(merged.footprintDims).toEqual({ lengthM: 46, widthM: 14 });
+    expect(merged.totalAreaM2).toBe(640);
+    expect(merged.perimeterM).toBe(150);
+    expect(merged.zones?.[0].areaM2).toBe(500);
+    expect(merged.calibration?.source).toBe('known_dimension');
+    expect(merged.calibration?.statedLengthMm).toBe(49000);
+    // Removal scope rescaled onto the blind geometry (× 640/980)
+    expect(merged.removalAreaM2).toBeCloseTo(980 * (640 / 980), 3);
+    expect(merged.removalBinM3).toBeCloseTo(10 * (640 / 980), 3);
+  });
+
+  it('then anchors onto the stated length via applyAnchorScale', () => {
+    const anchored = applyAnchorScale(mergeBlindTakeoff(original, blind));
+    const factor = 49 / 46;
+    expect(anchored.scaledToAnchor).toBe(true);
+    expect(anchored.scaleFactorApplied).toBeCloseTo(factor, 5);
+    expect(anchored.totalAreaM2).toBeCloseTo(640 * factor * factor, 1);
+  });
+
+  it('keeps the original when the blind read is unusable or implausible', () => {
+    expect(mergeBlindTakeoff(original, undefined)).toBe(original);
+    expect(mergeBlindTakeoff(original, base({ detected: true }))).toBe(original);
+    expect(
+      mergeBlindTakeoff(original, { ...blind, detected: false } as any),
+    ).toBe(original);
+    // >4× divergence between the two reads → keep the original
+    expect(
+      mergeBlindTakeoff(original, { ...blind, totalAreaM2: 5000 }),
+    ).toBe(original);
+    expect(
+      mergeBlindTakeoff(original, { ...blind, totalAreaM2: 100 }),
+    ).toBe(original);
+  });
+});
+
+describe('materialAnchorFactor', () => {
+  it('derives the linear factor from the area ratio (first pass → final)', () => {
+    const final = base({ totalAreaM2: 680 });
+    expect(materialAnchorFactor(980, final)).toBeCloseTo(Math.sqrt(680 / 980), 6);
+  });
+
+  it('falls back to scaleFactorApplied, else undefined', () => {
+    const anchoredOnly = base({ scaledToAnchor: true, scaleFactorApplied: 1.074 });
+    expect(materialAnchorFactor(undefined, anchoredOnly)).toBeCloseTo(1.074, 6);
+    expect(materialAnchorFactor(undefined, base({}))).toBeUndefined();
+    expect(materialAnchorFactor(500, undefined)).toBeUndefined();
   });
 });

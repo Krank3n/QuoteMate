@@ -28,6 +28,13 @@ export interface FloorplanAnalysis {
   calibration?: {
     source: 'scale_bar' | 'known_dimension' | 'stated_total';
     basisMm?: number;
+    /**
+     * Tradie-stated overall length echoed by the model REGARDLESS of how it
+     * scaled the drawing. This is the anchor: the model measures the drawing
+     * independently (scale bar / labelled dimension) and we reconcile its
+     * measurement against this stated ground truth deterministically.
+     */
+    statedLengthMm?: number;
     note: string;
   };
   footprintDims?: { lengthM: number; widthM: number };
@@ -51,17 +58,22 @@ export interface FloorplanAnalysis {
  */
 export function applyAnchorScale(analysis: FloorplanAnalysis): FloorplanAnalysis {
   // The real-world length to anchor onto: the stated *overall* footprint
-  // length the tradie supplied, captured in calibration.basisMm (millimetres).
-  // Only `stated_total` describes the outer footprint — `known_dimension` is a
-  // labelled sub-footprint dimension (e.g. a single grid bay) and using it as
-  // the footprint length would catastrophically mis-scale the whole takeoff.
+  // length the tradie supplied. Preferred carrier is `statedLengthMm`, which
+  // the model echoes regardless of how it scaled the drawing — so the anchor
+  // fires even when the drawing was measured off a scale bar or labelled
+  // dimension. Legacy fallback: `basisMm` when the model calibrated FROM the
+  // stated total (`source === 'stated_total'`). Only these two describe the
+  // outer footprint — `basisMm` under `known_dimension` is a labelled
+  // sub-footprint dimension (e.g. a single grid bay) and using it as the
+  // footprint length would catastrophically mis-scale the whole takeoff.
+  const isUsableMm = (v: unknown): v is number =>
+    typeof v === 'number' && isFinite(v) && v > 0;
   let statedLengthM: number | undefined;
-  if (
-    analysis.calibration &&
-    analysis.calibration.source === 'stated_total' &&
-    typeof analysis.calibration.basisMm === 'number' &&
-    isFinite(analysis.calibration.basisMm) &&
-    analysis.calibration.basisMm > 0
+  if (isUsableMm(analysis.calibration?.statedLengthMm)) {
+    statedLengthM = analysis.calibration!.statedLengthMm! / 1000;
+  } else if (
+    analysis.calibration?.source === 'stated_total' &&
+    isUsableMm(analysis.calibration.basisMm)
   ) {
     statedLengthM = analysis.calibration.basisMm / 1000;
   }
@@ -142,6 +154,123 @@ export function applyAnchorScale(analysis: FloorplanAnalysis): FloorplanAnalysis
   next.assumptions = next.assumptions ? `${next.assumptions} ${note}` : note;
 
   return next;
+}
+
+// ---------------------------------------------------------------------------
+// Blind re-measurement (anchor laundering fix)
+//
+// Live replays of a ground-truth plan showed the vision model "laundering" a
+// tradie-stated total length: told the building is 49 m, it reports
+// footprintDims.lengthM = 49 as its own measurement, so the anchor factor is
+// 49/49 and applyAnchorScale is a no-op — while the width (and thus every
+// area) stays an uncorrected guess. Prompt instructions alone did not stop
+// this. The deterministic fix: when laundering is detected, re-measure the
+// plan with a second vision call that receives ONLY the image (no job text),
+// so it cannot copy the stated value, then merge that independent geometry
+// back in and let applyAnchorScale reconcile it against the stated length.
+// ---------------------------------------------------------------------------
+
+/**
+ * True when the model appears to have copied the stated length into its own
+ * footprint measurement (within 2%), which makes the anchor a no-op. Only
+ * meaningful when a stated length exists.
+ */
+export function isAnchorLaundered(analysis: FloorplanAnalysis): boolean {
+  const statedMm = analysis.calibration?.statedLengthMm;
+  const modelLengthM = analysis.footprintDims?.lengthM;
+  if (
+    typeof statedMm !== 'number' || !isFinite(statedMm) || statedMm <= 0 ||
+    typeof modelLengthM !== 'number' || !isFinite(modelLengthM) || modelLengthM <= 0
+  ) {
+    return false;
+  }
+  return Math.abs(modelLengthM * 1000 - statedMm) / statedMm < 0.02;
+}
+
+/**
+ * Replace the takeoff's geometry with the blind pass's independent
+ * measurement, keeping the original's job-scoped fields (removal scope,
+ * stated length echo). Returns the original unchanged when the blind
+ * measurement is unusable or implausible — never regresses.
+ */
+export function mergeBlindTakeoff(
+  original: FloorplanAnalysis,
+  blind: FloorplanAnalysis | undefined | null,
+): FloorplanAnalysis {
+  const usableNum = (v: unknown): v is number =>
+    typeof v === 'number' && isFinite(v) && v > 0;
+  if (
+    !blind ||
+    blind.detected !== true ||
+    !usableNum(blind.totalAreaM2) ||
+    !usableNum(blind.footprintDims?.lengthM) ||
+    !usableNum(blind.footprintDims?.widthM)
+  ) {
+    return original;
+  }
+  // A blind read wildly different from the first read (>4× either way) means
+  // one of the two calls went off the rails — don't guess which; keep the
+  // original so behaviour is no worse than before this pass existed.
+  if (usableNum(original.totalAreaM2)) {
+    const ratio = blind.totalAreaM2! / original.totalAreaM2!;
+    if (ratio > 4 || ratio < 0.25) return original;
+  }
+
+  const areaRatio = usableNum(original.totalAreaM2)
+    ? blind.totalAreaM2! / original.totalAreaM2!
+    : undefined;
+  const note =
+    'Geometry re-measured from the drawing alone, independent of the job description.';
+
+  return {
+    ...original,
+    scale: blind.scale ?? original.scale,
+    calibration: blind.calibration
+      ? {
+          ...blind.calibration,
+          // Carry the stated-length echo forward — it's the anchor.
+          statedLengthMm: original.calibration?.statedLengthMm,
+        }
+      : original.calibration,
+    footprintDims: blind.footprintDims,
+    totalAreaM2: blind.totalAreaM2,
+    perimeterM: usableNum(blind.perimeterM) ? blind.perimeterM : original.perimeterM,
+    zones: Array.isArray(blind.zones) && blind.zones.length ? blind.zones : original.zones,
+    // Removal is job-text scope the blind pass can't see — keep the original
+    // estimate but rescale it onto the independently measured geometry.
+    removalAreaM2:
+      usableNum(original.removalAreaM2) && areaRatio !== undefined
+        ? original.removalAreaM2! * areaRatio
+        : original.removalAreaM2,
+    removalBinM3:
+      usableNum(original.removalBinM3) && areaRatio !== undefined
+        ? original.removalBinM3! * areaRatio
+        : original.removalBinM3,
+    confidence: blind.confidence ?? original.confidence,
+    assumptions: original.assumptions ? `${original.assumptions} ${note}` : note,
+  };
+}
+
+/**
+ * Linear factor that reconciles material quantities (grounded on the FIRST
+ * pass's areas) with the final anchored takeoff. Falls back to the anchor's
+ * own factor when either total is missing.
+ */
+export function materialAnchorFactor(
+  originalTotalAreaM2: number | undefined,
+  final: FloorplanAnalysis | undefined,
+): number | undefined {
+  if (!final) return undefined;
+  if (
+    typeof originalTotalAreaM2 === 'number' && isFinite(originalTotalAreaM2) && originalTotalAreaM2 > 0 &&
+    typeof final.totalAreaM2 === 'number' && isFinite(final.totalAreaM2) && final.totalAreaM2 > 0
+  ) {
+    return Math.sqrt(final.totalAreaM2 / originalTotalAreaM2);
+  }
+  if (final.scaledToAnchor && typeof final.scaleFactorApplied === 'number') {
+    return final.scaleFactorApplied;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

@@ -42,6 +42,28 @@ describe('normaliseFloorplanAnalysis — new fields', () => {
     ).toBeUndefined();
   });
 
+  it('coerces calibration.statedLengthMm, dropping non-finite/≤0', () => {
+    const cal = { source: 'known_dimension', basisMm: 2520, note: '' };
+    expect(
+      normaliseFloorplanAnalysis({
+        ...detected,
+        calibration: { ...cal, statedLengthMm: 49000 },
+      })?.calibration?.statedLengthMm,
+    ).toBe(49000);
+    expect(
+      normaliseFloorplanAnalysis({
+        ...detected,
+        calibration: { ...cal, statedLengthMm: 0 },
+      })?.calibration?.statedLengthMm,
+    ).toBeUndefined();
+    expect(
+      normaliseFloorplanAnalysis({
+        ...detected,
+        calibration: { ...cal, statedLengthMm: 'tall' },
+      })?.calibration?.statedLengthMm,
+    ).toBeUndefined();
+  });
+
   it('preserves scaledToAnchor boolean', () => {
     expect(
       normaliseFloorplanAnalysis({ ...detected, scaledToAnchor: true })?.scaledToAnchor,

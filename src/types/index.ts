@@ -162,6 +162,7 @@ export interface FloorplanAnalysis {
   calibration?: {
     source: 'scale_bar' | 'known_dimension' | 'stated_total';
     basisMm?: number;             // the reference length used to set scale
+    statedLengthMm?: number;      // tradie-stated overall length, echoed for the anchor
     note: string;
   };
   // Outer bounding-box dimensions the model measured for the whole plan.

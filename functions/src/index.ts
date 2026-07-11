@@ -118,7 +118,14 @@ import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
 import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
 import { buildReconcilePrompt } from './reconcile.helpers';
-import { applyAnchorScale, scaleMaterialsToAnchor, FloorplanAnalysis } from './floorplanScale';
+import {
+  applyAnchorScale,
+  scaleMaterialsToAnchor,
+  isAnchorLaundered,
+  mergeBlindTakeoff,
+  materialAnchorFactor,
+  FloorplanAnalysis,
+} from './floorplanScale';
 import {
   QM_APP_FEE_PCT_ONLINE,
   QM_APP_FEE_PCT_ONLINE_FREE,
@@ -1588,6 +1595,54 @@ async function callGeminiForMaterials(
   return parseLLMJson(content);
 }
 
+/**
+ * Blind takeoff re-measurement: a vision call that receives ONLY the images —
+ * no job description — so a tradie-stated dimension cannot leak into the
+ * measurement (the anchor-laundering failure mode). Used when the main pass
+ * appears to have copied the stated length into its own footprint read.
+ */
+async function callGeminiForBlindTakeoff(
+  apiKey: string,
+  photoBase64: string[],
+): Promise<any> {
+  const prompt = `You are measuring an architectural drawing. You have NO other context about the job — deliberately. Measure only what you can see.
+
+For the attached image that is an architectural plan, floorplan, or scaled drawing (ignore ordinary site photos; if none is a plan, return {"detected": false}):
+- CALIBRATE from the drawing itself, strongest reference first: (1) a clearly labelled dimension (small circled/annotated numbers; a dimensioned structural grid bay counts — if the grid is evenly spaced and one bay is dimensioned, apply that spacing across the drawing and count bays to derive overall length AND width; source "known_dimension"); (2) a printed scale bar you can measure against (source "scale_bar"). A bare ratio like "1:100" with nothing to measure against is NOT usable alone.
+- Measure the outer bounding box of the building ("footprintDims", longer side is "lengthM"), the floor area two independent ways (outer footprint minus notches/cutouts, and sum of zone areas) and reconcile into "totalAreaM2", the outer boundary "perimeterM", and per-zone areas ("zones", with any printed room/finish codes).
+- Measure "widthM" the same way as "lengthM" — off the drawing. Cross-check widthM/lengthM against the visible aspect ratio of the building outline.
+- "confidence": "high" only when scale came from a labelled dimension/scale bar AND the two area methods agreed; otherwise "medium"; "low" if you had to guess. Include "assumptions".
+
+Return ONLY valid JSON:
+{ "detected": true, "scale": "1:100", "calibration": { "source": "known_dimension|scale_bar", "basisMm": 2520, "note": "name the exact reference measured against" }, "footprintDims": { "lengthM": 0, "widthM": 0 }, "totalAreaM2": 0, "perimeterM": 0, "zones": [ { "label": "...", "code": "...", "areaM2": 0 } ], "assumptions": "...", "confidence": "medium" }`;
+
+  const parts: any[] = photoBase64.map((b64) => ({
+    inline_data: { mime_type: 'image/jpeg', data: b64 },
+  }));
+  parts.push({ text: prompt });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MATERIALS_MODEL}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8000,
+        responseMimeType: 'application/json',
+      },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Gemini blind takeoff returned ${response.status}: ${await response.text()}`);
+  }
+  const data = await response.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) throw new Error('No content in Gemini blind takeoff response');
+  return parseLLMJson(content);
+}
+
 async function callClaudeForMaterials(
   apiKey: string,
   prompt: string,
@@ -1640,7 +1695,7 @@ async function callClaudeForMaterials(
  * Analyze Job Description — Gemini 3 Pro Preview primary, Claude Opus 4.6 fallback.
  * This Cloud Function acts as a proxy to avoid CORS issues on web.
  */
-export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 300 }).https.onRequest((req, res) => {
+export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 420 }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
       res.status(405).send('Method Not Allowed');
@@ -1876,20 +1931,21 @@ Guidelines:
 FLOORPLAN ANALYSIS (only when one of the attached images is an architectural plan, floorplan, or scaled drawing — NOT an ordinary site photo):
 - First classify each attached image as a PLAN or a SITE PHOTO. Treat ordinary photos exactly as before; only fill "floorplanAnalysis" when at least one image is a plan/drawing. If no plan is attached, OMIT "floorplanAnalysis" entirely.
 - This is trade-agnostic: read the geometry, don't assume a trade. The same output serves flooring, tiling, painting, concreting, landscaping, fencing, roofing, etc.
-- CALIBRATE FIRST, then measure everything FROM that scale — do not eyeball areas. Establish one real-world scale from the strongest reference available, in this order, and you MUST record it in "calibration" (source + a short note stating the scale you derived):
-  1. a printed scale bar or ratio ("1:100");
-  2. a clearly labelled dimension on the drawing (treat a known structural grid spacing as a labelled dimension — if the grid is evenly spaced and any one bay is dimensioned, apply that spacing across the whole drawing; use source "known_dimension");
-  3. a total dimension the tradie stated in the job description (source "stated_total").
-  When references disagree, prefer a real-world measurement the tradie supplied over a hard-to-read drawing, and note the discrepancy.
-- Derive every "areaM2", "dims" and "perimeterM" by measuring against that single scale — never by guessing. Compute "totalAreaM2" two independent ways and reconcile them: (a) the overall footprint from its outer dimensions, and (b) the sum of the zone areas. If they differ by more than ~15%, re-measure, report the reconciled figure, and lower "confidence".
+- CALIBRATE FIRST, then measure everything FROM that scale — do not eyeball areas. Establish one real-world scale from the strongest reference ON THE DRAWING ITSELF, in this order, and you MUST record it in "calibration" (source + a short note stating the scale you derived):
+  1. a clearly labelled dimension on the drawing (treat a known structural grid spacing as a labelled dimension — if the grid is evenly spaced and any one bay is dimensioned, apply that spacing across the whole drawing, and count grid bays to derive the overall length AND width rather than eyeballing edge positions; use source "known_dimension");
+  2. a printed scale bar you can measure against (source "scale_bar"; a bare ratio like "1:100" with nothing to measure it against is NOT usable on its own — fall back to a labelled dimension);
+  3. LAST RESORT ONLY — permitted solely when you have searched the drawing and found NO legible labelled dimension, NO dimensioned grid bay, and NO measurable scale bar: a total dimension the tradie stated in the job description (source "stated_total"). Architect/engineer drawings almost always carry at least one labelled dimension or a dimensioned grid — hunt for the small circled/annotated numbers before giving up. Your "note" MUST name the exact reference you measured against (e.g. "grid bay 9–10 labelled 2520mm"); a note that only cites the job text while the drawing has visible dimension labels means you used the wrong source.
+- CRITICAL — measurements must be INDEPENDENT of the job text: "footprintDims", "totalAreaM2", every zone "areaM2"/"dims" and "perimeterM" must come from YOUR OWN measurement of the drawing against that drawing-derived scale. NEVER copy a measurement stated in the job text into these fields, never nudge or "proportionally estimate" your numbers toward it, and never use it to derive the width. Reporting "footprintDims" equal to "statedLengthMm" without having measured it off the drawing is a contract violation — it silently disables the app's deterministic reconciliation. If your measurement disagrees with a stated dimension, that is EXPECTED and useful: report YOUR measurement unchanged and note the discrepancy in "assumptions" — the app reconciles stated measurements deterministically afterwards, but only if you report what you actually measured.
+- Measure "widthM" exactly the way you measured "lengthM" — off the drawing against your scale reference, never "proportionally" from the length. Cross-check: widthM/lengthM must match the visual aspect ratio of the building outline in the image (a building that looks ~3× longer than it is wide cannot have widthM > lengthM/2).
+- If the tradie stated the building/site's overall length in the job description, echo it (in millimetres) as "calibration": { ..., "statedLengthMm": 49000 } IN ADDITION to your own measurements. Omit "statedLengthMm" when nothing was stated.
+- Derive every "areaM2", "dims" and "perimeterM" by measuring against that single scale — never by guessing. Compute "totalAreaM2" two independent ways and reconcile them: (a) the overall footprint from its outer dimensions minus any notches/cutouts, and (b) the sum of the zone areas. If they differ by more than ~15%, re-measure, report the reconciled figure, and lower "confidence".
 - ALWAYS echo "footprintDims": { "lengthM", "widthM" } — the overall outer bounding-box dimensions you measured for the whole plan (the longer side is "lengthM"). Report exactly what you measured here; do not pre-adjust it.
-- If the tradie stated any real-world measurement in the job description (a total length, a wall run, a room dimension), treat that as ground truth and record it in "calibration" — it overrides anything read off the drawing.
 - "perimeterM" is the outer boundary length (drives skirting/edging/cornice/kerb/fence runs). "zones" are the distinct regions you can identify, each { "label", "code" (a printed room number or area/finish code if shown, else omit), "areaM2", "dims": { "lengthM", "widthM" } }.
 - If the scope involves removing/stripping existing surfaces, estimate "removalAreaM2" and a rough waste skip volume "removalBinM3".
 - ALWAYS include "assumptions" (what you inferred or could not read clearly) and "confidence": "high" ONLY when scale came from a scale bar or labelled dimension AND the two area methods agreed; "medium" when scale came from a stated total or grid spacing; "low" when scale was guessed or the drawing was hard to read. NEVER silently invent dimensions — if you can't establish scale at all, set detected:true, confidence:"low", omit the numbers, and say so in "assumptions".
 - Use the calibrated areas/perimeter to GROUND the material quantities above (e.g. m² of surface, lineal m of edge) instead of guessing — and show that derivation in each material's "reasoning".
 - For every material whose quantity you derived from the plan geometry, tag it with "planBasis": "area" (scales with floor area), "perimeter" (scales with edge length), or "volume" (scales with area×depth). One-off counts (gates, fixtures, single appliances) get "planBasis": "fixed". This lets the app deterministically re-scale quantities if the takeoff is anchored to a measurement the tradie stated, so the priced quantities never drift from the corrected areas.
-- Shape: "floorplanAnalysis": { "detected": true, "scale": "1:100", "calibration": { "source": "scale_bar|known_dimension|stated_total", "basisMm": 2520, "note": "..." }, "footprintDims": { "lengthM": 0, "widthM": 0 }, "totalAreaM2": 0, "perimeterM": 0, "zones": [ { "label": "...", "code": "...", "areaM2": 0, "dims": { "lengthM": 0, "widthM": 0 } } ], "removalAreaM2": 0, "removalBinM3": 0, "assumptions": "...", "confidence": "medium" }
+- Shape: "floorplanAnalysis": { "detected": true, "scale": "1:100", "calibration": { "source": "scale_bar|known_dimension|stated_total", "basisMm": 2520, "statedLengthMm": 49000, "note": "..." }, "footprintDims": { "lengthM": 0, "widthM": 0 }, "totalAreaM2": 0, "perimeterM": 0, "zones": [ { "label": "...", "code": "...", "areaM2": 0, "dims": { "lengthM": 0, "widthM": 0 } } ], "removalAreaM2": 0, "removalBinM3": 0, "assumptions": "...", "confidence": "medium" }
 
 Return ONLY valid JSON, no other text.`;
 
@@ -1999,25 +2055,59 @@ Return ONLY valid JSON, no other text.`;
           ? parsed.jobQualityTier
           : undefined;
 
-      const floorplanAnalysis =
+      let floorplanAnalysis =
         parsed.floorplanAnalysis &&
         typeof parsed.floorplanAnalysis === 'object' &&
         parsed.floorplanAnalysis.detected === true
-          ? applyAnchorScale(parsed.floorplanAnalysis as FloorplanAnalysis)
+          ? (parsed.floorplanAnalysis as FloorplanAnalysis)
           : undefined;
+      const originalTotalAreaM2 = floorplanAnalysis?.totalAreaM2;
 
-      // Phase 3 — when the takeoff was anchored onto a stated dimension, push the
-      // same correction through the material quantities so the priced line items
-      // match the corrected areas instead of the model's un-anchored read. Only
-      // materials the model tagged with a geometry planBasis are touched.
+      // Anchor-laundering fix: when the model copied the tradie-stated length
+      // into its own footprint read (making the anchor a no-op), re-measure the
+      // plan blind — images only, no job text — and merge that independent
+      // geometry in. Failure of the blind pass keeps today's behaviour.
+      if (
+        floorplanAnalysis &&
+        isAnchorLaundered(floorplanAnalysis) &&
+        photoBase64.length > 0 &&
+        geminiApiKey
+      ) {
+        try {
+          const blind = await callGeminiForBlindTakeoff(geminiApiKey, photoBase64);
+          const merged = mergeBlindTakeoff(floorplanAnalysis, blind);
+          if (merged !== floorplanAnalysis) {
+            console.log('[floorplan anchor] blind re-measure applied', {
+              uid: decodedToken.uid,
+              originalLengthM: floorplanAnalysis.footprintDims?.lengthM,
+              blindLengthM: merged.footprintDims?.lengthM,
+              originalAreaM2: floorplanAnalysis.totalAreaM2,
+              blindAreaM2: merged.totalAreaM2,
+            });
+            floorplanAnalysis = merged;
+          }
+        } catch (blindErr: any) {
+          console.warn('[floorplan anchor] blind re-measure failed', blindErr?.message);
+        }
+      }
+
+      if (floorplanAnalysis) {
+        floorplanAnalysis = applyAnchorScale(floorplanAnalysis);
+      }
+
+      // Phase 3 — reconcile material quantities (grounded on the FIRST pass's
+      // areas) with the final anchored takeoff, so the priced line items match
+      // the corrected areas. Only materials the model tagged with a geometry
+      // planBasis are touched.
+      const materialFactor = materialAnchorFactor(originalTotalAreaM2, floorplanAnalysis);
       const anchoredMaterials =
-        floorplanAnalysis?.scaledToAnchor && typeof floorplanAnalysis.scaleFactorApplied === 'number'
-          ? scaleMaterialsToAnchor(repairedMaterials, floorplanAnalysis.scaleFactorApplied)
+        typeof materialFactor === 'number'
+          ? scaleMaterialsToAnchor(repairedMaterials, materialFactor)
           : repairedMaterials;
       if (anchoredMaterials !== repairedMaterials) {
         console.log('[floorplan anchor] scaled material quantities', {
           uid: decodedToken.uid,
-          factor: floorplanAnalysis?.scaleFactorApplied,
+          factor: materialFactor,
           materialCount: anchoredMaterials.length,
         });
       }
