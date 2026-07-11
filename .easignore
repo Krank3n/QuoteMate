@@ -10,6 +10,10 @@
 *.apk
 *.ipa
 app-production-*.aab
+/builds/
+/dist/
+/dist-staging/
+/node_modules/
 
 # Exclude unnecessary files
 node_modules/.cache/
@@ -35,3 +39,12 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Marketing media + web exports — build-irrelevant; these pushed the archive
+# to 646 MB and made uploads flake (EPIPE/socket hang up, Jul 2026)
+marketing-video/
+dist-web/
+dist-web-demo/
+docs/
+audit-*.json
+quote-replay-priced-audit*.json
