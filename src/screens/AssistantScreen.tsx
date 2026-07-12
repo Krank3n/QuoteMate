@@ -38,7 +38,12 @@ import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGr
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { shouldAutoStartMic } from './assistant/shouldAutoStartMic';
-import { voiceActionForAppState, VOICE_INACTIVE_GRACE_MS } from './assistant/voiceAppStatePolicy';
+import {
+  voiceActionForAppState,
+  VOICE_INACTIVE_GRACE_MS,
+  VOICE_BACKGROUND_GRACE_MS,
+} from './assistant/voiceAppStatePolicy';
+import { createGraceController } from './assistant/voiceGraceController';
 import { createVoiceOpenGate } from './assistant/voiceOpenGate';
 
 // Tag for the screen-wake lock held during voice mode. Keeping it the same
@@ -1169,6 +1174,10 @@ export function AssistantScreen() {
 
   // Serialises opens against stops — see voiceOpenGate for the two races.
   const voiceOpenGateRef = useRef(createVoiceOpenGate());
+  // Wall-clock ms of the last auto-start attempt. Feeds the cooldown that
+  // stops any residual AppState/focus churn from re-minting in a tight loop
+  // (the "too many requests" mint storm). Manual taps bypass it.
+  const lastAutoStartAttemptRef = useRef(0);
 
   const stopVoiceSession = useCallback(async () => {
     // Cancel any open still in flight so it can't resurrect refs after
@@ -1791,6 +1800,7 @@ export function AssistantScreen() {
             // We're inside useFocusEffect, so the screen is focused.
             isFocused: true,
             appActive: AppState.currentState === 'active',
+            sinceLastAttemptMs: Date.now() - lastAutoStartAttemptRef.current,
           }) &&
           // openVoiceMode sets voiceModeRef synchronously; guard against a
           // manual mic tap landing during the await above and opening a
@@ -1798,6 +1808,7 @@ export function AssistantScreen() {
           !voiceModeRef.current
         ) {
           hasAutoStartedThisVisit = true;
+          lastAutoStartAttemptRef.current = Date.now();
           void openVoiceModeRef.current('sticky');
         }
       };
@@ -1806,43 +1817,43 @@ export function AssistantScreen() {
         void tryAutoStart();
       }
 
-      // 'inactive' (iOS: Control Center, notification shade, call banner)
-      // gets a grace window instead of an instant teardown — see
-      // voiceAppStatePolicy. 'background' still stops immediately.
-      let inactiveGraceTimer: ReturnType<typeof setTimeout> | null = null;
-      const clearInactiveGrace = () => {
-        if (inactiveGraceTimer) {
-          clearTimeout(inactiveGraceTimer);
-          inactiveGraceTimer = null;
-        }
-      };
+      // Debounced teardown — see voiceAppStatePolicy + voiceGraceController.
+      // A 'background' starts a SHORT grace that absorbs the spurious
+      // background→active bounce Android fires when the audio/mic stack starts
+      // (the bounce that, left to tear the session down and re-open it, minted
+      // a token every cycle until the "too many requests" rate limit tripped).
+      // iOS 'inactive' (Control Center, notification shade, call banner) gets
+      // a LONG grace. Either is cancelled if the app returns to 'active' first.
+      const grace = createGraceController(() => {
+        // eslint-disable-next-line no-console
+        console.log('[Mate voice] grace expired — stopping session');
+        void stopVoiceSessionRef.current();
+      });
 
       const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
         const action = voiceActionForAppState({
           nextState,
           hasVoiceSession: !!voiceModeRef.current,
-          graceRunning: !!inactiveGraceTimer,
+          graceRunning: grace.isRunning(),
         });
         switch (action) {
           case 'stop':
-            clearInactiveGrace();
+            grace.clear();
             void stopVoiceSessionRef.current();
             break;
-          case 'start-grace':
-            inactiveGraceTimer = setTimeout(() => {
-              inactiveGraceTimer = null;
-              // eslint-disable-next-line no-console
-              console.log('[Mate voice] inactive grace expired — stopping session');
-              void stopVoiceSessionRef.current();
-            }, VOICE_INACTIVE_GRACE_MS);
+          case 'start-grace-short':
+            grace.start(VOICE_BACKGROUND_GRACE_MS);
+            break;
+          case 'start-grace-long':
+            grace.start(VOICE_INACTIVE_GRACE_MS);
             break;
           case 'cancel-grace':
-            clearInactiveGrace();
+            grace.clear();
             if (enabled) {
-              // Returning from a temporary background — re-arm even though we
-              // already auto-started this visit (the session was stopped on
-              // background). If the session rode out a grace window it's
-              // still open, and tryAutoStart's voiceState guard is a no-op.
+              // Returning to the foreground. If the session rode out a grace
+              // window it's still open, so tryAutoStart's voiceState guard
+              // (and the cooldown) makes this a no-op — it only re-opens when
+              // a genuine background actually stopped the session.
               hasAutoStartedThisVisit = false;
               void tryAutoStart();
             }
@@ -1854,7 +1865,7 @@ export function AssistantScreen() {
 
       return () => {
         cancelled = true;
-        clearInactiveGrace();
+        grace.clear();
         sub.remove();
         void stopVoiceSessionRef.current();
       };

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   shouldAutoStartMic,
+  AUTO_START_COOLDOWN_MS,
   type ShouldAutoStartParams,
   type VoiceState,
 } from '../shouldAutoStartMic';
@@ -44,6 +45,22 @@ describe('shouldAutoStartMic', () => {
 
   it('returns false when the app is backgrounded', () => {
     expect(shouldAutoStartMic({ ...allMet(), appActive: false })).toBe(false);
+  });
+
+  describe('mint-storm cooldown', () => {
+    it('allows auto-start when no attempt has happened yet (undefined)', () => {
+      expect(shouldAutoStartMic({ ...allMet(), sinceLastAttemptMs: undefined })).toBe(true);
+    });
+
+    it('blocks a re-mint within the cooldown window', () => {
+      expect(shouldAutoStartMic({ ...allMet(), sinceLastAttemptMs: 0 })).toBe(false);
+      expect(shouldAutoStartMic({ ...allMet(), sinceLastAttemptMs: AUTO_START_COOLDOWN_MS - 1 })).toBe(false);
+    });
+
+    it('allows auto-start once the cooldown has elapsed', () => {
+      expect(shouldAutoStartMic({ ...allMet(), sinceLastAttemptMs: AUTO_START_COOLDOWN_MS })).toBe(true);
+      expect(shouldAutoStartMic({ ...allMet(), sinceLastAttemptMs: 60_000 })).toBe(true);
+    });
   });
 });
 
