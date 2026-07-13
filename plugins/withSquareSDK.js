@@ -20,7 +20,9 @@
  *   • android/build.gradle — Square maven repo + squareSdkVersion ext prop
  *   • android/app/build.gradle — Square SDK dependency + disable Proguard
  *     for release (per Square's docs)
- *   • MainApplication.kt — initialize MobilePaymentsSdk in onCreate
+ *   • MainApplication.kt — initialize MobilePaymentsSdk at first main-thread
+ *     idle after onCreate (init is main-thread-mandatory but blocking it
+ *     inline caused cold-start ANRs — Sentry REACT-NATIVE-1)
  *   • AndroidManifest.xml — NFC + location permissions
  *
  * iOS Tap to Pay entitlement (proximity-reader.payment.acceptance) is added
@@ -245,26 +247,39 @@ function withSquareAndroidAppGradle(config) {
   ]);
 }
 
+function injectSquareMainApplication(src, applicationId) {
+  if (!src.includes('com.squareup.sdk.mobilepayments.MobilePaymentsSdk')) {
+    src = src.replace(
+      /^package\s+([\w.]+)\s*$/m,
+      `package $1\n\nimport com.squareup.sdk.mobilepayments.MobilePaymentsSdk`
+    );
+  }
+
+  if (!src.includes('MobilePaymentsSdk.initialize')) {
+    // Square's initialize() must run on the main thread (it throws
+    // otherwise) and blocks for the whole SDK bootstrap. Inline in
+    // onCreate() that stall sat inside the process-start ANR window
+    // (Sentry REACT-NATIVE-1); at first main-thread idle it runs after
+    // startup settles, still long before the user-triggered payment flow.
+    src = src.replace(
+      /super\.onCreate\(\)/,
+      `super.onCreate()\n` +
+        `    android.os.Looper.myQueue().addIdleHandler {\n` +
+        `      MobilePaymentsSdk.initialize("${applicationId}", this)\n` +
+        `      false\n` +
+        `    }`
+    );
+  }
+
+  return src;
+}
+
 function withSquareAndroidMainApplication(config, applicationId) {
   return withMainApplication(config, (config) => {
-    let src = config.modResults.contents;
-
-    if (!src.includes('com.squareup.sdk.mobilepayments.MobilePaymentsSdk')) {
-      src = src.replace(
-        /^package\s+([\w.]+)\s*$/m,
-        `package $1\n\nimport com.squareup.sdk.mobilepayments.MobilePaymentsSdk`
-      );
-    }
-
-    if (!src.includes('MobilePaymentsSdk.initialize')) {
-      // Insert immediately after `super.onCreate()` in onCreate().
-      src = src.replace(
-        /super\.onCreate\(\)/,
-        `super.onCreate()\n    MobilePaymentsSdk.initialize("${applicationId}", this)`
-      );
-    }
-
-    config.modResults.contents = src;
+    config.modResults.contents = injectSquareMainApplication(
+      config.modResults.contents,
+      applicationId
+    );
     return config;
   });
 }
@@ -305,3 +320,5 @@ function withSquareSDK(config, props = {}) {
 }
 
 module.exports = createRunOncePlugin(withSquareSDK, 'withSquareSDK', '1.0.0');
+// Exported for tests — pure string transform behind withSquareAndroidMainApplication.
+module.exports.injectSquareMainApplication = injectSquareMainApplication;
