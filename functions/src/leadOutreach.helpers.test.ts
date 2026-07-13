@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normaliseEmail, suppressionDocId, buildDiscoveryQuery, isNonAustralianPlace } from './leadOutreach';
+import { normaliseEmail, suppressionDocId, buildDiscoveryQuery, isNonAustralianPlace, domainAcceptsMail, isPermanentDomainBounce } from './leadOutreach';
 
 /**
  * Regression tests for the Jun-Jul 2026 poisoned send queue: a scraped
@@ -92,5 +92,90 @@ describe('isNonAustralianPlace', () => {
     expect(isNonAustralianPlace([{ long_name: 'NSW', short_name: 'NSW', types: ['administrative_area_level_1'] }])).toBe(false);
     expect(isNonAustralianPlace([])).toBe(false);
     expect(isNonAustralianPlace(undefined)).toBe(false);
+  });
+});
+
+/**
+ * Regression tests for the Jul 2026 outreach bounce: kirsten@toposlandscape.com
+ * passed the format check but the domain has no mail host, so Brevo bounced it
+ * ("Unable to find MX of domain toposlandscape.com") — 1 bounce in an 8-send
+ * week tripped the weekly report's >5% pause. domainAcceptsMail is the
+ * pre-send DNS gate; isPermanentDomainBounce escalates the webhook event.
+ */
+describe('domainAcceptsMail', () => {
+  const mx = (...exchanges: string[]) =>
+    exchanges.map((exchange, i) => ({ exchange, priority: (i + 1) * 10 }));
+  const noRecord = (code: string) => {
+    const e: any = new Error(code);
+    e.code = code;
+    return e;
+  };
+  const resolver = (opts: {
+    mx?: Array<{ exchange: string; priority: number }> | Error;
+    a?: string[] | Error;
+  }) => ({
+    resolveMx: async () => {
+      if (opts.mx instanceof Error) throw opts.mx;
+      return opts.mx ?? [];
+    },
+    resolve4: async () => {
+      if (opts.a instanceof Error) throw opts.a;
+      return opts.a ?? [];
+    },
+  });
+
+  it('accepts a domain with MX records', async () => {
+    expect(await domainAcceptsMail('bigpond.com', resolver({ mx: mx('mx1.bigpond.com') }))).toBe(true);
+  });
+
+  it('rejects a domain with no DNS records at all (the toposlandscape.com case)', async () => {
+    expect(await domainAcceptsMail('toposlandscape.com', resolver({
+      mx: noRecord('ENOTFOUND'),
+      a: noRecord('ENOTFOUND'),
+    }))).toBe(false);
+  });
+
+  it('accepts a domain with no MX but an A record (RFC 5321 fallback)', async () => {
+    expect(await domainAcceptsMail('example.com', resolver({
+      mx: noRecord('ENODATA'),
+      a: ['203.0.113.10'],
+    }))).toBe(true);
+  });
+
+  it('rejects an RFC 7505 null-MX domain that explicitly refuses mail', async () => {
+    expect(await domainAcceptsMail('nomail.example', resolver({
+      mx: mx('.'),
+      a: ['203.0.113.10'],
+    }))).toBe(false);
+  });
+
+  it('rejects when MX list is empty and A lookup finds nothing', async () => {
+    expect(await domainAcceptsMail('deadzone.example', resolver({ mx: [], a: noRecord('ENODATA') }))).toBe(false);
+  });
+
+  it('fails open (null) on transient DNS errors so the queue is not stalled', async () => {
+    expect(await domainAcceptsMail('flaky.example', resolver({ mx: noRecord('ETIMEOUT') }))).toBeNull();
+    expect(await domainAcceptsMail('flaky.example', resolver({
+      mx: noRecord('ENODATA'),
+      a: noRecord('ESERVFAIL'),
+    }))).toBeNull();
+  });
+});
+
+describe('isPermanentDomainBounce', () => {
+  it('matches the exact Brevo reason from the Jul 2026 bounce', () => {
+    expect(isPermanentDomainBounce('Unable to find MX of domain toposlandscape.com')).toBe(true);
+  });
+
+  it('matches other no-mail-host phrasings', () => {
+    expect(isPermanentDomainBounce('No MX record found for domain')).toBe(true);
+    expect(isPermanentDomainBounce('domain does not exist')).toBe(true);
+  });
+
+  it('leaves genuine soft bounces alone', () => {
+    expect(isPermanentDomainBounce('Mailbox full')).toBe(false);
+    expect(isPermanentDomainBounce('Greylisted, try again later')).toBe(false);
+    expect(isPermanentDomainBounce(null)).toBe(false);
+    expect(isPermanentDomainBounce(undefined)).toBe(false);
   });
 });

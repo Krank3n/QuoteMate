@@ -28,6 +28,7 @@
  */
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import { promises as dns } from 'dns';
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 import { sendEmail } from './email';
@@ -175,6 +176,67 @@ function domainOf(email: string | null | undefined): string | null {
   const e = normaliseEmail(email);
   if (!e) return null;
   return e.split('@')[1] || null;
+}
+
+export interface MailDnsResolver {
+  resolveMx(domain: string): Promise<Array<{ exchange: string; priority: number }>>;
+  resolve4(domain: string): Promise<string[]>;
+}
+
+const NO_RECORD_CODES = new Set(['ENOTFOUND', 'ENODATA']);
+
+/**
+ * Pre-send deliverability gate. Scraped addresses regularly pass the format
+ * check but point at domains with no mail host at all (Jul 2026:
+ * kirsten@toposlandscape.com bounced with "Unable to find MX", tripping the
+ * weekly report's >5% bounce pause). Brevo counts every such send against our
+ * sender reputation, so we check DNS ourselves before handing it an address.
+ *
+ * Returns true when the domain can receive mail (MX, or A-record fallback per
+ * RFC 5321), false when DNS says definitively that it cannot, and null when
+ * DNS itself failed (timeout/servfail) — callers should fail open on null so
+ * a resolver hiccup can't stall the queue.
+ */
+export async function domainAcceptsMail(domain: string, resolver: MailDnsResolver = dns): Promise<boolean | null> {
+  try {
+    const mx = await resolver.resolveMx(domain);
+    const usable = (mx || []).filter(r => r.exchange && r.exchange !== '.');
+    if (usable.length > 0) return true;
+    // RFC 7505 null MX ("MX 0 .") means the domain explicitly refuses mail.
+    if ((mx || []).some(r => !r.exchange || r.exchange === '.')) return false;
+  } catch (e: any) {
+    if (!NO_RECORD_CODES.has(e?.code)) return null;
+  }
+  // No MX records at all: RFC 5321 falls back to the A record.
+  try {
+    const a = await resolver.resolve4(domain);
+    return (a || []).length > 0 ? true : false;
+  } catch (e: any) {
+    if (!NO_RECORD_CODES.has(e?.code)) return null;
+    return false;
+  }
+}
+
+// Definitive DNS verdicts per domain, cached for the life of the instance so
+// a batch with several leads on one dead domain does one lookup, not N.
+const domainMailVerdicts = new Map<string, boolean>();
+
+async function domainAcceptsMailCached(domain: string): Promise<boolean | null> {
+  const cached = domainMailVerdicts.get(domain);
+  if (cached !== undefined) return cached;
+  const verdict = await domainAcceptsMail(domain);
+  if (verdict !== null) domainMailVerdicts.set(domain, verdict);
+  return verdict;
+}
+
+/**
+ * Brevo files "Unable to find MX of domain X" under soft_bounce, but a
+ * missing mail host is a permanent, domain-level failure — retrying or
+ * sending to other addresses on the domain just burns sender reputation.
+ */
+export function isPermanentDomainBounce(reason: string | null | undefined): boolean {
+  if (!reason) return false;
+  return /unable to find mx|no mx record|mx (record )?not found|domain (does not exist|not found)/i.test(reason);
 }
 
 function canSendToDomain(domainCounts: Map<string, number>, domain: string | null, perDomainMax: number): boolean {
@@ -1408,6 +1470,14 @@ async function sendOneLead(params: {
   }
   if (!canSendToDomain(domainSendCounts, dom, perDomainMax)) {
     return { sent: false, reason: 'per_domain_cap' };
+  }
+  // Deliverability gate: don't hand Brevo an address whose domain has no mail
+  // host — those come back as bounces and cost sender reputation. Fails open
+  // on DNS trouble (null) so a resolver blip can't stall the queue.
+  if (dom && (await domainAcceptsMailCached(dom)) === false) {
+    await addSuppression({ type: 'domain', value: dom, reason: 'no_mx' });
+    await ref.set({ status: 'rejected' as LeadStatus, rejectionReason: 'no_mx' }, { merge: true });
+    return { sent: false, reason: 'no_mx' };
   }
 
   const tags = ['lead_outreach', `lead:${leadId}`];
@@ -2781,6 +2851,18 @@ export async function applyBrevoEventToLead(params: {
     case 'soft_bounce':
       update.softBouncedAt = params.at;
       update.bounceReason = params.reason || 'soft_bounce';
+      // Brevo classes "Unable to find MX of domain X" as soft, but no mail
+      // host is permanent and domain-wide — treat it like a hard bounce and
+      // suppress the whole domain so we stop retrying dead addresses.
+      if (isPermanentDomainBounce(params.reason)) {
+        update.status = 'bounced' as LeadStatus;
+        update.bouncedAt = params.at;
+        if (params.email) {
+          await addSuppression({ type: 'email', value: params.email, reason: 'no_mx' });
+          const dom = domainOf(params.email);
+          if (dom) await addSuppression({ type: 'domain', value: dom, reason: 'no_mx' });
+        }
+      }
       break;
     case 'blocked':
     case 'invalid_email':
