@@ -8,7 +8,7 @@
  * Tier/status/billing derivation is reused from subscription.helpers.ts — the
  * single source of truth — never re-implemented here.
  */
-import { deriveSubFields, isBilledSub } from './subscription.helpers';
+import { deriveSubFields, isBilledSub, isRestoredStorePro } from './subscription.helpers';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -51,7 +51,12 @@ export interface FunnelPayload {
     signups: number;
     startedTrial: number;
     sentQuote: number;
+    /** Total paying headcount: billed + incident-restored store subs. */
     paying: number;
+    /** Subset of `paying` with a verifiable billing record (drives MRR). */
+    payingBilled: number;
+    /** Subset of `paying` restored from incident-2026-07, awaiting device receipt re-sync. */
+    payingRestored: number;
     // Each step as a fraction (0..1) of the previous step.
     pctStartedTrial: number;
     pctSentQuote: number;
@@ -118,7 +123,8 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
   const signups = inputs.length;
   let startedTrial = 0;
   let sentQuote = 0;
-  let paying = 0;
+  let payingBilled = 0;
+  let payingRestored = 0;
 
   let expiringTrials = 0;
   const neverSentQuote: FunnelActionRow[] = [];
@@ -132,7 +138,10 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
     // who converted from a trial.
     if (f.trialStartedAt !== null) startedTrial++;
     if (u.hasSentDoc) sentQuote++;
-    if (isBilledSub(u.sub)) paying++;
+    // Headcount includes incident-restored store subs (their Apple/Google
+    // billing kept running; only the Firestore billing record is missing).
+    if (isBilledSub(u.sub)) payingBilled++;
+    else if (isRestoredStorePro(u.sub, now)) payingRestored++;
 
     // Actionable: signed up, past the grace window, never sent anything.
     if (
@@ -156,12 +165,16 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
     }
   }
 
+  const paying = payingBilled + payingRestored;
+
   return {
     funnel: {
       signups,
       startedTrial,
       sentQuote,
       paying,
+      payingBilled,
+      payingRestored,
       pctStartedTrial: safeRatio(startedTrial, signups),
       pctSentQuote: safeRatio(sentQuote, startedTrial),
       pctPaying: safeRatio(paying, sentQuote),

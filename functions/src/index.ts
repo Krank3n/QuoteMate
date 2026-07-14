@@ -40,6 +40,7 @@ export * from './adminCrm';
 export * from './tickets';
 export { adminTrafficStats } from './analyticsTraffic';
 export { weeklyAnalyticsDigest, adminWeeklyDigest } from './analyticsDigest';
+export { subscriptionAuditDaily, adminSubscriptionAudit } from './subscriptionAudit';
 export {
   adminLeadDiscovery,
   adminEnrichLeads,

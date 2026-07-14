@@ -54,6 +54,21 @@ export function isBilledSub(sub: any): boolean {
   return !!(sub.productId || sub.subscriptionId || sub.priceId);
 }
 
+// A paying subscriber whose account was rebuilt by the incident-2026-07
+// reclaim flow: Pro restored on a store platform, but the billing identifiers
+// are gone until their device re-validates the receipt (accountReclaim.helpers
+// buildProRestorePatch). Their Apple/Google billing kept running independently
+// of Firebase, so for HEADCOUNT purposes they are paying — but they carry no
+// verifiable billing record, so keep them out of isBilledSub/MRR maths.
+export function isRestoredStorePro(sub: any, nowMs: number): boolean {
+  if (!sub?.isPro || isBilledSub(sub)) return false;
+  if (!sub.restoredFromIncident) return false;
+  const platform = String(sub.platform || '').toLowerCase();
+  if (platform !== 'ios' && platform !== 'android') return false;
+  const until = typeof sub.incidentProUntil === 'string' ? Date.parse(sub.incidentProUntil) : NaN;
+  return Number.isFinite(until) && until > nowMs;
+}
+
 function subInterval(sub: any): 'yearly' | 'monthly' {
   const i = String(sub?.interval || sub?.planInterval || '').toLowerCase();
   if (i.startsWith('year') || i.startsWith('annual')) return 'yearly';
