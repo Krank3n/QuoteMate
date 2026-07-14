@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, Animated, TextInput as RNTextInput } from 'react-native';
 import { Text, TextInput, Button, Surface, Title, ActivityIndicator } from 'react-native-paper';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider, sendEmailVerification } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider, sendEmailVerification, getAdditionalUserInfo, UserCredential } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -17,6 +17,7 @@ import { auth, db } from '../config/firebase';
 import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { lightTap, errorTap } from '../utils/haptics';
+import { trackWebEvent } from '../utils/webAnalytics';
 
 // Needed for expo-auth-session to work properly
 WebBrowser.maybeCompleteAuthSession();
@@ -65,9 +66,13 @@ function validateSignupEmail(rawEmail: string): string | null {
 }
 
 // Save registration platform info so cloud functions know which platform the user signed up on
-async function saveRegistrationPlatform(uid: string, method: 'email' | 'google' | 'apple') {
+async function saveRegistrationPlatform(result: UserCredential, method: 'email' | 'google' | 'apple') {
+  // Web GA: new account → sign_up (the event that closes the website→app
+  // attribution loop); returning OAuth user → login. No-ops on native.
+  const isNewUser = getAdditionalUserInfo(result)?.isNewUser ?? false;
+  trackWebEvent(isNewUser ? 'sign_up' : 'login', { method });
   try {
-    await setDoc(doc(db, 'users', uid, 'settings', 'registrationInfo'), {
+    await setDoc(doc(db, 'users', result.user.uid, 'settings', 'registrationInfo'), {
       platform: Platform.OS,
       method,
       registeredAt: serverTimestamp(),
@@ -132,7 +137,7 @@ export function AuthScreen() {
               : providerId.includes('google')
               ? 'google'
               : 'email';
-            saveRegistrationPlatform(result.user.uid, method);
+            saveRegistrationPlatform(result, method);
           }
         })
         .catch((error) => {
@@ -225,7 +230,7 @@ export function AuthScreen() {
       const credential = GoogleAuthProvider.credential(id_token);
       signInWithCredential(auth, credential)
         .then((result) => {
-          saveRegistrationPlatform(result.user.uid, 'google');
+          saveRegistrationPlatform(result, 'google');
           // Keep loading state - App.tsx will handle navigation
         })
         .catch((error) => {
@@ -249,6 +254,7 @@ export function AuthScreen() {
 
     try {
       await signInWithEmailAndPassword(auth, email.trim(), password);
+      trackWebEvent('login', { method: 'email' });
       // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       setError(getErrorMessage(err.code));
@@ -292,7 +298,7 @@ export function AuthScreen() {
     try {
       const result = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
       await sendEmailVerification(result.user).catch(() => {});
-      await saveRegistrationPlatform(result.user.uid, 'email');
+      await saveRegistrationPlatform(result, 'email');
       // Navigation will happen automatically when auth state changes
     } catch (err: any) {
       setError(getErrorMessage(err.code));
@@ -319,7 +325,7 @@ export function AuthScreen() {
         // Normal browser: Use Firebase popup
         setIsProcessingOAuth(true);
         const result = await signInWithPopup(auth, provider);
-        await saveRegistrationPlatform(result.user.uid, 'google');
+        await saveRegistrationPlatform(result, 'google');
         // Keep loading state - App.tsx will handle navigation
       } else {
         // Mobile: Use expo-auth-session
@@ -365,7 +371,7 @@ export function AuthScreen() {
         }
         setIsProcessingOAuth(true);
         const result = await signInWithPopup(auth, provider);
-        await saveRegistrationPlatform(result.user.uid, 'apple');
+        await saveRegistrationPlatform(result, 'apple');
         // Keep loading state - App.tsx will handle navigation
         return;
       }
@@ -397,7 +403,7 @@ export function AuthScreen() {
           rawNonce: nonce, // Pass the unhashed nonce to Firebase
         });
         const appleResult = await signInWithCredential(auth, firebaseCredential);
-        await saveRegistrationPlatform(appleResult.user.uid, 'apple');
+        await saveRegistrationPlatform(appleResult, 'apple');
         // Keep loading state - App.tsx will handle navigation
       } else {
         throw new Error('No identity token returned from Apple');

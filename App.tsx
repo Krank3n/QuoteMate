@@ -48,6 +48,7 @@ import { AuthScreen } from './src/screens/AuthScreen';
 import { subscriptionSyncService } from './src/services/subscriptionSyncService';
 import { auth } from './src/config/firebase';
 import { shouldClearLocalData } from './src/utils/localDataReset';
+import { initWebAnalytics } from './src/utils/webAnalytics';
 import { fetchReclaimedOldUid } from './src/services/accountReclaimService';
 import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
@@ -165,6 +166,10 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
     `;
     document.head.appendChild(style);
   }
+
+  // GA4 for the web build only — same property/origin as the marketing site,
+  // so sessions and sign_up events attribute to the acquiring channel.
+  initWebAnalytics();
 }
 
 // As early as possible so crashes during startup/data-load are captured —
