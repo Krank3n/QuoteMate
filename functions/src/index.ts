@@ -29,6 +29,8 @@ import {
   classifyUnsendable,
   canSendEmail,
 } from './email';
+import { listAllAuthUsers } from './authUsers.helpers';
+import { isUnreachableEmail, reEngagementVerdict } from './reEngagement.helpers';
 import {
   invoiceLinkAmountDue,
   isPaymentAlreadyApplied,
@@ -7588,15 +7590,22 @@ export const sendOnboardingDrip = functions.pubsub
   .timeZone('Australia/Sydney')
   .onRun(async () => {
     const now = new Date();
-    const authResult = await admin.auth().listUsers(1000);
+    const authUsers = await listAllAuthUsers(admin.auth());
     let totalProcessed = 0;
     let totalEligible = 0;
     let totalSent = 0;
     let totalErrors = 0;
 
-    for (const userRecord of authResult.users) {
+    for (const userRecord of authUsers) {
       try {
         const userId = userRecord.uid;
+        const email = userRecord.email;
+        // Unreachable addresses (Apple private relay, test domains) can never
+        // receive a tip; lastOnboardingTip only advances on a successful send,
+        // so without this they'd be re-attempted (and logged as 'blocked')
+        // every day of their drip window.
+        if (!email || isUnreachableEmail(email)) continue;
+
         const emailStateDoc = await db.doc(`users/${userId}/settings/emailState`).get();
         const data = emailStateDoc.data();
         if (!data?.signupAt) continue;
@@ -7620,9 +7629,6 @@ export const sendOnboardingDrip = functions.pubsub
         if (tipToSend === 0) continue;
 
         totalEligible++;
-
-        const email = userRecord.email;
-        if (!email) continue;
 
         let businessName = '';
         try {
@@ -7653,17 +7659,22 @@ export const sendReEngagement = functions.pubsub
   .timeZone('Australia/Sydney')
   .onRun(async () => {
     const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const twentyOneDaysAgo = new Date(now.getTime() - 21 * 24 * 60 * 60 * 1000);
-    const authResult = await admin.auth().listUsers(1000);
+    const authUsers = await listAllAuthUsers(admin.auth());
     let totalProcessed = 0;
     let totalEligible = 0;
     let totalSent = 0;
     let totalErrors = 0;
 
-    for (const userRecord of authResult.users) {
+    for (const userRecord of authUsers) {
       try {
         const userId = userRecord.uid;
+        const email = userRecord.email;
+        // Unreachable addresses (Apple private relay, test domains) never cool
+        // down — lastReEngagementAt is only stamped on a successful send — so
+        // skip them before the Firestore read and the daily 'blocked'
+        // emailLog row they used to generate.
+        if (!email || isUnreachableEmail(email)) continue;
+
         const emailStateDoc = await db.doc(`users/${userId}/settings/emailState`).get();
         const data = emailStateDoc.data();
         if (!data?.lastActivityAt) continue;
@@ -7671,20 +7682,14 @@ export const sendReEngagement = functions.pubsub
         totalProcessed++;
 
         const lastActivityAt = data.lastActivityAt?.toDate?.() || new Date(data.lastActivityAt);
-        const lastReEngagementAt = data.lastReEngagementAt?.toDate?.();
+        const lastReEngagementAt = data.lastReEngagementAt?.toDate?.() || null;
 
-        // Skip if active within the last 7 days
-        if (lastActivityAt >= sevenDaysAgo) continue;
-
-        // Don't send if we already sent a re-engagement email in the last 21 days
-        if (lastReEngagementAt && lastReEngagementAt > twentyOneDaysAgo) continue;
+        const verdict = reEngagementVerdict({ email, lastActivityAt, lastReEngagementAt }, now);
+        if (!verdict.send) continue;
 
         totalEligible++;
 
         const daysSinceActive = Math.floor((now.getTime() - lastActivityAt.getTime()) / (1000 * 60 * 60 * 24));
-
-        const email = userRecord.email;
-        if (!email) continue;
 
         let businessName = '';
         try {
@@ -8029,12 +8034,12 @@ export const testAllEmails = functions.https.onRequest(async (req, res) => {
 export const backfillEmailState = functions.https.onRequest(async (req, res) => {
   corsHandler(req, res, async () => {
     const firestore = admin.firestore();
-    const authResult = await admin.auth().listUsers(1000);
+    const allUsers = await listAllAuthUsers(admin.auth());
     let created = 0;
     let skipped = 0;
     let errors = 0;
 
-    for (const userRecord of authResult.users) {
+    for (const userRecord of allUsers) {
       try {
         const emailStateRef = firestore.doc(`users/${userRecord.uid}/settings/emailState`);
         const emailStateDoc = await emailStateRef.get();
@@ -8057,7 +8062,7 @@ export const backfillEmailState = functions.https.onRequest(async (req, res) => 
       }
     }
 
-    res.json({ created, skipped, errors, total: authResult.users.length });
+    res.json({ created, skipped, errors, total: allUsers.length });
   });
 });
 
@@ -8301,8 +8306,8 @@ async function getAdminAnalyticsData(): Promise<AnalyticsData> {
   ]);
 
   // Get auth users for signup/login data
-  const authResult = await admin.auth().listUsers(1000);
-  const authUsers = authResult.users.filter(au => !EXCLUDED_EMAILS.has(au.email || ''));
+  const allAuthUsers = await listAllAuthUsers(admin.auth());
+  const authUsers = allAuthUsers.filter(au => !EXCLUDED_EMAILS.has(au.email || ''));
 
   let totalQuotes = 0;
   let totalInvoices = 0;
@@ -9447,12 +9452,12 @@ export const sendUpdateAnnouncement = functions
         }
 
         // Send to all users
-        const authUsers = await admin.auth().listUsers(1000);
+        const authUsers = await listAllAuthUsers(admin.auth());
         let sent = 0;
         let failed = 0;
         let skipped = 0;
 
-        for (const user of authUsers.users) {
+        for (const user of authUsers) {
           const email = user.email;
           if (!email) { skipped++; continue; }
 
@@ -9475,7 +9480,7 @@ export const sendUpdateAnnouncement = functions
           }
         }
 
-        res.status(200).json({ sent, failed, skipped, total: authUsers.users.length });
+        res.status(200).json({ sent, failed, skipped, total: authUsers.length });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }

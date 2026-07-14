@@ -21,6 +21,7 @@ import type { DocumentStage, DocumentType } from './shared/document/types';
 // of truth (and the latter stays unit-testable without firebase). See
 // subscription.helpers.ts.
 import { ts, deriveSubFields } from './subscription.helpers';
+import { listAllAuthUsers as drainAuthUsers } from './authUsers.helpers';
 import {
   computeFunnelStats,
   isActivatingDoc,
@@ -159,14 +160,7 @@ async function fetchAllAdminNoteSummaries(): Promise<Map<string, { count: number
 }
 
 async function listAllAuthUsers(): Promise<admin.auth.UserRecord[]> {
-  const all: admin.auth.UserRecord[] = [];
-  let nextPageToken: string | undefined;
-  do {
-    const page = await admin.auth().listUsers(1000, nextPageToken);
-    all.push(...page.users);
-    nextPageToken = page.pageToken;
-  } while (nextPageToken);
-  return all;
+  return drainAuthUsers(admin.auth());
 }
 
 async function logAdminAction(params: {
