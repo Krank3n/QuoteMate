@@ -264,6 +264,17 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         || 'https://us-central1-hansendev.cloudfunctions.net/leadUnsubscribe';
       unsubscribeUrl = `${base}?to=${encodeURIComponent(to)}&lead=${encodeURIComponent(leadId)}`;
     }
+    // Attribute outreach clicks in GA (lands in the "Email" channel instead of
+    // hiding in Direct). Rewritten at send time so it covers every message the
+    // copy generator ever produced — visible link text stays clean.
+    htmlContent = htmlContent.replace(
+      /href="https:\/\/quotemateapp\.au([^"]*)"/g,
+      (_m, rest: string) => {
+        if (rest.includes('utm_')) return _m;
+        const sep = rest.includes('?') ? '&' : '?';
+        return `href="https://quotemateapp.au${rest}${sep}utm_source=outreach&utm_medium=email&utm_campaign=lead_outreach"`;
+      }
+    );
     htmlContent = wrapLeadOutreachBody(htmlContent, unsubscribeUrl);
   }
 
