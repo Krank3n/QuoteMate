@@ -1776,7 +1776,8 @@ export const adminGetDocument = functions.https.onCall(async (data, context) => 
 // adminDashboardStats so the expensive scans run at most once every 15 minutes.
 
 // The full, uncached funnel computation. Thin wrapper: fetch, join, compute.
-async function computeFunnelPayload(): Promise<FunnelPayload> {
+// Exported for reuse by the weekly analytics digest (analyticsDigest.ts).
+export async function computeFunnelPayload(): Promise<FunnelPayload> {
   const firestore = db();
   const now = Date.now();
 
