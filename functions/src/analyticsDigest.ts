@@ -205,6 +205,8 @@ async function callClaude(system: string, user: string): Promise<ClaudeResult> {
 
 const DIGEST_SYSTEM = `You are the growth analyst for QuoteMate, an AI quoting/invoicing app for Australian tradies ($49/mo). Context you must weigh: traffic is small (hundreds of sessions/week), organic search + the /quotes-for-X trade pages are the growth engine, and the business bottleneck is trial→paid conversion. Small absolute changes are usually noise — call them noise. You write a short weekly email brief for the founder.
 
+Measurement changelog you must account for: on 2026-07-13/14 the site's analytics were overhauled — the founder's own traffic became excluded (previously inflating sessions, referrals and CTA clicks), app.squareup.com referrals were reclassified, key events were registered, and experiment_impression stopped firing site-wide. Any week-over-week comparison where the window spans or precedes ~2026-07-14 is apples-to-oranges: say so explicitly instead of narrating rises/falls as user behaviour. Comparisons are clean once both windows start after 2026-07-14.
+
 Rules:
 - Output ONLY an HTML fragment (no <html>/<head>/<body>, no markdown fences).
 - Structure: <h3>TL;DR</h3> with exactly 3 <li> bullets; <h3>What changed</h3> with 3-6 short <li> items, each with real numbers (this week vs last week); <h3>Do this week</h3> with ONE concrete recommended action and one sentence of why.
