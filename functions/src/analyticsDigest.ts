@@ -224,6 +224,25 @@ function fallbackHtml(gaData: GaDigestData): string {
 <h3>Channels</h3><ul>${rows}</ul>`;
 }
 
+// Read endpoint for the admin dashboard: returns the latest stored digest.
+export const adminWeeklyDigest = functions
+  .runWith({ timeoutSeconds: 15, memory: '256MB' })
+  .https.onCall(async (_data, context) => {
+    const isAdmin = context.auth?.token?.admin === true;
+    if (!context.auth?.uid || !isAdmin) {
+      throw new functions.https.HttpsError('permission-denied', 'Admin access required.');
+    }
+    const doc = await admin.firestore().collection('adminStats').doc('weeklyDigest').get();
+    if (!doc.exists) return { available: false as const };
+    const d = doc.data() as any;
+    return {
+      available: true as const,
+      html: String(d?.html || ''),
+      aiGenerated: d?.aiGenerated !== false,
+      generatedAt: typeof d?.generatedAt === 'number' ? d.generatedAt : null,
+    };
+  });
+
 export const weeklyAnalyticsDigest = functions
   .runWith({ memory: '512MB', timeoutSeconds: 300 })
   .pubsub.schedule('every monday 07:00')

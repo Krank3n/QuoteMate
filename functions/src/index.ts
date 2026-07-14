@@ -39,7 +39,7 @@ import { shouldReadyToSendNudge, toMs } from './draftNudge.helpers';
 export * from './adminCrm';
 export * from './tickets';
 export { adminTrafficStats } from './analyticsTraffic';
-export { weeklyAnalyticsDigest } from './analyticsDigest';
+export { weeklyAnalyticsDigest, adminWeeklyDigest } from './analyticsDigest';
 export {
   adminLeadDiscovery,
   adminEnrichLeads,
