@@ -936,8 +936,9 @@ class FirestoreService {
   }
 
   /**
-   * Atomically check and increment the quote quota (server-side enforcement).
-   * Returns the updated quota info, or throws if quota exceeded.
+   * Atomically increment the quote count and report subscription state.
+   * Every tier may create quotes (free is unlimited — the paid gate is on
+   * sending); `allowed` stays in the shape for the callers' safety check.
    */
   async checkAndIncrementQuota(): Promise<{ allowed: boolean; quotesThisMonth: number; isPro: boolean; trialStartedAt?: string; trialExpired?: boolean; trialDaysRemaining?: number }> {
     const userId = this.getUserId();
@@ -999,10 +1000,18 @@ class FirestoreService {
           return { allowed: true, quotesThisMonth: newCount, isPro: false, trialStartedAt: now.toISOString(), trialExpired: false, trialDaysRemaining: TRIAL_DAYS };
         }
 
-        // Check if trial has expired
+        // Trial expired → free tier. Creation stays unlimited on free (the
+        // paid gate is on sending — see quoteDeliveryGuard), so count the
+        // quote and flag trialExpired instead of blocking.
         const elapsed = now.getTime() - trialStartedAt.getTime();
         if (elapsed >= TRIAL_MS) {
-          return { allowed: false, quotesThisMonth: data.quotesThisMonth || 0, isPro: false, trialStartedAt: trialStartedAt.toISOString(), trialExpired: true, trialDaysRemaining: 0 };
+          const newCount = (data.quotesThisMonth || 0) + 1;
+          transaction.set(subscriptionRef, {
+            ...data,
+            quotesThisMonth: newCount,
+            syncedAt: new Date().toISOString(),
+          });
+          return { allowed: true, quotesThisMonth: newCount, isPro: false, trialStartedAt: trialStartedAt.toISOString(), trialExpired: true, trialDaysRemaining: 0 };
         }
 
         // Trial still active - allow
