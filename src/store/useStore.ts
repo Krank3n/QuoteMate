@@ -40,6 +40,7 @@ import { documentService } from '../services/documentService';
 import * as xeroService from '../services/xeroService';
 import { TRIAL_MS } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
+import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
 import { auth } from '../config/firebase';
 import { searchLocalSources } from '../services/localMaterialSearch';
@@ -1882,6 +1883,14 @@ export const useStore = create<AppState>((set, get) => ({
       );
 
       set({ invoices: updatedInvoices });
+
+      // Invoice just went fully paid — the single best moment to ask for a
+      // store rating. Hooked here (not per screen) so the manual record-payment
+      // flow and the assistant flow both count; the service rate-limits and
+      // never throws, so it can't disturb the payment path.
+      if (newStatus === 'paid' && invoice.status !== 'paid') {
+        maybeRequestReview('invoice_paid').catch(() => {});
+      }
 
       // Sync to Firestore if user is signed in (non-blocking)
       if (auth.currentUser) {

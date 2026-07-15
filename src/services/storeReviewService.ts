@@ -28,7 +28,7 @@ const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 // enforces the long-term cap.
 let promptedThisSession = false;
 
-export type HappyEvent = 'payment_success' | 'quote_accepted';
+export type HappyEvent = 'payment_success' | 'quote_accepted' | 'invoice_paid';
 
 interface AppReviewState {
   lastPromptedAt?: number;
