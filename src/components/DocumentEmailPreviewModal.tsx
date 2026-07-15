@@ -38,6 +38,7 @@ import { BusinessSettings } from '../types';
 import { Document } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { formatCurrency } from '../utils/quoteCalculator';
+import { reviewQuoteMaterials, buildPresendWarning, type PresendWarning } from '../utils/quoteReview';
 import { auth } from '../config/firebase';
 import { AlertModal } from './AlertModal';
 import { useStore } from '../store/useStore';
@@ -414,6 +415,12 @@ export function DocumentEmailPreviewModal({
     };
   };
 
+  // Pre-send gate: a document with $0 rows shows $0 line items to the
+  // customer. The pipeline leaves rows deliberately unpriced when only the
+  // tradie knows the number (services, custom supply) — this is the moment
+  // they either fix them or consciously send anyway. Test sends skip it.
+  const [presendWarning, setPresendWarning] = useState<PresendWarning | null>(null);
+
   const handleSend = async () => {
     const error = validateEmail(recipientEmail);
     if (error) {
@@ -422,6 +429,20 @@ export function DocumentEmailPreviewModal({
       return;
     }
 
+    const warning = buildPresendWarning(
+      reviewQuoteMaterials(doc.materials),
+      doc.type === 'invoice' ? 'invoice' : 'quote',
+      { materialsShownToCustomer: doc.showMaterialCosts !== false },
+    );
+    if (warning) {
+      setPresendWarning(warning);
+      return;
+    }
+
+    await doSend();
+  };
+
+  const doSend = async () => {
     setSending(true);
     try {
       const idToken = await auth.currentUser?.getIdToken();
@@ -733,6 +754,24 @@ export function DocumentEmailPreviewModal({
           primaryButtonText="OK"
           primaryButtonAction={() => setAlertVisible(false)}
           showConfetti={alertType === 'success'}
+        />
+        <AlertModal
+          visible={presendWarning !== null}
+          onDismiss={() => setPresendWarning(null)}
+          type="warning"
+          icon="currency-usd-off"
+          title={presendWarning?.title || ''}
+          message={presendWarning?.message || ''}
+          primaryButtonText="Go back and fix"
+          primaryButtonAction={() => {
+            setPresendWarning(null);
+            onDismiss();
+          }}
+          secondaryButtonText="Send anyway"
+          secondaryButtonAction={() => {
+            setPresendWarning(null);
+            doSend();
+          }}
         />
       </Portal.Host>
     </Modal>

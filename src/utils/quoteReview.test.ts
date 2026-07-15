@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reviewQuoteMaterials, isFlaggedRow } from './quoteReview';
+import { reviewQuoteMaterials, isFlaggedRow, buildPresendWarning } from './quoteReview';
 import type { Material } from '../types';
 
 // Minimal Material factory — only the fields the classifier reads matter; the
@@ -101,5 +101,49 @@ describe('isFlaggedRow', () => {
   it('leaves confident rows and manual overrides alone', () => {
     expect(isFlaggedRow(mat({ price: 12, priceConfidence: 'high' }))).toBe(false);
     expect(isFlaggedRow(mat({ price: 0, totalPrice: 0, manualPriceOverride: true }))).toBe(false);
+  });
+});
+
+describe('buildPresendWarning', () => {
+  const mk = (over: Partial<Material> = {}): Material => ({
+    id: 'm1', name: 'Custom Cabinetry Supply', quantity: 1, unit: 'each',
+    price: 0, totalPrice: 0, manualPriceOverride: false, priceConfidence: 'low',
+    ...over,
+  });
+
+  it('returns null when nothing is unpriced — estimates alone never gate the send', () => {
+    const estimated = mk({ id: 'e1', price: 45, totalPrice: 45, pricingSource: 'ai' });
+    expect(buildPresendWarning(reviewQuoteMaterials([estimated]))).toBeNull();
+    expect(buildPresendWarning(reviewQuoteMaterials([]))).toBeNull();
+  });
+
+  it('warns with the $0 rows named and the doc label', () => {
+    const w = buildPresendWarning(reviewQuoteMaterials([mk()]), 'quote');
+    expect(w?.title).toBe('Some prices need a look');
+    expect(w?.message).toContain("1 item has no price and will show as $0 on the customer's quote");
+    expect(w?.message).toContain('• Custom Cabinetry Supply');
+  });
+
+  it('caps the named rows at three and counts the rest', () => {
+    const rows = ['A', 'B', 'C', 'D', 'E'].map((n, i) => mk({ id: `m${i}`, name: n }));
+    const w = buildPresendWarning(reviewQuoteMaterials(rows));
+    expect(w?.message).toContain('5 items have no price');
+    expect(w?.message).toContain('• C');
+    expect(w?.message).not.toContain('• D');
+    expect(w?.message).toContain('(+2 more)');
+  });
+
+  it('mentions estimates only alongside unpriced rows', () => {
+    const w = buildPresendWarning(reviewQuoteMaterials([
+      mk(),
+      mk({ id: 'e1', name: 'Paint', price: 45, totalPrice: 45, pricingSource: 'ai' }),
+    ]), 'invoice');
+    expect(w?.message).toContain("customer's invoice");
+    expect(w?.message).toContain('1 more is an estimate');
+  });
+
+  it('never warns about manual overrides — the tradie priced those on purpose', () => {
+    const manual = mk({ manualPriceOverride: true });
+    expect(buildPresendWarning(reviewQuoteMaterials([manual]))).toBeNull();
   });
 });

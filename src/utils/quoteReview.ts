@@ -117,3 +117,47 @@ export function reviewQuoteMaterials(materials: Material[] | undefined | null): 
 
   return { issues, counts, summary: buildSummary(issues, counts) };
 }
+
+export interface PresendWarning {
+  title: string;
+  message: string;
+}
+
+/**
+ * Pre-send gate message: built ONLY when the document still contains $0 rows
+ * — those print as $0 line items on the customer's copy. Estimated /
+ * low-confidence rows alone don't gate the send (they're priced and flagged
+ * in the list already; warning on every estimate would teach tradies to
+ * dismiss the dialog without reading it).
+ */
+export function buildPresendWarning(
+  review: QuoteReview,
+  docLabel: 'quote' | 'invoice' = 'quote',
+  options: {
+    /** false when the doc hides material line items from the customer
+     *  (showMaterialCosts off) — the $0 rows aren't visible then, but the
+     *  total is still missing their money, so the gate still fires with
+     *  wording that matches the real consequence. */
+    materialsShownToCustomer?: boolean;
+  } = {},
+): PresendWarning | null {
+  const unpriced = review.issues.filter((i) => i.kind === 'unpriced');
+  if (unpriced.length === 0) return null;
+
+  const visible = options.materialsShownToCustomer !== false;
+  const consequence = visible
+    ? `will show as $0 on the customer's ${docLabel}`
+    : `${unpriced.length === 1 ? "isn't" : "aren't"} counted in the ${docLabel} total`;
+  const shown = unpriced.slice(0, 3).map((i) => `• ${i.name}`);
+  const more = unpriced.length - shown.length;
+  const lines = [
+    `${unpriced.length} item${unpriced.length === 1 ? ' has' : 's have'} no price and ${consequence}:`,
+    ...shown,
+    ...(more > 0 ? [`(+${more} more)`] : []),
+  ];
+  const estimated = review.counts.estimated + review.counts.lowConfidence;
+  if (estimated > 0) {
+    lines.push('', `${estimated} more ${estimated === 1 ? 'is an estimate' : 'are estimates'} — worth a quick check too.`);
+  }
+  return { title: 'Some prices need a look', message: lines.join('\n') };
+}
