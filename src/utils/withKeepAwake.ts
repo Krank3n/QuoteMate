@@ -7,7 +7,9 @@
 // overlap via Mate's apply path, and the lock releases only when the last
 // run finishes. Activation/deactivation failures are swallowed — losing the
 // wake lock (e.g. web without the Wake Lock API) must never fail the run.
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import { activateKeepAwakeAsync } from 'expo-keep-awake';
+
+import { releaseKeepAwake } from './keepAwake';
 
 const PIPELINE_KEEP_AWAKE_TAG = 'materials-pipeline';
 
@@ -27,11 +29,7 @@ export async function withKeepAwake<T>(fn: () => Promise<T>): Promise<T> {
   } finally {
     activeRuns -= 1;
     if (activeRuns === 0) {
-      try {
-        void deactivateKeepAwake(PIPELINE_KEEP_AWAKE_TAG);
-      } catch {
-        /* non-fatal */
-      }
+      releaseKeepAwake(PIPELINE_KEEP_AWAKE_TAG);
     }
   }
 }

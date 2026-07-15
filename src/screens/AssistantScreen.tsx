@@ -36,7 +36,7 @@ import { LiveAuthError, LiveOfflineError, LiveQuotaError } from '../services/ass
 import { rememberAppliedQuote } from '../services/assistant/quoteRefMap';
 import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGranted } from '../services/assistant/mic';
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic } from './assistant/shouldAutoStartMic';
 import {
   voiceActionForAppState,
@@ -63,6 +63,7 @@ const VOICE_KEEP_AWAKE_TAG = 'mate-voice-session';
 const VOICE_IDLE_TIMEOUT_MS = 90_000;
 const VOICE_IDLE_CHECK_MS = 5_000;
 import { generateId } from '../utils/generateId';
+import { releaseKeepAwake } from '../utils/keepAwake';
 import {
   ChatMessage,
   Proposal,
@@ -1200,7 +1201,7 @@ export function AssistantScreen() {
     // Release the wake lock now that the session is torn down. Fire-and-
     // forget — if it fails (or the tag was never held, e.g. open errored
     // before activate) the OS just keeps the default sleep behaviour.
-    try { void deactivateKeepAwake(VOICE_KEEP_AWAKE_TAG); } catch { /* noop */ }
+    releaseKeepAwake(VOICE_KEEP_AWAKE_TAG);
     userBubbleIdRef.current = null;
     assistantBubbleIdRef.current = null;
     userBubbleTextRef.current = '';
