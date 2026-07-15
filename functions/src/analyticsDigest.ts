@@ -18,6 +18,7 @@ import * as admin from 'firebase-admin';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { sendEmail } from './email';
 import { computeFunnelPayload } from './adminCrm';
+import { readStoreStats } from './storeFunnel';
 
 const GA_PROPERTY = `properties/${process.env.GA_PROPERTY_ID || '527922866'}`;
 const DIGEST_TO = process.env.DIGEST_TO || 'thomas.andrew.hansen@gmail.com';
@@ -205,6 +206,8 @@ async function callClaude(system: string, user: string): Promise<ClaudeResult> {
 
 const DIGEST_SYSTEM = `You are the growth analyst for QuoteMate, an AI quoting/invoicing app for Australian tradies ($49/mo). Context you must weigh: traffic is small (hundreds of sessions/week), organic search + the /quotes-for-X trade pages are the growth engine, and the business bottleneck is trial→paid conversion. Small absolute changes are usually noise — call them noise. You write a short weekly email brief for the founder.
 
+If the data includes storeInstalls (daily Google Play installs + Apple download units), treat installs as the funnel step between website store-clicks and app signups — most signups come from app-store search, and an ASO overhaul shipped 2026-07-14, so install trend is the metric that judges it. Ignore storeInstalls when null or when daysWithData is low (feed still warming up).
+
 Measurement changelog you must account for: on 2026-07-13/14 the site's analytics were overhauled — the founder's own traffic became excluded (previously inflating sessions, referrals and CTA clicks), app.squareup.com referrals were reclassified, key events were registered, and experiment_impression stopped firing site-wide. Any week-over-week comparison where the window spans or precedes ~2026-07-14 is apples-to-oranges: say so explicitly instead of narrating rises/falls as user behaviour. Comparisons are clean once both windows start after 2026-07-14.
 
 Rules:
@@ -253,10 +256,25 @@ export const weeklyAnalyticsDigest = functions
     // 1. Gather. GA and the funnel scan are independent; a GA permission
     // problem should surface loudly, so no catch here — the run fails visibly
     // in functions logs.
-    const [gaData, funnel] = await Promise.all([gatherGa(), computeFunnelPayload()]);
+    const [gaData, funnel, storeDays] = await Promise.all([
+      gatherGa(),
+      computeFunnelPayload(),
+      readStoreStats(14).catch(() => []),
+    ]);
+
+    // Fold daily store installs into thisWeek/lastWeek to match the GA shape.
+    const week = (days: typeof storeDays) => ({
+      playInstalls: days.reduce((a, d) => a + (d.playInstalls || 0), 0),
+      appleUnits: days.reduce((a, d) => a + (d.appleUnits || 0), 0),
+      daysWithData: days.filter((d) => d.playInstalls !== undefined || d.appleUnits !== undefined).length,
+    });
+    const storeInstalls = storeDays.length
+      ? { thisWeek: week(storeDays.slice(-7)), lastWeek: week(storeDays.slice(0, -7)) }
+      : null;
 
     const payload = {
       web: gaData,
+      storeInstalls,
       product: {
         allTime: funnel.funnel,
         trialToPaid: funnel.conversion.trialToPaid,

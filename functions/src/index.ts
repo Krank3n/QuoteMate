@@ -44,6 +44,7 @@ export { adminTrafficStats } from './analyticsTraffic';
 export { weeklyAnalyticsDigest, adminWeeklyDigest } from './analyticsDigest';
 export { subscriptionAuditDaily, adminSubscriptionAudit } from './subscriptionAudit';
 export { dailyTrackingCheck } from './trackingAlarm';
+export { storeFunnelDaily } from './storeFunnel';
 export {
   adminLeadDiscovery,
   adminEnrichLeads,
