@@ -40,6 +40,7 @@ import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import {
   StickyJobActionBar,
   pickPrimaryDoc,
+  isUnfinishedDraftQuote,
   type JobActionId,
 } from '../components/StickyJobActionBar';
 import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaymentSheet';
@@ -342,6 +343,18 @@ export function ViewJobScreen() {
           navigation.navigate('NewJob', { jobId: job.id });
           break;
         case 'continueQuote':
+          if (actionableDoc) {
+            if (isUnfinishedDraftQuote(actionableDoc)) {
+              // Resume the wizard at the exact step the tradie left —
+              // same behaviour as the dashboard's draft banner. No
+              // `editing` param: this is a continuation, not an edit.
+              setCurrentQuote(documentToQuote(actionableDoc));
+              navigation.navigate('NewJob', { screen: actionableDoc.draftStep });
+            } else {
+              openEditorForDoc(actionableDoc, 'materials');
+            }
+          }
+          break;
         case 'editQuote':
           if (actionableDoc) {
             // Jump straight into the scope editor (materials). For

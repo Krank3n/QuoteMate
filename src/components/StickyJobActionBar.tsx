@@ -7,7 +7,8 @@
  * the tradie hunting for it:
  *
  *   no quote yet       → Create Quote
- *   draft quote        → Continue Quote
+ *   draft (mid-wizard) → Continue Quote (resumes at the step they left)
+ *   draft (ready)      → Send Quote
  *   quote sent         → Take Deposit (primary) + Mark Approved (secondary)
  *   accepted (deposit  → Take Deposit + Schedule
  *     still owed)
@@ -142,6 +143,22 @@ export function pickPrimaryDoc(docs: Document[]): Document | null {
   )[0];
 }
 
+/**
+ * A draft quote the tradie never finished in the wizard: draftStep is still
+ * stamped and they hadn't reached the preview step. "Send Quote" as the
+ * primary action would email a half-built quote — resuming the wizard at
+ * the step they left is the right lead.
+ */
+export function isUnfinishedDraftQuote(doc: Document | null): boolean {
+  return (
+    !!doc &&
+    doc.type === 'quote' &&
+    doc.stage === 'draft' &&
+    !!doc.draftStep &&
+    doc.draftStep !== 'JobPreview'
+  );
+}
+
 function depositOwed(doc: Document | null): boolean {
   if (!doc || doc.type !== 'quote') return false;
   const required = Number(doc.depositAmount ?? 0);
@@ -238,6 +255,12 @@ export function resolveJobActions(
   // Review demo. Fall back to Mark Approved / Resend.
   const isIos = Platform.OS === 'ios';
   if (isDraft) {
+    if (isUnfinishedDraftQuote(primaryDoc)) {
+      return [
+        { id: 'continueQuote', label: 'Continue Quote', icon: 'pencil-outline', tone: 'primary' },
+        { id: 'sendQuote', label: 'Send Quote', icon: 'send-outline', tone: 'ghost' },
+      ];
+    }
     return [
       { id: 'sendQuote', label: 'Send Quote', icon: 'send-outline', tone: 'primary' },
       ...(isIos

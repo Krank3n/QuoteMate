@@ -16,7 +16,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useScrollToTop, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 
 import { useStore } from '../store/useStore';
 import { useJobStore } from '../store/useJobStore';
@@ -40,7 +40,7 @@ import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { StageSheet } from '../components/StageSheet';
 import { applyStageChange } from '../utils/applyStageChange';
 import type { Document, DocumentStage } from '../types/document';
-import { SwipeableCard } from '../components/SwipeableCard';
+import { pickDashboardDraft, excludeDraftJob } from '../utils/dashboardDraft';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { useIsAppActive } from '../hooks/useIsAppActive';
 import { lightTap, successTap } from '../utils/haptics';
@@ -342,12 +342,10 @@ export function DashboardScreen() {
     return { sentQuotes: sent, acceptedQuotes: accepted, thisMonthRevenue: monthRevenue, pipelineValue: pipeline };
   }, [quotes]);
 
-  // Find in-progress draft (has draftStep set)
-  const inProgressDraft = useMemo(() => {
-    return quotes
-      .filter((q) => q.status === 'draft' && q.draftStep)
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] || null;
-  }, [quotes]);
+  // Newest in-progress draft, time-boxed — pickDashboardDraft hides
+  // drafts older than the banner window so a zombie draft can't squat on
+  // the home screen's top slot forever.
+  const inProgressDraft = useMemo(() => pickDashboardDraft(quotes), [quotes]);
 
   // Translate the wizard step they left off on into a "what's needed
   // next" hint shown on the draft banner. Mirrors the screens in the
@@ -371,17 +369,33 @@ export function DashboardScreen() {
     }
   }, [inProgressDraft?.draftStep]);
 
+  // "edited 2 hours ago" — the cue that tells the tradie whether the
+  // banner is today's job or old leftovers. Guarded: a malformed
+  // updatedAt must not crash the dashboard.
+  const draftEditedAgo = useMemo(() => {
+    if (!inProgressDraft?.updatedAt) return null;
+    try {
+      return formatDistanceToNow(new Date(inProgressDraft.updatedAt), { addSuffix: true });
+    } catch {
+      return null;
+    }
+  }, [inProgressDraft?.updatedAt]);
+
 
   // Recent jobs (last 3) — Phase 12 replaces the "Recent Quotes" card on
   // the dashboard. Jobs are the new primary object.
   const jobs = useJobStore((s) => s.jobs);
   const saveJob = useJobStore((s) => s.saveJob);
+  // While the draft banner is up, its auto-created Job would also sit at
+  // the top of this list (freshest updatedAt) — same work shown twice on
+  // one screen. The banner represents it; drop it from Recent Jobs.
   const recentJobs = useMemo(
     () =>
-      [...jobs]
-        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-        .slice(0, 3),
-    [jobs],
+      excludeDraftJob(
+        [...jobs].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+        inProgressDraft?.jobId,
+      ).slice(0, 3),
+    [jobs, inProgressDraft?.jobId],
   );
 
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
@@ -664,34 +678,31 @@ export function DashboardScreen() {
       {/* Continue Draft Banner */}
       {inProgressDraft && (
         <View>
-          <SwipeableCard
-            leftActions={[
-              { icon: 'delete-outline', label: 'Delete', color: colors.error, bgColor: colors.errorBg, onPress: handleDeleteDraft },
-            ]}
+          <TouchableOpacity
+            onPress={() => handleContinueDraft(inProgressDraft)}
+            activeOpacity={0.7}
+            accessibilityLabel={`Continue draft for ${inProgressDraft.job.name || 'Untitled'}`}
           >
-            <TouchableOpacity
-              onPress={() => handleContinueDraft(inProgressDraft)}
-              activeOpacity={0.7}
-              accessibilityLabel={`Continue draft for ${inProgressDraft.job.name || 'Untitled'}`}
-            >
-              <Surface style={styles.draftBanner}>
-                <View style={styles.draftBannerContent}>
-                  <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: colors.warningBg, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
-                    <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.secondary} />
-                  </RNAnimated.View>
-                  <View style={styles.draftBannerText}>
-                    <Text style={styles.draftBannerTitle} numberOfLines={1}>
-                      {inProgressDraft.job.name || 'Untitled'}{inProgressDraft.customerName ? ` — ${inProgressDraft.customerName}` : ''}
-                    </Text>
-                    <Text style={styles.draftBannerSubtitle} numberOfLines={1}>
-                      {draftStepLabel ? `Next: ${draftStepLabel}` : 'Continue draft'}
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={24} color={colors.primary} />
+            <Surface style={styles.draftBanner}>
+              <View style={styles.draftBannerContent}>
+                <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: colors.warningBg, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
+                  <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.secondary} />
+                </RNAnimated.View>
+                <View style={styles.draftBannerText}>
+                  <Text style={styles.draftBannerTitle} numberOfLines={1}>
+                    {inProgressDraft.job.name || 'Untitled'}{inProgressDraft.customerName ? ` — ${inProgressDraft.customerName}` : ''}
+                  </Text>
+                  <Text style={styles.draftBannerSubtitle} numberOfLines={1}>
+                    {[
+                      draftStepLabel ? `Next: ${draftStepLabel}` : 'Continue draft',
+                      draftEditedAgo ? `edited ${draftEditedAgo}` : null,
+                    ].filter(Boolean).join(' · ')}
+                  </Text>
                 </View>
-              </Surface>
-            </TouchableOpacity>
-          </SwipeableCard>
+                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.primary} />
+              </View>
+            </Surface>
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.draftDeleteButton}
             onPress={handleDeleteDraft}
@@ -873,7 +884,10 @@ export function DashboardScreen() {
         ) : null}
       </SkeletonCrossfade>
 
-      {recentJobs.length === 0 && initialLoaded && (
+      {/* Not shown while the draft banner is up — "bit quiet" under an
+          active draft reads as contradictory (the only job may have been
+          deduped out of Recent Jobs in favour of the banner). */}
+      {recentJobs.length === 0 && !inProgressDraft && initialLoaded && (
         <View style={styles.emptyState}>
           <RNAnimated.View style={[styles.emptyIconCircle, { transform: [{ translateY: emptyFloat }] }]}>
             <MaterialCommunityIcons name="hard-hat" size={36} color={colors.primary} />
