@@ -147,3 +147,28 @@ describe('buildPresendWarning', () => {
     expect(buildPresendWarning(reviewQuoteMaterials([manual]))).toBeNull();
   });
 });
+
+describe('buildPresendWarning — hidden materials and labour-only quotes', () => {
+  const zero = (name = 'Custom Cabinetry Supply'): Material => ({
+    id: 'z1', name, quantity: 1, unit: 'each',
+    price: 0, totalPrice: 0, manualPriceOverride: false, priceConfidence: 'low',
+  });
+
+  it('never gates a labour-only document (no materials)', () => {
+    expect(buildPresendWarning(reviewQuoteMaterials([]))).toBeNull();
+    expect(buildPresendWarning(reviewQuoteMaterials(undefined))).toBeNull();
+  });
+
+  it('still gates when material costs are hidden, with total-focused wording', () => {
+    const w = buildPresendWarning(reviewQuoteMaterials([zero()]), 'quote', {
+      materialsShownToCustomer: false,
+    });
+    expect(w?.message).toContain("isn't counted in the quote total");
+    expect(w?.message).not.toContain('$0 on the customer');
+  });
+
+  it('uses the visible wording by default', () => {
+    const w = buildPresendWarning(reviewQuoteMaterials([zero()]));
+    expect(w?.message).toContain("will show as $0 on the customer's quote");
+  });
+});
