@@ -777,69 +777,6 @@ export function sendSubscriptionCancelledEmail(to: string, businessName: string,
   });
 }
 
-export function sendQuotaWarningEmail(
-  to: string,
-  quotesUsed: number,
-  quotesLimit: number,
-  userId: string
-): Promise<boolean> {
-  const remaining = quotesLimit - quotesUsed;
-  const percentage = Math.round((quotesUsed / quotesLimit) * 100);
-
-  // Progress bar
-  const progressBar = `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0 8px;">
-      <tr>
-        <td>
-          <div style="background:#1e293b;border-radius:8px;height:10px;overflow:hidden;">
-            <div style="background:${percentage >= 80 ? '#cfa153' : '#009868'};width:${percentage}%;height:10px;border-radius:8px;"></div>
-          </div>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding-top:6px;">
-          <span style="color:#94a3b8;font-size:12px;">${quotesUsed} of ${quotesLimit} quotes used</span>
-          <span style="color:#94a3b8;font-size:12px;float:right;">${remaining} remaining</span>
-        </td>
-      </tr>
-    </table>`;
-
-  const content = wrapEmailTemplate(`
-    <div style="text-align:center;margin:0 0 24px;">
-      ${badge(`${remaining} LEFT`, '#78350f', '#e6b872')}
-    </div>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;text-align:center;line-height:1.3;">
-      You're running low on quotes
-    </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;text-align:center;">
-      You've used <strong style="color:#f8fafc;">${quotesUsed} of ${quotesLimit}</strong> free quotes this month.
-    </p>
-
-    ${progressBar}
-
-    ${infoCard(`
-      <tr>
-        <td style="padding:12px 0;">
-          ${featureBullet('&#9889;', '<strong style="color:#f8fafc;">Unlimited quotes</strong> every month')}
-          ${featureBullet('&#127912;', '<strong style="color:#f8fafc;">Custom branding</strong> on every quote')}
-          ${featureBullet('&#128200;', '<strong style="color:#f8fafc;">Priority support</strong> when you need it')}
-        </td>
-      </tr>
-    `, '#cfa153')}
-
-    ${ctaButton('Upgrade to Pro')}
-  `, { preheader: `You have ${remaining} quote${remaining === 1 ? '' : 's'} remaining this month. Upgrade for unlimited.` });
-
-  return sendEmail({
-    to,
-    subject: `${remaining} quote${remaining === 1 ? '' : 's'} remaining this month`,
-    htmlContent: content,
-    category: 'marketing',
-    userId,
-    tags: ['quota-warning'],
-  });
-}
-
 export function sendReEngagementEmail(
   to: string,
   businessName: string,
@@ -961,7 +898,7 @@ export function sendTrialEndingEmail(
       <tr>
         <td style="padding:12px 0;">
           <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">Pro keeps doing:</p>
-          ${featureBullet('&#129302;', 'AI-built material lists with live supplier pricing')}
+          ${featureBullet('&#128736;', 'Material lists built for you, with live supplier pricing')}
           ${featureBullet('&#128196;', 'Every premium template')}
           ${featureBullet('&#128179;', 'Lower Square rate + bank/PayID/BPAY/PayPal options')}
         </td>
@@ -1108,26 +1045,24 @@ export function sendOnboardingTipEmail(
         </p>
       `,
     },
+    // Tip 5 is not a feature tip: the drip only lets it reach users who are
+    // two weeks in with no first quote (anyone with a trial or Pro is skipped
+    // in sendOnboardingDrip). It's a personal activation note from Tom and
+    // deliberately sells nothing — the free plan claims here must stay true.
     5: {
-      subject: "You've got the hang of it — here's what Pro unlocks",
-      emoji: '&#11088;',
-      heading: 'Ready to go Pro?',
-      preheader: 'Invoicing, unlimited quotes, custom branding, and payment tracking — all yours with Pro.',
+      subject: "Your first quote's the hard part — let's knock it over",
+      emoji: '&#128736;',
+      heading: "Your first quote's the hard part",
+      preheader: 'Give QuoteMate a rough job and it hands back a finished quote in about five minutes.',
       body: `
         <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
-          You've been using QuoteMate like a pro already. Here's what upgrading unlocks:
+          It's Tom &mdash; I built QuoteMate. You signed up a couple of weeks back but haven't built a quote yet, and that first one's honestly the only tricky bit.
         </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
-          &#128462; <strong style="color:#f8fafc;">Invoicing</strong> &mdash; turn accepted quotes into invoices in one tap
-        </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
-          &#9854; <strong style="color:#f8fafc;">Unlimited quotes</strong> &mdash; no monthly cap holding you back
-        </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
-          &#127912; <strong style="color:#f8fafc;">Custom branding</strong> &mdash; your logo on every quote and invoice
+        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+          Give it a job, even a rough one &mdash; &ldquo;repaint a three-bedroom interior&rdquo; is plenty. QuoteMate prices the materials at live supplier rates, works out the labour, and hands you a quote your customer can accept on their phone. About five minutes, start to finish.
         </p>
         <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
-          &#128179; <strong style="color:#f8fafc;">Payment tracking</strong> &mdash; know who's paid and who hasn't
+          Stuck on anything? Just reply &mdash; it comes straight to me, not a support queue.
         </p>
       `,
     },
@@ -1136,7 +1071,26 @@ export function sendOnboardingTipEmail(
   const tip = tips[tipNumber];
   if (!tip) return Promise.resolve(false);
 
-  const content = wrapEmailTemplate(`
+  // The personal note renders plain (no badge/emoji chrome) and replies land
+  // with Tom; the feature tips keep the numbered-tip layout.
+  const isPersonalNote = tipNumber === 5;
+
+  const content = isPersonalNote
+    ? wrapEmailTemplate(`
+    <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      ${tip.heading}
+    </h1>
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 16px;">Hi ${greeting},</p>
+    ${tip.body}
+
+    ${ctaButton('Build your first quote')}
+
+    <p style="color:#f8fafc;font-size:15px;line-height:1.65;margin:28px 0 0;">
+      Cheers,<br/>
+      <strong>Tom</strong> &mdash; QuoteMate
+    </p>
+  `, { unsubscribeUrl, preheader: tip.preheader })
+    : wrapEmailTemplate(`
     <div style="text-align:center;margin:0 0 24px;">
       <div style="background:#1e293b;border:2px solid #334155;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 12px;">
         ${tip.emoji}
@@ -1158,8 +1112,11 @@ export function sendOnboardingTipEmail(
     htmlContent: content,
     category: 'marketing',
     userId,
-    tags: ['onboarding', `tip-${tipNumber}`],
+    tags: ['onboarding', isPersonalNote ? 'activation-note' : `tip-${tipNumber}`],
     unsubscribeUrl,
+    ...(isPersonalNote
+      ? { replyTo: { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' } }
+      : {}),
   });
 }
 
@@ -1187,9 +1144,9 @@ export function sendUpdateAnnouncementEmail(
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#127881; 7-Day Free Trial</p>
+          <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#127881; 14-Day Free Trial</p>
           <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
-            New to QuoteMate? You now get <strong style="color:#f8fafc;">full access to every feature for 7 days</strong> &mdash; no credit card required. Create unlimited quotes, send invoices, and use your business logo on everything.
+            New to QuoteMate? You now get <strong style="color:#f8fafc;">full access to every feature for 14 days</strong> &mdash; no credit card required. Create unlimited quotes, send invoices, and use your business logo on everything.
           </p>
         </td>
       </tr>
@@ -1225,7 +1182,7 @@ export function sendUpdateAnnouncementEmail(
         <td style="padding:12px 0;">
           <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#128200; More Accurate Pricing</p>
           <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
-            We've improved our AI-powered material pricing engine. Prices are now pulled in real-time from major hardware stores so your quotes are tighter and more competitive.
+            We've improved our material pricing engine. Prices are now pulled in real time from major hardware stores, so your quotes are tighter and more competitive.
           </p>
         </td>
       </tr>
@@ -1255,7 +1212,7 @@ export function sendUpdateAnnouncementEmail(
 
 interface QuoteEmailData {
   customerName: string;
-  emailBody: string; // AI-generated or default body text
+  emailBody: string; // generated or default body text
   jobName: string;
   materials: { name: string; quantity: number; unit: string; totalPrice: number; section?: string }[];
   laborTotal: number;

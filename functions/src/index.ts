@@ -7631,10 +7631,11 @@ export const sendOnboardingDrip = functions.pubsub
 
         if (tipToSend === 0) continue;
 
-        // Tip 5 is the Pro pitch. Users with a trial get the trial-anchored
-        // conversion emails instead (trialLifecycleDaily) — stacking both
-        // means three pitches in four days. Mark it consumed so the drip
-        // doesn't retry daily.
+        // Tip 5 is the first-quote activation note from Tom. Anyone with a
+        // trial has already built a quote (the trial starts on the first
+        // one) and Pro users don't need nudging, so both are skipped; the
+        // trial-anchored conversion emails (trialLifecycleDaily) own that
+        // audience. Mark it consumed so the drip doesn't retry daily.
         if (tipToSend === 5) {
           const subDoc = await db.doc(`users/${userId}/profile/subscription`).get();
           const sub = subDoc.data();
