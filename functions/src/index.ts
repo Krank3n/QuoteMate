@@ -42,6 +42,7 @@ export * from './adminCrm';
 export * from './tickets';
 export { adminTrafficStats } from './analyticsTraffic';
 export { weeklyAnalyticsDigest, adminWeeklyDigest } from './analyticsDigest';
+export { trialLifecycleDaily } from './lifecycleEmails';
 export { subscriptionAuditDaily, adminSubscriptionAudit } from './subscriptionAudit';
 export { dailyTrackingCheck } from './trackingAlarm';
 export { storeFunnelDaily } from './storeFunnel';
@@ -7629,6 +7630,19 @@ export const sendOnboardingDrip = functions.pubsub
         else if (daysSinceSignup >= 1 && lastTip < 1) tipToSend = 1;
 
         if (tipToSend === 0) continue;
+
+        // Tip 5 is the Pro pitch. Users with a trial get the trial-anchored
+        // conversion emails instead (trialLifecycleDaily) — stacking both
+        // means three pitches in four days. Mark it consumed so the drip
+        // doesn't retry daily.
+        if (tipToSend === 5) {
+          const subDoc = await db.doc(`users/${userId}/profile/subscription`).get();
+          const sub = subDoc.data();
+          if (sub?.isPro || sub?.trialStartedAt) {
+            await emailStateDoc.ref.set({ lastOnboardingTip: 5 }, { merge: true });
+            continue;
+          }
+        }
 
         totalEligible++;
 

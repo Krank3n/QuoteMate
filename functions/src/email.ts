@@ -921,6 +921,118 @@ export function sendReEngagementEmail(
   });
 }
 
+/**
+ * Trial lifecycle: "your trial ends in N days" — sent once, ~2 days before the
+ * 14-day Pro trial lapses. Anchored to trialStartedAt (NOT signup like the
+ * onboarding drip), because conversion pressure only makes sense against the
+ * trial clock. Copy source: website repo marketing/trial-lifecycle-emails.md.
+ */
+export function sendTrialEndingEmail(
+  to: string,
+  businessName: string,
+  daysRemaining: number,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = (businessName || '').trim() || 'there';
+  const daysWord = daysRemaining <= 1 ? 'tomorrow' : `in ${daysRemaining} days`;
+  const pricingUrl = 'https://quotemateapp.au/pricing?utm_source=lifecycle&utm_medium=email&utm_campaign=trial&utm_content=trial_ending';
+
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      Your Pro trial ends ${daysWord}
+    </h1>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;">
+      Hi ${greeting} &mdash; straight version, no tricks. Here's exactly what changes when the trial wraps up:
+    </p>
+
+    ${infoCard(`
+      <tr>
+        <td style="padding:12px 0;">
+          <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">You keep, free, forever:</p>
+          ${featureBullet('&#9989;', 'Unlimited quotes and invoices')}
+          ${featureBullet('&#9989;', 'Your branding on every PDF, GST handled')}
+          ${featureBullet('&#9989;', 'Online card payments')}
+        </td>
+      </tr>
+    `)}
+
+    ${infoCard(`
+      <tr>
+        <td style="padding:12px 0;">
+          <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">Pro keeps doing:</p>
+          ${featureBullet('&#129302;', 'AI-built material lists with live supplier pricing')}
+          ${featureBullet('&#128196;', 'Every premium template')}
+          ${featureBullet('&#128179;', 'Lower Square rate + bank/PayID/BPAY/PayPal options')}
+        </td>
+      </tr>
+    `)}
+
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:24px 0 0;">
+      Pro is <strong style="color:#f8fafc;">$49/month</strong>, or <strong style="color:#f8fafc;">$328 for the year</strong> &mdash; 44% off, which works out around $6.30 a week. Most tradies lose more than that in forgotten line items on one quote.
+    </p>
+
+    ${ctaButton('Keep Pro — takes 30 seconds', '#009868', pricingUrl)}
+
+    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 0;">
+      Either way, your quotes, invoices and customers stay yours.
+    </p>
+  `, { unsubscribeUrl, preheader: 'What you keep free forever, what Pro keeps doing.' });
+
+  return sendEmail({
+    to,
+    subject: `Your trial ends ${daysWord} — here's exactly what changes`,
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['trial-lifecycle', 'trial-ending'],
+    unsubscribeUrl,
+  });
+}
+
+/**
+ * Trial lifecycle: sent once, shortly after the trial lapses without an
+ * upgrade. Half reassurance (free plan keeps working), half churn research —
+ * the reply-to question is the point.
+ */
+export function sendTrialEndedEmail(
+  to: string,
+  businessName: string,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = (businessName || '').trim() || 'there';
+  const pricingUrl = 'https://quotemateapp.au/pricing?utm_source=lifecycle&utm_medium=email&utm_campaign=trial&utm_content=trial_ended';
+
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      You're on the free plan now &mdash; one question
+    </h1>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Hi ${greeting} &mdash; your trial wrapped up. You're on the free plan now: unlimited quotes and invoices, nothing deleted, no card charged, because we never took one.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      One question, genuinely: <strong style="color:#f8fafc;">what would Pro have needed to do for you to keep it?</strong> Hit reply with one line. Brutal is fine &mdash; brutal is useful.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
+      If the answer is price: the annual plan is $328, about $6.30 a week. If the answer is a missing feature, there's a decent chance it gets built &mdash; feature requests from real users run this roadmap.
+    </p>
+
+    ${ctaButton('See Pro pricing', '#009868', pricingUrl)}
+  `, { unsubscribeUrl, preheader: 'No card charged, nothing lost. But tell me one thing.' });
+
+  return sendEmail({
+    to,
+    subject: `You're on the free plan now — one question`,
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['trial-lifecycle', 'trial-ended'],
+    unsubscribeUrl,
+    replyTo: { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
+  });
+}
+
 export function sendOnboardingTipEmail(
   to: string,
   businessName: string,
