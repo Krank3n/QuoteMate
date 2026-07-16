@@ -41,6 +41,9 @@ import { StageSheet } from '../components/StageSheet';
 import { applyStageChange } from '../utils/applyStageChange';
 import type { Document, DocumentStage } from '../types/document';
 import { pickDashboardDraft, excludeDraftJob } from '../utils/dashboardDraft';
+import { pickFollowUpNudge, pruneSnoozes, NUDGE_SNOOZE_MS, type FollowUpNudge } from '../utils/followUpNudge';
+import { FollowUpNudgeBanner } from '../components/FollowUpNudgeBanner';
+import { auth } from '../config/firebase';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { useIsAppActive } from '../hooks/useIsAppActive';
 import { lightTap, successTap } from '../utils/haptics';
@@ -282,6 +285,7 @@ export function DashboardScreen() {
   // mutation. Replaces a single useStore() destructure that re-rendered on
   // every store write (the prime "janky return to home" suspect).
   const quotes = useStore((s) => s.quotes);
+  const invoices = useStore((s) => s.invoices);
   const businessSettings = useStore((s) => s.businessSettings);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
   // Action handles are stable Zustand fn refs — subscribing is a no-op
@@ -363,11 +367,74 @@ export function DashboardScreen() {
       case 'LaborMarkup':
         return 'Set labour & markup';
       case 'JobPreview':
-        return 'Ready to send';
+        // A draft with an acceptance token but still in draft = a test
+        // send went to the tradie's own inbox and stopped there. Point
+        // them at the real finish line.
+        return inProgressDraft?.acceptanceTokenCreatedAt
+          ? 'Send it to your customer'
+          : 'Ready to send';
       default:
         return null;
     }
-  }, [inProgressDraft?.draftStep]);
+  }, [inProgressDraft?.draftStep, inProgressDraft?.acceptanceTokenCreatedAt]);
+
+  // Follow-up nudge — one "chase this" card. Snoozes persist so a
+  // dismissal actually sticks; null until loaded so a nudge the tradie
+  // snoozed yesterday can't flash for a frame on mount.
+  const [nudgeSnoozes, setNudgeSnoozes] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    if (!isFocused) return;
+    let cancelled = false;
+    AsyncStorage.getItem('follow_up_nudge_snoozes')
+      .then((raw) => {
+        if (cancelled) return;
+        try {
+          setNudgeSnoozes(pruneSnoozes(raw ? JSON.parse(raw) : {}));
+        } catch {
+          setNudgeSnoozes({});
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setNudgeSnoozes({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isFocused]);
+
+  const followUpNudge = useMemo(() => {
+    // One banner slot: an active draft owns it (it's the freshest work,
+    // and it's time-boxed to a week so nudges are never starved for long).
+    if (inProgressDraft || nudgeSnoozes === null) return null;
+    return pickFollowUpNudge({
+      quotes,
+      invoices,
+      ownEmails: [auth.currentUser?.email, businessSettings?.email],
+      snoozed: nudgeSnoozes,
+    });
+  }, [inProgressDraft, nudgeSnoozes, quotes, invoices, businessSettings?.email]);
+
+  // Plain functions on purpose: FollowUpNudgeBanner isn't memoized, and
+  // handleViewQuote below is recreated per render — a useCallback here
+  // would just capture a stale closure over `quotes`.
+  const handleNudgePress = (nudge: FollowUpNudge) => {
+    if (nudge.jobId) {
+      navigation.navigate('ViewJob', { jobId: nudge.jobId });
+    } else if (nudge.type === 'invoice_overdue') {
+      navigation.navigate('Jobs');
+    } else {
+      handleViewQuote(nudge.docId);
+    }
+  };
+
+  const handleNudgeDismiss = (nudge: FollowUpNudge) => {
+    const next = pruneSnoozes({
+      ...(nudgeSnoozes || {}),
+      [nudge.key]: Date.now() + NUDGE_SNOOZE_MS,
+    });
+    setNudgeSnoozes(next);
+    AsyncStorage.setItem('follow_up_nudge_snoozes', JSON.stringify(next)).catch(() => {});
+  };
 
   // "edited 2 hours ago" — the cue that tells the tradie whether the
   // banner is today's job or old leftovers. Guarded: a malformed
@@ -712,6 +779,17 @@ export function DashboardScreen() {
             <MaterialCommunityIcons name="close-circle" size={22} color="#ef4444" />
           </TouchableOpacity>
         </View>
+      )}
+
+      {/* Follow-up nudge — one "chase this" card (overdue invoice /
+          self-sent quote / finished-but-unsent quote / aging sent quote).
+          Shares the banner slot with the draft banner; drafts win. */}
+      {followUpNudge && (
+        <FollowUpNudgeBanner
+          nudge={followUpNudge}
+          onPress={handleNudgePress}
+          onDismiss={handleNudgeDismiss}
+        />
       )}
 
       {/* New Job + Mate buttons */}

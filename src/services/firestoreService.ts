@@ -239,6 +239,9 @@ class FirestoreService {
           updatedAt: toDate(data.updatedAt) || createdAt,
           status: normalizeQuoteStatus(data.status),
           invoicedAt: toDate(data.invoicedAt),
+          // Declared as epoch-ms on Quote, but the send cloud function
+          // writes a serverTimestamp — normalize so readers can trust it.
+          sentAt: typeof data.sentAt === 'number' ? data.sentAt : toDate(data.sentAt)?.getTime(),
           // Handle new quote acceptance fields
           acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
           respondedAt: toDate(data.respondedAt),
@@ -468,6 +471,9 @@ class FirestoreService {
             updatedAt: toDate(data.updatedAt) || createdAt,
             status: normalizeQuoteStatus(data.status),
             invoicedAt: toDate(data.invoicedAt),
+            // Declared as epoch-ms on Quote, but the send cloud function
+            // writes a serverTimestamp — normalize so readers can trust it.
+            sentAt: typeof data.sentAt === 'number' ? data.sentAt : toDate(data.sentAt)?.getTime(),
             // Handle new quote acceptance fields
             acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
             respondedAt: toDate(data.respondedAt),

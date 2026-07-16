@@ -36,7 +36,14 @@ export type AnalyticsEvent =
   // User closed the gate without picking a path. Drop-off signal.
   | 'send_gate_abandoned'
   // User picked a path. `method` distinguishes square_connected vs pro_upgrade.
-  | 'send_gate_resolved';
+  | 'send_gate_resolved'
+  // Dashboard follow-up nudge banner. `nudge_type` distinguishes
+  // invoice_overdue / self_sent_quote / unsent_quote / quote_follow_up —
+  // measures whether nudging moves quotes to real customers (the Jul 2026
+  // audit: only customer-senders ever convert to paid).
+  | 'nudge_shown'
+  | 'nudge_tapped'
+  | 'nudge_dismissed';
 
 interface BaseProps {
   // Free-form per-event payload. Keep it flat (Firestore indexes flat fields
