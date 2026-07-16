@@ -3,9 +3,11 @@
  *
  * End of the New Job wizard. Unified replacement for the old separate
  * QuotePreviewScreen + InvoicePreviewScreen — branches on doc type for
- * the invoice-only payment-terms block, auto-saves on mount with the
- * confetti celebration, and defers the "send as Quote / Invoice" choice
- * to SendSwitcher.
+ * the invoice-only payment-terms block, auto-saves on mount with a brief
+ * "now send it" banner, and defers the "send as Quote / Invoice" choice
+ * to SendSwitcher. No confetti here — the celebration fires on send
+ * success, not save (Jul 2026 stall audit: rewarding the save stranded
+ * finished quotes).
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -53,41 +55,12 @@ import {
   type InvoiceDisplaySettingsChange,
 } from '../../components/InvoiceDisplaySettings';
 
-// Confetti piece definition (reused from AlertModal pattern)
-interface ConfettiPiece {
-  id: number;
-  x: number;
-  color: string;
-  size: number;
-  delay: number;
-  duration: number;
-}
-
-const CONFETTI_COLORS = [colors.success, colors.secondary, colors.info, colors.primary];
-
-const SUCCESS_MESSAGES: { title: string; subtitle: string }[] = [
-  { title: "Bloody Ripper!", subtitle: "Job's locked and loaded" },
-  { title: "Too Easy!", subtitle: "She's all saved, mate" },
-  { title: "Beauty!", subtitle: "Job's good to go" },
-  { title: "No Worries!", subtitle: "Saved and ready to send" },
-  { title: "Strewth!", subtitle: "That one's a done deal" },
-  { title: "Good as Gold!", subtitle: "Ready for the customer" },
-  { title: "Nailed It!", subtitle: "Job saved, legend" },
-  { title: "Sweet as!", subtitle: "All wrapped up, mate" },
-  { title: "Bonzer!", subtitle: "Job's in the bag" },
-  { title: "You Beauty!", subtitle: "Send it when you're ready" },
-];
-
-function createConfettiPieces(): ConfettiPiece[] {
-  return Array.from({ length: 25 }, (_, i) => ({
-    id: i,
-    x: Math.random() * 100,
-    color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
-    size: Math.random() * 6 + 4,
-    delay: i * 50,
-    duration: 2000 + Math.random() * 1000,
-  }));
-}
+// Success-banner copy lives in jobPreviewCopy.ts with a contract test:
+// it must point at SENDING, never claim completion. No confetti here —
+// the confetti celebration fires on actual send success (AlertModal in
+// DocumentEmailPreviewModal), not on save. Jul 2026 stall audit: 36 users
+// finished a sendable quote, got a "done deal" celebration, and never sent.
+import { pickSuccessMessage } from './jobPreviewCopy';
 
 export function JobPreviewScreen() {
   const navigation = useNavigation<any>();
@@ -181,21 +154,7 @@ export function JobPreviewScreen() {
     return `Q-${String(n).padStart(3, '0')}`;
   }, [isInvoiceMode, quotes, invoices, nextQuoteNumber, nextInvoiceNumber]);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [successMsg] = useState(() => SUCCESS_MESSAGES[Math.floor(Math.random() * SUCCESS_MESSAGES.length)]);
-
-  // Confetti state & animations
-  const [confetti] = useState<ConfettiPiece[]>(() => createConfettiPieces());
-  const confettiAnims = useRef(
-    confetti.map(() => ({
-      translateY: new Animated.Value(-100),
-      rotate: new Animated.Value(0),
-      opacity: new Animated.Value(0),
-    }))
-  ).current;
-  // Track in-flight confetti sequences so we can cancel them if the user
-  // navigates away mid-celebration — otherwise ~75 Animated callbacks keep
-  // ticking against Animated.Values attached to an unmounted screen.
-  const confettiSeqRef = useRef<Animated.CompositeAnimation[]>([]);
+  const [successMsg] = useState(pickSuccessMessage);
 
   // Banner animations
   const bannerScale = useRef(new Animated.Value(0.3)).current;
@@ -209,10 +168,10 @@ export function JobPreviewScreen() {
     if (!workingDoc) return;
     if (viewing) return;
 
-    // Celebration must fire exactly once per document — the *first* time
+    // The banner must fire exactly once per document — the *first* time
     // this screen mounts after the wizard creates it. Re-entering via a
     // section "Edit" button pops back through the wizard then re-pushes
-    // JobPreview, which is a fresh mount; without this guard the confetti
+    // JobPreview, which is a fresh mount; without this guard the banner
     // would replay on every loop. Source of truth is whether the doc has
     // already been persisted into quotes/invoices.
     const alreadySaved = isInvoiceMode
@@ -256,42 +215,6 @@ export function JobPreviewScreen() {
           duration: 300,
           useNativeDriver: true,
         }).start();
-      });
-
-      // Animate confetti — each piece's sequence is tracked so the unmount
-      // cleanup below can cancel anything still in flight.
-      confetti.forEach((piece, index) => {
-        const anim = confettiAnims[index];
-        const seq = Animated.sequence([
-          Animated.delay(piece.delay),
-          Animated.parallel([
-            Animated.timing(anim.translateY, {
-              toValue: 500,
-              duration: piece.duration,
-              useNativeDriver: true,
-            }),
-            Animated.timing(anim.rotate, {
-              toValue: (Math.random() - 0.5) * 720,
-              duration: piece.duration,
-              useNativeDriver: true,
-            }),
-            Animated.sequence([
-              Animated.timing(anim.opacity, {
-                toValue: 0.9,
-                duration: 200,
-                useNativeDriver: true,
-              }),
-              Animated.delay(piece.duration * 0.5),
-              Animated.timing(anim.opacity, {
-                toValue: 0,
-                duration: piece.duration * 0.3,
-                useNativeDriver: true,
-              }),
-            ]),
-          ]),
-        ]);
-        confettiSeqRef.current.push(seq);
-        seq.start();
       });
 
       // Auto-dismiss banner
@@ -355,13 +278,6 @@ export function JobPreviewScreen() {
     };
 
     autoSave();
-
-    return () => {
-      // Cancel any confetti sequences still in flight on unmount so the
-      // ~75 Animated callbacks aren't ticking against unmounted values.
-      confettiSeqRef.current.forEach((s) => s.stop());
-      confettiSeqRef.current = [];
-    };
   }, []); // Run once on mount
 
   const handleBackToDashboard = useCallback(async () => {
@@ -421,7 +337,7 @@ export function JobPreviewScreen() {
           disabled={isSaving}
           style={styles.headerDoneButton}
         >
-          <Text style={styles.headerDoneLabel}>Done</Text>
+          <Text style={styles.headerDoneLabel}>Close</Text>
         </TouchableOpacity>
       ),
     });
@@ -892,36 +808,9 @@ export function JobPreviewScreen() {
         onError={(message) => Alert.alert('Payment error', message)}
       />
 
-      {/* Confetti overlay — rendered last so it's on top */}
+      {/* Banner overlay — rendered last so it's on top. Deliberately no
+          confetti: the celebration belongs on send success, not save. */}
       <View style={[StyleSheet.absoluteFill, styles.celebrationOverlay]} pointerEvents="none">
-        {confetti.map((piece, index) => {
-          const anim = confettiAnims[index];
-          return (
-            <Animated.View
-              key={piece.id}
-              style={[
-                styles.confetti,
-                {
-                  left: `${piece.x}%` as any,
-                  width: piece.size,
-                  height: piece.size,
-                  backgroundColor: piece.color,
-                  opacity: anim.opacity,
-                  transform: [
-                    { translateY: anim.translateY },
-                    {
-                      rotate: anim.rotate.interpolate({
-                        inputRange: [-360, 360],
-                        outputRange: ['-360deg', '360deg'],
-                      }),
-                    },
-                  ],
-                },
-              ]}
-            />
-          );
-        })}
-
         {/* Success banner overlay */}
         {showSuccess && (
           <>
@@ -983,11 +872,6 @@ const styles = StyleSheet.create({
   },
   celebrationOverlay: {
     zIndex: 999,
-  },
-  confetti: {
-    position: 'absolute',
-    top: -100,
-    borderRadius: 2,
   },
   successBackdrop: {
     ...StyleSheet.absoluteFillObject,
