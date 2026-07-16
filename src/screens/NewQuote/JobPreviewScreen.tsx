@@ -61,6 +61,7 @@ import {
 // DocumentEmailPreviewModal), not on save. Jul 2026 stall audit: 36 users
 // finished a sendable quote, got a "done deal" celebration, and never sent.
 import { pickSuccessMessage } from './jobPreviewCopy';
+import { buildPreviewQuoteSave } from './previewQuoteSave';
 
 export function JobPreviewScreen() {
   const navigation = useNavigation<any>();
@@ -260,14 +261,9 @@ export function JobPreviewScreen() {
           };
           await saveInvoice(updatedInvoice);
         } else if (currentQuote) {
-          const updatedQuote = {
-            ...currentQuote,
-            notes,
-            draftStep: undefined,
-            ...(refNumber ? { quoteNumber: refNumber } : {}),
-            updatedAt: new Date(),
-          };
-          await saveQuote(updatedQuote);
+          // Stamps draftStep 'JobPreview' — see buildPreviewQuoteSave for
+          // why the marker must survive this save.
+          await saveQuote(buildPreviewQuoteSave(currentQuote, notes, refNumber));
         }
         savedNotesRef.current = notes;
         setIsSaving(false);
@@ -296,13 +292,7 @@ export function JobPreviewScreen() {
             updatedAt: new Date(),
           });
         } else if (currentQuote) {
-          await saveQuote({
-            ...currentQuote,
-            notes,
-            draftStep: undefined,
-            ...(refNumber ? { quoteNumber: refNumber } : {}),
-            updatedAt: new Date(),
-          });
+          await saveQuote(buildPreviewQuoteSave(currentQuote, notes, refNumber));
         }
       } catch (error) {
         // Non-blocking — navigate anyway
