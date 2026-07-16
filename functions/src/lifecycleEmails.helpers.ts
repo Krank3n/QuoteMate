@@ -19,8 +19,9 @@
  * tip 5 (Tom's first-quote note, day 14 post-signup) owns it — anyone with a
  * trial has already built a quote, so the two campaigns can't overlap.
  */
-import { deriveSubFields, TRIAL_MS } from './subscription.helpers';
+import { deriveSubFields, TRIAL_MS, ts } from './subscription.helpers';
 import { isActivatingDoc } from './adminFunnel.helpers';
+import { NUDGE_SEND_ONCE_FIELD } from './squareNudge.helpers';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 // How long after trial expiry the trial_ended email may still go out. Going
@@ -53,6 +54,49 @@ export const SEND_ONCE_FIELD: Record<LifecycleSend, keyof LifecycleEmailState> =
   trial_ending: 'trialEndingEmailAt',
   trial_ended: 'trialEndedEmailAt',
 };
+
+/**
+ * Same-day cross-campaign suppression window. The two marketing campaigns —
+ * this trial/nudge cron (07:30 Brisbane) and the signup-anchored onboarding
+ * drip (09:00 Sydney) — must never both email one user on the same morning.
+ * 20h suppresses the same-day pair (1.5h apart) but never the next-day one
+ * (22.5h apart). Steps deferred by suppression follow their normal window
+ * rules — if the window passes meanwhile, the step is skipped, not sent
+ * stale; fewer emails beats more.
+ */
+export const CROSS_CAMPAIGN_WINDOW_MS = 20 * 60 * 60 * 1000;
+
+/** ms epoch of the most recent conversion-campaign send, or null. */
+export function lastConversionSendMs(emailState: Record<string, unknown> | undefined): number | null {
+  if (!emailState) return null;
+  const fields = [...Object.values(SEND_ONCE_FIELD), ...Object.values(NUDGE_SEND_ONCE_FIELD)];
+  let latest: number | null = null;
+  for (const field of fields) {
+    const at = ts(emailState[field]);
+    if (at !== null && (latest === null || at > latest)) latest = at;
+  }
+  return latest;
+}
+
+/** Drip-side check: did the conversion campaign email this user today? */
+export function sentConversionEmailWithin(
+  emailState: Record<string, unknown> | undefined,
+  now: number,
+  windowMs: number = CROSS_CAMPAIGN_WINDOW_MS
+): boolean {
+  const last = lastConversionSendMs(emailState);
+  return last !== null && now - last < windowMs;
+}
+
+/** Conversion-side check: did the onboarding drip email this user today? */
+export function suppressedByOnboardingDrip(
+  emailState: { lastOnboardingTipAt?: unknown } | undefined,
+  now: number,
+  windowMs: number = CROSS_CAMPAIGN_WINDOW_MS
+): boolean {
+  const at = ts(emailState?.lastOnboardingTipAt);
+  return at !== null && now - at < windowMs;
+}
 
 export interface LifecycleDecision {
   send: LifecycleSend | null;

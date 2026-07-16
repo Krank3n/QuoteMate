@@ -7,6 +7,10 @@ import {
   SEND_ONCE_FIELD,
   RECAP_MIN_QUOTES,
   RECAP_MIN_DOLLARS,
+  CROSS_CAMPAIGN_WINDOW_MS,
+  lastConversionSendMs,
+  sentConversionEmailWithin,
+  suppressedByOnboardingDrip,
 } from './lifecycleEmails.helpers';
 import { TRIAL_MS } from './subscription.helpers';
 
@@ -127,6 +131,48 @@ describe('trial_ended (T+0..3d)', () => {
   it('never backfills trials that expired before the window', () => {
     const daysAgo = (TRIAL_MS + ENDED_WINDOW_MS) / DAY + 1;
     expect(lifecycleVerdict(trialSub(daysAgo), undefined, NOW).send).toBeNull();
+  });
+});
+
+describe('same-day cross-campaign suppression', () => {
+  const HOUR = 60 * 60 * 1000;
+
+  it('window is 20h: catches the same-morning pair (1.5h), never the next-day one (22.5h)', () => {
+    expect(CROSS_CAMPAIGN_WINDOW_MS).toBe(20 * HOUR);
+    expect(CROSS_CAMPAIGN_WINDOW_MS).toBeGreaterThan(1.5 * HOUR);
+    expect(CROSS_CAMPAIGN_WINDOW_MS).toBeLessThan(22.5 * HOUR);
+  });
+
+  it('suppressedByOnboardingDrip: true within the window, false at/after it or when absent', () => {
+    expect(suppressedByOnboardingDrip({ lastOnboardingTipAt: NOW - 1.5 * HOUR }, NOW)).toBe(true);
+    expect(suppressedByOnboardingDrip({ lastOnboardingTipAt: NOW - CROSS_CAMPAIGN_WINDOW_MS }, NOW)).toBe(false);
+    expect(suppressedByOnboardingDrip({}, NOW)).toBe(false);
+    expect(suppressedByOnboardingDrip(undefined, NOW)).toBe(false);
+  });
+
+  it('handles every timestamp shape emailState can carry', () => {
+    const t = NOW - HOUR;
+    expect(suppressedByOnboardingDrip({ lastOnboardingTipAt: iso(t) }, NOW)).toBe(true);
+    expect(suppressedByOnboardingDrip({ lastOnboardingTipAt: { _seconds: t / 1000 } }, NOW)).toBe(true);
+    expect(suppressedByOnboardingDrip({ lastOnboardingTipAt: { toMillis: () => t } }, NOW)).toBe(true);
+  });
+
+  it('lastConversionSendMs takes the max across lifecycle AND nudge flags, ignoring drip fields', () => {
+    expect(lastConversionSendMs(undefined)).toBeNull();
+    expect(lastConversionSendMs({ lastOnboardingTipAt: NOW })).toBeNull();
+    expect(
+      lastConversionSendMs({
+        trialEndingEmailAt: NOW - 5 * HOUR,
+        squareIdleNudgeEmailAt: NOW - 2 * HOUR,
+        lastOnboardingTipAt: NOW, // other campaign — never counted
+      })
+    ).toBe(NOW - 2 * HOUR);
+  });
+
+  it('sentConversionEmailWithin drives the drip-side skip on any of the seven flags', () => {
+    expect(sentConversionEmailWithin({ squareNoPaylinkNudgeEmailAt: iso(NOW - HOUR) }, NOW)).toBe(true);
+    expect(sentConversionEmailWithin({ trialStartValueEmailAt: NOW - 21 * HOUR }, NOW)).toBe(false);
+    expect(sentConversionEmailWithin({}, NOW)).toBe(false);
   });
 });
 

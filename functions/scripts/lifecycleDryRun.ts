@@ -10,7 +10,7 @@
 import * as admin from 'firebase-admin';
 admin.initializeApp({ projectId: process.env.GOOGLE_CLOUD_PROJECT || 'hansendev' });
 
-import { lifecycleVerdict } from '../src/lifecycleEmails.helpers';
+import { lifecycleVerdict, suppressedByOnboardingDrip } from '../src/lifecycleEmails.helpers';
 import { squareNudgeVerdict } from '../src/squareNudge.helpers';
 import { isActivatingDoc } from '../src/adminFunnel.helpers';
 import { docHasSquarePayment } from '../src/eventFunnel.helpers';
@@ -45,6 +45,7 @@ import { isUnreachableEmail } from '../src/reEngagement.helpers';
       db.doc(`users/${u.uid}/settings/squareConnection`).get(),
     ]);
     if (!subDoc.exists) continue;
+    if (suppressedByOnboardingDrip(stateDoc.data(), now)) continue;
     const v = lifecycleVerdict(subDoc.data(), stateDoc.data() as any, now, {
       hasSquareConnection: squareDoc.exists,
     });
