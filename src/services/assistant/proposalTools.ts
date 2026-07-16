@@ -18,6 +18,7 @@ import {
   UpdateQuoteRatesProposal,
 } from '../../types/assistant';
 import { resolveQuoteId } from './quoteRefMap';
+import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
 
 export interface ProposalResult {
   proposal?: Proposal;
@@ -52,7 +53,10 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         customerId: input.customerId,
         customerDraft: input.customerDraft,
         jobName: String(input.jobName),
-        jobDescription: String(input.jobDescription).trim(),
+        // The description prints on the customer's quote — strip any Mate
+        // conversation the model concatenated onto the scope ("what's their
+        // name and phone number… customer name is tarik", QU-178342).
+        jobDescription: sanitizeJobDescription(String(input.jobDescription)).text,
         estimatedDurationHours:
           Number.isFinite(Number(input.estimatedDurationHours)) && Number(input.estimatedDurationHours) > 0
             ? Number(input.estimatedDurationHours)

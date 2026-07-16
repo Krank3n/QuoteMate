@@ -191,7 +191,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         jobDescription: {
           type: 'string',
           description:
-            "The full scope the pipeline will analyse. Write it as the tradie would: rooms, surfaces, measurements, colours, finishes, any special conditions. The clearer this is, the better the materials list. Aim for 2-6 sentences — no preamble, just the work.",
+            "The full scope the pipeline will analyse. Write it as the tradie would: rooms, surfaces, measurements, colours, finishes, any special conditions. The clearer this is, the better the materials list. Aim for 2-6 sentences — no preamble, just the work. This text PRINTS ON THE CUSTOMER'S QUOTE: never include any of your conversation with the tradie — no questions ('what's their phone number'), no contact chatter ('customer name is…'), no notes about what you're about to do. Scope only.",
         },
         estimatedDurationHours: {
           type: 'number',

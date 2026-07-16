@@ -138,3 +138,26 @@ describe('buildProposal propose_update_customer', () => {
     expect(uc.customerName).toBe('Bob Builder');
   });
 });
+
+describe('propose_draft_quote description hygiene', () => {
+  it('strips Mate conversation from the customer-facing description (QU-178342 leak)', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_leak', {
+      jobName: 'Exposed aggregate driveway',
+      customerDraft: { name: 'Tarik' },
+      jobDescription:
+        "Prep and poor 230 square metres of exposed aggregate what's their name and phone number so I can add them to your list customer name is tarik",
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as any).jobDescription).toBe('Prep and poor 230 square metres of exposed aggregate');
+  });
+
+  it('passes clean descriptions through untouched', () => {
+    const clean = 'Construction of a 2m x 4m merbau deck with footings and two coats of oil.';
+    const { proposal } = buildProposal('propose_draft_quote', 'tool_clean', {
+      jobName: 'Deck build',
+      customerDraft: { name: 'Sam' },
+      jobDescription: clean,
+    });
+    expect((proposal as any).jobDescription).toBe(clean);
+  });
+});
