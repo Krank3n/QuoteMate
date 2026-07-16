@@ -1260,6 +1260,10 @@ export const useStore = create<AppState>((set, get) => ({
       await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updatedSubscription));
       set({ subscriptionStatus: updatedSubscription });
 
+      // Redundant with the durable trialStartedAt field by design — the
+      // funnel reads events, Firestore state stays the source of truth.
+      trackEvent('trial_started');
+
       // Sync to Firestore if authenticated
       if (auth.currentUser) {
         firestoreService.saveSubscriptionStatus(updatedSubscription).catch(() => {

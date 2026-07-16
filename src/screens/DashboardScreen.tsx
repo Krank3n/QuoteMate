@@ -534,7 +534,7 @@ export function DashboardScreen() {
   // intermediate sheet.
   const handleNewJob = () => {
     if (!canCreateQuote()) {
-      navigation.navigate('Paywall' as never);
+      navigation.navigate('Paywall' as never, { source: 'dashboard' } as never);
       return;
     }
     lightTap();
@@ -585,7 +585,7 @@ export function DashboardScreen() {
   const handleDuplicateQuote = async (quote: Quote) => {
     // Check if user can create a new quote
     if (!canCreateQuote()) {
-      navigation.navigate('Paywall' as never);
+      navigation.navigate('Paywall' as never, { source: 'dashboard' } as never);
       return;
     }
 
@@ -627,7 +627,7 @@ export function DashboardScreen() {
     if (!selectedDoc) return;
     setStageSheetVisible(false);
     if (target === 'invoice_sent' && selectedDoc.type === 'quote' && !isPro) {
-      navigation.navigate('Paywall' as never);
+      navigation.navigate('Paywall' as never, { source: 'dashboard' } as never);
       setSelectedDoc(null);
       return;
     }

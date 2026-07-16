@@ -49,6 +49,7 @@ import { WebContainer } from '../components/WebContainer';
 import { TRADE_CATEGORIES } from '../constants/tradeCategories';
 import { auth } from '../config/firebase';
 import * as squareService from '../services/squareService';
+import { trackEvent } from '../services/analyticsService';
 import { runReeceConnectFlow } from '../services/reeceConnect';
 import { getReeceConnectionStatus } from '../services/reeceApi';
 import { uploadBusinessLogo } from '../services/photoService';
@@ -396,6 +397,7 @@ export function NewOnboardingScreen() {
                     const status = await squareService.checkSquareConnection();
                     if (status.connected) {
                         connected = true;
+                        trackEvent('square_connected', { source: 'onboarding' });
                         break;
                     }
                 } catch {

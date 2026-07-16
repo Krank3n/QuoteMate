@@ -362,7 +362,7 @@ export function SendDocumentDialog({
           trackEvent('send_gate_resolved', { method: 'pro_upgrade', doc_type: isInvoice ? 'invoice' : 'quote' });
           setSendGateVisible(false);
           onDismiss();
-          navigation.navigate('Paywall' as never);
+          navigation.navigate('Paywall' as never, { source: 'send_gate' } as never);
         }}
       />
     </>

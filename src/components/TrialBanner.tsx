@@ -134,7 +134,7 @@ export function TrialBanner({ trialStartedAt, quoteCount, compact = false }: Tri
   const accentColor = barColor;
 
   const handlePress = () => {
-    navigation.navigate('Paywall' as never);
+    navigation.navigate('Paywall' as never, { source: 'trial_banner' } as never);
   };
 
   return (
