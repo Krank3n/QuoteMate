@@ -28,6 +28,14 @@ import {
   type FunnelUserInput,
   type FunnelPayload,
 } from './adminFunnel.helpers';
+import {
+  rollupEventFunnel,
+  foldEvent,
+  docHasSquarePayment,
+  type EventFunnelUserInput,
+  type EventFunnelPayload,
+  type UserEventFlags,
+} from './eventFunnel.helpers';
 
 const db = () => admin.firestore();
 
@@ -1839,6 +1847,101 @@ export const adminFunnelStats = functions
       console.error('adminFunnelStats cache write failed', err);
     }
     return result;
+  });
+
+// ============================================================
+// EVENT FUNNEL — trial→monetised across BOTH revenue paths (Pro subs +
+// Square-collecting free tradies). Step 1 of the conversion engine: the cron
+// owns the expensive computation; the callable serves cache only, so an admin
+// page load can never trigger the full collection-group scans.
+// ============================================================
+
+// Client events are lossy fire-and-forget writes; 30 days of history is
+// plenty to see where current users stall, and the where('ts','>=') bound
+// keeps the collectionGroup('events') scan from growing without limit.
+// Needs the events.ts COLLECTION_GROUP field override in firestore.indexes.json.
+const EVENT_WINDOW_DAYS = 30;
+
+// The full, uncached computation. Same join style as computeFunnelPayload,
+// plus the two Path-B signals (squareConnection doc, real square payments) and
+// the event-derived paywall/checkout flags.
+export async function computeEventFunnelPayload(): Promise<EventFunnelPayload> {
+  const firestore = db();
+  const now = Date.now();
+  const cutoff = admin.firestore.Timestamp.fromMillis(now - EVENT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+  const [authUsers, subs, userSettings, docsSnap, eventsSnap] = await Promise.all([
+    listAllAuthUsers(),
+    fetchAllSubscriptions(),
+    fetchAllUserSettings(),
+    firestore.collectionGroup('documents').get(),
+    firestore.collectionGroup('events').where('ts', '>=', cutoff).get(),
+  ]);
+
+  // One pass over every document: draft / activated / square-paid per uid.
+  const draftUids = new Set<string>();
+  const activatedUids = new Set<string>();
+  const squarePaidUids = new Set<string>();
+  for (const d of docsSnap.docs) {
+    const uid = d.ref.parent.parent?.id;
+    if (!uid) continue;
+    const data = d.data() as any;
+    draftUids.add(uid);
+    if (isActivatingDoc(data)) activatedUids.add(uid);
+    if (docHasSquarePayment(data)) squarePaidUids.add(uid);
+  }
+
+  // Bucket events by parent uid into de-duped per-user flags.
+  const eventFlags = new Map<string, UserEventFlags>();
+  for (const d of eventsSnap.docs) {
+    const uid = d.ref.parent.parent?.id;
+    if (!uid) continue;
+    eventFlags.set(uid, foldEvent(eventFlags.get(uid), (d.data() as any)?.event));
+  }
+
+  const inputs: EventFunnelUserInput[] = authUsers.map((u) => {
+    const flags = eventFlags.get(u.uid);
+    return {
+      uid: u.uid,
+      sub: subs.get(u.uid) || null,
+      hasQuoteDraft: draftUids.has(u.uid),
+      hasSentDoc: activatedUids.has(u.uid),
+      hasSquareConnection: userSettings.squareConnection.has(u.uid),
+      hasSquarePayment: squarePaidUids.has(u.uid),
+      viewedPaywall: flags?.viewedPaywall ?? false,
+      startedCheckout: flags?.startedCheckout ?? false,
+    };
+  });
+
+  return rollupEventFunnel(inputs, now, EVENT_WINDOW_DAYS);
+}
+
+// Every 6h (offset from the 15-min lazy funnel cache — this one is heavier
+// and its consumers are dashboards, not alerts).
+export const aggregateEventFunnel = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 120 })
+  .pubsub.schedule('every 6 hours')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const payload = await computeEventFunnelPayload();
+    await db().collection('adminStats').doc('eventFunnel').set({ payload, generatedAt: Date.now() });
+    console.log(
+      `aggregateEventFunnel: users=${payload.shared.signups}, monetized=${payload.monetized.count} ` +
+        `(pro=${payload.monetized.viaPro}, square=${payload.monetized.viaSquare}), ` +
+        `trialToMonetized=${(payload.conversion.trialToMonetized * 100).toFixed(1)}%`
+    );
+  });
+
+// Serve-cache-only: the cron owns computation. Before the first cron run the
+// admin UI gets { pending: true } and shows an empty state.
+export const adminEventFunnelStats = functions
+  .runWith({ memory: '256MB', timeoutSeconds: 30 })
+  .https.onCall(async (_data, context) => {
+    requireAdmin(context);
+    const cached = await db().collection('adminStats').doc('eventFunnel').get();
+    const data = cached.exists ? (cached.data() as any) : null;
+    if (!data?.payload) return { pending: true };
+    return { ...data.payload, cached: true, generatedAt: data.generatedAt ?? null };
   });
 
 // ============================================================

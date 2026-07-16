@@ -12,7 +12,7 @@ import {
   Title,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useStore } from '../store/useStore';
@@ -26,6 +26,8 @@ import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
 import { CancellationReasonModal } from '../components/CancellationReasonModal';
 import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
 import { regularPriceLabel, discountPercent } from '../config/pricingConfig';
+import { trackEvent } from '../services/analyticsService';
+import { resolvePurchaseAnalytics } from '../services/paywallAnalytics.helpers';
 
 const PRO_NUDGES = [
   "Your quotes deserve the VIP treatment",
@@ -48,6 +50,11 @@ const MAYBE_LATER_QUIPS = [
 
 export function PaywallScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  // Which surface sent the user here. Only the three highest-signal entry
+  // points pass it (send_gate / trial_banner / dashboard); everything else
+  // falls through to 'unknown'.
+  const paywallSource: string = route.params?.source ?? 'unknown';
   const insets = useSafeAreaInsets();
   const proNudge = useMemo(() => PRO_NUDGES[Math.floor(Math.random() * PRO_NUDGES.length)], []);
   const maybeLaterQuip = useMemo(() => MAYBE_LATER_QUIPS[Math.floor(Math.random() * MAYBE_LATER_QUIPS.length)], []);
@@ -77,6 +84,16 @@ export function PaywallScreen() {
     return Math.max(0, remaining);
   };
   const trialDaysRemaining = getTrialDaysRemaining();
+
+  useEffect(() => {
+    trackEvent('paywall_viewed', {
+      source: paywallSource,
+      trialExpired,
+      plan: selectedPlan,
+    });
+    // Mount-only: one view event per paywall visit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     // Safety timeout: if loading takes more than 30s, stop the spinner
@@ -177,6 +194,7 @@ export function PaywallScreen() {
             // expo-iap 3.x: check purchaseToken (not transactionReceipt)
             const hasValidPurchase = purchase.purchaseToken || purchase.transactionReceipt || purchase.id;
             if (hasValidPurchase) {
+              trackEvent('purchase_completed', resolvePurchaseAnalytics(purchase, Platform.OS));
               // Send receipt to server for validation
               const currentUser = auth.currentUser;
               if (currentUser) {
@@ -229,6 +247,7 @@ export function PaywallScreen() {
           try {
             const errorCode = error.code;
           if (errorCode !== 'user-cancelled' && errorCode !== 'E_USER_CANCELLED' && errorCode !== 'iap-not-available' && errorCode !== 'E_IAP_NOT_AVAILABLE') {
+              trackEvent('purchase_failed', { platform: Platform.OS, code: String(errorCode ?? 'unknown') });
               Alert.alert('Purchase Failed', error.message || 'An error occurred during purchase');
             }
           } catch (alertError) {
@@ -249,7 +268,7 @@ export function PaywallScreen() {
   };
 
   const handleUpgrade = async () => {
-
+    trackEvent('checkout_started', { plan: selectedPlan, platform: Platform.OS, source: paywallSource });
     setIsUpgrading(true);
     try {
       if (Platform.OS === 'ios') {
@@ -282,6 +301,7 @@ export function PaywallScreen() {
     } catch (error: any) {
       setIsUpgrading(false);
       if (error?.code !== 'user-cancelled' && error?.code !== 'E_USER_CANCELLED') {
+        trackEvent('purchase_failed', { platform: Platform.OS, code: String(error?.code ?? 'unknown') });
         Alert.alert('Error', error?.message || 'Failed to start purchase. Please try again.');
       }
     }
@@ -504,6 +524,7 @@ export function PaywallScreen() {
       const status = await stripeService.checkSubscriptionStatus(currentUser.uid);
 
       if (status.isPremium) {
+        trackEvent('purchase_completed', { plan: selectedPlan, platform: 'web' });
         // Update subscription status in Firestore and local storage
         const subscriptionStatus = {
           isPro: true,
@@ -775,7 +796,10 @@ export function PaywallScreen() {
           <Text style={styles.maybeLaterQuip}>{maybeLaterQuip}</Text>
           <Button
             mode="text"
-            onPress={() => navigation.goBack()}
+            onPress={() => {
+              trackEvent('paywall_dismissed', { source: paywallSource });
+              navigation.goBack();
+            }}
             style={styles.backButton}
             textColor={colors.textMuted}
           >

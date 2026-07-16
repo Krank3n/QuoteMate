@@ -20,7 +20,7 @@ export const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
 // Monthly-equivalent AUD we actually bill per subscription. Source of truth:
 // the live Stripe "Starter" prices ($49/mo, $328/yr); the iOS/Android yearly
 // SKUs are priced to match. Update here if prices change.
-const SUB_PRICE_AUD = { monthly: 49, yearly: 328 };
+export const SUB_PRICE_AUD = { monthly: 49, yearly: 328 };
 
 // Apple StoreKit 2 purchase tokens are JWS blobs (header.payload.signature)
 // whose payload records the purchase environment ('Sandbox' | 'Production').

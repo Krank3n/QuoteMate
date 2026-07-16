@@ -43,7 +43,23 @@ export type AnalyticsEvent =
   // audit: only customer-senders ever convert to paid).
   | 'nudge_shown'
   | 'nudge_tapped'
-  | 'nudge_dismissed';
+  | 'nudge_dismissed'
+  // — Conversion funnel (trial→monetised engine, Step 1) —
+  // Paywall lifecycle. `source` names the surface that sent the user here
+  // (send_gate / trial_banner / dashboard / unknown).
+  | 'paywall_viewed'
+  | 'paywall_dismissed'
+  // Purchase flow: started → completed | failed. User-cancels are not
+  // failures and are never tracked as such.
+  | 'checkout_started'
+  | 'purchase_completed'
+  | 'purchase_failed'
+  // The 14-day Pro trial began (fires with the first quote). Deliberately
+  // redundant with the durable trialStartedAt field — events are lossy,
+  // Firestore state stays the source of truth.
+  | 'trial_started'
+  // Path B: Square OAuth completed (client-observed poll success).
+  | 'square_connected';
 
 interface BaseProps {
   // Free-form per-event payload. Keep it flat (Firestore indexes flat fields

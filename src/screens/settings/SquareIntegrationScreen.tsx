@@ -30,6 +30,7 @@ import { AlertModal } from '../../components/AlertModal';
 import { SquareReconnectBanner } from '../../components/SquareReconnectBanner';
 import * as squareService from '../../services/squareService';
 import type { SquareConnectionStatus } from '../../services/squareService';
+import { trackEvent } from '../../services/analyticsService';
 import { primeTapToPayOnDevice } from '../../services/squarePayments';
 
 export function SquareIntegrationScreen() {
@@ -97,6 +98,7 @@ export function SquareIntegrationScreen() {
           if (status.connected) {
             setConnection(status);
             connected = true;
+            trackEvent('square_connected', { source: 'settings' });
             break;
           }
         } catch {
