@@ -47,6 +47,7 @@ import { sentConversionEmailWithin } from './lifecycleEmails.helpers';
 export { subscriptionAuditDaily, adminSubscriptionAudit } from './subscriptionAudit';
 export { dailyTrackingCheck } from './trackingAlarm';
 export { storeFunnelDaily } from './storeFunnel';
+export { websiteContact, websiteSubscribe } from './websiteForms';
 export {
   adminLeadDiscovery,
   adminEnrichLeads,
