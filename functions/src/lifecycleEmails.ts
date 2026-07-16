@@ -17,6 +17,11 @@
  * stale step. Copy source: website repo marketing/trial-lifecycle-emails.md
  * + the conversion-engine spec (cap-only: no deadlines anywhere).
  *
+ * The same run also dispatches the Path B nudge track (squareNudge.helpers):
+ *   - square_connected_idle: connected ≥5d, never collected
+ *   - square_no_paylink:     trial expired, sent quotes, never connected
+ * evaluated only when no lifecycle step is due, so one email/user/day holds.
+ *
  * SAFETY
  *   - Dry-run unless LIFECYCLE_LIVE=true in functions/.env. Dry runs log the
  *     exact would-send list.
@@ -35,12 +40,18 @@ import * as admin from 'firebase-admin';
 import { listAllAuthUsers } from './authUsers.helpers';
 import { isUnreachableEmail } from './reEngagement.helpers';
 import { lifecycleVerdict, midTrialRecap, SEND_ONCE_FIELD } from './lifecycleEmails.helpers';
+import { squareNudgeVerdict, NUDGE_SEND_ONCE_FIELD } from './squareNudge.helpers';
+import { isActivatingDoc } from './adminFunnel.helpers';
+import { docHasSquarePayment } from './eventFunnel.helpers';
+import { ts } from './subscription.helpers';
 import {
   sendTrialStartValueEmail,
   sendTrialSquarePitchEmail,
   sendTrialMidValueEmail,
   sendTrialEndingEmail,
   sendTrialEndedEmail,
+  sendSquareIdleNudgeEmail,
+  sendSquareNoPaylinkNudgeEmail,
   type FoundingSpots,
 } from './email';
 
@@ -62,6 +73,24 @@ export const trialLifecycleDaily = functions.pubsub
         founding = { spotsLeft: data.spotsLeft, cap: typeof data.cap === 'number' ? data.cap : 100 };
       }
     } catch {}
+
+    // One documents scan for the nudge track's durable signals: who has ever
+    // sent something, and who has ever collected a real Square payment.
+    const activatedUids = new Set<string>();
+    const squarePaidUids = new Set<string>();
+    try {
+      const docsSnap = await db.collectionGroup('documents').get();
+      for (const d of docsSnap.docs) {
+        const uid = d.ref.parent.parent?.id;
+        if (!uid) continue;
+        const data = d.data() as any;
+        if (isActivatingDoc(data)) activatedUids.add(uid);
+        if (docHasSquarePayment(data)) squarePaidUids.add(uid);
+      }
+    } catch (err: any) {
+      // Nudges degrade gracefully; lifecycle steps don't depend on the scan.
+      functions.logger.error('trialLifecycleDaily: documents scan failed', err?.message);
+    }
 
     const authUsers = await listAllAuthUsers(admin.auth());
     let processed = 0;
@@ -87,10 +116,26 @@ export const trialLifecycleDaily = functions.pubsub
         const verdict = lifecycleVerdict(subDoc.data(), stateDoc.data(), now, {
           hasSquareConnection: squareDoc.exists,
         });
-        if (!verdict.send) continue;
+        // Path B nudges only when no lifecycle step is due — one email per
+        // user per morning, lifecycle first.
+        const nudge = verdict.send
+          ? null
+          : squareNudgeVerdict(
+              {
+                sub: subDoc.data(),
+                emailState: stateDoc.data() as any,
+                hasSquareConnection: squareDoc.exists,
+                connectedAtMs: ts(squareDoc.data()?.connectedAt),
+                hasSquarePayment: squarePaidUids.has(userId),
+                hasSentDoc: activatedUids.has(userId),
+              },
+              now
+            );
+        const send = verdict.send ?? nudge;
+        if (!send) continue;
 
         if (!live) {
-          wouldSend.push(`${verdict.send} -> ${email} (${userId})`);
+          wouldSend.push(`${send} -> ${email} (${userId})`);
           continue;
         }
 
@@ -101,7 +146,7 @@ export const trialLifecycleDaily = functions.pubsub
         } catch {}
 
         let ok = false;
-        switch (verdict.send) {
+        switch (send) {
           case 'trial_start_value':
             ok = await sendTrialStartValueEmail(email, businessName, userId);
             break;
@@ -123,11 +168,20 @@ export const trialLifecycleDaily = functions.pubsub
           case 'trial_ended':
             ok = await sendTrialEndedEmail(email, businessName, userId, founding);
             break;
+          case 'square_connected_idle':
+            ok = await sendSquareIdleNudgeEmail(email, businessName, userId);
+            break;
+          case 'square_no_paylink':
+            ok = await sendSquareNoPaylinkNudgeEmail(email, businessName, userId);
+            break;
         }
 
         if (ok) {
+          const field = verdict.send
+            ? SEND_ONCE_FIELD[verdict.send]
+            : NUDGE_SEND_ONCE_FIELD[nudge!];
           await stateRef.set(
-            { [SEND_ONCE_FIELD[verdict.send]]: admin.firestore.FieldValue.serverTimestamp() },
+            { [field]: admin.firestore.FieldValue.serverTimestamp() },
             { merge: true }
           );
           sent++;
