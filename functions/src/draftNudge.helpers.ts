@@ -25,11 +25,11 @@ export interface NudgeQuote {
   customerName?: string | null;
   materials?: unknown[] | null;
   /**
-   * The wizard stamps the next screen to resume on per step; the JobPreview
-   * mount clears it back to null/undefined once the user reaches the preview.
-   * A finished quote therefore sits at null (cleared) or, if the preview hasn't
-   * mounted yet / on older data, at 'JobPreview' ('QuotePreview' is the legacy
-   * name for the same screen).
+   * The wizard stamps the next screen to resume on per step. Since Jul 2026
+   * (client commit a922427) the JobPreview save KEEPS the marker stamped at
+   * 'JobPreview', so a finished quote sits at 'JobPreview' on current data,
+   * or null on docs saved by older clients ('QuotePreview' is the legacy
+   * name for the same screen). Accept all three.
    */
   draftStep?: string | null;
   readyToSendNudgedAt?: unknown;
@@ -73,8 +73,9 @@ export function toMs(value: unknown): number | null {
 
 /**
  * True when a draft is fully built and parked on the preview screen: it's a
- * draft, has a customer and at least one material line, and the wizard step is
- * cleared (or on the preview screen). Mid-wizard drafts return false.
+ * draft, has a customer and at least one material line, and the wizard step
+ * is on the preview screen (current clients) or cleared (docs saved by older
+ * clients). Mid-wizard drafts return false.
  */
 export function isReadyToSend(q: NudgeQuote | null | undefined): boolean {
   if (!q || q.status !== 'draft') return false;
