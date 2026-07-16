@@ -139,7 +139,9 @@ export const adminTrafficStats = functions
         dimensionFilter: {
           filter: {
             fieldName: 'eventName',
-            inListFilter: { values: ['experiment_impression', ...CTA_EVENTS] },
+            // sign_up: fired by the /app web build with the hero variant param
+            // (webAnalytics.ts) — the direct experiment outcome.
+            inListFilter: { values: ['experiment_impression', 'sign_up', ...CTA_EVENTS] },
           },
         },
         limit: 50,
@@ -214,7 +216,18 @@ export const adminTrafficStats = functions
     // ---- hero A/B ----
     let abTest:
       | { available: false; reason: string }
-      | { available: true; variants: Array<{ variant: string; impressions: number; ctaClicks: number; ctr: number }> };
+      | {
+          available: true;
+          variants: Array<{
+            variant: string;
+            impressions: number;
+            ctaClicks: number;
+            ctr: number;
+            storeExits: number;
+            storeExitRate: number;
+            signups: number;
+          }>;
+        };
     if (!abR.ok) {
       abTest = {
         available: false,
@@ -222,14 +235,25 @@ export const adminTrafficStats = functions
           'Register an event-scoped custom dimension named "variant" in GA4 (Admin → Custom definitions). Data is not retroactive; it populates from creation onward.',
       };
     } else {
-      const byVariant: Record<string, { impressions: number; ctaClicks: number }> = {};
+      // Store exits (app store / play / web app) are the clicks that leave for
+      // the product — variant A's hero buttons land here, never in cta_click,
+      // so judging variants on cta_click alone is apples-vs-oranges.
+      const STORE_EXIT_EVENTS = new Set(['web_app_click', 'app_store_click', 'google_play_click']);
+      const byVariant: Record<
+        string,
+        { impressions: number; ctaClicks: number; storeExits: number; signups: number }
+      > = {};
       for (const r of abR.res.rows || []) {
         const variant = r.dimensionValues?.[0]?.value || '(not set)';
         const event = r.dimensionValues?.[1]?.value || '';
         const count = num(r.metricValues?.[0]?.value);
-        if (!byVariant[variant]) byVariant[variant] = { impressions: 0, ctaClicks: 0 };
+        if (!byVariant[variant]) byVariant[variant] = { impressions: 0, ctaClicks: 0, storeExits: 0, signups: 0 };
         if (event === 'experiment_impression') byVariant[variant].impressions += count;
-        else byVariant[variant].ctaClicks += count;
+        else if (event === 'sign_up') byVariant[variant].signups += count;
+        else {
+          byVariant[variant].ctaClicks += count;
+          if (STORE_EXIT_EVENTS.has(event)) byVariant[variant].storeExits += count;
+        }
       }
       const variants = Object.entries(byVariant)
         .map(([variant, v]) => ({
@@ -237,6 +261,9 @@ export const adminTrafficStats = functions
           impressions: v.impressions,
           ctaClicks: v.ctaClicks,
           ctr: v.impressions > 0 ? v.ctaClicks / v.impressions : 0,
+          storeExits: v.storeExits,
+          storeExitRate: v.impressions > 0 ? v.storeExits / v.impressions : 0,
+          signups: v.signups,
         }))
         .sort((a, b) => a.variant.localeCompare(b.variant));
       abTest = variants.length ? { available: true, variants } : {

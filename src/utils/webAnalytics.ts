@@ -18,6 +18,22 @@ function isWeb(): boolean {
   return Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined';
 }
 
+/**
+ * The marketing site's hero A/B assignment (layout.tsx AB_SCRIPT) lives in a
+ * same-origin cookie. Reading it here lets web-app events — sign_up above all
+ * — carry the variant, closing the experiment loop from hero impression to
+ * account creation. Returns null off-web or when the visitor never hit the
+ * homepage (direct /app visits have no assignment).
+ */
+function heroVariant(): string | null {
+  try {
+    const m = document.cookie.match(/(?:^|;\s*)qm_home_variant=([ab])/);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 export function initWebAnalytics(): void {
   if (!isWeb()) return;
   try {
@@ -45,5 +61,9 @@ export function trackWebEvent(name: string, params?: Record<string, unknown>): v
   if (!isWeb()) return;
   const w = window as any;
   if (typeof w.gtag !== 'function') return;
-  w.gtag('event', name, params || {});
+  // Stamp the hero A/B variant on every web-app event (the registered
+  // event-scoped `variant` dimension picks it up on any event name). Caller
+  // params win if they ever set their own.
+  const variant = heroVariant();
+  w.gtag('event', name, variant ? { variant, ...(params || {}) } : params || {});
 }
