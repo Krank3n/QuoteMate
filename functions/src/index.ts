@@ -43,6 +43,7 @@ export * from './tickets';
 export { adminTrafficStats } from './analyticsTraffic';
 export { weeklyAnalyticsDigest, adminWeeklyDigest } from './analyticsDigest';
 export { trialLifecycleDaily } from './lifecycleEmails';
+import { sentConversionEmailWithin } from './lifecycleEmails.helpers';
 export { subscriptionAuditDaily, adminSubscriptionAudit } from './subscriptionAudit';
 export { dailyTrackingCheck } from './trackingAlarm';
 export { storeFunnelDaily } from './storeFunnel';
@@ -7645,6 +7646,12 @@ export const sendOnboardingDrip = functions.pubsub
           }
         }
 
+        // Same-day cross-campaign suppression: if the trial/nudge cron
+        // (trialLifecycleDaily, 07:30 Brisbane) already emailed this user
+        // this morning, sit today out. The tip isn't consumed — it goes out
+        // on the next eligible day instead.
+        if (sentConversionEmailWithin(data, now.getTime())) continue;
+
         totalEligible++;
 
         let businessName = '';
@@ -7655,7 +7662,15 @@ export const sendOnboardingDrip = functions.pubsub
 
         const sent = await sendOnboardingTipEmail(email, businessName, tipToSend, userId);
         if (sent) {
-          await emailStateDoc.ref.set({ lastOnboardingTip: tipToSend }, { merge: true });
+          await emailStateDoc.ref.set(
+            {
+              lastOnboardingTip: tipToSend,
+              // Timestamp lets trialLifecycleDaily suppress in the other
+              // direction — the tip number alone carries no send time.
+              lastOnboardingTipAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
           totalSent++;
         }
       } catch (error: any) {

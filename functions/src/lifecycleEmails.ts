@@ -39,7 +39,12 @@ import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import { listAllAuthUsers } from './authUsers.helpers';
 import { isUnreachableEmail } from './reEngagement.helpers';
-import { lifecycleVerdict, midTrialRecap, SEND_ONCE_FIELD } from './lifecycleEmails.helpers';
+import {
+  lifecycleVerdict,
+  midTrialRecap,
+  SEND_ONCE_FIELD,
+  suppressedByOnboardingDrip,
+} from './lifecycleEmails.helpers';
 import { squareNudgeVerdict, NUDGE_SEND_ONCE_FIELD } from './squareNudge.helpers';
 import { isActivatingDoc } from './adminFunnel.helpers';
 import { docHasSquarePayment } from './eventFunnel.helpers';
@@ -113,7 +118,14 @@ export const trialLifecycleDaily = functions.pubsub
         if (!subDoc.exists) continue;
         processed++;
 
-        const verdict = lifecycleVerdict(subDoc.data(), stateDoc.data(), now, {
+        const emailState = stateDoc.data();
+
+        // Same-day cross-campaign suppression: if the onboarding drip
+        // emailed this user within the window, sit today out. Steps whose
+        // window survives fire tomorrow; ones that don't are skipped.
+        if (suppressedByOnboardingDrip(emailState, now)) continue;
+
+        const verdict = lifecycleVerdict(subDoc.data(), emailState, now, {
           hasSquareConnection: squareDoc.exists,
         });
         // Path B nudges only when no lifecycle step is due — one email per
@@ -123,7 +135,7 @@ export const trialLifecycleDaily = functions.pubsub
           : squareNudgeVerdict(
               {
                 sub: subDoc.data(),
-                emailState: stateDoc.data() as any,
+                emailState: emailState as any,
                 hasSquareConnection: squareDoc.exists,
                 connectedAtMs: ts(squareDoc.data()?.connectedAt),
                 hasSquarePayment: squarePaidUids.has(userId),
