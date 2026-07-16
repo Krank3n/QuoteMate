@@ -7,6 +7,7 @@
  */
 
 import { auth } from '../config/firebase';
+import { withScraperRetry } from '../utils/scraperRetry';
 
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
 const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
@@ -67,7 +68,9 @@ export async function searchBunningsProducts(
   searchTerm: string,
   limit: number = 5
 ): Promise<ScraperSearchResponse> {
-  try {
+  // Transient network blips (mobile radios, droplet resets) get a couple of
+  // retries; auth and application failures throw straight through.
+  return withScraperRetry(async () => {
     const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/bunningsScraperSearch`, {
       method: 'POST',
       headers: {
@@ -91,11 +94,8 @@ export async function searchBunningsProducts(
       throw new Error(data.error || 'Search failed');
     }
 
-
     return data;
-  } catch (error) {
-    throw error;
-  }
+  });
 }
 
 /**
@@ -253,30 +253,45 @@ export async function batchFindBestMatchesProgressive(
     const chunkResults = new Map<string, ScraperProduct[]>();
 
     try {
-      const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/bunningsScraperBatchSearch`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(await scraperAuthHeaders()),
+      // Retry the whole chunk on transient failures — losing a chunk means
+      // those rows silently drop from shelf prices to estimates. Cancellation
+      // stops the retries between attempts.
+      const data = await withScraperRetry(
+        async () => {
+          const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/bunningsScraperBatchSearch`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(await scraperAuthHeaders()),
+            },
+            body: JSON.stringify({
+              searches: chunkTerms.map((term) => ({
+                searchTerm: term,
+                limit: maxResultsPerTerm,
+                sortBy: 'relevance',
+              })),
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Batch scraper returned ${response.status}: ${response.statusText}`);
+          }
+
+          const parsed = await response.json();
+
+          if (!parsed.success || !Array.isArray(parsed.results)) {
+            throw new Error(parsed.error || 'Batch search failed');
+          }
+          return parsed;
         },
-        body: JSON.stringify({
-          searches: chunkTerms.map((term) => ({
-            searchTerm: term,
-            limit: maxResultsPerTerm,
-            sortBy: 'relevance',
-          })),
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Batch scraper returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      if (!data.success || !Array.isArray(data.results)) {
-        throw new Error(data.error || 'Batch search failed');
-      }
+        {
+          shouldAbort: () => isCancelled?.() === true,
+          onRetry: (attempt, err) =>
+            console.warn(
+              `[bunningsScraper] batch chunk ${chunkIndex + 1}/${totalChunks} attempt ${attempt} failed, retrying: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+        },
+      );
 
       // Map server results back to terms — preserve the full ranked
       // candidate list so reconciliation can evaluate alternatives.

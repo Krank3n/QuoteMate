@@ -20,6 +20,7 @@ import { checkDocumentIntegrity } from '../src/shared/document/integrityCheck';
 import { pickBestCandidate, RankableCandidate } from '../../src/services/candidateRanker';
 import { parsePackInfo } from '../../src/utils/parsePackInfo';
 import { isNonRetailTradeRow, tradeFallbackUnitPrice } from '../../src/utils/tradeFallback';
+import { withScraperRetry } from '../../src/utils/scraperRetry';
 import { buildReconcilePrompt, ReconcileDecision } from '../src/reconcile.helpers';
 import { buildReconcileItems, applyReconcileDecisions, finalCoverageSweep, rescueRejectedRows, ReplayPricedRow } from './replayReconcile';
 import { normalizeGapKind, replayDeterministicIssues, capVerdict } from './replayOracle.helpers';
@@ -195,16 +196,23 @@ async function scraperBatch(terms: string[]): Promise<Map<string, ScraperProduct
   const out = new Map<string, ScraperProduct[]>();
   for (let i = 0; i < terms.length; i += 10) {
     const searches = terms.slice(i, i + 10).map(searchTerm => ({ searchTerm, limit: 5, sortBy: 'relevance' }));
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 300000);
-    let res: any;
-    try {
-      res = await fetch(`${url.replace(/\/$/, '')}/api/batch-search`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': key }, signal: controller.signal as any, body: JSON.stringify({ searches }) });
-    } finally {
-      clearTimeout(timeout);
-    }
-    if (!res.ok) throw new Error(`Scraper batch ${res.status}: ${(await res.text()).slice(0, 500)}`);
-    const data = await res.json();
+    // Retry each chunk on transient droplet/network failures — a single
+    // ECONNRESET used to error the entire quote's replay.
+    const data = await withScraperRetry(
+      async () => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 300000);
+        let res: any;
+        try {
+          res = await fetch(`${url.replace(/\/$/, '')}/api/batch-search`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': key }, signal: controller.signal as any, body: JSON.stringify({ searches }) });
+        } finally {
+          clearTimeout(timeout);
+        }
+        if (!res.ok) throw new Error(`Scraper batch ${res.status}: ${(await res.text()).slice(0, 500)}`);
+        return res.json();
+      },
+      { backoffMs: 3000, onRetry: (attempt, err) => console.warn(`scraper batch attempt ${attempt} failed, retrying: ${String((err as any)?.message || err).slice(0, 120)}`) },
+    );
     for (const item of data.results || []) out.set(item.searchTerm, item.success ? item.results || [] : []);
     for (const s of searches) if (!out.has(s.searchTerm)) out.set(s.searchTerm, []);
   }
