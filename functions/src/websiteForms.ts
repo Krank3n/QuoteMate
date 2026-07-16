@@ -30,7 +30,11 @@ function runCors(
   res: functions.Response,
   handler: () => Promise<void>,
 ): void {
-  corsHandler(req, res, () => {
+  corsHandler(req, res, (corsError?: Error) => {
+    if (corsError) {
+      res.status(403).json({ error: 'Origin not allowed.' });
+      return;
+    }
     void handler().catch(error => {
       console.error('Website form request failed:', error);
       if (!res.headersSent) {
