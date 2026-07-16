@@ -1151,6 +1151,88 @@ ${recapBlock}
   });
 }
 
+/**
+ * Square nudge: connected ≥5 days, never collected. One send, ever. No
+ * invented social proof — at the current baseline almost nobody has
+ * collected yet, so the pitch is pure mechanics + benefit.
+ */
+export function sendSquareIdleNudgeEmail(
+  to: string,
+  businessName: string,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = (businessName || '').trim() || 'there';
+
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      Your Pay Now button's ready &mdash; put it to work
+    </h1>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Hi ${greeting} &mdash; you've hooked up Square, nice one. But nothing's come through it yet, and a connected account earns you exactly nothing until a customer taps that button.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Next quote or invoice you send, choose <strong style="color:#f8fafc;">&ldquo;Get paid on this quote&rdquo;</strong> and it goes out with a Pay Now button &mdash; your customer pays by card on their phone, and the job's marked paid before you've packed up.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+      Deposits up front, balances on the day, no chasing transfers.
+    </p>
+
+    ${ctaButton('Send a quote with a pay link')}
+  `, { unsubscribeUrl, preheader: 'One tap at send and your customer can pay by card on the spot.' });
+
+  return sendEmail({
+    to,
+    subject: "Your Pay Now button's ready — put it to work",
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['square-nudge', 'connected-idle'],
+    unsubscribeUrl,
+  });
+}
+
+/**
+ * Square nudge: trial expired, sent quotes during it, never connected
+ * payments. The post-trial reactivation — connecting Square is also what
+ * lets them send again on the free plan. One send, ever.
+ */
+export function sendSquareNoPaylinkNudgeEmail(
+  to: string,
+  businessName: string,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = (businessName || '').trim() || 'there';
+
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      Your quotes are ready to get paid
+    </h1>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Hi ${greeting} &mdash; you've built proper quotes in QuoteMate, and there's one step left to close the loop: getting paid through them.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Hook up Square &mdash; takes about a minute &mdash; and every quote and invoice you send carries a <strong style="color:#f8fafc;">Pay Now button</strong>. Deposits before you order materials, balances the day the job wraps, no &ldquo;I'll do a transfer tonight&rdquo;.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+      It's part of the free plan &mdash; connecting it is also what switches sending back on now your trial's wrapped.
+    </p>
+
+    ${ctaButton('Turn on payments')}
+  `, { unsubscribeUrl, preheader: 'A minute of setup and every quote carries a Pay Now button.' });
+
+  return sendEmail({
+    to,
+    subject: 'Get paid the day the job’s done — your quotes are ready',
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['square-nudge', 'no-paylink'],
+    unsubscribeUrl,
+  });
+}
+
 export function sendOnboardingTipEmail(
   to: string,
   businessName: string,
