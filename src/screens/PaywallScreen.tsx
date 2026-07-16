@@ -20,12 +20,19 @@ import { colors } from '../theme';
 import { billingService, SUBSCRIPTION_SKUS } from '../services/billingService';
 import { useSubscriptionStore } from '../store/subscriptionStore';
 import { unifiedBillingService } from '../services/unifiedBillingService';
-import { auth } from '../config/firebase';
+import { auth, db } from '../config/firebase';
+import { doc as firestoreDoc, getDoc } from 'firebase/firestore';
 import { WebContainer } from '../components/WebContainer';
 import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
 import { CancellationReasonModal } from '../components/CancellationReasonModal';
 import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
-import { regularPriceLabel, discountPercent } from '../config/pricingConfig';
+import {
+  regularPriceLabel,
+  discountPercent,
+  yearlyVsMonthlySavingsPercent,
+  feeSavingLabel,
+  squareCollectedLast30d,
+} from '../config/pricingConfig';
 import { trackEvent } from '../services/analyticsService';
 import { resolvePurchaseAnalytics } from '../services/paywallAnalytics.helpers';
 
@@ -58,7 +65,7 @@ export function PaywallScreen() {
   const insets = useSafeAreaInsets();
   const proNudge = useMemo(() => PRO_NUDGES[Math.floor(Math.random() * PRO_NUDGES.length)], []);
   const maybeLaterQuip = useMemo(() => MAYBE_LATER_QUIPS[Math.floor(Math.random() * MAYBE_LATER_QUIPS.length)], []);
-  const { subscriptionStatus, loadSubscription } = useStore();
+  const { subscriptionStatus, loadSubscription, documents } = useStore();
   const { quoteCount, setPremium } = useSubscriptionStore();
   const [isUpgrading, setIsUpgrading] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
@@ -71,6 +78,17 @@ export function PaywallScreen() {
   const [productsLoadError, setProductsLoadError] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('yearly');
+  // Founding-member cap status from config/foundingOffer (public read; the
+  // aggregateEventFunnel cron computes it from REAL billed subs). null =
+  // unknown/unavailable → all founding framing is suppressed, never faked.
+  const [founding, setFounding] = useState<{ taken: number; cap: number; spotsLeft: number; capActive: boolean } | null>(null);
+
+  // Fee-bleed: only from the user's real collected Square volume; null when
+  // too thin to claim anything.
+  const feeBleedLine = useMemo(
+    () => feeSavingLabel(squareCollectedLast30d(documents, Date.now())),
+    [documents]
+  );
 
   // Trial status
   const trialExpired = subscriptionStatus?.trialExpired || false;
@@ -93,6 +111,27 @@ export function PaywallScreen() {
     });
     // Mount-only: one view event per paywall visit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDoc(firestoreDoc(db, 'config', 'foundingOffer'))
+      .then((snap) => {
+        const data = snap.exists() ? (snap.data() as any) : null;
+        if (cancelled || !data || typeof data.spotsLeft !== 'number') return;
+        setFounding({
+          taken: data.taken,
+          cap: data.cap,
+          spotsLeft: data.spotsLeft,
+          capActive: !!data.capActive,
+        });
+      })
+      .catch(() => {
+        // Unavailable → founding framing stays hidden. Never invent numbers.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -707,7 +746,7 @@ export function PaywallScreen() {
             onPress={() => setSelectedPlan('yearly')}
           >
             <View style={styles.saveBadge}>
-              <Text style={styles.saveBadgeText}>Save 44%</Text>
+              <Text style={styles.saveBadgeText}>Save {yearlyVsMonthlySavingsPercent()}%</Text>
             </View>
             <Text style={[styles.planOptionLabel, selectedPlan === 'yearly' && styles.planOptionLabelSelected]}>Yearly</Text>
             <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('yearly')}</Text>
@@ -717,10 +756,28 @@ export function PaywallScreen() {
         </View>
       )}
 
-      {!isPro && (
+      {!isPro && founding?.capActive ? (
+        <>
+          {/* Founding-member framing — every number here is real: spotsLeft is
+              computed server-side from billed subs, and the price rise is the
+              committed store/Stripe change once the cap fills. Cap-only model:
+              no personal countdowns anywhere (nothing enforces one yet). */}
+          <Text style={styles.launchOffer}>
+            Founding member price · {founding.spotsLeft} of {founding.cap} spots left
+          </Text>
+          <Text style={styles.foundingNote}>
+            {getProductPrice(SUBSCRIPTION_SKUS.MONTHLY)}/mo locked for life — the price goes to{' '}
+            {regularPriceLabel('monthly')}/mo for new members once the {founding.cap} spots fill.
+          </Text>
+        </>
+      ) : !isPro ? (
         <Text style={styles.launchOffer}>
           Launch offer · {discountPercent(selectedPlan)}% off the regular price
         </Text>
+      ) : null}
+
+      {!isPro && feeBleedLine && (
+        <Text style={styles.foundingNote}>{feeBleedLine} — it pays for itself.</Text>
       )}
 
       {/* Upgrade Section for Free Users */}
@@ -964,6 +1021,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginHorizontal: 20,
     marginTop: -6,
+    marginBottom: 14,
+  },
+  foundingNote: {
+    textAlign: 'center',
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginHorizontal: 24,
+    marginTop: -8,
     marginBottom: 14,
   },
   saveBadge: {

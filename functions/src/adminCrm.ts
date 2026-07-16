@@ -20,7 +20,7 @@ import type { DocumentStage, DocumentType } from './shared/document/types';
 // so the admin CRM callables and the funnel analytics helpers share one source
 // of truth (and the latter stays unit-testable without firebase). See
 // subscription.helpers.ts.
-import { ts, deriveSubFields } from './subscription.helpers';
+import { ts, deriveSubFields, isBilledSub } from './subscription.helpers';
 import { listAllAuthUsers as drainAuthUsers } from './authUsers.helpers';
 import {
   computeFunnelStats,
@@ -36,6 +36,7 @@ import {
   type EventFunnelPayload,
   type UserEventFlags,
 } from './eventFunnel.helpers';
+import { foundingOfferStatus } from './foundingOffer';
 
 const db = () => admin.firestore();
 
@@ -1865,7 +1866,9 @@ const EVENT_WINDOW_DAYS = 30;
 // The full, uncached computation. Same join style as computeFunnelPayload,
 // plus the two Path-B signals (squareConnection doc, real square payments) and
 // the event-derived paywall/checkout flags.
-export async function computeEventFunnelPayload(): Promise<EventFunnelPayload> {
+export async function computeEventFunnelPayload(): Promise<
+  EventFunnelPayload & { foundingTaken: number }
+> {
   const firestore = db();
   const now = Date.now();
   const cutoff = admin.firestore.Timestamp.fromMillis(now - EVENT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
@@ -1913,7 +1916,14 @@ export async function computeEventFunnelPayload(): Promise<EventFunnelPayload> {
     };
   });
 
-  return rollupEventFunnel(inputs, now, EVENT_WINDOW_DAYS);
+  // Founding-member count over the FULL subs map, not just users with auth
+  // records — a billed sub whose auth account was deleted still holds a spot.
+  let foundingTaken = 0;
+  for (const sub of subs.values()) {
+    if (isBilledSub(sub)) foundingTaken++;
+  }
+
+  return { ...rollupEventFunnel(inputs, now, EVENT_WINDOW_DAYS), foundingTaken };
 }
 
 // Every 6h (offset from the 15-min lazy funnel cache — this one is heavier
@@ -1923,12 +1933,20 @@ export const aggregateEventFunnel = functions
   .pubsub.schedule('every 6 hours')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
-    const payload = await computeEventFunnelPayload();
+    const { foundingTaken, ...payload } = await computeEventFunnelPayload();
     await db().collection('adminStats').doc('eventFunnel').set({ payload, generatedAt: Date.now() });
+
+    // Founding-member cap status → config/ (public read, server-only write)
+    // so the paywall renders a REAL "X of 100 spots left". Same cadence as
+    // the funnel; the count only moves when someone subscribes.
+    const founding = foundingOfferStatus(foundingTaken);
+    await db().collection('config').doc('foundingOffer').set({ ...founding, generatedAt: Date.now() });
+
     console.log(
       `aggregateEventFunnel: users=${payload.shared.signups}, monetized=${payload.monetized.count} ` +
         `(pro=${payload.monetized.viaPro}, square=${payload.monetized.viaSquare}), ` +
-        `trialToMonetized=${(payload.conversion.trialToMonetized * 100).toFixed(1)}%`
+        `trialToMonetized=${(payload.conversion.trialToMonetized * 100).toFixed(1)}%, ` +
+        `foundingSpotsLeft=${founding.spotsLeft}/${founding.cap}`
     );
   });
 
