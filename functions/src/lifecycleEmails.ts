@@ -1,32 +1,48 @@
 /**
- * Trial lifecycle emails — the two conversion-critical sends anchored to the
+ * Trial lifecycle emails — five conversion-focused sends anchored to the
  * TRIAL clock (trialStartedAt), not the signup clock:
  *
- *   - trial_ending: once, when <= 2 days of the 14-day Pro trial remain.
- *   - trial_ended:  once, within 3 days after the trial lapses unconverted.
+ *   - trial_start_value  (day 0–1):  value framing + "send that quote today"
+ *   - trial_square_pitch (day 3–4):  Path B — turn on payments (skipped when
+ *                                    Square is already connected)
+ *   - trial_mid_value    (day 7–8):  the user's OWN real numbers; thin data
+ *                                    drops the figures
+ *   - trial_ending       (≤3 days):  what changes + REAL founding-spots count
+ *   - trial_ended        (T+0..3d):  free-plan reassurance + churn question
  *
  * The signup-anchored onboarding drip (sendOnboardingDrip in index.ts) keeps
- * owning activation tips; this function owns the conversion moment. Copy
- * source: website repo marketing/trial-lifecycle-emails.md.
+ * owning activation tips and the never-activated note (tip 5); this function
+ * owns the conversion moment. Windows are disjoint and each step is
+ * send-once, so a user gets at most one lifecycle email per day and never a
+ * stale step. Copy source: website repo marketing/trial-lifecycle-emails.md
+ * + the conversion-engine spec (cap-only: no deadlines anywhere).
  *
  * SAFETY
- *   - Dry-run by default: sends nothing until LIFECYCLE_LIVE=true is set in
- *     functions/.env (and the function redeployed). Dry runs log the exact
- *     would-send list so the first live run holds no surprises.
+ *   - Dry-run unless LIFECYCLE_LIVE=true in functions/.env. Dry runs log the
+ *     exact would-send list.
  *   - The 3-day trial_ended window means going live never backfills users
  *     whose trials lapsed weeks or months ago.
- *   - Send-once flags live in users/{uid}/settings/emailState
- *     (trialEndingEmailAt / trialEndedEmailAt), stamped only on successful
- *     sends. sendEmail() itself enforces the marketing opt-out and blocks
- *     unsendable domains; isUnreachableEmail() skips the Apple-relay class
- *     before we even read Firestore.
+ *   - Send-once flags live in users/{uid}/settings/emailState (one field per
+ *     step — see SEND_ONCE_FIELD), stamped only on successful sends.
+ *     sendEmail() itself enforces the marketing opt-out and blocks unsendable
+ *     domains; isUnreachableEmail() skips the Apple-relay class up front.
+ *   - Founding-spots numbers come from config/foundingOffer (computed from
+ *     real billed subs). Doc missing or cap filled → the founding copy is
+ *     suppressed, never invented.
  */
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import { listAllAuthUsers } from './authUsers.helpers';
 import { isUnreachableEmail } from './reEngagement.helpers';
-import { lifecycleVerdict } from './lifecycleEmails.helpers';
-import { sendTrialEndingEmail, sendTrialEndedEmail } from './email';
+import { lifecycleVerdict, midTrialRecap, SEND_ONCE_FIELD } from './lifecycleEmails.helpers';
+import {
+  sendTrialStartValueEmail,
+  sendTrialSquarePitchEmail,
+  sendTrialMidValueEmail,
+  sendTrialEndingEmail,
+  sendTrialEndedEmail,
+  type FoundingSpots,
+} from './email';
 
 export const trialLifecycleDaily = functions.pubsub
   .schedule('every day 07:30')
@@ -35,6 +51,17 @@ export const trialLifecycleDaily = functions.pubsub
     const db = admin.firestore();
     const now = Date.now();
     const live = process.env.LIFECYCLE_LIVE === 'true';
+
+    // Cap-only founding scarcity: real spots from config/foundingOffer, or
+    // null → founding copy suppressed.
+    let founding: FoundingSpots | null = null;
+    try {
+      const snap = await db.doc('config/foundingOffer').get();
+      const data = snap.data();
+      if (data?.capActive && typeof data.spotsLeft === 'number' && data.spotsLeft > 0) {
+        founding = { spotsLeft: data.spotsLeft, cap: typeof data.cap === 'number' ? data.cap : 100 };
+      }
+    } catch {}
 
     const authUsers = await listAllAuthUsers(admin.auth());
     let processed = 0;
@@ -48,13 +75,18 @@ export const trialLifecycleDaily = functions.pubsub
         const email = userRecord.email;
         if (!email || isUnreachableEmail(email)) continue;
 
-        const subDoc = await db.doc(`users/${userId}/profile/subscription`).get();
+        const stateRef = db.doc(`users/${userId}/settings/emailState`);
+        const [subDoc, stateDoc, squareDoc] = await Promise.all([
+          db.doc(`users/${userId}/profile/subscription`).get(),
+          stateRef.get(),
+          db.doc(`users/${userId}/settings/squareConnection`).get(),
+        ]);
         if (!subDoc.exists) continue;
         processed++;
 
-        const stateRef = db.doc(`users/${userId}/settings/emailState`);
-        const stateDoc = await stateRef.get();
-        const verdict = lifecycleVerdict(subDoc.data(), stateDoc.data(), now);
+        const verdict = lifecycleVerdict(subDoc.data(), stateDoc.data(), now, {
+          hasSquareConnection: squareDoc.exists,
+        });
         if (!verdict.send) continue;
 
         if (!live) {
@@ -68,14 +100,36 @@ export const trialLifecycleDaily = functions.pubsub
           businessName = settingsDoc.data()?.businessName || '';
         } catch {}
 
-        const ok =
-          verdict.send === 'trial_ending'
-            ? await sendTrialEndingEmail(email, businessName, verdict.daysRemaining ?? 2, userId)
-            : await sendTrialEndedEmail(email, businessName, userId);
+        let ok = false;
+        switch (verdict.send) {
+          case 'trial_start_value':
+            ok = await sendTrialStartValueEmail(email, businessName, userId);
+            break;
+          case 'trial_square_pitch':
+            ok = await sendTrialSquarePitchEmail(email, businessName, userId);
+            break;
+          case 'trial_mid_value': {
+            const docsSnap = await db.collection(`users/${userId}/documents`).get();
+            const recap = midTrialRecap(
+              docsSnap.docs.map((d) => d.data() as any),
+              verdict.trialStartedAt ?? now
+            );
+            ok = await sendTrialMidValueEmail(email, businessName, recap, userId);
+            break;
+          }
+          case 'trial_ending':
+            ok = await sendTrialEndingEmail(email, businessName, verdict.daysRemaining ?? 3, userId, founding);
+            break;
+          case 'trial_ended':
+            ok = await sendTrialEndedEmail(email, businessName, userId, founding);
+            break;
+        }
 
         if (ok) {
-          const field = verdict.send === 'trial_ending' ? 'trialEndingEmailAt' : 'trialEndedEmailAt';
-          await stateRef.set({ [field]: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+          await stateRef.set(
+            { [SEND_ONCE_FIELD[verdict.send]]: admin.firestore.FieldValue.serverTimestamp() },
+            { merge: true }
+          );
           sent++;
         }
       } catch (err: any) {
