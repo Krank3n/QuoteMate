@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import { PASSTHROUGH_SURCHARGE_PCT } from './shared/pdf';
+import { NEXT_PRICE_AUD } from './foundingOffer';
 import { NO_GST_NOTE } from './shared/document/gstMode';
 import {
   buildPaymentReceiptContentHtml,
@@ -888,7 +889,7 @@ export function sendTrialEndingEmail(
   const foundingLine = founding
     ? `
     <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:16px 0 0;">
-      Lock it in as a <strong style="color:#f8fafc;">founding member</strong> and $49/mo is yours for life &mdash; the price goes to $99 for new members once the first ${founding.cap} are in. Right now there are <strong style="color:#f8fafc;">${founding.spotsLeft} of ${founding.cap} spots left</strong>.
+      Lock it in as a <strong style="color:#f8fafc;">founding member</strong> and $49/mo is yours for life &mdash; the price goes to $${NEXT_PRICE_AUD.monthly} for new members once the first ${founding.cap} are in. Right now there are <strong style="color:#f8fafc;">${founding.spotsLeft} of ${founding.cap} spots left</strong>.
     </p>`
     : '';
 
@@ -963,7 +964,7 @@ export function sendTrialEndedEmail(
   const foundingLine = founding
     ? `
     <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-      And if Pro's still on your mind: your <strong style="color:#f8fafc;">founding spot's open while they last</strong> &mdash; $49/mo locked for life, ${founding.spotsLeft} of ${founding.cap} left. Once they fill, it's $99 for new members. No deadline, no pressure &mdash; just first in.
+      And if Pro's still on your mind: your <strong style="color:#f8fafc;">founding spot's open while they last</strong> &mdash; $49/mo locked for life, ${founding.spotsLeft} of ${founding.cap} left. Once they fill, it's $${NEXT_PRICE_AUD.monthly} for new members. No deadline, no pressure &mdash; just first in.
     </p>`
     : '';
 

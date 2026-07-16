@@ -58,4 +58,9 @@ describe('email.ts claim accuracy', () => {
     expect(TRIAL_MS).toBe(14 * 24 * 60 * 60 * 1000);
     expect(src).toMatch(/14[- ]day free trial/i);
   });
+
+  it('never hardcodes the post-cap price (use NEXT_PRICE_AUD from foundingOffer)', () => {
+    const hits = src.match(/^.*\$(?:99|658)\b.*$/gm) || [];
+    expect(hits).toEqual([]);
+  });
 });

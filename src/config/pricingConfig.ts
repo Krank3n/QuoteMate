@@ -1,15 +1,22 @@
 /**
- * Display-only "regular" (anchor) prices for the paywall.
+ * Paywall pricing: what we charge today, and the committed post-cap price.
  *
- * Customers are NEVER charged the REGULAR_PRICE_AUD amounts. They exist purely
- * to frame the actual charged price as a launch discount, via a struck-through
- * "was" price on the paywall and pricing page.
+ * REGULAR_PRICE_AUD is the price new members will pay once the founding-member
+ * cap fills (cap-only model, decided 2026-07-16) — a FUTURE price, not a "was"
+ * price. Nobody has ever been charged it yet. It must equal NEXT_PRICE_AUD in
+ * functions/src/foundingOffer.ts (crossPackageMirrors.guard.test.ts pins both),
+ * because that rise is the promise the founding offer makes: when the cap
+ * fills, the store/Stripe base prices genuinely move to these amounts and
+ * founding members are grandfathered at ACTUAL_PRICE_AUD.
+ *
+ * Display rule (paywall + website): founding framing and the struck-through
+ * anchor only render while config/foundingOffer confirms capActive — never as
+ * an unconditional "launch discount".
  *
  * The real charged prices live in the App Store / Play Store subscription
  * products and the Stripe prices. ACTUAL_PRICE_AUD below must be kept in sync
- * with those so the displayed discount percentage stays truthful. If you ever
- * change what is actually charged, update the store/Stripe products AND this
- * file together.
+ * with those. If you ever change what is actually charged, update the
+ * store/Stripe products AND this file together.
  */
 export type BillingPeriod = 'monthly' | 'yearly';
 
@@ -19,13 +26,13 @@ export const ACTUAL_PRICE_AUD: Record<BillingPeriod, number> = {
   yearly: 328,
 };
 
-/** The "regular" price shown struck-through. Display only — never charged. */
+/** Post-founding-cap price (mirrors functions NEXT_PRICE_AUD). Not charged yet. */
 export const REGULAR_PRICE_AUD: Record<BillingPeriod, number> = {
   monthly: 99,
   yearly: 658,
 };
 
-/** Formatted regular ("was") price for the given period, e.g. "$99". */
+/** Formatted post-cap price for the given period, e.g. "$99". */
 export const regularPriceLabel = (period: BillingPeriod): string =>
   `$${REGULAR_PRICE_AUD[period]}`;
 

@@ -28,7 +28,6 @@ import { CancellationReasonModal } from '../components/CancellationReasonModal';
 import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
 import {
   regularPriceLabel,
-  discountPercent,
   yearlyVsMonthlySavingsPercent,
   feeSavingLabel,
   squareCollectedLast30d,
@@ -736,7 +735,7 @@ export function PaywallScreen() {
             onPress={() => setSelectedPlan('monthly')}
           >
             <Text style={[styles.planOptionLabel, selectedPlan === 'monthly' && styles.planOptionLabelSelected]}>Monthly</Text>
-            <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('monthly')}</Text>
+            {founding?.capActive && <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('monthly')}</Text>}
             <Text style={[styles.planOptionPrice, selectedPlan === 'monthly' && styles.planOptionPriceSelected]}>{getProductPrice(SUBSCRIPTION_SKUS.MONTHLY)}</Text>
             <Text style={[styles.planOptionPeriod, selectedPlan === 'monthly' && styles.planOptionPeriodSelected]}>/month</Text>
           </Pressable>
@@ -749,19 +748,22 @@ export function PaywallScreen() {
               <Text style={styles.saveBadgeText}>Save {yearlyVsMonthlySavingsPercent()}%</Text>
             </View>
             <Text style={[styles.planOptionLabel, selectedPlan === 'yearly' && styles.planOptionLabelSelected]}>Yearly</Text>
-            <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('yearly')}</Text>
+            {founding?.capActive && <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('yearly')}</Text>}
             <Text style={[styles.planOptionPrice, selectedPlan === 'yearly' && styles.planOptionPriceSelected]}>{getProductPrice(SUBSCRIPTION_SKUS.YEARLY)}</Text>
             <Text style={[styles.planOptionPeriod, selectedPlan === 'yearly' && styles.planOptionPeriodSelected]}>/year</Text>
           </Pressable>
         </View>
       )}
 
-      {!isPro && founding?.capActive ? (
+      {!isPro && founding?.capActive && (
         <>
           {/* Founding-member framing — every number here is real: spotsLeft is
               computed server-side from billed subs, and the price rise is the
               committed store/Stripe change once the cap fills. Cap-only model:
-              no personal countdowns anywhere (nothing enforces one yet). */}
+              no personal countdowns anywhere (nothing enforces one yet).
+              Cap filled or status unknown → no offer framing at all: the
+              struck-through anchor is a FUTURE price, only honest while the
+              founding cap is verifiably open. */}
           <Text style={styles.launchOffer}>
             Founding member price · {founding.spotsLeft} of {founding.cap} spots left
           </Text>
@@ -770,11 +772,7 @@ export function PaywallScreen() {
             {regularPriceLabel('monthly')}/mo for new members once the {founding.cap} spots fill.
           </Text>
         </>
-      ) : !isPro ? (
-        <Text style={styles.launchOffer}>
-          Launch offer · {discountPercent(selectedPlan)}% off the regular price
-        </Text>
-      ) : null}
+      )}
 
       {!isPro && feeBleedLine && (
         <Text style={styles.foundingNote}>{feeBleedLine} — it pays for itself.</Text>
