@@ -72,13 +72,7 @@ export async function ensureCanDeliver(target: DeliveryDoc): Promise<DeliveryGat
   }
 
   try {
-    const result =
-      target.kind === 'invoice'
-        ? await squareService.mintInvoicePaymentLink(target.doc.id)
-        : (target.doc.requireDeposit && (target.doc.depositPercentage ?? 0) > 0)
-          ? await squareService.mintQuoteDepositPaymentLink(target.doc.id)
-          : await squareService.mintQuoteFullPaymentLink(target.doc.id);
-    return { ok: true, squarePaymentLinkUrl: result.paymentLinkUrl };
+    return { ok: true, squarePaymentLinkUrl: await mintPaymentLinkForDoc(target) };
   } catch (error: any) {
     return {
       ok: false,
@@ -86,6 +80,72 @@ export async function ensureCanDeliver(target: DeliveryDoc): Promise<DeliveryGat
       message:
         error?.message ||
         'Could not create a Square payment link. Please try again.',
+    };
+  }
+}
+
+/**
+ * Mint the right payment link for a doc: invoice balance, quote deposit (when
+ * a deposit is required), or full quote total. The server writes the link
+ * onto the document, so every customer-facing surface (PDF, hosted page,
+ * invoice email) picks it up from there. Shared by the free-tier gate above
+ * and the trial opt-in below — one routing rule, not two.
+ */
+async function mintPaymentLinkForDoc(target: DeliveryDoc): Promise<string> {
+  const result =
+    target.kind === 'invoice'
+      ? await squareService.mintInvoicePaymentLink(target.doc.id)
+      : (target.doc.requireDeposit && (target.doc.depositPercentage ?? 0) > 0)
+        ? await squareService.mintQuoteDepositPaymentLink(target.doc.id)
+        : await squareService.mintQuoteFullPaymentLink(target.doc.id);
+  return result.paymentLinkUrl;
+}
+
+/**
+ * Whether the send sheet should offer the opt-in "get paid on this quote"
+ * row. Trial users only: free users hit the mandatory gate instead, Pro users
+ * already have payments wherever they've set them up, and a doc that already
+ * carries a link needs nothing. Pure — unit tested.
+ */
+export function shouldOfferTrialPayLink(
+  plan: 'trial' | 'free' | 'pro',
+  doc: Pick<DeliverableDoc, 'squarePaymentLinkUrl'>,
+): boolean {
+  return plan === 'trial' && !doc.squarePaymentLinkUrl;
+}
+
+export type TrialPayLinkResult =
+  | { status: 'connect_required' }
+  | { status: 'attached'; squarePaymentLinkUrl: string }
+  | { status: 'failed'; message: string };
+
+/**
+ * The trial opt-in: attach a Pay Now link to this doc if Square is connected,
+ * or report that the user needs to connect first (caller routes them to
+ * SquareIntegrationScreen). Never blocks a send — the caller proceeds with or
+ * without a link; this exists so tradies wire up payments while they're most
+ * engaged instead of at the post-trial gate.
+ */
+export async function attachTrialPayLink(target: DeliveryDoc): Promise<TrialPayLinkResult> {
+  let connected = false;
+  try {
+    connected = (await checkSquareConnection()).connected;
+  } catch {
+    // Verification failure routes to the integration screen, which shows the
+    // real connection state and offers reconnect.
+  }
+  if (!connected) return { status: 'connect_required' };
+
+  if (target.doc.squarePaymentLinkUrl) {
+    return { status: 'attached', squarePaymentLinkUrl: target.doc.squarePaymentLinkUrl };
+  }
+
+  try {
+    return { status: 'attached', squarePaymentLinkUrl: await mintPaymentLinkForDoc(target) };
+  } catch (error: any) {
+    return {
+      status: 'failed',
+      message: error?.message || 'Could not create a Square payment link. Please try again.',
     };
   }
 }

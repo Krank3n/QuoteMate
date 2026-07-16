@@ -22,7 +22,11 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { markDocumentSent } from '../utils/applyStageChange';
 import { useStore } from '../store/useStore';
-import { ensureCanDeliver } from '../utils/quoteDeliveryGuard';
+import {
+  ensureCanDeliver,
+  attachTrialPayLink,
+  shouldOfferTrialPayLink,
+} from '../utils/quoteDeliveryGuard';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
 import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
 import { SendGateModal } from './SendGateModal';
@@ -60,7 +64,7 @@ export function SendDocumentDialog({
   const quote: Quote = useMemo(() => documentToQuote(doc), [doc]);
   const invoice: Invoice = useMemo(() => documentToInvoice(doc), [doc]);
 
-  const { subscriptionStatus, saveDraft, saveQuote, saveInvoice, createInvoiceFromQuote } = useStore();
+  const { subscriptionStatus, saveDraft, saveQuote, saveInvoice, createInvoiceFromQuote, getEffectivePlan } = useStore();
   const isTrialActive = !!(
     subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired
   );
@@ -72,6 +76,14 @@ export function SendDocumentDialog({
   const [emailBody, setEmailBody] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
+  const [payLinkAttached, setPayLinkAttached] = useState(false);
+  const [isAttachingPayLink, setIsAttachingPayLink] = useState(false);
+
+  // Path B opt-in: offer trial users a Pay Now link at the moment they're
+  // sending real work — connection happens while they're engaged, not at the
+  // post-trial gate. Free users are gated instead; Pro/linked docs need nothing.
+  const offerPayLink =
+    shouldOfferTrialPayLink(getEffectivePlan(), doc) && !payLinkAttached;
 
   const defaultSubject = (() => {
     const businessName = businessSettings?.businessName || 'Your Business';
@@ -92,6 +104,14 @@ export function SendDocumentDialog({
       setEmailPreviewVisible(false);
     }
   }, [visible]);
+
+  // One impression per sheet open — the attach-rate denominator.
+  useEffect(() => {
+    if (actionSheetVisible && offerPayLink) {
+      trackEvent('pay_link_optin_shown', { doc_type: isInvoice ? 'invoice' : 'quote' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionSheetVisible]);
 
   type EmailHandler = {
     draftBody: string | undefined;
@@ -314,8 +334,54 @@ export function SendDocumentDialog({
     onDismiss();
   };
 
+  /**
+   * Trial opt-in: attach a Pay Now link to this doc before it goes out. Not
+   * connected yet → route to SquareIntegrationScreen (square_connected fires
+   * there on OAuth success) and the tradie sends after connecting. Never
+   * blocks — the plain send options above it always work.
+   */
+  const handleAddPayLink = async () => {
+    if (isAttachingPayLink) return;
+    setIsAttachingPayLink(true);
+    try {
+      const result = await attachTrialPayLink(
+        isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: quote }
+      );
+      trackEvent('pay_link_optin_tapped', {
+        doc_type: isInvoice ? 'invoice' : 'quote',
+        outcome: result.status,
+      });
+      if (result.status === 'connect_required') {
+        setActionSheetVisible(false);
+        onDismiss();
+        navigation.navigate('SquareIntegration' as never);
+      } else if (result.status === 'attached') {
+        setPayLinkAttached(true);
+        Alert.alert(
+          'Pay Now button added',
+          `Your customer can pay this ${isInvoice ? 'invoice' : 'quote'} by card the moment it lands. Send it whichever way suits.`
+        );
+      } else {
+        Alert.alert("Couldn't add the pay link", result.message);
+      }
+    } finally {
+      setIsAttachingPayLink(false);
+    }
+  };
+
   const sendOptions: ActionSheetOption[] = [
-    { icon: 'email-outline', label: 'Email', onPress: handleEmailOption },
+    ...(offerPayLink
+      ? [{
+          icon: 'credit-card-fast-outline',
+          label: isAttachingPayLink
+            ? 'Adding your Pay Now button…'
+            : isInvoice
+              ? 'Get paid on this invoice'
+              : 'Get paid on this quote',
+          onPress: handleAddPayLink,
+        }]
+      : []),
+    { icon: 'email-outline', label: 'Email', onPress: handleEmailOption, divider: offerPayLink },
     { icon: 'message-text', label: 'SMS', onPress: handleSendSMS },
     { icon: 'share-variant', label: 'Share', onPress: handleShareFromDialog },
     { icon: 'file-pdf-box', label: 'Export PDF', onPress: handleExportFromDialog },
