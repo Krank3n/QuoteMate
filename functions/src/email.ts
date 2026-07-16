@@ -864,16 +864,33 @@ export function sendReEngagementEmail(
  * onboarding drip), because conversion pressure only makes sense against the
  * trial clock. Copy source: website repo marketing/trial-lifecycle-emails.md.
  */
+/**
+ * Real founding-member availability, read from config/foundingOffer by the
+ * lifecycle cron. null (cap filled / doc unavailable) suppresses every
+ * founding line — no invented scarcity, and cap-only: no deadlines anywhere.
+ */
+export interface FoundingSpots {
+  spotsLeft: number;
+  cap: number;
+}
+
 export function sendTrialEndingEmail(
   to: string,
   businessName: string,
   daysRemaining: number,
-  userId: string
+  userId: string,
+  founding: FoundingSpots | null = null
 ): Promise<boolean> {
   const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
   const greeting = (businessName || '').trim() || 'there';
   const daysWord = daysRemaining <= 1 ? 'tomorrow' : `in ${daysRemaining} days`;
   const pricingUrl = 'https://quotemateapp.au/pricing?utm_source=lifecycle&utm_medium=email&utm_campaign=trial&utm_content=trial_ending';
+  const foundingLine = founding
+    ? `
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:16px 0 0;">
+      Lock it in as a <strong style="color:#f8fafc;">founding member</strong> and $49/mo is yours for life &mdash; the price goes to $99 for new members once the first ${founding.cap} are in. Right now there are <strong style="color:#f8fafc;">${founding.spotsLeft} of ${founding.cap} spots left</strong>.
+    </p>`
+    : '';
 
   const content = wrapEmailTemplate(`
     <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
@@ -908,8 +925,8 @@ export function sendTrialEndingEmail(
     <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:24px 0 0;">
       Pro is <strong style="color:#f8fafc;">$49/month</strong>, or <strong style="color:#f8fafc;">$328 for the year</strong> &mdash; 44% off, which works out around $6.30 a week. Most tradies lose more than that in forgotten line items on one quote.
     </p>
-
-    ${ctaButton('Keep Pro — takes 30 seconds', '#009868', pricingUrl)}
+${foundingLine}
+    ${ctaButton(founding ? 'Claim your founding spot' : 'Keep Pro — takes 30 seconds', '#009868', pricingUrl)}
 
     <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 0;">
       Either way, your quotes, invoices and customers stay yours.
@@ -918,7 +935,9 @@ export function sendTrialEndingEmail(
 
   return sendEmail({
     to,
-    subject: `Your trial ends ${daysWord} — here's exactly what changes`,
+    subject: founding
+      ? `Your trial ends ${daysWord} — and ${founding.spotsLeft} founding spots to go`
+      : `Your trial ends ${daysWord} — here's exactly what changes`,
     htmlContent: content,
     category: 'marketing',
     userId,
@@ -935,11 +954,18 @@ export function sendTrialEndingEmail(
 export function sendTrialEndedEmail(
   to: string,
   businessName: string,
-  userId: string
+  userId: string,
+  founding: FoundingSpots | null = null
 ): Promise<boolean> {
   const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
   const greeting = (businessName || '').trim() || 'there';
   const pricingUrl = 'https://quotemateapp.au/pricing?utm_source=lifecycle&utm_medium=email&utm_campaign=trial&utm_content=trial_ended';
+  const foundingLine = founding
+    ? `
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
+      And if Pro's still on your mind: your <strong style="color:#f8fafc;">founding spot's open while they last</strong> &mdash; $49/mo locked for life, ${founding.spotsLeft} of ${founding.cap} left. Once they fill, it's $99 for new members. No deadline, no pressure &mdash; just first in.
+    </p>`
+    : '';
 
   const content = wrapEmailTemplate(`
     <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
@@ -954,7 +980,7 @@ export function sendTrialEndedEmail(
     <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
       If the answer is price: the annual plan is $328, about $6.30 a week. If the answer is a missing feature, there's a decent chance it gets built &mdash; feature requests from real users run this roadmap.
     </p>
-
+${foundingLine}
     ${ctaButton('See Pro pricing', '#009868', pricingUrl)}
   `, { unsubscribeUrl, preheader: 'No card charged, nothing lost. But tell me one thing.' });
 
@@ -967,6 +993,161 @@ export function sendTrialEndedEmail(
     tags: ['trial-lifecycle', 'trial-ended'],
     unsubscribeUrl,
     replyTo: { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
+  });
+}
+
+/**
+ * Trial lifecycle day 0–1: the trial just started (it starts on the first
+ * quote). Value framing plus ONE action — send that quote today. Pro claims
+ * here must stay true: free already has unlimited quotes/invoices + branding,
+ * so only genuine Pro features are named.
+ */
+export function sendTrialStartValueEmail(
+  to: string,
+  businessName: string,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const name = (businessName || '').trim();
+
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      Your 14 days of Pro start now
+    </h1>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;">
+      Good on ya${name ? `, ${name}` : ''} &mdash; your first quote's in, and that kicks off 14 days with everything unlocked. No card, no catch.
+    </p>
+
+    ${infoCard(`
+      <tr>
+        <td style="padding:12px 0;">
+          <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">While it's all unlocked, put it to work:</p>
+          ${featureBullet('&#128736;', 'Materials lists priced for you, with live supplier prices')}
+          ${featureBullet('&#128196;', 'Every premium PDF template')}
+          ${featureBullet('&#128179;', 'Lower card fee + bank/PayID/BPAY/PayPal options for your customers')}
+        </td>
+      </tr>
+    `)}
+
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:24px 0 0;">
+      One thing to do today: <strong style="color:#f8fafc;">send that quote</strong>. Email, SMS or share it, straight from the app. Quotes sent within the hour win jobs that quotes sent at 9pm lose.
+    </p>
+
+    ${ctaButton('Send your quote')}
+  `, { unsubscribeUrl, preheader: 'One thing to do today: send that quote.' });
+
+  return sendEmail({
+    to,
+    subject: 'Your 14 days of Pro start now',
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['trial-lifecycle', 'trial-start-value'],
+    unsubscribeUrl,
+  });
+}
+
+/**
+ * Trial lifecycle day 3–4 (Path B): pitch turning on payments while the
+ * tradie is engaged — skipped entirely if Square is already connected.
+ * Honest framing: payments work on the free plan too.
+ */
+export function sendTrialSquarePitchEmail(
+  to: string,
+  businessName: string,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = (businessName || '').trim() || 'there';
+
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      Get paid the second the job's done
+    </h1>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Hi ${greeting} &mdash; you're sending tidy quotes. Here's the other half: getting paid without chasing.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Hook up Square &mdash; takes about a minute &mdash; and every quote and invoice carries a <strong style="color:#f8fafc;">Pay Now button</strong> your customer can tap on their phone. Deposits up front, balances on the day, no &ldquo;I'll do a transfer tonight&rdquo;.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+      It's yours to keep on the free plan too &mdash; no need to be on Pro.
+    </p>
+
+    ${ctaButton('Turn on payments')}
+  `, { unsubscribeUrl, preheader: 'One minute of setup and every quote carries a Pay Now button.' });
+
+  return sendEmail({
+    to,
+    subject: "Want to get paid the second the job's done?",
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['trial-lifecycle', 'trial-square-pitch'],
+    unsubscribeUrl,
+  });
+}
+
+/**
+ * Trial lifecycle day 7–8: personalised recap of the user's OWN numbers.
+ * recap.rich gates the figures — thin data falls back to non-numeric copy,
+ * never padded numbers. Numbers come from midTrialRecap over the user's real
+ * documents (lifecycleEmails.helpers.ts).
+ */
+export function sendTrialMidValueEmail(
+  to: string,
+  businessName: string,
+  recap: { quotesBuilt: number; dollarsQuoted: number; sent: number; rich: boolean },
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = (businessName || '').trim() || 'there';
+  const pricingUrl = 'https://quotemateapp.au/pricing?utm_source=lifecycle&utm_medium=email&utm_campaign=trial&utm_content=trial_mid';
+  const dollars = `$${recap.dollarsQuoted.toLocaleString('en-AU')}`;
+
+  const recapBlock = recap.rich
+    ? `
+    ${infoCard(`
+      <tr>
+        <td style="padding:12px 0;">
+          <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">Your first week:</p>
+          ${featureBullet('&#128221;', `<strong style="color:#f8fafc;">${recap.quotesBuilt} quote${recap.quotesBuilt === 1 ? '' : 's'}</strong> built`)}
+          ${featureBullet('&#128176;', `<strong style="color:#f8fafc;">${dollars}</strong> quoted`)}
+          ${featureBullet('&#128232;', `<strong style="color:#f8fafc;">${recap.sent}</strong> sent to customers`)}
+        </td>
+      </tr>
+    `)}
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:24px 0 16px;">
+      That's real work off your plate.
+    </p>`
+    : `
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      One week into your trial &mdash; how's it treating you? If you've got a job sitting unquoted, now's the moment: describe it and QuoteMate prices the materials and labour for you.
+    </p>`;
+
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      ${recap.rich ? 'One week in — here’s your tally' : 'One week in — 7 days of Pro to go'}
+    </h1>
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 16px;">Hi ${greeting},</p>
+${recapBlock}
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+      7 days left on Pro. After that you keep going free &mdash; unlimited quotes and invoices, nothing deleted &mdash; you'll just add a pay link to each job and the fee's a touch higher.
+    </p>
+
+    ${ctaButton('See what Pro keeps', '#009868', pricingUrl)}
+  `, { unsubscribeUrl, preheader: recap.rich ? 'Your first week, tallied up — and 7 days of Pro to go.' : 'Halfway through — 7 days of Pro to go.' });
+
+  return sendEmail({
+    to,
+    subject: recap.rich
+      ? `You've quoted ${dollars} in your first week`
+      : 'One week in — 7 days of Pro to go',
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['trial-lifecycle', 'trial-mid-value'],
+    unsubscribeUrl,
   });
 }
 

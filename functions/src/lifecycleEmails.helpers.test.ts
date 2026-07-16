@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { lifecycleVerdict, ENDED_WINDOW_MS } from './lifecycleEmails.helpers';
+import {
+  lifecycleVerdict,
+  midTrialRecap,
+  ENDED_WINDOW_MS,
+  ENDING_THRESHOLD_DAYS,
+  SEND_ONCE_FIELD,
+  RECAP_MIN_QUOTES,
+  RECAP_MIN_DOLLARS,
+} from './lifecycleEmails.helpers';
 import { TRIAL_MS } from './subscription.helpers';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -13,41 +21,105 @@ const trialSub = (startedDaysAgo: number, over: Record<string, unknown> = {}) =>
   ...over,
 });
 
-describe('lifecycleVerdict', () => {
+describe('lifecycleVerdict — gating', () => {
   it('sends nothing for users who never started a trial', () => {
     expect(lifecycleVerdict(null, undefined, NOW).send).toBeNull();
     expect(lifecycleVerdict({ isPro: false }, undefined, NOW).send).toBeNull();
   });
 
-  it('sends nothing for converted (Pro) users, including comped admin grants', () => {
-    expect(lifecycleVerdict(trialSub(13, { isPro: true }), undefined, NOW).send).toBeNull();
+  it('any Pro signal short-circuits every step: billed, bare isPro flag, admin_grant comp', () => {
+    for (const daysAgo of [0.5, 3.5, 7.5, 12, 15]) {
+      expect(
+        lifecycleVerdict(trialSub(daysAgo, { isPro: true, productId: 'quotemate_pro_yearly' }), undefined, NOW).send
+      ).toBeNull();
+      expect(lifecycleVerdict(trialSub(daysAgo, { isPro: true }), undefined, NOW).send).toBeNull();
+      expect(
+        lifecycleVerdict(trialSub(daysAgo, { isPro: true, platform: 'admin_grant' }), undefined, NOW).send
+      ).toBeNull();
+    }
+  });
+
+  it('sends nothing in the gaps between windows', () => {
+    expect(lifecycleVerdict(trialSub(2.5), undefined, NOW).send).toBeNull();
+    expect(lifecycleVerdict(trialSub(5.5), undefined, NOW).send).toBeNull();
+    expect(lifecycleVerdict(trialSub(6.5), undefined, NOW).send).toBeNull();
+    expect(lifecycleVerdict(trialSub(9.5), undefined, NOW).send).toBeNull();
+  });
+});
+
+describe('trial_start_value (day 0–1)', () => {
+  it('fires inside the window, once', () => {
+    expect(lifecycleVerdict(trialSub(0.5), undefined, NOW).send).toBe('trial_start_value');
+    expect(lifecycleVerdict(trialSub(1.9), undefined, NOW).send).toBe('trial_start_value');
+    const state = { trialStartValueEmailAt: iso(NOW - DAY) };
+    expect(lifecycleVerdict(trialSub(0.5), state, NOW).send).toBeNull();
+  });
+
+  it('never sends stale — a user first seen on day 2+ skips it', () => {
+    expect(lifecycleVerdict(trialSub(2.1), undefined, NOW).send).toBeNull();
+  });
+});
+
+describe('trial_square_pitch (day 3–4, Path B)', () => {
+  it('fires inside the window when Square is NOT connected', () => {
+    expect(lifecycleVerdict(trialSub(3.5), undefined, NOW).send).toBe('trial_square_pitch');
+    expect(lifecycleVerdict(trialSub(4.9), undefined, NOW).send).toBe('trial_square_pitch');
+  });
+
+  it('skipped entirely for already-connected users', () => {
     expect(
-      lifecycleVerdict({ isPro: true, platform: 'admin_grant' }, undefined, NOW).send
+      lifecycleVerdict(trialSub(3.5), undefined, NOW, { hasSquareConnection: true }).send
     ).toBeNull();
   });
 
-  it('sends nothing mid-trial (more than 2 days remaining)', () => {
-    expect(lifecycleVerdict(trialSub(5), undefined, NOW).send).toBeNull();
-    expect(lifecycleVerdict(trialSub(11), undefined, NOW).send).toBeNull();
+  it('send-once and never stale', () => {
+    const state = { trialSquarePitchEmailAt: iso(NOW - DAY) };
+    expect(lifecycleVerdict(trialSub(3.5), state, NOW).send).toBeNull();
+    expect(lifecycleVerdict(trialSub(5.1), undefined, NOW).send).toBeNull();
+  });
+});
+
+describe('trial_mid_value (day 7–8)', () => {
+  it('fires inside the window with trialStartedAt for the personalisation read', () => {
+    const v = lifecycleVerdict(trialSub(7.5), undefined, NOW);
+    expect(v.send).toBe('trial_mid_value');
+    expect(v.trialStartedAt).toBe(NOW - 7.5 * DAY);
   });
 
-  it('sends trial_ending when <= 2 days remain', () => {
-    const v = lifecycleVerdict(trialSub(12.5), undefined, NOW);
+  it('send-once and never stale', () => {
+    const state = { trialMidValueEmailAt: iso(NOW - DAY) };
+    expect(lifecycleVerdict(trialSub(7.5), state, NOW).send).toBeNull();
+    expect(lifecycleVerdict(trialSub(9.1), undefined, NOW).send).toBeNull();
+  });
+});
+
+describe('trial_ending (≤3 days remaining)', () => {
+  it('fires at the threshold and inside it (deriveSubFields Math.ceil convention)', () => {
+    // 10.5 days in → ceil(3.5) = 4 days remaining → not yet.
+    expect(lifecycleVerdict(trialSub(10.5), undefined, NOW).send).toBeNull();
+    // 11.5 days in → ceil(2.5) = 3 → fires.
+    const v = lifecycleVerdict(trialSub(11.5), undefined, NOW);
     expect(v.send).toBe('trial_ending');
-    expect(v.daysRemaining).toBeLessThanOrEqual(2);
+    expect(v.daysRemaining).toBeLessThanOrEqual(ENDING_THRESHOLD_DAYS);
   });
 
-  it('sends trial_ending only once', () => {
+  it('still fires late in the trial and prefers ending over ended while trialing', () => {
+    expect(lifecycleVerdict(trialSub(13.9), undefined, NOW).send).toBe('trial_ending');
+  });
+
+  it('send-once', () => {
     const state = { trialEndingEmailAt: iso(NOW - DAY) };
     expect(lifecycleVerdict(trialSub(12.5), state, NOW).send).toBeNull();
   });
 
-  it('sends trial_ended shortly after expiry', () => {
-    const v = lifecycleVerdict(trialSub(15), undefined, NOW);
-    expect(v.send).toBe('trial_ended');
+  it('takes priority over stale earlier steps for a user with no flags at all', () => {
+    expect(lifecycleVerdict(trialSub(11.5), undefined, NOW).send).toBe('trial_ending');
   });
+});
 
-  it('sends trial_ended only once', () => {
+describe('trial_ended (T+0..3d)', () => {
+  it('fires shortly after expiry, once', () => {
+    expect(lifecycleVerdict(trialSub(15), undefined, NOW).send).toBe('trial_ended');
     const state = { trialEndedEmailAt: iso(NOW - DAY) };
     expect(lifecycleVerdict(trialSub(15), state, NOW).send).toBeNull();
   });
@@ -56,10 +128,60 @@ describe('lifecycleVerdict', () => {
     const daysAgo = (TRIAL_MS + ENDED_WINDOW_MS) / DAY + 1;
     expect(lifecycleVerdict(trialSub(daysAgo), undefined, NOW).send).toBeNull();
   });
+});
 
-  it('prefers trial_ending over trial_ended at the boundary (still trialing)', () => {
-    // 13.9 days in: still trialing with <1 day left.
-    const v = lifecycleVerdict(trialSub(13.9), undefined, NOW);
-    expect(v.send).toBe('trial_ending');
+describe('SEND_ONCE_FIELD', () => {
+  it('maps every step to a distinct emailState field', () => {
+    const fields = Object.values(SEND_ONCE_FIELD);
+    expect(new Set(fields).size).toBe(fields.length);
+    expect(fields).toHaveLength(5);
+  });
+});
+
+describe('midTrialRecap', () => {
+  const T0 = NOW - 7 * DAY;
+  const doc = (over: Record<string, unknown> = {}) => ({
+    createdAt: T0 + DAY,
+    total: 1000,
+    stage: 'draft',
+    ...over,
+  });
+
+  it('counts only documents created since the trial started', () => {
+    const recap = midTrialRecap(
+      [doc(), doc({ createdAt: T0 - DAY, total: 99999 }), doc({ createdAt: undefined })],
+      T0
+    );
+    expect(recap.quotesBuilt).toBe(1);
+    expect(recap.dollarsQuoted).toBe(1000);
+  });
+
+  it('counts sent via the activating-doc rule (stage or sentAt fallback)', () => {
+    const recap = midTrialRecap(
+      [doc({ stage: 'quote_sent' }), doc({ stage: 'draft', sentAt: T0 + DAY }), doc()],
+      T0
+    );
+    expect(recap.sent).toBe(2);
+  });
+
+  it('survives garbage totals', () => {
+    const recap = midTrialRecap([doc({ total: 'not-a-number' }), doc({ total: null })], T0);
+    expect(recap.dollarsQuoted).toBe(0);
+  });
+
+  it('rich only when the numbers would actually impress', () => {
+    // 2 quotes, $2000 → rich.
+    expect(midTrialRecap([doc(), doc()], T0).rich).toBe(true);
+    // 1 quote, $10k → thin (below RECAP_MIN_QUOTES).
+    expect(midTrialRecap([doc({ total: 10000 })], T0).rich).toBe(false);
+    // 3 quotes, $300 total → thin (below RECAP_MIN_DOLLARS).
+    const cheap = [doc({ total: 100 }), doc({ total: 100 }), doc({ total: 100 })];
+    expect(midTrialRecap(cheap, T0).rich).toBe(false);
+    expect(RECAP_MIN_QUOTES).toBe(2);
+    expect(RECAP_MIN_DOLLARS).toBe(500);
+  });
+
+  it('empty docs → thin recap with zeros', () => {
+    expect(midTrialRecap([], T0)).toEqual({ quotesBuilt: 0, dollarsQuoted: 0, sent: 0, rich: false });
   });
 });
