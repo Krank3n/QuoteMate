@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
+import { NBA_ENDING_THRESHOLD_DAYS } from '../utils/nextBestAction';
 import { ACTUAL_PRICE_AUD, REGULAR_PRICE_AUD } from './pricingConfig';
 
 /**
@@ -15,6 +16,12 @@ describe('trial length mirror (functions/src/subscription.helpers.ts TRIAL_DAYS)
   it('is 14 days', () => {
     expect(TRIAL_DAYS).toBe(14);
     expect(TRIAL_MS).toBe(14 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe('trial-ending threshold mirror (functions/src/lifecycleEmails.helpers.ts ENDING_THRESHOLD_DAYS)', () => {
+  it('is 3 days, so the in-app continuity_choice state flips the same day the trial_ending email fires', () => {
+    expect(NBA_ENDING_THRESHOLD_DAYS).toBe(3);
   });
 });
 

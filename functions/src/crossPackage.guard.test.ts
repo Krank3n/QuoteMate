@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SUB_PRICE_AUD, TRIAL_DAYS, TRIAL_MS } from './subscription.helpers';
+import { ENDING_THRESHOLD_DAYS } from './lifecycleEmails.helpers';
 
 /**
  * Cross-package mirror guards. TRIAL_DAYS and the charged prices are
@@ -21,5 +22,11 @@ describe('trial length mirror (src/utils/trialConfig.ts TRIAL_DAYS)', () => {
 describe('price mirror (app ACTUAL_PRICE_AUD + live store/Stripe products)', () => {
   it('charged prices are $49/mo, $328/yr AUD', () => {
     expect(SUB_PRICE_AUD).toEqual({ monthly: 49, yearly: 328 });
+  });
+});
+
+describe('trial-ending threshold mirror (app src/utils/nextBestAction.ts NBA_ENDING_THRESHOLD_DAYS)', () => {
+  it('is 3 days — the in-app continuity_choice state mirrors when trial_ending fires', () => {
+    expect(ENDING_THRESHOLD_DAYS).toBe(3);
   });
 });
