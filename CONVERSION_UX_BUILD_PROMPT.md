@@ -6,7 +6,7 @@ You are working in the QuoteMate app repo (Expo/React Native app + Firebase func
 
 ## Context you should not rediscover
 
-- North star: **20% of trials monetised** (billed Pro OR ≥1 real Square payment; `payments[].method==='square'` webhook-written, manual cash never counts). Live baseline 2026-07-16: 146 trials, 2.05% monetised. 5% gates marketing spend.
+- North star: **20% of trials monetised** (billed Pro OR ≥1 real Square payment; a payment counts when `payments[].method==='square'` or it carries a `squarePaymentId` — i.e. webhook-written, matching `docHasSquarePayment` in `functions/src/eventFunnel.helpers.ts`; manual cash never counts). Live baseline 2026-07-16: 146 trials, 2.05% monetised. 5% gates marketing spend.
 - Already shipped 2026-07-16 (PRs #43–#48) — **do not rebuild, extend**: event funnel (`src/services/analyticsService.ts` → `users/{uid}/events`; `functions/src/eventFunnel.helpers.ts` with `furthestStage`; `aggregateEventFunnel` cron), founding cap (`functions/src/foundingOffer.ts`, `config/foundingOffer`, cap-only, fail-closed display), 5-step lifecycle emails (`functions/src/lifecycleEmails.ts` + helpers, LIVE, dry-run via `functions/scripts/lifecycleDryRun.ts`), Square trial opt-in (`src/utils/quoteDeliveryGuard.ts`, `src/components/SendDocumentDialog.tsx`), Square nudges (`functions/src/squareNudge.helpers.ts`), cross-campaign email suppression (20h window).
 - Key surfaces: `src/screens/PaywallScreen.tsx`, `src/components/TrialBanner.tsx` (dashboard shows it only in the final 3 days — deliberate), `src/screens/DashboardScreen.tsx`, `src/components/SendGateModal.tsx`, `src/components/TakePaymentSheet.tsx`, `src/components/CancellationReasonModal.tsx`.
 - Trial: 14 days, starts on first quote (`trialStartedAt`), expiry recomputed live from `trialStartedAt + TRIAL_MS`; enforcement is the send gate only; creation stays unlimited on Free.
@@ -34,6 +34,10 @@ The plan forbids new conversion pressure while these are open. **Check current s
 - PAY-07 Stripe checkout accepts arbitrary price IDs
 - PAY-08 duplicate Stripe customers / incomplete subscriptions
 - EMAIL-01 documents marked sent before Brevo accepts; EMAIL-05 suppressed recipients retried; Brevo free-plan credits nearly exhausted
+
+## Phase 0.5 — founding-offer definition work (Intervention 6)
+
+The plan sequences this second — right after the blockers — because it protects live paywall/website copy. Follow Intervention 6 in the plan: the shipped model stays cap-only (no per-user deadline); enforcement is a manual price rise when the 100th billed subscriber lands; audit every founding claim currently rendered (paywall, website) against `config/foundingOffer` and the plan's copy rules, and fix any that overpromise.
 
 ## Phase 1 — behavioural-state selector + pressure budget + exposure events (Intervention 0 + 8)
 
@@ -69,7 +73,7 @@ The orchestration layer everything else hangs off. One PR.
 ## Phase 6 — Square-first moments + cancellation save (Interventions 7 + 5)
 
 - Accepted-quote in-app view: "Take a deposit" primary (reuse `TakePaymentSheet`/`StickyJobActionBar`; the hosted acceptance page already mints deposit links).
-- Implementation-intention prompts wiring existing settings: "When they accept, request a 20% deposit?" (`requireDeposit`/`depositPercentage`); "Use this payment setting on future invoices?" after first payment.
+- Implementation-intention prompts wiring existing settings: "When they accept, request a 20% deposit?" — the settings-level fields are `requireDepositByDefault`/`defaultDepositPercentage` (`src/types/index.ts`); `requireDeposit`/`depositPercentage` are the per-quote fields. "Use this payment setting on future invoices?" after first payment.
 - Cancellation (web/Stripe only): reason-routed save treatments per the plan; cancellation always completes in the same flow.
 
 ## Working style

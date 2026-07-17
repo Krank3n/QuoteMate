@@ -1,5 +1,7 @@
 # BUILD: QuoteMate trial→monetised conversion engine
 
+> ⚠️ **SUPERSEDED — do not execute.** Steps 1–4 shipped 2026-07-16 as PRs #43–#48 (cap-only founding model; the 72h grace window below was dropped). Parts of the copy now violate the current plan: no "Pro pays for itself" claims, no push-dependent sends (all tokens are Expo; FCM delivery is broken), and the day-7 email leads with payments collected, not face value. Current work: `CONVERSION_UX_BUILD_PROMPT.md` + `../QuoteMateAppWebsite/marketing/high-intent-conversion-plan.md` (v2). Kept for historical reference only.
+
 You are implementing a conversion system for QuoteMate (React Native/Expo app +
 Firebase Functions backend + Next.js admin site at ../QuoteMateAppWebsite).
 The full technical spec — exact files, line numbers, helpers to reuse, and per-file
