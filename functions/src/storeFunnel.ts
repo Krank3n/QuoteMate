@@ -170,9 +170,11 @@ export const storeFunnelDaily = functions
     if (!ascConfigured) console.info('storeFunnel: ASC_* not set — skipping Apple side');
     if (!playBucket && !ascConfigured) return null;
 
-    // Both sources lag, so refresh a rolling 4-day window (D-1..D-4) each run.
+    // Both sources lag — Play's monthly overview CSV by up to ~5 days — so a
+    // 4-day window could permanently miss days. Refresh a rolling 10-day
+    // window; merge-writes make re-processing already-written days free.
     const days: { compact: string; dashed: string; month: string }[] = [];
-    for (let back = 1; back <= 4; back++) {
+    for (let back = 1; back <= 10; back++) {
       days.push(brisbaneDateParts(new Date(Date.now() - back * 24 * 60 * 60 * 1000)));
     }
 
