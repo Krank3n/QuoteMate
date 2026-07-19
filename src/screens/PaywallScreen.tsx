@@ -34,6 +34,7 @@ import {
 } from '../config/pricingConfig';
 import { trackEvent } from '../services/analyticsService';
 import { resolvePurchaseAnalytics } from '../services/paywallAnalytics.helpers';
+import { classifyReceiptResponse, ReceiptOutcome } from '../utils/purchaseValidation';
 
 const PRO_NUDGES = [
   "Your quotes deserve the VIP treatment",
@@ -233,7 +234,10 @@ export function PaywallScreen() {
             const hasValidPurchase = purchase.purchaseToken || purchase.transactionReceipt || purchase.id;
             if (hasValidPurchase) {
               trackEvent('purchase_completed', resolvePurchaseAnalytics(purchase, Platform.OS));
-              // Send receipt to server for validation
+              // PAY-01: premium is granted only when the server verifies the
+              // receipt — no local fallback. On transient failures the store
+              // transaction stays unfinished so validation retries later.
+              let outcome: ReceiptOutcome = 'retry';
               const currentUser = auth.currentUser;
               if (currentUser) {
                 const API_BASE_URL = process.env.API_BASE_URL || 'https://us-central1-hansendev.cloudfunctions.net';
@@ -249,28 +253,44 @@ export function PaywallScreen() {
                       purchaseToken: purchase.purchaseToken || null,
                     }),
                   });
-                  const data = await response.json();
-                  if (data.success) {
-                    // Reload subscription from Firestore
-                    await loadSubscription();
-                  } else {
-                  }
+                  const data = await response.json().catch(() => null);
+                  outcome = classifyReceiptResponse(response.status, data);
                 } catch (serverError) {
+                  outcome = 'retry';
                 }
               }
 
-              // Always set local premium as fallback
-              await setPremium(
-                true,
-                purchase.productId,
-                new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
-              );
-              await billingService.finishTransaction(purchase);
-              Alert.alert(
-                'Success!',
-                'Welcome to QuoteMate Pro! You now have unlimited quotes.',
-                [{ text: 'OK', onPress: () => navigation.goBack() }]
-              );
+              if (outcome === 'granted') {
+                // Reload subscription from Firestore (server wrote it)
+                await loadSubscription();
+                await setPremium(
+                  true,
+                  purchase.productId,
+                  new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+                );
+                await billingService.finishTransaction(purchase);
+                Alert.alert(
+                  'Success!',
+                  'Welcome to QuoteMate Pro! You now have unlimited quotes.',
+                  [{ text: 'OK', onPress: () => navigation.goBack() }]
+                );
+              } else if (outcome === 'rejected') {
+                trackEvent('purchase_failed', { platform: Platform.OS, code: 'validation_rejected' });
+                await billingService.finishTransaction(purchase);
+                Alert.alert(
+                  "Couldn't verify your purchase",
+                  "The app store couldn't confirm this purchase, so Pro hasn't been switched on. If you were charged, use Restore Purchases or contact support and we'll sort it out.",
+                  [{ text: 'OK' }]
+                );
+              } else {
+                // Transient failure: leave the transaction unfinished so the
+                // store re-delivers it and validation retries.
+                Alert.alert(
+                  'Almost there',
+                  "Your purchase went through but we couldn't confirm it just now. It'll finish automatically next time you open the app.",
+                  [{ text: 'OK' }]
+                );
+              }
             }
           } catch (error) {
             Alert.alert('Error', 'Failed to process purchase. Please contact support.');
@@ -363,7 +383,9 @@ export function PaywallScreen() {
 
       if (activeSubscriptions.length > 0) {
         const purchase = activeSubscriptions[0];
-        // Validate with server
+        // PAY-01: restore only completes when the server verifies the
+        // receipt — no local-premium fallback.
+        let outcome: ReceiptOutcome = 'retry';
         const currentUser = auth.currentUser;
         if (currentUser) {
           const API_BASE_URL = process.env.API_BASE_URL || 'https://us-central1-hansendev.cloudfunctions.net';
@@ -379,22 +401,34 @@ export function PaywallScreen() {
                 purchaseToken: purchase.purchaseToken || null,
               }),
             });
-            const data = await response.json();
-            if (data.success) {
-              await loadSubscription();
-            }
+            const data = await response.json().catch(() => null);
+            outcome = classifyReceiptResponse(response.status, data);
           } catch (serverError) {
+            outcome = 'retry';
           }
         }
 
-        await setPremium(
-          true,
-          purchase.productId,
-          new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
-        );
-        Alert.alert('Restored', 'Your Pro subscription has been restored successfully!', [
-          { text: 'OK', onPress: () => navigation.goBack() },
-        ]);
+        if (outcome === 'granted') {
+          await loadSubscription();
+          await setPremium(
+            true,
+            purchase.productId,
+            new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+          );
+          Alert.alert('Restored', 'Your Pro subscription has been restored successfully!', [
+            { text: 'OK', onPress: () => navigation.goBack() },
+          ]);
+        } else if (outcome === 'rejected') {
+          Alert.alert(
+            "Couldn't verify your subscription",
+            "The app store couldn't confirm an active subscription for this account. If you believe that's wrong, contact support and we'll sort it out."
+          );
+        } else {
+          Alert.alert(
+            'Try again shortly',
+            "We found your subscription but couldn't confirm it just now. Please try Restore Purchases again in a few minutes."
+          );
+        }
       } else {
         Alert.alert('No Purchases Found', 'No previous subscriptions were found for this account.');
       }

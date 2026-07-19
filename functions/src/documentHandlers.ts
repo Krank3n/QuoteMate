@@ -38,6 +38,7 @@ import {
 } from './shared/document/adapter';
 import { canTransition } from './shared/document/stage';
 import { summarizeMaterialEdits, type SentMaterialLike } from './materialEdits.helpers';
+import { resolveServerPlan } from './subscription.helpers';
 import type {
   DocumentRecord,
   DocumentStage,
@@ -504,25 +505,14 @@ function stripLeadingGreeting(text: string): string {
   return text.replace(greetingLine, '').trimStart();
 }
 
-// Mirror of getUserPlanServerSide in index.ts — duplicated here to keep
-// documentHandlers free of index.ts imports. Used to gate the Payment Methods
-// block in invoice emails (pro/trial only). Resolves to 'trial' on profile
-// miss so we err on the generous side.
+// Used to gate the Payment Methods block in invoice emails (pro/trial only).
+// Resolves to 'trial' on profile miss so we err on the generous side.
+// Delegates to resolveServerPlan so the client-writable `plan` string is never
+// trusted for entitlement (PAY-02) — shared with getUserPlanServerSide.
 async function resolveUserPlan(userId: string): Promise<'trial' | 'free' | 'pro'> {
   try {
     const snap = await db().doc(`users/${userId}/profile/subscription`).get();
-    if (!snap.exists) return 'trial';
-    const data = snap.data() || {};
-    if (data.plan === 'pro' || data.plan === 'free' || data.plan === 'trial') return data.plan;
-    if (data.isPro) return 'pro';
-    if (data.trialStartedAt) {
-      const trialMs = 14 * 24 * 60 * 60 * 1000;
-      const startedAt = data.trialStartedAt.toDate
-        ? data.trialStartedAt.toDate()
-        : new Date(data.trialStartedAt);
-      return Date.now() - startedAt.getTime() < trialMs ? 'trial' : 'free';
-    }
-    return 'trial';
+    return resolveServerPlan(snap.exists ? snap.data() : undefined, Date.now());
   } catch {
     return 'trial';
   }

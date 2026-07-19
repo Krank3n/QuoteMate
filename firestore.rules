@@ -9,9 +9,64 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
-    // Users can read/write their own user document and ALL subcollections.
-    match /users/{userId}/{document=**} {
+    // Entitlement fields on users/{uid}/profile/subscription are server-owned
+    // (PAY-02): only the receipt validators, Stripe webhook, and admin tools
+    // may write them (Admin SDK bypasses rules). Client writes to that doc are
+    // allowed only for quota/trial bookkeeping — see the allow-list below,
+    // mirrored in src/utils/subscriptionWritePayload.ts (update both together).
+    // Server-owned keys the client may never add, change, or remove (unchanged
+    // values in a full set() are fine — only affectedKeys count). `isPro` is
+    // NOT here: it has its own rule below (creatable/settable only as false).
+    // `plan` IS here (PAY-02): the server re-derives tier from isPro +
+    // trialStartedAt (resolveServerPlan) and never trusts a client plan string,
+    // so a client plan:'trial'/'pro' — which dodged the free-tier gate + fee —
+    // must be rejected outright.
+    function subEntitlementKeys() {
+      return ['plan', 'platform', 'productId', 'transactionId', 'purchaseToken',
+              'appleValidated', 'googleValidated', 'validatedAt',
+              'subscriptionId', 'customerId', 'priceId', 'cancelAtPeriodEnd',
+              'canceledAt', 'environment', 'restoredFromIncident', 'incidentProUntil',
+              'interval', 'planInterval', 'platformFeeBps'];
+    }
+
+    // Users can read/write their own user document and ALL subcollections —
+    // EXCEPT profile/subscription, which gets the field-guarded match below.
+    // Overlapping matches OR together, so no match here may grant a write to
+    // that doc. In particular a recursive {x=**} matches ZERO or more segments
+    // under rules_version 2, so it must start below the doc, never at it.
+    match /users/{userId} {
       allow read, write: if isOwner(userId);
+    }
+    // Direct subcollection docs (users/{uid}/{collection}/{docId}).
+    match /users/{userId}/{collection}/{docId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId) && !(collection == 'profile' && docId == 'subscription');
+    }
+    // Anything nested deeper. {rest=**} can only resolve to a document here
+    // when it covers at least one segment, so this never re-grants the doc
+    // above (a zero-segment match lands on a collection path, which rules
+    // never evaluate).
+    match /users/{userId}/{collection}/{docId}/{sub}/{rest=**} {
+      allow read, write: if isOwner(userId);
+    }
+    match /users/{userId}/profile/subscription {
+      allow read: if isOwner(userId);
+      allow delete: if false;
+      // Create: the client trial/quota code seeds this doc (isPro:false, no
+      // entitlement keys — `plan` included, so the seed must omit it).
+      allow create: if isOwner(userId)
+        && !request.resource.data.keys().hasAny(subEntitlementKeys())
+        && request.resource.data.get('isPro', false) == false;
+      // Update: entitlement keys must be untouched (unchanged values in a
+      // full set() are fine — only added/removed/changed keys count). isPro
+      // may be written only as false and never to overwrite a server-granted
+      // true.
+      allow update: if isOwner(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(subEntitlementKeys())
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPro'])
+            || (request.resource.data.isPro == false && resource.data.get('isPro', false) == false));
+      // NOTE: trialStartedAt/trialExpired stay client-writable for the trial
+      // bootstrap — a known, accepted weakness (tracked as follow-up).
     }
 
     // Unified documents collection (phase-1 dual-write mirror of quotes+invoices).
@@ -82,6 +137,13 @@ service cloud.firestore {
 
     // Pending links — no client access (Cloud Functions only)
     match /pendingLinks/{linkId} {
+      allow read, write: if false;
+    }
+
+    // Square OAuth state nonces (PAY-03) — Cloud Functions only. A client
+    // read would leak nothing usable (docs are keyed by SHA-256 of the
+    // nonce), but there is no reason to allow any access.
+    match /squareOAuthStates/{stateHash} {
       allow read, write: if false;
     }
 
