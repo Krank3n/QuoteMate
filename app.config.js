@@ -12,7 +12,7 @@ export default {
     // 1.46: adds the @sentry/react-native NATIVE module. Do not publish JS
     // built from this tree as an OTA for 1.45 — the appVersion runtime
     // policy below is what stops that from happening automatically.
-    version: "1.46",
+    version: "1.47",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
