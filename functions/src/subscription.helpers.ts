@@ -17,6 +17,36 @@
 export const TRIAL_DAYS = 14;
 export const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
 
+// Resolve a user's effective tier from their profile/subscription doc for
+// server-side gating (free-tier send gate, Square fee tier, invoice payment
+// block). Source of truth on the server so the client cannot claim a tier.
+//
+// SECURITY (PAY-02): a stored `plan` string is NOT trusted — it was
+// historically client-writable, so a free/expired user could set
+// plan:'trial' or plan:'pro' to dodge the free-tier gate and the higher fee.
+// `isPro` is server-owned (firestore.rules denies client true-writes and every
+// server Pro-writer — Stripe, Apple/Google validators, incident restore — sets
+// it), so it is the only trustworthy Pro signal; trial/free is re-derived from
+// trialStartedAt. (trialStartedAt stays client-writable for the first-quote
+// trial bootstrap — a known, separately-tracked weakness; gaming it only
+// extends the trial, it does not grant Pro.)
+export function resolveServerPlan(
+  data: Record<string, any> | undefined | null,
+  nowMs: number,
+): 'trial' | 'free' | 'pro' {
+  if (!data) return 'trial';
+  if (data.isPro === true) return 'pro';
+  const rawStart = data.trialStartedAt;
+  if (rawStart) {
+    const startedAt = rawStart?.toDate ? rawStart.toDate() : new Date(rawStart);
+    const startMs = startedAt.getTime();
+    if (Number.isFinite(startMs)) {
+      return nowMs - startMs < TRIAL_MS ? 'trial' : 'free';
+    }
+  }
+  return 'trial';
+}
+
 // Monthly-equivalent AUD we actually bill per subscription. Source of truth:
 // the live Stripe "Starter" prices ($49/mo, $328/yr); the iOS/Android yearly
 // SKUs are priced to match. Update here if prices change.
@@ -24,9 +54,10 @@ export const SUB_PRICE_AUD = { monthly: 49, yearly: 328 };
 
 // Apple StoreKit 2 purchase tokens are JWS blobs (header.payload.signature)
 // whose payload records the purchase environment ('Sandbox' | 'Production').
-// validateAppleReceipt writes isPro + productId even when Apple validation
-// fails, so a sandbox/TestFlight purchase is otherwise indistinguishable from
-// a paid sub. Reads an explicit `environment` field first so a backfill can
+// Until Jul 2026 validateAppleReceipt wrote isPro + productId even when Apple
+// validation failed (fixed — PAY-01, receiptValidation.helpers.ts), so
+// HISTORICAL sandbox/TestFlight docs are otherwise indistinguishable from
+// paid subs. Reads an explicit `environment` field first so a backfill can
 // override without re-decoding.
 export function subEnvironment(sub: any): string | null {
   if (typeof sub?.environment === 'string') return sub.environment;

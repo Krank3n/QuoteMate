@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isBilledSub, subEnvironment, deriveSubFields } from './subscription.helpers';
+import { isBilledSub, subEnvironment, deriveSubFields, resolveServerPlan, TRIAL_MS } from './subscription.helpers';
 
 // Build a StoreKit 2-style JWS: header.payload.signature with base64url segments.
 function jwsWith(payload: Record<string, any>): string {
@@ -91,5 +91,50 @@ describe('deriveSubFields billing rollup', () => {
     expect(f.billed).toBe(true);
     expect(f.interval).toBe('yearly');
     expect(f.monthlyAud).toBeCloseTo(328 / 12, 1);
+  });
+});
+
+describe('resolveServerPlan (PAY-02 MAJOR-1 — client plan string is not trusted)', () => {
+  const NOW = Date.parse('2026-07-19T00:00:00Z');
+  const inTrial = new Date(NOW - 3 * 24 * 60 * 60 * 1000).toISOString();
+  const expiredTrial = new Date(NOW - TRIAL_MS - 1000).toISOString();
+
+  it('returns trial when the subscription doc is missing', () => {
+    expect(resolveServerPlan(undefined, NOW)).toBe('trial');
+    expect(resolveServerPlan(null, NOW)).toBe('trial');
+  });
+
+  it('keys Pro off the server-owned isPro flag', () => {
+    expect(resolveServerPlan({ isPro: true }, NOW)).toBe('pro');
+    expect(resolveServerPlan({ isPro: true, trialStartedAt: expiredTrial }, NOW)).toBe('pro');
+  });
+
+  it('IGNORES a forged client plan:pro on a non-Pro doc — regression for the fee/gate bypass', () => {
+    expect(resolveServerPlan({ isPro: false, plan: 'pro', trialStartedAt: expiredTrial }, NOW)).toBe('free');
+  });
+
+  it('IGNORES a forged client plan:trial on an expired-trial doc — regression for the free-tier gate bypass', () => {
+    expect(resolveServerPlan({ plan: 'trial', trialStartedAt: expiredTrial }, NOW)).toBe('free');
+  });
+
+  it('derives trial vs free from trialStartedAt, not the stored plan', () => {
+    expect(resolveServerPlan({ trialStartedAt: inTrial }, NOW)).toBe('trial');
+    expect(resolveServerPlan({ trialStartedAt: expiredTrial }, NOW)).toBe('free');
+    // stored plan:'free' must not override an in-window trial computation
+    expect(resolveServerPlan({ plan: 'free', trialStartedAt: inTrial }, NOW)).toBe('trial');
+  });
+
+  it('treats the trial boundary as exclusive (>= TRIAL_MS is free)', () => {
+    expect(resolveServerPlan({ trialStartedAt: new Date(NOW - TRIAL_MS).toISOString() }, NOW)).toBe('free');
+    expect(resolveServerPlan({ trialStartedAt: new Date(NOW - TRIAL_MS + 1000).toISOString() }, NOW)).toBe('trial');
+  });
+
+  it('accepts a Firestore Timestamp-like trialStartedAt (toDate)', () => {
+    const ts = { toDate: () => new Date(inTrial) };
+    expect(resolveServerPlan({ trialStartedAt: ts }, NOW)).toBe('trial');
+  });
+
+  it('falls back to trial when trialStartedAt is unparseable', () => {
+    expect(resolveServerPlan({ trialStartedAt: 'not-a-date' }, NOW)).toBe('trial');
   });
 });

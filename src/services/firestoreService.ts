@@ -23,6 +23,7 @@ import { auth, db } from '../config/firebase';
 import { Quote, BusinessSettings, SubscriptionStatus, Invoice, ReferralInfo, Contact } from '../types';
 import { Conversation } from '../types/assistant';
 import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
+import { clientSubscriptionWritePayload } from '../utils/subscriptionWritePayload';
 
 /**
  * Master switch for Mate conversation logging. While this is on, every chat is
@@ -379,19 +380,11 @@ class FirestoreService {
 
     try {
       const subscriptionRef = doc(db, 'users', userId, 'profile', 'subscription');
-      await setDoc(subscriptionRef, {
-        isPro: subscriptionStatus.isPro,
-        plan: subscriptionStatus.plan ?? null,
-        quotesThisMonth: subscriptionStatus.quotesThisMonth,
-        currentPeriodStart: subscriptionStatus.currentPeriodStart.toISOString(),
-        currentPeriodEnd: subscriptionStatus.currentPeriodEnd.toISOString(),
-        freeQuotesLimit: subscriptionStatus.freeQuotesLimit,
-        trialStartedAt: subscriptionStatus.trialStartedAt ? new Date(subscriptionStatus.trialStartedAt).toISOString() : null,
-        trialExpired: subscriptionStatus.trialExpired || false,
-        dismissedUpgradeBanner: subscriptionStatus.dismissedUpgradeBanner || false,
-        platformFeeBps: subscriptionStatus.platformFeeBps ?? null,
-        syncedAt: new Date().toISOString(),
-      });
+      // PAY-02: merge a whitelisted payload only. Entitlement fields (isPro,
+      // plan, platformFeeBps, …) are server-owned — firestore.rules denies
+      // client writes that touch them, and the old non-merge setDoc here was
+      // clobbering server-written billing fields for real Pro users.
+      await setDoc(subscriptionRef, clientSubscriptionWritePayload(subscriptionStatus), { merge: true });
     } catch (error) {
       throw error;
     }

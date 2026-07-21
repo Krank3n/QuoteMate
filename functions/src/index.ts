@@ -80,6 +80,15 @@ export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts'
 export { reportPriceFetchUsage } from './featureUsage';
 import { recordMaterialsRecommend } from './featureUsage';
 import { randomUUID } from 'crypto';
+import { receiptVerdict } from './receiptValidation.helpers';
+import { resolveServerPlan } from './subscription.helpers';
+import {
+  SQUARE_OAUTH_STATES_COLLECTION,
+  SQUARE_OAUTH_STATE_TTL_MS,
+  hashOAuthState,
+  newOAuthState,
+  oauthStateVerdict,
+} from './squareOAuth.helpers';
 import {
   AccountReclaimRecord,
   reclaimDocIdForEmail,
@@ -1247,16 +1256,20 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
       const receiptData = purchaseToken || transactionId;
       const sharedSecret = process.env.APPLE_SHARED_SECRET || '';
 
-      let appleValidated = false;
+      // 'unavailable' = couldn't reach a verdict (store unreachable / missing
+      // secret) → retryable. 'invalid' = Apple affirmatively rejected → terminal.
+      let appleOutcome: 'valid' | 'invalid' | 'unavailable' = 'unavailable';
       let appleExpiryDate: Date | null = null;
 
       if (sharedSecret && receiptData) {
-        try {
-          // Try production first, then sandbox
-          for (const url of [
-            'https://buy.itunes.apple.com/verifyReceipt',
-            'https://sandbox.itunes.apple.com/verifyReceipt',
-          ]) {
+        // Try production first, then sandbox (21007 = sandbox receipt sent to
+        // production). Only a definitive non-zero, non-21007 status is an
+        // affirmative rejection; a thrown fetch leaves the outcome unavailable.
+        for (const url of [
+          'https://buy.itunes.apple.com/verifyReceipt',
+          'https://sandbox.itunes.apple.com/verifyReceipt',
+        ]) {
+          try {
             const appleRes = await fetch(url, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -1269,10 +1282,8 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
 
             const appleData = await appleRes.json() as any;
 
-            // Status 0 = valid, 21007 = sandbox receipt sent to production (retry with sandbox)
             if (appleData.status === 0) {
-              appleValidated = true;
-              // Extract expiry from latest receipt info
+              appleOutcome = 'valid';
               const latestInfo = appleData.latest_receipt_info;
               if (latestInfo && latestInfo.length > 0) {
                 const latestExpiry = Math.max(...latestInfo.map((r: any) => parseInt(r.expires_date_ms || '0', 10)));
@@ -1281,22 +1292,44 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
                 }
               }
               break;
-            } else if (appleData.status !== 21007) {
+            } else if (appleData.status === 21007) {
+              continue; // retry against sandbox
+            } else {
+              appleOutcome = 'invalid'; // Apple affirmatively rejected
+              break;
             }
+          } catch (appleError) {
+            console.warn('[receipts] Apple verifyReceipt call failed', { userId, url, error: String(appleError) });
+            // leave outcome 'unavailable'; try the next url
           }
-        } catch (appleError) {
         }
       } else {
+        console.warn('[receipts] Apple validation skipped — missing shared secret or receipt data', { userId });
       }
+
+      // PAY-01: no validation, no entitlement. Never write isPro from an
+      // unverified (or already-expired) receipt.
+      const now = new Date();
+      const verdict = receiptVerdict({ outcome: appleOutcome, storeExpiry: appleExpiryDate, productId, now });
+      if (!verdict.grant) {
+        console.warn('[receipts] Apple receipt not granted', {
+          userId, productId, transactionId, reason: verdict.reason, retryable: verdict.retryable,
+        });
+        // Retryable (store unreachable) → 503 so the client leaves the store
+        // transaction unfinished and re-validates later. Terminal → 402.
+        res.status(verdict.retryable ? 503 : 402).json({
+          success: false,
+          validated: appleOutcome === 'valid',
+          error: verdict.retryable ? 'RECEIPT_VALIDATION_UNAVAILABLE' : 'RECEIPT_VALIDATION_FAILED',
+          reason: verdict.reason,
+        });
+        return;
+      }
+      const appleValidated = true;
+      const expiryDate = verdict.expiryDate;
 
       const firestore = admin.firestore();
       const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
-
-      // Determine subscription period
-      const isYearly = productId.includes('yearly');
-      const periodMs = isYearly ? 365 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
-      const now = new Date();
-      const expiryDate = appleExpiryDate || new Date(now.getTime() + periodMs);
 
       await subscriptionRef.set({
         isPro: true,
@@ -1368,7 +1401,10 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       }
 
 
-      let googleValidated = false;
+      // 'unavailable' = couldn't reach a verdict (API/network error or missing
+      // service account) → retryable. 'invalid' = Google says the purchase is
+      // bad/expired → terminal.
+      let googleOutcome: 'valid' | 'invalid' | 'unavailable' = 'unavailable';
       let googleExpiryDate: Date | null = null;
 
       // Validate with Google Play Developer API if service account is configured
@@ -1399,24 +1435,48 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
           if (googleRes.data) {
             const expiryTimeMs = parseInt(googleRes.data.expiryTimeMillis || '0', 10);
             if (expiryTimeMs > Date.now()) {
-              googleValidated = true;
+              googleOutcome = 'valid';
               googleExpiryDate = new Date(expiryTimeMs);
             } else {
+              googleOutcome = 'invalid'; // Google confirmed the sub has lapsed
             }
+          } else {
+            googleOutcome = 'invalid'; // API responded with no subscription data
           }
-        } catch (googleError) {
+        } catch (googleError: any) {
+          // A 4xx (invalid/not-found purchase token) is an affirmative
+          // rejection; a 5xx / network error is a transient outage.
+          const httpStatus = googleError?.code ?? googleError?.response?.status;
+          googleOutcome = (typeof httpStatus === 'number' && httpStatus >= 400 && httpStatus < 500)
+            ? 'invalid'
+            : 'unavailable';
+          console.warn('[receipts] Google subscriptions.get failed', { userId, httpStatus, outcome: googleOutcome, error: String(googleError) });
         }
       } else {
+        console.warn('[receipts] Google validation skipped — missing service account or purchase token', { userId });
       }
+
+      // PAY-01: no validation, no entitlement. Never write isPro from an
+      // unverified (or already-expired) receipt.
+      const now = new Date();
+      const verdict = receiptVerdict({ outcome: googleOutcome, storeExpiry: googleExpiryDate, productId, now });
+      if (!verdict.grant) {
+        console.warn('[receipts] Google receipt not granted', {
+          userId, productId, transactionId, reason: verdict.reason, retryable: verdict.retryable,
+        });
+        res.status(verdict.retryable ? 503 : 402).json({
+          success: false,
+          validated: googleOutcome === 'valid',
+          error: verdict.retryable ? 'RECEIPT_VALIDATION_UNAVAILABLE' : 'RECEIPT_VALIDATION_FAILED',
+          reason: verdict.reason,
+        });
+        return;
+      }
+      const googleValidated = true;
+      const expiryDate = verdict.expiryDate;
 
       const firestore = admin.firestore();
       const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
-
-      // Determine subscription period
-      const isYearly = productId.includes('yearly');
-      const periodMs = isYearly ? 365 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
-      const now = new Date();
-      const expiryDate = googleExpiryDate || new Date(now.getTime() + periodMs);
 
       await subscriptionRef.set({
         isPro: true,
@@ -1874,7 +1934,9 @@ QUALITY TIER DETECTION — read the job description for tier qualifiers and set 
 - Cabinetry/joinery substance descriptors map to tier too: "custom timber cabinetry", "solid timber doors", "marble benchtop", "stone benchtop", "engineered stone", "Caesarstone" all imply premium for those rows even if the job header doesn't say "premium".
 - EVERY section MUST have sectionLaborHours > 0. A section with zero labour hours is invalid output — if the work is materials-only with no labour (rare), put those materials under an existing labour-bearing section instead of creating a zero-hour section.
 - PER-AREA SURFACE-COVERING SECTIONS ONLY (paving installation, tiling, plastering, rendering, screeding): set sectionMultiplier = total surface area in m² and sectionLaborHours = hours PER m² (typical: paving install 0.4–0.6 h/m², tiling 0.5 h/m², plastering 0.3 h/m², screeding 0.2 h/m²). Per-m² IS a per-unit value: one m² is one unit. Material quantities inside these sections are PER m² (e.g. 6.25 pavers per m²) and get multiplied by sectionMultiplier at save time — do NOT pre-multiply.
-- DISCRETE-UNIT SECTIONS (fence bays, gates, post footings, framing, joists, footings, slabs poured per-pour, doors, windows, decks measured per board): sectionMultiplier = COUNT of those repeating units (e.g. 9 bays, 13 post holes, 1 deck), NOT an area. Material quantities are PER UNIT (e.g. 4 bags concrete per post hole × 13 holes). This applies to fencing, framing, and ALL concrete work that goes into individual holes/footings/footings-beams — those are per-hole not per-m².
+- PER-M² IS FOR JOBS WHERE ONE MATERIAL IS SPREAD/LAID CONTINUOUSLY OVER THE AREA AT A REAL DENSITY. It is NOT for roofing, re-roofing, re-cladding, sheet-metal roofing, insulation, or any job whose materials are sheets, lengths, rolls, ridge/flashing, fasteners and consumables — those are a DISCRETE roof/wall (sectionMultiplier = 1), and each material is derived from the roof's AREA and its EDGE/RIDGE LENGTHS via coverage, NOT by multiplying by the area. Roofing sheets ≈ area ÷ sheet-cover-width in lineal m; ridge capping = ridge-line length in lineal m; anticon = area ÷ roll-coverage; sealant = a few tubes per job. NONE of these is "1 per m²".
+- ANTI-LAUNDER RULE for any per-m² section: a material at exactly 1 (or 2, or 3) per m² — the same round placeholder across several materials — means you did NOT derive it and the save-time × area will launder the job size onto every line (e.g. a 165 m² job → 165 of everything). Either give the material its REAL per-m² density (a specific fraction like 0.35 rolls/m², 6.25 pavers/m²), or move it out of the per-m² section and derive it from the job's lengths/counts. If two materials of different physical kinds (a sheet and a tube of sealant) would both come out at the same number, the classification is wrong — recheck it.
+- DISCRETE-UNIT SECTIONS (fence bays, gates, post footings, framing, joists, footings, slabs poured per-pour, doors, windows, decks measured per board, ROOFS, wall-cladding runs): sectionMultiplier = COUNT of those repeating units (e.g. 9 bays, 13 post holes, 1 deck, 1 roof), NOT an area. Material quantities are PER UNIT (e.g. 4 bags concrete per post hole × 13 holes). This applies to fencing, framing, roofing, and ALL concrete work that goes into individual holes/footings/footings-beams — those are per-hole not per-m².
 - DO NOT include concreting/footings under the per-m² surface-covering rule above. A 13-post fence is 13 discrete footings, not a "concreting per m²" job. If you find yourself emitting >50 bags of concrete per post, your multiplier or per-unit quantity is wrong — recalculate.
 
 CRITICAL — emit quantities in the SMALLEST PHYSICAL UNIT, not in guessed packs/bags:
@@ -1919,6 +1981,15 @@ WORKED EXAMPLE — 30 m² (15m × 2m) merbau deck, no handrails — a previously
 - H4 posts 90x90 @ 1.8m: ((15 ÷ 1.8) + 1) ≈ 10 per row × 2 rows ≈ 20. quantity 20, unit "each". WRONG: 70.
 - Decking oil: 30m² × 2 coats ÷ ~8 m²/L = ~8. quantity 8, unit "L". WRONG: "12 tins".
 This deck is ONE discrete unit (sectionMultiplier = 1), NOT a per-m² surface-covering section — do not multiply these per-deck counts by the area.
+
+WORKED EXAMPLE — 165 m² single-storey tile-to-Colorbond re-roof (tiles off, corrugated .48 on) — a previously-broken case that classed a roof as per-m² and laundered "165" onto every line (165 sheets, 165 silicone tubes, 495 screws). This is ONE discrete roof (sectionMultiplier = 1); labour lives in a per-m² labour section if you like, but MATERIALS are derived from area + lengths, NEVER × area:
+- Colorbond corrugated .48 sheets: cover width ≈ 0.762m → lineal metres = 165 ÷ 0.762 × 1.1 waste ≈ 238. quantity 238, unit "m". reasoning: "165m² ÷ 0.762m cover × 1.1 = 238 lm". WRONG: 165 (that is the raw area, not lineal metres).
+- Anticon roofing blanket: 165 ÷ ~18 m² per roll × 1.1 ≈ 10. quantity 10, unit "each". WRONG: 165.
+- Roof battens @ 900 centres: (roof-slope-run ÷ 0.9 + 1) × ridge-length ≈ derive lineal metres (~185 lm typical). quantity ~185, unit "m". WRONG: 165 or 28-off-nothing.
+- Ridge capping: ridge-line length only (a single-storey gable ≈ 8–14 lineal m), unit "m". WRONG: 55 lengths / 165.
+- Roofing screws: ~5–6 per m² tie-down → 165 × 6 ≈ 990. quantity 990, unit "each". WRONG: 495 (that is 165 × 3 laundered).
+- Roof & gutter silicone: a few tubes per job — 6. quantity 6, unit "each". WRONG: 165 tubes.
+If EVERY roofing material comes out at 165 (or a small multiple), you have laundered the area — STOP and derive each from coverage and lengths.
 
 Guidelines:
 - Group materials into REPEATING WORK UNITS where possible. Identify the smallest repeating unit for each section (e.g. one fence bay, one square metre of decking, one staircase riser).
@@ -12733,9 +12804,23 @@ export const getSquareAuthUrl = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const state = Buffer.from(
-      JSON.stringify({ uid: decodedToken.uid, ts: Date.now() }),
-    ).toString('base64url');
+    // PAY-03: `state` is a random single-use nonce. Only its hash is stored,
+    // bound to the uid that authenticated THIS request — the callback resolves
+    // the uid from the stored doc, never from anything the client can craft.
+    const state = newOAuthState();
+    await admin.firestore()
+      .collection(SQUARE_OAUTH_STATES_COLLECTION)
+      .doc(hashOAuthState(state))
+      .set({
+        uid: decodedToken.uid,
+        createdAtMs: Date.now(),
+        env: SQUARE_ENV,
+        // Consumed (deleted) by squareCallback. Abandoned flows never come
+        // back, so this stamp exists for a Firestore TTL policy on the
+        // squareOAuthStates collection to reap them — enable it in the
+        // console; oauthStateVerdict rejects on createdAtMs regardless.
+        expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + SQUARE_OAUTH_STATE_TTL_MS),
+      });
 
     const params = new URLSearchParams({
       client_id: SQUARE_APP_ID,
@@ -12769,20 +12854,23 @@ export const squareCallback = functions.https.onRequest((req, res) => {
       return;
     }
 
-    let stateData: { uid: string; ts: number };
-    try {
-      stateData = JSON.parse(Buffer.from(state, 'base64url').toString());
-    } catch {
-      res.status(400).json({ error: 'Invalid state parameter' });
+    // PAY-03: resolve the uid from the server-side state doc and consume it
+    // atomically (single use) — a forged or replayed state finds no doc.
+    const stateRef = admin.firestore()
+      .collection(SQUARE_OAUTH_STATES_COLLECTION)
+      .doc(hashOAuthState(state));
+    const stateVerdict = await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(stateRef);
+      const verdict = oauthStateVerdict(snap.exists ? (snap.data() as any) : undefined, Date.now());
+      if (verdict.ok || snap.exists) tx.delete(stateRef);
+      return verdict;
+    });
+    if (!stateVerdict.ok) {
+      res.status(stateVerdict.status).json({ error: stateVerdict.error });
       return;
     }
 
-    if (Date.now() - stateData.ts > 10 * 60 * 1000) {
-      res.status(400).json({ error: 'Authorization expired. Please try again.' });
-      return;
-    }
-
-    const userId = stateData.uid;
+    const userId = stateVerdict.uid;
 
     try {
       const tokenResponse = await fetch(`${squareOAuthBase()}/oauth2/token`, {
@@ -13040,18 +13128,9 @@ async function flagScopeUpgradeIfNeeded(
 async function getUserPlanServerSide(userId: string): Promise<'trial' | 'free' | 'pro'> {
   try {
     const snap = await admin.firestore().doc(`users/${userId}/profile/subscription`).get();
-    if (!snap.exists) return 'trial';
-    const data = snap.data() || {};
-    if (data.plan === 'pro' || data.plan === 'free' || data.plan === 'trial') return data.plan;
-    if (data.isPro) return 'pro';
-    if (data.trialStartedAt) {
-      const trialMs = 14 * 24 * 60 * 60 * 1000; // 14-day trial — keep in sync with src/utils/trialConfig.ts
-      const startedAt = data.trialStartedAt.toDate
-        ? data.trialStartedAt.toDate()
-        : new Date(data.trialStartedAt);
-      return Date.now() - startedAt.getTime() < trialMs ? 'trial' : 'free';
-    }
-    return 'trial';
+    // resolveServerPlan ignores a client-writable `plan` string (PAY-02) and
+    // keys Pro off the server-owned isPro flag.
+    return resolveServerPlan(snap.exists ? snap.data() : undefined, Date.now());
   } catch (error) {
     console.error('[plan] failed to resolve user plan', { userId, error });
     // Fail closed — assume free so a fee is taken rather than waived.

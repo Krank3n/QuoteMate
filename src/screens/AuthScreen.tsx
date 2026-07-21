@@ -8,9 +8,7 @@ import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, An
 import { Text, TextInput, Button, Surface, Title, ActivityIndicator } from 'react-native-paper';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider, sendEmailVerification, getAdditionalUserInfo, UserCredential } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import * as WebBrowser from 'expo-web-browser';
 import * as Crypto from 'expo-crypto';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
@@ -18,9 +16,12 @@ import { colors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { lightTap, errorTap } from '../utils/haptics';
 import { trackWebEvent } from '../utils/webAnalytics';
-
-// Needed for expo-auth-session to work properly
-WebBrowser.maybeCompleteAuthSession();
+import { signInGetIdToken, statusCodes } from '../services/nativeGoogleSignIn';
+import {
+  firebaseSignInWithGoogleIdToken,
+  mapGoogleSignInError,
+  messageForGoogleSignInError,
+} from '../services/googleSignInCore';
 
 // Detect in-app browsers (Facebook Messenger, Instagram, etc.) that block popups
 function isInAppBrowser(): boolean {
@@ -105,25 +106,6 @@ export function AuthScreen() {
   // Input refs for keyboard Return key chaining
   const passwordRef = useRef<RNTextInput>(null);
   const confirmPasswordRef = useRef<RNTextInput>(null);
-
-  // Configure Google Sign-In for mobile (iOS/Android)
-  // On web, we use Firebase popup instead of expo-auth-session
-  // Use debug client ID in development, production client ID in production
-  const androidClientId = __DEV__ && process.env.GOOGLE_OAUTH_ANDROID_CLIENT_ID_DEBUG
-    ? process.env.GOOGLE_OAUTH_ANDROID_CLIENT_ID_DEBUG
-    : process.env.GOOGLE_OAUTH_ANDROID_CLIENT_ID;
-
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    iosClientId: process.env.GOOGLE_OAUTH_IOS_CLIENT_ID || undefined,
-    androidClientId: androidClientId || undefined,
-    // Public web OAuth client ID (exposed in the browser anyway). Hardcoded as
-    // a fallback because non-EXPO_PUBLIC env vars are not inlined into the web
-    // bundle — without this, Google.useAuthRequest throws on web ("webClientId
-    // must be defined"), crashing the whole app to a white screen. Mirrors the
-    // hardcoded-fallback pattern in src/config/firebase.ts.
-    webClientId: process.env.GOOGLE_OAUTH_WEB_CLIENT_ID
-      || '652758863537-86a4q9860h9aalo36f4sb9tpt39ut7bs.apps.googleusercontent.com',
-  });
 
   // Handle Google redirect result (for in-app browsers that can't use popups)
   useEffect(() => {
@@ -222,24 +204,6 @@ export function AuthScreen() {
     checkAppleAuth();
   }, []);
 
-  // Handle Google Sign-In response (mobile)
-  useEffect(() => {
-    if (response?.type === 'success') {
-      setIsProcessingOAuth(true);
-      const { id_token } = response.params;
-      const credential = GoogleAuthProvider.credential(id_token);
-      signInWithCredential(auth, credential)
-        .then((result) => {
-          saveRegistrationPlatform(result, 'google');
-          // Keep loading state - App.tsx will handle navigation
-        })
-        .catch((error) => {
-          setError('Failed to sign in with Google');
-          setIsProcessingOAuth(false);
-        });
-    }
-  }, [response]);
-
   const handleSignIn = async () => {
     if (!email || !password) {
       setError('Please enter email and password');
@@ -328,17 +292,29 @@ export function AuthScreen() {
         await saveRegistrationPlatform(result, 'google');
         // Keep loading state - App.tsx will handle navigation
       } else {
-        // Mobile: Use expo-auth-session
-        await promptAsync();
-        // OAuth state will be handled by response useEffect
+        // Mobile: native Google Sign-In (no browser, no OAuth redirect — works
+        // regardless of the device's default browser, including Firefox).
+        const idToken = await signInGetIdToken();
+        if (!idToken) return; // user cancelled the native picker — no error
+        setIsProcessingOAuth(true);
+        const result = await firebaseSignInWithGoogleIdToken(auth, idToken);
+        await saveRegistrationPlatform(result, 'google');
+        // Keep loading state - App.tsx will handle navigation
       }
     } catch (err: any) {
-      if (err.code === 'auth/popup-closed-by-user') {
-        setError('Sign-in cancelled');
-      } else if (err.code === 'auth/popup-blocked') {
-        setError('Pop-up blocked. Please allow pop-ups for this site.');
+      if (Platform.OS === 'web') {
+        if (err.code === 'auth/popup-closed-by-user') {
+          setError('Sign-in cancelled');
+        } else if (err.code === 'auth/popup-blocked') {
+          setError('Pop-up blocked. Please allow pop-ups for this site.');
+        } else {
+          setError('Failed to sign in with Google. Please try again.');
+        }
       } else {
-        setError('Failed to sign in with Google. Please try again.');
+        // Native SDK errors: no Play Services → email fallback; misconfig
+        // (DEVELOPER_ERROR) → generic; user cancel/in-progress → silent.
+        const message = messageForGoogleSignInError(mapGoogleSignInError(err, statusCodes));
+        if (message) setError(message);
       }
       setIsProcessingOAuth(false);
       setLoading(false);
@@ -544,7 +520,7 @@ export function AuthScreen() {
                   style={styles.googleButton}
                   contentStyle={styles.socialButtonContent}
                   labelStyle={styles.socialButtonLabel}
-                  disabled={loading || (Platform.OS !== 'web' && !request)}
+                  disabled={loading}
                   icon={() => <MaterialCommunityIcons name="google" size={22} color="#fff" />}
                   buttonColor="#4285F4"
                   textColor="#fff"

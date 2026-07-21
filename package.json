@@ -13,6 +13,7 @@
     "export:staging": "expo export --platform web --output-dir dist-staging",
     "deploy:staging": "npm run export:staging && firebase deploy --only hosting --config firebase.staging.json --project hansendev",
     "test": "vitest run",
+    "test:rules": "export PATH=\"/opt/homebrew/opt/openjdk/bin:$PATH\" && firebase emulators:exec --only firestore --project demo-quotemate-rules \"vitest run --config vitest.rules.config.ts\"",
     "test:watch": "vitest",
     "postinstall": "patch-package"
   },
@@ -21,6 +22,7 @@
     "@expo/vector-icons": "^14.1.0",
     "@lottiefiles/dotlottie-react": "^0.18.1",
     "@react-native-async-storage/async-storage": "^2.1.2",
+    "@react-native-google-signin/google-signin": "^16.1.2",
     "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/native": "^7.0.14",
     "@react-navigation/stack": "^7.0.0",
@@ -92,6 +94,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.23.5",
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/papaparse": "^5.5.2",
