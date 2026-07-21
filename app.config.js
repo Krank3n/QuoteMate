@@ -57,6 +57,17 @@ export default {
       ],
       "expo-apple-authentication",
       [
+        // Native Google Sign-In (Play Services / iOS account picker). Replaces
+        // the browser-based expo-auth-session flow, which Firefox and other
+        // non-Chrome default browsers broke by dropping the OAuth redirect.
+        "@react-native-google-signin/google-signin",
+        {
+          // Reversed iOS OAuth client ID — the URL scheme the SDK returns to on
+          // iOS (see GOOGLE_OAUTH_IOS_CLIENT_ID).
+          iosUrlScheme: "com.googleusercontent.apps.652758863537-isuaotmpo68rj5lirc40otkevmr8annf"
+        }
+      ],
+      [
         "expo-speech-recognition",
         {
           microphonePermission: "Allow QuoteMate to use your microphone for voice-to-text job descriptions.",
@@ -158,7 +169,15 @@ export default {
       eas: {
         projectId: "b164d7f8-b04e-4960-a962-ebc74fe65bce"
       },
-      squareApplicationId: SQUARE_APPLICATION_ID
+      squareApplicationId: SQUARE_APPLICATION_ID,
+      // Public Google OAuth client IDs consumed by nativeGoogleSignIn.native.ts
+      // via Constants.expoConfig.extra. Hardcoded fallbacks (mirroring
+      // src/config/firebase.ts) because non-EXPO_PUBLIC env vars are not in the
+      // EAS build context — so the correct value always bakes into the manifest.
+      googleWebClientId: process.env.GOOGLE_OAUTH_WEB_CLIENT_ID
+        || "652758863537-86a4q9860h9aalo36f4sb9tpt39ut7bs.apps.googleusercontent.com",
+      googleIosClientId: process.env.GOOGLE_OAUTH_IOS_CLIENT_ID
+        || "652758863537-isuaotmpo68rj5lirc40otkevmr8annf.apps.googleusercontent.com"
     }
   }
 };
