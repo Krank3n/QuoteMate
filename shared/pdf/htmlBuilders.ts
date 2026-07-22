@@ -626,8 +626,10 @@ function buildReportSignatureHTML(
   sig: { svgPath: string; name: string; width?: number; height?: number } | undefined,
 ): string {
   // No signature → no block. A heading over blank space on a customer
-  // document reads as "forgot to fill this in", not "optional".
-  if (!sig?.svgPath) return '';
+  // document reads as "forgot to fill this in", not "optional". A path
+  // without a single line-to is an accidental tap, not a signature — the
+  // pad filters these now, but legacy captures may still carry them.
+  if (!sig?.svgPath || !sig.svgPath.includes('L')) return '';
   const name = sig.name ? escapeHtml(sig.name) : '';
   // viewBox must match the capture-space of the pad the ink was drawn on;
   // a fixed guess clips signatures from pads with other proportions. The
@@ -638,7 +640,7 @@ function buildReportSignatureHTML(
   return `
       <div class="report-signature">
         <div class="report-signature-label">${escapeHtml(label)}</div>
-        <div class="report-signature-name">${name}</div>
+        ${name ? `<div class="report-signature-name">${name}</div>` : ''}
         ${svg}
       </div>`;
 }
@@ -691,7 +693,11 @@ export function buildReportPdfHtml(data: ReportPdfData, business: BusinessPdfDat
       })()
     : '';
 
-  const hasSignature = !!(data.customerSignature || data.technicianSignature);
+  // Only real ink counts — a signature whose path has no line-to is an
+  // accidental tap and renders nothing, so it must not pull in the
+  // "I am satisfied…" statement either.
+  const hasInk = (s?: { svgPath: string }) => !!s?.svgPath && s.svgPath.includes('L');
+  const hasSignature = hasInk(data.customerSignature) || hasInk(data.technicianSignature);
   const signaturesHtml = hasSignature
     ? `
       <div class="section-wrapper report-signatures" style="page-break-inside: avoid;">

@@ -123,4 +123,29 @@ describe('buildReportPdfHtml', () => {
     expect(html).toContain('Jess Tech');
     expect(html).not.toContain('report-signature-label">Customer<');
   });
+
+  // Regression: an accidental tap on the pad captured `M x y` (no line-to)
+  // — invisible ink that rendered an empty "signed" block plus the
+  // satisfaction statement on the customer PDF.
+  it('treats a tap-only path as unsigned — no block, no statement', () => {
+    const html = buildReportPdfHtml(
+      reportData({
+        customerSignature: { svgPath: 'M 224 92', name: '.' },
+      }),
+      business,
+    );
+    expect(html).not.toContain('class="report-signature-label"');
+    expect(html).not.toContain('I am satisfied the above work');
+  });
+
+  it('omits the name row when the signer name is blank', () => {
+    const html = buildReportPdfHtml(
+      reportData({
+        technicianSignature: { svgPath: 'M 1 1 L 50 20', name: '' },
+      }),
+      business,
+    );
+    expect(html).toContain('report-signature-label">Technician<');
+    expect(html).not.toContain('class="report-signature-name"');
+  });
 });
