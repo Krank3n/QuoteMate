@@ -559,7 +559,7 @@ export async function reviewQuote(input: { quoteId: string }): Promise<unknown> 
     return { error: res?.error || 'Quote not found.' };
   }
   const q = res.quote;
-  const review = reviewQuoteMaterials((q.materials as Material[]) || []);
+  const review = reviewQuoteMaterials((q.materials as Material[]) || [], q.sections);
   return {
     quoteId,
     number: q.number,
