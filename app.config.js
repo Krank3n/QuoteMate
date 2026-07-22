@@ -103,6 +103,9 @@ export default {
       ],
       "expo-iap",
       ["./plugins/withKotlinVersion", "2.2.0"],
+      // GoogleSignIn iOS SDK (native Google sign-in) pulls Swift pod
+      // AppCheckCore whose ObjC deps need module maps — see the plugin.
+      "./plugins/withModularHeaders",
       "./plugins/withFmtConstevalFix",
       "./plugins/withBouncyCastleDedup",
       // Skip the Square plugin entirely if SQUARE_APP_ID_PRODUCTION is missing
