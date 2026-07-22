@@ -5,8 +5,10 @@ import {
   buildInitialReportForm,
   buildReportInput,
   formFromReport,
+  latestTechnicianSignature,
   type ReportFormState,
 } from './reportDraft';
+import type { ServiceReport } from '../../../shared/report/types';
 import type { Job } from '../../../shared/job/types';
 
 function makeJob(overrides: Partial<Job> = {}): Job {
@@ -137,5 +139,54 @@ describe('formFromReport', () => {
     expect(form.equipment).toEqual(['Wrench']);
     expect(form.workCarriedOut).toBe('Resealed joint');
     expect(form.photos).toEqual([]);
+  });
+});
+
+describe('latestTechnicianSignature', () => {
+  const report = (over: Partial<ServiceReport>): ServiceReport =>
+    ({
+      id: 'r1',
+      jobId: 'j1',
+      userId: 'u1',
+      number: 'RP-001',
+      visitDate: 1,
+      serviceType: 'Service',
+      equipment: [],
+      itemsChecked: [],
+      status: 'draft',
+      createdAt: 1,
+      updatedAt: 1,
+      ...over,
+    }) as ServiceReport;
+
+  const realSig = { svgPath: 'M 10 80 L 60 20 L 110 90', name: 'Jess', signedAt: 1, width: 400, height: 180 };
+  const ghostSig = { svgPath: 'M 400 57 L 400 57', name: '', signedAt: 1 };
+
+  it('returns the first (newest) report with real technician ink', () => {
+    const found = latestTechnicianSignature([
+      report({ id: 'new', technicianSignature: realSig }),
+      report({ id: 'old', technicianSignature: { ...realSig, name: 'Older' } }),
+    ]);
+    expect(found?.name).toBe('Jess');
+  });
+
+  it('skips ghost captures without measurable ink', () => {
+    const found = latestTechnicianSignature([
+      report({ id: 'ghost', technicianSignature: ghostSig }),
+      report({ id: 'real', technicianSignature: realSig }),
+    ]);
+    expect(found?.name).toBe('Jess');
+  });
+
+  it('never returns a customer signature', () => {
+    const found = latestTechnicianSignature([
+      report({ id: 'c', customerSignature: realSig }),
+    ]);
+    expect(found).toBeNull();
+  });
+
+  it('returns null when no report carries technician ink', () => {
+    expect(latestTechnicianSignature([])).toBeNull();
+    expect(latestTechnicianSignature([report({})])).toBeNull();
   });
 });

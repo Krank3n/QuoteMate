@@ -47,6 +47,7 @@ import {
   buildReportInput,
   deriveReportContext,
   formFromReport,
+  latestTechnicianSignature,
   type ReportFormState,
 } from './reportDraft';
 
@@ -102,6 +103,29 @@ export function ServiceReportScreen() {
     if (routeReportId) return; // edit mode hydrates below instead
     setForm(buildInitialReportForm(job));
   }, [job, form, routeReportId]);
+
+  // New report: pre-fill the technician pad with the tradie's most recent
+  // real signature — their squiggle never changes, so re-drawing it on
+  // every docket is pure friction. Visible in the pad, one tap to Clear.
+  // Functional setters keep any ink the tradie laid down before this fetch
+  // resolved; the CUSTOMER pad is never pre-filled — fresh ink every visit.
+  useEffect(() => {
+    if (routeReportId) return;
+    let cancelled = false;
+    reportService.listReports().then((reports) => {
+      if (cancelled) return;
+      const sig = latestTechnicianSignature(reports);
+      if (!sig) return;
+      setTechSigPath((prev) => prev || sig.svgPath);
+      setTechSigName((prev) => prev || sig.name);
+      setTechSigSize((prev) =>
+        prev ?? (sig.width && sig.height ? { width: sig.width, height: sig.height } : prev),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [routeReportId]);
 
   // Edit mode: load the existing report once.
   useEffect(() => {

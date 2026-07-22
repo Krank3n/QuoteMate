@@ -16,8 +16,10 @@
 import type { Job, JobPhoto } from '../../../shared/job/types';
 import type {
   ReportChecklistItem,
+  ServiceReport,
   SignatureCapture,
 } from '../../../shared/report/types';
+import { pathHasInk } from '../../../shared/pdf/signatureInk';
 import type { CreateReportInput } from '../../services/reportService';
 
 /** Customer context lifted off the Job for the PDF export options. */
@@ -155,4 +157,22 @@ export function formFromReport(
     customerSignature: report.customerSignature,
     technicianSignature: report.technicianSignature,
   };
+}
+
+/**
+ * The tradie's most recent real technician signature, for pre-filling the
+ * pad on a NEW report — their signature never changes, so drawing it fresh
+ * on every docket is pure friction. Reports are expected newest-first (as
+ * listReports returns them); ghost captures (no measurable ink) and the
+ * customer signature are never carried forward — customer ink must be
+ * fresh on every visit.
+ */
+export function latestTechnicianSignature(
+  reports: ServiceReport[],
+): SignatureCapture | null {
+  for (const report of reports) {
+    const sig = report.technicianSignature;
+    if (sig && pathHasInk(sig.svgPath)) return sig;
+  }
+  return null;
 }
