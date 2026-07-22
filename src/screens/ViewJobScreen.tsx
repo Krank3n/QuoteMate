@@ -26,6 +26,7 @@ import { JobScopeCard, type ScopeStep } from '../components/JobScopeCard';
 import { JobDetailHeader } from '../components/JobDetailHeader';
 import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
+import { canUseServiceReports } from '../utils/reportEntitlement';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, stageMetaFor } from '../components/JobStageSheet';
 import {
@@ -69,6 +70,7 @@ export function ViewJobScreen() {
 
   const documents = useStore((s) => s.documents);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  const getEffectivePlan = useStore((s) => s.getEffectivePlan);
   const businessSettings = useStore((s) => s.businessSettings);
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
@@ -609,6 +611,13 @@ export function ViewJobScreen() {
         break;
       case 'duplicate':
         handleDuplicate();
+        break;
+      case 'service_report':
+        if (canUseServiceReports(getEffectivePlan())) {
+          navigation.navigate('ServiceReport', { jobId: job.id });
+        } else {
+          navigation.navigate('Paywall');
+        }
         break;
       case 'exportPdf':
         if (primaryDoc) {

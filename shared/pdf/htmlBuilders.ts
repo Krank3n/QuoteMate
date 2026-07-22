@@ -3,7 +3,7 @@
  * Used by both client (Expo Print) and server (Puppeteer) renderers
  */
 
-import { PdfMaterial, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId } from './types';
+import { PdfMaterial, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId, ReportPdfData } from './types';
 import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
@@ -596,6 +596,188 @@ export function buildQuotePdfHtml(
 
       <div class="pdf-footer">
         <p>QuoteMate</p>
+      </div>
+    </body>
+    </html>
+    `;
+}
+
+/**
+ * Render a single narrative block (nature of problem / work carried out /
+ * recommended work). Returns '' when the text is empty so the block is
+ * omitted entirely rather than left as an empty heading.
+ */
+function buildReportNarrativeHTML(heading: string, text: string | undefined): string {
+  if (!text || !text.trim()) return '';
+  return `
+      <div class="info-section" style="page-break-inside: avoid;">
+        <h3>${escapeHtml(heading)}</h3>
+        <p>${formatMultiline(text.trim())}</p>
+      </div>`;
+}
+
+/**
+ * Render one signature block: the printed name with the captured SVG path
+ * drawn inline underneath it. The viewBox matches the signature pad's
+ * coordinate space so the stroke scales to fit.
+ */
+function buildReportSignatureHTML(
+  label: string,
+  sig: { svgPath: string; name: string; width?: number; height?: number } | undefined,
+): string {
+  // No signature → no block. A heading over blank space on a customer
+  // document reads as "forgot to fill this in", not "optional".
+  if (!sig?.svgPath) return '';
+  const name = sig.name ? escapeHtml(sig.name) : '';
+  // viewBox must match the capture-space of the pad the ink was drawn on;
+  // a fixed guess clips signatures from pads with other proportions. The
+  // 300×150 fallback only covers legacy captures without dimensions.
+  const vbWidth = sig.width && sig.width > 0 ? sig.width : 300;
+  const vbHeight = sig.height && sig.height > 0 ? sig.height : 150;
+  const svg = `<svg class="report-signature-svg" viewBox="0 0 ${vbWidth} ${vbHeight}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"><path d="${sig.svgPath}" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+  return `
+      <div class="report-signature">
+        <div class="report-signature-label">${escapeHtml(label)}</div>
+        <div class="report-signature-name">${name}</div>
+        ${svg}
+      </div>`;
+}
+
+/**
+ * Build the full service-report PDF HTML document. A service report is a
+ * customer-facing leave-behind: what was found, what was done, what's
+ * recommended next — no money, no line items. Reuses the same header / logo
+ * / footer chrome as the quote and invoice builders. The footer shows only
+ * the tradie's business name (never "QuoteMate") because this is a
+ * customer-facing artifact.
+ */
+export function buildReportPdfHtml(data: ReportPdfData, business: BusinessPdfData): string {
+  const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
+
+  const equipmentHtml = data.equipment.length > 0
+    ? `
+      <div class="section-wrapper" style="page-break-inside: avoid;">
+        <h3>Equipment</h3>
+        <ul class="report-list">
+          ${data.equipment.map((e) => `<li>${escapeHtml(e)}</li>`).join('')}
+        </ul>
+      </div>`
+    : '';
+
+  const checklistHtml = data.itemsChecked.length > 0
+    ? `
+      <div class="section-wrapper" style="page-break-inside: avoid;">
+        <h3>Items checked</h3>
+        <ul class="report-checklist">
+          ${data.itemsChecked.map((it) => `<li><span class="report-check-box">${it.checked ? '&#10003;' : '&#9744;'}</span><span class="report-check-text">${escapeHtml(it.text)}</span></li>`).join('')}
+        </ul>
+      </div>`
+    : '';
+
+  const photosHtml = (data.photos && data.photos.length > 0)
+    ? (() => {
+        const imgs = data.photos!
+          .map((p) => p.dataUri || p.url)
+          .filter((src): src is string => !!src)
+          .map((src) => `<div class="report-photo"><img src="${src}" alt="Service photo" /></div>`)
+          .join('');
+        return imgs
+          ? `
+      <div class="section-wrapper" style="page-break-inside: avoid;">
+        <h3>Photos</h3>
+        <div class="report-photo-grid">${imgs}</div>
+      </div>`
+          : '';
+      })()
+    : '';
+
+  const hasSignature = !!(data.customerSignature || data.technicianSignature);
+  const signaturesHtml = hasSignature
+    ? `
+      <div class="section-wrapper report-signatures" style="page-break-inside: avoid;">
+        <p class="report-signature-statement">I am satisfied the above work has been carried out as stated.</p>
+        <div class="report-signature-grid">
+          ${buildReportSignatureHTML('Customer', data.customerSignature)}
+          ${buildReportSignatureHTML('Technician', data.technicianSignature)}
+        </div>
+      </div>`
+    : '';
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+      <style>
+        ${printMediaCSS}
+        ${getTemplateCSS(templateId, business.brandColor)}
+        .report-list { margin: 8px 0; padding-left: 20px; }
+        .report-list li { margin: 2px 0; }
+        .report-checklist { list-style: none; margin: 8px 0; padding: 0; }
+        .report-checklist li { display: flex; align-items: flex-start; margin: 4px 0; }
+        .report-check-box { display: inline-block; width: 20px; font-size: 15px; line-height: 1.4; }
+        .report-check-text { flex: 1; }
+        .report-photo-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+        .report-photo { width: 48%; box-sizing: border-box; }
+        .report-photo img { width: 100%; height: auto; border-radius: 6px; }
+        .report-signature-statement { font-size: 12px; color: #4b5563; margin: 0 0 12px 0; }
+        .report-signature-grid { display: flex; gap: 24px; }
+        .report-signature { flex: 1; }
+        .report-signature-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; }
+        .report-signature-name { font-weight: 700; margin: 4px 0; min-height: 18px; }
+        .report-signature-svg { width: 100%; max-width: 260px; height: 90px; border-bottom: 1px solid #9ca3af; }
+      </style>
+    </head>
+    <body>
+      <div class="content-wrapper">
+      <div class="header">
+        <div class="header-business">
+          <div class="header-content">
+            ${business.logoHtml || ''}
+            <div class="header-text">
+              <h1>${business.businessName}</h1>
+              <p>
+                ${business.abn ? `<strong>ABN:</strong> ${business.abn}<br>` : ''}
+                ${business.address ? `<strong>Address:</strong> ${business.address.replace(/\n/g, '<br>')}<br>` : ''}
+                ${business.email ? `<strong>Email:</strong> ${business.email}<br>` : ''}
+                ${business.phone ? `<strong>Phone:</strong> ${business.phone}${business.website ? '<br>' : ''}` : ''}
+                ${business.website ? `<strong>Web:</strong> ${business.website}` : ''}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="header-meta">
+          <h2>SERVICE REPORT</h2>
+          ${data.reportNumber ? `<p><strong>Report #:</strong> ${escapeHtml(data.reportNumber)}</p>` : ''}
+          <p><strong>Visit Date:</strong> ${escapeHtml(data.visitDate)}</p>
+          <p><strong>Service Type:</strong> ${escapeHtml(data.serviceType)}</p>
+          <p><strong>Customer:</strong> ${escapeHtml(data.customerName)}</p>
+          ${data.customerEmail ? `<p><strong>Email:</strong> ${escapeHtml(data.customerEmail)}</p>` : ''}
+          ${data.customerPhone ? `<p><strong>Phone:</strong> ${escapeHtml(data.customerPhone)}</p>` : ''}
+          ${data.jobAddress ? `<p><strong>Job Address:</strong> ${escapeHtml(data.jobAddress)}</p>` : ''}
+        </div>
+      </div>
+
+      ${buildReportNarrativeHTML('Risk Assessment', data.riskAssessment)}
+
+      ${equipmentHtml}
+
+      ${checklistHtml}
+
+      ${buildReportNarrativeHTML('Nature of Problem', data.natureOfProblem)}
+
+      ${buildReportNarrativeHTML('Work Carried Out', data.workCarriedOut)}
+
+      ${buildReportNarrativeHTML('Recommended Work', data.recommendedWork)}
+
+      ${photosHtml}
+
+      ${signaturesHtml}
+      </div>
+
+      <div class="pdf-footer">
+        <p>${escapeHtml(business.businessName)}</p>
       </div>
     </body>
     </html>

@@ -116,6 +116,25 @@ export interface InvoicePdfData extends QuotePdfData {
   depositCredit?: number;
 }
 
+export interface ReportPdfData {
+  reportNumber: string;
+  customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  jobAddress?: string;
+  visitDate: string; // preformatted e.g. "22 July 2026"
+  serviceType: string;
+  riskAssessment?: string;
+  equipment: string[];
+  itemsChecked: { text: string; checked: boolean }[];
+  natureOfProblem?: string;
+  workCarriedOut?: string;
+  recommendedWork?: string;
+  photos?: { dataUri?: string; url?: string }[];
+  customerSignature?: { svgPath: string; name: string; width?: number; height?: number };
+  technicianSignature?: { svgPath: string; name: string; width?: number; height?: number };
+}
+
 export interface BusinessPdfData {
   businessName: string;
   email?: string;
