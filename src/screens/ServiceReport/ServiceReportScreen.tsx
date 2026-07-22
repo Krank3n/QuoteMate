@@ -679,12 +679,6 @@ export function ServiceReportScreen() {
             numberOfLines={3}
             style={styles.input}
           />
-          <View style={styles.dictationRow}>
-            <DictationButton
-              value={form.riskAssessment}
-              onText={(next) => patch({ riskAssessment: next })}
-            />
-          </View>
 
           {/* Equipment */}
           <SectionLabel text="Equipment on site" optional />
@@ -785,12 +779,6 @@ export function ServiceReportScreen() {
             numberOfLines={3}
             style={styles.input}
           />
-          <View style={styles.dictationRow}>
-            <DictationButton
-              value={form.natureOfProblem}
-              onText={(next) => patch({ natureOfProblem: next })}
-            />
-          </View>
           <SectionLabel text="Work carried out" optional />
           <TextInput
             mode="outlined"
@@ -801,12 +789,6 @@ export function ServiceReportScreen() {
             numberOfLines={3}
             style={styles.input}
           />
-          <View style={styles.dictationRow}>
-            <DictationButton
-              value={form.workCarriedOut}
-              onText={(next) => patch({ workCarriedOut: next })}
-            />
-          </View>
           <SectionLabel text="Recommended work" optional />
           <TextInput
             mode="outlined"
@@ -817,12 +799,6 @@ export function ServiceReportScreen() {
             numberOfLines={3}
             style={styles.input}
           />
-          <View style={styles.dictationRow}>
-            <DictationButton
-              value={form.recommendedWork}
-              onText={(next) => patch({ recommendedWork: next })}
-            />
-          </View>
           {canQuoteRecommended && (
             <TouchableOpacity
               onPress={handleQuoteRecommendedWork}
@@ -844,6 +820,18 @@ export function ServiceReportScreen() {
               </Text>
             </TouchableOpacity>
           )}
+
+          {/* One mic for the whole write-up: everything lands in Work
+              carried out, and "Write it up" sorts the facts into the right
+              sections. Four stacked mics read as clutter; one reads as a
+              feature. */}
+          <View style={styles.dictationRow}>
+            <DictationButton
+              value={form.workCarriedOut}
+              onText={(next) => patch({ workCarriedOut: next })}
+              hint="Talk through the visit — Mate sorts it into the right sections"
+            />
+          </View>
 
           <TouchableOpacity
             onPress={handleWriteItUp}
