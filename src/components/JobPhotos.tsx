@@ -50,9 +50,12 @@ interface LocalPhoto extends QuotePhoto {
 interface JobPhotosProps {
   photos: QuotePhoto[];
   onPhotosChange: (photos: QuotePhoto[]) => void;
+  /** Hide the built-in "Job Photos / optional / hint" header — for screens
+   *  that render their own section label above this component. */
+  hideHeader?: boolean;
 }
 
-export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
+export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps) {
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
   const [annotatingPhoto, setAnnotatingPhoto] = useState<LocalPhoto | null>(null);
   const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
@@ -328,13 +331,17 @@ export function JobPhotos({ photos, onPhotosChange }: JobPhotosProps) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <Text style={styles.label}>Job Photos</Text>
-        <Text style={styles.optional}>optional</Text>
-      </View>
-      <Text style={styles.hint}>
-        Add site photos or plans to help with AI analysis and show clients the scope
-      </Text>
+      {!hideHeader && (
+        <>
+          <View style={styles.headerRow}>
+            <Text style={styles.label}>Job Photos</Text>
+            <Text style={styles.optional}>optional</Text>
+          </View>
+          <Text style={styles.hint}>
+            Add site photos or plans to help with AI analysis and show clients the scope
+          </Text>
+        </>
+      )}
 
       <View style={styles.grid}>
         {allPhotos.map((photo) => {

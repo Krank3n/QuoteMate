@@ -23,10 +23,13 @@ import { Platform, Alert } from 'react-native';
 import {
   buildQuotePdfHtml,
   buildInvoicePdfHtml,
+  buildReportPdfHtml,
   QuotePdfData,
   InvoicePdfData,
+  ReportPdfData,
   BusinessPdfData,
 } from '../../shared/pdf';
+import { ServiceReport } from '../../shared/report/types';
 import { useStore } from '../store/useStore';
 import { checkSquareConnection } from '../services/squareService';
 
@@ -393,6 +396,224 @@ export async function exportDocumentPDF(
                 await MailComposer.composeAsync({
                   subject: emailSubject,
                   recipients: doc.customerEmail ? [doc.customerEmail] : [],
+                  body: emailBody,
+                  attachments: [newUri],
+                });
+              } else {
+                Alert.alert('Error', 'Email is not available on this device');
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to compose email');
+            }
+          },
+        },
+        {
+          text: 'Share',
+          onPress: async () => {
+            const isAvailable = await Sharing.isAvailableAsync();
+            if (isAvailable) {
+              await Sharing.shareAsync(newUri, {
+                UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
+                mimeType: 'application/pdf',
+                dialogTitle: filename,
+              });
+            }
+          },
+        },
+        { text: 'OK' },
+      ],
+    );
+  } catch (error) {
+    Alert.alert('Error', 'Failed to export PDF. Please try again.');
+  }
+}
+
+// ============================================================
+// SERVICE REPORT PDF
+// ============================================================
+
+/**
+ * Context the report itself doesn't carry. A ServiceReport links to a Job by
+ * id and holds no customer fields, so the caller passes the resolved customer
+ * / address details (read off the linked Job) through options.
+ */
+export interface ReportPdfOptions {
+  isPro?: boolean;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  jobAddress?: string;
+}
+
+/**
+ * Build the ReportPdfData payload from a ServiceReport plus the customer
+ * context supplied by the caller, resolve the business chrome the same way
+ * quotes/invoices do, and render via the shared report HTML builder.
+ */
+// Session cache for base64-inlined report photos, keyed by source URI —
+// same rationale as logoHtmlCache above: re-encoding on every export blocks
+// the main thread for no reason.
+const photoDataUriCache = new Map<string, string>();
+
+/**
+ * Resolve a report photo to something the PDF renderer can safely embed.
+ *
+ * Web: the browser fetches remote images natively — pass the URL through.
+ * Mobile: remote <img src="https://…"> stalls Android's print bridge
+ * indefinitely (same failure documented on prepareLogoHtml above) and races
+ * expo-print's snapshot on iOS, silently dropping photos on slow signal. So
+ * photos are downloaded and inlined as base64 data URIs, exactly like the
+ * logo. A photo that can't be fetched (offline) is skipped rather than
+ * hanging the export.
+ */
+async function prepareReportPhoto(uri: string): Promise<{ dataUri?: string; url?: string } | null> {
+  if (Platform.OS === 'web') return { url: uri };
+
+  const cached = photoDataUriCache.get(uri);
+  if (cached) return { dataUri: cached };
+
+  try {
+    const isRemote = uri.startsWith('http://') || uri.startsWith('https://');
+    let base64: string;
+    if (isRemote) {
+      const tmp = `${FileSystem.cacheDirectory}report-photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.img`;
+      const downloaded = await FileSystem.downloadAsync(uri, tmp);
+      base64 = await FileSystem.readAsStringAsync(downloaded.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    } else {
+      base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    }
+    // image/jpeg decodes fine for both JPEG and PNG payloads in the print
+    // renderers (WebKit / Android print WebView) — same as the logo path.
+    const dataUri = `data:image/jpeg;base64,${base64}`;
+    photoDataUriCache.set(uri, dataUri);
+    return { dataUri };
+  } catch {
+    return null;
+  }
+}
+
+export async function generateReportPDF(
+  report: ServiceReport,
+  businessSettings: BusinessSettings | null,
+  options?: ReportPdfOptions,
+): Promise<string> {
+  const logoHtml = await prepareLogoHtml(businessSettings, options?.isPro);
+  const business = mapBusinessData(businessSettings, logoHtml);
+
+  // Inline photos before building the HTML — remote URLs hang the Android
+  // print bridge and race the iOS snapshot (see prepareReportPhoto).
+  const preparedPhotos = report.photos?.length
+    ? (await Promise.all(report.photos.map((p) => prepareReportPhoto(p.storageUrl)))).filter(
+        (p): p is { dataUri?: string; url?: string } => p !== null,
+      )
+    : undefined;
+
+  const pdfData: ReportPdfData = {
+    reportNumber: report.number,
+    customerName: options?.customerName || '',
+    customerEmail: options?.customerEmail,
+    customerPhone: options?.customerPhone,
+    jobAddress: options?.jobAddress,
+    visitDate: format(new Date(report.visitDate), 'dd MMMM yyyy'),
+    serviceType: report.serviceType,
+    riskAssessment: report.riskAssessment,
+    equipment: report.equipment,
+    itemsChecked: report.itemsChecked.map(it => ({ text: it.text, checked: it.checked })),
+    natureOfProblem: report.natureOfProblem,
+    workCarriedOut: report.workCarriedOut,
+    recommendedWork: report.recommendedWork,
+    photos: preparedPhotos,
+    customerSignature: report.customerSignature
+      ? {
+          svgPath: report.customerSignature.svgPath,
+          name: report.customerSignature.name,
+          width: report.customerSignature.width,
+          height: report.customerSignature.height,
+        }
+      : undefined,
+    technicianSignature: report.technicianSignature
+      ? {
+          svgPath: report.technicianSignature.svgPath,
+          name: report.technicianSignature.name,
+          width: report.technicianSignature.width,
+          height: report.technicianSignature.height,
+        }
+      : undefined,
+  };
+
+  return buildReportPdfHtml(pdfData, business);
+}
+
+/**
+ * Export a service report PDF. Mirrors `exportDocumentPDF`'s platform
+ * handling (web print window / mobile expo-print + share-or-email sheet)
+ * with report-appropriate filename and copy.
+ */
+export async function exportReportPDF(
+  report: ServiceReport,
+  businessSettings: BusinessSettings | null,
+  action: 'export' | 'share' = 'export',
+  options?: ReportPdfOptions,
+): Promise<void> {
+  try {
+    const html = await generateReportPDF(report, businessSettings, options);
+
+    const customerName = options?.customerName || 'Customer';
+    const filename = `Service_Report_${sanitizeForFilename(customerName)}_${format(new Date(report.visitDate), 'dd-MMM-yyyy')}.pdf`;
+    const emailSubject = `Service report for ${customerName}`;
+    const emailBody = `Please find attached your service report from ${format(new Date(report.visitDate), 'dd MMMM yyyy')}.\n\nThank you.`;
+
+    if (Platform.OS === 'web') {
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
+        printWindow.document.title = filename;
+        printWindow.onload = () => {
+          printWindow.focus();
+          printWindow.print();
+        };
+      } else {
+        Alert.alert('Error', 'Please allow popups to export PDF');
+      }
+      return;
+    }
+
+    const { uri } = await Print.printToFileAsync({ html });
+    const newUri = `${FileSystem.cacheDirectory}${filename}`;
+    await FileSystem.copyAsync({ from: uri, to: newUri });
+
+    if (action === 'share') {
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(newUri, {
+          UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
+          mimeType: 'application/pdf',
+          dialogTitle: filename,
+        });
+      } else {
+        Alert.alert('PDF Created', `${filename} saved successfully`);
+      }
+      return;
+    }
+
+    Alert.alert(
+      'PDF Exported',
+      `${filename} created successfully`,
+      [
+        {
+          text: 'Email',
+          onPress: async () => {
+            try {
+              const isAvailable = await MailComposer.isAvailableAsync();
+              if (isAvailable) {
+                await MailComposer.composeAsync({
+                  subject: emailSubject,
+                  recipients: options?.customerEmail ? [options.customerEmail] : [],
                   body: emailBody,
                   attachments: [newUri],
                 });

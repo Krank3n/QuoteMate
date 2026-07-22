@@ -52,6 +52,7 @@ import { AddMaterialScreen } from '../screens/NewQuote/AddMaterialScreen';
 import { LaborMarkupScreen } from '../screens/NewQuote/LaborMarkupScreen';
 import { JobPreviewScreen } from '../screens/NewQuote/JobPreviewScreen';
 import { ReeceOrderScreen } from '../screens/ReeceOrderScreen';
+import { ServiceReportScreen } from '../screens/ServiceReport/ServiceReportScreen';
 
 import { colors } from '../theme';
 
@@ -70,6 +71,14 @@ export type NewQuoteStackParamList = {
   AddMaterial: { materialId?: string; mode?: 'quote' | 'invoice' } | undefined;
   LaborMarkup: { mode?: 'quote' | 'invoice' } | undefined;
   JobPreview: { mode?: 'quote' | 'invoice'; viewing?: boolean; editing?: boolean } | undefined;
+};
+
+// Param types for full-screen routes on the RootStack. The navigator itself is
+// left untyped (it hosts many screens); this is the shared source of truth for
+// callers navigating into these routes. The Wiring phase reads ServiceReport
+// from here to type its navigation.navigate(...) call.
+export type RootStackParamList = {
+  ServiceReport: { jobId: string; reportId?: string };
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -491,6 +500,20 @@ export function RootNavigator() {
           headerTintColor: colors.white,
           headerTitleStyle: { fontWeight: '700' },
           title: 'Job',
+        }}
+      />
+      <RootStack.Screen
+        name="ServiceReport"
+        component={ServiceReportScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: colors.primary,
+          },
+          headerTintColor: colors.white,
+          headerTitleStyle: { fontWeight: '700' },
+          title: 'Service Report',
         }}
       />
       <RootStack.Screen

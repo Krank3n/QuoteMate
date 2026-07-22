@@ -27,6 +27,7 @@ export type JobAction =
   | 'edit'
   | 'send'
   | 'duplicate'
+  | 'service_report'
   | 'exportPdf'
   | 'pushToXero'
   | 'archive'
@@ -101,6 +102,13 @@ const ROWS: RowDef[] = [
     label: 'Duplicate',
     sub: 'Clone scope + checklist into a new Accepted job',
     icon: 'content-duplicate',
+    when: () => true,
+  },
+  {
+    id: 'service_report',
+    label: 'Service report',
+    sub: 'Leave-behind report for the visit',
+    icon: 'clipboard-check-outline',
     when: () => true,
   },
   {
