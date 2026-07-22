@@ -430,7 +430,7 @@ export function DocumentEmailPreviewModal({
     }
 
     const warning = buildPresendWarning(
-      reviewQuoteMaterials(doc.materials),
+      reviewQuoteMaterials(doc.materials, doc.sections),
       doc.type === 'invoice' ? 'invoice' : 'quote',
       { materialsShownToCustomer: doc.showMaterialCosts !== false },
     );

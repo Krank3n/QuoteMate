@@ -37,6 +37,7 @@ import {
   LiveAuthError,
   LiveOfflineError,
   LiveQuotaError,
+  LiveRateLimitError,
   mintLiveToken,
 } from './liveSession';
 
@@ -302,9 +303,14 @@ export async function openVoiceSession(
         return;
       } catch (err: any) {
         lastErr = err instanceof Error ? err : new LiveOfflineError('Voice reconnect failed.');
-        // Quota/auth failures won't heal with another attempt — bail now
-        // rather than burning more mints.
-        if (err instanceof LiveQuotaError || err instanceof LiveAuthError) break;
+        // Quota, auth, and rate-limit failures won't heal with another attempt
+        // — and re-minting into a rate limit only deepens it. Bail now rather
+        // than burning more mints.
+        if (
+          err instanceof LiveQuotaError ||
+          err instanceof LiveAuthError ||
+          err instanceof LiveRateLimitError
+        ) break;
       }
     }
     reconnecting = false;

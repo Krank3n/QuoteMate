@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { reviewQuoteMaterials, isFlaggedRow, buildPresendWarning } from './quoteReview';
-import type { Material } from '../types';
+import { reviewQuoteMaterials, isFlaggedRow, buildPresendWarning, detectAnchorLaunderedIssues } from './quoteReview';
+import type { Material, QuoteSection } from '../types';
 
 // Minimal Material factory — only the fields the classifier reads matter; the
 // rest get harmless defaults so a test row is a valid Material.
@@ -15,6 +15,42 @@ function mat(overrides: Partial<Material>): Material {
     manualPriceOverride: false,
     ...overrides,
   };
+}
+
+// Minimal QuoteSection factory — the detector reads name/multiplier/laborHours.
+function sec(overrides: Partial<QuoteSection>): QuoteSection {
+  return {
+    id: 's1',
+    name: 'Section',
+    multiplier: 1,
+    laborHours: 1,
+    laborRate: 85,
+    laborUnit: 'hours',
+    laborTotal: 85,
+    sortOrder: 0,
+    ...overrides,
+  };
+}
+
+// The exact QU-178425 quote: a 165 m² tile-to-Colorbond re-roof mis-classed as
+// a per-m² section (multiplier 165, 0.5 h/m²), so Round-1 emitted "1 per m²"
+// for every material and × 165 laundered the roof area onto each line.
+function roofFixture(): { materials: Material[]; sections: QuoteSection[] } {
+  const sections = [
+    sec({ id: 'roof', name: 'Roof Replacement', multiplier: 165, laborHours: 0.5 }),
+    sec({ id: 'site', name: 'Site Setup & Waste', multiplier: 1, laborHours: 7.5 }),
+  ];
+  const base = { section: 'Roof Replacement', priceConfidence: 'low' as const };
+  const materials: Material[] = [
+    mat({ id: 'r1', name: 'Colorbond Corrugated Roofing Sheets 0.48mm BMT', quantity: 165, unit: 'm', requiredQty: 165, requiredUnit: 'm', templateBaseQuantity: 1, price: 42, pricingSource: 'scraper', ...base }),
+    mat({ id: 'r2', name: 'Anticon Roofing Blanket', quantity: 9, unit: 'each', requiredQty: 165, requiredUnit: 'm²', templateBaseQuantity: 1, price: 89.9, pricingSource: 'scraper', ...base }),
+    mat({ id: 'r3', name: 'Metal Roof Battens 40mm', quantity: 28, unit: 'each', requiredQty: 165, requiredUnit: 'm', templateBaseQuantity: 1, price: 18.5, pricingSource: 'scraper', ...base }),
+    mat({ id: 'r4', name: 'Roofing Screws (Timber Fixing)', quantity: 495, unit: 'each', templateBaseQuantity: 3, price: 0.07, pricingSource: 'ai', ...base }),
+    mat({ id: 'r5', name: 'Batten Screws', quantity: 165, unit: 'each', templateBaseQuantity: 1, price: 0.07, pricingSource: 'ai', ...base }),
+    mat({ id: 'r6', name: 'Colorbond Ridge Capping', quantity: 55, unit: 'each', requiredQty: 165, requiredUnit: 'm', templateBaseQuantity: 1, price: 38.9, pricingSource: 'scraper', ...base }),
+    mat({ id: 'r7', name: 'Roof and Gutter Silicone Sealant', quantity: 165, unit: 'each', requiredQty: 165, requiredUnit: 'each', templateBaseQuantity: 1, price: 17.5, pricingSource: 'scraper', ...base }),
+  ];
+  return { materials, sections };
 }
 
 describe('reviewQuoteMaterials', () => {
@@ -170,5 +206,82 @@ describe('buildPresendWarning — hidden materials and labour-only quotes', () =
   it('uses the visible wording by default', () => {
     const w = buildPresendWarning(reviewQuoteMaterials([zero()]));
     expect(w?.message).toContain("will show as $0 on the customer's quote");
+  });
+});
+
+describe('detectAnchorLaunderedIssues — QU-178425 (165 m² re-roof)', () => {
+  it('flags every anchor-showing line in the laundered roof section', () => {
+    const { materials, sections } = roofFixture();
+    const issues = detectAnchorLaunderedIssues(materials, sections);
+    // All seven roof lines carry the laundered area, one way or another
+    // (quantity === 165, requiredQty === 165, or 495 = 3 × 165).
+    expect(issues.map((i) => i.materialId).sort()).toEqual(['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
+    expect(issues.every((i) => i.kind === 'inflated_quantity')).toBe(true);
+    // The detail names the area anchor and the section.
+    expect(issues[0].detail).toContain('165');
+    expect(issues[0].detail).toContain('Roof Replacement');
+  });
+
+  it('is a no-op when sections are not supplied (back-compat)', () => {
+    const { materials } = roofFixture();
+    expect(detectAnchorLaunderedIssues(materials, undefined)).toEqual([]);
+    // Without sections the rows still surface — but as their pricing verdict
+    // (low-confidence / estimated), NOT as inflated_quantity.
+    const review = reviewQuoteMaterials(materials);
+    expect(review.counts.inflatedQuantity).toBe(0);
+    expect(review.counts.total).toBe(7);
+  });
+
+  it('reviewQuoteMaterials surfaces the launder and dedupes it against the pricing verdict', () => {
+    const { materials, sections } = roofFixture();
+    const review = reviewQuoteMaterials(materials, sections);
+    // Every row is also low-confidence/ai-priced, but inflated_quantity wins the
+    // dedupe so nothing is listed twice.
+    expect(review.counts.inflatedQuantity).toBe(7);
+    expect(review.counts.estimated).toBe(0);
+    expect(review.counts.lowConfidence).toBe(0);
+    expect(review.counts.total).toBe(7);
+    expect(review.summary).toContain('7 with an inflated quantity');
+  });
+
+  it('gates the send with the silicone/sheet blow-out named and quantified', () => {
+    const { materials, sections } = roofFixture();
+    const w = buildPresendWarning(reviewQuoteMaterials(materials, sections), 'quote');
+    expect(w).not.toBeNull();
+    expect(w?.title).toBe('Some quantities need a look');
+    expect(w?.message).toContain('• Colorbond Corrugated Roofing Sheets 0.48mm BMT (165 m)');
+    expect(w?.message).toContain('(+4 more)');
+  });
+});
+
+describe('detectAnchorLaunderedIssues — does not fire on genuine sections', () => {
+  it('leaves a real per-m² paver patio alone (materials carry real densities)', () => {
+    const sections = [sec({ id: 'pave', name: 'Paver Patio', multiplier: 25, laborHours: 0.5 })];
+    const materials = [
+      mat({ id: 'p1', name: 'Concrete Pavers 400x400', quantity: 172, unit: 'each', templateBaseQuantity: 6, section: 'Paver Patio', priceConfidence: 'high' }),
+      mat({ id: 'p2', name: 'Crusher Dust', quantity: 4000, unit: 'kg', templateBaseQuantity: 160, section: 'Paver Patio', priceConfidence: 'high' }),
+      mat({ id: 'p3', name: 'Bedding Sand', quantity: 1275, unit: 'kg', templateBaseQuantity: 68, section: 'Paver Patio', priceConfidence: 'high' }),
+    ];
+    expect(detectAnchorLaunderedIssues(materials, sections)).toEqual([]);
+  });
+
+  it('leaves a discrete fence-bay section alone (per-unit labour >= 1 h)', () => {
+    const sections = [sec({ id: 'fence', name: 'Colorbond Fence Bay', multiplier: 9, laborHours: 1.5 })];
+    const materials = [
+      mat({ id: 'f1', name: 'Steel Fence Post', quantity: 18, unit: 'each', templateBaseQuantity: 2, section: 'Colorbond Fence Bay' }),
+      mat({ id: 'f2', name: 'Colorbond Fence Sheet', quantity: 27, unit: 'each', templateBaseQuantity: 3, section: 'Colorbond Fence Bay' }),
+      mat({ id: 'f3', name: 'Post Cap', quantity: 9, unit: 'each', templateBaseQuantity: 1, section: 'Colorbond Fence Bay' }),
+    ];
+    expect(detectAnchorLaunderedIssues(materials, sections)).toEqual([]);
+  });
+
+  it('does not fire on a small area (< 20 m²) — reserved for area-scale blow-ups', () => {
+    const sections = [sec({ id: 'tile', name: 'Bathroom Tiling', multiplier: 10, laborHours: 0.5 })];
+    const materials = [
+      mat({ id: 't1', name: 'Wall Tiles', quantity: 10, unit: 'each', templateBaseQuantity: 1, section: 'Bathroom Tiling' }),
+      mat({ id: 't2', name: 'Tile Adhesive', quantity: 10, unit: 'each', templateBaseQuantity: 1, section: 'Bathroom Tiling' }),
+      mat({ id: 't3', name: 'Grout', quantity: 10, unit: 'each', templateBaseQuantity: 1, section: 'Bathroom Tiling' }),
+    ];
+    expect(detectAnchorLaunderedIssues(materials, sections)).toEqual([]);
   });
 });

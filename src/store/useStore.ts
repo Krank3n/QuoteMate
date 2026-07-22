@@ -2914,7 +2914,7 @@ export const useStore = create<AppState>((set, get) => ({
 
             get().updateQuote(pricedResult.updatedQuote);
             await get().saveDraft(get().currentQuote!);
-            review = reviewQuoteMaterials(pricedResult.updatedQuote.materials);
+            review = reviewQuoteMaterials(pricedResult.updatedQuote.materials, pricedResult.updatedQuote.sections);
 
             const parts: string[] = [];
             if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
@@ -3316,7 +3316,7 @@ export const useStore = create<AppState>((set, get) => ({
               total: priced.total,
             };
             await get().saveDocument(repricedDoc);
-            const review = reviewQuoteMaterials(priced.materials);
+            const review = reviewQuoteMaterials(priced.materials, priced.sections);
             onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
             return { ok: true, navigate: { kind: 'job_preview', quoteId: doc.id }, review };
           }
@@ -3326,7 +3326,7 @@ export const useStore = create<AppState>((set, get) => ({
           if (!quote) return { ok: false, error: 'Quote not found.' };
           const { priced } = await runReprice(quote);
           await get().saveQuote(priced);
-          const review = reviewQuoteMaterials(priced.materials);
+          const review = reviewQuoteMaterials(priced.materials, priced.sections);
           onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
           return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, review };
         }

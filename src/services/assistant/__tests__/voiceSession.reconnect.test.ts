@@ -23,7 +23,7 @@ import {
   RECONNECT_DELAYS_MS,
   VoiceSessionCallbacks,
 } from '../voiceSession';
-import { mintLiveToken, LiveOfflineError, LiveQuotaError } from '../liveSession';
+import { mintLiveToken, LiveOfflineError, LiveQuotaError, LiveRateLimitError } from '../liveSession';
 
 const mintMock = vi.mocked(mintLiveToken);
 
@@ -274,6 +274,24 @@ describe('drop with reconnect (sticky)', () => {
     expect(cb.onError.mock.calls[0][0]).toBeInstanceOf(LiveQuotaError);
     expect(cb.onClose).toHaveBeenCalledTimes(1);
     // No second socket was ever opened.
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('stops retrying immediately on a rate-limit error', async () => {
+    const cb = makeCallbacks();
+    await openSticky(cb);
+
+    // A drop while the mint endpoint is rate-limited must not spin through the
+    // remaining attempts re-minting — that only deepens the storm.
+    mintMock.mockRejectedValue(new LiveRateLimitError('Whoa — too many requests. Wait a moment.'));
+    MockWebSocket.instances[0].onclose?.({ code: 1006 });
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
+
+    expect(cb.onReconnecting).toHaveBeenCalledTimes(1);
+    expect(cb.onError).toHaveBeenCalledTimes(1);
+    expect(cb.onError.mock.calls[0][0]).toBeInstanceOf(LiveRateLimitError);
+    expect(cb.onClose).toHaveBeenCalledTimes(1);
+    // No second socket was ever opened — the loop bailed after one attempt.
     expect(MockWebSocket.instances).toHaveLength(1);
   });
 

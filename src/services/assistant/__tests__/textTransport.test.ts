@@ -11,6 +11,8 @@ import {
   MINT_TIMEOUT_MS,
   LiveOfflineError,
   LiveQuotaError,
+  LiveRateLimitError,
+  __resetMintThrottle,
 } from '../liveSession';
 import type { ChatMessage } from '../../../types/assistant';
 
@@ -47,7 +49,9 @@ const history: ChatMessage[] = [
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(0);
   fetchMock.mockReset();
+  __resetMintThrottle();
   vi.stubGlobal('fetch', fetchMock);
   (auth as any).currentUser = { uid: 'test-uid', getIdToken: async () => 'id-tok' };
 });
@@ -153,6 +157,37 @@ describe('mintLiveToken', () => {
     await rejection;
     // The voice reconnect loop owns retries — the mint itself must not.
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces the server 429 as a LiveRateLimitError', async () => {
+    fetchMock.mockResolvedValueOnce(errorResponse(429));
+    await expect(mintLiveToken('voice')).rejects.toBeInstanceOf(LiveRateLimitError);
+  });
+
+  it('throttles a mint storm client-side before it can trip the server limit', async () => {
+    const ok = { ok: true, status: 200, json: async () => ({ token: 'tok', model: 'm' }) } as unknown as Response;
+    fetchMock.mockResolvedValue(ok);
+
+    // The server allows 10/min; we self-limit at 8. Burn the window.
+    for (let i = 0; i < 8; i++) await mintLiveToken('voice');
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+
+    // The 9th mint inside the same window fails fast and never hits the network.
+    await expect(mintLiveToken('voice')).rejects.toBeInstanceOf(LiveRateLimitError);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+  });
+
+  it('lets mints through again once the rolling window elapses', async () => {
+    const ok = { ok: true, status: 200, json: async () => ({ token: 'tok', model: 'm' }) } as unknown as Response;
+    fetchMock.mockResolvedValue(ok);
+
+    for (let i = 0; i < 8; i++) await mintLiveToken('voice');
+    await expect(mintLiveToken('voice')).rejects.toBeInstanceOf(LiveRateLimitError);
+
+    // Age the earlier mints out of the window, then a fresh mint is allowed.
+    vi.setSystemTime(61_000);
+    await expect(mintLiveToken('voice')).resolves.toEqual({ token: 'tok', model: 'm' });
+    expect(fetchMock).toHaveBeenCalledTimes(9);
   });
 });
 
