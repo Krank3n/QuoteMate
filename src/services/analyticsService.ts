@@ -64,7 +64,18 @@ export type AnalyticsEvent =
   // shown = impression per sheet open; tapped carries `outcome`
   // (connect_required / attached / failed) so attach-rate is measurable.
   | 'pay_link_optin_shown'
-  | 'pay_link_optin_tapped';
+  | 'pay_link_optin_tapped'
+  // — Service reports —
+  // First persist of a new service report (mints the RP number; re-saves
+  // don't fire again).
+  | 'report_created'
+  // Mate returned a clean write-up for the rough notes.
+  | 'report_written_up'
+  // First save carrying fresh signature ink (measured ink only — ghost
+  // taps and carried-forward/loaded signatures don't count).
+  | 'report_signed'
+  // The report PDF went out via the export/share path.
+  | 'report_shared';
 
 interface BaseProps {
   // Free-form per-event payload. Keep it flat (Firestore indexes flat fields

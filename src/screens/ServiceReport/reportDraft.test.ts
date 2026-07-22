@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  applyComposedWriteUp,
   deriveReportContext,
   buildInitialReportForm,
   buildReportInput,
   formFromReport,
   latestTechnicianSignature,
+  pruneSuggestions,
+  resumableReportId,
   type ReportFormState,
 } from './reportDraft';
 import type { ServiceReport } from '../../../shared/report/types';
@@ -139,6 +142,109 @@ describe('formFromReport', () => {
     expect(form.equipment).toEqual(['Wrench']);
     expect(form.workCarriedOut).toBe('Resealed joint');
     expect(form.photos).toEqual([]);
+  });
+});
+
+describe('applyComposedWriteUp', () => {
+  const current = {
+    natureOfProblem: 'heater dead. also reckon the flue needs redoing',
+    workCarriedOut: 'swapped thermocouple',
+    recommendedWork: '',
+  };
+
+  it('applies every returned field verbatim, including redistributed facts', () => {
+    const composed = {
+      natureOfProblem: 'Heater not operating on arrival.',
+      workCarriedOut: 'Replaced the thermocouple.',
+      recommendedWork: 'Flue requires replacement.',
+    };
+    expect(applyComposedWriteUp(current, composed)).toEqual(composed);
+  });
+
+  it('accepts an emptied source field when its fact moved to another field', () => {
+    const composed = {
+      natureOfProblem: '',
+      workCarriedOut: 'Replaced the thermocouple. Heater was not operating on arrival.',
+      recommendedWork: 'Flue requires replacement.',
+    };
+    const result = applyComposedWriteUp(current, composed);
+    expect(result.natureOfProblem).toBe('');
+    expect(result.workCarriedOut).toContain('thermocouple');
+  });
+
+  it('keeps the tradie text when the compose came back entirely blank', () => {
+    const result = applyComposedWriteUp(current, {
+      natureOfProblem: '',
+      workCarriedOut: '   ',
+      recommendedWork: '',
+    });
+    expect(result).toEqual(current);
+  });
+});
+
+describe('pruneSuggestions', () => {
+  it('trims entries and drops blanks', () => {
+    expect(pruneSuggestions(['  Ladder ', '   ', 'Multimeter'], [])).toEqual([
+      'Ladder',
+      'Multimeter',
+    ]);
+  });
+
+  it('drops suggestions already on the report, case-insensitively', () => {
+    expect(
+      pruneSuggestions(['ladder', 'Gas detector'], ['Ladder ', 'Hose kit']),
+    ).toEqual(['Gas detector']);
+  });
+
+  it('dedupes repeats within the suggestion list, keeping first occurrence order', () => {
+    expect(
+      pruneSuggestions(['Valve', 'Regulator', ' valve ', 'Regulator'], []),
+    ).toEqual(['Valve', 'Regulator']);
+  });
+
+  it('returns empty when everything is already covered', () => {
+    expect(pruneSuggestions(['Ladder'], ['ladder'])).toEqual([]);
+    expect(pruneSuggestions([], ['Ladder'])).toEqual([]);
+  });
+});
+
+describe('resumableReportId', () => {
+  const report = (over: Partial<ServiceReport>): ServiceReport =>
+    ({
+      id: 'r1',
+      jobId: 'j1',
+      userId: 'u1',
+      number: 'RP-001',
+      visitDate: 1,
+      serviceType: 'Service',
+      equipment: [],
+      itemsChecked: [],
+      status: 'draft',
+      createdAt: 1,
+      updatedAt: 1,
+      ...over,
+    }) as ServiceReport;
+
+  it('resumes the newest report when it is still a draft', () => {
+    expect(
+      resumableReportId([
+        report({ id: 'newest-draft', status: 'draft' }),
+        report({ id: 'older-sent', status: 'sent' }),
+      ]),
+    ).toBe('newest-draft');
+  });
+
+  it('does not resume when the newest report has been sent', () => {
+    expect(
+      resumableReportId([
+        report({ id: 'newest-sent', status: 'sent' }),
+        report({ id: 'older-draft', status: 'draft' }),
+      ]),
+    ).toBeNull();
+  });
+
+  it('returns null for an empty list', () => {
+    expect(resumableReportId([])).toBeNull();
   });
 });
 

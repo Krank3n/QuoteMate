@@ -1,8 +1,11 @@
 // Service Report write-up compose — authenticated proxy to the Gemini text
 // model, mirroring assistantChat.ts (cors + verifyAuth + GEMINI_API_KEY guard
 // + generateContent fetch). The client posts the tradie's rough notes; we
-// build a strictly-factual rewrite prompt, forward it with the master key kept
-// off the device, and return the three cleaned write-up fields.
+// build a strictly-factual rewrite prompt (facts may be redistributed between
+// the three fields but never invented), forward it with the master key kept
+// off the device, and return the three cleaned write-up fields plus two
+// suggestion lists (suggestedEquipment / suggestedChecklist) extracted from
+// the notes for the tradie to review — nothing is added automatically.
 //
 // Kept as its own onRequest (not folded into assistantChat) because it is a
 // one-shot rewrite with no tool loop and no per-turn quota: a service report

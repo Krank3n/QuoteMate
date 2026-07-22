@@ -3,12 +3,19 @@
  *
  * Posts the tradie's rough notes to the `composeServiceReport` Firebase
  * Function, which proxies the text model server-side (the master key never
- * touches the device) and returns the three cleaned write-up fields. Mirrors
- * emailService.ts for the auth header + functions URL so we stay on one auth
- * path.
+ * touches the device) and returns the three cleaned write-up fields plus two
+ * suggestion lists. Mirrors emailService.ts for the auth header + functions
+ * URL so we stay on one auth path.
  *
  * Strictly a rewrite of what the tradie typed — the server prompt forbids
- * invented detail — so an empty source field always comes back empty.
+ * invented detail. Facts may be REDISTRIBUTED into the field where they
+ * belong (a "recommend…" line typed under work carried out comes back under
+ * recommended work), so a field can return non-empty even when its own note
+ * was blank; when every note is blank, everything comes back blank.
+ *
+ * suggestedEquipment / suggestedChecklist are optional extras extracted from
+ * the notes for the tradie to review and tap to add — nothing is ever added
+ * to the report automatically.
  */
 
 import { auth } from '../config/firebase';
@@ -41,12 +48,19 @@ export interface ComposedReport {
   natureOfProblem: string;
   workCarriedOut: string;
   recommendedWork: string;
+  suggestedEquipment: string[];
+  suggestedChecklist: string[];
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
 }
 
 /**
  * Send the rough notes off for a clean write-up. Throws on a non-2xx reply so
- * the caller can surface a retry; the returned object always carries all three
- * keys (blank where the source note was blank).
+ * the caller can surface a retry; the returned object always carries all five
+ * keys (blank strings / empty arrays where nothing applies).
  */
 export async function composeServiceReport(
   notes: ComposeNotes,
@@ -75,5 +89,7 @@ export async function composeServiceReport(
     natureOfProblem: data.natureOfProblem || '',
     workCarriedOut: data.workCarriedOut || '',
     recommendedWork: data.recommendedWork || '',
+    suggestedEquipment: asStringArray(data.suggestedEquipment),
+    suggestedChecklist: asStringArray(data.suggestedChecklist),
   };
 }

@@ -7,10 +7,16 @@
  * Pulls the customer + address off the linked Job (read-only here), then lets
  * the tradie set the visit date, service type and risk assessment; manage a
  * short equipment list and a tick-box checklist (Mate NEVER pre-ticks — every
- * tick is a manual tap); jot rough notes into the three narrative fields and
- * tap "Write it up" to have Mate tidy them into customer-ready prose; attach
- * photos; and capture technician + customer signatures. Save persists via
- * reportService; "Export / Share" renders the PDF via exportReportPDF.
+ * tick is a manual tap); jot rough notes into the three narrative fields
+ * (typed or dictated via DictationButton) and tap "Write it up" to have Mate
+ * tidy them into customer-ready prose — the write-up may redistribute facts
+ * between the three fields, and any extra equipment/checklist items Mate
+ * spots come back as tap-to-add suggestion chips (never auto-added, checklist
+ * rows always land unticked); attach photos; capture technician + customer
+ * signatures; and, when Recommended work has content and the job has a
+ * customer, spin the follow-up into a new draft quote ("Quote this work").
+ * Save persists via reportService; "Export / Share" renders the PDF via
+ * exportReportPDF.
  *
  * Copy here is Australian English, gender-neutral, and never says the two-letter
  * word for the assistant — it is "Mate". Nothing on this screen or the exported
@@ -33,21 +39,27 @@ import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { JobPhotos } from '../../components/JobPhotos';
 import { SignaturePad, type SignaturePadSize } from '../../components/SignaturePad';
+import { DictationButton } from '../../components/DictationButton';
 import { useAlertModal } from '../../hooks/useAlertModal';
 import { generateId } from '../../utils/generateId';
 import { getTradeCategoryById } from '../../constants/tradeCategories';
 import { reportService } from '../../services/reportService';
 import { composeServiceReport } from '../../services/reportComposeService';
+import { trackEvent } from '../../services/analyticsService';
 import { exportReportPDF } from '../../utils/pdfGenerator';
+import { createQuoteFromRecommendedWork } from '../../utils/quoteFromReport';
 import type { QuotePhoto } from '../../types';
 import type { JobPhoto } from '../../../shared/job/types';
 import type { ServiceReport, SignatureCapture } from '../../../shared/report/types';
+import { pathHasInk } from '../../../shared/pdf/signatureInk';
 import {
+  applyComposedWriteUp,
   buildInitialReportForm,
   buildReportInput,
   deriveReportContext,
   formFromReport,
   latestTechnicianSignature,
+  pruneSuggestions,
   type ReportFormState,
 } from './reportDraft';
 
@@ -83,6 +95,13 @@ export function ServiceReportScreen() {
   const [composing, setComposing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [quoting, setQuoting] = useState(false);
+
+  // Mate's tap-to-add suggestions from the last write-up. Review-only:
+  // nothing lands on the report until the tradie taps a chip, and checklist
+  // rows always land unticked. Not persisted — dismissing loses nothing.
+  const [suggestedEquipment, setSuggestedEquipment] = useState<string[]>([]);
+  const [suggestedChecklist, setSuggestedChecklist] = useState<string[]>([]);
 
   // Signing locks the ScrollView so pen strokes don't fight the scroll.
   const [signing, setSigning] = useState(false);
@@ -96,6 +115,14 @@ export function ServiceReportScreen() {
   const dirtyRef = useRef(false);
   // Suppresses navigation.setParams once the screen is on its way out.
   const leavingRef = useRef(false);
+
+  // Analytics one-shots. "Signed" means fresh measured ink saved for the
+  // first time this visit — the baselines flag ink that arrived via edit-mode
+  // load or the technician pre-fill, so a carried-forward squiggle never
+  // counts as a new signing.
+  const signedEventFiredRef = useRef(false);
+  const baselineTechInkRef = useRef(false);
+  const baselineCustInkRef = useRef(false);
 
   // Seed the form from the job (new report).
   useEffect(() => {
@@ -116,7 +143,13 @@ export function ServiceReportScreen() {
       if (cancelled) return;
       const sig = latestTechnicianSignature(reports);
       if (!sig) return;
-      setTechSigPath((prev) => prev || sig.svgPath);
+      setTechSigPath((prev) => {
+        if (prev) return prev;
+        // Carried-forward ink is not a fresh signing (ref set is idempotent,
+        // so a double updater run under StrictMode is harmless).
+        baselineTechInkRef.current = true;
+        return sig.svgPath;
+      });
       setTechSigName((prev) => prev || sig.name);
       setTechSigSize((prev) =>
         prev ?? (sig.width && sig.height ? { width: sig.width, height: sig.height } : prev),
@@ -140,6 +173,9 @@ export function ServiceReportScreen() {
         status: report.status,
         createdAt: report.createdAt,
       });
+      // Ink already on the loaded report is not a fresh signing.
+      baselineTechInkRef.current = pathHasInk(report.technicianSignature?.svgPath ?? '');
+      baselineCustInkRef.current = pathHasInk(report.customerSignature?.svgPath ?? '');
       setTechSigName(report.technicianSignature?.name ?? '');
       setTechSigPath(report.technicianSignature?.svgPath ?? '');
       if (report.technicianSignature?.width && report.technicianSignature?.height) {
@@ -251,6 +287,31 @@ export function ServiceReportScreen() {
   const removeChecklistItem = (id: string) =>
     patch({ itemsChecked: form.itemsChecked.filter((it) => it.id !== id) });
 
+  // --- Suggestion chips (from the write-up) ----------------------------------
+  // Chips only OFFER a row — a tap adds it and retires the chip. Re-pruned
+  // against the live rows every render so a row the tradie typed themselves
+  // hides its duplicate chip.
+  const equipmentChips = pruneSuggestions(suggestedEquipment, form.equipment);
+  const checklistChips = pruneSuggestions(
+    suggestedChecklist,
+    form.itemsChecked.map((it) => it.text),
+  );
+
+  const addSuggestedEquipment = (text: string) => {
+    setSuggestedEquipment((prev) => prev.filter((s) => s !== text));
+    patch({ equipment: [...form.equipment, text] });
+  };
+  const addSuggestedChecklist = (text: string) => {
+    setSuggestedChecklist((prev) => prev.filter((s) => s !== text));
+    // Always unticked — ticking is the tradie's tap, never Mate's.
+    patch({
+      itemsChecked: [
+        ...form.itemsChecked,
+        { id: generateId(), text, checked: false },
+      ],
+    });
+  };
+
   // --- Write it up (compose) ------------------------------------------------
   const handleWriteItUp = async () => {
     const notes = {
@@ -281,12 +342,25 @@ export function ServiceReportScreen() {
         businessName: businessSettings?.businessName || undefined,
         tradeCategory,
       });
-      // Only overwrite a field when the tidy-up returned something for it —
-      // never blank out text the tradie had typed.
-      patch({
-        natureOfProblem: composed.natureOfProblem || form.natureOfProblem,
-        workCarriedOut: composed.workCarriedOut || form.workCarriedOut,
-        recommendedWork: composed.recommendedWork || form.recommendedWork,
+      // Apply the returned trio wholesale: the write-up may REDISTRIBUTE a
+      // fact into the field where it belongs, so a field can legitimately
+      // come back empty (its fact moved) or filled (a fact moved in). The
+      // helper's only guard is all-blank — Mate never wipes the lot.
+      patch(applyComposedWriteUp(notes, composed));
+      // Anything extra Mate spotted in the notes lands as tap-to-add chips,
+      // pruned against rows already on the report. Never auto-added.
+      setSuggestedEquipment(
+        pruneSuggestions(composed.suggestedEquipment, form.equipment),
+      );
+      setSuggestedChecklist(
+        pruneSuggestions(
+          composed.suggestedChecklist,
+          form.itemsChecked.map((it) => it.text),
+        ),
+      );
+      trackEvent('report_written_up', {
+        equipment_suggested: composed.suggestedEquipment.length,
+        checklist_suggested: composed.suggestedChecklist.length,
       });
     } catch (err: any) {
       showAlert({
@@ -364,6 +438,20 @@ export function ServiceReportScreen() {
       ),
     ]);
 
+  // Fire-and-forget "report signed" the first time a save carries fresh
+  // measured ink (pathHasInk — ghost taps don't count; loaded / pre-filled
+  // ink is baselined out above). Never blocks or fails the save.
+  const trackFirstSignature = () => {
+    if (signedEventFiredRef.current) return;
+    const freshTech =
+      !baselineTechInkRef.current && !!techSigPath && pathHasInk(techSigPath);
+    const freshCust =
+      !baselineCustInkRef.current && !!custSigPath && pathHasInk(custSigPath);
+    if (!freshTech && !freshCust) return;
+    signedEventFiredRef.current = true;
+    trackEvent('report_signed', { technician: freshTech, customer: freshCust });
+  };
+
   // Persist and return a fully-formed ServiceReport (for the PDF export).
   const persist = async (): Promise<ServiceReport | null> => {
     const sigs = currentSignatures();
@@ -376,6 +464,8 @@ export function ServiceReportScreen() {
     };
     if (!meta) {
       const created = await withTimeout(reportService.createReport(input));
+      trackEvent('report_created');
+      trackFirstSignature();
       setMeta({
         id: created.id,
         number: created.number,
@@ -391,6 +481,7 @@ export function ServiceReportScreen() {
       return created;
     }
     await withTimeout(reportService.updateReport(meta.id, input));
+    trackFirstSignature();
     dirtyRef.current = false;
     return {
       ...input,
@@ -439,6 +530,7 @@ export function ServiceReportScreen() {
         customerPhone: context?.customerPhone,
         jobAddress: context?.jobAddress,
       });
+      trackEvent('report_shared', { method: 'share' });
     } catch (err: any) {
       showAlert({
         type: 'error',
@@ -447,6 +539,49 @@ export function ServiceReportScreen() {
       });
     } finally {
       setExporting(false);
+    }
+  };
+
+  // --- Quote this work --------------------------------------------------
+  // Recommended work → a fresh draft quote for the same customer, then the
+  // wizard's MaterialsList with the pipeline running. Only offered when the
+  // job actually has a customer to quote. The report is persisted FIRST so
+  // navigating away never bins unsaved edits.
+  const canQuoteRecommended =
+    !!(job.customerName || '').trim() && !!form.recommendedWork.trim();
+
+  const handleQuoteRecommendedWork = async () => {
+    if (quoting) return;
+    setQuoting(true);
+    try {
+      await persist();
+      const s = useStore.getState();
+      const result = await createQuoteFromRecommendedWork(
+        {
+          job,
+          recommendedWork: form.recommendedWork,
+          serviceTypeLabel: form.serviceType,
+        },
+        {
+          createNewQuote: s.createNewQuote,
+          getCurrentQuote: () => useStore.getState().currentQuote,
+          updateQuote: s.updateQuote,
+          saveDraft: s.saveDraft,
+        },
+      );
+      if (!result) return; // Blank recommended work — button shouldn't show
+      navigation.navigate(result.navigate.navigator, {
+        screen: result.navigate.screen,
+        params: result.navigate.params,
+      });
+    } catch (err: any) {
+      showAlert({
+        type: 'error',
+        title: 'Could not start the quote',
+        message: err?.message || 'Please try again in a moment.',
+      });
+    } finally {
+      setQuoting(false);
     }
   };
 
@@ -544,6 +679,12 @@ export function ServiceReportScreen() {
             numberOfLines={3}
             style={styles.input}
           />
+          <View style={styles.dictationRow}>
+            <DictationButton
+              value={form.riskAssessment}
+              onText={(next) => patch({ riskAssessment: next })}
+            />
+          </View>
 
           {/* Equipment */}
           <SectionLabel text="Equipment on site" optional />
@@ -574,6 +715,13 @@ export function ServiceReportScreen() {
             </View>
           ))}
           <AddRow label="Add equipment" onPress={addEquipment} />
+          {equipmentChips.length > 0 && (
+            <SuggestionChips
+              items={equipmentChips}
+              onAdd={addSuggestedEquipment}
+              onClear={() => setSuggestedEquipment([])}
+            />
+          )}
 
           {/* Checklist — heading matches the PDF's "Items checked" */}
           <SectionLabel text="Items checked" optional />
@@ -618,6 +766,13 @@ export function ServiceReportScreen() {
             </View>
           ))}
           <AddRow label="Add checklist item" onPress={addChecklistItem} />
+          {checklistChips.length > 0 && (
+            <SuggestionChips
+              items={checklistChips}
+              onAdd={addSuggestedChecklist}
+              onClear={() => setSuggestedChecklist([])}
+            />
+          )}
 
           {/* Narrative */}
           <SectionLabel text="Nature of the problem" optional />
@@ -630,6 +785,12 @@ export function ServiceReportScreen() {
             numberOfLines={3}
             style={styles.input}
           />
+          <View style={styles.dictationRow}>
+            <DictationButton
+              value={form.natureOfProblem}
+              onText={(next) => patch({ natureOfProblem: next })}
+            />
+          </View>
           <SectionLabel text="Work carried out" optional />
           <TextInput
             mode="outlined"
@@ -640,6 +801,12 @@ export function ServiceReportScreen() {
             numberOfLines={3}
             style={styles.input}
           />
+          <View style={styles.dictationRow}>
+            <DictationButton
+              value={form.workCarriedOut}
+              onText={(next) => patch({ workCarriedOut: next })}
+            />
+          </View>
           <SectionLabel text="Recommended work" optional />
           <TextInput
             mode="outlined"
@@ -650,6 +817,33 @@ export function ServiceReportScreen() {
             numberOfLines={3}
             style={styles.input}
           />
+          <View style={styles.dictationRow}>
+            <DictationButton
+              value={form.recommendedWork}
+              onText={(next) => patch({ recommendedWork: next })}
+            />
+          </View>
+          {canQuoteRecommended && (
+            <TouchableOpacity
+              onPress={handleQuoteRecommendedWork}
+              disabled={quoting || saving || exporting}
+              style={styles.quoteWorkButton}
+              activeOpacity={0.8}
+            >
+              {quoting ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <MaterialCommunityIcons
+                  name="file-document-outline"
+                  size={18}
+                  color={colors.primary}
+                />
+              )}
+              <Text style={styles.quoteWorkText}>
+                {quoting ? 'Setting up the quote…' : 'Quote this work'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             onPress={handleWriteItUp}
@@ -740,11 +934,14 @@ export function ServiceReportScreen() {
         label="Save report"
         onPress={handleSave}
         loading={saving}
-        disabled={saving || exporting}
+        disabled={saving || exporting || quoting}
         secondaryLabel="Share PDF"
         secondaryOnPress={handleExport}
         secondaryLoading={exporting}
-        secondaryDisabled={saving}
+        // Without this the shared button falls back to its materials-flow
+        // default copy, "Fetching prices..." — nonsense on a report.
+        secondaryLoadingText="Preparing PDF..."
+        secondaryDisabled={saving || quoting}
         disableKeyboardSticky
       />
 
@@ -758,6 +955,54 @@ function SectionLabel({ text, optional }: { text: string; optional?: boolean }) 
     <View style={styles.sectionLabelRow}>
       <Text style={styles.sectionLabel}>{text}</Text>
       {optional ? <Text style={styles.optional}>optional</Text> : null}
+    </View>
+  );
+}
+
+/**
+ * Tap-to-add suggestions from Mate's write-up. Review-only by design: a tap
+ * adds the row (checklist rows land unticked) and retires the chip; "Clear"
+ * bins the lot. Mate never adds anything itself.
+ */
+function SuggestionChips({
+  items,
+  onAdd,
+  onClear,
+}: {
+  items: string[];
+  onAdd: (text: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <View style={styles.suggestionBlock}>
+      <View style={styles.suggestionHeader}>
+        <Text style={styles.suggestionLabel}>
+          Mate reckons these came up — tap to add
+        </Text>
+        <TouchableOpacity
+          onPress={onClear}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Clear suggestions"
+        >
+          <Text style={styles.suggestionClear}>Clear</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.chipWrap}>
+        {items.map((text) => (
+          <TouchableOpacity
+            key={text}
+            style={styles.chip}
+            onPress={() => onAdd(text)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Add ${text}`}
+          >
+            <MaterialCommunityIcons name="plus" size={14} color={colors.primary} />
+            <Text style={styles.chipText}>{text}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     </View>
   );
 }
@@ -852,4 +1097,47 @@ const styles = StyleSheet.create({
     marginTop: 6,
     lineHeight: 16,
   },
+  dictationRow: { marginTop: 2, marginBottom: 4 },
+  quoteWorkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  quoteWorkText: { fontSize: 14, fontWeight: '700', color: colors.primary },
+  suggestionBlock: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    marginTop: 4,
+  },
+  suggestionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  suggestionLabel: { flex: 1, fontSize: 12, color: colors.textMuted },
+  suggestionClear: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: colors.background,
+  },
+  chipText: { fontSize: 13, color: colors.primary, fontWeight: '600' },
 });
