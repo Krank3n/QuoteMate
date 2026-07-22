@@ -8,6 +8,7 @@ import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
 import { resolveGstMode, NO_GST_NOTE } from '../document/gstMode';
+import { pathHasInk } from './signatureInk';
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -626,8 +627,10 @@ function buildReportSignatureHTML(
   sig: { svgPath: string; name: string; width?: number; height?: number } | undefined,
 ): string {
   // No signature → no block. A heading over blank space on a customer
-  // document reads as "forgot to fill this in", not "optional".
-  if (!sig?.svgPath) return '';
+  // document reads as "forgot to fill this in", not "optional". Structural
+  // checks aren't enough — a tap with a micro-twitch captures a zero-length
+  // line-to — so "signed" means measurable ink (see signatureInk).
+  if (!sig || !pathHasInk(sig.svgPath)) return '';
   const name = sig.name ? escapeHtml(sig.name) : '';
   // viewBox must match the capture-space of the pad the ink was drawn on;
   // a fixed guess clips signatures from pads with other proportions. The
@@ -638,7 +641,7 @@ function buildReportSignatureHTML(
   return `
       <div class="report-signature">
         <div class="report-signature-label">${escapeHtml(label)}</div>
-        <div class="report-signature-name">${name}</div>
+        ${name ? `<div class="report-signature-name">${name}</div>` : ''}
         ${svg}
       </div>`;
 }
@@ -691,7 +694,10 @@ export function buildReportPdfHtml(data: ReportPdfData, business: BusinessPdfDat
       })()
     : '';
 
-  const hasSignature = !!(data.customerSignature || data.technicianSignature);
+  // Only measurable ink counts — an accidental tap renders nothing, so it
+  // must not pull in the "I am satisfied…" statement either.
+  const hasSignature =
+    pathHasInk(data.customerSignature?.svgPath) || pathHasInk(data.technicianSignature?.svgPath);
   const signaturesHtml = hasSignature
     ? `
       <div class="section-wrapper report-signatures" style="page-break-inside: avoid;">

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { buildSvgPath } from './signaturePath';
+import { buildSvgPath, pathHasInk } from './signaturePath';
 
 describe('buildSvgPath', () => {
   it('returns an empty string for empty input', () => {
@@ -35,21 +35,50 @@ describe('buildSvgPath', () => {
         { x: 5, y: 5 },
         { x: 6, y: 6 },
       ],
-      [{ x: 9, y: 9 }],
     ]);
 
-    expect((d.match(/M/g) || []).length).toBe(3);
-    expect(d).toBe('M 0 0 L 1 1 M 5 5 L 6 6 M 9 9');
+    expect((d.match(/M/g) || []).length).toBe(2);
+    expect(d).toBe('M 0 0 L 1 1 M 5 5 L 6 6');
   });
 
-  it('skips empty strokes but still joins the populated ones', () => {
+  // Regression: an accidental tap produced `M x y` with no line — invisible
+  // ink that still rendered a "signed" block on the customer PDF.
+  it('drops single-point strokes (a tap is not a signature)', () => {
+    expect(buildSvgPath([[{ x: 9, y: 9 }]])).toBe('');
+    expect(
+      buildSvgPath([
+        [{ x: 1, y: 2 }],
+        [],
+        [{ x: 3, y: 4 }],
+      ]),
+    ).toBe('');
+  });
+
+  it('keeps real strokes while dropping taps around them', () => {
     const d = buildSvgPath([
-      [{ x: 1, y: 2 }],
-      [],
-      [{ x: 3, y: 4 }],
+      [{ x: 9, y: 9 }], // tap — dropped
+      [
+        { x: 0, y: 0 },
+        { x: 4, y: 4 },
+      ],
     ]);
 
-    expect(d).toBe('M 1 2 M 3 4');
-    expect((d.match(/M/g) || []).length).toBe(2);
+    expect(d).toBe('M 0 0 L 4 4');
+  });
+});
+
+describe('pathHasInk', () => {
+  it('is false for empty / missing paths', () => {
+    expect(pathHasInk('')).toBe(false);
+    expect(pathHasInk(undefined)).toBe(false);
+    expect(pathHasInk(null)).toBe(false);
+  });
+
+  it('is false for a bare move-to (legacy tap capture)', () => {
+    expect(pathHasInk('M 10 10')).toBe(false);
+  });
+
+  it('is true for a path with a line-to', () => {
+    expect(pathHasInk('M 10 10 L 20 20')).toBe(true);
   });
 });

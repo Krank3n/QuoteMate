@@ -27,6 +27,8 @@ import { JobDetailHeader } from '../components/JobDetailHeader';
 import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { canUseServiceReports } from '../utils/reportEntitlement';
+import { reportService } from '../services/reportService';
+import { resumableReportId } from './ServiceReport/reportDraft';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, stageMetaFor } from '../components/JobStageSheet';
 import {
@@ -614,7 +616,15 @@ export function ViewJobScreen() {
         break;
       case 'service_report':
         if (canUseServiceReports(getEffectivePlan())) {
-          navigation.navigate('ServiceReport', { jobId: job.id });
+          // Resume an unfinished draft instead of minting a duplicate report;
+          // a sent (or absent) newest report means a genuinely new visit.
+          const reportId = resumableReportId(
+            await reportService.listReports(job.id),
+          );
+          navigation.navigate('ServiceReport', {
+            jobId: job.id,
+            ...(reportId ? { reportId } : {}),
+          });
         } else {
           navigation.navigate('Paywall');
         }

@@ -36,7 +36,7 @@ import {
 import Svg, { Path } from 'react-native-svg';
 
 import { colors } from '../theme';
-import { buildSvgPath, type Point } from './signaturePath';
+import { buildSvgPath, pathHasInk, type Point } from './signaturePath';
 
 const DEFAULT_HEIGHT = 180;
 
@@ -90,7 +90,10 @@ export function SignaturePad({
   // Lift the finished ink to the parent — called on stroke end and clear,
   // never per move-sample.
   const commit = (next: Point[][]) => {
-    onChangeRef.current(buildSvgPath(next), {
+    const d = buildSvgPath(next);
+    // Sub-threshold ink (taps, micro-twitches) commits as unsigned — an
+    // invisible mark must never count as a signature on the customer PDF.
+    onChangeRef.current(pathHasInk(d) ? d : '', {
       width: Math.round(sizeRef.current.width),
       height: Math.round(sizeRef.current.height),
     });
