@@ -44,6 +44,20 @@ export class LiveOfflineError extends Error {
   }
 }
 
+/**
+ * The token mint was rate-limited — the server returned 429, or we throttled
+ * ourselves client-side before hammering it. A subclass of LiveOfflineError so
+ * every existing `instanceof LiveOfflineError` handler still surfaces the
+ * message, while the voice reconnect loop can single it out and stop re-minting
+ * (retrying into a rate limit only deepens it).
+ */
+export class LiveRateLimitError extends LiveOfflineError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LiveRateLimitError';
+  }
+}
+
 export interface MintedToken {
   token: string;
   model: string;
@@ -77,6 +91,33 @@ export async function fetchWithTimeout(
   }
 }
 
+// Client-side mint throttle. The server caps ephemeral-token mints at 10/min
+// per user (assistantToken's HEAVY rate limit). Under patchy coverage the voice
+// reconnect loop fires up to a mint per attempt, and repeated drops — plus any
+// AppState/focus-driven auto-restart — used to blow past that ceiling and spray
+// the tradie with "too many requests" (each attempt also reserving a quota turn
+// server-side). We pace ourselves just below the server ceiling: once this many
+// mints land inside the rolling window, the next one fails fast client-side
+// instead of hammering the endpoint. 8 leaves headroom under the server's 10
+// while staying above what legit use reaches — rapid PTT turns run ~4-6/min
+// (each turn is speak + full spoken reply), and a drop cycle is 1 open + 3
+// reconnect mints, so two full drop cycles fit before the throttle bites.
+const MINT_WINDOW_MS = 60_000;
+const MINT_MAX_PER_WINDOW = 8;
+let mintTimestamps: number[] = [];
+
+/** Test-only: clear the rolling mint window between cases. */
+export function __resetMintThrottle(): void {
+  mintTimestamps = [];
+}
+
+// Drop timestamps that have aged out of the window, then report whether another
+// mint is allowed right now.
+function mintAllowed(now: number): boolean {
+  mintTimestamps = mintTimestamps.filter((t) => now - t < MINT_WINDOW_MS);
+  return mintTimestamps.length < MINT_MAX_PER_WINDOW;
+}
+
 // Mint a single-use ephemeral Gemini Live token via the assistantToken
 // Function. `mode` distinguishes the voice quota bucket from text; omit it for
 // the text path. The Function verifies the ID token, rate-limits, reserves a
@@ -84,6 +125,15 @@ export async function fetchWithTimeout(
 export async function mintLiveToken(mode?: 'voice'): Promise<MintedToken> {
   const idToken = await auth.currentUser?.getIdToken();
   if (!idToken) throw new LiveAuthError('Sign in to use Mate.');
+
+  // Self-limit before touching the network so a reconnect/restart storm can't
+  // trip the server's 10/min mint ceiling. Record the attempt only once it
+  // clears the throttle — a rejected call never left the device.
+  const now = Date.now();
+  if (!mintAllowed(now)) {
+    throw new LiveRateLimitError('Whoa — too many requests. Wait a moment.');
+  }
+  mintTimestamps.push(now);
 
   // No retry here on purpose: the voice reconnect loop already retries whole
   // connect attempts, and each successful mint reserves a quota turn — a
@@ -106,7 +156,7 @@ export async function mintLiveToken(mode?: 'voice'): Promise<MintedToken> {
     throw new LiveQuotaError(data.error || "You've hit today's Mate limit.");
   }
   if (response.status === 429) {
-    throw new LiveOfflineError('Whoa — too many requests. Wait a moment.');
+    throw new LiveRateLimitError('Whoa — too many requests. Wait a moment.');
   }
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
