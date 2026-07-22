@@ -114,7 +114,7 @@ describe('buildReportPdfHtml', () => {
   it('omits the block for a party who has not signed', () => {
     const html = buildReportPdfHtml(
       reportData({
-        technicianSignature: { svgPath: 'M1 1 L2 2', name: 'Jess Tech' },
+        technicianSignature: { svgPath: 'M 10 80 L 60 20 L 110 90', name: 'Jess Tech' },
         customerSignature: undefined,
       }),
       business,
@@ -131,6 +131,25 @@ describe('buildReportPdfHtml', () => {
     const html = buildReportPdfHtml(
       reportData({
         customerSignature: { svgPath: 'M 224 92', name: '.' },
+      }),
+      business,
+    );
+    expect(html).not.toContain('class="report-signature-label"');
+    expect(html).not.toContain('I am satisfied the above work');
+  });
+
+  // Regression: the exact ghost path from RP-001 in production — a tap with
+  // a micro-twitch captures a ZERO-LENGTH line-to, which defeats any
+  // structural "contains an L" check. Only measured ink length catches it.
+  it('treats a zero-length line-to as unsigned (RP-001 ghost)', () => {
+    const html = buildReportPdfHtml(
+      reportData({
+        customerSignature: {
+          svgPath: 'M 400 57.0625 L 400 57.0625 M 369 86.0625',
+          name: '',
+          width: 798,
+          height: 178,
+        },
       }),
       business,
     );

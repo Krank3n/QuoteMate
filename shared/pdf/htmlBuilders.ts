@@ -8,6 +8,7 @@ import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
 import { resolveGstMode, NO_GST_NOTE } from '../document/gstMode';
+import { pathHasInk } from './signatureInk';
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -626,10 +627,10 @@ function buildReportSignatureHTML(
   sig: { svgPath: string; name: string; width?: number; height?: number } | undefined,
 ): string {
   // No signature → no block. A heading over blank space on a customer
-  // document reads as "forgot to fill this in", not "optional". A path
-  // without a single line-to is an accidental tap, not a signature — the
-  // pad filters these now, but legacy captures may still carry them.
-  if (!sig?.svgPath || !sig.svgPath.includes('L')) return '';
+  // document reads as "forgot to fill this in", not "optional". Structural
+  // checks aren't enough — a tap with a micro-twitch captures a zero-length
+  // line-to — so "signed" means measurable ink (see signatureInk).
+  if (!sig || !pathHasInk(sig.svgPath)) return '';
   const name = sig.name ? escapeHtml(sig.name) : '';
   // viewBox must match the capture-space of the pad the ink was drawn on;
   // a fixed guess clips signatures from pads with other proportions. The
@@ -693,11 +694,10 @@ export function buildReportPdfHtml(data: ReportPdfData, business: BusinessPdfDat
       })()
     : '';
 
-  // Only real ink counts — a signature whose path has no line-to is an
-  // accidental tap and renders nothing, so it must not pull in the
-  // "I am satisfied…" statement either.
-  const hasInk = (s?: { svgPath: string }) => !!s?.svgPath && s.svgPath.includes('L');
-  const hasSignature = hasInk(data.customerSignature) || hasInk(data.technicianSignature);
+  // Only measurable ink counts — an accidental tap renders nothing, so it
+  // must not pull in the "I am satisfied…" statement either.
+  const hasSignature =
+    pathHasInk(data.customerSignature?.svgPath) || pathHasInk(data.technicianSignature?.svgPath);
   const signaturesHtml = hasSignature
     ? `
       <div class="section-wrapper report-signatures" style="page-break-inside: avoid;">

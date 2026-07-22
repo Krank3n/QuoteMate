@@ -45,11 +45,8 @@ export function buildSvgPath(strokes: Point[][]): string {
   return segments.join(' ');
 }
 
-/**
- * True when a path `d` string contains actual ink — at least one line-to.
- * Used by renderers as defence in depth: a legacy or hand-crafted path of
- * bare move-to commands must not produce a "signed" block.
- */
-export function pathHasInk(d: string | undefined | null): boolean {
-  return !!d && d.includes('L');
-}
+// Canonical "is this real ink?" lives in shared/pdf/signatureInk so the pad
+// and both PDF renderers (client expo-print, server Puppeteer) agree on one
+// definition of "signed". A structural check (path contains an L) is not
+// enough — a tap with a micro-twitch captures a zero-length line-to.
+export { pathHasInk, pathInkLength, MIN_SIGNATURE_INK_LENGTH } from '../../shared/pdf/signatureInk';
