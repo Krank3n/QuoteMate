@@ -70,6 +70,19 @@ interface TakePaymentSheetProps {
   target: TakePaymentTarget | null;
   onDismiss: () => void;
   onError: (message: string) => void;
+  /**
+   * Route to the manual-recording flow (RecordPaymentScreen) for an already-
+   * received bank transfer / cash / cheque. Only wired for invoice targets —
+   * quotes have no manual deposit path. When omitted, the row is hidden.
+   */
+  onRecordManualPayment?: (invoiceId: string) => void;
+  /**
+   * Square connection gate. The sheet always opens (so manual recording works
+   * with zero Square setup); the Square-only rows call this before doing any
+   * Square work and, when it resolves false, it has already routed the tradie
+   * to the Square settings screen. When omitted, the rows proceed unguarded.
+   */
+  ensureSquareConnected?: () => Promise<boolean>;
 }
 
 function describeAmounts(
@@ -111,6 +124,8 @@ export function TakePaymentSheet({
   target,
   onDismiss,
   onError,
+  onRecordManualPayment,
+  ensureSquareConnected,
 }: TakePaymentSheetProps) {
   const [sharing, setSharing] = useState(false);
   const [chargingCard, setChargingCard] = useState(false);
@@ -159,6 +174,14 @@ export function TakePaymentSheet({
     if (chargingCard || amounts.remaining <= 0) return;
     setChargingCard(true);
     try {
+      // Square-only path: route to settings if not connected. Runs inside
+      // the spinner window (the check is a network round-trip) and the
+      // guard has already navigated away, so dismiss to avoid a stranded
+      // modal over the settings screen.
+      if (ensureSquareConnected && !(await ensureSquareConnected())) {
+        onDismiss();
+        return;
+      }
       // Bake the passthrough surcharge (if opted in) into the charged amount
       // so the customer sees/pays the inflated total. The app fee (our cut)
       // is computed off the CHARGED amount so we also earn on the surcharge.
@@ -207,6 +230,14 @@ export function TakePaymentSheet({
     if (sharing) return;
     setSharing(true);
     try {
+      // Square-only path: route to settings if not connected. Runs inside
+      // the spinner window (the check is a network round-trip) and the
+      // guard has already navigated away, so dismiss to avoid a stranded
+      // modal over the settings screen.
+      if (ensureSquareConnected && !(await ensureSquareConnected())) {
+        onDismiss();
+        return;
+      }
       const result =
         target.kind === 'invoice'
           ? await squareService.mintInvoicePaymentLink(target.invoiceId)
@@ -398,6 +429,20 @@ export function TakePaymentSheet({
             onPress={handleShareLink}
             loading={sharing}
           />
+
+          {/* Manual recording — invoice only (quotes have no manual deposit
+              path). No Square guard: works with zero Square setup. */}
+          {target.kind === 'invoice' && onRecordManualPayment && (
+            <MethodRow
+              icon="cash-multiple"
+              title="Record a payment"
+              subtitle="Bank transfer, cash or cheque you've already received."
+              onPress={() => {
+                onDismiss();
+                onRecordManualPayment(target.invoiceId);
+              }}
+            />
+          )}
 
           <Button
             mode="text"

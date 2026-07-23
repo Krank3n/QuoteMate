@@ -279,7 +279,8 @@ export function ViewJobScreen() {
   const handlePaymentChipPress = async (doc: Document) => {
     const state = derivePaymentState(doc);
     if (state === 'unpaid' && Number(doc.total) > 0) {
-      if (!(await ensureSquareConnectedForPayment(navigation))) return;
+      // No Square gate here — the sheet's manual "Record a payment" row must
+      // work with zero Square setup; the Square rows gate themselves.
       openTakePaymentForDoc(doc);
       return;
     }
@@ -392,7 +393,6 @@ export function ViewJobScreen() {
           break;
         case 'takeDeposit':
           if (actionableDoc && actionableDoc.type === 'quote') {
-            if (!(await ensureSquareConnectedForPayment(navigation))) break;
             openTakePaymentForDoc(actionableDoc);
           }
           break;
@@ -459,7 +459,6 @@ export function ViewJobScreen() {
           break;
         case 'takeFinalPayment':
           if (actionableDoc && actionableDoc.type === 'invoice') {
-            if (!(await ensureSquareConnectedForPayment(navigation))) break;
             openTakePaymentForDoc(actionableDoc);
           }
           break;
@@ -593,7 +592,6 @@ export function ViewJobScreen() {
     switch (action) {
       case 'takePayment':
         if (primaryDoc) {
-          if (!(await ensureSquareConnectedForPayment(navigation))) break;
           openTakePaymentForDoc(primaryDoc);
         }
         break;
@@ -932,6 +930,10 @@ export function ViewJobScreen() {
         onError={(message) =>
           showAlert({ type: 'error', title: 'Payment error', message })
         }
+        onRecordManualPayment={(invoiceId) =>
+          navigation.navigate('RecordPayment', { invoiceId })
+        }
+        ensureSquareConnected={() => ensureSquareConnectedForPayment(navigation)}
       />
 
 
