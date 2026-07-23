@@ -8,6 +8,7 @@ import {
   formFromReport,
   latestTechnicianSignature,
   pruneSuggestions,
+  reportRowSummary,
   resumableReportId,
   type ReportFormState,
 } from './reportDraft';
@@ -294,5 +295,55 @@ describe('latestTechnicianSignature', () => {
   it('returns null when no report carries technician ink', () => {
     expect(latestTechnicianSignature([])).toBeNull();
     expect(latestTechnicianSignature([report({})])).toBeNull();
+  });
+});
+
+// Minified report rows on the Job screen — the tradie must see at a glance
+// which visits have dockets and whether each went out to the customer.
+describe('reportRowSummary', () => {
+  const NOW = new Date('2026-07-23T06:00:00Z').getTime();
+
+  it('leads with the service type and shows number + sent date for sent reports', () => {
+    const row = reportRowSummary(
+      {
+        number: 'RP-003',
+        serviceType: 'Aircon service',
+        status: 'sent',
+        sentAt: new Date('2026-07-21T02:00:00Z').getTime(),
+        updatedAt: NOW - 1000,
+      },
+      NOW,
+    );
+    expect(row.title).toBe('Aircon service');
+    expect(row.subtitle).toBe('RP-003 · Sent 21 Jul');
+  });
+
+  it('shows Draft with an edited-ago tail for unfinished reports', () => {
+    const row = reportRowSummary(
+      {
+        number: 'RP-004',
+        serviceType: 'Filter replacement',
+        status: 'draft',
+        updatedAt: NOW - 2 * 60 * 60 * 1000,
+      },
+      NOW,
+    );
+    expect(row.subtitle).toBe('RP-004 · Draft · edited about 2 hours ago');
+  });
+
+  it('falls back to a generic title when serviceType is blank', () => {
+    const row = reportRowSummary(
+      { number: 'RP-001', serviceType: '  ', status: 'draft', updatedAt: NOW },
+      NOW,
+    );
+    expect(row.title).toBe('Service report');
+  });
+
+  it('handles a sent report with no sentAt stamp', () => {
+    const row = reportRowSummary(
+      { number: 'RP-002', serviceType: 'Ducted heating', status: 'sent', updatedAt: NOW },
+      NOW,
+    );
+    expect(row.subtitle).toBe('RP-002 · Sent');
   });
 });
