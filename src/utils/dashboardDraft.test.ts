@@ -65,6 +65,26 @@ describe('pickDashboardDraft', () => {
   it('returns null for an empty quote list', () => {
     expect(pickDashboardDraft([], NOW)).toBeNull();
   });
+
+  // Regression (Jul 2026): converting a wizard draft to an invoice via the
+  // unified convertDocumentToInvoice path left the legacy quote row as
+  // status 'draft' with a draftStep, so the banner offered "Continue draft"
+  // for a job that was already invoiced — and paid.
+  it('ignores a draft that has been converted to an invoice (invoiceId stamped)', () => {
+    const converted = draft({ id: 'converted', invoiceId: 'converted' });
+    expect(pickDashboardDraft([converted], NOW)).toBeNull();
+  });
+
+  it('ignores a draft with invoicedAt stamped even without invoiceId', () => {
+    const invoiced = draft({ id: 'invoiced', invoicedAt: new Date(NOW - 1000) });
+    expect(pickDashboardDraft([invoiced], NOW)).toBeNull();
+  });
+
+  it('an invoiced zombie does not shadow an older genuine draft', () => {
+    const zombie = draft({ id: 'zombie', invoiceId: 'zombie', updatedAt: new Date(NOW - 1000).toISOString() });
+    const genuine = draft({ id: 'genuine', updatedAt: new Date(NOW - 2 * 60 * 60 * 1000).toISOString() });
+    expect(pickDashboardDraft([zombie, genuine], NOW)?.id).toBe('genuine');
+  });
 });
 
 describe('excludeDraftJob', () => {

@@ -19,7 +19,11 @@ export const DRAFT_BANNER_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
  */
 export function pickDashboardDraft(quotes: Quote[], now: number = Date.now()): Quote | null {
   const newest = quotes
-    .filter((q) => q.status === 'draft' && q.draftStep)
+    // An invoiced quote is finished work, not an in-progress draft — the
+    // unified convert path used to leave the legacy row as status 'draft',
+    // so the invoiceId/invoicedAt check also heals rows stamped before
+    // convertDocumentToInvoice started clearing them.
+    .filter((q) => q.status === 'draft' && q.draftStep && !q.invoiceId && !q.invoicedAt)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
   if (!newest) return null;
   const age = now - new Date(newest.updatedAt).getTime();
