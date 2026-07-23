@@ -172,14 +172,16 @@ export function TakePaymentSheet({
 
   const handleTakeCardPayment = async () => {
     if (chargingCard || amounts.remaining <= 0) return;
-    // Square-only path: route to settings if not connected. The guard has
-    // already navigated away, so dismiss to avoid a stranded modal over it.
-    if (ensureSquareConnected && !(await ensureSquareConnected())) {
-      onDismiss();
-      return;
-    }
     setChargingCard(true);
     try {
+      // Square-only path: route to settings if not connected. Runs inside
+      // the spinner window (the check is a network round-trip) and the
+      // guard has already navigated away, so dismiss to avoid a stranded
+      // modal over the settings screen.
+      if (ensureSquareConnected && !(await ensureSquareConnected())) {
+        onDismiss();
+        return;
+      }
       // Bake the passthrough surcharge (if opted in) into the charged amount
       // so the customer sees/pays the inflated total. The app fee (our cut)
       // is computed off the CHARGED amount so we also earn on the surcharge.
@@ -226,14 +228,16 @@ export function TakePaymentSheet({
 
   const handleShareLink = async () => {
     if (sharing) return;
-    // Square-only path: route to settings if not connected. The guard has
-    // already navigated away, so dismiss to avoid a stranded modal over it.
-    if (ensureSquareConnected && !(await ensureSquareConnected())) {
-      onDismiss();
-      return;
-    }
     setSharing(true);
     try {
+      // Square-only path: route to settings if not connected. Runs inside
+      // the spinner window (the check is a network round-trip) and the
+      // guard has already navigated away, so dismiss to avoid a stranded
+      // modal over the settings screen.
+      if (ensureSquareConnected && !(await ensureSquareConnected())) {
+        onDismiss();
+        return;
+      }
       const result =
         target.kind === 'invoice'
           ? await squareService.mintInvoicePaymentLink(target.invoiceId)

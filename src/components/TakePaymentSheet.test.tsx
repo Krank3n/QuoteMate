@@ -34,8 +34,13 @@ vi.mock('../services/squareService', () => ({
   mintQuoteFullPaymentLink: vi.fn(async () => ({ paymentLinkUrl: 'https://sq.link/x' })),
   mintQuoteDepositPaymentLink: vi.fn(async () => ({ paymentLinkUrl: 'https://sq.link/x' })),
 }));
+// Mutable so individual tests can flip Tap to Pay on and exercise the
+// card-payment guard; reset to disabled in beforeEach.
+const tapToPay = vi.hoisted(() => ({
+  state: { enabled: false, reason: 'pending_apple' } as any,
+}));
 vi.mock('../hooks/useTapToPayEnabled', () => ({
-  useTapToPayEnabled: () => ({ enabled: false, reason: 'pending_apple' }),
+  useTapToPayEnabled: () => tapToPay.state,
 }));
 vi.mock('../store/useStore', () => ({
   useStore: () => ({ businessSettings: null }),
@@ -43,6 +48,7 @@ vi.mock('../store/useStore', () => ({
 
 import { TakePaymentSheet, type TakePaymentTarget } from './TakePaymentSheet';
 import * as squareService from '../services/squareService';
+import * as squarePayments from '../services/squarePayments';
 
 const invoiceTarget: TakePaymentTarget = {
   kind: 'invoice',
@@ -75,6 +81,7 @@ function renderSheet(overrides: Partial<React.ComponentProps<typeof TakePaymentS
 
 beforeEach(() => {
   vi.clearAllMocks();
+  tapToPay.state = { enabled: false, reason: 'pending_apple' };
 });
 
 describe('TakePaymentSheet manual "Record a payment" row', () => {
@@ -134,6 +141,33 @@ describe('TakePaymentSheet Square rows gate themselves', () => {
 
     await waitFor(() =>
       expect(squareService.mintInvoicePaymentLink).toHaveBeenCalledWith('inv-42'),
+    );
+  });
+
+  it('Tap to Pay aborts (no charge attempted) when Square is not connected', async () => {
+    tapToPay.state = { enabled: true };
+    const ensureSquareConnected = vi.fn(async () => false);
+    const { getByText, props } = renderSheet({ ensureSquareConnected });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(ensureSquareConnected).toHaveBeenCalled());
+    expect(squarePayments.takeInAppPayment).not.toHaveBeenCalled();
+    await waitFor(() => expect(props.onDismiss).toHaveBeenCalled());
+  });
+
+  it('Tap to Pay proceeds to charge when Square is connected', async () => {
+    tapToPay.state = { enabled: true };
+    const ensureSquareConnected = vi.fn(async () => true);
+    const { getByText } = renderSheet({ ensureSquareConnected });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(squarePayments.takeInAppPayment).toHaveBeenCalled());
+    expect(squarePayments.takeInAppPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { kind: 'invoice', invoiceId: 'inv-42' },
+      }),
     );
   });
 });
