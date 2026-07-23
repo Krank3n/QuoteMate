@@ -749,7 +749,9 @@ export function JobPreviewScreen() {
                       : 'Tap to Pay'
                 }
                 onPress={async () => {
-                  if (!(await ensureSquareConnectedForPayment(navigation))) return;
+                  // No Square gate here — the sheet's manual "Record a
+                  // payment" row must work with zero Square setup; the
+                  // Square rows gate themselves.
                   if (liveDoc.type === 'invoice') {
                     setTakePaymentTarget({
                       kind: 'invoice',
@@ -796,6 +798,10 @@ export function JobPreviewScreen() {
         target={takePaymentTarget}
         onDismiss={() => setTakePaymentTarget(null)}
         onError={(message) => Alert.alert('Payment error', message)}
+        onRecordManualPayment={(invoiceId) =>
+          navigation.navigate('RecordPayment', { invoiceId })
+        }
+        ensureSquareConnected={() => ensureSquareConnectedForPayment(navigation)}
       />
 
       {/* Banner overlay — rendered last so it's on top. Deliberately no

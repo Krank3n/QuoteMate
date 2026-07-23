@@ -70,6 +70,19 @@ interface TakePaymentSheetProps {
   target: TakePaymentTarget | null;
   onDismiss: () => void;
   onError: (message: string) => void;
+  /**
+   * Route to the manual-recording flow (RecordPaymentScreen) for an already-
+   * received bank transfer / cash / cheque. Only wired for invoice targets —
+   * quotes have no manual deposit path. When omitted, the row is hidden.
+   */
+  onRecordManualPayment?: (invoiceId: string) => void;
+  /**
+   * Square connection gate. The sheet always opens (so manual recording works
+   * with zero Square setup); the Square-only rows call this before doing any
+   * Square work and, when it resolves false, it has already routed the tradie
+   * to the Square settings screen. When omitted, the rows proceed unguarded.
+   */
+  ensureSquareConnected?: () => Promise<boolean>;
 }
 
 function describeAmounts(
@@ -111,6 +124,8 @@ export function TakePaymentSheet({
   target,
   onDismiss,
   onError,
+  onRecordManualPayment,
+  ensureSquareConnected,
 }: TakePaymentSheetProps) {
   const [sharing, setSharing] = useState(false);
   const [chargingCard, setChargingCard] = useState(false);
@@ -157,6 +172,12 @@ export function TakePaymentSheet({
 
   const handleTakeCardPayment = async () => {
     if (chargingCard || amounts.remaining <= 0) return;
+    // Square-only path: route to settings if not connected. The guard has
+    // already navigated away, so dismiss to avoid a stranded modal over it.
+    if (ensureSquareConnected && !(await ensureSquareConnected())) {
+      onDismiss();
+      return;
+    }
     setChargingCard(true);
     try {
       // Bake the passthrough surcharge (if opted in) into the charged amount
@@ -205,6 +226,12 @@ export function TakePaymentSheet({
 
   const handleShareLink = async () => {
     if (sharing) return;
+    // Square-only path: route to settings if not connected. The guard has
+    // already navigated away, so dismiss to avoid a stranded modal over it.
+    if (ensureSquareConnected && !(await ensureSquareConnected())) {
+      onDismiss();
+      return;
+    }
     setSharing(true);
     try {
       const result =
@@ -398,6 +425,20 @@ export function TakePaymentSheet({
             onPress={handleShareLink}
             loading={sharing}
           />
+
+          {/* Manual recording — invoice only (quotes have no manual deposit
+              path). No Square guard: works with zero Square setup. */}
+          {target.kind === 'invoice' && onRecordManualPayment && (
+            <MethodRow
+              icon="cash-multiple"
+              title="Record a payment"
+              subtitle="Bank transfer, cash or cheque you've already received."
+              onPress={() => {
+                onDismiss();
+                onRecordManualPayment(target.invoiceId);
+              }}
+            />
+          )}
 
           <Button
             mode="text"

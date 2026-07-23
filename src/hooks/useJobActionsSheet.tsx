@@ -151,7 +151,8 @@ export function useJobActionsSheet(
       case 'takePayment': {
         const doc = primaryDocForJob(job);
         if (!doc) return;
-        if (!(await ensureSquareConnectedForPayment(navigation))) break;
+        // No Square gate here — the sheet's manual "Record a payment" row
+        // must work with zero Square setup; the Square rows gate themselves.
         if (doc.type === 'invoice') {
           setTakePaymentTarget({
             kind: 'invoice',
@@ -371,6 +372,10 @@ export function useJobActionsSheet(
         target={takePaymentTarget}
         onDismiss={() => setTakePaymentTarget(null)}
         onError={(message) => Alert.alert('Payment error', message)}
+        onRecordManualPayment={(invoiceId) =>
+          navigation.navigate('RecordPayment', { invoiceId })
+        }
+        ensureSquareConnected={() => ensureSquareConnectedForPayment(navigation)}
       />
 
       {followUpState ? (
