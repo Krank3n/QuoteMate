@@ -13,6 +13,8 @@
  * customer-facing document.
  */
 
+import { format, formatDistance } from 'date-fns';
+
 import type { Job, JobPhoto } from '../../../shared/job/types';
 import type {
   ReportChecklistItem,
@@ -243,4 +245,31 @@ export function latestTechnicianSignature(
     if (sig && pathHasInk(sig.svgPath)) return sig;
   }
   return null;
+}
+
+/**
+ * Compact one-line summary for a report row on the Job screen: the service
+ * type leads (that's how the tradie thinks of the visit), with the report
+ * number and lifecycle state underneath. `now` is injectable for tests.
+ */
+export function reportRowSummary(
+  report: Pick<ServiceReport, 'number' | 'serviceType' | 'status' | 'sentAt' | 'updatedAt'>,
+  now: number = Date.now(),
+): { title: string; subtitle: string } {
+  const title = report.serviceType?.trim() || 'Service report';
+  const parts: string[] = [];
+  if (report.number) parts.push(report.number);
+  if (report.status === 'sent') {
+    parts.push(
+      report.sentAt ? `Sent ${format(new Date(report.sentAt), 'd MMM')}` : 'Sent',
+    );
+  } else {
+    parts.push('Draft');
+    if (report.updatedAt) {
+      parts.push(
+        `edited ${formatDistance(new Date(report.updatedAt), new Date(now), { addSuffix: true })}`,
+      );
+    }
+  }
+  return { title, subtitle: parts.join(' · ') };
 }
