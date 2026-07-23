@@ -2433,6 +2433,31 @@ export const useStore = create<AppState>((set, get) => ({
       legacyInvoiceId: existing.id,
       updatedAt: now,
     };
+    // Stamp the legacy source quote BEFORE flipping the unified doc — the
+    // legacy createInvoiceFromQuote path stamps its source quote, but the
+    // unified path used to skip it, leaving the row as status 'draft' with
+    // a wizard draftStep. That zombie fed the dashboard's "Continue draft"
+    // banner for a job that was already invoiced (and possibly paid).
+    // Ordering matters: once the unified doc is type 'invoice', saveQuote's
+    // forward-only type guard re-routes to saveInvoice and the stamp would
+    // never land on the legacy quotes row. (draftStep only clears locally —
+    // firestoreService strips undefined under merge — so pickDashboardDraft
+    // keys off invoiceId/invoicedAt, which do persist.)
+    const sourceQuote = get().quotes.find((q) => q.id === documentId);
+    if (sourceQuote && !sourceQuote.invoiceId) {
+      try {
+        await get().saveQuote({
+          ...sourceQuote,
+          invoiceId: documentId,
+          invoicedAt: new Date(now),
+          draftStep: undefined,
+          updatedAt: new Date(now),
+        });
+      } catch {
+        // Non-fatal — pickDashboardDraft also excludes invoiced quotes, so
+        // the banner stays correct even if this stamp doesn't land.
+      }
+    }
     set((state) => ({
       documents: state.documents.map((d) => (d.id === documentId ? optimistic : d)),
     }));
