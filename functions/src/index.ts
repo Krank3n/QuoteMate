@@ -336,12 +336,19 @@ async function recordAffiliateEarning(
 }
 
 // CORS configuration - whitelist allowed origins
-const allowedOrigins = [
+// Exported for tests: web builds silently lose every HTTP function when
+// their hosting origin is missing from this list (see fix/staging-web-cors).
+export const allowedOrigins = [
   'https://us-central1-hansendev.cloudfunctions.net',
   'https://hansendev.web.app',
   'https://hansendev.firebaseapp.com',
   'https://quotemateapp.au',
   'https://www.quotemateapp.au',
+  // Staging hosting site (deploy:staging) — without these, every HTTP
+  // function call from the staging web build dies as an opaque
+  // "Failed to fetch", which presents as silently-disabled send buttons.
+  'https://quotemate-staging.web.app',
+  'https://quotemate-staging.firebaseapp.com',
 ];
 
 const corsHandler = cors({
