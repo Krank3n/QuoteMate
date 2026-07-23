@@ -28,7 +28,8 @@ import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { canUseServiceReports } from '../utils/reportEntitlement';
 import { reportService } from '../services/reportService';
-import { resumableReportId } from './ServiceReport/reportDraft';
+import { resumableReportId, reportRowSummary } from './ServiceReport/reportDraft';
+import type { ServiceReport } from '../../shared/report/types';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, stageMetaFor } from '../components/JobStageSheet';
 import {
@@ -117,6 +118,24 @@ export function ViewJobScreen() {
       .catch(() => { if (!cancelled) setReeceConnected(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Service reports attached to this job — reloaded on focus so a report
+  // saved/sent on the ServiceReport screen shows up when the tradie backs
+  // out to the job. Errors leave the list as-is (rows just don't appear).
+  const [jobReports, setJobReports] = useState<ServiceReport[]>([]);
+  useEffect(() => {
+    if (!jobId) return;
+    let cancelled = false;
+    const load = () => {
+      reportService
+        .listReports(jobId)
+        .then((reports) => { if (!cancelled) setJobReports(reports); })
+        .catch(() => {});
+    };
+    load();
+    const unsubscribe = navigation.addListener('focus', load);
+    return () => { cancelled = true; unsubscribe(); };
+  }, [jobId, navigation]);
   const [notesDirty, setNotesDirty] = useState(false);
   const [notesEditing, setNotesEditing] = useState(false);
 
@@ -186,6 +205,41 @@ export function ViewJobScreen() {
   // "Order from Reece" entry — only when Reece is connected and the doc has
   // at least one Reece-priced material with order identifiers. Slots into
   // the ScopeBlock right under the JobScopeCard via the `extra` prop.
+  // Minified service-report rows for the scope card. Reuses the Reece entry's
+  // row styling so the "extras" under the scope card read as one family.
+  // Tap → reopen that report (draft resumes, sent reports open read-back).
+  const serviceReportRows = jobReports.length > 0 ? (
+    <>
+      {jobReports.map((report) => {
+        const row = reportRowSummary(report);
+        return (
+          <TouchableOpacity
+            key={report.id}
+            style={styles.reeceOrderButton}
+            onPress={() =>
+              navigation.navigate('ServiceReport', {
+                jobId: job.id,
+                reportId: report.id,
+              })
+            }
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons
+              name="clipboard-check-outline"
+              size={20}
+              color={colors.primary}
+            />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.reeceOrderButtonTitle}>{row.title}</Text>
+              <Text style={styles.reeceOrderButtonSubtitle}>{row.subtitle}</Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+          </TouchableOpacity>
+        );
+      })}
+    </>
+  ) : null;
+
   const reeceOrderEntry =
     reeceConnected === true &&
     primaryDoc?.materials?.some((m) => !!m.reeceItemNumber && !!m.reeceUnitOfMeasure) ? (
@@ -833,7 +887,7 @@ export function ViewJobScreen() {
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={handlePaymentChipPress}
             onConvertToInvoice={handleConvertToInvoice}
-            extra={reeceOrderEntry}
+            extra={<>{serviceReportRows}{reeceOrderEntry}</>}
           />
         ) : null}
 
@@ -854,7 +908,7 @@ export function ViewJobScreen() {
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={handlePaymentChipPress}
             onConvertToInvoice={handleConvertToInvoice}
-            extra={reeceOrderEntry}
+            extra={<>{serviceReportRows}{reeceOrderEntry}</>}
           />
         ) : null}
 
@@ -1014,7 +1068,9 @@ function ScopeBlock({
 }: ScopeBlockProps) {
   if (!primaryDoc) {
     // No doc yet — the sticky bar already offers "Create Quote". Render
-    // an empty-state stub so the section doesn't just vanish.
+    // an empty-state stub so the section doesn't just vanish. `extra`
+    // still renders: a service-visit job can carry reports without ever
+    // having a quote, and those must stay reachable from the job.
     return (
       <WebContainer>
         <Card style={styles.emptyDocsCard}>
@@ -1029,6 +1085,7 @@ function ScopeBlock({
             </Text>
           </View>
         </Card>
+        {extra}
       </WebContainer>
     );
   }
