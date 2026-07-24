@@ -350,10 +350,13 @@ export function ViewJobScreen() {
       primaryKeepsOpen: true,
       primaryButtonAction: async () => {
         try {
-          const converted = await convertDocumentToInvoice(doc.id);
+          await convertDocumentToInvoice(doc.id);
           dismissAlert();
+          // Stay on the job screen — the card flips to an Unpaid invoice in
+          // place and the snackbar confirms. Jumping into the materials
+          // editor here (the old behaviour) read as being yanked off the
+          // job mid-flow.
           setConvertSnackbar(true);
-          if (converted) openEditorForDoc(converted, 'materials');
         } catch (err) {
           showAlert({
             type: 'error',
