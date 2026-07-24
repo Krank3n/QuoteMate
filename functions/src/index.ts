@@ -46,6 +46,7 @@ export { trialLifecycleDaily } from './lifecycleEmails';
 import { sentConversionEmailWithin } from './lifecycleEmails.helpers';
 export { subscriptionAuditDaily, adminSubscriptionAudit } from './subscriptionAudit';
 export { dailyTrackingCheck } from './trackingAlarm';
+export { sentryAutofix } from './sentryAutofix';
 export { storeFunnelDaily } from './storeFunnel';
 export { websiteContact, websiteSubscribe } from './websiteForms';
 export {
