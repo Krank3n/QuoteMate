@@ -649,6 +649,11 @@ export function ViewJobScreen() {
           openTakePaymentForDoc(primaryDoc);
         }
         break;
+      case 'convertToInvoice':
+        if (primaryDoc && primaryDoc.type === 'quote') {
+          handleConvertToInvoice(primaryDoc);
+        }
+        break;
       case 'followUp':
         if (primaryDoc) {
           setFollowUpState({
