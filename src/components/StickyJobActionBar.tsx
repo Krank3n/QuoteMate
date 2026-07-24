@@ -316,10 +316,16 @@ export function resolveJobActions(
       }
       return actions;
     }
-    // stage === 'accepted' (or any unexpected value): schedule is the priority.
+    // stage === 'accepted' (or any unexpected value): schedule is the
+    // priority; money collection beats conversion when a deposit is owed.
+    // Otherwise offer Generate Invoice here too — plenty of tradies
+    // invoice straight off an acceptance without ever scheduling, and
+    // hiding conversion until in_progress forced stage gymnastics.
     actions.push({ id: 'schedule', label: 'Pick a Date', icon: 'calendar-plus', tone: 'primary' });
     if (depositOwed(primaryDoc)) {
       actions.push({ id: 'takeDeposit', label: 'Take Deposit', icon: 'credit-card-outline', tone: 'ghost' });
+    } else {
+      actions.push({ id: 'generateInvoice', label: 'Generate Invoice', icon: 'receipt', tone: 'ghost' });
     }
     return actions;
   }
