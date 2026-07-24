@@ -73,6 +73,7 @@ export {
   leadUnsubscribe,
 } from './leadOutreach';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
+export { onQuoteCreatedBootstrapTrial } from './trialBootstrap';
 export { assistantToken } from './assistantToken';
 export { assistantChat } from './assistantChat';
 export { composeServiceReport } from './composeServiceReport';
