@@ -39,6 +39,9 @@ interface SendEmailOptions {
   // display name changes — so DKIM/SPF/DMARC remain aligned.
   replyTo?: { email: string; name?: string };
   senderName?: string;
+  // Blind-copy recipients (e.g. the tradie's own "email me a copy" toggle on
+  // quote/invoice sends). Invisible to the primary recipient.
+  bcc?: Array<{ email: string; name?: string }>;
 }
 
 // Strip characters that could break an RFC 5322 display-name header.
@@ -250,7 +253,7 @@ QuoteMate is made by Hansen Dev (Sydney NSW, Australia). You're receiving this b
 // Brevo webhook posts back events keyed to that tag, which lets us correlate
 // delivery / bounce / open / click / spam back to this exact send.
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName } = options;
+  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName, bcc } = options;
   let { htmlContent, unsubscribeUrl } = options;
 
   // For cold lead outreach, wrap with the AU spam-act compliance footer
@@ -366,6 +369,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
             ? { email: process.env.OUTREACH_REPLY_TO_EMAIL, name: process.env.OUTREACH_REPLY_TO_NAME || 'Tom' }
             : { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
         to: [{ email: to }],
+        ...(bcc?.length ? { bcc } : {}),
         subject,
         htmlContent,
         tags: brevoTags,
@@ -604,7 +608,36 @@ export function sendQuoteSentEmail(
   });
 }
 
-export function sendQuoteAcceptedEmail(
+export interface QuoteAcceptedHook {
+  line: string;
+  cta: string;
+  tag: string;
+}
+
+/**
+ * The conversion hook under the accepted-quote celebration. quote-accepted is
+ * the best-engaged email in the program (43% open / 26% click, Jul 2026
+ * audit) and lands at the exact moment the tradie has seen the payoff — so
+ * unconnected users get the connect-Square pitch here (Path B), and connected
+ * users get pointed at the card-link invoice they already have. Distinct tags
+ * so emailLogAudit can read the two variants separately.
+ */
+export function quoteAcceptedHook(hasSquareConnection: boolean): QuoteAcceptedHook {
+  return hasSquareConnection
+    ? {
+        line: 'Convert it to an invoice &mdash; your customer can pay by card straight from the link.',
+        cta: 'Send the invoice',
+        tag: 'square-ready',
+      }
+    : {
+        line:
+          'Convert it to an invoice and get paid. Connect Square once and every invoice can go out with a pay-by-card link &mdash; the money lands without the chasing.',
+        cta: 'Invoice &amp; get paid',
+        tag: 'square-hook',
+      };
+}
+
+export async function sendQuoteAcceptedEmail(
   to: string,
   customerName: string,
   quoteNumber: string,
@@ -612,6 +645,15 @@ export function sendQuoteAcceptedEmail(
   clientNotes: string | null,
   userId: string
 ): Promise<boolean> {
+  // Read failure defaults to the connect pitch — for the mostly-unconnected
+  // user base that's the right guess, and it's harmless for connected users.
+  let hasSquareConnection = false;
+  try {
+    const snap = await admin.firestore().doc(`users/${userId}/settings/squareConnection`).get();
+    hasSquareConnection = snap.exists;
+  } catch {}
+  const hook = quoteAcceptedHook(hasSquareConnection);
+
   const content = wrapEmailTemplate(`
     <div style="text-align:center;margin:0 0 24px;">
       <div style="background:#064e3b;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 16px;">
@@ -635,9 +677,9 @@ export function sendQuoteAcceptedEmail(
     )}
 
     <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 0;text-align:center;">
-      Convert this quote to an invoice and get paid.
+      ${hook.line}
     </p>
-    ${ctaButton('Open in QuoteMate', '#009868')}
+    ${ctaButton(hook.cta, '#009868')}
   `, { preheader: `Great news! ${customerName} accepted quote #${quoteNumber} for $${total.toFixed(2)}` });
 
   return sendEmail({
@@ -646,7 +688,7 @@ export function sendQuoteAcceptedEmail(
     htmlContent: content,
     category: 'transactional',
     userId,
-    tags: ['quote-accepted'],
+    tags: ['quote-accepted', hook.tag],
   });
 }
 
