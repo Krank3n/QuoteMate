@@ -948,6 +948,60 @@ ${foundingLine}
 }
 
 /**
+ * Trial lifecycle: the trial_ending slot for users who built quotes but never
+ * sent one. A personal note from Tom in the tip-5 mould — plain layout,
+ * replies land with Tom, sells nothing. The reply question is the point:
+ * these users are days from churning and we don't know why they stalled.
+ */
+export function sendTrialEndingNudgeEmail(
+  to: string,
+  businessName: string,
+  daysRemaining: number,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = (businessName || '').trim() || 'there';
+  const daysWord = daysRemaining <= 1 ? 'tomorrow' : `in ${daysRemaining} days`;
+
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      Before your trial wraps up &mdash; quick one
+    </h1>
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 16px;">Hi ${greeting},</p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      It's Tom &mdash; I built QuoteMate. Your trial wraps up ${daysWord}, and I noticed you've built a quote but haven't sent one to a customer yet.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Was there something that didn't feel right &mdash; pricing off, layout not you, or just flat out with work? Hit reply and tell me. It comes straight to me, not a support queue, and it genuinely shapes what I fix next.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+      And if the quote's good to go, sending takes about ten seconds &mdash; your customer gets a link they can accept right on their phone.
+    </p>
+
+    ${ctaButton('Send that quote')}
+
+    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 0;">
+      No pressure either way &mdash; quotes and invoices stay free after the trial.
+    </p>
+    <p style="color:#f8fafc;font-size:15px;line-height:1.65;margin:28px 0 0;">
+      Cheers,<br/>
+      <strong>Tom</strong> &mdash; QuoteMate
+    </p>
+  `, { unsubscribeUrl, preheader: 'You built a quote but never sent it — what got in the way?' });
+
+  return sendEmail({
+    to,
+    subject: 'Your quote never went out — what got in the way?',
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['trial-lifecycle', 'trial-ending-nudge'],
+    unsubscribeUrl,
+    replyTo: { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
+  });
+}
+
+/**
  * Trial lifecycle: sent once, shortly after the trial lapses without an
  * upgrade. Half reassurance (free plan keeps working), half churn research —
  * the reply-to question is the point.

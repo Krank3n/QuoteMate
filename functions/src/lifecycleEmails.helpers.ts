@@ -160,6 +160,21 @@ export function lifecycleVerdict(
   return { send: null };
 }
 
+export type TrialEndingVariant = 'standard' | 'nudge';
+
+/**
+ * Which trial_ending email to send. Trial starters who built quotes but never
+ * SENT one get a personal "what got in the way?" note from Tom instead of the
+ * pricing pitch — sending is the activation event, and the what-changes email
+ * lands wrong on someone who hasn't seen the payoff yet. Same window and
+ * send-once flag either way: one email, different message. When the documents
+ * scan failed the sent-signal is unknowable, so fall back to the standard
+ * email rather than guess anyone inactive.
+ */
+export function trialEndingVariant(hasSentDoc: boolean, docsScanOk: boolean): TrialEndingVariant {
+  return docsScanOk && !hasSentDoc ? 'nudge' : 'standard';
+}
+
 export interface MidTrialRecap {
   quotesBuilt: number;
   dollarsQuoted: number;
