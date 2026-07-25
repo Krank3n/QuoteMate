@@ -50,7 +50,9 @@ const corsHandler = cors({
 // Limits and pricing.
 // ---------------------------------------------------------------------------
 
-const CHAT_MODEL = 'claude-sonnet-4-6';
+// Haiku for speed: FAQ answering from a curated KB doesn't need Sonnet-level
+// reasoning, and Haiku roughly halves generation time (and cost).
+const CHAT_MODEL = 'claude-haiku-4-5';
 const MAX_OUTPUT_TOKENS = 1024;
 const MAX_MESSAGE_CHARS = 1500;
 const MAX_TURNS_PER_CHAT = 30;          // user turns; then we hand off to email
@@ -61,13 +63,13 @@ const RATE_LIMIT_MAX = 10;              // messages per IP per window
 // bot politely degrades to an email handoff instead of burning budget.
 const DAILY_COST_CAP_MICROS = 5_000_000; // US$5/day
 
-// USD per 1M tokens for claude-sonnet-4-6 (same convention as
+// USD per 1M tokens for claude-haiku-4-5 (same convention as
 // assistantCosts.ts: integer micros stored, divide by 1e6 on read).
 const PRICE = {
-  inputPerM: 3.0,
-  outputPerM: 15.0,
-  cacheReadPerM: 0.3,
-  cacheWritePerM: 3.75, // 1.25x input for 5-minute ephemeral cache writes
+  inputPerM: 1.0,
+  outputPerM: 5.0,
+  cacheReadPerM: 0.1,
+  cacheWritePerM: 2.0, // 2x input for 1-hour ephemeral cache writes
 };
 
 const SUPPORT_EMAIL = 'tom@hansendev.com.au';
@@ -161,12 +163,25 @@ function costMicros(u: Usage): number {
 
 const VALID_CHAT_ID = /^[a-zA-Z0-9_-]{10,64}$/;
 
+// The widget renders plain text. The prompt says "no markdown", but Haiku
+// still slips in bold/headings sometimes — strip it server-side so the
+// visitor never sees literal asterisks.
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/^#{1,4}\s+/gm, '')
+    .replace(/^(\s*)\*\s+/gm, '$1- ');
+}
+
 // ---------------------------------------------------------------------------
 // The function.
 // ---------------------------------------------------------------------------
 
 export const supportChat = functions
-  .runWith({ timeoutSeconds: 60, memory: '256MB' })
+  // minInstances keeps one instance warm — cold starts added 2-4s to the
+  // first message of most conversations at current traffic (~US$2-3/mo).
+  .runWith({ timeoutSeconds: 60, memory: '256MB', minInstances: 1 })
   .https.onRequest((req, res) => {
     corsHandler(req, res, (corsError?: Error) => {
       if (corsError) { res.status(403).json({ error: 'Origin not allowed.' }); return; }
@@ -220,11 +235,6 @@ async function handle(req: functions.https.Request, res: functions.Response): Pr
     return;
   }
 
-  if (await isRateLimited(req)) {
-    res.status(429).json({ reply: `Steady on — you're sending messages faster than I can read them. Give it a minute, or email ${SUPPORT_EMAIL}.`, handoff: false });
-    return;
-  }
-
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     console.error('supportChat: ANTHROPIC_API_KEY missing');
@@ -232,17 +242,33 @@ async function handle(req: functions.https.Request, res: functions.Response): Pr
     return;
   }
 
-  // Daily budget kill-switch.
+  // All pre-flight reads in parallel — serially these added ~0.5-1s per
+  // message. History ordered by seq (not createdAt): both halves of a turn
+  // share one batch commit timestamp, so createdAt ties would make
+  // user/assistant order non-deterministic.
   const dayRef = db().collection('supportChatDaily').doc(todayKey());
-  const daySnap = await dayRef.get();
+  const [limited, daySnap, chatSnap, historySnap, kb] = await Promise.all([
+    isRateLimited(req),
+    dayRef.get(),
+    chatRef.get(),
+    chatRef.collection('messages').orderBy('seq', 'desc').limit(HISTORY_TURNS).get(),
+    loadKb(),
+  ]);
+
+  if (limited) {
+    res.status(429).json({ reply: `Steady on — you're sending messages faster than I can read them. Give it a minute, or email ${SUPPORT_EMAIL}.`, handoff: false });
+    return;
+  }
+
+  // Daily budget kill-switch.
   if ((daySnap.data()?.costMicros ?? 0) >= DAILY_COST_CAP_MICROS) {
     console.warn('supportChat: daily cost cap reached');
     res.json({ reply: `I'm offline for the rest of the day — email ${SUPPORT_EMAIL} and we'll get back to you.`, handoff: true });
     return;
   }
 
-  // Load or create the chat doc; enforce the turn cap.
-  const chatSnap = await chatRef.get();
+  // Turn cap. New-chat creation fields are folded into the final tracking
+  // batch (no extra round trip before the model call).
   const isNewChat = !chatSnap.exists;
   const userTurns = (chatSnap.data()?.userTurns ?? 0) as number;
   if (userTurns >= MAX_TURNS_PER_CHAT) {
@@ -250,23 +276,6 @@ async function handle(req: functions.https.Request, res: functions.Response): Pr
     return;
   }
 
-  if (isNewChat) {
-    await chatRef.set({
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      page: typeof page === 'string' ? page.slice(0, 200) : null,
-      origin: req.get('origin') ?? null,
-      ipHash: ipHash(req),
-      userTurns: 0,
-      handoff: false,
-      totals: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costMicros: 0 },
-    });
-  }
-
-  // Replay recent history for the model. Ordered by seq (not createdAt):
-  // both halves of a turn share one batch commit timestamp, so createdAt
-  // ties would make user/assistant order non-deterministic.
-  const historySnap = await chatRef.collection('messages')
-    .orderBy('seq', 'desc').limit(HISTORY_TURNS).get();
   const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   historySnap.docs.reverse().forEach((doc) => {
     const d = doc.data();
@@ -275,8 +284,6 @@ async function handle(req: functions.https.Request, res: functions.Response): Pr
     }
   });
   history.push({ role: 'user', content: message.trim() });
-
-  const kb = await loadKb();
   if (!kb.count) {
     console.error('supportChat: supportKb collection is empty — run functions/scripts/syncSupportKb.ts');
     res.json({ reply: HANDOFF_MESSAGE, handoff: true });
@@ -296,11 +303,13 @@ async function handle(req: functions.https.Request, res: functions.Response): Pr
     body: JSON.stringify({
       model: CHAT_MODEL,
       max_tokens: MAX_OUTPUT_TOKENS,
-      thinking: { type: 'disabled' },
-      output_config: { effort: 'low' },
+      // No thinking/effort params: Haiku 4.5 rejects `effort` and defaults
+      // to no thinking, which is what a fast FAQ bot wants anyway.
+      // 1h cache TTL (2x write cost): at sparse traffic the 5-minute TTL
+      // meant most conversations paid the slow 12.8k-token cold prefill.
       system: [
         { type: 'text', text: GUARDRAILS },
-        { type: 'text', text: kb.text, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: kb.text, cache_control: { type: 'ephemeral', ttl: '1h' } },
       ],
       messages: history,
     }),
@@ -318,11 +327,13 @@ async function handle(req: functions.https.Request, res: functions.Response): Pr
     usage?: Usage;
     stop_reason?: string;
   };
-  const reply = (data.content ?? [])
-    .filter((b) => b.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text)
-    .join('\n')
-    .trim() || HANDOFF_MESSAGE;
+  const reply = stripMarkdown(
+    (data.content ?? [])
+      .filter((b) => b.type === 'text' && typeof b.text === 'string')
+      .map((b) => b.text)
+      .join('\n')
+      .trim(),
+  ) || HANDOFF_MESSAGE;
   const usage = data.usage ?? {};
   const micros = costMicros(usage);
   const handoff = reply.includes(SUPPORT_EMAIL);
@@ -350,6 +361,12 @@ async function handle(req: functions.https.Request, res: functions.Response): Pr
     costMicros: micros,
   });
   batch.set(chatRef, {
+    ...(isNewChat ? {
+      createdAt: now,
+      page: typeof page === 'string' ? page.slice(0, 200) : null,
+      origin: req.get('origin') ?? null,
+      ipHash: ipHash(req),
+    } : {}),
     updatedAt: now,
     userTurns: admin.firestore.FieldValue.increment(1),
     handoff: handoff || (chatSnap.data()?.handoff ?? false),
