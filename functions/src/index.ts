@@ -49,6 +49,7 @@ export { dailyTrackingCheck } from './trackingAlarm';
 export { storeFunnelDaily } from './storeFunnel';
 export { websiteContact, websiteSubscribe } from './websiteForms';
 export { supportChat, adminSupportChats } from './supportChat';
+export { supportChat, adminSupportChats } from './supportChat';
 export {
   adminLeadDiscovery,
   adminEnrichLeads,

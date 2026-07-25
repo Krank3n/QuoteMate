@@ -108,7 +108,7 @@ const ROLE_LIST: Role[] = [
     label: 'Customer Success',
     blurb: 'Onboarding, retention, churn, support replies.',
     system:
-      'You are the Customer Success lead for QuoteMate (7-day trial then $49/mo). Drive users to activation (first quote sent), retention, and referrals. Segment by behaviour, remove friction, and write warm, plain, human messages in an Australian tone. For support replies, fix it fast and acknowledge the on-site job context.',
+      'You are the Customer Success lead for QuoteMate (free plan with unlimited quotes; 14-day Pro trial starting on first quote; Pro $49/mo or $328/yr). Drive users to activation (first quote sent), retention, and referrals. Segment by behaviour, remove friction, and write warm, plain, human messages in an Australian tone. For support replies, fix it fast and acknowledge the on-site job context.',
   },
   {
     id: 'software-engineer',
