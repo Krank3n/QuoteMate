@@ -1357,34 +1357,11 @@ export function sendOnboardingTipEmail(
         </p>
       `,
     },
-    2: {
-      subject: 'Pro tip: Real material prices, automatically',
-      emoji: '&#128178;',
-      heading: 'No more guessing material costs',
-      preheader: 'QuoteMate pulls real prices from major hardware stores automatically.',
-      body: `
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-          QuoteMate automatically looks up <strong style="color:#f8fafc;">real prices</strong> from major hardware stores. No more manual price checks.
-        </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
-          Head to <strong style="color:#f8fafc;">Settings &rarr; Trade & Pricing</strong> and enable your preferred stores for the most accurate pricing in your area.
-        </p>
-      `,
-    },
-    3: {
-      subject: 'Pro tip: Clients can accept quotes online',
-      emoji: '&#10003;',
-      heading: 'One-click quote acceptance',
-      preheader: 'Send quotes your clients can accept online. Get notified instantly.',
-      body: `
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-          When you send a quote, your client gets a <strong style="color:#f8fafc;">professional link</strong> where they can review every detail and accept or decline &mdash; no phone tag needed.
-        </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
-          You'll get an <strong style="color:#f8fafc;">instant notification</strong> when they respond, so you can lock in the job right away.
-        </p>
-      `,
-    },
+    // Tips 2 (supplier prices) and 3 (accept online) retired 2026-07: the
+    // emailLog audit had them at 9–10% opens, and tip 4's copy already covers
+    // tip 3's acceptance-link and notification points. Numbering is kept so
+    // in-flight lastOnboardingTip state needs no migration — the drip ladder
+    // (onboardingDrip.helpers.ts) can no longer select the retired slots.
     4: {
       subject: 'Pro tip: Send your quote to a client in one tap',
       emoji: '&#128232;',
@@ -1458,7 +1435,7 @@ export function sendOnboardingTipEmail(
       <div style="background:#1e293b;border:2px solid #334155;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 12px;">
         ${tip.emoji}
       </div>
-      ${badge(`TIP ${tipNumber} OF 5`, '#1e293b', '#94a3b8')}
+      ${badge('PRO TIP', '#1e293b', '#94a3b8')}
     </div>
     <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 20px;text-align:center;line-height:1.3;">
       ${tip.heading}
