@@ -55,10 +55,21 @@ export function useUnsavedChangesGuard({ isDirty, onSave, onDiscard }: Options) 
 
   const dispatchPending = (action: NavigationAction | null) => {
     allowExitRef.current = true;
-    if (action) {
-      navigation.dispatch(action);
-    } else {
-      navigation.goBack();
+    try {
+      if (action) {
+        navigation.dispatch(action);
+      } else {
+        navigation.goBack();
+      }
+    } catch {
+      // The captured action was in flight when we paused it; awaiting
+      // onSave/onDiscard opens an async gap in which the navigator (or the
+      // whole root tree in App.tsx) can be torn down, leaving the stored
+      // action pointing at state that no longer exists. React Navigation then
+      // throws synchronously from getStateForAction ("Cannot read properties
+      // of undefined (reading 'routes')"). The user already chose to exit, so
+      // swallow it rather than crash. No fallback goBack() here — the dispatch
+      // may have partially succeeded, and a second nav would double-navigate.
     }
   };
 
