@@ -122,6 +122,18 @@ function laborSummary(doc: Document): string {
   return parts.join(' · ') || 'Not set';
 }
 
+/**
+ * The doc stage chip earns its spot on QUOTES and the terminal paid state.
+ * For quotes, the chip's stage sheet is this card's only door to
+ * "Convert to Invoice" — hiding it (the old `stage === 'paid'` gate)
+ * orphaned conversion until the job reached in_progress. Invoice
+ * lifecycle in between stays hidden: payment state lives in PaymentChip
+ * and the job timeline above tells the rest.
+ */
+export function shouldShowStageChip(doc: Pick<Document, 'type' | 'stage'>): boolean {
+  return doc.type === 'quote' || doc.stage === 'paid';
+}
+
 export function JobScopeCard({
   doc,
   onEdit,
@@ -129,10 +141,7 @@ export function JobScopeCard({
   onPaymentPress,
 }: JobScopeCardProps) {
   const meta = STAGE_META[doc.stage];
-  // Doc stage chip is mostly redundant noise — payment state lives in
-  // PaymentChip and the job-level timeline above tells the "where is
-  // it" story. Keep the chip only for the terminal-paid state.
-  const showStageChip = doc.stage === 'paid';
+  const showStageChip = shouldShowStageChip(doc);
   const isInvoice = doc.type === 'invoice';
   const typeLabel = isInvoice ? 'Invoice' : 'Quote';
   const lineCount = countLineItems(doc);

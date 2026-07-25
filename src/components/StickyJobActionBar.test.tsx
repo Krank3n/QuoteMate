@@ -88,3 +88,33 @@ describe('resolveJobActions — draft quote', () => {
     expect(actions.map((a) => a.id)).toEqual(['sendInvoice', 'editQuote']);
   });
 });
+
+// Regression (Jul 2026): an accepted quote had NO conversion affordance
+// anywhere on the job screen — Generate Invoice only appeared once the job
+// reached in_progress, forcing stage gymnastics to invoice an accepted job.
+describe('resolveJobActions — accepted quote conversion access', () => {
+  it('offers Generate Invoice alongside scheduling when no deposit is owed', () => {
+    const actions = resolveJobActions(
+      'accepted',
+      quoteDoc({ stage: 'quote_accepted' }),
+    );
+    expect(actions.map((a) => a.id)).toEqual(['schedule', 'generateInvoice']);
+    expect(actions[1].tone).toBe('ghost');
+  });
+
+  it('keeps money first: deposit owed still shows Take Deposit, not convert', () => {
+    const actions = resolveJobActions(
+      'accepted',
+      quoteDoc({ stage: 'quote_accepted', depositAmount: 100, depositPaid: 0 }),
+    );
+    expect(actions.map((a) => a.id)).toEqual(['schedule', 'takeDeposit']);
+  });
+
+  it('in_progress still leads with Generate Invoice (unchanged)', () => {
+    const actions = resolveJobActions(
+      'in_progress',
+      quoteDoc({ stage: 'quote_accepted' }),
+    );
+    expect(actions.map((a) => a.id)).toEqual(['generateInvoice', 'markComplete']);
+  });
+});

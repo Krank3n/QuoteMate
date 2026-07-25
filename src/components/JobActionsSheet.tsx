@@ -26,6 +26,7 @@ export type JobAction =
   | 'followUp'
   | 'edit'
   | 'send'
+  | 'convertToInvoice'
   | 'duplicate'
   | 'service_report'
   | 'exportPdf'
@@ -67,7 +68,7 @@ function resolve<T>(value: T | ((ctx: RowCtx) => T), ctx: RowCtx): T {
 // Take Payment and Follow Up sit at the top — those are the
 // everyday actions; everything else (edit, send, archive, delete)
 // is less frequent.
-const ROWS: RowDef[] = [
+export const ROWS: RowDef[] = [
   {
     id: 'takePayment',
     label: 'Take Payment',
@@ -96,6 +97,16 @@ const ROWS: RowDef[] = [
     sub: 'Email / SMS / Share / PDF',
     icon: 'send-outline',
     when: ({ primaryDoc }) => !!primaryDoc,
+  },
+  {
+    id: 'convertToInvoice',
+    label: 'Convert to Invoice',
+    sub: 'Job done? Turn this quote into an invoice',
+    icon: 'file-swap-outline',
+    // Quotes only, and never re-offer once invoiced — conversion is
+    // one-way and the idempotent path already guards double-taps.
+    when: ({ primaryDoc }) =>
+      !!primaryDoc && primaryDoc.type === 'quote' && !primaryDoc.invoicedAt,
   },
   {
     id: 'duplicate',
