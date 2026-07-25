@@ -48,6 +48,7 @@ export { subscriptionAuditDaily, adminSubscriptionAudit } from './subscriptionAu
 export { dailyTrackingCheck } from './trackingAlarm';
 export { storeFunnelDaily } from './storeFunnel';
 export { websiteContact, websiteSubscribe } from './websiteForms';
+export { supportChat, adminSupportChats } from './supportChat';
 export {
   adminLeadDiscovery,
   adminEnrichLeads,
@@ -7797,8 +7798,9 @@ export const sendReEngagement = functions.pubsub
 
         const lastActivityAt = data.lastActivityAt?.toDate?.() || new Date(data.lastActivityAt);
         const lastReEngagementAt = data.lastReEngagementAt?.toDate?.() || null;
+        const touchCount = typeof data.reEngagementCount === 'number' ? data.reEngagementCount : 0;
 
-        const verdict = reEngagementVerdict({ email, lastActivityAt, lastReEngagementAt }, now);
+        const verdict = reEngagementVerdict({ email, lastActivityAt, lastReEngagementAt, touchCount }, now);
         if (!verdict.send) continue;
 
         totalEligible++;
@@ -7815,6 +7817,7 @@ export const sendReEngagement = functions.pubsub
         if (sent) {
           await emailStateDoc.ref.set({
             lastReEngagementAt: admin.firestore.FieldValue.serverTimestamp(),
+            reEngagementCount: admin.firestore.FieldValue.increment(1),
           }, { merge: true });
           totalSent++;
         }

@@ -936,9 +936,10 @@ ${foundingLine}
 
   return sendEmail({
     to,
-    subject: founding
-      ? `Your trial ends ${daysWord} — and ${founding.spotsLeft} founding spots to go`
-      : `Your trial ends ${daysWord} — here's exactly what changes`,
+    // Flat transactional subject on purpose: the Jul 2026 emailLog audit found
+    // pitch-shaped subjects on this step opened at 1/15 while plain personal
+    // ones ran ~20%. The founding pitch stays in the body.
+    subject: `Your Pro access ends ${daysWord}`,
     htmlContent: content,
     category: 'marketing',
     userId,
@@ -1041,7 +1042,9 @@ ${foundingLine}
 
   return sendEmail({
     to,
-    subject: `You're on the free plan now — one question`,
+    // Plain reply-seeking subject (see trial_ending note): the old
+    // plan-status subject opened at 0/15.
+    subject: `Your trial's wrapped up — quick question`,
     htmlContent: content,
     category: 'marketing',
     userId,

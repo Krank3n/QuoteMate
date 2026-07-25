@@ -12,6 +12,7 @@ import {
   reEngagementVerdict,
   REENGAGE_INACTIVE_DAYS,
   REENGAGE_COOLDOWN_DAYS,
+  REENGAGE_MAX_TOUCHES,
 } from './reEngagement.helpers';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -86,5 +87,34 @@ describe('reEngagementVerdict', () => {
 
   it('sends to an inactive user who has never been re-engaged', () => {
     expect(reEngagementVerdict({ email: 'tradie@gmail.com', ...inactive }, NOW)).toEqual({ send: true });
+  });
+});
+
+describe('lifetime touch cap', () => {
+  const inactive40d = { email: 'tradie@gmail.com', lastActivityAt: daysAgo(40), lastReEngagementAt: null };
+
+  it('stops at the cap even when every other gate passes', () => {
+    expect(reEngagementVerdict({ ...inactive40d, touchCount: REENGAGE_MAX_TOUCHES }, NOW)).toEqual({
+      send: false,
+      reason: 'max-touches',
+    });
+    expect(reEngagementVerdict({ ...inactive40d, touchCount: REENGAGE_MAX_TOUCHES + 5 }, NOW)).toEqual({
+      send: false,
+      reason: 'max-touches',
+    });
+  });
+
+  it('sends below the cap', () => {
+    expect(reEngagementVerdict({ ...inactive40d, touchCount: REENGAGE_MAX_TOUCHES - 1 }, NOW)).toEqual({
+      send: true,
+    });
+  });
+
+  it('missing count (pre-backfill state doc) behaves as zero', () => {
+    expect(reEngagementVerdict(inactive40d, NOW)).toEqual({ send: true });
+  });
+
+  it('cap is 3 — past it the identical email is only spam-complaint risk', () => {
+    expect(REENGAGE_MAX_TOUCHES).toBe(3);
   });
 });
