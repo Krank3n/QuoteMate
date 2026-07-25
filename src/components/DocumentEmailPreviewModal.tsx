@@ -240,6 +240,10 @@ export function DocumentEmailPreviewModal({
   const ownerEmail = auth.currentUser?.email || '';
   const hasPhotos = photos.length > 0;
   const [includePhotos, setIncludePhotos] = useState(true);
+  // "Email me a copy" — BCCs the tradie's account email on the real send so
+  // they keep the exact email the customer received. Test sends already go
+  // to the tradie, so the flag is only sent for real sends.
+  const [sendCopyToSelf, setSendCopyToSelf] = useState(false);
 
   // Keyboard UX state
   const scrollViewRef = useRef<ScrollView>(null);
@@ -369,6 +373,7 @@ export function DocumentEmailPreviewModal({
       setSent(false);
       setEmailTouched(false);
       setEmailError('');
+      setSendCopyToSelf(false);
     }
   }, [visible, doc.customerEmail]);
 
@@ -401,6 +406,7 @@ export function DocumentEmailPreviewModal({
         ...(isTestSend ? { isTestSend: true } : {}),
         includePhotos: hasPhotos && includePhotos,
         ...(trimmedSubject ? { subject: trimmedSubject } : {}),
+        ...(!isTestSend && sendCopyToSelf ? { sendCopyToSelf: true } : {}),
       };
     }
     const quote = documentToQuote(doc);
@@ -412,6 +418,7 @@ export function DocumentEmailPreviewModal({
       ...(isTestSend ? { isTestSend: true } : {}),
       includePhotos: hasPhotos && includePhotos,
       ...(trimmedSubject ? { subject: trimmedSubject } : {}),
+      ...(!isTestSend && sendCopyToSelf ? { sendCopyToSelf: true } : {}),
     };
   };
 
@@ -665,6 +672,30 @@ export function DocumentEmailPreviewModal({
               <Switch
                 value={includePhotos}
                 onValueChange={setIncludePhotos}
+                color={colors.primary}
+              />
+            </View>
+          </View>
+        )}
+
+        {/* Send-me-a-copy toggle - hidden when editing body */}
+        {!isEditingBody && !!ownerEmail && (
+          <View style={styles.sectionCard}>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLeft}>
+                <View style={[styles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
+                  <MaterialCommunityIcons name="email-sync-outline" size={18} color={colors.info} />
+                </View>
+                <View style={styles.toggleTextContainer}>
+                  <Text style={styles.sectionTitle}>Email me a copy</Text>
+                  <Text style={styles.toggleSubtext} numberOfLines={1}>
+                    Keeps a copy at {ownerEmail} for your records
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={sendCopyToSelf}
+                onValueChange={setSendCopyToSelf}
                 color={colors.primary}
               />
             </View>

@@ -49,7 +49,6 @@ export { dailyTrackingCheck } from './trackingAlarm';
 export { storeFunnelDaily } from './storeFunnel';
 export { websiteContact, websiteSubscribe } from './websiteForms';
 export { supportChat, adminSupportChats } from './supportChat';
-export { supportChat, adminSupportChats } from './supportChat';
 export {
   adminLeadDiscovery,
   adminEnrichLeads,
@@ -5882,7 +5881,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { quoteId, quote: quoteFromClient, emailBody, recipientEmail, isTestSend, includePhotos, subject } = req.body;
+    const { quoteId, quote: quoteFromClient, emailBody, recipientEmail, isTestSend, includePhotos, subject, sendCopyToSelf } = req.body;
 
     if (!quoteId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: quoteId, emailBody, recipientEmail' });
@@ -5917,6 +5916,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         isTestSend,
         includePhotos,
         subject: typeof subject === 'string' ? subject : undefined,
+        sendCopyToSelf: sendCopyToSelf === true,
         overrides: quoteFromClient && typeof quoteFromClient === 'object' ? quoteFromClient : undefined,
         squareDepositLinkMint: async (uid, qid) => {
           const r = await mintAndRotate(uid, qid, 'deposit');
@@ -5965,7 +5965,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { invoiceId, invoice: invoiceFromClient, emailBody, recipientEmail, isTestSend, includePhotos, subject } = req.body;
+    const { invoiceId, invoice: invoiceFromClient, emailBody, recipientEmail, isTestSend, includePhotos, subject, sendCopyToSelf } = req.body;
 
     if (!invoiceId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: invoiceId, emailBody, recipientEmail' });
@@ -5998,6 +5998,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         isTestSend,
         includePhotos,
         subject: typeof subject === 'string' ? subject : undefined,
+        sendCopyToSelf: sendCopyToSelf === true,
         overrides: invoiceFromClient && typeof invoiceFromClient === 'object' ? invoiceFromClient : undefined,
         squareInvoiceLinkMint: async (uid, iid) => {
           const r = await mintAndRotate(uid, iid, 'invoice');
