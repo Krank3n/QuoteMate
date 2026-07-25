@@ -111,7 +111,10 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
       - name: OTA update (production channel, iOS + Android)
-        run: eas update --branch production --message "Sentry autofix PR #${{ github.event.pull_request.number }}" --non-interactive
+        # Block scalar: a plain "run:" scalar would treat the # in the message
+        # as a YAML comment and truncate the command mid-string.
+        run: |
+          eas update --branch production --message "Sentry autofix PR #${{ github.event.pull_request.number }}" --non-interactive
 
   native-build-needed:
     needs: classify
