@@ -93,6 +93,7 @@ export function useJobActionsSheet(
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
+  const convertDocumentToInvoice = useStore((s) => s.convertDocumentToInvoice);
 
   const { showAlert, alertNode } = useAlertModal();
 
@@ -146,6 +147,30 @@ export function useJobActionsSheet(
       case 'followUp': {
         const doc = primaryDocForJob(job);
         if (doc) openFollowUpForDoc(doc);
+        break;
+      }
+      case 'convertToInvoice': {
+        const doc = primaryDocForJob(job);
+        if (!doc || doc.type !== 'quote') return;
+        showAlert({
+          type: 'warning',
+          title: 'Convert to invoice?',
+          message: "This quote will become an invoice and can't be sent as a quote again.",
+          primaryButtonText: 'Convert to invoice',
+          primaryButtonAction: async () => {
+            try {
+              await convertDocumentToInvoice(doc.id);
+            } catch {
+              showAlert({
+                type: 'error',
+                title: 'Conversion failed',
+                message: 'Something went wrong. Pull to refresh and try again.',
+              });
+            }
+          },
+          secondaryButtonText: 'Cancel',
+          secondaryButtonAction: () => {},
+        });
         break;
       }
       case 'takePayment': {

@@ -1,0 +1,140 @@
+name: Deploy on autofix merge
+
+# Closes the Sentry autofix loop: when a PR whose linked issue carries the
+# `sentry-autofix` label is MERGED to main, redeploy whatever the fix touched:
+#   - functions/**            -> firebase deploy --only functions
+#   - src/** / App.tsx / assets -> EAS OTA update on the production channel
+#                                 (reaches installed iOS + Android apps)
+#   - native surface (android/, ios/, plugins/, package.json, app.config.js,
+#     patches/) -> OTA is SKIPPED (unsafe over a native mismatch) and a PR
+#     comment asks for a store build via the EAS Pipeline workflow instead.
+#
+# Deliberately does NOT fire for ordinary PRs — normal merges keep the existing
+# manual deploy flow. Human review of the PR remains the only gate; merging IS
+# the deploy approval.
+#
+# Secrets used: FIREBASE_SERVICE_ACCOUNT (needs functions deploy roles, not
+# just Hosting Admin), EXPO_TOKEN.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  classify:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      autofix: ${{ steps.check.outputs.autofix }}
+      functions: ${{ steps.check.outputs.functions }}
+      app: ${{ steps.check.outputs.app }}
+      native: ${{ steps.check.outputs.native }}
+    steps:
+      - name: Check autofix label + classify changed files
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+
+            // Autofix PRs are identified by the `sentry-autofix` label on the
+            // LINKED ISSUE (the webhook labels it at creation), or on the PR
+            // itself as a manual override.
+            let autofix = pr.labels.some(l => l.name === 'sentry-autofix');
+            if (!autofix) {
+              const m = (pr.body || '').match(/Closes #(\d+)/i);
+              if (m) {
+                try {
+                  const { data: issue } = await github.rest.issues.get({
+                    owner: context.repo.owner, repo: context.repo.repo,
+                    issue_number: Number(m[1]),
+                  });
+                  autofix = issue.labels.some(l => l.name === 'sentry-autofix');
+                } catch (e) {
+                  core.warning(`Could not read linked issue: ${e.message}`);
+                }
+              }
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              pull_number: pr.number, per_page: 100,
+            });
+            const paths = files.map(f => f.filename);
+            const touches = (re) => paths.some(p => re.test(p));
+
+            const functionsChanged = touches(/^functions\//);
+            const nativeChanged = touches(/^(android\/|ios\/|plugins\/|patches\/|package(-lock)?\.json$|app\.config\.js$|app\.json$)/);
+            const appChanged = touches(/^(src\/|App\.tsx$|assets\/)/);
+
+            core.setOutput('autofix', String(autofix));
+            core.setOutput('functions', String(functionsChanged));
+            core.setOutput('app', String(appChanged));
+            core.setOutput('native', String(nativeChanged));
+            core.info(`autofix=${autofix} functions=${functionsChanged} app=${appChanged} native=${nativeChanged}`);
+
+  deploy-functions:
+    needs: classify
+    if: needs.classify.outputs.autofix == 'true' && needs.classify.outputs.functions == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install functions dependencies
+        run: npm --prefix functions install --no-audit --no-fund
+      - name: Deploy functions
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+        run: |
+          printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
+          npx firebase-tools deploy --only functions --project hansendev --force
+
+  ota-update:
+    needs: classify
+    if: >-
+      needs.classify.outputs.autofix == 'true' &&
+      needs.classify.outputs.app == 'true' &&
+      needs.classify.outputs.native != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: OTA update (production channel, iOS + Android)
+        # Block scalar: a plain "run:" scalar would treat the # in the message
+        # as a YAML comment and truncate the command mid-string.
+        run: |
+          eas update --branch production --message "Sentry autofix PR #${{ github.event.pull_request.number }}" --non-interactive
+
+  native-build-needed:
+    needs: classify
+    if: >-
+      needs.classify.outputs.autofix == 'true' &&
+      needs.classify.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comment that a store build is required
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: [
+                '⚠️ **Autofix merged, but it touches native code — OTA was skipped.**',
+                '',
+                'Shipping this to installed apps needs a store build: run the **EAS Pipeline** workflow (`build`, then `submit`), or the Rebuild button on the Tasks board.',
+              ].join('\n'),
+            });
