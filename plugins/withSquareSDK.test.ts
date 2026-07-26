@@ -115,6 +115,22 @@ describe('injectSquareMainApplication', () => {
     expect(out).not.toContain('addIdleHandler');
     expect(out).toContain('onActivityPreCreated');
     expect(out.match(/MobilePaymentsSdk\.initialize/g)).toHaveLength(2); // pre-created + <29 fallback
+
+    // Convergence: a migrated legacy checkout must end up byte-identical to a
+    // fresh injection — the transform's output can't depend on prior state.
+    const legacyTemplate = LEGACY_IDLE_HANDLER.replace(
+      /\n    android\.os\.Looper\.myQueue\(\)\.addIdleHandler \{\n      MobilePaymentsSdk\.initialize\([^)]*\)\n      false\n    \}/,
+      ''
+    ).replace(/import com\.squareup\.sdk\.mobilepayments\.MobilePaymentsSdk\n/, '');
+    expect(out).toBe(
+      injectSquareMainApplication(
+        injectSquareMainApplication(legacyTemplate, APP_ID),
+        APP_ID
+      )
+    );
+
+    // Migration is idempotent too.
+    expect(injectSquareMainApplication(out, APP_ID)).toBe(out);
   });
 
   it('injects after super.onCreate() and keeps the rest of onCreate intact', () => {

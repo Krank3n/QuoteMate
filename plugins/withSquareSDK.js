@@ -264,6 +264,14 @@ function injectSquareMainApplication(src, applicationId) {
     /\n\s*android\.os\.Looper\.myQueue\(\)\.addIdleHandler \{\n\s*MobilePaymentsSdk\.initialize\([^)]*\)\n\s*false\n\s*\}/,
     ''
   );
+  // If an idle-handler init survives the whitespace-exact strip above, the
+  // marker check below would silently keep the broken timing on this machine.
+  if (src.includes('addIdleHandler') && src.includes('MobilePaymentsSdk.initialize')) {
+    console.warn(
+      'withSquareSDK: unrecognized idle-handler MobilePaymentsSdk.initialize block — ' +
+        'migrate MainApplication.kt manually or the #66 crash timing ships again.'
+    );
+  }
 
   if (!src.includes('MobilePaymentsSdk.initialize')) {
     // Square's initialize() must (a) run on the main thread — it throws
