@@ -22,6 +22,19 @@ export function shouldEnableSentry(dsn: string, isDev: boolean): boolean {
   return dsn.length > 0 && !isDev;
 }
 
+/**
+ * Known-benign errors we deliberately don't report.
+ *
+ * Pointer capture (REACT-NATIVE-5): thrown by react-native-web's internal
+ * ResponderEventPlugin on web when a pointer is already gone by the time it
+ * calls set/releasePointerCapture (fast flick, touch cancel, unmount
+ * mid-gesture). No first-party frame, the browser auto-releases capture,
+ * and the drag/slider interaction still completes — pure noise.
+ */
+export const SENTRY_IGNORE_ERRORS: (string | RegExp)[] = [
+  /Failed to execute '(set|release)PointerCapture' on 'Element'/,
+];
+
 export function initSentry(): void {
   if (!shouldEnableSentry(SENTRY_DSN, __DEV__)) return;
   Sentry.init({
@@ -30,6 +43,7 @@ export function initSentry(): void {
     // no PII. Keep the payload to stack traces + device context.
     sendDefaultPii: false,
     tracesSampleRate: 0,
+    ignoreErrors: SENTRY_IGNORE_ERRORS,
   });
 }
 

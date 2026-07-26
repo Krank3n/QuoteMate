@@ -12,7 +12,52 @@ const { init, wrap } = vi.hoisted(() => ({
 }));
 vi.mock('@sentry/react-native', () => ({ init, wrap }));
 
-import { initSentry, wrapRootComponent, shouldEnableSentry, SENTRY_DSN } from './sentry';
+import {
+  initSentry,
+  wrapRootComponent,
+  shouldEnableSentry,
+  SENTRY_DSN,
+  SENTRY_IGNORE_ERRORS,
+} from './sentry';
+
+const matchesIgnoreList = (message: string): boolean =>
+  SENTRY_IGNORE_ERRORS.some((p) =>
+    typeof p === 'string' ? message.includes(p) : p.test(message),
+  );
+
+describe('SENTRY_IGNORE_ERRORS', () => {
+  it('filters the exact react-native-web pointer-capture messages seen in production (REACT-NATIVE-5)', () => {
+    expect(
+      matchesIgnoreList(
+        "Failed to execute 'setPointerCapture' on 'Element': No active pointer with the given id is found.",
+      ),
+    ).toBe(true);
+    expect(
+      matchesIgnoreList(
+        "Failed to execute 'releasePointerCapture' on 'Element': No active pointer with the given id is found.",
+      ),
+    ).toBe(true);
+  });
+
+  it('does not swallow other NotFoundErrors or unrelated crashes', () => {
+    expect(matchesIgnoreList('NotFoundError: The object can not be found here.')).toBe(false);
+    expect(
+      matchesIgnoreList("TypeError: Cannot read properties of undefined (reading 'routes')"),
+    ).toBe(false);
+  });
+
+  it('is passed to Sentry.init in enabled builds', () => {
+    init.mockClear();
+    initSentry();
+    if (SENTRY_DSN !== '') {
+      expect(init).toHaveBeenCalledWith(
+        expect.objectContaining({ ignoreErrors: SENTRY_IGNORE_ERRORS }),
+      );
+    } else {
+      expect(init).not.toHaveBeenCalled();
+    }
+  });
+});
 
 describe('shouldEnableSentry', () => {
   it('is off with no DSN', () => {
