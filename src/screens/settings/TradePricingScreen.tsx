@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   StyleSheet,
+  ScrollView,
   TouchableOpacity,
   Pressable,
   Platform,
@@ -233,16 +234,19 @@ export function TradePricingScreen() {
         {/* Drag handle. Using Pressable (not TouchableOpacity) to match the
             JobChecklist pattern — TouchableOpacity's tap-feedback animation
             bubbles up to the parent NestableScrollContainer and triggers a
-            scroll-to-top when the handle is tapped without a long-press. */}
-        <Pressable
-          onLongPress={drag}
-          delayLongPress={150}
-          disabled={isActive}
-          style={styles.supplierDragHandle}
-          hitSlop={6}
-        >
-          <MaterialCommunityIcons name="drag-vertical" size={20} color={colors.textMuted} />
-        </Pressable>
+            scroll-to-top when the handle is tapped without a long-press.
+            Hidden on web, where reordering isn't available (see web branch below). */}
+        {Platform.OS !== 'web' ? (
+          <Pressable
+            onLongPress={drag}
+            delayLongPress={150}
+            disabled={isActive}
+            style={styles.supplierDragHandle}
+            hitSlop={6}
+          >
+            <MaterialCommunityIcons name="drag-vertical" size={20} color={colors.textMuted} />
+          </Pressable>
+        ) : null}
         <MaterialCommunityIcons name={iconName} size={22} color={iconColor} style={{ marginRight: 12 }} />
         {/* Body — tap to navigate where applicable; built-in always-on
             suppliers (Bunnings, connected Reece) just sit there. */}
@@ -264,9 +268,16 @@ export function TradePricingScreen() {
     );
   };
 
+  // react-native-draggable-flatlist's cells call findNodeHandle on mount,
+  // which react-native-web@0.20 removed and throws on. So on web we swap the
+  // Nestable containers for a plain ScrollView + a static (non-draggable) list
+  // — nothing from the draggable-flatlist library mounts there. Native keeps
+  // the drag-reorder experience unchanged. Mirrors JobChecklist's web gate.
+  const ScrollContainer = Platform.OS !== 'web' ? NestableScrollContainer : ScrollView;
+
   return (
     <View style={styles.container}>
-      <NestableScrollContainer
+      <ScrollContainer
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
@@ -365,7 +376,9 @@ export function TradePricingScreen() {
           <Surface style={styles.card}>
             <Title style={styles.sectionTitle}>Hardware Stores</Title>
             <Text style={styles.helperText}>
-              Quotes search these suppliers in order. Long-press and drag to change priority — whoever's at the top is tried first.
+              {Platform.OS !== 'web'
+                ? "Quotes search these suppliers in order. Long-press and drag to change priority — whoever's at the top is tried first."
+                : "Quotes search these suppliers in order — whoever's at the top is tried first. Reorder them in the app."}
             </Text>
 
             <TouchableOpacity
@@ -383,17 +396,27 @@ export function TradePricingScreen() {
               <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
             </TouchableOpacity>
 
-            <NestableDraggableFlatList
-              data={orderedSuppliers}
-              keyExtractor={(item) => item.id}
-              renderItem={renderSupplierItem}
-              onDragEnd={({ data }) => handleSupplierReorder(data)}
-              activationDistance={8}
-              containerStyle={{ marginTop: 12 }}
-            />
+            {Platform.OS !== 'web' ? (
+              <NestableDraggableFlatList
+                data={orderedSuppliers}
+                keyExtractor={(item) => item.id}
+                renderItem={renderSupplierItem}
+                onDragEnd={({ data }) => handleSupplierReorder(data)}
+                activationDistance={8}
+                containerStyle={{ marginTop: 12 }}
+              />
+            ) : (
+              <View style={{ marginTop: 12 }}>
+                {orderedSuppliers.map((item) => (
+                  <React.Fragment key={item.id}>
+                    {renderSupplierItem({ item, drag: () => {}, isActive: false, getIndex: () => undefined })}
+                  </React.Fragment>
+                ))}
+              </View>
+            )}
           </Surface>
         </WebContainer>
-      </NestableScrollContainer>
+      </ScrollContainer>
 
       <FixedBottomButton
         mode="contained"
