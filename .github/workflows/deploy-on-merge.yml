@@ -42,7 +42,9 @@ jobs:
             // itself as a manual override.
             let autofix = pr.labels.some(l => l.name === 'sentry-autofix');
             if (!autofix) {
-              const m = (pr.body || '').match(/Closes #(\d+)/i);
+              // Any GitHub closing keyword counts (a "Fixes #66" PR missed
+              // this check when it only matched "Closes").
+              const m = (pr.body || '').match(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #(\d+)/i);
               if (m) {
                 try {
                   const { data: issue } = await github.rest.issues.get({
