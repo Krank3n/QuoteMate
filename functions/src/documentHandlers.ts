@@ -456,6 +456,11 @@ export interface SendDocumentEmailInput {
    */
   subject?: string;
   /**
+   * "Email me a copy" toggle — BCC the tradie's account email on the send so
+   * they keep the exact email the customer received. Real sends only.
+   */
+  sendCopyToSelf?: boolean;
+  /**
    * Override fields the client may have edited locally and wants persisted as
    * part of this send. Mirrors the legacy `quote: ...` / `invoice: ...` body
    * field on the old endpoints.
@@ -503,6 +508,23 @@ export interface SendDocumentEmailResult {
 function stripLeadingGreeting(text: string): string {
   const greetingLine = /^\s*(hi|hello|hey|g'?day|dear|good (?:morning|afternoon|evening))\b[^\n]*[,!.:]?\s*\n+/i;
   return text.replace(greetingLine, '').trimStart();
+}
+
+/**
+ * BCC list for the "email me a copy" toggle. Real sends only — test sends
+ * already go to the tradie — and never when it would duplicate the customer
+ * recipient (a tradie emailing a quote to their own address).
+ */
+export function buildSelfCopyBcc(params: {
+  sendCopyToSelf?: boolean;
+  isTestSend?: boolean;
+  selfEmail: string | null;
+  recipientEmail: string;
+}): Array<{ email: string }> | undefined {
+  const { sendCopyToSelf, isTestSend, selfEmail, recipientEmail } = params;
+  if (!sendCopyToSelf || isTestSend || !selfEmail) return undefined;
+  if (selfEmail.trim().toLowerCase() === (recipientEmail || '').trim().toLowerCase()) return undefined;
+  return [{ email: selfEmail }];
 }
 
 // Used to gate the Payment Methods block in invoice emails (pro/trial only).
@@ -796,6 +818,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
   const trimmedSubject = (subject || '').trim();
   const baseSubject = trimmedSubject
     || `Quotation from ${business.businessName || 'Your Tradie'} - ${quote.job?.name || 'Job'}`;
+  const selfEmail = input.sendCopyToSelf && !isTestSend ? await getUserEmail(userId) : null;
   const sent = await sendEmail({
     to: recipientEmail,
     subject: `${isTestSend ? '[TEST] ' : ''}${baseSubject}`,
@@ -806,6 +829,9 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     attachment: attachments,
     senderName: tradieDisplayName,
     replyTo: tradieReplyEmail ? { email: tradieReplyEmail, name: tradieDisplayName } : undefined,
+    bcc: buildSelfCopyBcc({
+      sendCopyToSelf: input.sendCopyToSelf, isTestSend, selfEmail, recipientEmail,
+    }),
   });
 
   if (!sent) return { success: false };
@@ -1027,6 +1053,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
   const trimmedSubject = (subject || '').trim();
   const baseSubject = trimmedSubject
     || `Invoice from ${business.businessName || 'Your Tradie'} - ${invoice.job?.name || 'Job'}`;
+  const selfEmail = input.sendCopyToSelf && !isTestSend ? await getUserEmail(userId) : null;
   const sent = await sendEmail({
     to: recipientEmail,
     subject: `${isTestSend ? '[TEST] ' : ''}${baseSubject}`,
@@ -1037,6 +1064,9 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     attachment: attachments,
     senderName: tradieDisplayName,
     replyTo: tradieReplyEmail ? { email: tradieReplyEmail, name: tradieDisplayName } : undefined,
+    bcc: buildSelfCopyBcc({
+      sendCopyToSelf: input.sendCopyToSelf, isTestSend, selfEmail, recipientEmail,
+    }),
   });
 
   if (!sent) return { success: false };

@@ -8,10 +8,16 @@ import { Material, FloorplanAnalysis } from '../types';
 import { normaliseFloorplanAnalysis } from './floorplanNormalise';
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase';
-// Lazy-import FileSystem (only available on native)
+// Lazy-import FileSystem (only available on native). try/catch so the module
+// stays importable where the native package can't load (e.g. unit tests) —
+// every use site already null-guards.
 let FileSystem: typeof import('expo-file-system') | null = null;
 if (Platform.OS !== 'web') {
-  FileSystem = require('expo-file-system');
+  try {
+    FileSystem = require('expo-file-system');
+  } catch {
+    FileSystem = null;
+  }
 }
 
 // All platforms route through Firebase Functions so API keys stay server-side.
@@ -598,51 +604,18 @@ export async function generateQuoteEmail(params: {
   photoDescriptions?: string[];
   gstRegistered?: boolean;
 }): Promise<string> {
-  const { jobName, jobDescription, materials, laborHours, total, businessName, customerName, photoDescriptions, gstRegistered } = params;
+  const { jobName, total, businessName, customerName, gstRegistered } = params;
 
   const prompt = createEmailPrompt(params);
 
-  // On web, use Firebase Functions
-  if (Platform.OS === 'web') {
-    return generateEmailViaFirebaseFunction(prompt);
-  }
-
-  // On mobile, call Anthropic API directly
-  if (!ANTHROPIC_API_KEY) {
-    throw new Error('API key not configured');
-  }
-
+  // All platforms route through the Firebase Function. The client bundle
+  // deliberately ships no LLM API keys (removed after the July 2026 key
+  // leak), so a direct-API path here can never work on device — it silently
+  // dropped every mobile Pro user to the generic template.
   try {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = data.content[0].text;
-    return parseEmailResponse(content);
+    return await generateEmailViaFirebaseFunction(prompt);
   } catch (error) {
-    // Try Gemini fallback
-    try {
-      return await generateEmailViaGemini(prompt);
-    } catch (geminiError) {
-      // Gemini fallback also failed
-    }
-
-    // Final fallback - return a basic template
+    // Fallback - return a basic template
     return getDefaultEmailBody(customerName, jobName, total, businessName, gstRegistered);
   }
 }
@@ -706,40 +679,6 @@ async function generateEmailViaFirebaseFunction(prompt: string): Promise<string>
 
   const data = await response.json();
   return stripLeadingGreeting(data.emailBody || '');
-}
-
-async function generateEmailViaGemini(prompt: string): Promise<string> {
-  if (!GEMINI_API_KEY) throw new Error('Gemini API key not configured');
-
-  const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 500 },
-    }),
-  });
-
-  if (!response.ok) throw new Error(`Gemini API returned ${response.status}`);
-
-  const data = await response.json();
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!content) throw new Error('No content in Gemini response');
-
-  return parseEmailResponse(content);
-}
-
-function parseEmailResponse(content: string): string {
-  // Strip any markdown code blocks or JSON wrapping
-  let text = content.trim();
-  if (text.startsWith('```')) {
-    text = text.replace(/```[a-z]*\n?/g, '').replace(/\n?```$/g, '');
-  }
-  // Remove wrapping quotes if present
-  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
-    text = text.slice(1, -1);
-  }
-  return stripLeadingGreeting(text.trim());
 }
 
 // The email template always renders "Hi {customerName}," above the body, so any
@@ -808,45 +747,10 @@ Guidelines:
 
 Return ONLY the email body text, no JSON wrapping or quotes.`;
 
-  // On web, use Firebase Functions
-  if (Platform.OS === 'web') {
-    return generateEmailViaFirebaseFunction(prompt);
-  }
-
-  // On mobile, call Anthropic API directly
-  if (!ANTHROPIC_API_KEY) {
-    throw new Error('API key not configured');
-  }
-
+  // All platforms route through the Firebase Function — see generateQuoteEmail.
   try {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = data.content[0].text;
-    return parseEmailResponse(content);
+    return await generateEmailViaFirebaseFunction(prompt);
   } catch (error) {
-    try {
-      return await generateEmailViaGemini(prompt);
-    } catch (geminiError) {
-      // Gemini fallback also failed
-    }
-
     return getDefaultInvoiceEmailBody(customerName, jobName, total, businessName, dueDate, gstRegistered);
   }
 }

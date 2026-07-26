@@ -39,6 +39,9 @@ interface SendEmailOptions {
   // display name changes — so DKIM/SPF/DMARC remain aligned.
   replyTo?: { email: string; name?: string };
   senderName?: string;
+  // Blind-copy recipients (e.g. the tradie's own "email me a copy" toggle on
+  // quote/invoice sends). Invisible to the primary recipient.
+  bcc?: Array<{ email: string; name?: string }>;
 }
 
 // Strip characters that could break an RFC 5322 display-name header.
@@ -250,7 +253,7 @@ QuoteMate is made by Hansen Dev (Sydney NSW, Australia). You're receiving this b
 // Brevo webhook posts back events keyed to that tag, which lets us correlate
 // delivery / bounce / open / click / spam back to this exact send.
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName } = options;
+  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName, bcc } = options;
   let { htmlContent, unsubscribeUrl } = options;
 
   // For cold lead outreach, wrap with the AU spam-act compliance footer
@@ -366,6 +369,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
             ? { email: process.env.OUTREACH_REPLY_TO_EMAIL, name: process.env.OUTREACH_REPLY_TO_NAME || 'Tom' }
             : { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
         to: [{ email: to }],
+        ...(bcc?.length ? { bcc } : {}),
         subject,
         htmlContent,
         tags: brevoTags,
@@ -604,7 +608,36 @@ export function sendQuoteSentEmail(
   });
 }
 
-export function sendQuoteAcceptedEmail(
+export interface QuoteAcceptedHook {
+  line: string;
+  cta: string;
+  tag: string;
+}
+
+/**
+ * The conversion hook under the accepted-quote celebration. quote-accepted is
+ * the best-engaged email in the program (43% open / 26% click, Jul 2026
+ * audit) and lands at the exact moment the tradie has seen the payoff — so
+ * unconnected users get the connect-Square pitch here (Path B), and connected
+ * users get pointed at the card-link invoice they already have. Distinct tags
+ * so emailLogAudit can read the two variants separately.
+ */
+export function quoteAcceptedHook(hasSquareConnection: boolean): QuoteAcceptedHook {
+  return hasSquareConnection
+    ? {
+        line: 'Convert it to an invoice &mdash; your customer can pay by card straight from the link.',
+        cta: 'Send the invoice',
+        tag: 'square-ready',
+      }
+    : {
+        line:
+          'Convert it to an invoice and get paid. Connect Square once and every invoice can go out with a pay-by-card link &mdash; the money lands without the chasing.',
+        cta: 'Invoice &amp; get paid',
+        tag: 'square-hook',
+      };
+}
+
+export async function sendQuoteAcceptedEmail(
   to: string,
   customerName: string,
   quoteNumber: string,
@@ -612,6 +645,15 @@ export function sendQuoteAcceptedEmail(
   clientNotes: string | null,
   userId: string
 ): Promise<boolean> {
+  // Read failure defaults to the connect pitch — for the mostly-unconnected
+  // user base that's the right guess, and it's harmless for connected users.
+  let hasSquareConnection = false;
+  try {
+    const snap = await admin.firestore().doc(`users/${userId}/settings/squareConnection`).get();
+    hasSquareConnection = snap.exists;
+  } catch {}
+  const hook = quoteAcceptedHook(hasSquareConnection);
+
   const content = wrapEmailTemplate(`
     <div style="text-align:center;margin:0 0 24px;">
       <div style="background:#064e3b;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 16px;">
@@ -635,9 +677,9 @@ export function sendQuoteAcceptedEmail(
     )}
 
     <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 0;text-align:center;">
-      Convert this quote to an invoice and get paid.
+      ${hook.line}
     </p>
-    ${ctaButton('Open in QuoteMate', '#009868')}
+    ${ctaButton(hook.cta, '#009868')}
   `, { preheader: `Great news! ${customerName} accepted quote #${quoteNumber} for $${total.toFixed(2)}` });
 
   return sendEmail({
@@ -646,7 +688,7 @@ export function sendQuoteAcceptedEmail(
     htmlContent: content,
     category: 'transactional',
     userId,
-    tags: ['quote-accepted'],
+    tags: ['quote-accepted', hook.tag],
   });
 }
 
@@ -936,14 +978,69 @@ ${foundingLine}
 
   return sendEmail({
     to,
-    subject: founding
-      ? `Your trial ends ${daysWord} — and ${founding.spotsLeft} founding spots to go`
-      : `Your trial ends ${daysWord} — here's exactly what changes`,
+    // Flat transactional subject on purpose: the Jul 2026 emailLog audit found
+    // pitch-shaped subjects on this step opened at 1/15 while plain personal
+    // ones ran ~20%. The founding pitch stays in the body.
+    subject: `Your Pro access ends ${daysWord}`,
     htmlContent: content,
     category: 'marketing',
     userId,
     tags: ['trial-lifecycle', 'trial-ending'],
     unsubscribeUrl,
+  });
+}
+
+/**
+ * Trial lifecycle: the trial_ending slot for users who built quotes but never
+ * sent one. A personal note from Tom in the tip-5 mould — plain layout,
+ * replies land with Tom, sells nothing. The reply question is the point:
+ * these users are days from churning and we don't know why they stalled.
+ */
+export function sendTrialEndingNudgeEmail(
+  to: string,
+  businessName: string,
+  daysRemaining: number,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const greeting = (businessName || '').trim() || 'there';
+  const daysWord = daysRemaining <= 1 ? 'tomorrow' : `in ${daysRemaining} days`;
+
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      Before your trial wraps up &mdash; quick one
+    </h1>
+    <p style="color:#94a3b8;font-size:14px;margin:0 0 16px;">Hi ${greeting},</p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      It's Tom &mdash; I built QuoteMate. Your trial wraps up ${daysWord}, and I noticed you've built a quote but haven't sent one to a customer yet.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Was there something that didn't feel right &mdash; pricing off, layout not you, or just flat out with work? Hit reply and tell me. It comes straight to me, not a support queue, and it genuinely shapes what I fix next.
+    </p>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+      And if the quote's good to go, sending takes about ten seconds &mdash; your customer gets a link they can accept right on their phone.
+    </p>
+
+    ${ctaButton('Send that quote')}
+
+    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 0;">
+      No pressure either way &mdash; quotes and invoices stay free after the trial.
+    </p>
+    <p style="color:#f8fafc;font-size:15px;line-height:1.65;margin:28px 0 0;">
+      Cheers,<br/>
+      <strong>Tom</strong> &mdash; QuoteMate
+    </p>
+  `, { unsubscribeUrl, preheader: 'You built a quote but never sent it — what got in the way?' });
+
+  return sendEmail({
+    to,
+    subject: 'Your quote never went out — what got in the way?',
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['trial-lifecycle', 'trial-ending-nudge'],
+    unsubscribeUrl,
+    replyTo: { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
   });
 }
 
@@ -987,7 +1084,9 @@ ${foundingLine}
 
   return sendEmail({
     to,
-    subject: `You're on the free plan now — one question`,
+    // Plain reply-seeking subject (see trial_ending note): the old
+    // plan-status subject opened at 0/15.
+    subject: `Your trial's wrapped up — quick question`,
     htmlContent: content,
     category: 'marketing',
     userId,
@@ -1258,34 +1357,11 @@ export function sendOnboardingTipEmail(
         </p>
       `,
     },
-    2: {
-      subject: 'Pro tip: Real material prices, automatically',
-      emoji: '&#128178;',
-      heading: 'No more guessing material costs',
-      preheader: 'QuoteMate pulls real prices from major hardware stores automatically.',
-      body: `
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-          QuoteMate automatically looks up <strong style="color:#f8fafc;">real prices</strong> from major hardware stores. No more manual price checks.
-        </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
-          Head to <strong style="color:#f8fafc;">Settings &rarr; Trade & Pricing</strong> and enable your preferred stores for the most accurate pricing in your area.
-        </p>
-      `,
-    },
-    3: {
-      subject: 'Pro tip: Clients can accept quotes online',
-      emoji: '&#10003;',
-      heading: 'One-click quote acceptance',
-      preheader: 'Send quotes your clients can accept online. Get notified instantly.',
-      body: `
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-          When you send a quote, your client gets a <strong style="color:#f8fafc;">professional link</strong> where they can review every detail and accept or decline &mdash; no phone tag needed.
-        </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
-          You'll get an <strong style="color:#f8fafc;">instant notification</strong> when they respond, so you can lock in the job right away.
-        </p>
-      `,
-    },
+    // Tips 2 (supplier prices) and 3 (accept online) retired 2026-07: the
+    // emailLog audit had them at 9–10% opens, and tip 4's copy already covers
+    // tip 3's acceptance-link and notification points. Numbering is kept so
+    // in-flight lastOnboardingTip state needs no migration — the drip ladder
+    // (onboardingDrip.helpers.ts) can no longer select the retired slots.
     4: {
       subject: 'Pro tip: Send your quote to a client in one tap',
       emoji: '&#128232;',
@@ -1359,7 +1435,7 @@ export function sendOnboardingTipEmail(
       <div style="background:#1e293b;border:2px solid #334155;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 12px;">
         ${tip.emoji}
       </div>
-      ${badge(`TIP ${tipNumber} OF 5`, '#1e293b', '#94a3b8')}
+      ${badge('PRO TIP', '#1e293b', '#94a3b8')}
     </div>
     <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 20px;text-align:center;line-height:1.3;">
       ${tip.heading}

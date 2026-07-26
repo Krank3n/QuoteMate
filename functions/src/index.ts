@@ -38,6 +38,7 @@ import {
   evaluatePaymentReceipt,
 } from './paymentReceipt.helpers';
 import { shouldReadyToSendNudge, toMs } from './draftNudge.helpers';
+import { onboardingTipDue } from './onboardingDrip.helpers';
 export * from './adminCrm';
 export * from './tickets';
 export { adminTrafficStats } from './analyticsTraffic';
@@ -49,6 +50,7 @@ export { dailyTrackingCheck } from './trackingAlarm';
 export { sentryAutofix } from './sentryAutofix';
 export { storeFunnelDaily } from './storeFunnel';
 export { websiteContact, websiteSubscribe } from './websiteForms';
+export { supportChat, adminSupportChats } from './supportChat';
 export {
   adminLeadDiscovery,
   adminEnrichLeads,
@@ -74,6 +76,7 @@ export {
   leadUnsubscribe,
 } from './leadOutreach';
 export { onQuoteWritten, onInvoiceWritten, mirrorAllDocuments } from './documentMirror';
+export { onQuoteCreatedBootstrapTrial } from './trialBootstrap';
 export { assistantToken } from './assistantToken';
 export { assistantChat } from './assistantChat';
 export { composeServiceReport } from './composeServiceReport';
@@ -5880,7 +5883,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { quoteId, quote: quoteFromClient, emailBody, recipientEmail, isTestSend, includePhotos, subject } = req.body;
+    const { quoteId, quote: quoteFromClient, emailBody, recipientEmail, isTestSend, includePhotos, subject, sendCopyToSelf } = req.body;
 
     if (!quoteId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: quoteId, emailBody, recipientEmail' });
@@ -5915,6 +5918,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         isTestSend,
         includePhotos,
         subject: typeof subject === 'string' ? subject : undefined,
+        sendCopyToSelf: sendCopyToSelf === true,
         overrides: quoteFromClient && typeof quoteFromClient === 'object' ? quoteFromClient : undefined,
         squareDepositLinkMint: async (uid, qid) => {
           const r = await mintAndRotate(uid, qid, 'deposit');
@@ -5963,7 +5967,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
     if (!decodedToken) return;
 
     const userId = decodedToken.uid;
-    const { invoiceId, invoice: invoiceFromClient, emailBody, recipientEmail, isTestSend, includePhotos, subject } = req.body;
+    const { invoiceId, invoice: invoiceFromClient, emailBody, recipientEmail, isTestSend, includePhotos, subject, sendCopyToSelf } = req.body;
 
     if (!invoiceId || !emailBody || !recipientEmail) {
       res.status(400).json({ error: 'Missing required fields: invoiceId, emailBody, recipientEmail' });
@@ -5996,6 +6000,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         isTestSend,
         includePhotos,
         subject: typeof subject === 'string' ? subject : undefined,
+        sendCopyToSelf: sendCopyToSelf === true,
         overrides: invoiceFromClient && typeof invoiceFromClient === 'object' ? invoiceFromClient : undefined,
         squareInvoiceLinkMint: async (uid, iid) => {
           const r = await mintAndRotate(uid, iid, 'invoice');
@@ -7669,7 +7674,9 @@ export const unsubscribeEmail = functions.https.onRequest(async (req, res) => {
 
 /**
  * Scheduled: Onboarding drip emails
- * Runs daily, sends tips on day 1, 2, 5, 10, and 14 after signup
+ * Runs daily. Consolidated 2026-07 to three sends — voice tip (day 1),
+ * send-it tip (day 4), Tom's first-quote note (day 14). Ladder lives in
+ * onboardingDrip.helpers.ts.
  */
 export const sendOnboardingDrip = functions.pubsub
   .schedule('every day 09:00')
@@ -7705,13 +7712,7 @@ export const sendOnboardingDrip = functions.pubsub
 
         const daysSinceSignup = Math.floor((now.getTime() - signupAt.getTime()) / (1000 * 60 * 60 * 24));
 
-        let tipToSend = 0;
-        if (daysSinceSignup >= 14 && lastTip < 5) tipToSend = 5;
-        else if (daysSinceSignup >= 10 && lastTip < 4) tipToSend = 4;
-        else if (daysSinceSignup >= 5 && lastTip < 3) tipToSend = 3;
-        else if (daysSinceSignup >= 2 && lastTip < 2) tipToSend = 2;
-        else if (daysSinceSignup >= 1 && lastTip < 1) tipToSend = 1;
-
+        const tipToSend = onboardingTipDue(daysSinceSignup, lastTip);
         if (tipToSend === 0) continue;
 
         // Tip 5 is the first-quote activation note from Tom. Anyone with a
@@ -7797,8 +7798,9 @@ export const sendReEngagement = functions.pubsub
 
         const lastActivityAt = data.lastActivityAt?.toDate?.() || new Date(data.lastActivityAt);
         const lastReEngagementAt = data.lastReEngagementAt?.toDate?.() || null;
+        const touchCount = typeof data.reEngagementCount === 'number' ? data.reEngagementCount : 0;
 
-        const verdict = reEngagementVerdict({ email, lastActivityAt, lastReEngagementAt }, now);
+        const verdict = reEngagementVerdict({ email, lastActivityAt, lastReEngagementAt, touchCount }, now);
         if (!verdict.send) continue;
 
         totalEligible++;
@@ -7815,6 +7817,7 @@ export const sendReEngagement = functions.pubsub
         if (sent) {
           await emailStateDoc.ref.set({
             lastReEngagementAt: admin.firestore.FieldValue.serverTimestamp(),
+            reEngagementCount: admin.firestore.FieldValue.increment(1),
           }, { merge: true });
           totalSent++;
         }
@@ -8121,8 +8124,6 @@ export const testAllEmails = functions.https.onRequest(async (req, res) => {
     const results: Record<string, boolean> = {};
 
     results.tip1 = await sendOnboardingTipEmail(to, 'HansenDev', 1, 'test');
-    results.tip2 = await sendOnboardingTipEmail(to, 'HansenDev', 2, 'test');
-    results.tip3 = await sendOnboardingTipEmail(to, 'HansenDev', 3, 'test');
     results.tip4 = await sendOnboardingTipEmail(to, 'HansenDev', 4, 'test');
     results.tip5 = await sendOnboardingTipEmail(to, 'HansenDev', 5, 'test');
     results.reEngagement = await sendReEngagementEmail(to, 'HansenDev', 12, 'test');

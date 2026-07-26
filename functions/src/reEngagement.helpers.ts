@@ -12,6 +12,12 @@ import { classifyUnsendable } from './email';
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const REENGAGE_INACTIVE_DAYS = 7;
 export const REENGAGE_COOLDOWN_DAYS = 21;
+// Lifetime cap. The Jul 2026 emailLog audit found the identical "your next
+// quote is waiting" going out every 21 days forever (one user reached
+// inactive-220d) with opens decaying 12% → 5% → ~0 past 50 days: beyond the
+// third touch it's only spam-complaint risk. Existing sends count — users
+// already past the cap stop immediately.
+export const REENGAGE_MAX_TOUCHES = 3;
 
 /** True when no email campaign can ever reach this address. */
 export function isUnreachableEmail(email: string | null | undefined): boolean {
@@ -20,17 +26,20 @@ export function isUnreachableEmail(email: string | null | undefined): boolean {
 
 export type ReEngagementVerdict =
   | { send: true }
-  | { send: false; reason: 'unreachable' | 'no-activity' | 'recently-active' | 'cooldown' };
+  | { send: false; reason: 'unreachable' | 'no-activity' | 'recently-active' | 'cooldown' | 'max-touches' };
 
 export function reEngagementVerdict(
   input: {
     email: string | null | undefined;
     lastActivityAt: Date | null;
     lastReEngagementAt: Date | null;
+    /** Lifetime sends so far (users/{uid}/settings/emailState.reEngagementCount). */
+    touchCount?: number;
   },
   now: Date,
 ): ReEngagementVerdict {
   if (isUnreachableEmail(input.email)) return { send: false, reason: 'unreachable' };
+  if ((input.touchCount ?? 0) >= REENGAGE_MAX_TOUCHES) return { send: false, reason: 'max-touches' };
   if (!input.lastActivityAt) return { send: false, reason: 'no-activity' };
   if (now.getTime() - input.lastActivityAt.getTime() < REENGAGE_INACTIVE_DAYS * DAY_MS) {
     return { send: false, reason: 'recently-active' };

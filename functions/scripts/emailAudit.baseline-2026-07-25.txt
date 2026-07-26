@@ -1,0 +1,1251 @@
+
+=== emailLog audit — 3804 rows, 210 types (0 untagged) ===
+
+welcome
+  total=339 (30d=87)  delivered=286  blocked=0  bounced=16  spam=0  unsub=0
+  open=68 (20%)  click=17 (5%)  span=2026-04-18..2026-07-25
+    192× keen for an 8-min QuoteMate walkthrough?
+    138× Welcome to QuoteMate, there!
+    3× Hansen Dev, fancy an 8-min QuoteMate walkthrough?
+
+admin-notification/new-user
+  total=334 (30d=114)  delivered=334  blocked=0  bounced=0  spam=0  unsub=0
+  open=243 (73%)  click=0 (0%)  span=2026-04-18..2026-07-25
+    5× New QuoteMate user: tom@hansendev.com.au (Android)
+    2× New QuoteMate user: slimix@gmail.com (Android)
+    2× New QuoteMate user: testuser@example.com (Android)
+
+onboarding/tip-1
+  total=270 (30d=80)  delivered=264  blocked=0  bounced=2  spam=0  unsub=0
+  open=42 (16%)  click=6 (2%)  span=2026-04-18..2026-07-24
+    270× Pro tip: Use your voice to create quotes
+
+onboarding/tip-2
+  total=268 (30d=81)  delivered=260  blocked=0  bounced=1  spam=0  unsub=0
+  open=28 (10%)  click=7 (3%)  span=2026-04-18..2026-07-24
+    268× Pro tip: Real material prices, automatically
+
+onboarding/tip-3
+  total=259 (30d=80)  delivered=255  blocked=0  bounced=1  spam=0  unsub=0
+  open=24 (9%)  click=4 (2%)  span=2026-04-18..2026-07-24
+    259× Pro tip: Clients can accept quotes online
+
+onboarding/tip-5
+  total=259 (30d=38)  delivered=183  blocked=0  bounced=2  spam=0  unsub=0
+  open=29 (11%)  click=4 (2%)  span=2026-04-19..2026-07-15
+    259× You've got the hang of it — here's what Pro unlocks
+
+re-engagement/inactive-7d
+  total=242 (30d=74)  delivered=239  blocked=0  bounced=2  spam=0  unsub=0
+  open=29 (12%)  click=7 (3%)  span=2026-04-19..2026-07-25
+    28× Your next quote is waiting
+    18× mate, your next quote is waiting
+    3× Test Company, your next quote is waiting
+
+onboarding/tip-4
+  total=231 (30d=72)  delivered=227  blocked=0  bounced=0  spam=0  unsub=0
+  open=26 (11%)  click=6 (3%)  span=2026-04-18..2026-07-24
+    231× Pro tip: Send your quote to a client in one tap
+
+quote-to-client
+  total=199 (30d=77)  delivered=175  blocked=0  bounced=6  spam=0  unsub=0
+  open=132 (66%)  click=21 (11%)  span=2026-04-19..2026-07-25
+    4× Quotation from OHplastering - Plastering
+    3× Quotation from Ritzy Painting - 168 Church Road Moggill
+    3× Quotation from R&G Homes - Exposed aggregate
+
+quote-follow-up
+  total=157 (30d=36)  delivered=130  blocked=0  bounced=0  spam=0  unsub=0
+  open=19 (12%)  click=5 (3%)  span=2026-04-18..2026-07-24
+    126× How'd your first quote go? 🤔
+    2× How'd the quote to Bruce Wayne go? 🤔
+    2× How'd your first quote go?
+
+quote-sent
+  total=150 (30d=32)  delivered=133  blocked=0  bounced=0  spam=0  unsub=0
+  open=77 (51%)  click=0 (0%)  span=2026-04-19..2026-07-25
+    4× Quote #QU-177830 sent to Lauren
+    3× Quote #270426 sent to Shane
+    3× Quote #QU-177696 sent to Tina Upton
+
+lead_outreach/campaign:RZeMPylP8l1CdI1d9CXu/auto_send
+  total=116 (30d=28)  delivered=104  blocked=0  bounced=9  spam=0  unsub=0
+  open=37 (32%)  click=10 (9%)  span=2026-05-07..2026-07-13
+    1× washing pebble samples on the spot
+    1× loved chris's cronulla alfresco
+    1× saw susy's review re your tools
+
+re-engagement/inactive-29d
+  total=88 (30d=16)  delivered=87  blocked=0  bounced=0  spam=0  unsub=0
+  open=9 (10%)  click=3 (3%)  span=2026-05-08..2026-07-25
+    14× Your next quote is waiting
+    3× mate, your next quote is waiting
+    2× MasterFix, your next quote is waiting
+
+quote-test
+  total=70 (30d=3)  delivered=30  blocked=0  bounced=0  spam=0  unsub=0
+  open=18 (26%)  click=1 (1%)  span=2026-04-19..2026-07-18
+    13× [TEST] Quotation from HansenDev - Custom Job
+    5× [TEST] Quotation from Hansen - Built-in Wardrobe
+    4× [TEST] Quotation from Hansen - Bathroom Door and Frame Repair
+
+ready-to-send-nudge
+  total=57 (30d=57)  delivered=57  blocked=0  bounced=0  spam=0  unsub=0
+  open=14 (25%)  click=2 (4%)  span=2026-07-03..2026-07-23
+    3× Your quote for Test is ready to send
+    3× Your quote for Test Company is ready to send
+    2× Your quote for Aaron Ngoi is ready to send
+
+product-update/v1.0.61
+  total=55 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    55× What's new in QuoteMate — Invoicing, Payment Tracking & More
+
+re-engagement/inactive-51d
+  total=42 (30d=17)  delivered=42  blocked=0  bounced=0  spam=0  unsub=0
+  open=2 (5%)  click=1 (2%)  span=2026-05-30..2026-07-24
+    6× Your next quote is waiting
+    1× TopGun welding, your next quote is waiting
+    1× Grime Be Gone, your next quote is waiting
+
+re-engagement/inactive-28d
+  total=38 (30d=21)  delivered=38  blocked=0  bounced=0  spam=0  unsub=0
+  open=6 (16%)  click=1 (3%)  span=2026-05-15..2026-07-20
+    7× Your next quote is waiting
+    2× mate, your next quote is waiting
+    1× Mihalopoulos Plumbing, your next quote is waiting
+
+re-engagement/inactive-50d
+  total=34 (30d=21)  delivered=33  blocked=0  bounced=0  spam=0  unsub=0
+  open=3 (9%)  click=0 (0%)  span=2026-05-08..2026-07-24
+    6× Your next quote is waiting
+    1× Jonathan's Gardening Service, your next quote is waiting
+    1× Voltron Electrical, your next quote is waiting
+
+trial-lifecycle/trial-start-value
+  total=25 (30d=25)  delivered=25  blocked=0  bounced=0  spam=0  unsub=0
+  open=4 (16%)  click=0 (0%)  span=2026-07-16..2026-07-24
+    25× Your 14 days of Pro start now
+
+trial-lifecycle/trial-square-pitch
+  total=24 (30d=24)  delivered=24  blocked=0  bounced=0  spam=0  unsub=0
+  open=3 (13%)  click=0 (0%)  span=2026-07-16..2026-07-22
+    24× Want to get paid the second the job's done?
+
+quote-accepted
+  total=23 (30d=9)  delivered=21  blocked=0  bounced=0  spam=0  unsub=0
+  open=10 (43%)  click=6 (26%)  span=2026-04-21..2026-07-21
+    1× Quote #QU-178237 accepted by Fara Curlewis
+    1× Quote #QU-178290 accepted by Pamela Ray
+    1× Quote #1776832950467-ieigfzngb accepted by Jeff Bezozozoz
+
+invoice-test
+  total=22 (30d=2)  delivered=18  blocked=0  bounced=0  spam=0  unsub=0
+  open=17 (77%)  click=0 (0%)  span=2026-04-25..2026-07-20
+    5× [TEST] Invoice from HansenDev - React Native App Development - Milestone 1
+    5× [TEST] Rescue Round - MVP Proposal & Next Steps
+    3× [TEST] Invoice from HansenDev - Custom Job
+
+trial-lifecycle/trial-mid-value
+  total=22 (30d=22)  delivered=22  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (5%)  click=0 (0%)  span=2026-07-16..2026-07-24
+    19× One week in — 7 days of Pro to go
+    1× You've quoted $3,091 in your first week
+    1× You've quoted $17,302 in your first week
+
+invoice-to-client
+  total=21 (30d=12)  delivered=18  blocked=0  bounced=3  spam=0  unsub=0
+  open=15 (71%)  click=1 (5%)  span=2026-05-22..2026-07-24
+    3× Invoice from Bribie Island Cabinetmakers - Office fitout
+    2× Invoice from RogueDone Pest Management - quartet treatment 9 Tarcoola
+    2× Invoice from Bribie island cabinetmakers - Walk-in Robe and Linen Cupboard Installation
+
+quick-feedback-admin
+  total=18 (30d=3)  delivered=18  blocked=0  bounced=0  spam=0  unsub=0
+  open=17 (94%)  click=0 (0%)  span=2026-04-21..2026-07-10
+    4× Quick feedback: "great" from sales.greatsouthern@thinkwater.com.au
+    3× Quick feedback: "okay" from sales.greatsouthern@thinkwater.com.au
+    3× Quick feedback: "bad" from sales.greatsouthern@thinkwater.com.au
+
+re-engagement/inactive-72d
+  total=16 (30d=13)  delivered=15  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (6%)  click=1 (6%)  span=2026-05-30..2026-07-22
+    1× mark plumbing, your next quote is waiting
+    1× Rinnovo Projects, your next quote is waiting
+    1× Diamond Pressure Cleaning, your next quote is waiting
+
+trial-lifecycle/trial-ending
+  total=15 (30d=15)  delivered=15  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (7%)  click=0 (0%)  span=2026-07-16..2026-07-24
+    14× Your trial ends in 3 days — and 98 founding spots to go
+    1× Your trial ends tomorrow — here's exactly what changes
+
+trial-lifecycle/trial-ended
+  total=15 (30d=15)  delivered=15  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-16..2026-07-24
+    15× You're on the free plan now — one question
+
+lead_weekly_report
+  total=12 (30d=4)  delivered=12  blocked=0  bounced=0  spam=0  unsub=0
+  open=10 (83%)  click=0 (0%)  span=2026-05-03..2026-07-19
+    1× Lead Outreach: 70 sent, 0.0% reply rate · week of 17/05/2026
+    1× Lead Outreach: 1 sent, 0.0% reply rate · week of 24/05/2026
+    1× Lead Outreach: 0 sent, 0.0% reply rate · week of 21/06/2026
+
+admin-notification/material-list-error
+  total=11 (30d=1)  delivered=11  blocked=0  bounced=0  spam=0  unsub=0
+  open=6 (55%)  click=0 (0%)  span=2026-04-21..2026-07-07
+    6× Material list generation failed for thomas.andrew.hansen@gmail.com
+    5× Material list generation failed for mdkinnovations@gmail.com
+
+lead_outreach/campaign:N4km9x2aOP3yIwegQTnL/auto_send
+  total=10 (30d=0)  delivered=8  blocked=0  bounced=2  spam=0  unsub=0
+  open=5 (50%)  click=0 (0%)  span=2026-05-19..2026-05-21
+    1× natalie's deck review caught my eye
+    1× loved alan's review on dan & wally
+    1× loved carl's picket fence review
+
+quote-customer-reminder/followup:1
+  total=8 (30d=1)  delivered=8  blocked=0  bounced=0  spam=0  unsub=0
+  open=5 (63%)  click=1 (13%)  span=2026-06-14..2026-06-29
+    1× Reminder: your quote from Bribie Island Cabinetmakers for Bill Wilson new kitchen
+    1× Reminder: your quote from Bribie Island Cabinetmakers for Kitchen Refurbishment and Fixtur
+    1× Reminder: your quote from Bribie Island Cabinetmakers for Top Doctors Bribie Island Fit Ou
+
+square-nudge/no-paylink
+  total=8 (30d=8)  delivered=8  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (13%)  click=1 (13%)  span=2026-07-16..2026-07-16
+    8× Get paid the day the job’s done — your quotes are ready
+
+onboarding/activation-note
+  total=8 (30d=8)  delivered=8  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (13%)  click=0 (0%)  span=2026-07-16..2026-07-24
+    8× Your first quote's the hard part — let's knock it over
+
+re-engagement/inactive-73d
+  total=7 (30d=4)  delivered=7  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-07-24
+    1× Your next quote is waiting
+    1× mate, your next quote is waiting
+    1× Dani's Plumbing, your next quote is waiting
+
+admin-notification/new-pro-subscription
+  total=6 (30d=2)  delivered=6  blocked=0  bounced=0  spam=0  unsub=0
+  open=6 (100%)  click=0 (0%)  span=2026-05-01..2026-07-08
+    2× 💰 New Pro subscriber: justinharbottle@icloud.com (Monthly ($29/mo) — iOS (App Store))
+    2× 💰 New Pro subscriber: p2s6s5r4cg@privaterelay.appleid.com (Yearly ($328/yr) — iOS (App St
+    1× 💰 New Pro subscriber: bribieislandcabinetmakers@outlook.com (Yearly ($199/yr) — Android (
+
+re-engagement/inactive-11d
+  total=6 (30d=1)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (17%)  click=0 (0%)  span=2026-05-25..2026-07-15
+    1× J. Gorman insulation, your next quote is waiting
+    1× My Company, your next quote is waiting
+    1× AusDilaps, your next quote is waiting
+
+re-engagement/inactive-170d
+  total=6 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× Heart of Wood Furniture, your next quote is waiting
+    1× Ryan Builders, your next quote is waiting
+    1× Concrete, your next quote is waiting
+
+re-engagement/inactive-235d
+  total=5 (30d=0)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Smitty's mowing, your next quote is waiting
+    1× Nancy bird airport shuttle bus, your next quote is waiting
+    1× Concrete, your next quote is waiting
+
+re-engagement/inactive-16d
+  total=5 (30d=1)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-13..2026-07-24
+    1× CASA CK STUDIO, your next quote is waiting
+    1× Duffs painting, your next quote is waiting
+    1× Zia, your next quote is waiting
+
+re-engagement/inactive-49d
+  total=5 (30d=4)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-07-16
+    1× mate, your next quote is waiting
+    1× Metrom Constructions Pty Ltd t/as Blake's Renovations, your next quote is waiting
+    1× Your next quote is waiting
+
+lead-interest/callkatie
+  total=5 (30d=2)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
+  open=5 (100%)  click=0 (0%)  span=2026-06-02..2026-06-28
+    2× New Katie lead: HansenDev
+    1× New Katie lead: Demo & Dump Services
+    1× New Katie lead: CBD Power Services Pty Ltd
+
+re-engagement/inactive-213d
+  total=5 (30d=0)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Smitty's mowing, your next quote is waiting
+    1× Heart of Wood Furniture, your next quote is waiting
+    1× Nancy bird airport shuttle bus, your next quote is waiting
+
+quote-customer-reminder/followup:2
+  total=5 (30d=0)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
+  open=3 (60%)  click=2 (40%)  span=2026-06-19..2026-06-23
+    5× Following up on your quote from Bribie Island Cabinetmakers
+
+re-engagement/inactive-191d
+  total=5 (30d=0)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (20%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Smitty's mowing, your next quote is waiting
+    1× Heart of Wood Furniture, your next quote is waiting
+    1× Ok, your next quote is waiting
+
+quote-declined
+  total=5 (30d=1)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-04-19..2026-07-01
+    1× Quote #100001 declined by Helena ❤️
+    1× Quote #QU-177841 declined by Jaye Lee
+    1× Quote #QU-178225 declined by Matthew Ross
+
+lead_outreach/campaign:CcLFvhHx7zuslprVUVzu/auto_send
+  total=4 (30d=0)  delivered=4  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-04..2026-05-05
+    1× loved mark's review on explaining decisions
+    1× andy ha's urgent job
+    1× steve todd's contour job
+
+square-nudge/connected-idle
+  total=4 (30d=4)  delivered=4  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-16..2026-07-16
+    4× Your Pay Now button's ready — put it to work
+
+re-engagement/inactive-175d
+  total=4 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× T, your next quote is waiting
+    1× Brireno, your next quote is waiting
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-14d
+  total=4 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-02..2026-07-02
+    1× King Arthur Handyman & Pest Control Services, your next quote is waiting
+    1× Aquilina Timber, your next quote is waiting
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-71d
+  total=4 (30d=2)  delivered=4  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-07-16
+    1× Tiling, your next quote is waiting
+    1× Test, your next quote is waiting
+    1× Fixology Maintenance, your next quote is waiting
+
+re-engagement/inactive-76d
+  total=4 (30d=0)  delivered=4  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-06-21
+    1× Apple, your next quote is waiting
+    1× mate, your next quote is waiting
+    1× AusDilaps, your next quote is waiting
+
+re-engagement/inactive-33d
+  total=3 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-16..2026-06-16
+    1× AH Decks, your next quote is waiting
+    1× Healy Building, your next quote is waiting
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-64d
+  total=3 (30d=1)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-07-24
+    1× Precision Outdoor Timber, your next quote is waiting
+    1× Northern Reach Construction, your next quote is waiting
+    1× JNRBUILDING, your next quote is waiting
+
+re-engagement/inactive-104d
+  total=3 (30d=0)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-06-21
+    1× ASC Home Solutions, your next quote is waiting
+    1× Ryan Builders, your next quote is waiting
+    1× test, your next quote is waiting
+
+re-engagement/inactive-52d
+  total=3 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (33%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× My Business, your next quote is waiting
+    1× mate, your next quote is waiting
+    1× S E AMMERSHUBER, your next quote is waiting
+
+re-engagement/inactive-91d
+  total=3 (30d=0)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (33%)  click=0 (0%)  span=2026-05-30..2026-06-21
+    1× Pro Home Specialists, your next quote is waiting
+    1× Mr Smith, your next quote is waiting
+    1× kreativ living, your next quote is waiting
+
+re-engagement/inactive-34d
+  total=3 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-06-03
+    1× Sapphire projects pty ltd, your next quote is waiting
+    1× Tereza, your next quote is waiting
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-154d
+  total=3 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Brireno, your next quote is waiting
+    1× Bundaberg handyman and property maintenance, your next quote is waiting
+    1× T, your next quote is waiting
+
+re-engagement/inactive-79d
+  total=3 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-06-21
+    1× My Test Company, your next quote is waiting
+    1× Chizel Carpentry And Renovation Pty Ltd, your next quote is waiting
+    1× Your next quote is waiting
+
+re-engagement/inactive-126d
+  total=3 (30d=1)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-07-13
+    1× ASC Home Solutions, your next quote is waiting
+    1× test, your next quote is waiting
+    1× Ryan Builders, your next quote is waiting
+
+re-engagement/inactive-74d
+  total=3 (30d=0)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (33%)  click=0 (0%)  span=2026-05-08..2026-05-30
+    1× jjh, your next quote is waiting
+    1× S E AMMERSHUBER, your next quote is waiting
+    1× My Business, your next quote is waiting
+
+re-engagement/inactive-13d
+  total=3 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-13..2026-07-24
+    1× Tereza, your next quote is waiting
+    1× mate, your next quote is waiting
+    1× Dario airco, your next quote is waiting
+
+re-engagement/inactive-37d
+  total=3 (30d=1)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (33%)  click=0 (0%)  span=2026-05-08..2026-07-09
+    1× Mds carpentry, your next quote is waiting
+    1× Shaynens lawn and garden services, your next quote is waiting
+    1× Zia, your next quote is waiting
+
+re-engagement/inactive-86d
+  total=3 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Dogg plumbs, your next quote is waiting
+    1× JNRBUILDING, your next quote is waiting
+    1× Precision Outdoor Timber, your next quote is waiting
+
+re-engagement/inactive-93d
+  total=3 (30d=1)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-07-16
+    1× Your next quote is waiting
+    1× Test, your next quote is waiting
+    1× Azrach Pools, your next quote is waiting
+
+re-engagement/inactive-135d
+  total=3 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (33%)  click=0 (0%)  span=2026-07-11..2026-07-13
+    1× kreativ living, your next quote is waiting
+    1× Test, your next quote is waiting
+    1× Bundaberg handyman and property maintenance, your next quote is waiting
+
+re-engagement/inactive-55d
+  total=3 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-07-08
+    1× Healy Building, your next quote is waiting
+    1× Apple, your next quote is waiting
+    1× Sapphire projects pty ltd, your next quote is waiting
+
+re-engagement/inactive-69d
+  total=3 (30d=0)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-30
+    1× kreativ living, your next quote is waiting
+    1× Mr Smith, your next quote is waiting
+    1× Pro Home Specialists, your next quote is waiting
+
+re-engagement/inactive-67d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Smiths plumbin, your next quote is waiting
+    1× Chilli, your next quote is waiting
+
+re-engagement/inactive-113d
+  total=2 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-07-13
+    1× kreativ living, your next quote is waiting
+    1× Pro Home Specialists, your next quote is waiting
+
+re-engagement/inactive-31d
+  total=2 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× My Business, your next quote is waiting
+    1× S E AMMERSHUBER, your next quote is waiting
+
+re-engagement/inactive-160d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× HansenDev, your next quote is waiting
+    1× Hedgers Homes, your next quote is waiting
+
+re-engagement/inactive-182d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-06-21
+    1× Testing, your next quote is waiting
+    1× Hedgers Homes, your next quote is waiting
+
+re-engagement/inactive-83d
+  total=2 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Ryan Builders, your next quote is waiting
+    1× ASC Home Solutions, your next quote is waiting
+
+service-report-to-client
+  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=2 (100%)  click=0 (0%)  span=2026-07-22..2026-07-22
+    2× Service report from HansenDev - Construction of 2m x 4m Deck
+
+re-engagement/inactive-87d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Fkfk, your next quote is waiting
+    1× bug roofing, your next quote is waiting
+
+lead_outreach/campaign:CcLFvhHx7zuslprVUVzu
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=0 (0%)  span=2026-05-03..2026-05-03
+    1× olly working in the rain
+    1× david's cleanup game
+
+re-engagement/inactive-41d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Pele, your next quote is waiting
+    1× mate, your next quote is waiting
+
+lead_outreach/campaign:fAKawgm3p1r1Kdw7OwTa/auto_send
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-07..2026-06-07
+    1× loved ram's review about listening
+    1× loved fay's 3-day turnaround story
+
+re-engagement/inactive-98d
+  total=2 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=1 (50%)  span=2026-06-21..2026-07-13
+    1× AH Decks, your next quote is waiting
+    1× AusDilaps, your next quote is waiting
+
+re-engagement/inactive-219d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Brireno, your next quote is waiting
+    1× T, your next quote is waiting
+
+re-engagement/inactive-88d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-06-21
+    1× Chilli, your next quote is waiting
+    1× Your next quote is waiting
+
+re-engagement/inactive-47d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Pro Home Specialists, your next quote is waiting
+    1× Mr Smith, your next quote is waiting
+
+re-engagement/inactive-44d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Fkfk, your next quote is waiting
+    1× mate, your next quote is waiting
+
+lead_outreach/campaign:q3mrKiisawyZlui542XK/auto_send
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-21..2026-05-22
+    1× loved liz's review about the 17yo deck
+    1× saw domenic's rain review
+
+re-engagement/inactive-218d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× P-true's shop, your next quote is waiting
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-43d
+  total=2 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× JNRBUILDING, your next quote is waiting
+    1× Precision Outdoor Timber, your next quote is waiting
+
+re-engagement/inactive-95d
+  total=2 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-07-13
+    1× mate, your next quote is waiting
+    1× Your next quote is waiting
+
+re-engagement/inactive-240d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Your next quote is waiting
+    1× P-true's shop, your next quote is waiting
+
+re-engagement/inactive-39d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=0 (0%)  span=2026-06-16..2026-06-16
+    1× Nixon Rendering, your next quote is waiting
+    1× test, your next quote is waiting
+
+re-engagement/inactive-111d
+  total=2 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-07-13
+    1× Antonio PrimeScape Construction, your next quote is waiting
+    1× Smiths plumbin, your next quote is waiting
+
+callkatie/demo-recovery
+  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=0 (0%)  span=2026-07-13..2026-07-22
+    2× Katie's still ready — start your trial
+
+re-engagement/inactive-12d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× HansenDev, your next quote is waiting
+    1× Duffs painting, your next quote is waiting
+
+re-engagement/inactive-96d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=0 (0%)  span=2026-05-30..2026-06-21
+    1× S E AMMERSHUBER, your next quote is waiting
+    1× jjh, your next quote is waiting
+
+re-engagement/inactive-171d
+  total=2 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× mate, your next quote is waiting
+    1× Heart of Wood Furniture, your next quote is waiting
+
+re-engagement/inactive-81d
+  total=2 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-07-13
+    1× Jerry's Shop, your next quote is waiting
+    1× Mds carpentry, your next quote is waiting
+
+re-engagement/inactive-137d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× ADAMSONS paving, your next quote is waiting
+    1× Duncan's diggers and drainage, your next quote is waiting
+
+analytics_digest
+  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=2 (100%)  click=0 (0%)  span=2026-07-14..2026-07-19
+    1× QuoteMate weekly digest — 2026-07-14
+    1× QuoteMate weekly digest — 2026-07-19
+
+re-engagement/inactive-8d
+  total=2 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-16..2026-07-16
+    1× mate, your next quote is waiting
+    1× RenovAction, your next quote is waiting
+
+re-engagement/inactive-108d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Precision Outdoor Timber, your next quote is waiting
+    1× JNRBUILDING, your next quote is waiting
+
+lead_outreach/campaign:KDFVRSzhNqWMzOCn89if/auto_send
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=0 (0%)  span=2026-06-14..2026-06-14
+    1× loved vicki's louvre screen review
+    1× loved khalil's teak deck review
+
+re-engagement/inactive-84d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=0 (0%)  span=2026-05-08..2026-05-30
+    1× Pele, your next quote is waiting
+    1× Ak Home Maintenance, your next quote is waiting
+
+re-engagement/inactive-78d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Tester, your next quote is waiting
+    1× Your next quote is waiting
+
+re-engagement/inactive-196d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× mate, your next quote is waiting
+    1× P-true's shop, your next quote is waiting
+
+re-engagement/inactive-148d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× ASC Home Solutions, your next quote is waiting
+    1× Ryan Builders, your next quote is waiting
+
+re-engagement/inactive-10d
+  total=2 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-25..2026-07-16
+    1× Topshield roof restoration, your next quote is waiting
+    1× Tereza, your next quote is waiting
+
+re-engagement/inactive-150d
+  total=2 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Hansen, your next quote is waiting
+    1× Mds carpentry, your next quote is waiting
+
+re-engagement/inactive-82d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× test, your next quote is waiting
+    1× Handyman Huss, your next quote is waiting
+
+re-engagement/inactive-197d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× T, your next quote is waiting
+    1× Brireno, your next quote is waiting
+
+re-engagement/inactive-54d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=0 (0%)  span=2026-05-08..2026-05-30
+    1× AH Decks, your next quote is waiting
+    1× AusDilaps, your next quote is waiting
+
+re-engagement/inactive-9d
+  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-02..2026-07-19
+    1× CASA CK STUDIO, your next quote is waiting
+    1× BRADS ROOFING REPAIRS AND HOME MAINTENANCE SERVICES, your next quote is waiting
+
+re-engagement/inactive-59d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-06-21
+    1× Mds carpentry, your next quote is waiting
+    1× Jerry's Shop, your next quote is waiting
+
+re-engagement/inactive-19d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-09..2026-05-09
+    1× mate, your next quote is waiting
+    1× Test Company, your next quote is waiting
+
+re-engagement/inactive-173d
+  total=2 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× Dogg plumbs, your next quote is waiting
+    1× Hansen, your next quote is waiting
+
+re-engagement/inactive-32d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=0 (0%)  span=2026-05-08..2026-06-16
+    1× AusDilaps, your next quote is waiting
+    1× Topshield roof restoration, your next quote is waiting
+
+re-engagement/inactive-63d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× mate, your next quote is waiting
+    1× Ak Home Maintenance, your next quote is waiting
+
+re-engagement/inactive-35d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× mate, your next quote is waiting
+    1× Aquilina Timber, your next quote is waiting
+
+re-engagement/inactive-117d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Hedgers Homes, your next quote is waiting
+    1× Your next quote is waiting
+
+re-engagement/inactive-89d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-06-21
+    1× Antonio PrimeScape Construction, your next quote is waiting
+    1× Smiths plumbin, your next quote is waiting
+
+re-engagement/inactive-167d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Flamin' Strewth, your next quote is waiting
+    1× KL Building, your next quote is waiting
+
+re-engagement/inactive-56d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-06-25
+    1× mate, your next quote is waiting
+    1× Tereza, your next quote is waiting
+
+re-engagement/inactive-262d
+  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× P-true's shop, your next quote is waiting
+    1× Your next quote is waiting
+
+payment-receipt
+  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=0 (0%)  span=2026-07-02..2026-07-23
+    1× Receipt from QuoteMate Test Tradie — Invoice TEST-RECEIPT-001
+    1× Receipt from HansenDev — Invoice INV-004
+
+admin_manual
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-04-18..2026-05-01
+    1× 200k! That quote seemed way off
+    1× yo testies
+
+re-engagement/inactive-106d
+  total=2 (30d=0)  delivered=1  blocked=0  bounced=1  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-06-21
+    1× Ak Home Maintenance, your next quote is waiting
+    1× Pele, your next quote is waiting
+
+re-engagement/inactive-99d
+  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-06-21
+    1× Sapphire projects pty ltd, your next quote is waiting
+    1× Tester, your next quote is waiting
+
+re-engagement/inactive-159d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× ADAMSONS paving, your next quote is waiting
+
+re-engagement/inactive-77d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Sapphire projects pty ltd, your next quote is waiting
+
+re-engagement/inactive-146d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Jim, your next quote is waiting
+
+re-engagement/inactive-45d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Smiths plumbin, your next quote is waiting
+
+re-engagement/inactive-60d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× test, your next quote is waiting
+
+re-engagement/inactive-17d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-05-25..2026-05-25
+    1× Nixon Rendering, your next quote is waiting
+
+lead_outreach/campaign:YLb01zLoKdYQjF5eOJZN/auto_send
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-05-24..2026-05-24
+    1× loved pamela's pergola review
+
+re-engagement/inactive-120d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× AH Decks, your next quote is waiting
+
+website_contact/submission:VoB9WaG9RxwqR5AIwL8t
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-07-16..2026-07-16
+    1× QuoteMate enquiry from Form review test
+
+re-engagement/inactive-20d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-10..2026-06-10
+    1× Northern Reach Construction, your next quote is waiting
+
+website_contact/submission:pXRI9DtxP2iDPLPpDZik
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-07-16..2026-07-16
+    1× QuoteMate enquiry from QuoteMate production check
+
+re-engagement/inactive-166d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× Chizel Carpentry And Renovation Pty Ltd, your next quote is waiting
+
+re-engagement/inactive-226d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Testing, your next quote is waiting
+
+re-engagement/inactive-27d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-85d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Your next quote is waiting
+
+re-engagement/inactive-176d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Bundaberg handyman and property maintenance, your next quote is waiting
+
+re-engagement/inactive-15d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Mds carpentry, your next quote is waiting
+
+re-engagement/inactive-68d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Antonio PrimeScape Construction, your next quote is waiting
+
+re-engagement/inactive-130d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× Precision Outdoor Timber, your next quote is waiting
+
+re-engagement/inactive-22d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× SlimJims Food, your next quote is waiting
+
+re-engagement/inactive-128d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Ak Home Maintenance, your next quote is waiting
+
+re-engagement/inactive-57d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-36d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× My Test Company, your next quote is waiting
+
+re-engagement/inactive-129d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Dogg plumbs, your next quote is waiting
+
+lead_outreach/lead_outreach_test/test_lead:yJlhn235wmDQuJ08VQQM
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-05-02..2026-05-02
+    1× [TEST] fencing quotes in sydney
+
+re-engagement/inactive-118d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× jjh, your next quote is waiting
+
+re-engagement/inactive-187d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-116d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× ADAMSONS paving, your next quote is waiting
+
+re-engagement/inactive-62d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Pele, your next quote is waiting
+
+re-engagement/inactive-198d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Bundaberg handyman and property maintenance, your next quote is waiting
+
+feedback/other-feedback
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-06-25..2026-06-25
+    1× QuoteMate Feedback: Other feedback
+
+re-engagement/inactive-48d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× kreativ living, your next quote is waiting
+
+re-engagement/inactive-192d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Heart of Wood Furniture, your next quote is waiting
+
+re-engagement/inactive-151d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Dogg plumbs, your next quote is waiting
+
+lead_outreach/lead_outreach_test/test_lead:d1pFMkQNvOERGHyd01ru
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-05-02..2026-05-02
+    1× [TEST] saw sue's review about tash
+
+re-engagement/inactive-145d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× KL Building, your next quote is waiting
+
+re-engagement/inactive-38d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Jerry's Shop, your next quote is waiting
+
+re-engagement/inactive-66d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-204d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Testing, your next quote is waiting
+
+re-engagement/inactive-236d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Heart of Wood Furniture, your next quote is waiting
+
+re-engagement/inactive-107d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Dogg plumbs, your next quote is waiting
+
+re-engagement/inactive-114d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-20..2026-06-20
+    1× Test, your next quote is waiting
+
+re-engagement/inactive-101d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× Your next quote is waiting
+
+re-engagement/inactive-92d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-29..2026-05-29
+    1× Test, your next quote is waiting
+
+re-engagement/inactive-214d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Heart of Wood Furniture, your next quote is waiting
+
+re-engagement/inactive-139d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× Your next quote is waiting
+
+re-engagement/inactive-46d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Duncan's diggers and drainage, your next quote is waiting
+
+re-engagement/inactive-144d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Chizel Carpentry And Renovation Pty Ltd, your next quote is waiting
+
+re-engagement/inactive-138d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Hedgers Homes, your next quote is waiting
+
+re-engagement/inactive-165d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-258d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× Heart of Wood Furniture, your next quote is waiting
+
+re-engagement/inactive-24d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Smiths plumbin, your next quote is waiting
+
+re-engagement/inactive-248d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× Testing, your next quote is waiting
+
+re-engagement/inactive-40d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Plombier Hicham, your next quote is waiting
+
+re-engagement/inactive-94d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× NH Building, your next quote is waiting
+
+re-engagement/inactive-26d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Mr Smith, your next quote is waiting
+
+re-engagement/inactive-122d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Chizel Carpentry And Renovation Pty Ltd, your next quote is waiting
+
+re-engagement/inactive-133d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Antonio PrimeScape Construction, your next quote is waiting
+
+re-engagement/inactive-140d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× jjh, your next quote is waiting
+
+re-engagement/inactive-189d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× KL Building, your next quote is waiting
+
+re-engagement/inactive-143d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× mate, your next quote is waiting
+
+re-engagement/inactive-125d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-05-30
+    1× Handyman Huss, your next quote is waiting
+
+re-engagement/inactive-147d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
+    1× Handyman Huss, your next quote is waiting
+
+re-engagement/inactive-23d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× mate, your next quote is waiting
+
+feedback/general
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-04-22..2026-04-22
+    1× QuoteMate Feedback: General
+
+re-engagement/inactive-161d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Testing, your next quote is waiting
+
+re-engagement/inactive-65d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Fkfk, your next quote is waiting
+
+re-engagement/inactive-257d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× Heart of Wood Furniture, your next quote is waiting
+
+re-engagement/inactive-241d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+    1× Brireno, your next quote is waiting
+
+re-engagement/inactive-25d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Pro Home Specialists, your next quote is waiting
+
+re-engagement/inactive-53d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× jjh, your next quote is waiting
+
+re-engagement/inactive-102d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× KL Building, your next quote is waiting
+
+re-engagement/inactive-100d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=1 (100%)  span=2026-05-08..2026-05-08
+    1× Chizel Carpentry And Renovation Pty Ltd, your next quote is waiting
+
+re-engagement/inactive-103d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× Handyman Huss, your next quote is waiting
+
+re-engagement/inactive-169d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× HansenDev, your next quote is waiting
+
+quick-feedback-detail-admin
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-07-10..2026-07-10
+    1× Detailed feedback from leo.65@bigpond.com (rated: okay)
+
+lead_outreach/campaign:BjUs9ywLZdUPRBMrnCwQ/auto_send
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-05-31..2026-05-31
+    1× barbara's bushfire zone deck
+
+product-update/v1.0.57
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× What's new in QuoteMate — Free Trial, Invoicing & Smarter Pricing
+
+draft-nudge/tier-2
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× HansenDev, you have 2 unsent quotes ($9,138)
+
+re-engagement/inactive-124d
+  total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=—..—
+    1× Yyyyy, your next quote is waiting
+
+re-engagement/inactive-42d
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-02..2026-07-02
+    1× Northern Reach Construction, your next quote is waiting
+
+re-engagement/inactive-123d
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
+    1× KL Building, your next quote is waiting
+
+=== weekly volume (last 12 weeks) ===
+  2026-05-04: 288
+  2026-05-11: 246
+  2026-05-18: 270
+  2026-05-25: 256
+  2026-06-01: 188
+  2026-06-08: 221
+  2026-06-15: 274
+  2026-06-22: 216
+  2026-06-29: 206
+  2026-07-06: 228
+  2026-07-13: 392
+  2026-07-20: 237
+
+=== heaviest recipients (top 15) ===
+  283× tom@hansendev.com.au
+  226× thomas.andrew.hansen@gmail.com
+  143× admin@thieleconstructions.com.au
+  45× deckreck@gmail.com
+  42× bribieislandcabinetmakers@outlook.com
+  20× justinharbottle@icloud.com
+  20× handyservicesdirect@gmail.com
+  18× dazizifard2705@gmail.com
+  17× fletcherrayner832@gmail.com
+  15× benyg43bg@gmail.com
+  14× ljindd@gmail.com
+  14× dirdamtereza8@hotmail.com
+  14× sdrcundall11@gmail.com
+  14× jon11e@hotmail.com
+  13× liam@byronandbeyondfencing.com.au

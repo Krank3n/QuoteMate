@@ -11,6 +11,7 @@ import {
   lastConversionSendMs,
   sentConversionEmailWithin,
   suppressedByOnboardingDrip,
+  trialEndingVariant,
 } from './lifecycleEmails.helpers';
 import { TRIAL_MS } from './subscription.helpers';
 
@@ -229,5 +230,20 @@ describe('midTrialRecap', () => {
 
   it('empty docs → thin recap with zeros', () => {
     expect(midTrialRecap([], T0)).toEqual({ quotesBuilt: 0, dollarsQuoted: 0, sent: 0, rich: false });
+  });
+});
+
+describe('trialEndingVariant — never-sent users get the personal nudge', () => {
+  it('never sent a doc + scan ok → nudge', () => {
+    expect(trialEndingVariant(false, true)).toBe('nudge');
+  });
+
+  it('has sent a doc → standard pitch', () => {
+    expect(trialEndingVariant(true, true)).toBe('standard');
+  });
+
+  it('docs scan failed → standard, never guess someone inactive', () => {
+    expect(trialEndingVariant(false, false)).toBe('standard');
+    expect(trialEndingVariant(true, false)).toBe('standard');
   });
 });

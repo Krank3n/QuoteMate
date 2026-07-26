@@ -42,6 +42,7 @@ import { isUnreachableEmail } from './reEngagement.helpers';
 import {
   lifecycleVerdict,
   midTrialRecap,
+  trialEndingVariant,
   SEND_ONCE_FIELD,
   suppressedByOnboardingDrip,
 } from './lifecycleEmails.helpers';
@@ -54,6 +55,7 @@ import {
   sendTrialSquarePitchEmail,
   sendTrialMidValueEmail,
   sendTrialEndingEmail,
+  sendTrialEndingNudgeEmail,
   sendTrialEndedEmail,
   sendSquareIdleNudgeEmail,
   sendSquareNoPaylinkNudgeEmail,
@@ -83,6 +85,9 @@ export const trialLifecycleDaily = functions.pubsub
     // sent something, and who has ever collected a real Square payment.
     const activatedUids = new Set<string>();
     const squarePaidUids = new Set<string>();
+    // Scan success gates the trial_ending nudge variant: a failed scan makes
+    // everyone look never-sent, so the variant falls back to standard then.
+    let docsScanOk = false;
     try {
       const docsSnap = await db.collectionGroup('documents').get();
       for (const d of docsSnap.docs) {
@@ -92,6 +97,7 @@ export const trialLifecycleDaily = functions.pubsub
         if (isActivatingDoc(data)) activatedUids.add(uid);
         if (docHasSquarePayment(data)) squarePaidUids.add(uid);
       }
+      docsScanOk = true;
     } catch (err: any) {
       // Nudges degrade gracefully; lifecycle steps don't depend on the scan.
       functions.logger.error('trialLifecycleDaily: documents scan failed', err?.message);
@@ -146,8 +152,16 @@ export const trialLifecycleDaily = functions.pubsub
         const send = verdict.send ?? nudge;
         if (!send) continue;
 
+        // trial_ending splits: never-sent users get the personal never-sent
+        // note instead of the pricing pitch (same window, same send-once flag).
+        const endingVariant =
+          send === 'trial_ending'
+            ? trialEndingVariant(activatedUids.has(userId), docsScanOk)
+            : null;
+
         if (!live) {
-          wouldSend.push(`${send} -> ${email} (${userId})`);
+          const label = endingVariant === 'nudge' ? `${send}(nudge)` : send;
+          wouldSend.push(`${label} -> ${email} (${userId})`);
           continue;
         }
 
@@ -175,7 +189,10 @@ export const trialLifecycleDaily = functions.pubsub
             break;
           }
           case 'trial_ending':
-            ok = await sendTrialEndingEmail(email, businessName, verdict.daysRemaining ?? 3, userId, founding);
+            ok =
+              endingVariant === 'nudge'
+                ? await sendTrialEndingNudgeEmail(email, businessName, verdict.daysRemaining ?? 3, userId)
+                : await sendTrialEndingEmail(email, businessName, verdict.daysRemaining ?? 3, userId, founding);
             break;
           case 'trial_ended':
             ok = await sendTrialEndedEmail(email, businessName, userId, founding);

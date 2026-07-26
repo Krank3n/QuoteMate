@@ -11,6 +11,7 @@
  */
 import * as functions from 'firebase-functions';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
+import { AB_TEST_START, abStartDate } from './analyticsTraffic.helpers';
 
 const GA_PROPERTY = `properties/${process.env.GA_PROPERTY_ID || '527922866'}`;
 const GA_SERVICE_ACCOUNT = 'ga-reader@hansendev.iam.gserviceaccount.com';
@@ -130,10 +131,11 @@ export const adminTrafficStats = functions
     // ----- 6. Hero A/B by variant (needs the `variant` custom dimension) -----
     // Wrapped: if the custom dimension isn't registered the Data API 400s, and
     // we surface a friendly "not yet available" instead of failing the call.
+    // Date range is clamped to the v2 launch so v1 events never pollute it.
     const abP = ga
       .runReport({
         property: GA_PROPERTY,
-        dateRanges,
+        dateRanges: [{ startDate: abStartDate(days, new Date()), endDate: 'today' }],
         dimensions: [{ name: 'customEvent:variant' }, { name: 'eventName' }],
         metrics: [{ name: 'eventCount' }],
         dimensionFilter: {
@@ -282,5 +284,6 @@ export const adminTrafficStats = functions
       funnel,
       topPages,
       abTest,
+      abSince: AB_TEST_START,
     };
   });
